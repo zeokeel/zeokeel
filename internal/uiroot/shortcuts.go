@@ -302,7 +302,6 @@ func (r *Root) bindChromeShortcuts(c *ui.Context) {
 	// (they open the host panel themselves and are idempotent), so the host
 	// only binds the chords the guide advertises.
 	c.OnShortcut(ui.Cmd|ui.Alt, ui.KeyP, guardRepeat(func() { r.runCommandByID("rightpanel.files.open") }))
-	c.OnShortcut(ui.Cmd, ui.KeyBackquote, guardRepeat(func() { r.runCommandByID("rightpanel.terminal.open") }))
 
 	// Built-in window shortcuts (not configurable): new session and settings.
 	c.OnShortcut(ui.Cmd, ui.KeyN, r.newSessionShortcut)

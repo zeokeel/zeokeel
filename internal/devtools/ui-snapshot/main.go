@@ -804,7 +804,7 @@ func main() {
 		a.tester.Frame()
 	}
 
-	// P2: the right sidebar's 开始 guide (工作区文件 / 命令运行 cards). The
+	// P2: the right sidebar's 开始 guide (a single 工作区文件 card). The
 	// retired 8-pane inspector is gone: the sidebar is one tab strip with the
 	// fixed pages plus one tab per opened file.
 	a.ui.SetRightPanelOpen(true)
@@ -834,28 +834,6 @@ func main() {
 			a.render(outDir + "/p2-file-diff.png")
 		}
 	}
-	// 命令 page: run a real command in the workspace root.
-	if err := a.showSidebarPage("命令"); err != nil {
-		fail("terminal page", err)
-	}
-	a.tester.Frame()
-	if runRect, ok := a.tester.Find("运行"); ok {
-		a.tester.ClickAt(runRect.X-140, runRect.Y+runRect.H/2)
-		a.tester.Frame()
-		a.tester.Type("echo ZeoKeel terminal")
-		if err := a.tester.Click("运行"); err != nil {
-			fmt.Println("run terminal:", err)
-		}
-		deadline := time.Now().Add(5 * time.Second)
-		for time.Now().Before(deadline) {
-			a.tester.Frame()
-			if a.tester.HasText("ZeoKeel terminal") {
-				break
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-	a.render(outDir + "/p2-terminal.png")
 	a.ui.SetRightPanelOpen(false)
 	a.tester.Frame()
 

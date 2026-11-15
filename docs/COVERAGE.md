@@ -88,9 +88,9 @@
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
 | Settings 外壳与页面 | ✅ | `internal/ui/settings`、about | 17 页（高级分组默认折叠，日常导航 9 项）：常用（模型/行为/预设）、外观（外观/技能/快捷键）、集成（MCP/搜索/网络）、高级（通知/归档/导入/更新/诊断/记忆/LSP/数据与隐私）、关于；**模型页 = 模型列表（每模型服务商/Base URL/API Key/系列/思考模式/生成参数编辑；添加模型弹窗含常用服务商预填、密钥继承与测试连接，可设默认模型）+ 提示词 + 运行参数（最大迭代默认不限制/上下文预算/流完整性）**；**插件参数已落在 Plugins 页（已接线键）**；插件市场为明确非目标 |
 | Approval 审批内联卡（V3 强调） | ✅ | `uikit.ApprovalDialog`（Inline）+ `internal/ui/approval` + approvals 模块 | 输入框上方内联卡（警示横幅+警示描边，不遮挡 transcript）；allow/allow-always/deny、无默认焦点、Esc=deny 最早一条且不中断本轮（session 判断审批优先）、多请求计数、非会话屏自动切回会话；旧 Modal 路径保留给 embedder；只读/工作区可写/所有权限三档预设（settings 覆盖；旧 ask/never 存值归一为只读；headless assembly 可配 ask/never 策略） |
-| 右侧栏 | ✅ | rightpanel | 默认收起；多标签：开始引导 / 文件 / 终端 / 每个打开文件一个可关闭标签；文件页含工作区树、交付区、预览/改动；无概览/工具/日志/变更/团队/任务常驻 pane；en/zh |
+| 右侧栏 | ✅ | rightpanel | 默认收起；多标签：开始引导 / 文件 / 每个打开文件一个可关闭标签；文件页含工作区树、交付区、预览/改动；无概览/工具/日志/变更/团队/任务常驻 pane、无侧边栏终端；en/zh |
 | 文件页 / 文件标签 | ✅ | rightpanel files + workspace | 工作区树/面包屑/文本/Markdown/图片预览/错误态/交付区；打开文件新标签，内容可滚动 |
-| Terminal 运行器 | ✅ | rightpanel terminal + terminal 模块 | 独立 shell -c、cwd、输出/退出码/停止/超时；无 PTY/持久 shell |
+| Terminal 运行器 | ❌ | — | 侧边栏终端/命令页 0.2.41 移除；模型侧 terminal_* 工具保留 |
 | Workspace Changes/diff | ✅ | rightpanel changes + WorkspaceDiffer | 未提交变更列表、状态 badge、diff 折叠/截断 |
 | Trajectory/工具时间线 | ✅ | session Trajectory tab | 轨迹卡片/工具调用时间线 |
 | Tool cards | ✅ | `internal/ui/toolcards` | rig 工具卡 + todo/team_task 卡 + demo/兜底；MCP 动态工具走 session 兜底 |
@@ -155,7 +155,7 @@ ACP 客户端职责（auth/fs/terminal）、系统级全局热键以外的 OS �
 
 ## 6. 对外表述建议
 
-- 可说："已支持完整对话、工作区/文件/变更/终端检查、17 页设置（模型/诊断/快捷键/外观/技能/更新/导入/
+- 可说："已支持完整对话、工作区/文件/变更检查、17 页设置（模型/诊断/快捷键/外观/技能/更新/导入/
   搜索/MCP/网络/预设/LSP/数据与隐私/通知/行为/记忆）、审批与权限模式、聊天模式（普通/计划/精简/创作）、
   右栏（团队/任务）、搜索/fork/导出（Markdown+JSONL，含反馈）、置顶归档、web search、ask_user/present/plan 审阅、
   keep-planning、真实 subagent/team 编排、per-session 模型与思考强度/自定义模式与上下文预算与最大迭代、@session 引用、

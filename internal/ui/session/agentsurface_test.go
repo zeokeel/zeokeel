@@ -173,8 +173,6 @@ func (f *fakeFilePreview) OpenFiles() error {
 	return nil
 }
 
-func (f *fakeFilePreview) OpenTerminal() error { return nil }
-
 func (f *fakeFilePreview) OpenNative(path string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

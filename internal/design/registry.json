@@ -889,19 +889,6 @@
       "until": "2027-06-30"
     },
     {
-      "id": "rightpanel.terminal-copy-success",
-      "paths": [
-        "internal/ui/rightpanel/terminal.go"
-      ],
-      "rules": [
-        "DS-06"
-      ],
-      "what": "终端复制按钮的 success 确认态（Copy→Check + SuccessText）",
-      "owner": "rightpanel",
-      "reason": "IconButton 未建模 success/status variant；状态语义不可降级（DESIGN.md §5.2/§7.1）",
-      "until": "2027-06-30"
-    },
-    {
       "id": "composer.action-row",
       "paths": [
         "internal/ui/session/view.go"

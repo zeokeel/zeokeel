@@ -59,7 +59,7 @@
 ## 1.2 团队 / 子代理 / 后台任务约定（2026-11-10 重构）
 
 - **团队与子代理不再有右栏 pane**：会话头部三个入口（`智能体团队 / 子智能体 N / N 个后台任务`）打开官方 `PopoverBase` 原生浮层；团队浮层 = 成员卡 + 共享任务卡（只读），子代理浮层打开主栏子会话（面包屑返回），后台任务浮层可停止运行中的任务。
-- **跨模块命令 ID**：`uiroot.install-update`（更新安装，host 注册）、`rightpanel.files.open`（Ctrl/Cmd+Alt+P）、`rightpanel.terminal.open`（Ctrl/Cmd+`）；旧的 `rightpanel.team.open`/`rightpanel.tasks.open`/`rightpanel.pane.*` 已删除。
+- **跨模块命令 ID**：`uiroot.install-update`（更新安装，host 注册）、`rightpanel.files.open`（Ctrl/Cmd+Alt+P）；`rightpanel.terminal.open` 与侧边栏终端已于 0.2.41 删除；旧的 `rightpanel.team.open`/`rightpanel.tasks.open`/`rightpanel.pane.*` 已删除。
 - **数据来源**：`contracts.TeamService`/`TaskBoard`（只读展示），子代理与队友用 `contracts.ChildAgentService` 统一读模型（`ChildAgents`/`SendChildAgent`）；后台任务用 `contracts.JobService`。
 - **测试/Snapshot**：`internal/ui/session/agentsurface_test.go`、`internal/modules/agent/childagents_test.go`、`internal/modules/toolkit/jobs_service_test.go`；ui-snapshot 场景 `p2-team-*`/`p2-jobs*`/`p2-child-*`。改动这些语义时同步本文件与 AGENT-SURFACES S9。
 

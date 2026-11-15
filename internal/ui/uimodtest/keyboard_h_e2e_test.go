@@ -1,13 +1,13 @@
 package uimodtest
 
-// H-series keyboard chrome E2E: the right sidebar's page shortcuts
-// (Cmd/Ctrl+Alt+P opens the 文件 page, Ctrl+` the 终端 page) and the command
-// palette's shortcut column for the same commands.
+// H-series keyboard chrome E2E: the right sidebar's page shortcut
+// (Cmd/Ctrl+Alt+P opens the 文件 page) and the command palette's shortcut
+// column for the same command.
 //
 // The retired 8-pane inspector picked its panes with a "Switch pane" menu and
-// Cmd/Ctrl+Alt+←/→; the DSH-aligned sidebar keeps only the fixed pages (开始,
-// 文件, 终端) plus opened-file tabs, so the discoverable keyboard paths are the
-// two page commands.
+// Cmd/Ctrl+Alt+←/→; the sidebar now keeps only the fixed pages (开始, 文件)
+// plus opened-file tabs, so the discoverable keyboard path is the files page
+// command.
 
 import (
 	"testing"
@@ -16,9 +16,8 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// TestInspectorPageShortcuts covers the two page shortcuts and their palette
-// entries. With no workspace open the 文件 page shows the open-folder onboarding
-// and the 终端 page shows the command runner.
+// TestInspectorPageShortcuts covers the files page shortcut and its palette
+// entry. With no workspace open the 文件 page shows the open-folder onboarding.
 func TestInspectorPageShortcuts(t *testing.T) {
 	product := newInteractionProduct(t)
 	tester := product.tester
@@ -46,21 +45,7 @@ func TestInspectorPageShortcuts(t *testing.T) {
 		t.Fatalf("the 开始 guide is still showing after the 文件 page shortcut; texts = %v", tester.Texts())
 	}
 
-	// Ctrl+` switches the open sidebar to the 终端 page.
-	tester.Key(ui.Cmd, ui.KeyBackquote)
-	deadline = time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && !tester.HasText("运行") {
-		tester.Frame()
-		time.Sleep(5 * time.Millisecond)
-	}
-	if !tester.HasText("运行") || !tester.HasText("选择 shell") {
-		t.Fatalf("Ctrl+` did not show the 终端 page; texts = %v", tester.Texts())
-	}
-	if tester.HasText("打开文件夹") {
-		t.Fatalf("the 文件 page content is still showing after the 终端 shortcut; texts = %v", tester.Texts())
-	}
-
-	// The command palette advertises the same two chords on the page commands.
+	// The command palette advertises the files page command's chord.
 	tester.Key(ui.Cmd, ui.KeyK)
 	if !frameUntil(tester, "命令面板", 2*time.Second) {
 		t.Fatalf("command palette did not open; texts = %v", tester.Texts())
@@ -80,15 +65,6 @@ func TestInspectorPageShortcuts(t *testing.T) {
 	tester.Key(ui.Cmd, ui.KeyK)
 	if !frameUntil(tester, "命令面板", 2*time.Second) {
 		t.Fatalf("command palette did not reopen; texts = %v", tester.Texts())
-	}
-	if err := tester.Click("搜索命令"); err != nil {
-		t.Fatalf("click palette search: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Type("命令页")
-	tester.Frame()
-	tester.Frame()
-	if !tester.HasText("Ctrl+`") {
-		t.Fatalf("terminal page command shortcut missing from the palette; texts = %v", tester.Texts())
 	}
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()

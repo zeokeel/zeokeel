@@ -1,7 +1,7 @@
 package rightpanel_test
 
 // Scripted backend services for the right sidebar frame tests: a workspace
-// service (with an optional diff extension), a terminal runner and an artifact
+// service (with an optional diff extension) and an artifact
 // presenter/history lister. They mirror the real contract semantics, run no
 // I/O, and are safe to call from the module's off-thread loads.
 
@@ -214,117 +214,6 @@ func (d *differWorkspace) callCount() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.calls
-}
-
-// --- fake TerminalService ---------------------------------------------------
-
-// fakeTerminal is a scripted contracts.TerminalService. Run can block until a
-// command is released (or the context is canceled) to exercise the async path.
-type fakeTerminal struct {
-	mu sync.Mutex
-
-	dir      string
-	shell    string
-	shells   []string
-	setShell []string
-	setErr   error
-
-	runCalls []string
-	runOut   contracts.TerminalOutput
-	runErr   error
-	runBlock bool
-	started  chan string
-	release  chan struct{}
-}
-
-func newFakeTerminal() *fakeTerminal {
-	return &fakeTerminal{
-		dir:     "/work/proj",
-		shell:   "bash",
-		shells:  []string{"bash", "zsh"},
-		started: make(chan string, 8),
-		release: make(chan struct{}, 8),
-	}
-}
-
-func (f *fakeTerminal) WorkingDir(context.Context) string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.dir
-}
-
-func (f *fakeTerminal) Shell() string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.shell
-}
-
-func (f *fakeTerminal) Shells() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]string(nil), f.shells...)
-}
-
-func (f *fakeTerminal) SetShell(name string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.setShell = append(f.setShell, name)
-	if f.setErr != nil {
-		return f.setErr
-	}
-	f.shell = name
-	return nil
-}
-
-func (f *fakeTerminal) Run(ctx context.Context, command string) (contracts.TerminalOutput, error) {
-	f.mu.Lock()
-	f.runCalls = append(f.runCalls, command)
-	block := f.runBlock
-	result, err := f.runOut, f.runErr
-	f.mu.Unlock()
-
-	if block {
-		select {
-		case f.started <- command:
-		default:
-		}
-		select {
-		case <-ctx.Done():
-			return contracts.TerminalOutput{}, ctx.Err()
-		case <-f.release:
-		}
-	}
-	return result, err
-}
-
-func (f *fakeTerminal) runs() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]string(nil), f.runCalls...)
-}
-
-func (f *fakeTerminal) shellCalls() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]string(nil), f.setShell...)
-}
-
-func (f *fakeTerminal) setRunOutput(result contracts.TerminalOutput) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.runOut = result
-}
-
-func (f *fakeTerminal) setRunErr(err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.runErr = err
-}
-
-func (f *fakeTerminal) setRunBlock(block bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.runBlock = block
 }
 
 // --- fake artifact presenter/lister -----------------------------------------

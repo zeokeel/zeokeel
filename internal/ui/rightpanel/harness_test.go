@@ -3,7 +3,7 @@ package rightpanel_test
 // Shared headless harness for the right sidebar frame tests: the host frame
 // (uiroot.View) renders a real screen that draws the right-panel slot, so
 // every assertion is about visible text and clicks go through the native tab
-// strip. The workspace/terminal/artifact backends are scripted per test.
+// strip. The workspace/artifact backends are scripted per test.
 
 import (
 	"strings"
@@ -21,7 +21,6 @@ import (
 
 type harnessOptions struct {
 	Workspace contracts.WorkspaceService
-	Terminal  contracts.TerminalService
 	Artifacts contracts.ArtifactPresenter
 	Language  string
 	Config    rightpanel.Config
@@ -36,8 +35,8 @@ type harness struct {
 }
 
 // newHarness builds the product frame with the right sidebar module and the
-// optional workspace/terminal/artifact backends. The screen renders the
-// right-panel slot directly (as the session screen does).
+// optional workspace/artifact backends. The screen renders the right-panel slot
+// directly (as the session screen does).
 func newHarness(t *testing.T, options harnessOptions) *harness {
 	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel", Language: options.Language})
@@ -51,9 +50,6 @@ func newHarness(t *testing.T, options harnessOptions) *harness {
 	provide(t, ctx, contracts.KeyScreenLister, uiRoot.ScreenLister())
 	if options.Workspace != nil {
 		provide[contracts.WorkspaceService](t, ctx, contracts.KeyWorkspace, options.Workspace)
-	}
-	if options.Terminal != nil {
-		provide[contracts.TerminalService](t, ctx, contracts.KeyTerminal, options.Terminal)
 	}
 	if options.Artifacts != nil {
 		provide[contracts.ArtifactPresenter](t, ctx, contracts.KeyArtifactPresenter, options.Artifacts)
@@ -258,9 +254,6 @@ func TestFilePreviewerIsProvided(t *testing.T) {
 	if err := service.OpenFiles(); err != nil {
 		t.Fatalf("OpenFiles: %v", err)
 	}
-	if err := service.OpenTerminal(); err != nil {
-		t.Fatalf("OpenTerminal: %v", err)
-	}
 }
 
 // TestDisposeUnwindsContributions: disposing the module unregisters the slot
@@ -274,7 +267,7 @@ func TestDisposeUnwindsContributions(t *testing.T) {
 		t.Fatalf("dispose: %v", err)
 	}
 	tester.Frame()
-	h.assertNoTexts(tester, "工作区文件", "命令运行")
+	h.assertNoTexts(tester, "工作区文件")
 	if service, ok := h.ctx.Get(contracts.KeyFilePreview); ok && service != nil {
 		t.Fatal("the file previewer is still provided after dispose")
 	}

@@ -115,5 +115,5 @@ go test -race ./internal/ui/... ./internal/uikit/... -count=1
 | Service | `contracts.KeyJobs`（`zeokeel/jobs`） | `internal/modules/toolkit`（`jobs_service.go`） | `internal/ui/session` | 后台任务 chip：`Jobs()`（status/command/duration/exit/state）/`KillJob(id)`；每帧解析当前 workspace 的 rig job manager |
 | Service | `contracts.KeyFilePreview`（`zeokeel/filepreview`） | `internal/ui/rightpanel` | `internal/ui/session` | 生成文件卡与文件引用打开右栏标签：`PreviewFile(path)` / `OpenFiles()` / `OpenTerminal()` / `OpenNative(path)`（`internal/lib/openpath`） |
 | 命令 | `uiroot.open-inspector` | `internal/uiroot` | 右栏/文件卡 | 幂等展开右侧栏（与 `uiroot.toggle-inspector` 区分） |
-| 命令 | `rightpanel.files.open` / `rightpanel.terminal.open` | `internal/ui/rightpanel` | 宿主快捷键 | `Cmd/Ctrl+Alt+P` 文件页 / ``Ctrl+` `` 终端页（guide 卡片标注）；旧 `rightpanel.pane.*`、`rightpanel.team.open`、`rightpanel.tasks.open` 已删除 |
+| 命令 | `rightpanel.files.open` | `internal/ui/rightpanel` | 宿主快捷键 | `Cmd/Ctrl+Alt+P` 文件页（guide 卡片标注）；`rightpanel.terminal.open` 与侧边栏终端已于 0.2.41 删除；旧 `rightpanel.pane.*`、`rightpanel.team.open`、`rightpanel.tasks.open` 已删除 |
 | 槽位 | `session.banner` 不变；团队/子代理**不新增**常驻槽位 | — | — | 头部三入口由 session 模块注册到 `screen.header`/`screen.actions`；右栏仅 `session.panel.right` 一个模块（多标签） |

@@ -1,5 +1,32 @@
 # Verification log (final)
 
+## 0.2.41 — 2026-11-15 (移除侧边栏终端)
+
+```
+$ gofmt -l internal cmd
+(empty)
+$ go build ./...
+OK
+$ CGO_ENABLED=0 go build ./...
+OK
+$ go vet ./...
+OK
+$ go tool mygo vet .
+OK
+$ go test ./... -count=1
+all packages ok
+$ go run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
+311 files, 90 violations (all baseline): 0 error, 0 warn, 0 new, 0 blocking
+$ bash scripts/design-check.sh
+6 passed, 0 failed
+$ go run ./internal/devtools/ui-drive --out .cache/impl-drive-no-terminal
+93 PASS / 0 FAIL / 0 WARN / 0 BLOCKED
+$ go run ./internal/devtools/ui-snapshot .cache/impl-shots-no-terminal
+121 PNG (p2-terminal removed)
+```
+
+删除：`internal/ui/rightpanel/terminal.go(+test)`、`internal/modules/terminal/`、`internal/contracts/terminal.go`；rightpanel 固定页、guide 命令卡片、`rightpanel.terminal.open`、Cmd/Ctrl+`、assembly `zeokeel/terminal` 同步移除。模型侧 `terminal_*` 工具与 execution terminal 事件保留。证据：`.cache/impl-drive-no-terminal/drive-report.md`、`.cache/impl-shots-no-terminal/`。
+
 ## 0.2.40 — 2026-11-15 (DSH 客户端功能对齐)
 
 `go version go1.27.3 linux/amd64`

@@ -25,8 +25,8 @@ import (
 )
 
 // clickRightSidebarPage clicks one of the right sidebar's fixed page tabs
-// (开始/文件/终端). The sidebar must already be open; opening it is the host's
-// job (the header toggle, the inspector shortcut or SetRightPanelOpen).
+// (开始/文件). The sidebar must already be open; opening it is the host's job
+// (the header toggle, the inspector shortcut or SetRightPanelOpen).
 func clickRightSidebarPage(t *testing.T, tester *ui.Tester, label string) {
 	t.Helper()
 	tester.Frame()
@@ -39,7 +39,7 @@ func clickRightSidebarPage(t *testing.T, tester *ui.Tester, label string) {
 // sidebarGuideVisible reports whether the right sidebar shows its 开始 guide:
 // the landing of the new DSH-aligned sidebar with no page opened.
 func sidebarGuideVisible(tester *ui.Tester) bool {
-	return tester.HasText("工作区文件") && tester.HasText("命令运行")
+	return tester.HasText("工作区文件")
 }
 
 // requireRightSidebarGuide fails unless the right sidebar's 开始 guide is

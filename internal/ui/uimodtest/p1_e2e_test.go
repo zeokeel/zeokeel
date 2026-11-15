@@ -228,30 +228,6 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("opened file is not its own tab; texts = %v", tester.Texts())
 	}
 
-	// The 终端 page runs real commands in the workspace root.
-	clickRightSidebarPage(t, tester, "命令")
-	if !frameUntil(tester, "运行", 3*time.Second) {
-		t.Fatalf("terminal page missing its run control; texts = %v", tester.Texts())
-	}
-	if runRect, ok := tester.Find("运行"); ok {
-		tester.ClickAt(runRect.X-140, runRect.Y+runRect.H/2)
-		tester.Frame()
-		tester.Type("echo zeokeel-terminal")
-		if err := tester.Click("运行"); err != nil {
-			t.Fatalf("run terminal command: %v; texts = %v", err, tester.Texts())
-		}
-		deadline := time.Now().Add(5 * time.Second)
-		for time.Now().Before(deadline) {
-			tester.Frame()
-			if tester.HasText("zeokeel-terminal") {
-				break
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-		if !tester.HasText("zeokeel-terminal") {
-			t.Fatalf("terminal output missing; texts = %v", tester.Texts())
-		}
-	}
 	uiRoot.SetRightPanelOpen(false)
 	// The official drawer is a modal overlay: the frame must rebuild after
 	// closing it before the next click can reach the content behind it.

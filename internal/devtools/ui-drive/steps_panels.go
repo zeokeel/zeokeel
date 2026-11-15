@@ -1,9 +1,9 @@
 package main
 
 // Right-sidebar steps: the DSH-aligned sidebar replaced the retired 8-pane
-// inspector. It opens on the 开始 guide (工作区文件 / 命令运行 cards), has one
-// tab strip (开始 | 文件 | 命令 | opened files), opens a workspace file as a
-// preview tab with its folded unified diff, and runs commands in the 命令 page.
+// inspector. It opens on the 开始 guide (a single 工作区文件 card), has one
+// tab strip (开始 | 文件 | opened files), and opens a workspace file as a
+// preview tab with its folded unified diff.
 // The old pane selector, 概览/工具/日志/变更/团队/任务 panes and their commands
 // are gone: team/tasks coverage lives in steps_team.go and the log is folded
 // into the file tabs.
@@ -15,11 +15,11 @@ import (
 )
 
 // sidebarPageTabs are the right sidebar's fixed pages in strip order.
-var sidebarPageTabs = []string{"开始", "文件", "命令"}
+var sidebarPageTabs = []string{"开始", "文件"}
 
 func (d *drive) runPanelSteps() {
 	d.step("panel-open", "shell", "右栏：打开右侧栏 → 开始 guide",
-		"点击顶栏「打开右侧栏」→ 侧栏出现开始 guide：两个等宽卡片 工作区文件/命令运行 + 标签页 开始|文件|命令；旧的 8-pane 选择器与概览/工具/日志/变更/团队/任务 pane 已移除", func(c *check) {
+		"点击顶栏「打开右侧栏」→ 侧栏出现开始 guide：单个工作区文件卡片 + 标签页 开始|文件；旧的 8-pane 选择器、命令页与概览/工具/日志/变更/团队/任务 pane 已移除", func(c *check) {
 			d.resetToSession()
 			d.uiRoot.SetRightPanelOpen(false)
 			d.frame()
@@ -27,7 +27,7 @@ func (d *drive) runPanelSteps() {
 				return
 			}
 			c.require(d.uiRoot.RightPanelOpen(), "点击「打开右侧栏」后侧栏未打开")
-			c.mustText("开始", "工作区文件", "命令运行")
+			c.mustText("开始", "工作区文件")
 			missing := []string{}
 			for _, tab := range sidebarPageTabs {
 				if _, ok := d.find(tab); !ok {
@@ -41,8 +41,8 @@ func (d *drive) runPanelSteps() {
 			c.shot("panel-guide")
 		})
 
-	d.step("panel-guide-cards", "shell", "右栏：guide 卡片进入 文件/命令 页",
-		"开始 guide 点「工作区文件」→ 文件页（工作区树 + 产物区）；点「开始」标签回 guide；点「命令运行」→ 命令页（命令输入 + 运行）", func(c *check) {
+	d.step("panel-guide-cards", "shell", "右栏：guide 卡片进入文件页",
+		"开始 guide 点「工作区文件」→ 文件页（工作区树 + 产物区）；点「开始」标签回 guide；不再有命令页", func(c *check) {
 			if !d.uiRoot.RightPanelOpen() {
 				d.uiRoot.SetRightPanelOpen(true)
 				d.frame()
@@ -64,20 +64,7 @@ func (d *drive) runPanelSteps() {
 				return
 			}
 			d.drain(2)
-			if !c.click("命令运行") {
-				return
-			}
-			d.drain(2)
-			c.mustText("运行")
-			if _, ok := d.find("输入命令…"); !ok && !c.has("命令") {
-				c.failf("命令页没有命令输入（「输入命令…」缺失）")
-				return
-			}
-			c.shot("panel-terminal-page")
-			if !c.click("开始") {
-				return
-			}
-			d.drain(2)
+			c.require(!c.has("命令运行"), "开始 guide 仍显示已删除的命令运行卡片")
 		})
 
 	d.step("panel-files-preview", "shell", "右栏：文件页打开 README.md → 文件标签预览",
@@ -179,35 +166,6 @@ func (d *drive) runPanelSteps() {
 			d.tester.Advance(200 * time.Millisecond)
 			d.drain(2)
 			c.shot("panel-file-diff")
-		})
-
-	d.step("panel-terminal-run", "shell", "右栏：命令页运行 echo 命令",
-		"命令标签页输入 echo ui-drive-terminal → 点「运行」→ 输出包含该文本", func(c *check) {
-			if !d.uiRoot.RightPanelOpen() {
-				d.uiRoot.SetRightPanelOpen(true)
-				d.frame()
-			}
-			if !c.click("命令") {
-				return
-			}
-			d.drain(2)
-			// Focus the terminal input by its distinct accessible name: the
-			// view tab is also called 命令, so the input's label is 「命令输入」.
-			if err := d.click("命令输入"); err != nil {
-				c.failf("命令页没有可聚焦的命令输入：%v", err)
-				return
-			}
-			d.frame()
-			d.typeText("echo ui-drive-terminal")
-			d.frame()
-			if !c.click("运行") {
-				return
-			}
-			if !d.waitText("ui-drive-terminal", 8*time.Second) {
-				c.failf("命令页输出未出现；texts=%v", paletteTailTexts(d))
-				return
-			}
-			c.shot("panel-terminal-run")
 		})
 
 	d.step("panel-close", "shell", "右栏：关闭侧栏",

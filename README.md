@@ -4,17 +4,13 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.40 — DSH 客户端功能对齐** (2026-11-15). Native, compile-time modular
+> **v0.2.41 — 移除侧边栏终端** (2026-11-15). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
-> webview. 本版按 [UI/UX 升级评估](docs/UI-UX-UPGRADE-2026-11-15.md) 收口设计债：
-> 输入框去小方块/附件直连 picker、审批内联 diff、命令面板首屏与分组、
-> 团队/子代理停止与执行域历史、后台完成通知静默、窄窗自动 rail + docked 检查器、
-> 会话 FindBar/轨迹定位、设置条目级搜索、搜索命中定位、rail 会话入口、
-> 窗口标题/托盘运行态、恢复会话元信息、状态/字号/a11y 收尾，并抽出
-> `uikit.ComposerToolbar`/`DiffPreview`/`PropertySheet`/`ReadingColumn`/`SegmentedControl`。
+> webview. 本版按用户要求删除侧边栏终端/命令页与 `zeokeel/terminal` 模块；
+> 模型侧 `terminal_*` 工具、执行域 terminal 历史、右栏文件/预览保留。
 > Final verification: `go test ./...` green (incl. key-package `-race`),
-> `ui-drive` **94/94 PASS**, `ui-snapshot` **122 PNG**, designlint
-> **0 new / 0 blocking**, design-check **6/6**. See [CHANGELOG.md](CHANGELOG.md).
+> `ui-drive` **93/93 PASS**, `ui-snapshot` **121 PNG** (p2-terminal removed),
+> designlint **0 new / 0 blocking**, design-check **6/6**. See [CHANGELOG.md](CHANGELOG.md).
 
 > **v0.2.24 主要变化**：按 `docs/PRODUCT-BUG-REVIEW-2026-11-11.md` 做 TDD 修复——
 > ① 安全/权限：MCP 多 server 重名 panic、`settings_get` 明文凭据、自动化只读越权、只读预设 destructive memory、LSP 初始化与沙箱路径、损坏数据文件隔离、后端工具开关生效；
@@ -217,9 +213,7 @@ go test ./...
 - ✅ P3 会话↔工作区 + workspace 树：sessionstore 幂等迁移 `workspace_id`（旧库兼容）+ agent 在新建/首次发送时
   记录当前工作区；侧栏会话区按工作区分组（当前工作区高亮、组折叠、会话数、未分组、搜索跨组）；截图
   `p2-workspace-tree.png`
-- ✅ P3 终端：`zeokeel/terminal`（workspace root 为 cwd 的简单命令运行器，shell 探测/选择、timeout、
-  输出截断、ctx 取消；无 PTY/持久 shell，与 old terminalPanel 一致）；右侧栏「终端」Tab：cwd/shell/清空、
-  mono 输出、输入 + 运行/停止、退出码；截图 `p2-terminal.png`；desktop 18 / headless 9 实例
+- ⛔ P3 终端（0.2.41 移除）：侧边栏终端/命令页与 `zeokeel/terminal` 模块已删除；模型侧 `terminal_*` 工具保留。
 - ✅ P3 技能：`zeokeel/skills`（多根发现，优先级**工作区** `<root>/skills`、`.agents/skills`、
   `.zeokeel/skills` → 用户配置目录（`skills.dirs`）→ assembly 配置目录 → `dataDir/skills` →
   `$ZEOKEEL_SKILLS` → `~/.zeokeel/skills`；动态 roots、frontmatter 解析、body 去 frontmatter、同名技能

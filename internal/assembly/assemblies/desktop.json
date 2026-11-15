@@ -31,11 +31,6 @@
       "config": {}
     },
     {
-      "id": "terminal",
-      "module": "zeokeel/terminal",
-      "config": {}
-    },
-    {
       "id": "skills",
       "module": "zeokeel/skills",
       "config": {}

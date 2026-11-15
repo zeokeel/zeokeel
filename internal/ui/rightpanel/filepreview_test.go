@@ -76,8 +76,8 @@ func TestPreviewFileFocusesAnOpenTab(t *testing.T) {
 	h.assertTexts(tester, "甲", "关闭 b.md")
 }
 
-// TestOpenFilesAndOpenTerminalFocusPages: the two page-focus entry points.
-func TestOpenFilesAndOpenTerminalFocusPages(t *testing.T) {
+// TestOpenFilesFocusesTheFilesPage: the previewer's page entry point.
+func TestOpenFilesFocusesTheFilesPage(t *testing.T) {
 	workspace := newFakeWorkspace()
 	workspace.setCurrent()
 	h := newHarness(t, harnessOptions{Workspace: workspace})
@@ -89,12 +89,6 @@ func TestOpenFilesAndOpenTerminalFocusPages(t *testing.T) {
 	}
 	tester.Frame()
 	h.assertTexts(tester, "工作区", "proj")
-
-	if err := previewer.OpenTerminal(); err != nil {
-		t.Fatalf("OpenTerminal: %v", err)
-	}
-	tester.Frame()
-	h.assertTexts(tester, "命令未启用")
 }
 
 // TestOpenNativeResolvesWorkspaceRelativePath: the native launch action takes

@@ -57,7 +57,6 @@ const slotOrder = 10
 const (
 	pageGuide = iota
 	pageFiles
-	pageTerminal
 	// pageFixedCount is the number of fixed pages; a tab index at or above it
 	// is an opened file (index - pageFixedCount).
 	pageFixedCount
@@ -67,8 +66,7 @@ const (
 // sidebar through commands, and the host opens the panel through its stable
 // command; string literals keep UI modules from importing each other.
 const (
-	filesOpenCommandID    = "rightpanel.files.open"
-	terminalOpenCommandID = "rightpanel.terminal.open"
+	filesOpenCommandID = "rightpanel.files.open"
 	// hostOpenCommandID is the host's idempotent "open the inspector" command
 	// (never toggles): a preview request from a conversation card opens the
 	// sidebar through it.
@@ -78,31 +76,24 @@ const (
 // The guide's shortcut labels. They are the command metadata's shortcuts: the
 // guide is the discoverability surface of the same chords, so the two cannot
 // drift.
-var (
-	filesOpenShortcut    = platformShortcut("Ctrl+Alt+P", "Cmd+Alt+P")
-	terminalOpenShortcut = platformShortcut("Ctrl+`", "Cmd+`")
-)
+var filesOpenShortcut = platformShortcut("Ctrl+Alt+P", "Cmd+Alt+P")
 
 // Config is the module's typed assembly config (all fields have defaults).
 type Config struct {
 	// Title is the sidebar's assistive name (default 右侧栏).
 	Title string `json:"title"`
-	// GuideTab/FilesTab/TerminalTab are the fixed page tab labels; the terminal
-	// runner's page is "命令" (Commands): it is a one-off command runner, not an
-	// interactive terminal.
-	GuideTab    string `json:"guideTab"`
-	FilesTab    string `json:"filesTab"`
-	TerminalTab string `json:"terminalTab"`
+	// GuideTab/FilesTab are the fixed page tab labels.
+	GuideTab string `json:"guideTab"`
+	FilesTab string `json:"filesTab"`
 }
 
 // resolved trims the configured strings, keeping explicit overrides only; the
 // localized defaults are resolved per frame from the host locale.
 func (c Config) resolved() Config {
 	return Config{
-		Title:       strings.TrimSpace(c.Title),
-		GuideTab:    strings.TrimSpace(c.GuideTab),
-		FilesTab:    strings.TrimSpace(c.FilesTab),
-		TerminalTab: strings.TrimSpace(c.TerminalTab),
+		Title:    strings.TrimSpace(c.Title),
+		GuideTab: strings.TrimSpace(c.GuideTab),
+		FilesTab: strings.TrimSpace(c.FilesTab),
 	}
 }
 
@@ -116,10 +107,6 @@ func (c Config) guideLabel(locale contracts.LocaleService) string {
 
 func (c Config) filesLabel(locale contracts.LocaleService) string {
 	return firstNonEmpty(c.FilesTab, uikit.T(locale, "文件", "Files"))
-}
-
-func (c Config) terminalLabel(locale contracts.LocaleService) string {
-	return firstNonEmpty(c.TerminalTab, uikit.T(locale, "命令", "Commands"))
 }
 
 // fileTab is one opened file tab: the workspace-relative path (slash
@@ -140,7 +127,7 @@ type dirListing struct {
 // on the UI thread).
 type state struct {
 	// ctx is the module's kernel context: the optional backends (workspace,
-	// terminal, artifact presenter) are looked up with ctx.Get, no Requires.
+	// artifact presenter) are looked up with ctx.Get, no Requires.
 	ctx cordis.Context
 	// locale localizes the sidebar's own copy on every frame.
 	locale contracts.LocaleService
@@ -150,7 +137,7 @@ type state struct {
 	runtime contracts.UIRuntime
 
 	// tab is the active tab index: a fixed page (pageGuide/pageFiles/
-	// pageTerminal) or pageFixedCount+fileTab. fileTabs are appended in open
+	// pageFixedCount+fileTab. fileTabs are appended in open
 	// order; revealTab asks the next frame to scroll the active tab into view.
 	tab       int
 	fileTabs  []fileTab
@@ -216,10 +203,6 @@ type state struct {
 	// snapshot.
 	changesGeneration int
 
-	// term is the Terminal page's state (its command runner appends output
-	// from a background goroutine, so its guard lives in terminalState).
-	term *terminalState
-
 	// commands are the registered page commands; commandLang re-registers them
 	// with localized titles after a language switch.
 	commands    []func()
@@ -258,8 +241,6 @@ func (st *state) tabLabel(index int) string {
 		return st.cfg.guideLabel(st.locale)
 	case pageFiles:
 		return st.cfg.filesLabel(st.locale)
-	case pageTerminal:
-		return st.cfg.terminalLabel(st.locale)
 	}
 	fileIndex := index - pageFixedCount
 	if fileIndex < 0 || fileIndex >= len(st.fileTabs) {
@@ -398,7 +379,6 @@ func Module() *module.Descriptor[Config] {
 			diffs:         make(map[string]*diffView),
 			artifactsOpen: make(map[string]bool),
 			artifactsSel:  -1,
-			term:          newTerminalState(),
 		}
 		if err := moduleState.registerCommands(); err != nil {
 			return err
@@ -410,8 +390,8 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		// The FilePreviewer is the session surface's entry point into the
-		// sidebar: conversation cards preview a file, open the files/terminal
-		// page or launch a generated file in the platform's application.
+		// sidebar: conversation cards preview a file, open the files page or
+		// launch a generated file in the platform's application.
 		previewer := &filePreviewService{state: moduleState}
 		if _, err := ctx.Provide(contracts.KeyFilePreview, contracts.FilePreviewer(previewer)); err != nil {
 			return err
@@ -426,17 +406,13 @@ func Module() *module.Descriptor[Config] {
 					if service, ok := ctx.Get(contracts.KeyWorkspace); ok {
 						workspace = service
 					}
-					var terminal contracts.TerminalService
-					if service, ok := ctx.Get(contracts.KeyTerminal); ok {
-						terminal = service
-					}
 					// The deliverables history is the optional lister half of
 					// the host artifact presenter; the Files page only reads it.
 					var artifacts contracts.ArtifactLister
 					if service, ok := ctx.Get(contracts.KeyArtifactPresenter); ok {
 						artifacts, _ = service.(contracts.ArtifactLister)
 					}
-					buildPanel(c, design.Of(c), workspace, terminal, artifacts, config, moduleState)
+					buildPanel(c, design.Of(c), workspace, artifacts, config, moduleState)
 				},
 			})
 		})
@@ -446,9 +422,8 @@ func Module() *module.Descriptor[Config] {
 		WithName("ZeoKeel right sidebar")
 }
 
-// registerCommands (re)registers the two page-focus commands: the guide's
-// shortcut labels, the host palette and the sidebar's own cards all target the
-// same ids.
+// registerCommands (re)registers the files-page command: the guide's shortcut
+// label, the host palette and the sidebar's own card all target the same id.
 func (st *state) registerCommands() error {
 	if st.runtime == nil {
 		return nil
@@ -465,19 +440,7 @@ func (st *state) registerCommands() error {
 	if err != nil {
 		return err
 	}
-	terminal, err := st.runtime.RegisterCommand(contracts.CommandSpec{
-		ID:       terminalOpenCommandID,
-		Title:    st.tr("打开命令页", "Open commands page"),
-		Hint:     st.tr("在右侧栏运行一次性命令，输出可复制", "Run one-off commands in the right sidebar; the output is copyable"),
-		Order:    921,
-		Shortcut: terminalOpenShortcut,
-		Run:      func() error { st.showFixedPage(pageTerminal); return nil },
-	})
-	if err != nil {
-		files()
-		return err
-	}
-	st.commands = []func(){files, terminal}
+	st.commands = []func(){files}
 	st.commandLang = uikit.Language(st.locale)
 	return nil
 }
@@ -536,15 +499,6 @@ func (s *filePreviewService) OpenFiles() error {
 		return errors.New("rightpanel: the right sidebar is not loaded")
 	}
 	s.state.showFixedPage(pageFiles)
-	return nil
-}
-
-// OpenTerminal focuses the sidebar's terminal page.
-func (s *filePreviewService) OpenTerminal() error {
-	if s == nil || s.state == nil {
-		return errors.New("rightpanel: the right sidebar is not loaded")
-	}
-	s.state.showFixedPage(pageTerminal)
 	return nil
 }
 

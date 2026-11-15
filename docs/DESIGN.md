@@ -303,7 +303,7 @@
 | 裸 `FontSize` | **0**（Phase 1b 已清零） | 7 处 mono 小字已改 `t.MonoText(role)` | 保持零（DS-03 阻断） |
 | 裸数值度量调用 | **51**（grep 行口径） | 全模块（UI 层已无宽度/字号字面量） | 逐模块 token 化，baseline 只降不升 |
 | 裸 `FontWeight` | designlint warn（baseline 收口） | 多为标题 600 | heading type role 后收敛 |
-| 手绘 `ButtonBase` | **10**（Phase 2a 后） | 命令面板行 / slash@ 富行 / 侧栏富行与行内 ⋯ / terminal copy success 态 / `uikit.IconButton` 内核 | 富行与 success 态登记 allowlist；图标按钮已全部收敛 |
+| 手绘 `ButtonBase` | **9**（Phase 2a 后） | 命令面板行 / slash@ 富行 / 侧栏富行与行内 ⋯ / `uikit.IconButton` 内核 | 富行与图标按钮内核登记 allowlist；图标按钮已全部收敛 |
 | 重复状态→(文案,颜色) 函数 | **0**（Phase 2b 收敛） | uikit.Status* 唯一出口 | 保持零（design-check DS-09 阈值 0） |
 | 对话框宽度绕 token | **0**（Phase 1b 已清零） | 8 处已换 `DialogWidth*`/`OverlayWidthS` | 保持零 |
 | 工具卡渲染路径 | **2**（Phase 2c） | `uikit.ToolRow`（紧凑行）+ `uikit.ToolCallCard`（完整卡：决策/轨迹/plan/demo） | 保持 2；新增工具只注册渲染器 |
@@ -662,7 +662,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 
 | 位置 | 内容 | 理由 |
 |---|---|---|
-| 命令面板行 / slash@ 富行 / 侧栏富行与行内 ⋯ / terminal copy success 态（8 处富行/success 态站点，按区域登记 registry allowlist） | 富行按钮、on-accent 行内动作、success 确认态 | 图标按钮已在 Phase 2a 收敛到 `uikit.IconButton`；上述站点受官方 List 行语义 / 行状态前景 / 状态语义限制，保留自绘并登记 registry allowlist（DESIGN.md §7.1） |
+| 命令面板行 / slash@ 富行 / 侧栏富行与行内 ⋯（7 处富行站点，按区域登记 registry allowlist） | 富行按钮、on-accent 行内动作 | 图标按钮已在 Phase 2a 收敛到 `uikit.IconButton`；上述站点受官方 List 行语义 / 行状态前景限制，保留自绘并登记 registry allowlist（DESIGN.md §7.1） |
 | composer 动作行 | Shell 的 Row 承载 Toolbar + hint + 发送/排队/停止 | `ui.Toolbar` 溢出菜单会吞掉发送键，故主操作放在 Toolbar 外；Toolbar 内部仍是官方控件（`uikit.ComposerToolbar`），不新增按钮状态机 |
 | slash/@ 建议菜单 | 富行建议面板（图标/标题/说明） | 官方 Autocomplete 仅纯文本；已按官方 suggestions a11y 模式实现 |
 | 命令面板行按钮 | 单次点击执行 + RoleButton 行 | 官方 List 行语义是 listitem，不提供按钮行 |

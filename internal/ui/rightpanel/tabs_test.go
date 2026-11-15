@@ -1,8 +1,8 @@
 package rightpanel_test
 
-// Frame tests for the right sidebar tab strip: the fixed pages (开始/文件/
-// 命令), one tab per opened file, switching, closing and overflow, plus the
-// removal of the old 8-pane inspector and its cycle commands.
+// Frame tests for the right sidebar tab strip: the fixed pages (开始/文件),
+// one tab per opened file, switching, closing and overflow, plus the removal of
+// the old 8-pane inspector and its cycle commands.
 
 import (
 	"fmt"
@@ -22,8 +22,8 @@ func TestOldInspectorPanesAreGone(t *testing.T) {
 	workspace.setCurrent()
 	h := newHarness(t, harnessOptions{Workspace: workspace})
 	tester := h.tester()
-	h.assertTexts(tester, "开始", "文件", "命令")
-	h.assertNoTexts(tester, "概览", "工具", "日志", "变更", "团队", "任务", "切换面板", "检查器")
+	h.assertTexts(tester, "开始", "文件")
+	h.assertNoTexts(tester, "命令", "概览", "工具", "日志", "变更", "团队", "任务", "切换面板", "检查器")
 
 	ids := make(map[string]bool)
 	for _, command := range h.uiRoot.Runtime().Commands() {
@@ -51,7 +51,7 @@ func TestFileTabOpensFromWorkspaceTree(t *testing.T) {
 	h.assertTexts(tester, "README.md")
 	h.click(tester, "README.md")
 	h.assertTexts(tester, "关闭 README.md", "项目说明")
-	h.assertTexts(tester, "开始", "文件", "命令")
+	h.assertTexts(tester, "开始", "文件")
 }
 
 // TestFileTabSwitchAndClose: each opened file is one tab; switching back shows
@@ -82,7 +82,7 @@ func TestFileTabSwitchAndClose(t *testing.T) {
 	h.assertTexts(tester, "乙文件")
 	h.closeFileTab(tester, "b.md")
 	h.assertNoTexts(tester, "关闭 b.md")
-	h.assertTexts(tester, "开始", "文件", "命令")
+	h.assertTexts(tester, "开始", "文件")
 }
 
 // TestFileTabsFocusExistingTab: opening an already open file focuses its tab
@@ -120,7 +120,7 @@ func TestFileTabsAreClosableButPagesAreNot(t *testing.T) {
 	h.openPage(tester, "文件")
 	h.click(tester, "a.md")
 	tester.Frame()
-	for _, fixed := range []string{"关闭 开始", "关闭 文件", "关闭 命令"} {
+	for _, fixed := range []string{"关闭 开始", "关闭 文件"} {
 		if tester.HasText(fixed) {
 			t.Fatalf("fixed page has a close control (%q); texts = %v", fixed, tester.Texts())
 		}
@@ -156,8 +156,9 @@ func TestTabStripOverflowsSafely(t *testing.T) {
 	}
 }
 
-// TestPageCommands: the file/terminal pages have stable command ids the host
-// palette and shortcuts can target; they open the panel and focus the page.
+// TestPageCommands: the files page has a stable command id the host palette and
+// shortcuts can target; it opens the panel and focuses the page. The removed
+// command page's command id is gone.
 func TestPageCommands(t *testing.T) {
 	workspace := newFakeWorkspace()
 	workspace.setCurrent()
@@ -172,17 +173,9 @@ func TestPageCommands(t *testing.T) {
 	if !strings.Contains(files.Hint, "文件") || !strings.Contains(files.Title, "文件") {
 		t.Fatalf("files command = %+v, want 文件 in title/hint", files)
 	}
-	terminal := h.command(tester, "rightpanel.terminal.open")
-	if terminal.Shortcut != "Ctrl+`" {
-		t.Fatalf("terminal command shortcut = %q, want Ctrl+`", terminal.Shortcut)
+	if files.Run == nil {
+		t.Fatal("the files command has no Run")
 	}
-	if !strings.Contains(terminal.Hint, "命令") || !strings.Contains(terminal.Title, "命令") {
-		t.Fatalf("terminal command = %+v, want 命令 in title/hint", terminal)
-	}
-	if files.Run == nil || terminal.Run == nil {
-		t.Fatal("page commands have no Run")
-	}
-
 	if err := files.Run(); err != nil {
 		t.Fatalf("run files command: %v", err)
 	}
@@ -192,11 +185,13 @@ func TestPageCommands(t *testing.T) {
 		t.Fatal("running the files command did not open the host panel")
 	}
 
-	if err := terminal.Run(); err != nil {
-		t.Fatalf("run terminal command: %v", err)
+	ids := make(map[string]bool)
+	for _, command := range h.uiRoot.Runtime().Commands() {
+		ids[command.ID] = true
 	}
-	tester.Frame()
-	h.assertTexts(tester, "命令未启用")
+	if ids["rightpanel.terminal.open"] {
+		t.Fatal("the removed terminal page command is still registered")
+	}
 }
 
 // TestTabStripKeyboard: the native tab list keeps the arrows/Home/End
@@ -212,7 +207,8 @@ func TestTabStripKeyboard(t *testing.T) {
 	h.assertTexts(tester, "工作区未启用")
 	tester.Key(0, ui.KeyLeft)
 	tester.Frame()
-	h.assertTexts(tester, "工作区文件", "命令运行")
+	h.assertTexts(tester, "工作区文件")
+	h.assertNoTexts(tester, "命令运行")
 }
 
 // TestViewAndDocumentTabsAreSeparateRows pins the V10 tab model: the fixed

@@ -1,8 +1,9 @@
 package rightpanel_test
 
 // Frame tests for the right sidebar's 开始 guide (the no-page-open landing):
-// two equal side-by-side cards, their shortcuts, no explanatory copy, and a
-// scrollable body.
+// the single workspace-files card, its shortcut, no explanatory copy, and a
+// scrollable body. The sidebar used to offer a second "命令运行" card; the
+// command page is gone, so the guide has exactly one entry point.
 
 import (
 	"strings"
@@ -11,12 +12,13 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// TestGuideIsTheDefaultPage: with no page opened the sidebar shows the two
-// onboarding cards and their shortcuts.
+// TestGuideIsTheDefaultPage: with no page opened the sidebar shows the
+// workspace-files card and its shortcut.
 func TestGuideIsTheDefaultPage(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	tester := h.tester()
-	h.assertTexts(tester, "开始", "文件", "命令", "工作区文件", "命令运行", "Ctrl+Alt+P", "Ctrl+`")
+	h.assertTexts(tester, "开始", "文件", "工作区文件", "Ctrl+Alt+P")
+	h.assertNoTexts(tester, "命令", "命令运行", "Ctrl+`")
 }
 
 // TestGuideHasNoDescriptionCopy: the user-approved guide is title + shortcut
@@ -24,7 +26,7 @@ func TestGuideIsTheDefaultPage(t *testing.T) {
 func TestGuideHasNoDescriptionCopy(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	tester := h.tester()
-	h.assertTexts(tester, "工作区文件", "命令运行")
+	h.assertTexts(tester, "工作区文件")
 	h.assertNoTexts(tester,
 		"浏览会话工作区的文件", "在会话工作区运行命令",
 		"只保留两个按需页面", "点开才会出现，两个可以并排查看",
@@ -33,36 +35,25 @@ func TestGuideHasNoDescriptionCopy(t *testing.T) {
 		"Run commands in the session workspace")
 }
 
-// TestGuideCardsAreEqualSideBySide pins the approved layout: two equal cards
-// on one row.
-func TestGuideCardsAreEqualSideBySide(t *testing.T) {
+// TestGuideHasOneWorkspaceFilesCard pins the new layout: a single accessible
+// card, not a two-up row with an empty second slot.
+func TestGuideHasOneWorkspaceFilesCard(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	tester := h.tester()
 	tester.Frame()
-	first, ok := tester.AccessByRole(ui.RoleButton, "工作区文件")
+	card, ok := tester.AccessByRole(ui.RoleButton, "工作区文件")
 	if !ok {
 		t.Fatalf("工作区文件 is not an accessible button; texts = %v", tester.Texts())
 	}
-	second, ok := tester.AccessByRole(ui.RoleButton, "命令运行")
-	if !ok {
-		t.Fatalf("命令运行 is not an accessible button; texts = %v", tester.Texts())
+	if card.Bounds.W <= 0 || card.Bounds.H <= 0 {
+		t.Fatalf("workspace-files card has no visible box: %+v", card.Bounds)
 	}
-	if first.Bounds.W <= 0 || second.Bounds.W <= 0 {
-		t.Fatalf("card widths = %v / %v, want visible cards", first.Bounds, second.Bounds)
-	}
-	if first.Bounds.W != second.Bounds.W {
-		t.Fatalf("guide card widths differ: %v vs %v, want equal side-by-side cards",
-			first.Bounds, second.Bounds)
-	}
-	if first.Bounds.Y != second.Bounds.Y {
-		t.Fatalf("guide cards are not on one row: %v vs %v", first.Bounds, second.Bounds)
-	}
-	if first.Bounds.X >= second.Bounds.X {
-		t.Fatalf("guide cards are not side by side: %v then %v", first.Bounds, second.Bounds)
+	if _, ok := tester.AccessByRole(ui.RoleButton, "命令运行"); ok {
+		t.Fatalf("the removed command card is still an accessible button; texts = %v", tester.Texts())
 	}
 }
 
-// TestGuideCardsOpenTheirPages: the cards are the guide's entry points.
+// TestGuideCardsOpenTheirPages: the card is the guide's entry point.
 func TestGuideCardsOpenTheirPages(t *testing.T) {
 	workspace := newFakeWorkspace()
 	workspace.setCurrent()
@@ -75,22 +66,21 @@ func TestGuideCardsOpenTheirPages(t *testing.T) {
 	h.assertTexts(tester, "工作区", "README.md")
 
 	h.click(tester, "开始")
-	h.assertTexts(tester, "工作区文件", "命令运行")
-	h.click(tester, "命令运行")
-	h.assertTexts(tester, "命令未启用")
+	h.assertTexts(tester, "工作区文件")
+	h.assertNoTexts(tester, "命令运行")
 }
 
 // TestGuideBodyScrolls: the guide body is a native scroll, so a short window
-// keeps both cards reachable instead of clipping the content.
+// keeps the card reachable instead of clipping the content.
 func TestGuideBodyScrolls(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	tester := h.tester()
 	tester.SetSize(1100, 320)
 	tester.Frame()
-	h.assertTexts(tester, "工作区文件", "命令运行")
+	h.assertTexts(tester, "工作区文件")
 	tester.SetSize(1200, 800)
 	tester.Frame()
-	h.assertTexts(tester, "工作区文件", "命令运行")
+	h.assertTexts(tester, "工作区文件")
 }
 
 // TestShortcutLabelsMatchCommands keeps the guide copy and the palette command
@@ -101,12 +91,8 @@ func TestShortcutLabelsMatchCommands(t *testing.T) {
 	tester.Frame()
 	texts := strings.Join(tester.Texts(), "\n")
 	files := h.command(tester, "rightpanel.files.open")
-	terminal := h.command(tester, "rightpanel.terminal.open")
 	if !strings.Contains(texts, files.Shortcut) {
 		t.Fatalf("guide does not show the files shortcut %q; texts = %v", files.Shortcut, tester.Texts())
-	}
-	if !strings.Contains(texts, terminal.Shortcut) {
-		t.Fatalf("guide does not show the terminal shortcut %q; texts = %v", terminal.Shortcut, tester.Texts())
 	}
 }
 

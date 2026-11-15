@@ -18,7 +18,6 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/sandbox"
 	"github.com/zeokeel/zeokeel/internal/modules/sessionstore"
 	"github.com/zeokeel/zeokeel/internal/modules/skills"
-	"github.com/zeokeel/zeokeel/internal/modules/terminal"
 	"github.com/zeokeel/zeokeel/internal/modules/toolkit"
 	"github.com/zeokeel/zeokeel/internal/modules/update"
 	"github.com/zeokeel/zeokeel/internal/modules/workspace"
@@ -64,7 +63,6 @@ func Registry() *module.Registry {
 	mustRegister(registry, sessionstore.Module())
 	mustRegister(registry, approvals.Module())
 	mustRegister(registry, workspace.Module())
-	mustRegister(registry, terminal.Module())
 	mustRegister(registry, skills.Module())
 	mustRegister(registry, memory.Module())
 	mustRegister(registry, sandbox.Module())

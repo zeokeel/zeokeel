@@ -64,8 +64,8 @@ func (d *drive) runPaletteSteps() {
 			d.clearDraft()
 			d.typeText("打开命令页")
 			d.drain(2)
-			c.require(c.has("Ctrl+`"),
-				"命令面板缺少命令页快捷键 chord；texts=%v", paletteTailTexts(d))
+			c.require(!c.has("打开命令页"),
+				"命令面板仍显示已删除的命令页命令")
 			c.shot("palette-shortcut-column")
 			d.key(0, ui.KeyEscape)
 			d.drain(2)

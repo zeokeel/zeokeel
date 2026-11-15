@@ -167,8 +167,6 @@ type FilePreviewer interface {
 	PreviewFile(path string) error
 	// OpenFiles focuses the sidebar's files page.
 	OpenFiles() error
-	// OpenTerminal focuses the sidebar's terminal page.
-	OpenTerminal() error
 	// OpenNative opens the file in the platform's default application (the
 	// secondary action on generated-file cards).
 	OpenNative(path string) error

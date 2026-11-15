@@ -149,7 +149,7 @@ func TestDesignRegistryIsValid(t *testing.T) {
 	if len(r.AntiPatterns) < 18 {
 		t.Errorf("anti_patterns = %d, want the full AP-01..AP-18 list", len(r.AntiPatterns))
 	}
-	if len(r.Allowlist) < 9 {
+	if len(r.Allowlist) < 8 {
 		t.Errorf("allowlist = %d, want the DESIGN.md §7.1 self-drawn areas", len(r.Allowlist))
 	}
 	// Every rule the lint layer implements must be in the registry's AP map.

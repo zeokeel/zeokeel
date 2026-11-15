@@ -4,6 +4,23 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.41] - 2026-11-15
+
+按用户要求删除侧边栏终端/命令页（模型侧 `terminal_*` 工具保留）。
+
+### Removed
+
+- **侧边栏终端/命令页**：删除 `internal/ui/rightpanel/terminal.go`、`internal/modules/terminal/`、`internal/contracts/terminal.go`；右栏固定页只剩「开始 / 文件 + 打开文件」，guide 只剩工作区文件卡片；`rightpanel.terminal.open` 命令与 Cmd/Ctrl+` 快捷键删除；FilePreviewer 去 `OpenTerminal`；assembly 删除 `zeokeel/terminal`（desktop roots 17 / registry 32 / desktop instances 30 / headless 15）。
+- 保留：toolkit 的 `terminal_open/list/send/read/signal/close` 模型工具、execution history 的 terminal 事件、右栏文件/预览。
+
+### Verification
+
+- `gofmt` 空；`go build ./...`、`CGO_ENABLED=0 go build ./...`、`go vet ./...`、`go tool mygo vet .` 通过
+- `go test ./... -count=1` 全绿
+- `designlint --strict --baseline` 0 new / 0 blocking；`scripts/design-check.sh` 6/6
+- `ui-drive` **93/93 PASS**（`.cache/impl-drive-no-terminal/drive-report.md`）
+- `ui-snapshot` **121 PNG**（`.cache/impl-shots-no-terminal/`；`p2-terminal.png` 移除）
+
 ## [0.2.40] - 2026-11-15
 
 DSH 客户端功能对齐批次：补 Todo、Job 输出流、原始日志、提醒、能力设置、工作区重命名、附件画廊、文档外部打开与轨迹时间概览。

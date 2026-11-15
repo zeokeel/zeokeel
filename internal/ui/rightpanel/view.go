@@ -26,7 +26,7 @@ const filePreviewHeight = design.Space6 * 10
 // active page (or opened file) below it. The host paints the docked surface
 // and owns the width; the tab strip sits flush at the top, DSH-style.
 func buildPanel(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
-	terminal contracts.TerminalService, artifacts contracts.ArtifactLister, cfg Config, st *state) {
+	artifacts contracts.ArtifactLister, cfg Config, st *state) {
 	// The page commands' palette titles follow the host language, the live
 	// workspace identity scopes the path-keyed caches (a workspace switch
 	// re-reads the opened tabs instead of showing the old workspace's bytes),
@@ -52,8 +52,6 @@ func buildPanel(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceSe
 			switch st.tab {
 			case pageFiles:
 				buildFilesPage(c, t, workspace, artifacts, st)
-			case pageTerminal:
-				buildTerminalPage(c, t, terminal, st)
 			default:
 				buildGuidePage(c, t, st)
 			}
@@ -228,21 +226,19 @@ func buildDocumentTab(c *ui.Context, t *design.Tokens, st *state, tabs ui.TabsPa
 // --- guide page -------------------------------------------------------------
 
 // buildGuidePage is the 开始 landing: with no page open the sidebar offers the
-// only two things it still owns, as two equal cards. Per the user-approved
-// design the cards carry a title and their shortcut only: no explanatory copy
+// one thing it still owns, the workspace files page. Per the user-approved
+// design the card carries a title and its shortcut only: no explanatory copy
 // lives here. The body is a native scroll so a short window cannot clip it.
 func buildGuidePage(c *ui.Context, t *design.Tokens, st *state) {
 	ui.Scroll(c).FillWidth().Grow(1).Children(func() {
 		// The view tab already names the pane (开始): repeating it as an H2 in
 		// the body was the duplicate-heading finding (B7/P3-8).
 		ui.Column(c).FillWidth().Padding(design.Space3).Gap(design.Space4).Children(func() {
-			// Two equal side-by-side cards: the official Grid's two equal
-			// columns keep them the same width regardless of their content.
-			ui.Grid(c).FillWidth().Columns(2).GapX(design.Space2).GapY(design.Space2).Children(func() {
+			// One full-width card: the workspace files page is the sidebar's
+			// only fixed destination now (the command page is gone).
+			ui.Grid(c).FillWidth().Columns(1).GapY(design.Space2).Children(func() {
 				buildGuideCard(c, t, st, icons.Folder(), st.tr("工作区文件", "Workspace files"),
 					filesOpenShortcut, pageFiles)
-				buildGuideCard(c, t, st, icons.Terminal(), st.tr("命令运行", "Run command"),
-					terminalOpenShortcut, pageTerminal)
 			})
 		})
 	})
