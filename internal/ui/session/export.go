@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -54,6 +55,66 @@ var ExportSaver = func(title, defaultName, content string) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// ExportLogSaver is the raw-log ZIP export seam: the default opens the native
+// save dialog filtered to .zip and writes the archive bytes there; tests replace
+// it so no desktop backend is needed. It returns the written path, "" when the
+// user canceled, or an error.
+var ExportLogSaver = func(title, defaultName string, content []byte) (string, error) {
+	path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
+		Title:       title,
+		DefaultPath: defaultName,
+		Filters: []mygo.FileFilter{{
+			Name:       "ZIP",
+			Extensions: []string{"zip"},
+		}},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// sessionLogExporter returns the host's optional raw-log export capability, or
+// nil when this host has none (the menu then omits the entry).
+func (st *state) sessionLogExporter() contracts.SessionLogExporter {
+	if st == nil {
+		return nil
+	}
+	raw, ok := st.ctx.Get(contracts.KeySessionLogExporter)
+	if !ok || raw == nil {
+		return nil
+	}
+	exporter, _ := raw.(contracts.SessionLogExporter)
+	return exporter
+}
+
+// exportSessionLog archives the conversation's raw durable event log through the
+// backend capability, then saves the ZIP through its seam. The header keeps the
+// bare error (localized prefix added by the status line); the toast reports the
+// outcome.
+func exportSessionLog(st *state, exporter contracts.SessionLogExporter, chatSession contracts.ChatSession, cfg Config) {
+	archive, err := exporter.SessionLogArchive(context.Background(), chatSession.ID)
+	if err != nil {
+		st.exportErr = err.Error()
+		notifyExport(st, contracts.NotifyError, st.tr("导出失败：", "Export failed: ")+err.Error())
+		return
+	}
+	title := firstNonEmpty(chatSession.Title, cfg.Title, st.tr("会话", "Conversation"))
+	path, err := ExportLogSaver(st.tr("导出会话原始日志", "Export raw session log"),
+		sanitizeExportFilename(title)+".zip", archive)
+	switch {
+	case err != nil:
+		st.exportErr = err.Error()
+		notifyExport(st, contracts.NotifyError, st.tr("导出失败：", "Export failed: ")+err.Error())
+	case strings.TrimSpace(path) != "":
+		st.exportErr = ""
+		notifyExport(st, contracts.NotifySuccess, st.tr("原始日志已导出", "Raw log exported"))
+	}
 }
 
 // exportJSONLTranscript renders the session as JSON Lines: one session header

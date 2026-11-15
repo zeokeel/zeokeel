@@ -408,6 +408,10 @@ type state struct {
 	memOpen     bool
 	memDraft    string
 	memErr      string
+
+	// reminders is the current-session reminder surfaces' state: the create
+	// dialog, the list dialog and the delete confirmation (session_reminders.go).
+	reminders reminderState
 }
 
 // tr returns the localized copy for the current frame's language.

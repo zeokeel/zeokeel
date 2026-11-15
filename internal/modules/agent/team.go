@@ -104,11 +104,7 @@ func (r *dynamicTeamRunner) Start(ctx context.Context, spec rig.SubagentSpec) (r
 	// The shared delegated-child spec: explicit round budget, workspace-scoped
 	// tools with the run origin, gate, history and context budget.
 	parent := r.service.delegatedParentSpec(active, workspaceRoot, childTools, cfg, provider, contracts.AgentRunOriginSubagent)
-	runner, err := rigagent.NewRunner(parent, rigagent.RunnerOptions{
-		MaxDepth:      teamMaxDepth,
-		MaxConcurrent: teamMaxConcurrent,
-		ExcludedTools: teamExcludedTools(),
-	})
+	runner, err := rigagent.NewRunner(parent, r.service.teamRunnerOptions())
 	if err != nil {
 		return nil, fmt.Errorf("agent: team member %q: create runner: %w", strings.TrimSpace(spec.Name), err)
 	}
@@ -120,6 +116,18 @@ func (r *dynamicTeamRunner) Start(ctx context.Context, spec rig.SubagentSpec) (r
 		return subagent, nil
 	}
 	return r.tracker.track(subagent, spec, cfg.Model, active), nil
+}
+
+// teamRunnerOptions builds the runner options of one team member: the team
+// depth, the member tool exclusions, and the live Team member concurrency cap
+// from the capability settings (read on every start).
+func (s *service) teamRunnerOptions() rigagent.RunnerOptions {
+	_, teamLimit := s.delegationConcurrency()
+	return rigagent.RunnerOptions{
+		MaxDepth:      teamMaxDepth,
+		MaxConcurrent: teamLimit,
+		ExcludedTools: teamExcludedTools(),
+	}
 }
 
 // teamManagerLocked returns the service's team manager, creating it on first

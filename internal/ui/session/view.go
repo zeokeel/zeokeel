@@ -203,6 +203,10 @@ func buildScreen(
 		buildPlanDialog(c, t, runtime, st)
 		buildMemoryDialog(c, t, runtime, st)
 		buildHelpDialog(c, t, runtime, st)
+		// Current-session reminders: the create dialog, the session reminder
+		// list and its destructive delete confirmation (native Modals above the
+		// screen, like the command dialogs).
+		buildReminderDialogs(c, t, runtime, st, chat)
 		// The goal actions' destructive confirmation is the native AlertDialog:
 		// it lives above the whole screen (the goal menu itself is in the dock).
 		buildGoalMenuActions(c, runtime, st)
@@ -544,6 +548,13 @@ func buildConversationActionsMenu(m *ui.Menu, c *ui.Context, st *state,
 	if m.Item(st.tr("导出 JSONL", "Export JSONL")).Chosen() {
 		exportSessionJSONL(st, chatSession, cfg)
 	}
+	// The raw log is only offered when the backend can archive the durable event
+	// log (the optional contracts.SessionLogExporter): no capability, no entry.
+	if exporter := st.sessionLogExporter(); exporter != nil {
+		if m.Item(st.tr("导出原始日志（ZIP）", "Export raw log (ZIP)")).Chosen() {
+			exportSessionLog(st, exporter, chatSession, cfg)
+		}
+	}
 	// The goal entry: the dock only exists while a goal does, so the ⋯ menu
 	// carries the zero-value entry too. One entry only — the dock's own menu
 	// owns pause/resume/complete/clear once a goal is there.
@@ -555,6 +566,24 @@ func buildConversationActionsMenu(m *ui.Menu, c *ui.Context, st *state,
 		m.Separator()
 		if m.Item(label).ID("session.conversation.goal").Chosen() {
 			openGoalDialog(st, runtime)
+		}
+	}
+	// Current-session reminders: the automation backend can deliver a scheduled
+	// prompt into this conversation. Both entries appear only with that backend
+	// (a headless product keeps the previous menu).
+	if service := st.automationService(); service != nil && chatSession.ID != "" {
+		m.Separator()
+		if m.Item(st.tr("创建提醒…", "Create reminder…")).ID("session.reminder.create").Chosen() {
+			st.openReminderCreate()
+			runtime.Invalidate()
+		}
+		reminderLabel := st.tr("本会话提醒", "Session reminders")
+		if tasks, err := st.sessionReminderTasks(chatSession.ID); err == nil {
+			reminderLabel = fmt.Sprintf(st.tr("本会话提醒（%d）", "Session reminders (%d)"), len(tasks))
+		}
+		if m.Item(reminderLabel).ID("session.reminder.list").Chosen() {
+			st.reminders.listOpen = true
+			runtime.Invalidate()
 		}
 	}
 	// Archiving moved to the settings data page, but the conversation keeps its

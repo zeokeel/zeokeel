@@ -726,6 +726,7 @@ func Module() *module.Descriptor[Config] {
 		behavior := &behaviorState{}
 		memoryPage := &memoryPageState{sel: -1}
 		network := newNetworkState()
+		capabilities := newCapabilitiesState()
 		dataPrivacy := newDataPrivacyState()
 		diagnostics := &diagnosticsState{}
 
@@ -1021,6 +1022,33 @@ func Module() *module.Descriptor[Config] {
 				Dirty: func() bool { return network.dirty(store) },
 				Discard: func() {
 					network.discardDrafts(store)
+				},
+			},
+			{
+				ID: CapabilitiesPageID, Section: CapabilitiesPageSection, Order: CapabilitiesPageOrder,
+				zhTitle: "能力", enTitle: "Capabilities",
+				keywords: capabilitiesPageKeywords,
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildCapabilitiesPage(c, store, capabilities, locale)
+				},
+				Footer: func(c *ui.Context) {
+					uikit.DialogFooter(c, []uikit.DialogAction{
+						{Label: localized(locale, "恢复默认", "Restore defaults"), OnClick: func() {
+							capabilities.restoreDefaults(locale)
+							c.Invalidate()
+						}},
+						{Label: localized(locale, "保存", "Save"), Primary: true,
+							Disabled: !capabilities.dirty(store),
+							OnClick: func() {
+								capabilities.save(store, locale)
+								c.Invalidate()
+							}},
+					})
+				},
+				Dirty: func() bool { return capabilities.dirty(store) },
+				Discard: func() {
+					capabilities.discardDrafts(store)
 				},
 			},
 			{

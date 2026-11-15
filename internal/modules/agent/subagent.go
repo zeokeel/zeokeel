@@ -121,6 +121,19 @@ func (s *service) Run(ctx context.Context, req contracts.SubagentRequest) (contr
 	return result, err
 }
 
+// subagentRunnerOptions builds the rig runner options of one synchronous
+// delegation: one-level depth, the child tool exclusions, and the live
+// Subagent concurrency cap from the capability settings (read on every
+// delegation, so a change applies to the next one).
+func (s *service) subagentRunnerOptions() rigagent.RunnerOptions {
+	subagentLimit, _ := s.delegationConcurrency()
+	return rigagent.RunnerOptions{
+		MaxDepth:      subagentMaxDepth,
+		MaxConcurrent: subagentLimit,
+		ExcludedTools: subagentExcludedTools(),
+	}
+}
+
 // runSubagent is the delegation itself: it creates the child provider/runner,
 // starts the subagent, waits for the final answer and stops it. Run owns the
 // activity lifecycle around it; cfg already carries the override model and its
@@ -148,11 +161,7 @@ func (s *service) runSubagent(ctx context.Context, prompt, name string, req cont
 	parent := s.delegatedParentSpec(active, workspaceRoot, childTools, cfg, provider, contracts.AgentRunOriginSubagent)
 	// Delegated children get the same context protection as a full run.
 	s.withContextBudget(&parent, cfg, provider)
-	options := rigagent.RunnerOptions{
-		MaxDepth:      subagentMaxDepth,
-		MaxConcurrent: subagentMaxConcurrent,
-		ExcludedTools: subagentExcludedTools(),
-	}
+	options := s.subagentRunnerOptions()
 	if req.Fork {
 		if active == "" {
 			return contracts.SubagentResult{}, errors.New("agent: fork subagent requires an active session")

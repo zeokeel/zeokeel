@@ -14,6 +14,7 @@ package toolkit
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -120,11 +121,18 @@ func Module() *module.Descriptor[Config] {
 		// The data directory is optional: a headless/unit-test composition
 		// without it keeps the task board in memory.
 		dataDir, _ := ctx.Get(contracts.KeyDataDir)
-		timeout := time.Duration(cfg.ShellTimeoutMs) * time.Millisecond
-		if timeout <= 0 {
-			timeout = 30 * time.Second
-		}
 		settingsService, hasSettings := ctx.Get(contracts.KeySettings)
+		// The capability settings override the module config for the shell
+		// tool: the timeout (toolkit.shellTimeoutSeconds, 5–600s) replaces
+		// Config.ShellTimeoutMs and the output cap (toolkit.shellMaxOutputKiB,
+		// 0 = the rig default) replaces Config.MaxOutputBytes for the
+		// root-scoped tools (files, shell, editor, terminal). Both are resolved
+		// here, at activation: the settings page says a restart applies them.
+		// policyCfg carries only those two values; the MCP runtime below keeps
+		// the assembly config's own output cap.
+		timeout := shellTimeout(cfg, settingsService, hasSettings)
+		policyCfg := cfg
+		policyCfg.MaxOutputBytes = shellMaxOutputBytes(cfg, settingsService, hasSettings)
 		// The OS sandbox is optional: an assembly without the sandbox module
 		// keeps the pre-sandbox behavior (nil runner, approval-only boundary).
 		sandboxService, hasSandbox := ctx.Get(contracts.KeySandbox)
@@ -142,7 +150,7 @@ func Module() *module.Descriptor[Config] {
 		// worktree, working_directory) follow the workspace that is current at
 		// call time; tools without a filesystem root are registered once below.
 		rootOf := workspaceRootSource(ctx, cfg.Root)
-		group := newRebindGroup(cfg, timeout, rootOf, sandboxOf, logf)
+		group := newRebindGroup(policyCfg, timeout, rootOf, sandboxOf, logf)
 		// Optional durable store: execution lifecycle events (job/terminal
 		// start/finish/close) are recorded for the agent session that invoked the
 		// tool. A product without a store keeps the tools working, event-free.
@@ -327,7 +335,7 @@ func Module() *module.Descriptor[Config] {
 
 		// Optional single LSP server: its tools join the same registry and the
 		// server is closed when the module unloads.
-		lspPolicy := newPolicy(cfg, rootScoped.root, timeout, rootScoped.mode)
+		lspPolicy := newPolicy(policyCfg, rootScoped.root, timeout, rootScoped.mode)
 		lspTools, closeLSP := startLSPTools(context.Background(), ctx, logf, settingsService, hasSettings, tools, lspPolicy)
 		tools = append(tools, lspTools...)
 		tools = filterDisabledTools(tools, disabledTools, logf)
@@ -491,6 +499,45 @@ func webFetcher(cfg Config) rig.Tool {
 		return nil
 	}
 	return web.NewFetcher(nil)
+}
+
+// shellTimeout resolves the shell-tool timeout: the capability setting
+// (contracts.SettingToolkitShellTimeoutSeconds, 5–600 seconds) when the row is
+// valid, else the module's Config.ShellTimeoutMs (0 = 30s). The toolkit resolves
+// it once at activation, so a settings change applies after a restart (the
+// settings page states that).
+func shellTimeout(cfg Config, settings contracts.SettingsService, hasSettings bool) time.Duration {
+	fallback := time.Duration(cfg.ShellTimeoutMs) * time.Millisecond
+	if fallback <= 0 {
+		fallback = 30 * time.Second
+	}
+	if !hasSettings || settings == nil {
+		return fallback
+	}
+	seconds := contracts.NormalizeShellTimeoutSeconds(
+		settings.Get(contracts.SettingToolkitShellTimeoutSeconds, ""),
+		int(fallback/time.Second))
+	return time.Duration(seconds) * time.Second
+}
+
+// shellMaxOutputBytes resolves the tool-output cap: an explicit 0 row selects
+// the rig/tool default, a 1..CapabilityMaxShellOutputKiB row becomes bytes, and
+// an absent, malformed or out-of-range row keeps Config.MaxOutputBytes
+// unchanged (exactly, not rounded to KiB). Resolved once at activation (restart
+// applies), like the shell timeout.
+func shellMaxOutputBytes(cfg Config, settings contracts.SettingsService, hasSettings bool) int {
+	if !hasSettings || settings == nil {
+		return cfg.MaxOutputBytes
+	}
+	raw := strings.TrimSpace(settings.Get(contracts.SettingToolkitShellMaxOutputKiB, ""))
+	if raw == "" {
+		return cfg.MaxOutputBytes
+	}
+	kiB, err := strconv.Atoi(raw)
+	if err != nil || kiB < contracts.CapabilityShellOutputDefaultKiB || kiB > contracts.CapabilityMaxShellOutputKiB {
+		return cfg.MaxOutputBytes
+	}
+	return kiB * 1024
 }
 
 // newPolicy builds the sandbox policy from the module config. It is a helper so
