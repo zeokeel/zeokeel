@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.39 — 半闭环收口补丁** (2026-11-15). Native, compile-time modular
+> **v0.2.40 — DSH 客户端功能对齐** (2026-11-15). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. 本版按 [UI/UX 升级评估](docs/UI-UX-UPGRADE-2026-11-15.md) 收口设计债：
 > 输入框去小方块/附件直连 picker、审批内联 diff、命令面板首屏与分组、
@@ -13,7 +13,7 @@
 > 窗口标题/托盘运行态、恢复会话元信息、状态/字号/a11y 收尾，并抽出
 > `uikit.ComposerToolbar`/`DiffPreview`/`PropertySheet`/`ReadingColumn`/`SegmentedControl`。
 > Final verification: `go test ./...` green (incl. key-package `-race`),
-> `ui-drive` **93/93 PASS**, `ui-snapshot` **122 PNG**, designlint
+> `ui-drive` **94/94 PASS**, `ui-snapshot` **122 PNG**, designlint
 > **0 new / 0 blocking**, design-check **6/6**. See [CHANGELOG.md](CHANGELOG.md).
 
 > **v0.2.24 主要变化**：按 `docs/PRODUCT-BUG-REVIEW-2026-11-11.md` 做 TDD 修复——

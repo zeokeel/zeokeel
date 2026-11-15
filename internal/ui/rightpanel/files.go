@@ -50,6 +50,12 @@ const (
 	// the bitmap, so a small "image bomb" file cannot exhaust memory on the
 	// background read.
 	maxImagePixels = 24_000_000
+	// imageTooLargeErrPrefix prefixes the honest "over the image read bound"
+	// error. The preview treats it as the external-open fallback instead of a
+	// bare read failure: the file is fine, only this build's embedded image
+	// preview cannot hold it.
+	imageTooLargeErrPrefix = "image is too large"
+
 	// maxTreeEntries bounds one directory's rendered rows: a directory with
 	// tens of thousands of entries would make the native tree build every row
 	// each frame. The workspace service exposes search for exhaustive lookups,
@@ -68,6 +74,10 @@ type filePreview struct {
 	err       string
 	loading   bool
 	workspace string
+	// openErr is the last "open with the system application" failure of this
+	// tab's fallback action, shown inline until the next successful open (or a
+	// reload). Localized at the call site.
+	openErr string
 }
 
 // editorKey identifies one cached code-editor state: the workspace identity and
@@ -488,7 +498,7 @@ func loadImagePreview(workspace contracts.WorkspaceService, path string) filePre
 		return result
 	}
 	if len(data) > maxImageBytes {
-		result.err = fmt.Sprintf("image is too large: over %d MiB", maxImageBytes>>20)
+		result.err = fmt.Sprintf("%s: over %d MiB", imageTooLargeErrPrefix, maxImageBytes>>20)
 		return result
 	}
 	config, _, configErr := image.DecodeConfig(bytes.NewReader(data))
@@ -497,7 +507,7 @@ func loadImagePreview(workspace contracts.WorkspaceService, path string) filePre
 		return result
 	}
 	if int64(config.Width)*int64(config.Height) > maxImagePixels {
-		result.err = fmt.Sprintf("image is too large: %dx%d pixels (max %d)", config.Width, config.Height, maxImagePixels)
+		result.err = fmt.Sprintf("%s: %dx%d pixels (max %d)", imageTooLargeErrPrefix, config.Width, config.Height, maxImagePixels)
 		return result
 	}
 	bitmap, decodeErr := ui.DecodeBitmap(data)
@@ -516,6 +526,7 @@ func applyFilePreview(preview *filePreview, result filePreviewResult) {
 	preview.bitmap = result.bitmap
 	preview.err = result.err
 	preview.loading = false
+	preview.openErr = ""
 }
 
 // editorFor returns the read-only official code editor for one file tab. The
@@ -553,7 +564,7 @@ var (
 	imageExts = []string{".png", ".jpg", ".jpeg", ".gif", ".webp"}
 	textExts  = []string{
 		".txt", ".md", ".json", ".yaml", ".yml", ".go", ".log", ".csv",
-		".toml", ".ini", ".cfg", ".sh", ".bash", ".py", ".js", ".ts", ".css", ".html",
+		".toml", ".ini", ".cfg", ".sh", ".bash", ".py", ".js", ".ts", ".css",
 	}
 )
 
@@ -570,6 +581,66 @@ func hasExt(path string, exts []string) bool {
 func isImagePath(path string) bool    { return hasExt(path, imageExts) }
 func isMarkdownPath(path string) bool { return strings.EqualFold(filepath.Ext(path), ".md") }
 func isTextPath(path string) bool     { return hasExt(path, textExts) }
+
+// pdfExts/officeExts/genuineDocumentExts name the document families this build
+// deliberately does not render inline. The product ships no PDF/Office/HTML
+// engine (no third-party renderer dependency), so those files are shown as a
+// clear explanation with the platform's default application as the action.
+var (
+	pdfExts    = []string{".pdf"}
+	officeExts = []string{
+		".doc", ".docx", ".odt", ".rtf",
+		".xls", ".xlsx", ".ods",
+		".ppt", ".pptx", ".odp",
+	}
+	htmlExts = []string{".html", ".htm"}
+)
+
+// filePreviewKind is how one loaded preview renders in the panel.
+type filePreviewKind int
+
+const (
+	filePreviewLoading filePreviewKind = iota
+	filePreviewError
+	filePreviewImage
+	filePreviewMarkdown
+	filePreviewText
+	// filePreviewExternal is the honest fallback: a document/binary/oversized
+	// file this build cannot render inline, offered to the system application.
+	filePreviewExternal
+)
+
+// classifyFilePreview decides how one preview renders. Text (including code),
+// Markdown and images keep their native previews; every other type (PDF,
+// Office, HTML, binary/unknown) and an image over the embedded bounds fall back
+// to the external-open explanation.
+func classifyFilePreview(path string, preview *filePreview) filePreviewKind {
+	if preview == nil || preview.loading {
+		return filePreviewLoading
+	}
+	if preview.err != "" {
+		if isImagePath(path) && strings.HasPrefix(preview.err, imageTooLargeErrPrefix) {
+			return filePreviewExternal
+		}
+		return filePreviewError
+	}
+	switch {
+	case preview.bitmap != nil:
+		return filePreviewImage
+	case isMarkdownPath(path):
+		return filePreviewMarkdown
+	case isTextPath(path):
+		return filePreviewText
+	default:
+		return filePreviewExternal
+	}
+}
+
+// unsupportedPreviewIsDocument reports whether an unsupported preview is a
+// document family (PDF/Office/HTML) rather than a binary/unknown file.
+func unsupportedPreviewIsDocument(path string) bool {
+	return hasExt(path, pdfExts) || hasExt(path, officeExts) || hasExt(path, htmlExts)
+}
 
 // formatFileSize renders a file size in B/KB/MB.
 func formatFileSize(size int64) string {

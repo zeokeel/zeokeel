@@ -1,5 +1,39 @@
 # Verification log (final)
 
+## 0.2.40 — 2026-11-15 (DSH 客户端功能对齐)
+
+`go version go1.27.3 linux/amd64`
+
+```
+$ gofmt -l internal cmd
+(empty)
+$ go build ./...
+OK
+$ CGO_ENABLED=0 go build ./...
+OK
+$ go vet ./...
+OK
+$ go tool mygo vet .
+OK
+$ go test ./... -count=1
+all packages ok
+$ go test -race ./internal/modules/agent ./internal/modules/toolkit \
+    ./internal/ui/session ./internal/uiroot ./internal/ui/rightpanel ./internal/ui/sidebar -count=1
+all packages ok (race)
+$ go run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
+314 files, 90 violations (all baseline): 0 error, 0 warn, 0 new, 0 blocking
+$ bash scripts/design-check.sh
+6 passed, 0 failed
+$ go run ./internal/devtools/ui-drive --out .cache/impl-drive-final3
+94 PASS / 0 FAIL / 0 WARN / 0 BLOCKED
+$ go run ./internal/devtools/ui-snapshot .cache/impl-shots-final3
+122 PNG
+```
+
+Evidence: `.cache/impl-shots-final3/` (122 PNG),
+`.cache/impl-drive-final3/drive-report.md` (94/94), `settings-page-capabilities.png`,
+`jobs-overlay.png`/`jobs-stopped.png`, `p1-trajectory.png` (timing overview).
+
 ## 0.2.39 — 2026-11-15 (半闭环收口补丁)
 
 `go version go1.27.3 linux/amd64`

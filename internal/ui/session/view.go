@@ -207,6 +207,9 @@ func buildScreen(
 		// list and its destructive delete confirmation (native Modals above the
 		// screen, like the command dialogs).
 		buildReminderDialogs(c, t, runtime, st, chat)
+		// The attachment image lightbox: message images and staged composer
+		// images open the original above the screen (P1).
+		buildAttachmentGallery(c, t, runtime, st)
 		// The goal actions' destructive confirmation is the native AlertDialog:
 		// it lives above the whole screen (the goal menu itself is in the dock).
 		buildGoalMenuActions(c, runtime, st)
@@ -1230,7 +1233,7 @@ func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 						FontSize(st.messageFontSize()).TextColor(t.LabelPrimary)
 				})
 			}
-			buildMessageAttachments(c, t, st, message.Attachments)
+			buildMessageAttachments(c, t, runtime, st, message.Attachments)
 			// Quiet metadata/actions under the bubble: time, copy the original
 			// text, and edit it back into the composer (never auto-sent).
 			buildUserMessageMeta(c, t, runtime, st, message)
@@ -2172,20 +2175,98 @@ func trajectoryItems(chatSession contracts.ChatSession) []trajectoryItem {
 	return items
 }
 
+// toolKnownDuration returns the call's wall time. It is known only when both
+// ends are stamped: a zero start/end is unknown (restored from an event without
+// a timestamp, or still running), and a reversed interval is a clock skew rather
+// than a negative duration.
+func toolKnownDuration(call contracts.ToolCall) (time.Duration, bool) {
+	if call.StartedAt.IsZero() || call.EndedAt.IsZero() || call.EndedAt.Before(call.StartedAt) {
+		return 0, false
+	}
+	return call.EndedAt.Sub(call.StartedAt), true
+}
+
+// formatTrajectoryDuration renders a tool duration with the usage strip's
+// vocabulary: milliseconds under a second, one decimal of seconds above it, and
+// "<1ms" instead of a misleading 0ms for a sub-millisecond call.
+func formatTrajectoryDuration(duration time.Duration) string {
+	if duration <= 0 {
+		return formatUsageDuration(0)
+	}
+	if milliseconds := duration.Milliseconds(); milliseconds > 0 {
+		return formatUsageDuration(milliseconds)
+	}
+	return "<1ms"
+}
+
+// trajectoryTimingEntry is one known tool duration in the timing overview.
+type trajectoryTimingEntry struct {
+	name     string
+	duration time.Duration
+}
+
+// trajectoryTimingOverview is the pane's timing header: the sum of the calls
+// whose both ends are known, plus the two slowest of them. Calls without a known
+// interval are left out of both numbers (a guessed duration would be dishonest);
+// with no known interval at all the header says "—".
+func trajectoryTimingOverview(st *state, items []trajectoryItem) string {
+	label := st.tr("已知耗时 ", "Known time ")
+	total := time.Duration(0)
+	entries := make([]trajectoryTimingEntry, 0, len(items))
+	for _, item := range items {
+		duration, ok := toolKnownDuration(item.tool)
+		if !ok {
+			continue
+		}
+		total += duration
+		entries = append(entries, trajectoryTimingEntry{
+			name:     firstNonEmpty(uikit.ToolDisplayName(st.locale, item.tool.Name), item.tool.Name),
+			duration: duration,
+		})
+	}
+	if len(entries) == 0 {
+		return label + "—"
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].duration > entries[j].duration })
+	if len(entries) > 2 {
+		entries = entries[:2]
+	}
+	parts := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		parts = append(parts, entry.name+" "+formatTrajectoryDuration(entry.duration))
+	}
+	return label + formatTrajectoryDuration(total) +
+		st.tr(" · 最慢：", " · Slowest: ") + strings.Join(parts, st.tr("、", ", "))
+}
+
+// trajectoryToolDurationLabel is one card's duration line: the measured interval
+// or "—" when either end (or both) is unknown.
+func trajectoryToolDurationLabel(st *state, call contracts.ToolCall) string {
+	label := st.tr("用时 ", "Took ")
+	if duration, ok := toolKnownDuration(call); ok {
+		return label + formatTrajectoryDuration(duration)
+	}
+	return label + "—"
+}
+
 // buildTrajectoryPane is the tool timeline: the same card anatomy as the
 // transcript's tool cards on the shared reading column, following the end while
 // the stream runs, with the floating "back to latest" action. The tab already
-// says 轨迹, so the pane carries the count as a muted line instead of repeating
-// the title and a badge.
+// says 轨迹, so the pane carries the count (and the known-time overview) as muted
+// lines instead of repeating the title and a badge.
 func buildTrajectoryPane(c *ui.Context, t *design.Tokens, chatSession contracts.ChatSession, hasSession bool, st *state) {
 	items := trajectoryItems(chatSession)
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
 		if len(items) > 0 {
-			// The count line sits on the transcript's reading measure, so it lines
-			// up with the cards below and with the conversation's prose.
+			// The count and timing lines sit on the transcript's reading measure,
+			// so they line up with the cards below and with the prose.
 			uikit.ReadingColumn(c, func(body *ui.Context) {
-				design.Apply(ui.Text(body, fmt.Sprintf(st.tr("%d 个工具调用", "%d tool calls"), len(items))),
-					t.TextMuted(design.TypeXXS))
+				ui.Column(body).FillWidth().Gap(design.Space1).Children(func() {
+					design.Apply(ui.Text(body, fmt.Sprintf(st.tr("%d 个工具调用", "%d tool calls"), len(items))),
+						t.TextMuted(design.TypeXXS))
+					design.Apply(ui.Text(body, trajectoryTimingOverview(st, items)),
+						t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+				})
 			})
 		}
 		switch {
@@ -2232,11 +2313,17 @@ func buildTrajectoryPane(c *ui.Context, t *design.Tokens, chatSession contracts.
 						ui.Column(body).FillWidth().Gap(design.Space1).Children(func() {
 							buildToolCard(body, st, item.tool, "session.trajectory."+item.key, row.Index+1,
 								uikit.ToolCallCardNormal)
-							// The jump is an explicit row action; a click on the row
-							// itself (the List's choice) and Enter on the chosen row do
-							// the same, so the timeline works with the pointer and the
-							// keyboard.
-							ui.Row(body).FillWidth().Justify(ui.End).Children(func() {
+							// The card's known duration sits in the row footer, next to
+							// the jump action: the card itself stays the shared tool
+							// anatomy. Unknown intervals say "—".
+							ui.Row(body).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+								design.Apply(ui.Text(body, trajectoryToolDurationLabel(st, item.tool)),
+									t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).NoWrap()
+								ui.Spacer(body).Grow(1)
+								// The jump is an explicit row action; a click on the row
+								// itself (the List's choice) and Enter on the chosen row do
+								// the same, so the timeline works with the pointer and the
+								// keyboard.
 								toolName := firstNonEmpty(uikit.ToolDisplayName(st.locale, item.tool.Name),
 									st.tr("工具调用", "Tool call"))
 								agentRowAction(body, t, st.tr("在对话中查看", "Show in conversation"),

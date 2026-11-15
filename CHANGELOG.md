@@ -4,6 +4,40 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.40] - 2026-11-15
+
+DSH 客户端功能对齐批次：补 Todo、Job 输出流、原始日志、提醒、能力设置、工作区重命名、附件画廊、文档外部打开与轨迹时间概览。
+
+### Added
+
+- **Todo dock**：composer 上方只读待办 dock（进行中/待处理/已完成、计数、折叠、空态隐藏），读取 agent `todo_write` 列表。已知限制：当前 store 为进程级，暂未 per-session。
+- **Job 输出流 + 两段式停止**：后台任务行可展开 256 DIP mono 输出面板（复制命令/输出、截断/中断提示、500ms live 刷新）；停止改为「停止 → 3s 内确认停止」。
+- **原始会话日志导出（ZIP）**：`SessionLogExporter` 从 durable store 导出 `session.jsonl` + `meta.json`（有界 20000 事件/64 MiB，不静默截断）；⋯ 菜单「导出原始日志（ZIP）」。
+- **当前会话提醒**：会话 ⋯ 菜单「创建提醒…」「本会话提醒（N）」；支持 30 分钟后/明天 09:00/每天 09:00/精确时间，列表启用/删除/跳转自动化页。
+- **能力设置**：设置→能力页：Subagent/Team 并发、Shell 超时/输出上限；agent 每次委派读取，toolkit 重启生效；rig 并行工具上限固定 8 如实标注。
+- **工作区重命名**：`WorkspaceRenamer` + sidebar ⋯ 菜单原生 Modal；空名/重名/未知 ID 本地化错误，ID/root/current 保留。
+- **附件图片画廊**：消息/暂存图片点击 → 原生 Modal 原图（文件名/大小、多图上一张/下一张、←→、Esc/背景关闭、Fit 视口），历史无图片字节/超限/解码失败诚实提示。
+- **文档预览外部打开**：PDF/Office/HTML/二进制/超大图片显示「用系统应用打开」兜底，无内嵌渲染器说明；不新增第三方渲染依赖。
+- **轨迹时间概览**：ToolCall 记录 StartedAt/EndedAt（live 与 durable 事件回填），轨迹页「已知耗时/最慢工具」与每卡「用时」，未知显示「—」。
+
+### Known limitations / 技术结论
+
+- **Workflow run 持久节点**：rig `tools/workflow` 只返回工具结果，不写 `workflow_run/*` session 事件；DSH 的 run→phase→member 节点需要上游事件源，当前产品无法诚实重建，暂不做（非 UI 缺口）。
+- **交互式终端**：`contracts.TerminalService` 只有一次性 `Run`，没有 PTY/stream 句柄；右栏「命令」是 one-shot runner。要做 DSH terminal tabs 需新增终端后端契约与持久 shell 管理，另立项目。
+- **浏览器侧栏**：原生 Go/无 webview 架构下需要内嵌 Web 引擎（CEF/WebKit）或系统 webview，属于新依赖/第二 UI 栈，不做；文件/网页用系统应用打开兜底。
+- **官方账号/日志上传、语音输入、CoT 翻译**：产品与实验性能力，不在本轮（自用/本地优先路线）。
+- **PDF/Office 内嵌预览**：无原生渲染器，已提供系统应用打开兜底；不做第三方文档渲染依赖。
+- **Todo 进程级 store**：DSH 为 per-session；当前 scaffold 先行，后续可换 per-session store 实现同一 `TodoService`。
+- **能力设置 Shell 生效时机**：toolkit 设置重启生效（不改 rebind key）。
+
+### Verification
+
+- `gofmt` 空；`go build ./...`、`CGO_ENABLED=0 go build ./...`、`go vet ./...`、`go tool mygo vet .` 通过
+- `go test ./... -count=1` 全绿；`go test -race`（agent/sessionstore/session/uiroot/insights/rightpanel）通过
+- `designlint --strict --baseline` 0 new / 0 blocking；`scripts/design-check.sh` 6/6
+- `ui-drive` **94/94 PASS**（`.cache/impl-drive-final3/drive-report.md`）
+- `ui-snapshot` **122 PNG**（`.cache/impl-shots-final3/`）
+
 ## [0.2.39] - 2026-11-15
 
 「半闭环」收口补丁：把 Long-task/Goal/Context/Insights 里「功能已存在、体验未闭环」的最后一段补上。

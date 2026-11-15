@@ -2651,6 +2651,10 @@ func (s *service) handleEvent(ctx context.Context, sessionID, workspaceRoot stri
 					Arguments:  arguments,
 					Path:       path,
 					TextOffset: textOffset,
+					// The live read model stamps the call so the trajectory can
+					// show its duration without a restart; restore backfills the
+					// same clocks from the durable event times.
+					StartedAt: time.Now(),
 				})
 				// The turn records live tool calls, so its offsets are a known
 				// timeline even when they are all zero (the model called tools
@@ -2696,6 +2700,7 @@ func (s *service) handleEvent(ctx context.Context, sessionID, workspaceRoot stri
 					}
 					message.Tools[index].Status = status
 					message.Tools[index].Summary = content
+					message.Tools[index].EndedAt = time.Now()
 					s.appendEvent(context.Background(), sessionID, "tool_result", map[string]any{
 						"id": event.Call.ID, "name": event.Call.Name,
 						"status": status, "content": content,

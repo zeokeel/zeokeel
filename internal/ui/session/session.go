@@ -288,6 +288,10 @@ type state struct {
 	// attach actions show 选择中…/Choosing… and stay disabled until the result
 	// is posted back, because mygo's dialog blocks its caller.
 	attachBusy bool
+	// gallery is the attachment image lightbox (P1): the images of one message
+	// or of the staged composer attachments, the shown index and the inert
+	// full-window viewport probe the dialog fits itself inside.
+	gallery attachmentGallery
 
 	// md caches the Markdown renderer options for the current appearance (the
 	// library keeps its parse state per view root and the options must stay

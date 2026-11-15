@@ -6,6 +6,8 @@
 package contracts
 
 import (
+	"time"
+
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
@@ -117,6 +119,13 @@ type ToolCall struct {
 	// of drawing the whole reply above every call: 0 with text present means
 	// "before the text" (restored history without the metadata).
 	TextOffset int
+	// StartedAt is when the agent requested the call; the zero time means
+	// unknown (e.g. restored from a durable event without a timestamp). The UI
+	// never fills a zero clock with a guess.
+	StartedAt time.Time
+	// EndedAt is when the result arrived; the zero time means unknown (running
+	// or restored from an event without a timestamp).
+	EndedAt time.Time
 }
 
 // ToolRenderer draws one tool call (a tool card). Several renderers may match

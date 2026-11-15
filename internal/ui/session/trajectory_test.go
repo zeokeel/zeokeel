@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -170,4 +171,79 @@ func TestTrajectoryEnterJumpsFromTheKeyboard(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "早期回复正文")
 	h.assertNoTexts(tester, "工具调用轨迹")
+}
+
+// --- trajectory timing ------------------------------------------------------
+
+// timedTrajectoryChat is a conversation whose tool calls carry real time
+// intervals: three known durations plus one call still running (unknown end).
+func timedTrajectoryChat() *fakeChat {
+	start := time.Date(2026, 11, 15, 10, 0, 0, 0, time.Local)
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{
+		ID: "sess-1", Title: "耗时轨迹",
+		Messages: []contracts.ChatMessage{
+			{ID: "u1", Role: contracts.ChatRoleUser, Text: "开始检查"},
+			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "检查完成", Tools: []contracts.ToolCall{
+				{ID: "t1", Name: "read_file", Status: "ok", Summary: "读取配置",
+					StartedAt: start, EndedAt: start.Add(2 * time.Second)},
+				{ID: "t2", Name: "write_file", Status: "ok", Summary: "写入报告",
+					StartedAt: start.Add(2 * time.Second), EndedAt: start.Add(7 * time.Second)},
+				{ID: "t3", Name: "bash", Status: "ok", Summary: "快速命令",
+					StartedAt: start.Add(7 * time.Second), EndedAt: start.Add(7500 * time.Millisecond)},
+				{ID: "t4", Name: "grep", Status: "running", Summary: "还在搜索",
+					StartedAt: start.Add(8 * time.Second)},
+			}},
+		},
+	}, true)
+	return chat
+}
+
+// TestTrajectoryTimingOverviewAndPerCard covers the timing header (known total
+// and the two slowest tools, unknown calls excluded) and each card's duration
+// line; the running call without an end shows "—".
+func TestTrajectoryTimingOverviewAndPerCard(t *testing.T) {
+	h := newHarness(t, timedTrajectoryChat())
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "轨迹")
+	h.assertTexts(tester, "4 个工具调用",
+		"已知耗时 7.5s · 最慢：写入文件 5.0s、读取文件 2.0s")
+	h.assertTexts(tester, "用时 5.0s", "用时 2.0s", "用时 500ms", "用时 —")
+}
+
+// TestTrajectoryTimingUnknownRendersDash covers a timeline with no known
+// intervals at all: the overview and every card say "—" instead of guessing.
+func TestTrajectoryTimingUnknownRendersDash(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{
+		ID: "sess-1", Title: "未知耗时",
+		Messages: []contracts.ChatMessage{
+			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "完成", Tools: []contracts.ToolCall{
+				{ID: "t1", Name: "read_file", Status: "ok", Summary: "读取"},
+				// A clock skew must not render a negative duration: unknown.
+				{ID: "t2", Name: "bash", Status: "ok", Summary: "倒流",
+					StartedAt: time.Date(2026, 11, 15, 10, 0, 5, 0, time.Local),
+					EndedAt:   time.Date(2026, 11, 15, 10, 0, 1, 0, time.Local)},
+			}},
+		},
+	}, true)
+	h := newHarness(t, chat)
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "轨迹")
+	h.assertTexts(tester, "已知耗时 —", "用时 —")
+	h.assertNoTexts(tester, "已知耗时 0", "-4.0s", "-4s")
+}
+
+// TestTrajectoryTimingEnglish covers the English copy of the overview and the
+// per-card line.
+func TestTrajectoryTimingEnglish(t *testing.T) {
+	h := newHarness(t, timedTrajectoryChat())
+	h.ui.Locale().SetLanguage("en")
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "Trajectory")
+	h.assertTexts(tester, "Known time 7.5s · Slowest: Write file 5.0s, Read file 2.0s",
+		"Took 5.0s", "Took 500ms", "Took —")
 }

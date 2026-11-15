@@ -104,6 +104,8 @@ func SessionThread(c *ui.Context, o SessionThreadOptions)
 
 **落地补充（2026-11-15 收尾）**：空会话 hero 在已有空会话时主按钮「开始输入/Start typing」只聚焦 composer，另给 3 个示例 prompt（点击仅填草稿）；从洞察/自动化/插件进入会话时页头 `‹ 来源屏` 走 `nav.Back()`，非会话屏不再双高亮活动会话行；恢复会话从 durable `user_message`/`run_end` 回填 user 与 turn 最终 assistant 时间（压缩/rewind 不错配、不伪造），无时钟且无 usage 的恢复回合不渲染孤立 ⋯。子代理完成回执行尾「打开子会话」；会话 ⋯ 菜单在无目标时给「设置目标」、有目标时「编辑目标」；冷恢复空草稿发送按钮为 DisabledPrimary；活动行 kind 词不重复。窗口标题/托盘 tooltip 显示 `运行中 N` / `等待审批`（`Root.Activity()`，Chat/Approvals/语言事件刷新）。
 
+**0.2.40 DSH 客户端对齐补充**：composer 上方 Todo dock（只读待办，进行中/待处理/已完成，空态隐藏；当前 store 仍为进程级）；消息/暂存图片点击打开原生 Modal 原图画廊（多图翻页、Esc/背景关闭、历史无字节诚实提示）；会话 ⋯「创建提醒/本会话提醒」；⋯「导出原始日志（ZIP）」；轨迹页「已知耗时/最慢工具」与每卡「用时」（未知显示 —）。
+
 **查找与轨迹定位（2026-11-15）**：Cmd/Ctrl+F 打开官方 `ui.FindBar`（自动切到「对话」；子会话忽略），匹配每条消息的正文+推理（大小写不敏感，每条消息计 1 次），显示计数并用 `uikit.BuildSessionRowMap` 把消息映射到 transcript 分组行后 `ScrollIntoView`；Enter/Shift+Enter/上一/下一/Done/Esc 走官方控件；Esc 分层——字段自己消费，运行中 `interruptEsc` 先关 FindBar 且不停止 run，空闲时仅 findOpen 注册 screen Esc 并让位 slash 菜单；关闭保留 query/current，重开回到当前匹配，键盘交还 composer。轨迹页：`trajList.FollowEnd` 跟随流式新调用；计数行在 `uikit.ReadingColumn` 与卡片同轴；每卡「在对话中查看」（可及名「在对话中定位 <工具>」），方向键只移动选中、Enter/双击才切回对话并滚动到该消息行。
 
 **迁移步骤**：① 把 `buildChatPane` 的 List 配置/空态/回到最新抽成 `uikit.SessionThread`；② 消息体渲染保留为可插拔 `func(*ui.Context)`（业务 slot）；③ 用现有 transcript/scroll 测试作回归；④ 新增快照 `uikit-session-thread.png`。
@@ -437,6 +439,8 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 **布局**：状态行在最后消息之后（消息内）或 composer 上方（运行态）；消息用量收进消息元信息行（时间 · 用时 · 紧凑 tokens · ⋯ → 用量明细子菜单，不再单独占 footer 行）；错误行贴近失败内容；toast 只做通知，不替代可操作错误。
 
 **禁止**：伪造进度条；把"停止"和"发送"并排同权重；运行中每帧重排布局（几何稳定）；用常驻 badge 代替 toast/错误；用 `ui.Toggle` 表达忙碌状态。
+
+**Job 输出（0.2.40）**：后台任务浮层每行可展开 256 DIP mono 输出面板（复制命令/输出、截断/中断提示、500ms live 刷新、结束补读）；停止为两段式（第一次 arm「确认停止」，3 秒内第二次 `KillJob`，超时/关闭复位），键盘 Enter 可确认。
 
 **当前实现**：session 生成中 Spinner/文本、queue Badge/popover、stop 按钮、消息元信息行（时间 + `FormatCompactCount` 紧凑用量 + ⋯ 用量明细）、`buildRetryAction`；后台完成通知静默由可选 `contracts.ForegroundSession`（uiroot 提供、host 接线）判定：只有当前屏幕=会话且该会话在前台才静默，其他屏幕的后台完成照常通知；无该服务（headless）回退 agent active 会话判定。toasts 模块（`c.AddToast` + `ToastViewportBase`，2 条上限 + 合并 ×N）。测试：`queue_send_test.go`、`usage_test.go`、`toasts_test.go`。
 

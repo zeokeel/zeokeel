@@ -22,7 +22,7 @@ type settingsPageSpec struct {
 	controls []string
 }
 
-// settingsPages is the product's settings navigation (19 pages, after the host
+// settingsPages is the product's settings navigation (20 pages, after the host
 // groups them by Section; the advanced pages live behind a collapsed group).
 var settingsPages = []settingsPageSpec{
 	{"settings-page-model", "model", "模型", []string{"模型列表", "添加模型", "系统提示词"}},
@@ -41,6 +41,7 @@ var settingsPages = []settingsPageSpec{
 	{"settings-page-lsp", "lsp", "LSP", []string{"语言服务器", "新增服务器"}},
 	{"settings-page-presets", "presets", "预设", []string{"预设列表", "新增预设", "代理预设"}},
 	{"settings-page-network", "network", "网络", []string{"代理配置", "保存"}},
+	{"settings-page-capabilities", "capabilities", "能力", []string{"委派并发", "Subagent 并发", "Shell 命令"}},
 	{"settings-page-data", "data-privacy", "数据与隐私", []string{"数据目录", "清除全部会话"}},
 	{"settings-page-about", "about", "关于", []string{"关于 ZeoKeel", "构建信息", "架构"}},
 }

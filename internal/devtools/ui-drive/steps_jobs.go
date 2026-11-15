@@ -101,6 +101,19 @@ func (d *drive) runJobsSteps() {
 				c.failf("点击停止后台任务失败：%v", err)
 				return
 			}
+			d.drain(2)
+			c.require(d.has("确认停止"), "第一次停止没有进入二次确认")
+			confirmLabel := ""
+			for _, text := range d.texts() {
+				if strings.HasPrefix(text, "确认停止后台任务 ") {
+					confirmLabel = text
+					break
+				}
+			}
+			if confirmLabel == "" || d.click(confirmLabel) != nil {
+				c.failf("二次确认停止失败")
+				return
+			}
 			if !d.waitJobDone(related, 10*time.Second) {
 				c.failf("停止后任务仍显示运行中（job %s）", related)
 				return

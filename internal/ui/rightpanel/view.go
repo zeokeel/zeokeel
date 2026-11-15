@@ -13,6 +13,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/lib/openpath"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -285,7 +286,7 @@ func buildFileTabPage(c *ui.Context, t *design.Tokens, workspace contracts.Works
 	path := st.fileTabs[index].path
 	preview := st.filePreviewFor(workspace, path)
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
-		buildFileTabHeader(c, t, st, path)
+		buildFileTabHeader(c, t, st, path, preview)
 		ui.Scroll(c).FillWidth().Grow(1).Children(func() {
 			ui.Column(c).FillWidth().Padding(design.Space3).Gap(design.Space2).Children(func() {
 				buildFileDiffFold(c, t, workspace, st, path)
@@ -296,9 +297,10 @@ func buildFileTabPage(c *ui.Context, t *design.Tokens, workspace contracts.Works
 }
 
 // buildFileTabHeader names the opened file (base name emphasized, parent
-// directory muted) and carries the tab's two actions: copy the path and reload
-// the preview from disk.
-func buildFileTabHeader(c *ui.Context, t *design.Tokens, st *state, path string) {
+// directory muted) and carries the tab's actions: copy the path, reload the
+// preview from disk and, for a preview this build cannot render inline, open
+// the file with the platform's default application.
+func buildFileTabHeader(c *ui.Context, t *design.Tokens, st *state, path string, preview *filePreview) {
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
 		Padding(design.Space2, design.Space3).Children(func() {
 		ui.Icon(c, icons.File()).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelSecondary)
@@ -331,6 +333,19 @@ func buildFileTabHeader(c *ui.Context, t *design.Tokens, st *state, path string)
 				st.reloadFile(path)
 			},
 		})
+		if classifyFilePreview(path, preview) == filePreviewExternal && nativeLauncherAvailable() {
+			openLabel := st.tr("用系统应用打开", "Open natively")
+			uikit.IconButton(c, uikit.IconButtonOptions{
+				Key:     "rightpanel.file.open-native/" + path,
+				Label:   openLabel + " " + filepath.Base(path),
+				Tooltip: openLabel,
+				Icon:    icons.FolderOpen(),
+				Size:    design.IconSizeS,
+				OnClick: func() {
+					st.openPreviewNatively(path, preview)
+				},
+			})
+		}
 	})
 }
 
@@ -342,11 +357,12 @@ func (st *state) reloadFile(path string) {
 }
 
 // buildFilePreviewBody renders one file preview: the official code editor for
-// text, the Markdown view for .md, a native bitmap for images and an honest
-// metadata fallback for everything else.
+// text, the Markdown view for .md, a native bitmap for images, an error row for
+// a failed read and the external-open fallback for a file this build cannot
+// render inline.
 func buildFilePreviewBody(c *ui.Context, t *design.Tokens, st *state, path string, preview *filePreview) {
-	switch {
-	case preview == nil || preview.loading:
+	switch classifyFilePreview(path, preview) {
+	case filePreviewLoading:
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			ui.Spinner(c).Label(st.tr("正在读取文件…", "Reading the file…")).
 				Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
@@ -354,31 +370,107 @@ func buildFilePreviewBody(c *ui.Context, t *design.Tokens, st *state, path strin
 				t.TextMuted(design.TypeXS))
 		})
 		return
-	case preview.err != "":
+	case filePreviewError:
 		uikit.ErrorLine(c, st.tr("读取文件失败：", "Failed to read the file: ")+preview.err)
 		return
-	}
-	switch {
-	case preview.bitmap != nil:
+	case filePreviewImage:
 		// The image is the tab's content, so it carries the file name as its
 		// accessible name instead of reading as a decoration.
 		ui.Image(c, preview.bitmap).Label(filepath.Base(path)).MaxWidthPercent(100)
-	case isMarkdownPath(path):
+	case filePreviewMarkdown:
 		markdown.View(c, string(preview.data), docMarkdown(t))
-	case isTextPath(path):
+	case filePreviewText:
 		editorView(c, t, st, path, preview.data)
-	default:
-		uikit.KeyValueRows(c, []uikit.KeyValue{
-			{Key: st.tr("大小", "Size"), Value: formatFileSize(int64(len(preview.data)))},
-			{Key: st.tr("类型", "Type"), Value: strings.TrimPrefix(filepath.Ext(path), ".")},
-		})
-		design.Apply(ui.Text(c, st.tr("暂不支持预览", "Preview is not supported")),
-			t.TextMuted(design.TypeXXS))
+	case filePreviewExternal:
+		buildExternalPreview(c, t, st, path, preview)
 	}
 	if preview.truncated {
 		design.Apply(ui.Text(c, st.tr("仅显示前 256 KiB", "Showing the first 256 KiB only")),
 			t.TextMuted(design.TypeXXXS))
 	}
+}
+
+// buildExternalPreview is the honest fallback for a document this build cannot
+// render: the panel ships no embedded PDF/Office/HTML renderer (and no
+// third-party one), so the file's metadata and a clear explanation take the
+// preview's place, with "open in the system application" as the primary
+// action. A build without the launcher seam hides the action instead of
+// offering a dead button.
+func buildExternalPreview(c *ui.Context, t *design.Tokens, st *state, path string, preview *filePreview) {
+	if len(preview.data) > 0 {
+		uikit.KeyValueRows(c, []uikit.KeyValue{
+			{Key: st.tr("大小", "Size"), Value: formatFileSize(int64(len(preview.data)))},
+			{Key: st.tr("类型", "Type"), Value: strings.TrimPrefix(filepath.Ext(path), ".")},
+		})
+	}
+	design.Apply(ui.Text(c, st.tr("暂不支持预览", "Preview is not supported")),
+		t.Font(design.TypeXS)).TextColor(t.LabelPrimary).Bold()
+	design.Apply(ui.Text(c, st.tr(
+		"本机没有内嵌 PDF、Office 或 HTML 渲染器，无法在侧边栏显示该文件。",
+		"This build has no embedded PDF, Office or HTML renderer, so the file cannot be shown here.")),
+		t.TextMuted(design.TypeXXS)).MaxLines(3)
+	design.Apply(ui.Text(c, st.externalPreviewHint(path, preview)),
+		t.TextMuted(design.TypeXXS)).MaxLines(2)
+	if preview.openErr != "" {
+		uikit.ErrorLine(c, preview.openErr)
+	}
+	if nativeLauncherAvailable() {
+		action := design.Apply(ui.PrimaryButton(c, st.tr("用系统应用打开", "Open natively")),
+			t.PrimaryButton())
+		if action.Clicked() {
+			st.openPreviewNatively(path, preview)
+		}
+	}
+}
+
+// externalPreviewHint names the concrete fallback reason: the document family,
+// the oversized image, or a binary/unknown type.
+func (st *state) externalPreviewHint(path string, preview *filePreview) string {
+	if isImagePath(path) && preview != nil && strings.HasPrefix(preview.err, imageTooLargeErrPrefix) {
+		return st.tr("图片超过内嵌预览上限，请用系统应用查看。",
+			"The image is larger than the embedded preview limit; open it with the system application.")
+	}
+	switch {
+	case hasExt(path, pdfExts):
+		return st.tr("PDF 文档需要系统应用打开。", "Open PDF documents with the system application.")
+	case hasExt(path, officeExts):
+		return st.tr("Office 文档需要系统应用打开。", "Open Office documents with the system application.")
+	case hasExt(path, htmlExts):
+		return st.tr("HTML 页面需要浏览器打开。", "Open HTML pages in the browser.")
+	default:
+		return st.tr("二进制或其它类型没有内嵌预览。",
+			"Binary and other file types have no embedded preview.")
+	}
+}
+
+// nativeLauncherAvailable reports whether the platform launcher seam is wired.
+// A host build without it (or a headless test) hides the external-open action
+// instead of showing a button that cannot work.
+func nativeLauncherAvailable() bool {
+	return openpath.Open != nil
+}
+
+// openPreviewNatively hands one previewed file to the platform's default
+// application. It reuses the same workspace containment as the previewer's
+// OpenNative entry point (a relative path under the live root, no escapes), and
+// keeps a localized failure inline on the tab's preview.
+func (st *state) openPreviewNatively(path string, preview *filePreview) {
+	if preview == nil || !nativeLauncherAvailable() {
+		return
+	}
+	prefix := st.tr("打开文件失败：", "Could not open the file: ")
+	_, native, err := st.resolveWorkspacePath(st.workspaceService(), path)
+	if err != nil {
+		preview.openErr = prefix + err.Error()
+		st.invalidate()
+		return
+	}
+	if err := openpath.Open(native); err != nil {
+		preview.openErr = prefix + err.Error()
+	} else {
+		preview.openErr = ""
+	}
+	st.invalidate()
 }
 
 // docMarkdown is the narrow-panel Markdown theme of the inspector's file and

@@ -1,4 +1,4 @@
-# UI/UX 升级空间评估（v0.2.39 · 2026-11-15）
+# UI/UX 升级空间评估（v0.2.40 · 2026-11-15）
 
 > **问题**：按照当前功能规划（长任务 DSH 对齐、Goal v2、PromptQueue/inbox、Context、Insights、冷恢复、系统通知），UI/UX 还有哪些升级空间？
 >
@@ -56,8 +56,11 @@
 | P2-6 团队工作台 | **不做（产品决策）** | 不新增右栏常驻团队页；Run Band/浮层/子会话已覆盖 |
 | P3 TableColumn token / plugins 首页 / 暗色证据债 | **部分** | release 快照覆盖主要亮/暗/窄窗；TableColumn token 与 plugins 新首页留待后续版本 |
 | 半闭环收口（0.2.39） | **已实现** | Goal 状态词/⋯ 入口；中断 toast+Announce；团队工作台 Modal；Context 压缩/设置/归档原文；Insights 限宽/空天/筛选；闭环表见 §1 |
+| DSH 客户端对齐（0.2.40） | **已实现** | Todo dock；Job 输出流+两段停止；原始日志 ZIP；当前会话提醒；能力设置；工作区重命名；附件画廊；文档外部打开；轨迹时间概览 |
+| Workflow 持久节点 / 交互式终端 / 浏览器侧栏 | **技术性不做** | rig workflow 无 durable 事件；TerminalService 无 PTY/stream；无 webview，需新 Web 引擎/第二 UI 栈 |
+| 官方账号/日志上传、语音输入、CoT 翻译 | **产品性不做** | 自用/本地优先路线；实验性能力 |
 
-验证（v0.2.39 发布前）：`go test ./... -count=1` 全绿；`go vet ./...` / `go tool mygo vet .` 干净；`designlint --strict --baseline` 0 new / 0 blocking；`scripts/design-check.sh` 6/6；`go test -race`（agent/toolkit/sessionstore/session/uiroot/settings/uikit）通过；`ui-drive` 93/93、`ui-snapshot` 122 PNG；真实帧在 `.cache/impl-shots-halfclosed/`（`p1-chat.png`、`p1-trajectory.png`、`p2-palette.png`、`p2-context.png`、`p2-approval-diff.png`、`p2-insights.png`、`p2-team-overlay.png`、`narrow/narrow-session-inspector.png`）。
+验证（v0.2.40 发布前）：`go test ./... -count=1` 全绿；`go vet ./...` / `go tool mygo vet .` 干净；`designlint --strict --baseline` 0 new / 0 blocking；`scripts/design-check.sh` 6/6；`go test -race`（agent/toolkit/session/uiroot/rightpanel/sidebar）通过；`ui-drive` 94/94、`ui-snapshot` 122 PNG；真实帧在 `.cache/impl-shots-final3/`（`p1-chat.png`、`p1-trajectory.png`、`p2-palette.png`、`p2-context.png`、`p2-approval-diff.png`、`p2-insights.png`、`p2-team-overlay.png`、`narrow/narrow-session-inspector.png`）。
 
 ---
 

@@ -144,6 +144,11 @@ func (s *service) hydrateToolTimeline(ctx context.Context, sessionID string, sta
 			if path := strings.TrimSpace(payload.Path); path != "" {
 				tool.Path = path
 			}
+			// The call's clock: the durable event time. Old events have no time
+			// (zero), and those calls stay unknown instead of guessing one.
+			if !event.Time.IsZero() {
+				tool.StartedAt = event.Time
+			}
 			if payload.TextOffset == nil {
 				continue
 			}
@@ -167,6 +172,11 @@ func (s *service) hydrateToolTimeline(ctx context.Context, sessionID string, sta
 				tool.Status = status
 			}
 			tool.Summary = payload.Content
+			// The result event's time ends the call; a zero event time leaves it
+			// unknown (never fabricated).
+			if !event.Time.IsZero() {
+				tool.EndedAt = event.Time
+			}
 		}
 	}
 	timedPerMessage := make(map[int]int, len(refs))

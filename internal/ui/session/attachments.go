@@ -258,13 +258,26 @@ func buildPendingAttachments(c *ui.Context, t *design.Tokens, runtime contracts.
 			})
 		}
 		if len(st.pendingAttachments) > 0 {
+			// The staged images of this composer are one gallery: previewing one
+			// pages through the others before they are sent.
+			stagedImages := imageAttachments(st.pendingAttachments)
+			stagedIndex := 0
 			ui.Row(c).FillWidth().Wrap().Gap(design.Space1).Children(func() {
 				for _, attachment := range st.pendingAttachments {
 					attachment := attachment
+					var onPreview func()
+					if attachment.IsImage() {
+						imageIndex := stagedIndex
+						stagedIndex++
+						onPreview = func() {
+							st.openAttachmentGallery(stagedImages, imageIndex)
+							runtime.Invalidate()
+						}
+					}
 					buildAttachmentChip(c, t, st, attachment, true, func() {
 						removePendingAttachment(st, attachment.ID)
 						runtime.Invalidate()
-					})
+					}, onPreview)
 				}
 			})
 		}
@@ -286,50 +299,77 @@ func buildPendingAttachments(c *ui.Context, t *design.Tokens, runtime contracts.
 	})
 }
 
-// buildMessageAttachments renders the read-only chips of a user message.
-func buildMessageAttachments(c *ui.Context, t *design.Tokens, st *state, attachments []contracts.Attachment) {
+// buildMessageAttachments renders the read-only chips of a user message. An
+// image chip is a button that opens the message's image gallery (P1), so the
+// reader can see the original behind the 32 DIP thumbnail; a non-image chip
+// stays inert.
+func buildMessageAttachments(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, attachments []contracts.Attachment) {
 	if len(attachments) == 0 {
 		return
 	}
+	images := imageAttachments(attachments)
+	imageIndex := 0
 	ui.Row(c).FillWidth().Justify(ui.End).Gap(design.Space1).Children(func() {
 		for _, attachment := range attachments {
-			buildAttachmentChip(c, t, st, attachment, false, nil)
+			attachment := attachment
+			var onPreview func()
+			if attachment.IsImage() {
+				index := imageIndex
+				imageIndex++
+				onPreview = func() {
+					st.openAttachmentGallery(images, index)
+					runtime.Invalidate()
+				}
+			}
+			buildAttachmentChip(c, t, st, attachment, false, nil, onPreview)
 		}
 	})
 }
 
 // buildAttachmentChip is one native attachment chip: optional image preview (or
-// a file glyph), the file name, its size and, while staged, a remove button.
-// The chip is a quiet BgStrong fill with no outline (P2-12): on the composer
-// card an outlined chip joined the toolbar's old boxed controls as visual
-// noise. ControlChip still owns the 28 DIP height and RadiusSM.
-func buildAttachmentChip(c *ui.Context, t *design.Tokens, st *state, attachment contracts.Attachment, removable bool, onRemove func()) {
+// a file glyph), the file name, its size and, while staged, the preview (images
+// only) and remove actions. A message's image chip is a plain ui.Button: the
+// whole chip opens the image gallery, and mygo keeps the native hover, pressed,
+// focus and keyboard states instead of a hand-written click surface. The staged
+// and non-image chips keep the quiet BgStrong fill with no outline (P2-12);
+// their actions are the shared icon buttons (24 DIP hit target).
+func buildAttachmentChip(c *ui.Context, t *design.Tokens, st *state, attachment contracts.Attachment,
+	removable bool, onRemove, onPreview func()) {
 	th := t.Theme()
 	key := "session.attachment." + attachment.ID
+	name := firstNonEmpty(attachment.Name, st.tr("未命名附件", "Untitled attachment"))
+	if onPreview != nil && !removable {
+		// A sent image's chip is the open-original action: native button metrics
+		// only (no background/border override), so the theme's hover/pressed/
+		// focus states stay visible and Enter/Space work.
+		button := design.Apply(ui.Button(c.Key(key), ""), t.Font(design.TypeXXS), func(el ui.Element) ui.Element {
+			return el.Height(design.ControlCompactHeight).PaddingX(design.Space2).
+				Gap(design.Space1).Radius(design.RadiusSM)
+		}).Label(name).Tooltip(st.tr("查看原图", "View the original"))
+		button.Children(func() {
+			buildAttachmentChipContent(c, t, st, attachment, name, th)
+		})
+		if button.Clicked() {
+			onPreview()
+		}
+		return
+	}
 	chip := design.Apply(ui.Row(c.Key(key)), t.ControlChip(), func(el ui.Element) ui.Element {
 		return el.Background(t.BgStrong).Border(0, ui.Transparent)
-	}).AlignItems(ui.Center).Shrink(0).Label(attachment.Name)
+	}).AlignItems(ui.Center).Shrink(0).Label(name)
 	chip.Children(func() {
-		if bitmap := st.attachmentThumbnail(attachment); bitmap != nil {
-			ui.Image(c, bitmap).Size(th.Space(8), th.Space(8)) // 32 DIP preview
-		} else {
-			// A file is a file and an image is an image: the icon is the
-			// affordance, not a network globe.
-			icon := icons.File()
-			if attachment.IsImage() {
-				icon = icons.Image()
-			}
-			ui.Icon(c, icon).Size(th.Space(4), th.Space(4)).TextColor(t.LabelSecondary)
-		}
-		design.Apply(ui.Text(c, firstNonEmpty(attachment.Name, st.tr("未命名附件", "Untitled attachment"))), t.Font(design.TypeXXS)).
-			TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
-		if attachment.Size() > 0 {
-			design.Apply(ui.Text(c, formatAttachmentSize(attachment.Size())), t.Font(design.TypeXXS)).
-				TextColor(t.LabelTertiary).NoWrap()
+		buildAttachmentChipContent(c, t, st, attachment, name, th)
+		if onPreview != nil {
+			uikit.IconButton(c, uikit.IconButtonOptions{
+				Key:     key + ".preview",
+				Label:   st.tr("查看原图 ", "View the original ") + name,
+				Tooltip: st.tr("查看原图", "View the original"),
+				Icon:    icons.Image(),
+				Size:    design.IconSizeS,
+				OnClick: onPreview,
+			})
 		}
 		if removable {
-			// The one icon-button entry component keeps the 24 DIP minimum hit
-			// target (AP-17); the old 20 DIP close button was below it (P3-10).
 			uikit.IconButton(c, uikit.IconButtonOptions{
 				Label:   st.tr("移除附件 ", "Remove attachment ") + attachment.Name,
 				Tooltip: st.tr("移除附件", "Remove attachment"),
@@ -339,4 +379,311 @@ func buildAttachmentChip(c *ui.Context, t *design.Tokens, st *state, attachment 
 			})
 		}
 	})
+}
+
+// buildAttachmentChipContent draws a chip's leading thumbnail/glyph and its
+// name/size copy; the caller owns the surface (button or quiet chip).
+func buildAttachmentChipContent(c *ui.Context, t *design.Tokens, st *state, attachment contracts.Attachment,
+	name string, th *ui.Theme) {
+	if bitmap := st.attachmentThumbnail(attachment); bitmap != nil {
+		ui.Image(c, bitmap).Size(th.Space(8), th.Space(8)) // 32 DIP preview
+	} else {
+		// A file is a file and an image is an image: the icon is the affordance,
+		// not a network globe.
+		icon := icons.File()
+		if attachment.IsImage() {
+			icon = icons.Image()
+		}
+		ui.Icon(c, icon).Size(th.Space(4), th.Space(4)).TextColor(t.LabelSecondary)
+	}
+	design.Apply(ui.Text(c, name), t.Font(design.TypeXXS)).
+		TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
+	if attachment.Size() > 0 {
+		design.Apply(ui.Text(c, formatAttachmentSize(attachment.Size())), t.Font(design.TypeXXS)).
+			TextColor(t.LabelTertiary).NoWrap()
+	}
+}
+
+// --- attachment image gallery (P1) ------------------------------------------
+
+// galleryMargin keeps the lightbox clear of the window edges.
+const galleryMargin = design.Space6
+
+// attachmentGallery is the attachment image lightbox state: the images of one
+// message (or of the staged composer attachments), the shown index, the decoded
+// originals and the always-built viewport probe. One gallery is open at a time;
+// closing drops the attachment bytes and bitmaps so a large original is not kept
+// alive behind a closed dialog.
+type attachmentGallery struct {
+	open     bool
+	images   []contracts.Attachment
+	index    int
+	entries  map[int]galleryEntry
+	viewport ui.Handle
+}
+
+// galleryEntry is one image's decoded original, or the honest reason it cannot
+// be shown; it is decoded once per gallery, never in a plain frame.
+type galleryEntry struct {
+	bitmap *ui.Bitmap
+	notice string
+}
+
+// imageAttachments filters one attachment collection to the images, in order.
+func imageAttachments(attachments []contracts.Attachment) []contracts.Attachment {
+	images := make([]contracts.Attachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		if attachment.IsImage() {
+			images = append(images, attachment)
+		}
+	}
+	return images
+}
+
+// openAttachmentGallery opens the lightbox on one image of images. It runs from
+// a click handler inside the frame build, so the shown original is decoded once
+// here (a frame never decodes an image) and the other images decode only when
+// paged to.
+func (st *state) openAttachmentGallery(images []contracts.Attachment, index int) {
+	if st == nil || len(images) == 0 {
+		return
+	}
+	g := &st.gallery
+	g.open = true
+	g.images = append([]contracts.Attachment(nil), images...)
+	g.index = clampGalleryIndex(index, len(images))
+	g.entries = make(map[int]galleryEntry, len(images))
+	st.galleryEntry(g.index)
+}
+
+// closeAttachmentGallery closes the lightbox and releases the originals.
+func (st *state) closeAttachmentGallery() {
+	if st == nil {
+		return
+	}
+	st.gallery.open = false
+	st.gallery.images = nil
+	st.gallery.entries = nil
+	st.gallery.index = 0
+}
+
+// move pages the open gallery by delta, wrapping at both ends.
+func (g *attachmentGallery) move(delta int) {
+	if !g.open || len(g.images) < 2 {
+		return
+	}
+	g.index = (g.index + delta + len(g.images)) % len(g.images)
+}
+
+// clampGalleryIndex bounds one shown index into a gallery of count images.
+func clampGalleryIndex(index, count int) int {
+	if count <= 0 {
+		return 0
+	}
+	if index < 0 {
+		return 0
+	}
+	if index >= count {
+		return count - 1
+	}
+	return index
+}
+
+// galleryEntry returns the decoded original of the image at index, or the honest
+// notice that says why it cannot be shown. The result is cached for the gallery's
+// lifetime, so switching back and forth decodes nothing twice.
+func (st *state) galleryEntry(index int) galleryEntry {
+	g := &st.gallery
+	if index < 0 || index >= len(g.images) {
+		return galleryEntry{notice: st.tr("没有这张图片", "This image is not here")}
+	}
+	if entry, ok := g.entries[index]; ok {
+		return entry
+	}
+	attachment := g.images[index]
+	entry := galleryEntry{}
+	switch {
+	case !attachment.IsImage():
+		entry.notice = st.tr("这个附件不是图片", "This attachment is not an image")
+	case len(attachment.Data) == 0:
+		// A restored history keeps only the attachment's name: be honest instead
+		// of showing an empty frame.
+		entry.notice = st.tr("历史消息没有保存图片数据，无法显示原图",
+			"The stored message has no image data, so the original cannot be shown")
+	case len(attachment.Data) > maxThumbnailBytes:
+		entry.notice = st.tr("图片超过 10 MB 预览上限，无法显示原图",
+			"The image exceeds the 10 MB preview limit, so the original cannot be shown")
+	default:
+		bitmap, err := ui.DecodeBitmap(attachment.Data)
+		if err != nil || bitmap == nil {
+			entry.notice = st.tr("无法解码这张图片，无法显示原图",
+				"This image could not be decoded, so the original cannot be shown")
+			break
+		}
+		entry.bitmap = bitmap
+	}
+	g.entries[index] = entry
+	return entry
+}
+
+// galleryImageSize fits one original inside the room the dialog leaves: it never
+// scales an image up, and keeps the bitmap's aspect ratio when it scales down.
+func galleryImageSize(bitmap *ui.Bitmap, maxW, maxH float32) (float32, float32) {
+	if bitmap == nil {
+		return 0, 0
+	}
+	sourceW, sourceH := bitmap.Size()
+	if sourceW <= 0 || sourceH <= 0 {
+		return 0, 0
+	}
+	width, height := float32(sourceW), float32(sourceH)
+	if maxW > 0 && width > maxW {
+		height *= maxW / width
+		width = maxW
+	}
+	if maxH > 0 && height > maxH {
+		width *= maxH / height
+		height = maxH
+	}
+	if width < 1 {
+		width = 1
+	}
+	if height < 1 {
+		height = 1
+	}
+	return width, height
+}
+
+// buildAttachmentGallery draws the attachment image lightbox: the inert
+// full-window viewport probe (built every frame, so the first lightbox frame
+// already knows the window), then the official ui.Modal with the original image,
+// its file name and size, the close action and, for a message with several
+// images, the previous/next paging. Modal owns the dialog semantics (focus,
+// Escape, a click on the scrim, the standard look); this file owns only the
+// image content and paging. No image editing is offered.
+func buildAttachmentGallery(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+	if st == nil {
+		return
+	}
+	g := &st.gallery
+	// The probe is out of the flow and out of the pointer's path; its last
+	// frame's bounds are the window the dialog fits the original inside.
+	ui.Overlay(c, func() {
+		ui.Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
+			IgnoreInput(true).AccessHidden(true).Bind(&g.viewport)
+	})
+	if !g.open || len(g.images) == 0 {
+		return
+	}
+	g.index = clampGalleryIndex(g.index, len(g.images))
+	single := len(g.images) == 1
+	attachment := g.images[g.index]
+	entry := st.galleryEntry(g.index)
+	viewport := g.viewport.Bounds(c)
+	if viewport.W <= 0 || viewport.H <= 0 {
+		// The probe never laid out (a dialog opened in the window's first
+		// frame): fit against a conservative default instead of clipping.
+		viewport = ui.Rect{W: design.TranscriptWidth + 2*galleryMargin, H: 720}
+	}
+	// The modal panel pads by Space5 on each side and caps itself at the window
+	// minus that padding; the image fits inside the room that leaves, with the
+	// dialog's own header and paging row counted as chrome.
+	chrome := design.RowCompactHeight + 2*design.Space2
+	if !single {
+		chrome += design.RowCompactHeight + design.Space2
+	}
+	fittedW, fittedH := galleryImageSize(entry.bitmap,
+		viewport.W-2*galleryMargin-2*design.Space5,
+		viewport.H-2*galleryMargin-2*design.Space5-chrome)
+	name := firstNonEmpty(attachment.Name, st.tr("未命名图片", "Untitled image"))
+	modal := ui.Modal(c, &g.open, func() {
+		ui.Column(c).Gap(design.Space2).Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				ui.Column(c).Grow(1).Children(func() {
+					design.Apply(ui.Text(c, name), t.Font(design.TypeXS)).
+						FontWeight(design.WeightSemibold).TextColor(t.LabelPrimary).
+						MaxLines(1).Ellipsis("…").Tooltip(name)
+					meta := formatAttachmentSize(attachment.Size())
+					if !single {
+						meta = fmt.Sprintf(st.tr("第 %d / %d 张 · %s", "%d of %d · %s"),
+							g.index+1, len(g.images), meta)
+					}
+					if strings.TrimSpace(meta) != "" {
+						design.Apply(ui.Text(c, meta), t.Font(design.TypeXXS)).
+							TextColor(t.LabelTertiary).NoWrap()
+					}
+				})
+				uikit.IconButton(c, uikit.IconButtonOptions{
+					Key:     "session.gallery.close",
+					Label:   st.tr("关闭大图", "Close image"),
+					Tooltip: st.tr("关闭大图", "Close image"),
+					Icon:    icons.Close(),
+					Size:    design.IconSizeS,
+					OnClick: func() {
+						g.open = false
+						runtime.Invalidate()
+					},
+				})
+			})
+			if entry.bitmap != nil {
+				ui.Image(c, entry.bitmap).Size(fittedW, fittedH).Fit(ui.Contain).Label(name)
+			} else {
+				// An original that cannot be shown keeps its honest reason, with
+				// the warning glyph so it does not read as an empty dialog.
+				ui.Row(c).AlignItems(ui.Start).Gap(design.Space2).Children(func() {
+					ui.Icon(c, icons.AlertTriangle()).Size(design.Space4, design.Space4).TextColor(t.WarningText)
+					design.Apply(ui.Text(c, entry.notice), t.Font(design.TypeXS)).
+						TextColor(t.WarningText).MaxLines(3)
+				})
+			}
+			if !single {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Justify(ui.Center).Gap(design.Space3).Children(func() {
+					uikit.IconButton(c, uikit.IconButtonOptions{
+						Key:     "session.gallery.previous",
+						Label:   st.tr("上一张", "Previous image"),
+						Tooltip: st.tr("上一张", "Previous image"),
+						// icons has no left chevron; the shared icon button's
+						// Content slot takes the right one turned around.
+						Content: func(c *ui.Context) {
+							ui.Icon(c, icons.ChevronRight()).
+								Size(design.IconSizeS, design.IconSizeS).
+								TextColor(t.LabelSecondary).Rotate(180)
+						},
+						Size: design.IconSizeS,
+						OnClick: func() {
+							g.move(-1)
+							runtime.Invalidate()
+						},
+					})
+					design.Apply(ui.Text(c, fmt.Sprintf(st.tr("%d / %d", "%d / %d"), g.index+1, len(g.images))),
+						t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+					uikit.IconButton(c, uikit.IconButtonOptions{
+						Key:     "session.gallery.next",
+						Label:   st.tr("下一张", "Next image"),
+						Tooltip: st.tr("下一张", "Next image"),
+						Icon:    icons.ChevronRight(),
+						Size:    design.IconSizeS,
+						OnClick: func() {
+							g.move(1)
+							runtime.Invalidate()
+						},
+					})
+				})
+			}
+		})
+	})
+	modal.Label(st.tr("查看图片：", "View image: ") + name)
+	if !single {
+		// Left/Right page while the dialog owns the keyboard. The modal is built
+		// last, so its own base reads Escape and the backdrop click first; the
+		// arrows only reach this when they are not taken by a focused control.
+		if modal.OverlayShortcut(0, ui.KeyLeft) {
+			g.move(-1)
+			runtime.Invalidate()
+		}
+		if modal.OverlayShortcut(0, ui.KeyRight) {
+			g.move(1)
+			runtime.Invalidate()
+		}
+	}
 }
