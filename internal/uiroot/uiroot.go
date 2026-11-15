@@ -124,6 +124,16 @@ type Root struct {
 	// opens (but never re-opens) the advanced group; an explicit collapse stays
 	// collapsed until the user chooses another page.
 	settingsSelectedID string
+	// settingsRevealedQuery is the search query whose first item hit was already
+	// handed to its page: the reveal (scroll into view + transient highlight) is
+	// a one-shot per query, not a per-frame scroll that would fight the user.
+	settingsRevealedQuery string
+	// settingsRevealPage/settingsRevealAnchor are the pending item hit the host
+	// hands to that page's Reveal hook on the frame it builds (the hit page may
+	// be selected one frame before its body builds, so the request is kept until
+	// consumed).
+	settingsRevealPage   string
+	settingsRevealAnchor string
 
 	// hostCommands unregisters the host's own window commands; hostLang is the
 	// language they were registered in, so a language switch re-registers them
@@ -138,6 +148,11 @@ type Root struct {
 	// sidebarCollapsed is the host-owned left sidebar state: the old shell's
 	// 64 DIP icon rail. It is toggled by Cmd/Ctrl+B or the brand-row control.
 	sidebarCollapsed bool
+	// railSessionsOpen is the rail's conversation popover state (the rail's form
+	// of the expanded sidebar's session tree) and railSessionsQuery its search
+	// draft. UI thread only.
+	railSessionsOpen  bool
+	railSessionsQuery string
 
 	// inspectorToggle is the content header's inspector button; a close that
 	// removes the focused control (the drawer, the pane header's X) asks for
@@ -181,6 +196,16 @@ type Root struct {
 	// focus.
 	paletteFilter string
 	paletteCount  int
+	// paletteShown marks that the palette drew in the previous frame, so the
+	// first frame of an opening scrolls the list to the top (a reopened palette
+	// must not keep the previous opening's scroll place, which could leave the
+	// chosen first row off screen).
+	paletteShown bool
+	// paletteReveal is the choice the palette's list last scrolled into view.
+	// When the choice moves (Up/Down) the next frame scrolls it into view, so
+	// the painted target is always the row Enter will run (SH-02's class: a
+	// chosen row scrolled out of view).
+	paletteReveal int
 }
 
 // SidebarCollapsed reports whether the left sidebar is in its icon-rail form.
@@ -194,6 +219,11 @@ func (r *Root) SetSidebarCollapsed(collapsed bool) {
 		return
 	}
 	r.sidebarCollapsed = collapsed
+	if !collapsed {
+		// The rail's conversation popover belongs to the rail: expanding the
+		// sidebar shows the real session tree and closes it.
+		r.railSessionsOpen = false
+	}
 	r.saveSidebarCollapsed()
 	r.requestFrame()
 }
@@ -344,6 +374,12 @@ func New(cfg Config) *Root {
 	r.locale = &localeService{root: r, lang: cfg.Language}
 	r.rt = newRuntime(r)
 	r.nav = newNavigator(r)
+	// Session-tagged notifications get an "open conversation" action on the
+	// in-app toast with the same semantics as the host's OS notification click:
+	// the notifier bridge owns the action, the Root owns opening the session.
+	r.notifier.setSessionOpener(r.openNotifiedSession, func() string {
+		return r.tr("打开会话", "Open conversation")
+	})
 	r.registerHostCommands()
 	return r
 }

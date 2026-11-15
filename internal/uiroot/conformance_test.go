@@ -69,7 +69,7 @@ func TestInspectorDrawerAnnouncements(t *testing.T) {
 	// model, so the host offers it nowhere else.
 	mustScreen(t, r, textScreen("session", "会话", "body-session", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
-	tt := newTestTester(t, r, 1000, 720)
+	tt := newTestTester(t, r, 800, 720)
 	tt.Frame()
 
 	tt.Key(ui.Cmd|ui.Alt, ui.KeyI)
@@ -184,7 +184,7 @@ func TestShellLandmarks(t *testing.T) {
 	// A narrow window shows the inspector as the modal drawer; its content is
 	// the same named complementary landmark, inside the named dialog.
 	r.SetSidebarCollapsed(false)
-	tt.SetSize(900, 700)
+	tt.SetSize(800, 700)
 	tt.Frame()
 	if _, ok := tt.AccessByRole(ui.RoleDialog, "检查器"); !ok {
 		t.Fatalf("narrow inspector is not the named dialog; texts = %v", tt.Texts())

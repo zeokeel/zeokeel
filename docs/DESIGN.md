@@ -89,7 +89,7 @@
 | `Grid` | CSS grid 式行列 | 多列对齐的表单/参数区可用；普通行不用 Grid 硬凑 |
 | `Scroll` / `ScrollHorizontal` / `ScrollBoth` + `ScrollState` | 滚动容器 | **只用于单文本面/页面滚动**；集合一律 `ui.List`；偏移持久化用 `ScrollState.TrackScroll` |
 | `Split` / `SplitVertical`（+`Percent`、`SplitReset`） | 可拖动分栏 | 壳层唯一分栏方式；宽度存设置；不许手写分隔条 |
-| `Toolbar` | 窗口工具栏（按钮/Toggle/菜单，自动溢出菜单） | 工具栏行用 `ui.Toolbar`；**composer 动作行例外**（溢出会吞发送键，已登记自绘） |
+| `Toolbar` | 窗口工具栏（按钮/Toggle/菜单，自动溢出菜单） | 工具栏行用 `ui.Toolbar`；composer 左半控件走 `uikit.ComposerToolbar`（官方 Toolbar 封装），**发送/排队/停止必须在 Toolbar 外**（溢出会吞主操作） |
 | `Form` / `Field` / `Fieldset` | 标签/描述/错误/分组 | 所有表单字段必须用 `Field`（label 与 a11y 绑定）；多字段子组用 `Fieldset` |
 | `Accordion` / `Collapsible`（+Base） | 折叠/手风琴 | 推理、工具详情、参数展开用 `Collapsible`；不许用 `if open` 手拼箭头 |
 | `Overlay` | 窗口最上层浮层 | 命令面板/抽屉必须走官方 overlay recipe（Esc/焦点陷阱/焦点归还）；不许 ZIndex 模拟 |
@@ -226,10 +226,10 @@
 | 会话线程 / 消息 | `uikit.SessionThread`（已有，Phase 3a） | `ui.List` + `ListState{Key, FollowEnd, HoldPlace}` + `markdown.Stream/View` | `Scroll` + 循环构建消息；手写 scroll 贴底；消息卡片墙 |
 | 推理 / 思维链 | `uikit.ReasoningTrace`（已有，Phase 3a） | `ui.CollapsibleBase` + `markdown.View/Stream` + `Spinner` | 大 Card 当正文；默认展开；把推理混进正文段落 |
 | 工具调用 | `uikit.ToolRow`（已有）+ `uikit.ToolCallCard`（已有，Phase 2c） | `ui.CollapsibleBase` + `Spinner` + `Badge` + 可复制文本段 | 塞进消息气泡；纯 `ui.Text` 渲染结果；另一套工具卡解剖 |
-| 审批 / 中断 | `uikit.ApprovalDialog`（已有，Phase 3b；**Inline=V3 内联卡**为产品默认） | 内联卡（输入框上方，警示横幅+警示描边+中性卡体）或兼容 Modal + `uikit.DialogFooter`（**无 Default**，Esc=deny，危险在前）；session 负责 Esc 审批优先 | 普通 Button + 中性文案；默认焦点落在允许/拒绝；`AlertDialog` 末位默认语义；把审批做成居中 Modal（产品默认路径） |
+| 审批 / 中断 | `uikit.ApprovalDialog`（已有，Phase 3b；**Inline=V3 内联卡**为产品默认） | 内联卡（输入框上方，警示横幅+警示描边+中性卡体）或兼容 Modal + `uikit.DialogFooter`（**无 Default**，Esc=deny，危险在前）；摘要与原始参数之间用 `uikit.DiffPreview` 显示「将改动」unified diff（write/edit）；session 负责 Esc 审批优先 | 普通 Button + 中性文案；默认焦点落在允许/拒绝；`AlertDialog` 末位默认语义；把审批做成居中 Modal（产品默认路径）；无 diff 的盲批 |
 | 计划审阅 | `uikit.PlanReviewDialog`（已有，Phase 3b） | `ui.Modal` + `markdown.View` + `DialogFooter`（无 Default；Esc 不取消；反馈 Enter=继续规划） | Esc 静默取消计划；空反馈 Enter 批准；自拼 footer 顺序 |
 | 用户提问（ask） | `uikit.AskDialog`（已有，Phase 3b） | `ui.Modal` + 等权选项按钮 + `TextInput` + `DialogFooter`（取消 Default） | Enter 误选未选中的选项；选项排主次；空回答可提交 |
-| Composer | `uikit.ComposerShell`（已有，Phase 3c） | `ui.TextArea` + `PopoverMenuButton` + `ui.PrimaryButton` + `uikit.ErrorLine` | 新造输入框；把主操作藏进溢出菜单；宽度写死 |
+| Composer | `uikit.ComposerShell`（已有，Phase 3c） | `ui.TextArea` + `uikit.ComposerToolbar`（官方 `ui.Toolbar`：默认无边框、hover 才显底色）+ `uikit.ComposerAttachButton`（直连原生 picker）+ `ui.PrimaryButton` + `uikit.ErrorLine` | 新造输入框；把主操作藏进溢出菜单；宽度写死；一排带边框的小方块；附件手动路径 |
 | 流式 / 运行态 | `uikit.RunStatus`（已有，Phase 3c） | `Spinner` / `Progress` / 队列 Badge / 停止按钮 / `Toast` | 按 token 重排布局；伪造进度；停止按钮与发送模糊并排 |
 | 错误 / 恢复 | `uikit.ErrorLine`（已有）+ `uikit.RunStatus` 的重试（Phase 3c）；大块 ErrorPanel 暂缓（当前无调用点） | `RoleAlert` + danger token + 恢复动作（重试/去设置） | Warning 色；只报错不给下一步；纯 toast 代替可操作错误 |
 | 多 Agent / 团队 | 会话 agent surface（`session` 包：header 三入口 + `ui.PopoverBase` 团队浮层 + 主栏子会话视图） | `PopoverBase` + 成员/任务卡 + 面包屑标题 + `ChildAgentService` | 把子代理/团队放进侧边栏或右栏页签；把 `active` 画成 running；卡片墙 |
@@ -520,6 +520,8 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | cancelled | `LabelTertiary` | `LabelTertiary` | 用户取消（中性，不画成失败） |
 | unknown | `LabelTertiary` | `LabelTertiary` | 未知/旧后端回退 |
 
+**状态展示三层（2026-11-15 收口）**：①对象头/独立状态对象（文件、搜索配置、工作区提示、审批/工具卡头）= `uikit.StatusBadge`（语义 tint + AA 文字 + 必填标签）；②紧凑行内（侧栏会话行、活动行、表行）= 行内 `StatusText` + 运行图标/点，不拼「中性底 + 状态字」，也不为每行加 badge；③瞬时操作成功（保存完成、工作区已切换）= 图标 + 文案（可带 announcement），不常驻 badge。DS-14 的 AP-21 残留 grep 已归零；新增状态先选层，再选组件。
+
 **语义不可降级**：error 不得用 warning 或普通文本；审批动词不得中性化（「允许/拒绝/提交」不写成「确定/取消」）；`cancelled` 不得画成红色失败。
 
 **侧栏会话行的运行细节（2026-11-14）**：会话行不拼状态徽章，用「行首图标 + 行尾状态词/未读点」表达真实运行态（数据来自 `contracts.ChatSessionInfo.Running/Waiting/Unread`，不伪造）：
@@ -541,7 +543,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 |---|---|---|
 | `TypeXL` | 24/32/400 | 欢迎页/极少用 |
 | `TypeL` | 20/28/500 | 页面标题、对话框标题（配合 600 权重） |
-| `TypeM` | 16/24/400 | 小节标题 |
+| `TypeM` | 16/24/400 | 小节标题；Insights KPI 值（600 权重，页面 4 档收敛） |
 | `TypeBody` | 14/22/400 | 正文、消息；Markdown 阅读列行高 1.55 比例（`uikit.ChatMarkdown`，14→21.7） |
 | `TypeS` | 14/24/400 | 行内 label |
 | `TypeXS` | 13/20/400 | 说明、列表次文本 |
@@ -571,7 +573,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 控件高度 | `RowCompactHeight 32` / `ControlHeight 36` / `PageActionHeight 40` / `RowDoubleHeight 44`；紧凑 chip 用 `ControlCompactHeight 28` | 全部 4 的倍数；**禁止 38**；页面唯一 primary 用 40，其余控件 36，列表行 36/44，树/菜单 32 |
 | 圆角 | `RadiusXS 4` / `SM 8` / `MD 10` / `LG 16` / `XL 20` / `Max 999` | XS 仅内嵌小方块；SM 行/控制 chip/palette；MD 原生控件/S3/菜单；LG S2 卡/对话框/toast/团队浮层；**XL 仅 composer**；Max 状态药丸。子圆角 ≤ 父圆角；同屏最多 3 档；禁止 chip 用 LG |
 | 阴影 | `ShadowComposer`（composer）、`ShadowOverlay`（浮层/抽屉/toast，深色更重） | 卡片默认无阴影；浮层才用 elevation；禁止手写 `ui.RGBA` |
-| 布局 | `SidebarWidth 280` / `SidebarRailWidth 64` / `InspectorWidth 320` / `InspectorMinWidth 260` / `ContentMinWidth 520` / `SettingsWidth 820` / `SettingsHeight 760` / `TranscriptWidth 960` / `DialogWidthXS 360` / `DialogWidthS 460` / `DialogWidthCompact 520` / `DialogWidthM 560` / `DialogWidthL 620` / `DialogWidthXL 680` / `DialogBodyMax 480` / `OverlayWidthS 380` | 壳层/对话框/浮层/阅读列尺寸只能引这些 token（Phase 1b 已补齐并替换存量） |
+| 布局 | `SidebarWidth 280` / `SidebarRailWidth 64` / `InspectorWidth 320` / `InspectorMinWidth 260` / `ContentMinWidth 520` / `SettingsWidth 820` / `SettingsHeight 760` / `TranscriptWidth 960` / `DialogWidthXS 360` / `DialogWidthS 460` / `DialogWidthCompact 520` / `DialogWidthM 560` / `DialogWidthL 620` / `DialogWidthXL 680` / `DialogBodyMax 480` / `OverlayWidthS 380` | 壳层/对话框/浮层/阅读列尺寸只能引这些 token（Phase 1b 已补齐并替换存量）。**窄窗规则（2026-11-15）**：检查器打开且窗口放不下 侧栏+ContentMinWidth+检查器 时，侧栏按本帧临时渲染为 `SidebarRailWidth`（不写用户折叠偏好），检查器按可用宽度收缩到 ≥InspectorMinWidth 并保持 docked；窗口变宽/关闭检查器自动恢复。 |
 | 图标尺寸 | `IconSizeS/M/L = 16/20/24`（已落地） | 图标按钮统一走 `uikit.IconButton`（Phase 2）；其他图标尺寸优先用 token，禁止 12–40 裸值继续新增 |
 
 ### 5.5 使用规则与检查
@@ -610,7 +612,11 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 |---|---|---|
 | 页面结构 | `PageHeader` / `Section` / `PageHeaderAction` / `SectionAction` | 页头/小节/动作位置（heading role 已内置） |
 | 空态/错误 | `EmptyState` / `EmptyStateBlock` / `uikit.EmptyStateHero` / `ErrorLine` | 行内空态 / 带下一步动作 / hero（图标+标题+primary）/ RoleAlert 错误行 |
-| 只读展示 | `KeyValueRows` / `Bullet` | 属性表（值可选中）/ 项目符号 |
+| 只读展示 | `uikit.PropertySheet`（首选）/ `KeyValueRows`（Deprecated）/ `Bullet` | 属性表：160 DIP 标签列 + 值左对齐 + 32 行 + Divider + 值可选中；`KeyValueRows` 旧的右对齐形态只留给未迁移调用点 |
+| 阅读列 | `uikit.ReadingColumn` | 960 居中、`MaxWidthPercent(92)`、无 `Grow`、PaddingX 16 / Gap 20；SessionThread / Context / Goal dock / 子会话 banner 共用 |
+| 分段控件 | `uikit.SegmentedControl` | 包官方 `ui.SegmentedBase`；选中段 `BgSelected` + `LabelPrimary` + 600 + 2 DIP Accent 下划线；设置页 / Insights 唯一入口 |
+| 差异预览 | `DiffPreview` | 官方 `editor.NewBuffer` + `DiffState` + `DiffView`；块头路径 + `+N −M`、高度上限、二进制/超大回退；审批「将改动」与后续工具卡共用 |
+| 输入框工具栏 | `ComposerToolbar` / `ComposerAttachButton` | 官方 `ui.Toolbar` 封装（单 Tab stop、左右键、溢出菜单、原生 hover/pressed/focus）；附件按钮直连原生文件选择器（拖入/粘贴保留，无手动路径） |
 | 列表行强调 | `OnAccentBadge` | List 选中 accent 行上的可读徽章（AccentText 填充 + accent 文字；status label 语义保留） |
 | 对话框 | `DialogFooter` + `DialogAction` / `uikit.DialogHeader` / `uikit.ConfirmDanger` | 唯一动作条（危险→次要→主操作最右）；`DialogHeader` 统一图标/标题/副标题/关闭；`ConfirmDanger` 是不可逆动作的唯一入口（取消 Default、危险非 Default）；`Default` 仅无文本输入时用；审批无 Default |
 | 工具行 | `ToolRow` + `ToolRowOptions` / `ToolPanelSectionView` / `ToolPreview` / `ToolDisplayName` / `ToolIcon` | 工具调用统一解剖（图标/名/状态/预览/详情段/团队跳转）；状态 gutter 是**固定宽度左边框**（active 染色、完成态透明），只换色不 reflow |
@@ -619,7 +625,6 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 检查器文档 | `uikit.MarkdownDoc(t, size)` | 320px 检查器内的文件/产物预览（13px 正文，H1≈15，不再用默认 22px H1） |
 | 阅读区 Markdown | `uikit.ChatMarkdown` | 主阅读列（会话正文）的 Markdown 主题：14px 正文 + 1.55 比例行高；H1 17–18 / H2≤16 / H3≤15，均在屏幕标题之下；显式收紧标题上下距；行内代码用 `BgStrong` 底 + 等宽；引用/分隔线用 `BorderL2`；表格头 `BgStrong`；链接 Accent + 500 字重；暗色同构 |
 | 代码围栏 | `uikit.MarkdownCodeBlock` | 会话/推理/检查器 Markdown 的统一代码块：填充 `BgStrong`、无边框、`RadiusSM`；只有语言真实命名时才显示语言标签（不再把 `text` 当成标题）；官方 Copy 按钮保留复制反馈；流式/高亮/横向滚动沿用官方 `CodeBlockView` |
-| 附件 | `SplitAttachmentPaths` / `InvalidAttachmentPath` / `ResolveAttachmentPaths` | 手输附件路径 |
 | accent 行徽章 | `uikit.OnAccentBadge` | **仅**在 Accent 填充的瞬态行（palette/菜单选中项）使用；持久导航改为 tint + 普通 `uikit.Badge`（AP-19） |
 
 ### 6.3 Agent 入口组件（目标；规格见 [AGENT-SURFACES.md](AGENT-SURFACES.md)）
@@ -630,11 +635,11 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | `uikit.ReasoningTrace` | **已有**（Phase 3a） | 折叠推理、streaming 展开/结束后收起；muted 主题在 uikit |
 | `uikit.ToolRow` | **已有** | 工具调用唯一入口；需收编 session 的 `buildToolCard` 卡头 |
 | `uikit.ToolCallCard` | **已有**（Phase 2c） | 决策/轨迹/plan/demo 统一完整卡；普通工具调用仍走 `uikit.ToolRow`；无 body 时 Normal 退化为单行 |
-| `uikit.ApprovalDialog` | **已有**（Phase 3b；Inline 2026-11-10） | `Inline : bool`（产品默认 true）：输入框上方 V3 内联卡（警示横幅/描边）；`false` 保留 Modal 兼容路径；无 Default footer；Esc 由 session 审批优先路径 deny 最早一条；模块只留队列/自动切回会话 |
+| `uikit.ApprovalDialog` | **已有**（Phase 3b；Inline 2026-11-10；diff 2026-11-15） | `Inline : bool`（产品默认 true）：输入框上方 V3 内联卡（警示横幅/描边）；`false` 保留 Modal 兼容路径；摘要与原始参数之间 `uikit.DiffPreview` 显示「将改动」；无 Default footer；Esc 由 session 审批优先路径 deny 最早一条；模块只留队列/自动切回会话 |
 | `uikit.PlanReviewDialog` | **已有**（Phase 3b） | Esc 不取消 + 一次性 RoleAlert 提示；空反馈不批准；失败 Esc 可关 |
 | `uikit.AskDialog` | **已有**（Phase 3b） | 等权选项 + 「其他…」+ 取消 Default；自由文本空 Disabled |
 | 会话 Agent Run Band | **已有（2026-11-11 签名表面）** | `session.buildAgentRunBand`：标题后一行原生入口按钮（不套第二层容器，避免官方按钮描边+容器描边的双重外观；仅以间距分组），收拢运行中/智能体团队/子智能体/后台任务/待审批；团队与子代理为**关键功能，零值也常显**（可发现）但零值不显示数字 0，后台任务/审批只在有内容时出现；入口仍是 `ui.PopoverBase` 浮层；子代理/成员在主栏打开并以面包屑返回；右栏不再有团队/任务 pane |
-| `uikit.ComposerShell` | **已有**（Phase 3c） | 两处 composer 共用卡片/输入/宽度/发送位/键语义；toolbar/提交保留为 slot |
+| `uikit.ComposerShell` | **已有**（Phase 3c） | 两处 composer 共用卡片/输入/宽度/发送位/键语义；toolbar/提交保留为 slot；session/home 的 toolbar 走 `uikit.ComposerToolbar`（官方 `ui.Toolbar`），附件走 `ComposerAttachButton` 直连 picker |
 | `uikit.RunStatus` | **已有**（Phase 3c） | 生成中/不伪造进度、队列、停止、重试、用量折叠 |
 | `uikit.ErrorPanel` | 暂缓（无调用点） | 行内错误用 `uikit.ErrorLine`；会话级错误带在 SessionThread；需要大块错误面板时再建 |
 | `uikit.StatusText` / `StatusBadge` | **已有**（Phase 2b） | 13 个重复状态函数已收敛；域词表（Tool/Run/Task）保留，`active` 不再当 running |
@@ -658,7 +663,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 位置 | 内容 | 理由 |
 |---|---|---|
 | 命令面板行 / slash@ 富行 / 侧栏富行与行内 ⋯ / terminal copy success 态（8 处富行/success 态站点，按区域登记 registry allowlist） | 富行按钮、on-accent 行内动作、success 确认态 | 图标按钮已在 Phase 2a 收敛到 `uikit.IconButton`；上述站点受官方 List 行语义 / 行状态前景 / 状态语义限制，保留自绘并登记 registry allowlist（DESIGN.md §7.1） |
-| composer 动作行 | Plain Row + 3 个 PopoverMenuButton | `ui.Toolbar` 溢出菜单会吞掉发送键（已注释） |
+| composer 动作行 | Shell 的 Row 承载 Toolbar + hint + 发送/排队/停止 | `ui.Toolbar` 溢出菜单会吞掉发送键，故主操作放在 Toolbar 外；Toolbar 内部仍是官方控件（`uikit.ComposerToolbar`），不新增按钮状态机 |
 | slash/@ 建议菜单 | 富行建议面板（图标/标题/说明） | 官方 Autocomplete 仅纯文本；已按官方 suggestions a11y 模式实现 |
 | 命令面板行按钮 | 单次点击执行 + RoleButton 行 | 官方 List 行语义是 listitem，不提供按钮行 |
 | 消息元信息行（时间 · 紧凑用量 · ⋯） | 消息级元信息 + 单一动作菜单 | 官方列表行不提供行内元信息区；只用官方 Text/Button/Menu 组合（不新增自绘控件），时间与用量常显、动作收进一个 ⋯ |

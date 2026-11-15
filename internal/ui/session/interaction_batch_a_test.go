@@ -10,6 +10,7 @@ package session_test
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -139,7 +140,7 @@ func TestStreamingMessageHidesActions(t *testing.T) {
 	chat.updateSession(contracts.ChatSession{
 		ID: "sess-1", Title: "流式", Running: false,
 		Messages: []contracts.ChatMessage{
-			{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "写好了"},
+			{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "写好了", CreatedAt: time.Date(2026, 11, 15, 9, 0, 0, 0, time.Local)},
 		},
 	})
 	tester.Frame()
@@ -157,7 +158,7 @@ func TestCopyWritesClipboardAndToasts(t *testing.T) {
 	chat.addSession(contracts.ChatSession{
 		ID: "sess-1", Title: "复制",
 		Messages: []contracts.ChatMessage{
-			{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "回答"},
+			{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "回答", CreatedAt: time.Date(2026, 11, 15, 9, 0, 0, 0, time.Local)},
 		},
 	}, true)
 	h := newToastHarness(t, chat, notifier)
@@ -181,7 +182,7 @@ func TestSessionErrorsClearedOnSwitch(t *testing.T) {
 	chat.addSession(contracts.ChatSession{
 		ID: "sess-1", Title: "A",
 		Messages: []contracts.ChatMessage{
-			{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "回答"},
+			{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "回答", CreatedAt: time.Date(2026, 11, 15, 9, 0, 0, 0, time.Local)},
 		},
 	}, true)
 	chat.addSession(contracts.ChatSession{ID: "sess-2", Title: "B"}, false)

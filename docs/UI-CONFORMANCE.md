@@ -51,6 +51,7 @@
 - 保留自绘清单与理由见 [UI-COMPONENT-MIGRATION.md](UI-COMPONENT-MIGRATION.md) §3：
   仅限无官方对应（无边框图标按钮、富行建议菜单、composer 动作行布局、palette 按钮行、
   hover 动作行、回到最新浮层、测试 seam）或产品语义不适用（Rating/Meter 等）。
+- 设置搜索（2026-11-15）：`contracts.SettingsPageSpec` 的可选 `Keywords` / `SearchItems{ID,Label,Keywords,AnchorKey}` / `Reveal(c, anchor)` 是唯一索引来源；host 只匹配这些声明并打开页面，页面在 Build 前自行展开 disclosure、滚动并短暂高亮（1.5s）；不要再往 host 加 page-ID 别名表（已删除，曾漂移）。
 - 设置导航的「高级」分组跟随当前页：选中的页面属于高级组时展开，切回日常页时折叠
   （避免上次访问留下的长/短两种导航形态；`internal/uiroot/shell_ux_test.go` 钉住）。
 - 新增 UI 时先查 §1 表与官方 docs；出现新的自绘控件必须在本文件与迁移文档记录理由。
@@ -95,7 +96,7 @@
    - 程序化 `Focus()` 会把元素滚入视野（v0.9.0 行为）；不需要改变滚动的焦点变化用
      `Focus(ui.FocusOptions{PreventScroll: true})`，且须有帧测试证据（先有反证）
 6. **收口**：删除被替换的手写逻辑与死代码；若确实要偏离官方，在代码注释里写清理由
-   （例：composer 动作行不用 `ui.Toolbar` 是因为溢出菜单会吞掉发送按钮）。
+   （例：composer 的发送/排队/停止放在 `ui.Toolbar` 外，因为溢出菜单会吞掉主操作；左半工具栏走 `uikit.ComposerToolbar` 仍是官方 Toolbar）。
 
 ## 3. 常用验证命令
 

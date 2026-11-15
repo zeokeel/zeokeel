@@ -55,7 +55,7 @@ func TestReplyHasOneCopyEntry(t *testing.T) {
 	h := newHarness(t, foldChat(
 		contracts.ChatMessage{ID: "u1", Role: contracts.ChatRoleUser, Text: "问题"},
 		contracts.ChatMessage{
-			ID: "a1", Role: contracts.ChatRoleAssistant, Text: "最终答复",
+			ID: "a1", Role: contracts.ChatRoleAssistant, Text: "最终答复", CreatedAt: time.Date(2026, 11, 15, 9, 0, 0, 0, time.Local),
 			Reasoning: "想想",
 			Tools:     []contracts.ToolCall{{ID: "t1", Name: "bash", Status: "ok", Summary: "ls"}},
 		},

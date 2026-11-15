@@ -133,13 +133,11 @@ func TestHomeComposerAttachmentFallback(t *testing.T) {
 	// remains visible after the fallback send.
 	chat := newFakeChat()
 	_, tester := startHomeUI(t, chat, false)
-	// The 附件 menu is closed until asked for; opening it offers both the native
-	// picker and the manual path fallback (the redesign's single attach control).
+	// The 附件 control opens the native picker directly (P2-12); there is no
+	// intermediate menu with a manual path entry.
 	requireNoText(t, tester, "选择文件…")
+	requireNoText(t, tester, "手动输入路径…")
 	clickHomeText(t, tester, "附件")
-	requireHasText(t, tester, "选择文件…")
-	requireHasText(t, tester, "手动输入路径…")
-	clickHomeText(t, tester, "选择文件…")
 	settleFrames(t, tester, "staged home attachment chip", func() bool {
 		return tester.HasText("notes.txt")
 	})
@@ -156,7 +154,6 @@ func TestHomeComposerAttachmentFallback(t *testing.T) {
 	// Picker failure is readable and keeps the composer usable.
 	overrideHomePicker(t, func() ([]string, error) { return nil, errors.New("picker failed") })
 	clickHomeText(t, tester, "附件")
-	clickHomeText(t, tester, "选择文件…")
 	settleFrames(t, tester, "home picker error line", func() bool {
 		return tester.HasText("无法打开文件选择器：picker failed")
 	})

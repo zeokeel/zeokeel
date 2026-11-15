@@ -3,6 +3,7 @@ package agent
 // Tests for the background-run completion notification (non-active sessions).
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -168,4 +169,108 @@ func indexOf(haystack, needle string) int {
 		}
 	}
 	return -1
+}
+
+// foregroundSessionStub is a contracts.ForegroundSession with a scripted answer.
+type foregroundSessionStub struct {
+	sessionID string
+	ok        bool
+}
+
+func (f *foregroundSessionStub) ForegroundSession() (string, bool) {
+	return f.sessionID, f.ok
+}
+
+// backgroundRunService builds a service whose completion notifications go to a
+// recording notifier.
+func backgroundRunService(t *testing.T) (*service, *fakeNotifier) {
+	t.Helper()
+	svc := newTestService(t, Config{}, newFakeSettings(map[string]string{contracts.SettingsChatModel: "test-model"}), nil)
+	notifier := &fakeNotifier{}
+	svc.notifier = notifier
+	return svc, notifier
+}
+
+// watchingSession creates one session and makes it the backend's active one.
+func watchingSession(t *testing.T, svc *service, title string) string {
+	t.Helper()
+	sessionID, err := svc.NewSession(title)
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := svc.SetActiveSession(sessionID); err != nil {
+		t.Fatalf("SetActiveSession: %v", err)
+	}
+	return sessionID
+}
+
+// TestBackgroundRunQuietWhenForegroundSessionMatches covers the desktop rule:
+// the run finishes for the conversation actually on screen, so it is not news
+// even when the backend's active session is another one.
+func TestBackgroundRunQuietWhenForegroundSessionMatches(t *testing.T) {
+	svc, notifier := backgroundRunService(t)
+	sessionID := watchingSession(t, svc, "watching")
+	// The backend's active session has moved on; the foreground rule decides.
+	if _, err := svc.NewSession("elsewhere"); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	svc.foreground = &foregroundSessionStub{sessionID: sessionID, ok: true}
+	svc.notifyBackgroundRunFinished(sessionID, nil, context.Background())
+	if notifications := notifier.taken(); len(notifications) != 0 {
+		t.Fatalf("notifications = %+v, want none for the foreground conversation", notifications)
+	}
+}
+
+// TestBackgroundRunNotifiesWhenNoForegroundSession covers the case the desktop
+// read model exists but nothing is in front of the user (another screen shown):
+// the backend's active session must not quiet the notification.
+func TestBackgroundRunNotifiesWhenNoForegroundSession(t *testing.T) {
+	svc, notifier := backgroundRunService(t)
+	sessionID := watchingSession(t, svc, "watching")
+	svc.foreground = &foregroundSessionStub{ok: false}
+	svc.notifyBackgroundRunFinished(sessionID, nil, context.Background())
+	notifications := notifier.taken()
+	if len(notifications) != 1 {
+		t.Fatalf("notifications = %+v, want one when no conversation is in the foreground", notifications)
+	}
+	if notifications[0].SessionID != sessionID {
+		t.Fatalf("notification session = %q, want %q", notifications[0].SessionID, sessionID)
+	}
+}
+
+// TestBackgroundRunNotifiesWhenForegroundSessionDiffers covers a foreground
+// conversation other than the finished one: the run is background news even
+// when the backend still calls the finished session active.
+func TestBackgroundRunNotifiesWhenForegroundSessionDiffers(t *testing.T) {
+	svc, notifier := backgroundRunService(t)
+	sessionID := watchingSession(t, svc, "watching")
+	otherID, err := svc.NewSession("other")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	// The finished session is still the backend's active one; only the
+	// foreground rule can tell the user moved to another conversation.
+	if err := svc.SetActiveSession(sessionID); err != nil {
+		t.Fatalf("SetActiveSession: %v", err)
+	}
+	svc.foreground = &foregroundSessionStub{sessionID: otherID, ok: true}
+	svc.notifyBackgroundRunFinished(sessionID, nil, context.Background())
+	if notifications := notifier.taken(); len(notifications) != 1 {
+		t.Fatalf("notifications = %+v, want one for a background conversation", notifications)
+	}
+}
+
+// TestBackgroundRunQuietForActiveSessionWithoutForegroundService covers the
+// fallback: a product without the desktop foreground read model (headless) keeps
+// the previous active-session rule.
+func TestBackgroundRunQuietForActiveSessionWithoutForegroundService(t *testing.T) {
+	svc, notifier := backgroundRunService(t)
+	sessionID := watchingSession(t, svc, "watching")
+	if svc.foreground != nil {
+		t.Fatal("a bare test service has a foreground session read model")
+	}
+	svc.notifyBackgroundRunFinished(sessionID, nil, context.Background())
+	if notifications := notifier.taken(); len(notifications) != 0 {
+		t.Fatalf("notifications = %+v, want none for the active session (fallback rule)", notifications)
+	}
 }

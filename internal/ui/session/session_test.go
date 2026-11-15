@@ -1129,6 +1129,11 @@ func registerTestCommands(t *testing.T, h *harness, run func()) {
 // composer tests do.
 func focusComposer(t *testing.T, tester *ui.Tester) {
 	t.Helper()
+	// A popover menu left open (the session menu, an attachment menu) draws over
+	// the composer and owns the next click: close it first, as Esc would, so the
+	// click below reaches the input.
+	tester.CloseMenu()
+	tester.Frame()
 	sendRect, ok := tester.Find("发送")
 	if !ok {
 		sendRect, ok = tester.Find("Send")
@@ -1136,7 +1141,16 @@ func focusComposer(t *testing.T, tester *ui.Tester) {
 	if !ok {
 		t.Fatalf("send control missing; texts = %v", tester.Texts())
 	}
-	tester.ClickAt(sendRect.X-120, sendRect.Y-50)
+	// Click the composer input's own center instead of an offset from the send
+	// control: the quiet toolbar (P2-12) made the action row a few DIP taller, so
+	// a fixed offset from the send button can land on the input's bottom edge.
+	if inputRect, found := tester.Find("输入消息…"); found {
+		tester.ClickAt(inputRect.X+inputRect.W/2, inputRect.Y+inputRect.H/2)
+	} else if inputRect, found := tester.Find("Ask ZeoKeel…"); found {
+		tester.ClickAt(inputRect.X+inputRect.W/2, inputRect.Y+inputRect.H/2)
+	} else {
+		tester.ClickAt(sendRect.X-120, sendRect.Y-50)
+	}
 	tester.Frame()
 	if !tester.Focused("输入消息…") && !tester.Focused("Ask ZeoKeel…") {
 		t.Fatalf("composer TextArea did not take focus; texts = %v", tester.Texts())

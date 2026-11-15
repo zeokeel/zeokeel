@@ -357,21 +357,23 @@ func buildGoalDock(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 				}
 				// The clear entry appears on hover so the resting strip stays one
 				// quiet line; it opens the same destructive confirmation as the
-				// menu's 清除目标记录 instead of clearing on a stray click.
+				// menu's 清除目标记录 instead of clearing on a stray click. It is
+				// an icon-only action, so it goes through uikit.IconButton and
+				// gets the shared 24 DIP hit target (AP-17); the glyph keeps the
+				// dock's quiet tertiary ink.
 				if group.Hovered() {
-					clear := ui.Button(c, "").
-						Label(st.tr("清除目标", "Clear goal")).
-						Tooltip(st.tr("清除目标记录（需确认）", "Clear the goal record (asks first)")).
-						Size(t.Scale(design.Space5), t.Scale(design.Space5)).
-						PaddingX(design.Space0).Radius(design.RadiusSM)
-					clear.Children(func() {
-						ui.Icon(c, icons.Close()).Size(design.Space3, design.Space3).
-							TextColor(t.LabelTertiary)
+					uikit.IconButton(c, uikit.IconButtonOptions{
+						Key:      "session.goal.clear",
+						Label:    st.tr("清除目标", "Clear goal"),
+						Tooltip:  st.tr("清除目标记录（需确认）", "Clear the goal record (asks first)"),
+						Icon:     icons.Close(),
+						Size:     design.IconSizeS,
+						InkColor: t.LabelTertiary,
+						OnClick: func() {
+							st.goalConfirm = "clear"
+							runtime.Invalidate()
+						},
 					})
-					if clear.Clicked() {
-						st.goalConfirm = "clear"
-						runtime.Invalidate()
-					}
 				}
 				buildGoalDockMenuButton(c, t, runtime, st)
 			})

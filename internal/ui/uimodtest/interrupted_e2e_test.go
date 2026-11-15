@@ -85,23 +85,23 @@ func TestInterruptedRestoreE2E(t *testing.T) {
 	tester := ui.NewTester(uiRoot2.View, 1280, 800)
 	tester.Frame()
 	tester.Frame()
-	for _, want := range []string{"上次运行被中断", "未重放；请检查工作区状态后继续。", "继续"} {
+	for _, want := range []string{"上次运行被中断", "未重放；请检查工作区状态，然后在输入框继续。", "在输入框继续"} {
 		if !tester.HasText(want) {
 			t.Fatalf("interrupted notice missing %q; texts = %v", want, tester.Texts())
 		}
 	}
 
-	// 继续 only hands the composer the keyboard.
-	if err := tester.Click("继续"); err != nil {
-		t.Fatalf("click 继续: %v; texts = %v", err, tester.Texts())
+	// 在输入框继续 only hands the composer the keyboard.
+	if err := tester.Click("在输入框继续"); err != nil {
+		t.Fatalf("click 在输入框继续: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
 	if !tester.Focused("输入消息…") {
-		t.Fatalf("继续 did not focus the composer; texts = %v", tester.Texts())
+		t.Fatalf("在输入框继续 did not focus the composer; texts = %v", tester.Texts())
 	}
 	session, _ := chat2.Session(sessionID)
 	if len(session.Messages) != 2 {
-		t.Fatalf("继续 changed the restored transcript: %+v", session.Messages)
+		t.Fatalf("在输入框继续 changed the restored transcript: %+v", session.Messages)
 	}
 
 	// 忽略 hides only the notice (the read model hint stays until the next run).

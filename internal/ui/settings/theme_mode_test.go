@@ -8,6 +8,8 @@ package settings_test
 import (
 	"testing"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
 )
@@ -50,6 +52,17 @@ func TestAppearanceThemeModeDefaultLightAndSwitching(t *testing.T) {
 	}
 }
 
+// makeAppearanceFooterDirty gives the appearance page a pending footer draft:
+// theme, language and the desktop switches apply immediately and do not dirty
+// the page, so its footer primary (the hotkey save) is disabled until the
+// hotkey draft differs.
+func makeAppearanceFooterDirty(t *testing.T, h *harness, tester *ui.Tester) {
+	t.Helper()
+	h.focusInput(tester, "组合键 输入")
+	tester.Type("CmdOrCtrl+Shift+K")
+	tester.Frame()
+}
+
 func TestAppearanceThemeModeLegacyFallback(t *testing.T) {
 	store := newFakeSettings(map[string]string{contracts.SettingsUIThemeDark: "true"})
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
@@ -57,7 +70,8 @@ func TestAppearanceThemeModeLegacyFallback(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "模型")
 	h.click(tester, "外观")
-	h.click(tester, "应用")
+	makeAppearanceFooterDirty(t, h, tester)
+	h.click(tester, "保存")
 
 	// The legacy dark flag normalizes to the dark mode and is persisted.
 	if got := store.get(contracts.SettingThemeMode); got != "dark" {
@@ -72,7 +86,8 @@ func TestAppearanceThemeModeBadValueNormalizesLight(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "模型")
 	h.click(tester, "外观")
-	h.click(tester, "应用")
+	makeAppearanceFooterDirty(t, h, tester)
+	h.click(tester, "保存")
 	if got := store.get(contracts.SettingThemeMode); got != "light" {
 		t.Fatalf("%s = %q, want light", contracts.SettingThemeMode, got)
 	}

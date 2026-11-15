@@ -425,6 +425,11 @@ func runDesktop(opts Options) error {
 	// logged by syncAutostart and never blocks startup.
 	_ = syncAutostart(settings, logger)
 
+	// refreshChrome re-applies the host chrome that follows the live backend
+	// state and the product language (window title, tray tooltip/menu). It is
+	// assigned once the window and tray exist; the language hook may fire before
+	// that, hence the nil check.
+	var refreshChrome func()
 	// The UI root exists before the assembly loads: UI modules require its
 	// services during activation. It owns the frame and every contribution
 	// registry; the host only creates the window around its single view.
@@ -438,6 +443,9 @@ func runDesktop(opts Options) error {
 		// those strings follow the product language (fix round SH-06).
 		OnLanguageChange: func(lang string) {
 			mygo.App.SetLocale(frameworkLocale(lang))
+			if refreshChrome != nil {
+				refreshChrome()
+			}
 		},
 	})
 	root := cordis.Root()
@@ -455,9 +463,15 @@ func runDesktop(opts Options) error {
 	}
 
 	var (
-		loader               *module.Loader
-		window               *mygo.Window
-		tray                 trayHandle
+		loader *module.Loader
+		window *mygo.Window
+		tray   trayHandle
+		// chatService is the loaded product's conversation service: the tray
+		// actions and the activity chrome (P2-9) both read it.
+		chatService contracts.ChatService
+		// activityUnsubscribes release the backend subscriptions that refresh the
+		// window title and tray on shutdown.
+		activityUnsubscribes []func()
 		hotkeyOff            func()
 		themeOff             func()
 		updateCommandOff     func()
@@ -512,6 +526,14 @@ func runDesktop(opts Options) error {
 				}
 				loader = nil
 			}
+			// Release the activity subscriptions before the services they read
+			// go away: a late callback must not post a frame during teardown.
+			for _, unregister := range activityUnsubscribes {
+				if unregister != nil {
+					unregister()
+				}
+			}
+			activityUnsubscribes = nil
 			if themeOff != nil {
 				themeOff()
 				themeOff = nil
@@ -668,13 +690,20 @@ func runDesktop(opts Options) error {
 				uiRoot.FileDrop().Dispatch(event.Paths)
 			}
 		})
-		// Tray actions: a fresh session (create + push the session screen) and
-		// the settings overlay. ChatService/Navigator are required by the loaded
-		// product; if either is missing the tray just omits that item.
-		trayMenuActions := trayActions{}
-		if chatService, chatErr := root.Require(contracts.KeyChat); chatErr != nil {
+		// Tray actions: a fresh session (create + push the session screen), the
+		// settings overlay, and the live chrome (P2-9): the localized menu copy
+		// and the run/approval counters the tooltip and menu show.
+		trayMenuActions := trayActions{
+			English: func() bool { return uiRoot.Locale().Language() == "en" },
+			Status: func() (int, int) {
+				status := uiRoot.Activity()
+				return status.Running, status.Approvals
+			},
+		}
+		if service, chatErr := root.Require(contracts.KeyChat); chatErr != nil {
 			logger.Printf("%s: tray actions unavailable: %v", appName, chatErr)
 		} else {
+			chatService = service
 			navigator := uiRoot.Navigator()
 			trayMenuActions.NewSession = func() error {
 				if _, err := chatService.NewSession(""); err != nil {
@@ -691,11 +720,46 @@ func runDesktop(opts Options) error {
 		// bare Xvfb display, fails NewTray; log it and keep running. With
 		// close-to-tray enabled the close handler hides the window instead of
 		// quitting; the teardown path (keepAlive false) still closes it.
-		if created, trayErr := setupTrayWithActions(window, settings, func() bool { return !closing.Load() }, trayMenuActions, logger); trayErr != nil {
+		var trayRefresh func()
+		if created, refresh, trayErr := setupTrayWithActivity(window, settings, func() bool { return !closing.Load() }, trayMenuActions, newMygoTray, logger); trayErr != nil {
 			logger.Printf("%s: system tray unavailable: %v", appName, trayErr)
 		} else {
 			tray = created
+			trayRefresh = refresh
 			logger.Printf("%s: system tray ready (close to tray: %t)", appName, closeToTrayEnabled(settings))
+		}
+		// P2-9: the window title and the tray mirror the live run/approval state
+		// ("ZeoKeel · 运行中 2", "ZeoKeel · 等待审批", the app name alone when idle),
+		// in the product language. Backends notify from any goroutine, so every
+		// refresh hops onto the UI thread through the frame queue.
+		refreshChrome = func() {
+			status := uiRoot.Activity()
+			english := uiRoot.Locale().Language() == "en"
+			if window != nil {
+				window.SetTitle(activityStatusText(appName, status.Running, status.Approvals, english))
+			}
+			if trayRefresh != nil {
+				trayRefresh()
+			}
+		}
+		refreshChrome()
+		if chatService != nil {
+			if unregister, subErr := chatService.Subscribe(func(string) {
+				uiRoot.Runtime().Post(refreshChrome)
+			}); subErr != nil {
+				logger.Printf("%s: activity chrome (sessions): %v", appName, subErr)
+			} else {
+				activityUnsubscribes = append(activityUnsubscribes, unregister)
+			}
+		}
+		if approvals, ok := root.Get(contracts.KeyApprovals); ok && approvals != nil {
+			if unregister, subErr := approvals.Subscribe(func() {
+				uiRoot.Runtime().Post(refreshChrome)
+			}); subErr != nil {
+				logger.Printf("%s: activity chrome (approvals): %v", appName, subErr)
+			} else {
+				activityUnsubscribes = append(activityUnsubscribes, unregister)
+			}
 		}
 		// Close-to-tray only hides the window when the tray exists to bring it
 		// back; without a tray the quit-on-close path (with its running-work
@@ -758,6 +822,14 @@ func provideServices(root cordis.Context, dataDir string, settings *Settings, lo
 	}
 	if _, err := root.Provide(contracts.KeyNavigator, uiRoot.Navigator()); err != nil {
 		return fmt.Errorf("%s: provide navigator: %w", appName, err)
+	}
+	// The foreground-session read model is host-owned (it mirrors the live
+	// screens): the agent uses it to keep background-run notifications quiet
+	// only for the conversation actually on screen. Provided before any module
+	// loads; the service resolves the chat backend from the kernel lazily
+	// because the agent module provides KeyChat later.
+	if _, err := root.Provide(contracts.KeyForegroundSession, uiRoot.ForegroundSession()); err != nil {
+		return fmt.Errorf("%s: provide foreground session: %w", appName, err)
 	}
 	if _, err := root.Provide(contracts.KeyTheme, uiRoot.Theme()); err != nil {
 		return fmt.Errorf("%s: provide theme: %w", appName, err)

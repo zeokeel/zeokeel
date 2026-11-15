@@ -258,7 +258,10 @@ func buildArtifactsSection(c *ui.Context, t *design.Tokens, artifacts contracts.
 		}
 		if st.artifactsNotice != "" {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				design.Apply(ui.Badge(c, st.artifactsNotice), t.Badge()).TextColor(t.SuccessText)
+				// A delivered file's "已保存" is the download's success status:
+				// the shared StatusBadge anatomy (Success tint + Success text),
+				// not the neutral badge + status-colored text AP-21 forbids.
+				uikit.StatusBadge(c, t, uikit.StatusSuccess, st.artifactsNotice)
 				if st.artifactsSavedPath != "" {
 					design.Apply(ui.Text(c, st.artifactsSavedPath), t.Font(design.TypeXXXS)).
 						TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…").

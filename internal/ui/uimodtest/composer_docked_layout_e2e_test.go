@@ -104,21 +104,41 @@ func TestDockedInspectorKeepsComposerAtBottom(t *testing.T) {
 		}
 	}
 
-	// A narrow window keeps the modal-drawer path: the composer is still laid
-	// out at the window bottom behind the drawer, and the drawer names itself.
+	// A mid-width window cannot hold the expanded sidebar plus a usable
+	// inspector: the shell takes the temporary rail and docks the inspector
+	// instead of covering the composer with the modal drawer.
 	product.uiRoot.SetSidebarCollapsed(false)
+	product.uiRoot.SetRightPanelOpen(false)
 	tester.SetSize(1024, 720)
-	tester.Frame()
 	tester.Frame()
 	product.uiRoot.SetRightPanelOpen(true)
 	tester.Frame()
-	if !tester.HasText("检查器") {
-		t.Fatalf("1024x720: inspector did not render as the drawer; texts = %v", tester.Texts())
+	tester.Frame()
+	if _, drawer := tester.AccessByRole(ui.RoleDialog, "检查器"); drawer {
+		t.Fatalf("1024x720: inspector fell back to the modal drawer; texts = %v", tester.Texts())
 	}
-	if _, ok := tester.AccessByRole(ui.RoleDialog, "检查器"); !ok {
-		t.Fatalf("1024x720: drawer is not an accessible dialog; texts = %v", tester.Texts())
+	if !product.uiRoot.RightPanelOpen() {
+		t.Fatalf("1024x720: inspector did not stay open")
 	}
+	requireRightSidebarGuide(t, tester, "1024x720 docked inspector")
 	requireComposerAtBottom(t, tester, 1024, 720)
+
+	// A truly narrow window keeps the modal-drawer path: it is the named
+	// dialog, and the composer's send control stays laid out inside the window
+	// behind it (at this width the attach control folds into the toolbar's
+	// More menu, so only the input and send are painted directly).
+	product.uiRoot.SetRightPanelOpen(false)
+	tester.Frame()
+	tester.SetSize(800, 720)
+	tester.Frame()
+	product.uiRoot.SetRightPanelOpen(true)
+	tester.Frame()
+	if _, ok := tester.AccessByRole(ui.RoleDialog, "检查器"); !ok {
+		t.Fatalf("800x720: drawer is not an accessible dialog; texts = %v", tester.Texts())
+	}
+	if send, ok := tester.Find("发送"); !ok || !windowHasRect(800, 720, send) {
+		t.Fatalf("800x720: send control missing from the drawer path; texts = %v", tester.Texts())
+	}
 }
 
 // usageChatServer answers every chat request with one short reply and token

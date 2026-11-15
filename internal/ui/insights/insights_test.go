@@ -8,6 +8,8 @@ package insights_test
 import (
 	"context"
 	"errors"
+	"image"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/ui/insights"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -532,5 +535,184 @@ func TestScreenRegisteredWithNavEntry(t *testing.T) {
 		if !ok {
 			t.Fatalf("slots = %v, want %q", slots, want)
 		}
+	}
+}
+
+// --- selected leaderboard row contrast -------------------------------------
+
+// framePixel reads one pixel of the last frame as a token color.
+func framePixel(t *testing.T, img *image.RGBA, x, y int) ui.Color {
+	t.Helper()
+	if x < 0 || y < 0 || x >= img.Rect.Dx() || y >= img.Rect.Dy() {
+		t.Fatalf("pixel (%d,%d) is outside the %dx%d frame", x, y, img.Rect.Dx(), img.Rect.Dy())
+	}
+	c := img.RGBAAt(x, y)
+	return ui.Color{R: c.R, G: c.G, B: c.B, A: c.A}
+}
+
+// colorNear reports whether two colors are within tolerance per channel (the
+// painter composites in 8-bit channels).
+func colorNear(got, want ui.Color, tolerance int) bool {
+	close := func(a, b uint8) bool {
+		d := int(a) - int(b)
+		if d < 0 {
+			d = -d
+		}
+		return d <= tolerance
+	}
+	return close(got.R, want.R) && close(got.G, want.G) && close(got.B, want.B)
+}
+
+// colorDistance is the RGB distance between two colors.
+func colorDistance(a, b ui.Color) float64 {
+	dr := float64(a.R) - float64(b.R)
+	dg := float64(a.G) - float64(b.G)
+	db := float64(a.B) - float64(b.B)
+	return math.Sqrt(dr*dr + dg*dg + db*db)
+}
+
+// luminance is WCAG's relative luminance of an opaque color.
+func luminance(c ui.Color) float64 {
+	linear := func(v uint8) float64 {
+		s := float64(v) / 255
+		if s <= 0.03928 {
+			return s / 12.92
+		}
+		return math.Pow((s+0.055)/1.055, 2.4)
+	}
+	return 0.2126*linear(c.R) + 0.7152*linear(c.G) + 0.0722*linear(c.B)
+}
+
+// contrastRatio is WCAG's ratio of two opaque colors.
+func contrastRatio(a, b ui.Color) float64 {
+	la, lb := luminance(a), luminance(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
+// nearestPixel returns the pixel of the box nearest the wanted color, and its
+// distance: a rendered glyph of that color (a full-coverage anti-aliased pixel
+// is near it) makes the distance small.
+func nearestPixel(t *testing.T, img *image.RGBA, box ui.Rect, wanted ui.Color) (ui.Color, float64) {
+	t.Helper()
+	best, bestDistance := ui.Color{}, math.Inf(1)
+	x0, x1 := int(box.X)+1, int(box.X+box.W)-1
+	y0, y1 := int(box.Y)+1, int(box.Y+box.H)-1
+	for y := y0; y < y1; y++ {
+		for x := x0; x < x1; x++ {
+			pixel := framePixel(t, img, x, y)
+			if d := colorDistance(pixel, wanted); d < bestDistance {
+				best, bestDistance = pixel, d
+			}
+		}
+	}
+	return best, bestDistance
+}
+
+// focusSessionLeaderboard moves the keyboard focus to the session leaderboard
+// with Tab: the leaderboard is the screen's last focus stop, after the refresh
+// action, the range switch and the tables.
+func focusSessionLeaderboard(t *testing.T, tester *ui.Tester) {
+	t.Helper()
+	for attempt := 0; attempt < 40; attempt++ {
+		if tester.Focused("发布检查") {
+			return
+		}
+		tester.Key(0, ui.KeyTab)
+		tester.Frame()
+	}
+	t.Fatalf("the session leaderboard never took the keyboard focus; texts = %v", tester.Texts())
+}
+
+// TestSelectedSessionRowReadable covers the leaderboard's chosen row in both
+// themes: mygo paints the row in the accent fill, so its own copy must switch to
+// the on-accent foreground (Tokens.AccentText) — the resting label inks measure
+// 2.4:1 (light ink on royal blue) and 1.9:1 (dark ink on sky) and are the bug
+// this test locks (>= 4.5:1 required for the row's small text).
+func TestSelectedSessionRowReadable(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		dark bool
+	}{
+		{name: "light"},
+		{name: "dark", dark: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &fakeInsights{result: sampleInsights()}
+			h := newHarness(t, service, nil)
+			tester := h.tester(1280, 800)
+			h.waitForText(tester, "发布检查")
+			if tc.dark {
+				h.uiRoot.Theme().SetDark(true)
+				tester.Frame()
+				h.waitForText(tester, "发布检查")
+			}
+			tokens := design.Light()
+			if tc.dark {
+				tokens = design.Dark()
+			}
+
+			// The keys choose the first row without opening it (a click on a
+			// row opens the conversation, so the test drives the keyboard).
+			focusSessionLeaderboard(t, tester)
+			tester.Key(0, ui.KeyDown)
+			tester.Frame()
+			row, ok := tester.AccessByRole(ui.RoleListItem, "")
+			if !ok {
+				t.Fatalf("the leaderboard row is not in the accessibility tree; texts = %v", tester.Texts())
+			}
+			if !row.Selected {
+				t.Fatalf("the chosen row does not read as selected; %+v", row)
+			}
+
+			img := tester.Image()
+			// The row's own background, left of its 8 DIP content padding.
+			fill := framePixel(t, img, int(row.Bounds.X)+3, int(row.Bounds.Y+row.Bounds.H/2))
+			if !colorNear(fill, tokens.Accent, 3) {
+				t.Fatalf("chosen row fill = %+v, want the theme's accent %+v", fill, tokens.Accent)
+			}
+			// The contract against the actual painted fill: the on-accent ink
+			// clears AA for the row's 12-14px text.
+			if got := contrastRatio(tokens.AccentText, fill); got < 4.5 {
+				t.Fatalf("AccentText on the painted chosen row is %.2f:1, want >= 4.5:1", got)
+			}
+			// And the frame paints that ink: the pixel nearest AccentText in
+			// the row is a full-coverage glyph pixel, not a resting-ink blend.
+			ink, inkDistance := nearestPixel(t, img, row.Bounds, tokens.AccentText)
+			if inkDistance > 48 {
+				t.Fatalf("no pixel of the chosen row is near AccentText %+v (nearest %+v, distance %.1f): the row copy is not on-accent ink",
+					tokens.AccentText, ink, inkDistance)
+			}
+			if got := contrastRatio(ink, fill); got < 4.5 {
+				t.Fatalf("the chosen row's rendered ink %+v is %.2f:1 on the row fill, want >= 4.5:1", ink, got)
+			}
+		})
+	}
+}
+
+// TestKPIValuesUseThePageTypeScale covers DESIGN.md §5.3 on the Insights screen:
+// the KPI row's values are metric values, not a page/dialog H1, so they take a
+// page type-scale step (<= TypeM's 24 DIP line) instead of TypeL's 28 DIP line;
+// that also brings the screen from five sizes down to the four the rule allows
+// while the metric row stays above the 13/12 DIP metadata.
+func TestKPIValuesUseThePageTypeScale(t *testing.T) {
+	service := &fakeInsights{result: sampleInsights()}
+	h := newHarness(t, service, nil)
+	tester := h.tester(1280, 800)
+	h.waitForText(tester, "发布检查")
+
+	value, ok := tester.Find("2M")
+	if !ok {
+		t.Fatalf("the tokens KPI value is missing; texts = %v", tester.Texts())
+	}
+	if value.H >= 28 {
+		t.Fatalf("the KPI value's line is %.1f DIP tall, want <= 24 (TypeL's 28 DIP is a settings/dialog H1 role and gives the screen five sizes)",
+			value.H)
+	}
+	if value.H <= 20 {
+		t.Fatalf("the KPI value's line is %.1f DIP tall, too close to the metadata: the metric row must stay a level above the 13/12 DIP text",
+			value.H)
 	}
 }

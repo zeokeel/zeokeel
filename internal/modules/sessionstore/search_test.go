@@ -421,3 +421,57 @@ func TestSearchMigrationBackfillsDecodedText(t *testing.T) {
 		t.Fatalf("reopened SearchMessages = %+v/%v", hits, err)
 	}
 }
+
+// TestSearchMessagesReturnsDurableMessageID covers the search hit's durable
+// message identity (P2-4): the stored history carries no in-memory chat id, so
+// every hit names its message by the store's stable 1-based position, newest
+// message first, and two messages with identical text still get distinct ids.
+func TestSearchMessagesReturnsDurableMessageID(t *testing.T) {
+	current := openTestStore(t)
+	appendText(t, current, "s1",
+		rig.NewMessage(rig.RoleUser, "first needle"),
+		rig.NewMessage(rig.RoleAssistant, "second needle"),
+		rig.NewMessage(rig.RoleUser, "third needle"),
+	)
+	appendText(t, current, "s2", rig.NewMessage(rig.RoleUser, "other needle"))
+
+	hits := searchAll(t, current, "needle", 0)
+	if len(hits) != 4 {
+		t.Fatalf("needle hits = %d (%+v), want 4", len(hits), hits)
+	}
+	want := []struct {
+		session string
+		ordinal int
+	}{
+		{"s2", 1},
+		{"s1", 3},
+		{"s1", 2},
+		{"s1", 1},
+	}
+	for index, expected := range want {
+		hit := hits[index]
+		if hit.SessionID != expected.session {
+			t.Fatalf("hit %d session = %q, want %q", index, hit.SessionID, expected.session)
+		}
+		if got, wantID := hit.MessageID, contracts.MessageOrdinalLocator(expected.ordinal); got != wantID {
+			t.Fatalf("hit %d message id = %q, want the durable locator %q", index, got, wantID)
+		}
+	}
+
+	// Identical texts in one session are distinct messages, so their locators
+	// differ even though snippet and timestamp can match.
+	if err := current.CreateSession(context.Background(), "dupes", "Dupes"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	appendText(t, current, "dupes",
+		rig.NewMessage(rig.RoleUser, "same needle text"),
+		rig.NewMessage(rig.RoleUser, "same needle text"),
+	)
+	dupes := searchAll(t, current, "same needle", 0)
+	if len(dupes) != 2 {
+		t.Fatalf("duplicate hits = %d, want 2", len(dupes))
+	}
+	if dupes[0].MessageID == dupes[1].MessageID {
+		t.Fatalf("identical messages share the durable id %q", dupes[0].MessageID)
+	}
+}

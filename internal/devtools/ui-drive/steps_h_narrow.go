@@ -2,7 +2,7 @@ package main
 
 // H-series narrow-layout steps: the session Memory tab must not repeat its
 // title, the conversation header keeps the title readable and the goal chip
-// compact when the content column is narrow (1024 + inspector drawer), and the
+// compact when the content column is narrow (1024 + auto-rail docked inspector), and the
 // very narrow composer keeps only the attach menu, the single session menu and
 // send (the model chip folds into that menu) instead of an unlabeled » overflow.
 
@@ -30,7 +30,7 @@ func (d *drive) runHNarrowSteps() {
 		})
 
 	d.step("session-narrow-header", "session", "窄列 header：B3 顶栏标题 + 输入框上方目标条",
-		"1024 窗口 + 右栏 drawer：标题在宿主 B3 顶栏保持可读；目标状态与正文在 composer 上方目标条（宽窄一致），目标动作在条上的 ⋯ 菜单", func(c *check) {
+		"1024 窗口 + 右栏 docked（自动 rail）：标题在宿主 B3 顶栏保持可读；目标状态与正文在 composer 上方目标条（宽窄一致），目标动作在条上的 ⋯ 菜单", func(c *check) {
 			d.resetToSession()
 			goalText := "窄列标题优先与目标紧凑显示的测试目标"
 			if err := d.seedGoal(goalText); err != nil {
@@ -46,7 +46,7 @@ func (d *drive) runHNarrowSteps() {
 			d.setSize(1024, 720)
 			d.uiRoot.SetRightPanelOpen(true)
 			d.drain(3)
-			c.require(d.uiRoot.RightPanelOpen(), "1024 窗口下右侧检查器未以 drawer 打开")
+			c.require(d.uiRoot.RightPanelOpen(), "1024 窗口下右侧检查器未打开")
 			title := d.currentSessionTitle()
 			c.require(d.has(title), "窄列 B3 顶栏的会话标题不可见")
 			if !c.has("目标") {
@@ -58,8 +58,7 @@ func (d *drive) runHNarrowSteps() {
 				return
 			}
 			c.shot("session-narrow-header")
-			// The drawer overlays the dock's right edge at this width: close it
-			// before using the goal ⋯ entry.
+			// Close the inspector before the goal ⋯ entry so the dock has its full width.
 			d.uiRoot.SetRightPanelOpen(false)
 			d.drain(3)
 			if !c.click("目标操作") {
@@ -94,8 +93,11 @@ func (d *drive) runHNarrowSteps() {
 				c.require(c.has(want), "极窄 composer 缺少「%s」", want)
 			}
 			c.require(!d.hasExactText("»"), "极窄 composer 出现了无标签 » 溢出按钮")
-			if d.has("drive-model") || d.has("未配置") {
-				c.failf("极窄 composer 仍直接显示模型 chip（应折进会话设置菜单）")
+			// A model chip folded into the toolbar's overflow still appears in the
+			// accessibility texts; the visual contract is that no chip's box is
+			// laid out on the composer row at this width.
+			if rect, ok := d.find("drive-model"); ok && rect.W > 0 {
+				c.failf("极窄 composer 仍直接显示模型 chip（应折进会话设置菜单；rect=%+v）", rect)
 			}
 			c.shot("composer-very-narrow")
 			// The session menu carries the folded model entry and the low-frequency groups.
@@ -110,12 +112,16 @@ func (d *drive) runHNarrowSteps() {
 			c.shot("composer-very-narrow-menu")
 			d.key(0, ui.KeyEscape)
 			d.drain(2)
-			// The attach menu keeps both file picking and the manual path entry.
-			if c.click("附件") {
-				d.drain(2)
-				c.mustText("选择文件…", "手动输入路径…")
-				d.key(0, ui.KeyEscape)
-				d.drain(2)
+			// The attach control opens the native picker directly; the old menu
+			// (选择文件… / 手动输入路径…) is gone (P2-12). Do not click it here:
+			// that would open the real native picker in the driven window.
+			if !d.has("附件") {
+				c.failf("极窄 composer 缺少「附件」")
+			}
+			for _, gone := range []string{"选择文件…", "手动输入路径…"} {
+				if d.has(gone) {
+					c.failf("极窄 composer 仍显示旧附件菜单项 %q", gone)
+				}
 			}
 			// Typing "/" still opens the command menu even though no chip exists.
 			if err := d.focusComposer(); err != nil {

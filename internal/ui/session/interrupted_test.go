@@ -2,7 +2,8 @@ package session_test
 
 // Tests for the restored-run interruption notice: the agent backend's read-model
 // ChatSession.Interrupted is shown as one quiet notice above the transcript with
-// a 继续 (focus the composer, never replay the turn) and a dismiss action; the
+// a 在输入框继续 (focus the composer, never replay the turn) and a dismiss
+// action; the
 // next run (when the backend clears the hint) makes it disappear, and a normal
 // session never shows it.
 
@@ -32,7 +33,8 @@ func TestInterruptedNoticeShownOnRestore(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 
-	h.assertTexts(tester, "上次运行被中断", "未重放；请检查工作区状态后继续。", "继续")
+	h.assertTexts(tester, "上次运行被中断",
+		"未重放；请检查工作区状态，然后在输入框继续。", "在输入框继续")
 	if _, ok := tester.Access("忽略上次运行中断提示"); !ok {
 		t.Fatalf("interrupted notice lacks the dismiss action; texts = %v", tester.Texts())
 	}
@@ -43,21 +45,31 @@ func TestInterruptedContinueFocusesComposer(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 
-	// Move the keyboard focus away from the composer first, so the assertion is
-	// about the action and not the screen's opening autofocus.
-	h.click(tester, "附件")
+	// Move the keyboard focus away from the composer first (a toolbar menu, not
+	// the composer input), so the assertion is about the action and not the
+	// screen's opening autofocus.
+	h.click(tester, "会话设置")
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
-	h.click(tester, "继续")
+	// The action names its outcome instead of a vague 继续: it hands the user
+	// the composer's input and says so in the tooltip too.
+	cont, ok := tester.AccessByRole(ui.RoleButton, "在输入框继续")
+	if !ok {
+		t.Fatalf("interrupted notice lacks the explicit continue-in-composer action; texts = %v", tester.Texts())
+	}
+	if cont.Description != "把光标移到输入框；发送内容由你决定" {
+		t.Fatalf("continue action tooltip = %q, want the visible-feedback explanation", cont.Description)
+	}
+	h.click(tester, "在输入框继续")
 	tester.Frame()
 	if !tester.Focused("输入消息…") {
-		t.Fatalf("继续 did not focus the composer; texts = %v", tester.Texts())
+		t.Fatalf("在输入框继续 did not focus the composer; texts = %v", tester.Texts())
 	}
 	// Continuing must not replay the turn or hide the explanation: only the next
 	// run (backend clears Interrupted) removes the notice.
 	h.assertTexts(tester, "上次运行被中断")
 	if sends := h.chat.sends(); len(sends) != 0 {
-		t.Fatalf("继续 replayed a prompt: %v", sends)
+		t.Fatalf("在输入框继续 replayed a prompt: %v", sends)
 	}
 }
 
@@ -128,7 +140,8 @@ func TestInterruptedNoticeAbsentForNormalSession(t *testing.T) {
 	h := newHarness(t, chat)
 	tester := h.tester()
 	tester.Frame()
-	h.assertNoTexts(tester, "上次运行被中断", "未重放；请检查工作区状态后继续。", "忽略上次运行中断提示")
+	h.assertNoTexts(tester, "上次运行被中断",
+		"未重放；请检查工作区状态，然后在输入框继续。", "在输入框继续", "忽略上次运行中断提示")
 }
 
 func TestInterruptedNoticeEnglish(t *testing.T) {
@@ -137,7 +150,12 @@ func TestInterruptedNoticeEnglish(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.assertTexts(tester, "Last run was interrupted",
-		"The turn was not replayed; check the workspace, then continue.", "Continue")
+		"The turn was not replayed; check the workspace, then continue in the composer.",
+		"Continue in the composer")
+	if cont, ok := tester.AccessByRole(ui.RoleButton, "Continue in the composer"); !ok ||
+		cont.Description != "Puts the cursor in the composer; you decide what to send" {
+		t.Fatalf("English continue action = %+v found %v", cont, ok)
+	}
 	if _, ok := tester.Access("Dismiss the interrupted-run notice"); !ok {
 		t.Fatalf("English interrupted notice lacks the dismiss action; texts = %v", tester.Texts())
 	}

@@ -729,3 +729,28 @@ func TestToastSkeletonUnified(t *testing.T) {
 		t.Fatalf("toast body width = %.1f, want it inside the 360 DIP max card", long.W)
 	}
 }
+
+// TestToastQueueCountUsesMetadataType covers DESIGN.md §5.3 on the queue count:
+// "+ N 条通知排队 / + N more queued" is a sentence, not a kbd or micro label, so
+// it takes the metadata step (TypeXXS, 18 DIP line), not an 11 DIP line.
+func TestToastQueueCountUsesMetadataType(t *testing.T) {
+	h := newHarness(t, "zh")
+	tester := h.tester()
+	for index := 1; index <= 5; index++ {
+		h.notifier.trigger(contracts.Notification{
+			ID:    "n" + string(rune('0'+index)),
+			Level: contracts.NotifyInfo,
+			Text:  "消息" + string(rune('0'+index)),
+		})
+	}
+	tester.Frame()
+	require := "+ 3 条通知排队"
+	rect, ok := tester.Find(require)
+	if !ok {
+		t.Fatalf("the queue count %q is missing; texts = %v", require, tester.Texts())
+	}
+	if rect.H < 18 {
+		t.Fatalf("the queue count is %.1f DIP tall, want the 18 DIP metadata line (TypeXXS); an 11 DIP sentence is DESIGN.md §5.3's TypeXXXS misuse",
+			rect.H)
+	}
+}

@@ -634,12 +634,19 @@ func buildMessageSearch(c *ui.Context, t *design.Tokens, chat contracts.ChatServ
 					}
 					buildMessageHitRowContent(row.Context, t, state, result.hit, false, query)
 				})
+			// The optional session focus handoff: a message hit names the exact
+			// message to show, and the session screen consumes that target on its
+			// next build. A host without the service keeps the plain open.
+			var focus contracts.SessionFocus
+			if service, ok := state.ctx.Get(contracts.KeySessionFocus); ok {
+				focus = service
+			}
 			activate := func() {
 				if state.searchSel < 0 || state.searchSel >= len(rows) {
 					return
 				}
 				if hit := rows[state.searchSel]; hit.group == nil {
-					activateMessageHit(chat, nav, runtime, hit.hit)
+					activateMessageHit(chat, nav, focus, runtime, hit.hit)
 				}
 			}
 			if list.Changed() {
@@ -872,10 +879,18 @@ func runesMatchAt(runes, needle []rune, at int) bool {
 	return true
 }
 
-// activateMessageHit opens the conversation one search hit belongs to.
+// activateMessageHit opens the conversation one search hit belongs to and, when
+// the hit names the message and the session module offers the optional focus
+// handoff, asks it to show that message: the click lands on the matched message
+// instead of the conversation's followed end.
 func activateMessageHit(chat contracts.ChatService, nav contracts.Navigator,
-	runtime contracts.UIRuntime, hit contracts.MessageSearchHit) {
+	focus contracts.SessionFocus, runtime contracts.UIRuntime, hit contracts.MessageSearchHit) {
 	_ = chat.SetActiveSession(hit.SessionID)
+	if focus != nil {
+		if messageID := strings.TrimSpace(hit.MessageID); messageID != "" {
+			focus.FocusMessage(hit.SessionID, messageID)
+		}
+	}
 	runtime.Post(func() { _ = nav.Push("session") })
 	runtime.Invalidate()
 }
@@ -959,10 +974,12 @@ func buildWorkspaceSectionHeader(c *ui.Context, t *design.Tokens, workspace cont
 		})
 	})
 	// The status/error rows live below the header (two badges in the 280px
-	// header would squeeze the add action to zero width).
+	// header would squeeze the add action to zero width). The add/switch/delete
+	// notice is a success status, so it wears the shared StatusBadge anatomy
+	// instead of a neutral badge with success-colored text (AP-21).
 	if state.addWorkspaceStatus != "" {
 		ui.Row(c).FillWidth().Children(func() {
-			design.Apply(ui.Badge(c, state.addWorkspaceStatus), t.Badge()).TextColor(t.SuccessText)
+			uikit.StatusBadge(c, t, uikit.StatusSuccess, state.addWorkspaceStatus)
 		})
 	}
 	if state.addWorkspaceErr != "" {
@@ -1040,17 +1057,25 @@ func buildWorkspaceTree(
 	}
 
 	active := chat.ActiveSession()
+	// P2-7: the conversation row is the sidebar's persistent selection only
+	// while the conversation screen is the current screen. On Insights /
+	// Automation / Plugins the screen destination is the one selection, so the
+	// active conversation row must not stay highlighted beside it.
+	selection := active
+	if nav.Current() != "session" {
+		selection = ""
+	}
 	rows := workspaceTreeRows(tree, &state.tree.Open)
 	rowOf := make(map[string]int, len(rows))
 	for index, item := range rows {
 		rowOf[item] = index
 	}
 	activeRow := -1
-	if index, ok := rowOf[active]; ok {
+	if index, ok := rowOf[selection]; ok {
 		activeRow = index
 	}
-	if state.treeActive != active {
-		state.treeActive = active
+	if state.treeActive != selection {
+		state.treeActive = selection
 		state.treeRow = activeRow
 	}
 	if state.treeRow >= len(rows) {
@@ -1626,9 +1651,16 @@ func buildFlatSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatSe
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState,
 	sessions []contracts.ChatSessionInfo) {
 	active := chat.ActiveSession()
+	// P2-7: mirror the active conversation into the list's choice only while the
+	// conversation screen is current; on another screen the screen destination is
+	// the single selection (see buildWorkspaceTree).
+	selection := active
+	if nav.Current() != "session" {
+		selection = ""
+	}
 	activeRow := -1
 	for index := range sessions {
-		if sessions[index].ID == active {
+		if sessions[index].ID == selection {
 			activeRow = index
 			break
 		}
@@ -1636,8 +1668,8 @@ func buildFlatSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatSe
 	// Mirror the current session into the native choice (Selected) whenever it
 	// changes outside the list; a keyboard cursor moved within the list is not
 	// overwritten.
-	if state.sessionActive != active {
-		state.sessionActive = active
+	if state.sessionActive != selection {
+		state.sessionActive = selection
 		state.sessionRow = activeRow
 	}
 	if state.sessionRow >= len(sessions) {

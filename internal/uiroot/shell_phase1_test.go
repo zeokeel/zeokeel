@@ -86,7 +86,7 @@ func TestInspectorDrawerEscapeOnceAndRestoresFocus(t *testing.T) {
 	mustScreen(t, r, textScreen(sessionScreenID, "会话", "body-session", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotScreenHeader, "hdr", "screen-title", 10))
-	tt := newTestTester(t, r, 1000, 720)
+	tt := newTestTester(t, r, 800, 720)
 	tt.Frame()
 
 	tt.Key(ui.Cmd|ui.Alt, ui.KeyI)

@@ -358,6 +358,18 @@ func Module() *module.Descriptor[Config] {
 			group.close()
 			return err
 		}
+		// The execution-history read model folds the durable execution/* events
+		// (bounded, session-scoped) and overlays the live managers, so the session
+		// header can show what ran in a conversation after a restart. Its read
+		// happens off the UI thread; a product without a store simply has no
+		// history.
+		if _, err := ctx.Provide(contracts.KeyExecutionHistory,
+			contracts.ExecutionHistoryService(newExecutionHistoryService(executionStore, groupExecutionLiveness{group: group}))); err != nil {
+			closeLSP()
+			runtime.close()
+			group.close()
+			return err
+		}
 		if _, err := ctx.Effect(func() cordis.Effect {
 			return cordis.Effect{cordis.CleanupOf(closeLSP)}
 		}); err != nil {
@@ -370,6 +382,7 @@ func Module() *module.Descriptor[Config] {
 		module.Provides(contracts.KeyPlugins),
 		module.Provides(contracts.KeyTaskBoard),
 		module.Provides(contracts.KeyJobs),
+		module.Provides(contracts.KeyExecutionHistory),
 	).WithName("ZeoKeel Rig toolset")
 }
 

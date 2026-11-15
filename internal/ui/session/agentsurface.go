@@ -112,6 +112,22 @@ type agentSurface struct {
 	jobKilling string
 	jobErr     string
 
+	// Team controls: teamStopping/teamClosing are the member ids of the control
+	// action in flight (its row action is disabled); teamErr is the last failure
+	// (shown inside the team overlay / child view); closeMember is the member
+	// whose close awaits the destructive confirmation.
+	teamStopping string
+	teamClosing  string
+	teamErr      string
+	closeMember  string
+
+	// Execution history: the durable lifecycle records of the active
+	// conversation. historySession scopes the cache to the session on screen;
+	// the read happens off the UI thread and publishes through UIRuntime.Post.
+	history        []contracts.ExecutionRecord
+	historyList    ui.ListState
+	historySession string
+
 	// lastVisitFrame/lastVisitSet track the frame of the previous conversation
 	// screen build. The host rebuilds only the current screen, so a gap means
 	// another screen was shown in between; the transient overlays belong to one
@@ -190,6 +206,21 @@ func (st *state) jobService() contracts.JobService {
 	return jobs
 }
 
+// executionHistoryService returns the host's durable execution-history read
+// model, or nil when the host has none (the jobs overlay then shows live rows
+// only).
+func (st *state) executionHistoryService() contracts.ExecutionHistoryService {
+	if st == nil {
+		return nil
+	}
+	raw, ok := st.ctx.Get(contracts.KeyExecutionHistory)
+	if !ok || raw == nil {
+		return nil
+	}
+	history, _ := raw.(contracts.ExecutionHistoryService)
+	return history
+}
+
 // filePreviewer returns the right sidebar's file-preview bridge.
 func (st *state) filePreviewer() contracts.FilePreviewer {
 	if st == nil {
@@ -265,11 +296,19 @@ func buildAgentRunBand(c *ui.Context, t *design.Tokens, st *state, chat contract
 	if jobs != nil {
 		jobList = jobs.Jobs()
 	}
+	// The durable execution history is session-scoped and read off the UI
+	// thread: the eager per-session read lets the jobs entry stay hidden when a
+	// conversation never ran anything, while still surfacing the records after a
+	// restart (when no live manager is left to list).
+	st.ensureExecutionHistory(activeID)
+	history := st.sessionExecutionHistory(activeID)
 	pending := pendingApprovalCount(st)
 	// The band exists only when it has something to say: a team/subagent backend
-	// (their entries stay discoverable at zero), a live job, a running turn or a
-	// pending approval. Otherwise the title keeps the whole band's width.
-	if team == nil && children == nil && len(jobList) == 0 && !running && pending == 0 {
+	// (their entries stay discoverable at zero), a live job, a durable execution
+	// record, a running turn or a pending approval. Otherwise the title keeps
+	// the whole band's width.
+	if team == nil && children == nil && len(jobList) == 0 && len(history) == 0 &&
+		!running && pending == 0 {
 		return
 	}
 	compact := st.headerWidth > 0 && st.headerWidth < agentHeaderCompactWidth
@@ -288,12 +327,19 @@ func buildAgentRunBand(c *ui.Context, t *design.Tokens, st *state, chat contract
 				buildTeamEntry(c, t, st, teamMembers, teamRunning, activeID, compact)
 			}
 			buildSubagentEntry(c, t, st, activeID, compact)
-			buildJobsEntry(c, t, st, compact)
+			buildJobsEntry(c, t, st, activeID, history, compact)
 			if pending > 0 {
 				uikit.StatusBadge(c, t, uikit.StatusPending,
 					fmt.Sprintf(st.tr("待审批 %d", "%d awaiting approval"), pending)).
 					Tooltip(st.tr("待审批的请求在上方输入框旁处理",
 						"Pending approvals are handled above the composer"))
+			}
+			// The close confirmation is a screen-level overlay, not a child of
+			// the team popover: answering it dismisses the popover (an outside
+			// click), and a dialog built inside the panel would unmount with it
+			// before its action ran.
+			if st.agents.closeMember != "" {
+				buildTeamMemberCloseConfirm(c, st, teamMembers)
 			}
 		})
 }
@@ -556,6 +602,9 @@ func buildTeamPanel(c *ui.Context, t *design.Tokens, st *state, members []contra
 	running int) {
 	agentPanelHeader(c, t, icons.Users(), st.tr("智能体团队", "Agent team"),
 		teamMemberCounts(st, members, running))
+	if st.agents.teamErr != "" {
+		uikit.ErrorLine(c, st.agents.teamErr)
+	}
 	live, history := splitTeamMembers(members)
 	ui.Scroll(c).FillWidth().MaxHeight(design.DialogBodyMax).
 		TrackScroll(&st.agents.teamScroll).Children(func() {
@@ -646,6 +695,9 @@ func buildTeamMemberCard(c *ui.Context, t *design.Tokens, st *state, member cont
 					TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 			}
 		})
+		if !member.Historical {
+			st.buildTeamMemberControls(c, t, member, name, kind)
+		}
 		if st.childAgentService() != nil {
 			action, actionLabel := st.tr("打开", "Open"), st.tr("打开成员 ", "Open member ")+name
 			tooltip := st.tr("打开成员会话", "Open the member conversation")
@@ -1057,17 +1109,21 @@ func (st *state) exitChildView() {
 
 // --- background jobs --------------------------------------------------------
 
-// buildJobsEntry is the header's background-jobs chip: the retained job count,
-// opening the native jobs overlay. It renders nothing while the manager has no
-// jobs: the chip is a notification of real work, not a permanent zero badge
-// that squeezes the title (R15).
-func buildJobsEntry(c *ui.Context, t *design.Tokens, st *state, compact bool) {
+// buildJobsEntry is the header's background-jobs chip: the retained live-job
+// count and the conversation's durable execution history (the records that
+// survive a restart) open the native jobs overlay. It renders nothing while the
+// session has neither: the chip is a notification of real work, not a permanent
+// zero badge that squeezes the title (R15).
+func buildJobsEntry(c *ui.Context, t *design.Tokens, st *state, sessionID string,
+	history []contracts.ExecutionRecord, compact bool) {
 	jobs := st.jobService()
-	if jobs == nil {
-		return
+	var list []contracts.BackgroundJob
+	if jobs != nil {
+		list = jobs.Jobs()
 	}
-	list := jobs.Jobs()
-	if len(list) == 0 {
+	// The live rows already show a job, so the history group never repeats one.
+	visibleHistory := visibleExecutionHistory(history, list)
+	if len(list) == 0 && len(visibleHistory) == 0 {
 		return
 	}
 	running := 0
@@ -1082,15 +1138,30 @@ func buildJobsEntry(c *ui.Context, t *design.Tokens, st *state, compact bool) {
 		// another user interaction (each frame schedules the next poll).
 		c.After(jobsPollInterval)
 	}
-	label := fmt.Sprintf(st.tr("%d 个后台任务", "%d background tasks"), len(list))
-	tooltip := fmt.Sprintf(st.tr("%d 个任务 · %d 个运行中", "%d jobs · %d running"),
-		len(list), running)
-	chip := agentEntryButton(c, t, label, tooltip)
+	label := st.tr("后台任务", "Background jobs")
+	tooltipParts := make([]string, 0, 2)
+	if len(list) > 0 {
+		label = fmt.Sprintf(st.tr("%d 个后台任务", "%d background tasks"), len(list))
+		tooltipParts = append(tooltipParts, fmt.Sprintf(
+			st.tr("%d 个任务 · %d 个运行中", "%d jobs · %d running"), len(list), running))
+	} else {
+		tooltipParts = append(tooltipParts, st.tr("没有运行中的后台任务",
+			"No background job is running"))
+	}
+	if len(visibleHistory) > 0 {
+		tooltipParts = append(tooltipParts, fmt.Sprintf(
+			st.tr("历史 %d 条", "%d in history"), len(visibleHistory)))
+	}
+	chip := agentEntryButton(c, t, label, strings.Join(tooltipParts, " · "))
 	chip.Children(func() {
 		ui.Icon(c, icons.Clock()).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
 		if compact {
-			design.Apply(ui.Text(c, fmt.Sprintf("%d", len(list))),
-				t.Font(design.TypeXS)).TextColor(t.LabelSecondary).NoWrap()
+			// A zero live count says nothing: the history-only entry keeps the
+			// glyph and its accessible name, without a "0".
+			if len(list) > 0 {
+				design.Apply(ui.Text(c, fmt.Sprintf("%d", len(list))),
+					t.Font(design.TypeXS)).TextColor(t.LabelSecondary).NoWrap()
+			}
 		} else {
 			design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).
 				TextColor(t.LabelSecondary).NoWrap()
@@ -1098,6 +1169,9 @@ func buildJobsEntry(c *ui.Context, t *design.Tokens, st *state, compact bool) {
 	})
 	if chip.Clicked() {
 		st.agents.jobsOpen = !st.agents.jobsOpen
+		if st.agents.jobsOpen {
+			st.openExecutionHistory(sessionID)
+		}
 		st.runtime.Invalidate()
 	}
 	if !st.agents.jobsOpen {
@@ -1105,17 +1179,18 @@ func buildJobsEntry(c *ui.Context, t *design.Tokens, st *state, compact bool) {
 	}
 	ui.PopoverBase(c, chip, &st.agents.jobsOpen, func(panel ui.Element) {
 		agentPanelStyle(panel, t, design.DialogWidthCompact)
-		buildJobsPanel(c, t, st, jobs, list, running)
+		buildJobsPanel(c, t, st, jobs, list, running, visibleHistory)
 	})
 }
 
 // buildJobsPanel is the jobs overlay: status, command, duration and exit code
-// per job, with the stop action of a running job.
+// per job, with the stop action of a running job, then the conversation's
+// durable execution history (lifecycle only; the output is not persisted).
 func buildJobsPanel(c *ui.Context, t *design.Tokens, st *state, jobs contracts.JobService,
-	list []contracts.BackgroundJob, running int) {
+	list []contracts.BackgroundJob, running int, history []contracts.ExecutionRecord) {
 	agentPanelHeader(c, t, icons.Clock(), st.tr("后台任务", "Background jobs"),
 		fmt.Sprintf(st.tr("%d 个任务 · %d 个运行中", "%d jobs · %d running"), len(list), running))
-	if len(list) == 0 {
+	if len(list) == 0 && len(history) == 0 {
 		design.Apply(ui.Text(c, st.tr("暂无后台任务。job_start 启动的后台任务会出现在这里。",
 			"No background jobs yet. Jobs started with job_start appear here.")),
 			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(3)
@@ -1127,21 +1202,28 @@ func buildJobsPanel(c *ui.Context, t *design.Tokens, st *state, jobs contracts.J
 	ui.Scroll(c).FillWidth().MaxHeight(design.DialogBodyMax).
 		TrackScroll(&st.agents.jobsScroll).Children(func() {
 		ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-			st.agents.jobsList.Key = func(index int) any {
-				if index < 0 || index >= len(list) {
-					return nil
+			if len(list) > 0 {
+				st.agents.jobsList.Key = func(index int) any {
+					if index < 0 || index >= len(list) {
+						return nil
+					}
+					return list[index].ID
 				}
-				return list[index].ID
-			}
-			st.agents.jobsList.Label = func(index int) string {
-				if index < 0 || index >= len(list) {
-					return ""
+				st.agents.jobsList.Label = func(index int) string {
+					if index < 0 || index >= len(list) {
+						return ""
+					}
+					return backgroundJobCommand(list[index], st)
 				}
-				return backgroundJobCommand(list[index], st)
+				ui.List(c, &st.agents.jobsList, len(list), func(index int) {
+					buildBackgroundJobRow(c, t, st, jobs, list[index])
+				}).FillWidth().Gap(design.Space2)
+			} else {
+				design.Apply(ui.Text(c, st.tr("当前没有运行中的后台任务。",
+					"No background job is running right now.")),
+					t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
 			}
-			ui.List(c, &st.agents.jobsList, len(list), func(index int) {
-				buildBackgroundJobRow(c, t, st, jobs, list[index])
-			}).FillWidth().Gap(design.Space2)
+			buildExecutionHistoryGroup(c, t, st, history)
 		})
 	})
 	agentHint(c, t, st.tr("停止会终止任务的进程 · Esc 关闭",
@@ -1370,7 +1452,11 @@ func buildChildHeader(c *ui.Context, t *design.Tokens, st *state, child contract
 				design.Apply(ui.Text(c, summary), t.Font(design.TypeXXXS)).
 					TextColor(t.LabelTertiary).NoWrap()
 			}
+			st.buildChildStopAction(c, t, child)
 		})
+		if st.agents.teamErr != "" {
+			uikit.ErrorLine(c, st.agents.teamErr)
+		}
 	})
 }
 
@@ -1474,16 +1560,25 @@ func buildChildActivitySection(c *ui.Context, t *design.Tokens, st *state, child
 }
 
 // buildChildActivityRow is one timeline row: the kind, the text and the clock.
-// A finish entry's own text already says 已完成, so the separate kind word is
-// dropped instead of reading "完成 「研究员」已完成：…" (R6); the body uses the
-// 12 metadata step because it is a sentence, not a micro label.
+// A kind word the entry's own text already opens with is dropped instead of
+// duplicating it: a finish entry reads "「研究员」已完成：…" rather than
+// "完成 「研究员」已完成：…" (R6), and a close entry reads 关闭「队友」 rather
+// than 关闭 关闭「队友」. The body uses the 12 metadata step because it is a
+// sentence, not a micro label.
 func buildChildActivityRow(c *ui.Context, t *design.Tokens, st *state, entry contracts.ChildAgentActivity) {
 	color := t.LabelSecondary
 	if entry.Error {
 		color = t.DangerText
 	}
 	showKind := true
-	if entry.Kind == contracts.TeamActivityFinish && strings.Contains(entry.Text, "已完成") {
+	kindLabel := childActivityKindLabel(st, entry.Kind)
+	switch {
+	case entry.Kind == contracts.TeamActivityFinish && strings.Contains(entry.Text, "已完成"):
+		showKind = false
+	case strings.HasPrefix(strings.TrimSpace(entry.Text), kindLabel):
+		// The backend's text already opens with the kind word (a close entry
+		// reads 关闭「队友」), so printing the kind again would read
+		// 关闭 关闭「队友」.
 		showKind = false
 	}
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
@@ -1491,7 +1586,7 @@ func buildChildActivityRow(c *ui.Context, t *design.Tokens, st *state, entry con
 		design.Apply(ui.Text(c, messageClock(st.locale, entry.Time)),
 			t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).NoWrap()
 		if showKind {
-			design.Apply(ui.Text(c, childActivityKindLabel(st, entry.Kind)),
+			design.Apply(ui.Text(c, kindLabel),
 				t.Font(design.TypeXXS)).FontWeight(agentHeadingWeight).TextColor(color).NoWrap()
 		}
 		design.Apply(ui.Text(c, entry.Text), t.Font(design.TypeXXS)).
@@ -1586,9 +1681,23 @@ func buildChildComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRun
 					st.agents.childInput.Focus(c)
 				}
 				submitted := input.Submitted()
-				send := design.Apply(ui.PrimaryButton(c, st.tr("发送", "Send")), t.PrimaryButton()).
-					Label(st.tr("发送消息给 ", "Send message to ") + name).Shrink(0)
-				send.Disabled(strings.TrimSpace(st.agents.childDraft) == "" || st.agents.childSending)
+				// The empty draft's send button must not keep the accent fill:
+				// mygo's 50% accent wash on a disabled primary still reads as a
+				// clickable brand-blue button. The neutral enabled-shaped
+				// DisabledPrimary keeps the size and the native disabled state,
+				// and the accent primary comes back once there is text to send.
+				sendLabel := st.tr("发送", "Send")
+				canSend := strings.TrimSpace(st.agents.childDraft) != "" && !st.agents.childSending
+				var send ui.Element
+				if canSend {
+					send = design.Apply(ui.PrimaryButton(c, sendLabel), t.PrimaryButton())
+				} else {
+					send = design.Apply(ui.Button(c, sendLabel), t.DisabledPrimary())
+				}
+				send = send.Label(st.tr("发送消息给 ", "Send message to ") + name).Shrink(0)
+				if !canSend {
+					send = send.Disabled(true)
+				}
 				clicked := send.Clicked()
 				if st.agents.childSending {
 					ui.Spinner(c).Label(st.tr("发送中", "Sending")).
@@ -1990,4 +2099,399 @@ func sessionTitle(st *state, chat contracts.ChatService, cfg Config) string {
 		title = session.Title
 	}
 	return title
+}
+
+// --- team controls (P1-2): stop and close a teammate -----------------------
+
+// buildTeamMemberControls draws the running member's stop action and the row's
+// member-actions menu (close, through the destructive confirmation). Historic
+// rows are records, not live teammates, so they keep only their open/continue
+// action.
+func (st *state) buildTeamMemberControls(c *ui.Context, t *design.Tokens,
+	member contracts.TeamMember, name string, kind uikit.StatusKind) {
+	team := st.teamService()
+	if team == nil {
+		return
+	}
+	if kind == uikit.StatusRunning {
+		stopText := st.tr("停止", "Stop")
+		if st.agents.teamStopping == member.ID {
+			stopText = st.tr("停止中…", "Stopping…")
+		}
+		// Interrupting a teammate cancels its current run; the teammate stays and
+		// can continue, so the action is secondary, not a danger verb.
+		stop := design.Apply(ui.Button(c, stopText), t.SecondaryButton()).
+			Label(st.tr("停止成员 ", "Stop member ") + name).
+			Tooltip(st.tr("停止会取消该队友当前的运行；队友会保留，可随时继续",
+				"Stopping cancels the teammate's current run; the teammate stays and can continue")).
+			Height(agentRowActionHeight).PaddingX(design.Space2).Shrink(0)
+		stop.Disabled(st.agents.teamStopping != "")
+		if stop.Clicked() {
+			st.stopTeamMember(team, member.ID)
+		}
+	}
+	menu := uikit.IconButton(c, uikit.IconButtonOptions{
+		Key:     "session.team.member.menu." + member.ID,
+		Label:   st.tr("成员操作 ", "Member actions ") + name,
+		Tooltip: st.tr("成员操作", "Member actions"),
+		Icon:    icons.More(),
+		Size:    design.IconSizeS,
+	})
+	menu.PopoverMenuButton(func(m *ui.Menu) {
+		if m.Item(st.tr("关闭成员", "Close member")).Danger().Chosen() {
+			// The confirmation is a screen-level modal: close the overlay first so
+			// the dialog owns the keyboard and its buttons are the only targets.
+			st.agents.closeMember = member.ID
+			st.agents.teamOpen = false
+			st.runtime.Invalidate()
+		}
+	})
+}
+
+// buildTeamMemberCloseConfirm renders the pending close through the shared
+// destructive confirmation: the safe action (取消) carries the default focus and
+// Enter, and the danger action is explicit (DESIGN.md AP-12).
+func buildTeamMemberCloseConfirm(c *ui.Context, st *state, members []contracts.TeamMember) {
+	id := strings.TrimSpace(st.agents.closeMember)
+	if id == "" {
+		return
+	}
+	team := st.teamService()
+	if team == nil {
+		st.agents.closeMember = ""
+		return
+	}
+	name := id
+	for _, member := range members {
+		if member.ID == id {
+			name = agentDisplayName(member.Name, member.ID)
+			break
+		}
+	}
+	open := true
+	uikit.ConfirmDanger(c, &open, uikit.ConfirmDangerOptions{
+		Key:   "session.team.close." + id,
+		Title: st.tr("关闭成员", "Close member"),
+		Message: fmt.Sprintf(st.tr(
+			"关闭「%s」会停止并移除该队友，进行中的运行会中断，且无法撤销。",
+			"Closing %q stops and removes the teammate; a run in flight is interrupted and this cannot be undone."),
+			name),
+		Cancel:  st.tr("取消", "Cancel"),
+		Confirm: st.tr("确认关闭", "Close member"),
+		OnConfirm: func() {
+			st.agents.closeMember = ""
+			st.closeTeamMember(team, id)
+		},
+	})
+	if !open {
+		st.agents.closeMember = ""
+	}
+}
+
+// stopTeamMember interrupts one teammate's current run off the UI thread (the
+// rig manager waits for the run to settle) and publishes the outcome at the
+// next frame.
+func (st *state) stopTeamMember(team contracts.TeamService, memberID string) {
+	if team == nil || st.agents.teamStopping != "" {
+		return
+	}
+	memberID = strings.TrimSpace(memberID)
+	if memberID == "" {
+		return
+	}
+	st.agents.teamStopping = memberID
+	st.agents.teamErr = ""
+	runtime := st.runtime
+	go func() {
+		err := team.Interrupt(memberID)
+		runtime.Post(func() {
+			if st.agents.teamStopping == memberID {
+				st.agents.teamStopping = ""
+			}
+			if err != nil {
+				st.agents.teamErr = st.tr("停止失败：", "Stop failed: ") + err.Error()
+			}
+			runtime.Invalidate()
+		})
+	}()
+}
+
+// closeTeamMember stops and removes one teammate off the UI thread; the row
+// disappears on the next backend snapshot.
+func (st *state) closeTeamMember(team contracts.TeamService, memberID string) {
+	if team == nil || st.agents.teamClosing != "" {
+		return
+	}
+	memberID = strings.TrimSpace(memberID)
+	if memberID == "" {
+		return
+	}
+	st.agents.teamClosing = memberID
+	st.agents.teamErr = ""
+	runtime := st.runtime
+	go func() {
+		err := team.Close(memberID)
+		runtime.Post(func() {
+			if st.agents.teamClosing == memberID {
+				st.agents.teamClosing = ""
+			}
+			if err != nil {
+				st.agents.teamErr = st.tr("关闭失败：", "Close failed: ") + err.Error()
+			}
+			runtime.Invalidate()
+		})
+	}()
+}
+
+// childRunningTeammate reports whether the child conversation is a live
+// teammate whose run is in flight — the only child kind the interrupt API can
+// stop (a one-shot subagent is synchronous and has no interrupt surface).
+func childRunningTeammate(child contracts.ChildAgent) bool {
+	return child.Kind == contracts.ChildAgentTeammate && !child.Historical &&
+		strings.EqualFold(strings.TrimSpace(child.Status), contracts.ChildAgentRunning)
+}
+
+// buildChildStopAction draws the child header's stop action for a running
+// teammate, so the user can interrupt it from the conversation they are reading
+// instead of returning to the team overlay.
+func (st *state) buildChildStopAction(c *ui.Context, t *design.Tokens, child contracts.ChildAgent) {
+	if st.teamService() == nil || !childRunningTeammate(child) {
+		return
+	}
+	stopText := st.tr("停止", "Stop")
+	if st.agents.teamStopping == child.ID {
+		stopText = st.tr("停止中…", "Stopping…")
+	}
+	name := agentDisplayName(child.Name, child.ID)
+	stop := design.Apply(ui.Button(c, stopText), t.SecondaryButton()).
+		Label(st.tr("停止成员 ", "Stop member ") + name).
+		Tooltip(st.tr("停止会取消该队友当前的运行；队友会保留，可随时继续",
+			"Stopping cancels the teammate's current run; the teammate stays and can continue")).
+		Height(agentRowActionHeight).PaddingX(design.Space2).Shrink(0)
+	stop.Disabled(st.agents.teamStopping != "")
+	if stop.Clicked() {
+		st.stopTeamMember(st.teamService(), child.ID)
+	}
+}
+
+// --- execution history (P1-3) ----------------------------------------------
+
+// ensureExecutionHistory starts the one bounded read of the active
+// conversation's durable execution records. The read runs off the UI thread and
+// publishes through UIRuntime.Post; the per-session guard keeps stable frames
+// from re-reading the store every frame, and a session switch resets the cache
+// before starting the new read.
+func (st *state) ensureExecutionHistory(sessionID string) {
+	if st == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if st.agents.historySession == sessionID {
+		return
+	}
+	st.agents.historySession = sessionID
+	st.agents.history = nil
+	st.agents.historyList = ui.ListState{}
+	service := st.executionHistoryService()
+	if service == nil || sessionID == "" {
+		return
+	}
+	st.loadExecutionHistory(service, sessionID)
+}
+
+// openExecutionHistory re-reads the records when the jobs overlay opens, so a
+// panel opened after new executions shows them. The previous records stay on
+// screen until the new read lands (no flicker).
+func (st *state) openExecutionHistory(sessionID string) {
+	if st == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if st.agents.historySession != sessionID {
+		st.ensureExecutionHistory(sessionID)
+		return
+	}
+	service := st.executionHistoryService()
+	if service == nil || sessionID == "" {
+		return
+	}
+	st.loadExecutionHistory(service, sessionID)
+}
+
+// loadExecutionHistory reads the bounded records off the UI thread and publishes
+// them at the next frame; a late answer for a session the user already left is
+// dropped.
+func (st *state) loadExecutionHistory(service contracts.ExecutionHistoryService, sessionID string) {
+	runtime := st.runtime
+	go func() {
+		records := service.ExecutionHistory(sessionID, 0)
+		runtime.Post(func() {
+			if st.agents.historySession != sessionID {
+				return
+			}
+			st.agents.history = records
+			runtime.Invalidate()
+		})
+	}()
+}
+
+// sessionExecutionHistory returns the cached records of one conversation (nil
+// while that conversation's read is still in flight, or for another session).
+func (st *state) sessionExecutionHistory(sessionID string) []contracts.ExecutionRecord {
+	if st == nil || st.agents.historySession != strings.TrimSpace(sessionID) {
+		return nil
+	}
+	return st.agents.history
+}
+
+// visibleExecutionHistory drops the records whose resource is already listed as
+// a live background job: the live row is the current truth, and the same job
+// must not appear twice in one overlay.
+func visibleExecutionHistory(records []contracts.ExecutionRecord,
+	live []contracts.BackgroundJob) []contracts.ExecutionRecord {
+	if len(records) == 0 {
+		return nil
+	}
+	liveIDs := make(map[string]bool, len(live))
+	for _, job := range live {
+		liveIDs[job.ID] = true
+	}
+	out := make([]contracts.ExecutionRecord, 0, len(records))
+	for _, record := range records {
+		if record.Kind == contracts.ExecutionKindJob && liveIDs[record.ID] {
+			continue
+		}
+		out = append(out, record)
+	}
+	return out
+}
+
+// buildExecutionHistoryGroup draws the durable execution records under the live
+// jobs: the lifecycle only, with the honest no-output note and the interrupted
+// state as a neutral one. An empty set renders nothing (no empty section).
+func buildExecutionHistoryGroup(c *ui.Context, t *design.Tokens, st *state,
+	records []contracts.ExecutionRecord) {
+	if len(records) == 0 {
+		return
+	}
+	ui.Divider(c)
+	agentSectionLabel(c, t, st.tr("历史", "History"))
+	agentHint(c, t, st.tr(
+		"持久记录，重启后仍可查看；只记录开始/结束/中断，输出不会持久化。",
+		"Persisted records survive a restart; they cover the lifecycle (start/end/interrupt) only — output is not persisted."))
+	st.agents.historyList.Key = func(index int) any {
+		if index < 0 || index >= len(records) {
+			return nil
+		}
+		return records[index].Kind + "/" + records[index].ID
+	}
+	st.agents.historyList.Label = func(index int) string {
+		if index < 0 || index >= len(records) {
+			return ""
+		}
+		return executionRecordLabel(st, records[index])
+	}
+	ui.List(c, &st.agents.historyList, len(records), func(index int) {
+		buildExecutionHistoryRow(c, t, st, records[index])
+	}).FillWidth().Gap(design.Space2)
+}
+
+// buildExecutionHistoryRow is one durable record: state badge, kind glyph, the
+// command/cwd, the start clock and the observed duration.
+func buildExecutionHistoryRow(c *ui.Context, t *design.Tokens, st *state,
+	record contracts.ExecutionRecord) {
+	kind, label := executionRecordStatus(st, record)
+	row := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+		Background(t.BgBase).Border(1, t.BorderL2).Radius(design.RadiusMD).
+		Padding(design.Space2, design.Space3)
+	row.Children(func() {
+		uikit.StatusBadge(c, t, kind, label).Tooltip(executionRecordStateTooltip(st, record))
+		glyph := icons.Clock()
+		if record.Kind == contracts.ExecutionKindTerminal {
+			glyph = icons.Terminal()
+		}
+		ui.Icon(c, glyph).Size(design.Space3, design.Space3).TextColor(t.LabelTertiary)
+		summary := executionRecordSummary(record)
+		design.Apply(ui.Text(c, summary), t.MonoText(design.TypeXXS)).
+			TextColor(t.LabelSecondary).Grow(1).Shrink(1).MinWidthPercent(0).
+			MaxLines(1).Ellipsis("…").Tooltip(summary)
+		if !record.Started.IsZero() {
+			design.Apply(ui.Text(c, messageClock(st.locale, record.Started)),
+				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).NoWrap()
+		}
+		if duration := record.Duration(); duration > 0 {
+			design.Apply(ui.Text(c, formatUsageDuration(duration.Milliseconds())),
+				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).NoWrap()
+		}
+	})
+}
+
+// executionRecordStatus maps a folded record onto the product's status
+// vocabulary. An interrupted record is neutral (not a failure); a finished job
+// keeps its backend outcome word, and a terminal's close is a success.
+func executionRecordStatus(st *state, record contracts.ExecutionRecord) (uikit.StatusKind, string) {
+	switch record.State {
+	case contracts.ExecutionStateRunning:
+		return uikit.StatusRunning, st.tr("运行中", "Running")
+	case contracts.ExecutionStateInterrupted:
+		return uikit.StatusInterrupted, st.tr("已中断", "Interrupted")
+	case contracts.ExecutionStateFinished:
+		switch strings.ToLower(strings.TrimSpace(record.Outcome)) {
+		case "killed":
+			return uikit.StatusCancelled, st.tr("已取消", "Cancelled")
+		case "failed":
+			return uikit.StatusError, st.tr("失败", "Failed")
+		case "timed_out":
+			return uikit.StatusError, st.tr("超时", "Timed out")
+		default:
+			return uikit.StatusSuccess, st.tr("已完成", "Finished")
+		}
+	default:
+		label := strings.TrimSpace(record.State)
+		if label == "" {
+			label = st.tr("未知", "Unknown")
+		}
+		return uikit.StatusUnknown, label
+	}
+}
+
+// executionRecordSummary is the record row's readable line: the job command, or
+// the terminal's working directory (its transport when no cwd was recorded),
+// falling back to the id.
+func executionRecordSummary(record contracts.ExecutionRecord) string {
+	if command := strings.TrimSpace(record.Command); command != "" {
+		return command
+	}
+	if cwd := strings.TrimSpace(record.CWD); cwd != "" {
+		return cwd
+	}
+	if transport := strings.TrimSpace(record.Transport); transport != "" {
+		return transport
+	}
+	return record.ID
+}
+
+// executionRecordLabel is the record row's accessible name.
+func executionRecordLabel(st *state, record contracts.ExecutionRecord) string {
+	kind := st.tr("后台任务 ", "job ")
+	if record.Kind == contracts.ExecutionKindTerminal {
+		kind = st.tr("终端 ", "terminal ")
+	}
+	return kind + record.ID
+}
+
+// executionRecordStateTooltip explains the state words that need it: an
+// interrupted record's end was never observed, and a finished job's exit code is
+// not part of the durable lifecycle.
+func executionRecordStateTooltip(st *state, record contracts.ExecutionRecord) string {
+	switch record.State {
+	case contracts.ExecutionStateInterrupted:
+		return st.tr("结束未记录：应用退出或进程结束时没有收尾（不代表仍在运行）。",
+			"The end was not recorded (the app or process exited first); this does not mean it is still running.")
+	case contracts.ExecutionStateFinished:
+		return st.tr("只记录了生命周期，退出码与输出不会持久化。",
+			"Only the lifecycle is recorded; the exit code and output are not persisted.")
+	default:
+		return ""
+	}
 }

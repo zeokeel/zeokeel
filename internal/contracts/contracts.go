@@ -55,6 +55,44 @@ type SettingsPageSpec struct {
 	// values. The host calls it when the user chooses "Discard" in the unsaved
 	// close guard, so the next open does not show edits the user abandoned.
 	Discard func()
+	// Keywords are the page's search aliases in the languages its users search
+	// in (usually Chinese and English): the settings navigation matches them in
+	// addition to the title and section, so a page is found by the words users
+	// know it by ("密钥", "theme", "字号") rather than only its title. They are
+	// declared by the page's own module, so there is no host-side alias table
+	// that can drift away from the page.
+	Keywords []string
+	// SearchItems are the page's searchable items: a field, a row or a section
+	// the navigation search matches by its label and keywords. A hit on an item
+	// selects its page and asks the page to reveal the item's region (see
+	// Reveal), so a search for "压缩" or "字号" reaches the control itself
+	// instead of only the page that holds it.
+	SearchItems []SettingsSearchItem
+	// Reveal, when set, is called on the UI thread in the frame the page is
+	// built after one of its SearchItems was the search hit: anchorKey is the
+	// hit item's AnchorKey. The page expands whatever disclosure holds the
+	// region, scrolls the region into view and highlights it briefly; it must
+	// only touch its own UI state (the host calls it inside the frame, before
+	// Build, so the region it reveals is built by the same frame).
+	Reveal func(c *ui.Context, anchorKey string)
+}
+
+// SettingsSearchItem is one searchable item (a control, a row or a section) of
+// a settings page: the words a user searches for, and the stable key of the
+// region the page reveals when this item is the hit.
+type SettingsSearchItem struct {
+	// ID identifies the item within its page (stable and unique); it is what
+	// tests and diagnostics name the item by.
+	ID string
+	// Label is the item's user-facing name in the current language.
+	Label string
+	// Keywords are the aliases users search for, in the current language and
+	// English ("上下文预算", "compact", "compaction").
+	Keywords []string
+	// AnchorKey names the region the page reveals for this item: the page maps
+	// it to the element it builds (and scrolls/highlights it in Build). Empty
+	// means the item has no region to reveal beyond the page itself.
+	AnchorKey string
 }
 
 // ToolCall is the read-only summary a tool renderer receives. The full tool
@@ -103,6 +141,16 @@ type CommandSpec struct {
 	// command ("Cmd/Ctrl + Alt + →"), shown in the command palette. Empty when
 	// the command has no keyboard chord; the palette simply omits it.
 	Shortcut string
+	// Category groups the command in the command palette: the goto and
+	// settings categories render under their own headings, and the empty value
+	// (also CommandCategoryActions) keeps the default actions group. The host
+	// also generates the "前往 …" and "设置：…" commands of those two groups
+	// from the registered screens and settings pages.
+	Category string
+	// Keywords are extra search aliases (Chinese and English synonyms) the
+	// palette matches besides Title, ID and Hint, so a command is found by the
+	// words users know it by rather than the words the module chose.
+	Keywords []string
 }
 
 // AppInfo is the build identity provided by the appinfo module.

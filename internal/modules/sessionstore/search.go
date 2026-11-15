@@ -54,7 +54,7 @@ func (s *store) SearchMessages(ctx context.Context, query string, limit int) ([]
 	}
 	pattern := escapeLike(trimmed)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.session_id, m.payload, m.text, m.created_at, COALESCE(s.title, '')
+		SELECT m.session_id, m.ordinal, m.payload, m.text, m.created_at, COALESCE(s.title, '')
 		FROM messages m
 		JOIN sessions s ON s.id = m.session_id
 		WHERE LOWER(m.text) LIKE '%' || LOWER(?) || '%' ESCAPE '\'
@@ -74,12 +74,13 @@ func (s *store) SearchMessages(ctx context.Context, query string, limit int) ([]
 		}
 		var (
 			sessionID string
+			ordinal   sql.NullInt64
 			payload   []byte
 			text      string
 			created   sql.NullInt64
 			title     string
 		)
-		if err := rows.Scan(&sessionID, &payload, &text, &created, &title); err != nil {
+		if err := rows.Scan(&sessionID, &ordinal, &payload, &text, &created, &title); err != nil {
 			return nil, fmt.Errorf("sessionstore: scan message search hit: %w", err)
 		}
 		var message rig.Message
@@ -91,8 +92,15 @@ func (s *store) SearchMessages(ctx context.Context, query string, limit int) ([]
 		if strings.TrimSpace(title) == "" {
 			title = unnamedSessionTitle
 		}
+		// The durable history has no chat message id; the row's ordinal is the
+		// stable within-session position the conversation screen resolves (P2-4).
+		messageID := ""
+		if ordinal.Valid && ordinal.Int64 > 0 {
+			messageID = contracts.MessageOrdinalLocator(int(ordinal.Int64))
+		}
 		hits = append(hits, contracts.MessageSearchHit{
 			SessionID:    sessionID,
+			MessageID:    messageID,
 			SessionTitle: title,
 			Role:         string(message.Role),
 			Snippet:      buildSearchSnippet(text, trimmed),

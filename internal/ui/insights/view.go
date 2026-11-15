@@ -108,7 +108,7 @@ func buildScreen(c *ui.Context, cfg Config, st *state) {
 // switch stays the one control in the row).
 func buildToolbar(c *ui.Context, t *design.Tokens, st *state) {
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space3).Children(func() {
-		buildRangeSwitch(c, t, st)
+		buildRangeSwitch(c, st)
 		ui.Spacer(c).Grow(1)
 		if st.hasData {
 			design.Apply(ui.Text(c, insightsRangeLabel(st, st.data)), t.TextMuted(design.TypeXXS)).
@@ -117,29 +117,17 @@ func buildToolbar(c *ui.Context, t *design.Tokens, st *state) {
 	})
 }
 
-// buildRangeSwitch renders the product's themed segmented control (the settings
-// pages own the other copy of this look): ui.SegmentedBase keeps the radio-group
-// semantics, arrow keys and Changed, while the explicit track/segment look keeps
-// the chosen segment readable in this theme (the stock Segmented paints a
-// near-white chosen segment on the track). Switching reloads the aggregation.
-func buildRangeSwitch(c *ui.Context, t *design.Tokens, st *state) {
+// buildRangeSwitch renders the page's range control through the product's one
+// segmented control (uikit.SegmentedControl: the same BgSelected/LabelPrimary
+// chosen segment, Accent boundary, radio-group semantics and arrow keys the
+// settings pages use). Switching reloads the aggregation.
+func buildRangeSwitch(c *ui.Context, st *state) {
 	labels := []string{st.tr("7 天", "7 days"), st.tr("30 天", "30 days")}
-	seg := ui.SegmentedBase(c, &st.rangeIndex, len(labels))
-	seg.Track.Label(st.tr("时间范围", "Time range")).Height(design.ControlHeight).
-		Padding(design.Space1).Radius(design.RadiusMD).Background(t.BgHover).Children(func() {
-		for index, text := range labels {
-			segment := seg.Segment(index).Height(design.ControlHeight - design.Space2).
-				PaddingX(design.Space4).Radius(design.RadiusSM).Center().Label(text)
-			if index == st.rangeIndex {
-				segment.Background(t.BgRaised).BorderWidth(1).BorderColor(t.BorderL3).
-					FontWeight(design.WeightSemibold).TextColor(t.LabelPrimary)
-			} else {
-				segment.TextColor(t.LabelSecondary)
-			}
-			segment.Children(func() {
-				design.Apply(ui.Text(c, text), t.Font(design.TypeS)).MaxLines(1)
-			})
-		}
+	uikit.SegmentedControl(c, uikit.SegmentedOptions{
+		Key:      "insights.range",
+		Label:    st.tr("时间范围", "Time range"),
+		Labels:   labels,
+		Selected: &st.rangeIndex,
 	})
 	// The widget writes st.rangeIndex as it takes the click or the arrow keys;
 	// the data switch follows the value (the following pass), not a one-shot
@@ -216,10 +204,16 @@ func buildKPI(c *ui.Context, t *design.Tokens, st *state, data contracts.Insight
 // kpiCell is one metric of the KPI row: a muted micro-label, the value and an
 // optional muted detail line. Grow+MinWidth keep the four metrics from wrapping
 // into a second row on a narrow window.
+//
+// The value takes the page's TypeM step with 600 weight rather than TypeXL/L:
+// §5.3 reserves TypeL (20/28) for settings pages' and dialogs' H1, and spending
+// it on a metric value gave this one screen five sizes (TypeM/S/L/XS/XXS)
+// against the four the rule allows. TypeM/600 keeps the value a level above the
+// 14/13/12 text around it, so the metric row still reads as the page's data.
 func kpiCell(c *ui.Context, t *design.Tokens, label, value, hint string) {
 	ui.Column(c).Grow(1).Shrink(1).MinWidth(design.Space8 * 3).Gap(design.Space1).Children(func() {
 		design.Apply(ui.Text(c, label), t.TextMuted(design.TypeXXS)).MaxLines(1).Ellipsis("…")
-		design.Apply(ui.Text(c, value), t.Font(design.TypeL)).FontWeight(design.WeightSemibold).
+		design.Apply(ui.Text(c, value), t.Font(design.TypeM)).FontWeight(design.WeightSemibold).
 			TextColor(t.LabelPrimary).MaxLines(1).NoWrap()
 		if hint != "" {
 			design.Apply(ui.Text(c, hint), t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).
@@ -449,8 +443,22 @@ func buildSessionSection(c *ui.Context, t *design.Tokens, st *state, data contra
 // meta line on the left, tokens and the optional cost at the row's end. The
 // row content observes the pointer so a single click opens the conversation
 // (the List's Submitted keeps Enter and a double click working).
+//
+// The chosen row is painted by mygo's List in the theme's accent fill, so all
+// of its own copy switches to Tokens.AccentText while row.Selected(): leaving
+// LabelPrimary/LabelTertiary there would paint the near-black ink (light) or
+// the near-white ink (dark) on the accent and measure 2.4:1 / 1.9:1, below the
+// 4.5:1 the row's small text needs. A secondary tone would dim to a blend
+// below AA as well, so the whole row takes the on-accent foreground and keeps
+// its hierarchy through weight and size, as the settings list rows do.
 func buildSessionRow(row ui.ListRow, t *design.Tokens, st *state,
 	session contracts.InsightsSession, workspaceNames map[string]string) {
+	titleColor, metaColor, valueColor := t.LabelPrimary, t.LabelTertiary, t.LabelPrimary
+	costColor, unpricedColor := t.LabelSecondary, t.LabelTertiary
+	if row.Selected() {
+		titleColor, metaColor, valueColor = t.AccentText, t.AccentText, t.AccentText
+		costColor, unpricedColor = t.AccentText, t.AccentText
+	}
 	content := ui.Row(row.Context).FillWidth().AlignItems(ui.Center).Gap(design.Space3).
 		PaddingX(design.Space2).PaddingY(design.Space1).Radius(design.RadiusSM)
 	content.ObserveInput(func(ev ui.InputEvent) {
@@ -463,7 +471,7 @@ func buildSessionRow(row ui.ListRow, t *design.Tokens, st *state,
 		ui.Column(row.Context).Grow(1).Shrink(1).MinWidth(design.Space0).Gap(design.Space1).Children(func() {
 			title := firstNonEmpty(session.Title, st.tr("未命名会话", "Untitled conversation"))
 			design.Apply(ui.Text(row.Context, title), t.Font(design.TypeS)).
-				FontWeight(design.WeightMedium).TextColor(t.LabelPrimary).
+				FontWeight(design.WeightMedium).TextColor(titleColor).
 				MaxLines(1).Ellipsis("…").Tooltip(title)
 			meta := make([]string, 0, 3)
 			if model := strings.TrimSpace(session.Model); model != "" {
@@ -477,23 +485,23 @@ func buildSessionRow(row ui.ListRow, t *design.Tokens, st *state,
 			}
 			if len(meta) > 0 {
 				design.Apply(ui.Text(row.Context, strings.Join(meta, " · ")), t.Font(design.TypeXXS)).
-					TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+					TextColor(metaColor).MaxLines(1).Ellipsis("…")
 			}
 		})
 		// The trailing numbers are right-aligned at fixed token widths, so the
 		// leaderboard reads as columns even though it is a List.
 		design.Apply(ui.Text(row.Context, uikit.FormatCompactCount(session.TotalTokens)),
-			t.Font(design.TypeXS)).TextColor(t.LabelPrimary).NoWrap().
+			t.Font(design.TypeXS)).TextColor(valueColor).NoWrap().
 			Width(design.Space8 * 3).TextAlign(ui.End).
 			Tooltip(st.tr("本时间段内的 token 总量", "Tokens in this time range"))
 		if sessionsCostVisible(st.data.Sessions) {
 			cost := formatCostCell(session.CostUSD, session.CostKnown)
 			if session.CostKnown {
 				design.Apply(ui.Text(row.Context, cost), t.Font(design.TypeXS)).
-					TextColor(t.LabelSecondary).NoWrap().Width(design.Space8 * 3).TextAlign(ui.End)
+					TextColor(costColor).NoWrap().Width(design.Space8 * 3).TextAlign(ui.End)
 			} else {
 				design.Apply(ui.Text(row.Context, cost), t.Font(design.TypeXS)).
-					TextColor(t.LabelTertiary).NoWrap().Width(design.Space8 * 3).TextAlign(ui.End).
+					TextColor(unpricedColor).NoWrap().Width(design.Space8 * 3).TextAlign(ui.End).
 					Tooltip(st.tr("该会话的模型未配置价格",
 						"This conversation's model has no pricing configured"))
 			}

@@ -182,7 +182,11 @@ func startAttachmentPick(runtime contracts.UIRuntime, st *state) {
 			st.attachBusy = false
 			st.withComposerSession(sessionID, func() {
 				if err != nil {
-					st.attachErr = st.tr("无法打开文件选择器：", "Could not open the file picker: ") + err.Error()
+					// There is no manual path entry to fall back to: say why the
+					// picker failed and name the paths that still work (drag and
+					// drop, pasting an image), instead of asking for a typed path.
+					st.attachErr = st.tr("无法打开文件选择器：", "Could not open the file picker: ") + err.Error() +
+						st.tr("；请拖入文件或粘贴图片", "; drag files in or paste an image instead")
 					return
 				}
 				stageAttachmentFiles(st, paths)
@@ -190,116 +194,6 @@ func startAttachmentPick(runtime contracts.UIRuntime, st *state) {
 			runtime.Invalidate()
 		})
 	}()
-}
-
-// manualAttachmentErrors localizes the rejected entries of the manual path
-// fallback, one line per entry, so a typo names the exact path.
-func manualAttachmentErrors(st *state, invalid []uikit.InvalidAttachmentPath) []string {
-	messages := make([]string, 0, len(invalid))
-	for _, entry := range invalid {
-		switch {
-		case entry.Relative:
-			messages = append(messages, st.tr("路径必须是绝对路径：", "Path must be absolute: ")+entry.Path)
-		default:
-			messages = append(messages, st.tr("文件不存在或不可读：", "File does not exist or is not readable: ")+entry.Path)
-		}
-	}
-	return messages
-}
-
-// applyManualAttachmentPaths validates and stages one manual path-entry
-// submission. Valid paths go through the ordinary staging path; invalid entries
-// and staging errors stay inline in the dialog (which therefore does not close
-// on a partial failure). It reports whether the dialog should close.
-func applyManualAttachmentPaths(st *state, raw string) bool {
-	if strings.TrimSpace(raw) == "" {
-		st.attachPathErr = st.tr("请输入至少一个文件路径", "Enter at least one file path")
-		return false
-	}
-	valid, invalid := uikit.ResolveAttachmentPaths(raw)
-	messages := manualAttachmentErrors(st, invalid)
-	if len(valid) > 0 {
-		before := len(st.pendingAttachments)
-		stageAttachmentFiles(st, valid)
-		staged := len(st.pendingAttachments) > before
-		if !staged && st.attachErr == "" {
-			// Defensive: the resolver said the paths exist but staging read
-			// none of them, so tell the user instead of closing silently.
-			messages = append(messages, st.tr("未能添加所选文件", "None of the files could be added"))
-		}
-		// The staging error belongs to this dialog while it is open; showing it
-		// again under the composer would duplicate it.
-		if st.attachErr != "" {
-			messages = append(messages, st.attachErr)
-			st.attachErr = ""
-		}
-	}
-	if len(messages) == 0 {
-		st.attachPathErr = ""
-		return true
-	}
-	separator := "；"
-	if st.english() {
-		separator = "; "
-	}
-	st.attachPathErr = strings.Join(messages, separator)
-	return false
-}
-
-// buildAttachmentPathDialog is the portal-less fallback (ZK-09): a native Modal
-// where the user enters absolute paths directly instead of using the native
-// file chooser that can be unavailable (or block) on portal-less X11. It shares
-// the composer's staging path, so chips/MIME/preview behave identically.
-func buildAttachmentPathDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
-	if !st.attachPathsOpen {
-		return
-	}
-	add := func() {
-		if applyManualAttachmentPaths(st, st.attachPathDraft) {
-			st.attachPathsOpen = false
-			st.attachPathDraft = ""
-		}
-		runtime.Invalidate()
-	}
-	closeDialog := func() {
-		st.attachPathsOpen = false
-		st.attachPathDraft = ""
-		st.attachPathErr = ""
-		runtime.Invalidate()
-	}
-	ui.Modal(c, &st.attachPathsOpen, func() {
-		dialogEnter(c, add)
-		design.Apply(ui.Column(c).Width(design.DialogWidthM).Gap(design.Space4), func(el ui.Element) ui.Element {
-			return el.PaddingX(design.Space6).PaddingY(design.Space2)
-		}).Children(func() {
-			design.Apply(ui.Text(c, st.tr("手动添加附件", "Add attachments by path")), t.Font(design.TypeL)).
-				FontWeight(600).TextColor(t.LabelPrimary)
-			design.Apply(ui.Text(c, st.tr(
-				"输入文件的绝对路径，每行一个（Shift+Enter 换行）；也可以用逗号或分号分隔。",
-				"Enter absolute file paths, one per line (Shift+Enter for a newline); commas or semicolons also work.")),
-				t.TextMuted(design.TypeXS)).MaxLines(2)
-			ui.TextArea(c, &st.attachPathDraft).Label(st.tr("文件路径", "File paths")).
-				Placeholder("/home/you/notes.txt").FillWidth().MinHeight(design.Space6 * 3).
-				OnTextKey(func(k ui.TextKey) bool {
-					// Shift+Enter keeps the multiline list; a bare Enter adds.
-					if k.Key != ui.KeyEnter || k.Mods != 0 {
-						return false
-					}
-					add()
-					return true
-				})
-			if st.attachPathErr != "" {
-				buildDialogError(c, t, st.attachPathErr)
-			}
-			ui.Divider(c)
-			uikit.DialogFooter(c, []uikit.DialogAction{
-				{Label: st.tr("取消", "Cancel"), OnClick: closeDialog},
-				{Label: st.tr("添加", "Add"), Primary: true,
-					Disabled: strings.TrimSpace(st.attachPathDraft) == "",
-					OnClick:  add},
-			})
-		})
-	})
 }
 
 // removePendingAttachment drops one staged attachment (and its cached preview).
@@ -406,11 +300,15 @@ func buildMessageAttachments(c *ui.Context, t *design.Tokens, st *state, attachm
 
 // buildAttachmentChip is one native attachment chip: optional image preview (or
 // a file glyph), the file name, its size and, while staged, a remove button.
+// The chip is a quiet BgStrong fill with no outline (P2-12): on the composer
+// card an outlined chip joined the toolbar's old boxed controls as visual
+// noise. ControlChip still owns the 28 DIP height and RadiusSM.
 func buildAttachmentChip(c *ui.Context, t *design.Tokens, st *state, attachment contracts.Attachment, removable bool, onRemove func()) {
 	th := t.Theme()
 	key := "session.attachment." + attachment.ID
-	chip := design.Apply(ui.Row(c.Key(key)), t.ControlChip()).
-		AlignItems(ui.Center).Shrink(0).Label(attachment.Name)
+	chip := design.Apply(ui.Row(c.Key(key)), t.ControlChip(), func(el ui.Element) ui.Element {
+		return el.Background(t.BgStrong).Border(0, ui.Transparent)
+	}).AlignItems(ui.Center).Shrink(0).Label(attachment.Name)
 	chip.Children(func() {
 		if bitmap := st.attachmentThumbnail(attachment); bitmap != nil {
 			ui.Image(c, bitmap).Size(th.Space(8), th.Space(8)) // 32 DIP preview

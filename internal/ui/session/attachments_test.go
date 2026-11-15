@@ -127,20 +127,13 @@ func (h *attachmentHarness) click(tester *ui.Tester, label string) {
 	tester.Frame()
 }
 
-// attachFiles opens the composer's single 附件 menu and chooses the native
-// picker item. The picker itself runs off the UI thread: callers keep waiting on
-// frames for the staged result.
+// attachFiles clicks the composer's attach control, which opens the native
+// picker directly (P2-12: no menu between the button and the picker). The
+// picker itself runs off the UI thread: callers keep waiting on frames for the
+// staged result.
 func (h *attachmentHarness) attachFiles(tester *ui.Tester) {
 	h.t.Helper()
 	h.click(tester, "附件")
-	h.click(tester, "选择文件…")
-}
-
-// attachManualPaths opens the 附件 menu and chooses the manual path-entry item.
-func (h *attachmentHarness) attachManualPaths(tester *ui.Tester) {
-	h.t.Helper()
-	h.click(tester, "附件")
-	h.click(tester, "手动输入路径…")
 }
 
 func (h *attachmentHarness) assertTexts(tester *ui.Tester, wanted ...string) {

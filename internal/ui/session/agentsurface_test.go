@@ -8,6 +8,7 @@ package session_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -17,7 +18,9 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/ui/session"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
@@ -178,6 +181,7 @@ type agentServices struct {
 	board     contracts.TaskBoard
 	children  contracts.ChildAgentService
 	jobs      contracts.JobService
+	execution contracts.ExecutionHistoryService
 	preview   contracts.FilePreviewer
 	approvals contracts.Approvals
 }
@@ -207,6 +211,9 @@ func newAgentSurfaceHarness(t *testing.T, chat *fakeChat, services agentServices
 	}
 	if services.jobs != nil {
 		provide[contracts.JobService](t, ctx, contracts.KeyJobs, services.jobs)
+	}
+	if services.execution != nil {
+		provide[contracts.ExecutionHistoryService](t, ctx, contracts.KeyExecutionHistory, services.execution)
 	}
 	if services.preview != nil {
 		provide[contracts.FilePreviewer](t, ctx, contracts.KeyFilePreview, services.preview)
@@ -1106,4 +1113,401 @@ func TestTeamOverlayWithoutSessionShowsEmptyTasks(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "共享任务", "还没有共享任务")
 	h.assertNoTexts(tester, "读取任务板…", "旧全局任务")
+}
+
+// --- team controls (P1-2): stop / close -------------------------------------
+
+// recordingTeam is a contracts.TeamService that records the control calls the
+// session header makes (Interrupt/Close) and can update its member state the way
+// the backend does after an interrupt.
+type recordingTeam struct {
+	mu             sync.Mutex
+	members        []contracts.TeamMember
+	interrupts     []string
+	closes         []string
+	stopErr        error
+	closeErr       error
+	afterInterrupt string
+}
+
+func (f *recordingTeam) Members() []contracts.TeamMember {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]contracts.TeamMember(nil), f.members...)
+}
+
+func (f *recordingTeam) Spawn(context.Context, string, string, string) (contracts.TeamMember, error) {
+	return contracts.TeamMember{}, nil
+}
+
+func (f *recordingTeam) SendAsync(string, string) error { return nil }
+
+func (f *recordingTeam) Send(context.Context, string, string) (string, error) { return "", nil }
+
+func (f *recordingTeam) Wait(context.Context, string) (string, error) { return "", nil }
+
+func (f *recordingTeam) Interrupt(id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.stopErr != nil {
+		return f.stopErr
+	}
+	f.interrupts = append(f.interrupts, id)
+	if state := f.afterInterrupt; state != "" {
+		for index := range f.members {
+			if f.members[index].ID == id {
+				f.members[index].RunState = state
+			}
+		}
+	}
+	return nil
+}
+
+func (f *recordingTeam) Close(id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closeErr != nil {
+		return f.closeErr
+	}
+	f.closes = append(f.closes, id)
+	return nil
+}
+
+func (f *recordingTeam) interrupted() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.interrupts...)
+}
+
+func (f *recordingTeam) closed() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.closes...)
+}
+
+// TestTeamMemberRunningShowsStopAndInterrupts covers the running teammate's
+// stop action: it calls TeamService.Interrupt off the UI thread, and the row
+// then shows the neutral interrupted state (never a failure).
+func TestTeamMemberRunningShowsStopAndInterrupts(t *testing.T) {
+	chat := headerChat("团队会话")
+	team := &recordingTeam{
+		members: []contracts.TeamMember{
+			{ID: "member-1", Name: "文档审查员", RunState: contracts.TeamRunRunning, Model: "gpt-5-codex"},
+		},
+		afterInterrupt: contracts.TeamRunInterrupted,
+	}
+	h := newAgentSurfaceHarness(t, chat, agentServices{team: team, children: &fakeChildAgents{}})
+	tester := h.tester()
+	tester.Frame()
+
+	h.click(tester, "智能体团队")
+	if _, ok := tester.AccessByRole(ui.RoleButton, "停止成员 文档审查员"); !ok {
+		t.Fatalf("running member has no stop action; texts = %v", tester.Texts())
+	}
+	h.click(tester, "停止成员 文档审查员")
+	waitFor(t, tester, func() bool { return len(team.interrupted()) == 1 }, "TeamService.Interrupt call")
+	if got := team.interrupted(); got[0] != "member-1" {
+		t.Fatalf("Interrupt(%q), want member-1", got[0])
+	}
+	waitFor(t, tester, func() bool { return tester.HasText("已中断") }, "interrupted member status")
+	if _, ok := tester.AccessByRole(ui.RoleButton, "停止成员 文档审查员"); ok {
+		t.Fatalf("interrupted member still offers stop; texts = %v", tester.Texts())
+	}
+	h.assertNoTexts(tester, "失败")
+	// The interrupted run is neutral, not a failure: the shared run-state
+	// mapping (pinned by uikit's status tests) resolves to LabelTertiary.
+	tokens := design.Light()
+	if kind := uikit.ParseRunState(contracts.TeamRunInterrupted).Kind(); kind != uikit.StatusInterrupted {
+		t.Fatalf("interrupted run kind = %v, want StatusInterrupted", kind)
+	} else if color := uikit.StatusColor(tokens, kind); color != tokens.LabelTertiary {
+		t.Fatalf("interrupted status colour = %v, want LabelTertiary", color)
+	}
+}
+
+// TestTeamMemberIdleHasNoStop covers the resting state: only a running teammate
+// offers stop.
+func TestTeamMemberIdleHasNoStop(t *testing.T) {
+	chat := headerChat("团队会话")
+	team := &recordingTeam{members: []contracts.TeamMember{
+		{ID: "member-1", Name: "文档审查员", RunState: contracts.TeamRunIdle},
+	}}
+	h := newAgentSurfaceHarness(t, chat, agentServices{team: team})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "智能体团队")
+	h.assertTexts(tester, "文档审查员", "空闲")
+	if _, ok := tester.AccessByRole(ui.RoleButton, "停止成员 文档审查员"); ok {
+		t.Fatalf("idle member offers stop; texts = %v", tester.Texts())
+	}
+}
+
+// TestTeamMemberCloseConfirmsWithCancelDefault covers the member row's ⋯ danger
+// action: close asks first through uikit.ConfirmDanger, whose safe action
+// carries the default focus and Enter. Only the explicit confirm calls
+// TeamService.Close.
+func TestTeamMemberCloseConfirmsWithCancelDefault(t *testing.T) {
+	chat := headerChat("团队会话")
+	team := &recordingTeam{members: []contracts.TeamMember{
+		{ID: "member-1", Name: "文档审查员", RunState: contracts.TeamRunIdle},
+	}}
+	h := newAgentSurfaceHarness(t, chat, agentServices{team: team})
+	tester := h.tester()
+	tester.Frame()
+
+	h.click(tester, "智能体团队")
+	h.click(tester, "成员操作 文档审查员")
+	h.click(tester, "关闭成员")
+	h.assertTexts(tester, "关闭成员", "取消", "确认关闭", "无法撤销")
+	if !tester.Focused("取消") {
+		t.Fatalf("the safe action does not carry the focus; texts = %v", tester.Texts())
+	}
+	// Enter answers the default (cancel): the teammate is not closed.
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if got := team.closed(); len(got) != 0 {
+		t.Fatalf("Enter closed the teammate: %v", got)
+	}
+	h.assertNoTexts(tester, "确认关闭")
+
+	// Reopen the overlay and answer the confirmation explicitly.
+	h.click(tester, "智能体团队")
+	h.click(tester, "成员操作 文档审查员")
+	h.click(tester, "关闭成员")
+	h.click(tester, "确认关闭")
+	waitFor(t, tester, func() bool { return len(team.closed()) == 1 }, "TeamService.Close call")
+	if got := team.closed(); got[0] != "member-1" {
+		t.Fatalf("Close(%q), want member-1", got[0])
+	}
+	h.assertNoTexts(tester, "确认关闭")
+}
+
+// TestTeamMemberStopFailureIsLocalized covers the failed stop: it stays inside
+// the overlay as an actionable error line instead of a silent no-op.
+func TestTeamMemberStopFailureIsLocalized(t *testing.T) {
+	chat := headerChat("团队会话")
+	team := &recordingTeam{
+		members: []contracts.TeamMember{
+			{ID: "member-1", Name: "文档审查员", RunState: contracts.TeamRunRunning},
+		},
+		stopErr: errors.New("manager unavailable"),
+	}
+	h := newAgentSurfaceHarness(t, chat, agentServices{team: team})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "智能体团队")
+	h.click(tester, "停止成员 文档审查员")
+	waitFor(t, tester, func() bool { return tester.HasText("停止失败") }, "localized stop failure")
+	h.assertTexts(tester, "manager unavailable")
+}
+
+// --- child header stop (P1-2) ----------------------------------------------
+
+// TestChildHeaderShowsStopForRunningTeammate covers the child conversation's
+// header: a running teammate offers the same stop action there, so the user
+// does not have to return to the team overlay to interrupt it.
+func TestChildHeaderShowsStopForRunningTeammate(t *testing.T) {
+	chat := headerChat("发布会话")
+	team := &recordingTeam{
+		members: []contracts.TeamMember{
+			{ID: "member-1", Name: "文档审查员", RunState: contracts.TeamRunRunning},
+		},
+		afterInterrupt: contracts.TeamRunInterrupted,
+	}
+	children := &fakeChildAgents{agents: []contracts.ChildAgent{{
+		ID: "member-1", Name: "文档审查员", Kind: contracts.ChildAgentTeammate,
+		Mode: contracts.ChildAgentContinuable, Status: contracts.ChildAgentRunning,
+		Prompt: "核对文档",
+	}}}
+	h := newAgentSurfaceHarness(t, chat, agentServices{team: team, children: children})
+	tester := h.tester()
+	tester.Frame()
+
+	h.click(tester, "子智能体 1")
+	h.click(tester, "进入子智能体会话 文档审查员")
+	h.assertTexts(tester, "文档审查员", "运行中")
+	if _, ok := tester.AccessByRole(ui.RoleButton, "停止成员 文档审查员"); !ok {
+		t.Fatalf("running child header has no stop action; texts = %v", tester.Texts())
+	}
+	h.click(tester, "停止成员 文档审查员")
+	waitFor(t, tester, func() bool { return len(team.interrupted()) == 1 }, "child header Interrupt call")
+	if got := team.interrupted(); got[0] != "member-1" {
+		t.Fatalf("Interrupt(%q), want member-1", got[0])
+	}
+	children.mu.Lock()
+	children.agents[0].Status = contracts.ChildAgentInterrupted
+	children.mu.Unlock()
+	waitFor(t, tester, func() bool { return tester.HasText("已中断") }, "child interrupted status")
+	h.assertNoTexts(tester, "失败")
+}
+
+// TestChildHeaderNoStopForOneShotSubagent covers the read-only child: a one-shot
+// subagent has no interrupt API, so the header offers none.
+func TestChildHeaderNoStopForOneShotSubagent(t *testing.T) {
+	chat := headerChat("发布会话")
+	children := &fakeChildAgents{agents: []contracts.ChildAgent{{
+		ID: "subagent-1", Name: "目录审计员", Kind: contracts.ChildAgentSubagent,
+		Mode: contracts.ChildAgentOneShot, Status: contracts.ChildAgentRunning,
+		Prompt: "检查目录",
+	}}}
+	h := newAgentSurfaceHarness(t, chat, agentServices{children: children})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "子智能体 1")
+	h.click(tester, "进入子智能体会话 目录审计员")
+	if _, ok := tester.AccessByRole(ui.RoleButton, "停止成员 目录审计员"); ok {
+		t.Fatalf("one-shot subagent header offers stop; texts = %v", tester.Texts())
+	}
+}
+
+// --- execution history (P1-3) ----------------------------------------------
+
+// fakeExecutionHistory is a contracts.ExecutionHistoryService over a scripted
+// per-session record set. gate, when set, holds the read until closed so a test
+// can prove the frame never waits for the store.
+type fakeExecutionHistory struct {
+	mu       sync.Mutex
+	records  map[string][]contracts.ExecutionRecord
+	requests []string
+	gate     <-chan struct{}
+}
+
+func (f *fakeExecutionHistory) ExecutionHistory(sessionID string, _ int) []contracts.ExecutionRecord {
+	f.mu.Lock()
+	f.requests = append(f.requests, sessionID)
+	gate := f.gate
+	f.mu.Unlock()
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]contracts.ExecutionRecord(nil), f.records[sessionID]...)
+}
+
+func (f *fakeExecutionHistory) requested() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.requests...)
+}
+
+// historyFixture is the durable record set of sess-1: one finished job and one
+// interrupted terminal.
+func historyFixture(at time.Time) map[string][]contracts.ExecutionRecord {
+	return map[string][]contracts.ExecutionRecord{
+		"sess-1": {
+			{
+				ID: "job-7", SessionID: "sess-1", Kind: contracts.ExecutionKindJob,
+				Command: "go test ./...", CWD: "/tmp/ws", Root: "/tmp/ws",
+				State: contracts.ExecutionStateFinished, Outcome: "exited",
+				Started: at, Ended: at.Add(2 * time.Second),
+			},
+			{
+				ID: "term-3", SessionID: "sess-1", Kind: contracts.ExecutionKindTerminal,
+				CWD: "/tmp/ws", Root: "/tmp/ws", Transport: "pipe",
+				State: contracts.ExecutionStateInterrupted, Started: at.Add(time.Minute),
+			},
+		},
+	}
+}
+
+// TestJobsOverlayShowsDurableExecutionHistory covers the restart case: with no
+// live jobs the header entry appears for the persisted records, and the overlay
+// shows the history group with the honest states and the no-output note.
+func TestJobsOverlayShowsDurableExecutionHistory(t *testing.T) {
+	chat := headerChat("任务会话")
+	at := time.Date(2026, 11, 15, 9, 0, 0, 0, time.Local)
+	history := &fakeExecutionHistory{records: historyFixture(at)}
+	h := newAgentSurfaceHarness(t, chat, agentServices{execution: history})
+	tester := h.tester()
+	tester.Frame()
+
+	waitFor(t, tester, func() bool { return tester.HasText("后台任务") }, "history-only jobs entry")
+	if got := history.requested(); len(got) == 0 || got[0] != "sess-1" {
+		t.Fatalf("history requested sessions = %v, want sess-1", got)
+	}
+	h.click(tester, "后台任务")
+	tester.Frame()
+	h.assertTexts(tester, "历史", "go test ./...", "已完成", "已中断", "输出不会持久化")
+	h.assertNoTexts(tester, "失败")
+}
+
+// TestJobsOverlayHistoryFiltersLiveJobs covers the de-duplication rule: a live
+// job is already listed above, so the history group never repeats it.
+func TestJobsOverlayHistoryFiltersLiveJobs(t *testing.T) {
+	chat := headerChat("任务会话")
+	at := time.Date(2026, 11, 15, 9, 0, 0, 0, time.Local)
+	jobs := &fakeJobs{jobs: []contracts.BackgroundJob{{
+		ID: "job-1", Kind: "bash", Command: "npm test --watch",
+		State: "running", Status: "running", Running: true,
+	}}}
+	records := historyFixture(at)
+	records["sess-1"] = append(records["sess-1"], contracts.ExecutionRecord{
+		ID: "job-1", SessionID: "sess-1", Kind: contracts.ExecutionKindJob,
+		Command: "npm test --watch", State: contracts.ExecutionStateRunning, Started: at,
+	})
+	history := &fakeExecutionHistory{records: records}
+	h := newAgentSurfaceHarness(t, chat, agentServices{jobs: jobs, execution: history})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "1 个后台任务")
+	tester.Frame()
+
+	// The live job keeps its live row (command text) and the history group does
+	// not repeat it: its history row would be labelled 后台任务 job-1.
+	h.assertTexts(tester, "npm test --watch", "历史", "go test ./...", "已中断")
+	h.assertNoExactTexts(tester, "后台任务 job-1")
+}
+
+// TestJobsOverlayHistoryWithoutServiceKeepsLiveOnly covers a host without the
+// read model: no empty history section appears.
+func TestJobsOverlayHistoryWithoutServiceKeepsLiveOnly(t *testing.T) {
+	chat := headerChat("任务会话")
+	jobs := &fakeJobs{jobs: []contracts.BackgroundJob{{
+		ID: "job-1", Command: "go build ./...", State: "exited", Status: "completed",
+	}}}
+	h := newAgentSurfaceHarness(t, chat, agentServices{jobs: jobs})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "1 个后台任务")
+	h.assertTexts(tester, "后台任务", "go build ./...", "完成")
+	h.assertNoTexts(tester, "历史", "输出不会持久化")
+}
+
+// TestExecutionHistoryLoadIsOffTheUiThreadAndScopedToSession proves the read
+// happens outside the frame: while the service is blocked the screen still
+// renders, and the scoped read only ever asks for the active conversation.
+func TestExecutionHistoryLoadIsOffTheUiThreadAndScopedToSession(t *testing.T) {
+	chat := headerChat("任务会话")
+	chat.addSession(contracts.ChatSession{
+		ID: "sess-2", Title: "另一个会话",
+		Messages: []contracts.ChatMessage{{ID: "u2", Role: contracts.ChatRoleUser, Text: "另一个问题"}},
+	}, false)
+	at := time.Date(2026, 11, 15, 9, 0, 0, 0, time.Local)
+	gate := make(chan struct{})
+	history := &fakeExecutionHistory{records: historyFixture(at), gate: gate}
+	h := newAgentSurfaceHarness(t, chat, agentServices{execution: history})
+	tester := h.tester()
+	tester.Frame()
+
+	waitFor(t, tester, func() bool { return len(history.requested()) == 1 }, "history read request")
+	// The blocked read did not block the frame: the screen still renders.
+	h.assertTexts(tester, "任务会话")
+	h.assertNoTexts(tester, "后台任务")
+	close(gate)
+	waitFor(t, tester, func() bool { return tester.HasText("后台任务") }, "history entry after the read")
+
+	// A session switch reads its own records only; sess-2 has none, so the
+	// entry disappears instead of showing sess-1's history.
+	if err := chat.SetActiveSession("sess-2"); err != nil {
+		t.Fatalf("switch to sess-2: %v", err)
+	}
+	waitFor(t, tester, func() bool {
+		requested := history.requested()
+		return len(requested) >= 2 && requested[len(requested)-1] == "sess-2"
+	}, "history read for sess-2")
+	tester.Frame()
+	h.assertNoTexts(tester, "后台任务", "go test ./...")
 }

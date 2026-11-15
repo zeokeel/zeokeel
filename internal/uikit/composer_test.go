@@ -387,3 +387,190 @@ func TestComposerRefocusKeepsScroll(t *testing.T) {
 		t.Fatalf("refocusing the composer moved the view: input at %+v, before %+v", after.Bounds, before.Bounds)
 	}
 }
+
+// TestComposerToolbarOneTabStopAndArrowKeys covers the shared composer toolbar's
+// native keyboard contract: one Tab stop, Left/Right between its controls with
+// wrap-around, Enter activating the focused control, and Tab leaving the
+// toolbar. The wrapper adds the accessible name; mygo's toolbar owns the state
+// and the focus model, so nothing here reimplements them.
+func TestComposerToolbarOneTabStopAndArrowKeys(t *testing.T) {
+	picks := 0
+	view := func(c *ui.Context) {
+		tokens := design.Of(c)
+		ui.Column(c).FillWidth().FillHeight().Background(tokens.BgBase).
+			Padding(design.Space4).Gap(design.Space3).Children(func() {
+			ui.Button(c, "前").Label("前")
+			uikit.ComposerToolbar(c, uikit.ComposerToolbarOptions{
+				Key:   "test.toolbar",
+				Label: "输入框工具栏",
+				Items: func(c *ui.Context) {
+					uikit.ComposerAttachButton(c, uikit.ComposerAttachOptions{
+						Label:   "附件",
+						Tooltip: "添加文件或图片",
+						OnPick:  func() { picks++ },
+					})
+					ui.PopoverMenuButton(c, "模型", func(m *ui.Menu) {
+						m.Item("模型一")
+					}).Label("模型")
+					ui.PopoverMenuButton(c, "会话设置", func(m *ui.Menu) {
+						m.Item("权限模式")
+					}).Label("会话设置")
+				},
+			})
+			ui.Button(c, "后").Label("后")
+		})
+	}
+	tt := ui.NewTester(view, 900, 400)
+	tt.Frame()
+	if _, ok := tt.AccessByRole(ui.RoleToolbar, "输入框工具栏"); !ok {
+		t.Fatalf("toolbar has no accessible name; texts = %v", tt.Texts())
+	}
+
+	tt.Key(0, ui.KeyTab)
+	if !tt.Focused("前") {
+		t.Fatalf("Tab did not reach the control before the toolbar")
+	}
+	tt.Key(0, ui.KeyTab)
+	if !tt.Focused("附件") {
+		t.Fatalf("Tab did not enter the toolbar on its first control; texts = %v", tt.Texts())
+	}
+	// The three controls are one Tab stop: arrows move between them.
+	tt.Key(0, ui.KeyRight)
+	if !tt.Focused("模型") {
+		t.Fatalf("Right did not reach the model control")
+	}
+	tt.Key(0, ui.KeyRight)
+	if !tt.Focused("会话设置") {
+		t.Fatalf("Right did not reach the session control")
+	}
+	tt.Key(0, ui.KeyRight)
+	if !tt.Focused("附件") {
+		t.Fatalf("Right did not wrap to the first control")
+	}
+	tt.Key(0, ui.KeyLeft)
+	if !tt.Focused("会话设置") {
+		t.Fatalf("Left did not wrap to the last control")
+	}
+	// Enter opens the focused menu button's menu.
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if !tt.HasText("权限模式") {
+		t.Fatalf("Enter on the session menu did not open it; texts = %v", tt.Texts())
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	// Enter on the attach control opens the picker directly.
+	tt.Key(0, ui.KeyLeft)
+	tt.Key(0, ui.KeyLeft)
+	if !tt.Focused("附件") {
+		t.Fatalf("arrows did not return to the attach control")
+	}
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if picks != 1 {
+		t.Fatalf("Enter on the attach control called the picker %d times, want 1", picks)
+	}
+	// Tab leaves the toolbar as one stop.
+	tt.Key(0, ui.KeyTab)
+	if !tt.Focused("后") {
+		t.Fatalf("Tab did not leave the toolbar for the control after it")
+	}
+}
+
+// TestComposerToolbarOverflowKeepsShellActions covers the architectural split:
+// when the toolbar has no room and folds its controls into its overflow menu,
+// the shell's send/queue/stop actions stay outside the toolbar, remain clickable
+// and never appear in that menu.
+func TestComposerToolbarOverflowKeepsShellActions(t *testing.T) {
+	toolbar := func(c *ui.Context) {
+		uikit.ComposerToolbar(c, uikit.ComposerToolbarOptions{
+			Key:   "test.toolbar",
+			Label: "输入框工具栏",
+			Items: func(c *ui.Context) {
+				uikit.ComposerAttachButton(c, uikit.ComposerAttachOptions{Label: "附件"})
+				ui.PopoverMenuButton(c, "模型选择器", func(m *ui.Menu) {
+					m.Item("模型一")
+				}).Label("模型选择器")
+				ui.PopoverMenuButton(c, "会话设置选项", func(m *ui.Menu) {
+					m.Item("权限模式")
+				}).Label("会话设置选项")
+			},
+		})
+	}
+	// overflowName finds the toolbar's overflow button in the accessibility tree
+	// (mygo labels it More in the library's language).
+	overflowName := func(tt *ui.Tester) string {
+		for _, a := range tt.AccessAll() {
+			if a.Role == ui.RoleMenuButton && (a.Name == "More" || a.Name == "更多") {
+				return a.Name
+			}
+		}
+		return ""
+	}
+
+	st := &composerTestState{draft: "hello"}
+	tt := ui.NewTester(composerTestView(st, func(o *uikit.ComposerShellOptions) {
+		o.Toolbar = toolbar
+		o.Hint = func(*ui.Context) string { return "" }
+	}), 360, 420)
+	tt.Frame()
+	// The narrow composer really overflows: at least one switcher folded away.
+	if tt.HasText("会话设置选项") && tt.HasText("模型选择器") {
+		t.Fatalf("a 360 DIP composer still fits every toolbar control; texts = %v", tt.Texts())
+	}
+	more := overflowName(tt)
+	if more == "" {
+		t.Fatalf("toolbar did not show its overflow button; texts = %v", tt.Texts())
+	}
+	if err := tt.Click(more); err != nil {
+		t.Fatalf("open toolbar overflow: %v", err)
+	}
+	tt.Frame()
+	items := tt.Menu()
+	for _, forbidden := range []string{"发送", "Send", "排队", "Queue", "停止", "Stop"} {
+		for _, item := range items {
+			if item == forbidden {
+				t.Fatalf("the toolbar overflow menu holds the primary action %q: %v", forbidden, items)
+			}
+		}
+	}
+	tt.CloseMenu()
+	tt.Frame()
+	// The send action is outside the toolbar and still clicks.
+	if err := tt.Click("发送"); err != nil {
+		t.Fatalf("click send while the toolbar overflows: %v", err)
+	}
+	tt.Frame()
+	if st.sent != 1 {
+		t.Fatalf("send calls = %d, want 1 (the overflow must not swallow the primary action)", st.sent)
+	}
+
+	// Same for the running composer's queue and stop actions.
+	run := &composerTestState{draft: "next"}
+	runTT := ui.NewTester(composerTestView(run, func(o *uikit.ComposerShellOptions) {
+		o.Running = true
+		o.QueueEnabled = true
+		o.QueueSend = func() bool { run.queued++; return true }
+		o.Stop = func() { run.stopped++ }
+		o.Toolbar = toolbar
+		o.Hint = func(*ui.Context) string { return "" }
+	}), 360, 420)
+	runTT.Frame()
+	if runMore := overflowName(runTT); runMore == "" {
+		t.Fatalf("running composer toolbar did not overflow at 360 DIP; texts = %v", runTT.Texts())
+	}
+	if err := runTT.Click("排队"); err != nil {
+		t.Fatalf("click queue while the toolbar overflows: %v", err)
+	}
+	runTT.Frame()
+	if run.queued != 1 {
+		t.Fatalf("queue calls = %d, want 1", run.queued)
+	}
+	if err := runTT.Click("停止"); err != nil {
+		t.Fatalf("click stop while the toolbar overflows: %v", err)
+	}
+	runTT.Frame()
+	if run.stopped != 1 {
+		t.Fatalf("stop calls = %d, want 1", run.stopped)
+	}
+}

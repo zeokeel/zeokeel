@@ -4,7 +4,50 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.38] - 2026-11-15
+
+UI/UX 升级小版本：按 [UI/UX 升级评估](docs/UI-UX-UPGRADE-2026-11-15.md) 收口 P1/P2 与 P3 高价值项，并抽出共享组件。
+
+### Added
+
+- **搜索命中定位**：`MessageSearchHit.MessageID` + 可选 `contracts.SessionFocus`（session 提供、sidebar 消费）；点击消息命中打开会话并滚动到该消息（durable 历史用 `ordinal:<n>` locator，按 user/assistant 换算跳过 tool 行），无服务时仅打开会话。
+- **rail 会话入口**：折叠 64 rail 增加「会话」按钮 → 原生 popover（最近会话/运行/未读点/搜索/展开侧栏），点击打开会话并保持 rail。
+- **窗口标题/托盘运行态**：`Root.Activity()`（运行会话数+待审批数）；窗口标题与托盘 tooltip/menu 本地化状态（运行中 N/等待审批），Chat/Approvals/语言变化事件刷新。
+- **会话 FindBar 与轨迹定位**：Cmd/Ctrl+F 打开官方 `ui.FindBar`，匹配正文+推理并滚动到对应分组行；Esc 关闭不停止运行；轨迹页 `FollowEnd` 跟随流式调用、计数行与阅读列同轴、每卡「在对话中查看」/Enter 定位。新增 `uikit.BuildSessionRowMap` 消息→行映射。
+- **设置条目级搜索**：`SettingsPageSpec` 增加可选 `Keywords/SearchItems/Reveal`；设置搜索命中具体条目后打开页面、展开所在 disclosure、滚动并短暂高亮（1.5s）；旧 host 别名表删除，关键字回到页面模块声明。
+- **工具行预览本地化**：`toolcards.Preview` 按工具名从 arguments 生成本地化单行预览（team_task_*/job_*/terminal_*/web_*/file/shell 等），未知工具回退后端 summary；超长 96 runes 截断。
+- **团队/子代理控制**：团队浮层 running 成员可「停止」（`TeamService.Interrupt`，中性 cancelled），「关闭」走成员行 ⋯ → `uikit.ConfirmDanger`（取消 Default）；子会话 header 同位置可停止 running teammate。
+- **执行域历史**：新增只读 `contracts.ExecutionHistoryService`（`KeyExecutionHistory`），toolkit 从 durable `execution/*` 事件有界折叠 job/terminal 生命周期；后台任务浮层新增「历史」分组（重启后仍可看，明确输出不持久，interrupted 中性）。
+- **公共 uikit 组件**：`ComposerToolbar` / `ComposerAttachButton`（官方 `ui.Toolbar` 封装，附件按钮直连原生 picker）、`DiffPreview`（官方 `editor.DiffView` 封装，含块头路径 + `+N −M`、高度上限、二进制/超大诚实回退）、`PropertySheet`（160 DIP 标签列、值左对齐、32 行、Divider）、`ReadingColumn`（960 居中、无 Grow、统一 PaddingX/Gap）、`SegmentedControl`（官方 `ui.SegmentedBase`，选中段 BgSelected + Accent 下划线）。
+- **审批「将改动」**：inline 审批卡在摘要与原始参数之间显示 write/edit 的 unified diff；无法生成时回退为有界 mono 预览。无 Default/Esc=deny/footer 顺序不变。
+- **应用内通知「打开会话」**：session-tagged toast 在右上角位置不变的前提下增加「打开会话」动作，点击切到对应会话；普通 toast 与 OS 通知行为不变。
+- **命令面板「前往 / 设置」**：由可见 screen 生成「前往…」命令、由设置页生成「设置：页名」命令；按 操作/前往/设置 分组；搜索覆盖标题/ID/Hint/Keywords；打开/移动选择时把选中行滚入视口。
+
+### Changed
+
+- **空会话 hero**：已在空会话时主按钮改「开始输入/Start typing」并只聚焦 composer；新增 3 个示例 prompt，点击仅填入草稿不发送。
+- **设置分组/保存语义**：通知/记忆/归档/数据与隐私/导入/更新移入可见「数据与通知」组，技能/LSP 归集成；4 个页脚保存页统一「保存/Save」，clean 时 primary Disabled；hotkey 帮助文案同步。
+- **非会话屏选中态**：洞察/自动化/插件屏只弱选中当前 screen，不再双高亮活动会话行；从这些屏进入会话时页头显示 `‹ 来源屏` 返回（回到 nav.Back）。
+- **恢复会话元信息**：restore 从 durable `user_message`/`run_end` 诚实回填 user 与 turn 最终 assistant 时间（压缩/rewind 不错配、不伪造）；无时钟且无 usage 的恢复回合不再渲染孤立 ⋯。
+- **子代理/Goal 收尾**：子会话回执加「打开子会话」动作、全文 tooltip；会话 ⋯ 菜单无目标时「设置目标」/有目标时「编辑目标」；冷恢复空草稿发送按钮改 DisabledPrimary；活动行 kind 词去重。
+- **状态/字号/a11y 收尾**：交付已保存、工作区提示、搜索已配置/未配置改 `uikit.StatusBadge`；设置 Modal/Sidebar 补可访问名；goal dock 清除改 `uikit.IconButton` 24 DIP；成句 11px 改 TypeXXS；Insights KPI 从 TypeL 收敛到 TypeM/600（页面 4 档）。
+- **中断恢复文案**：「继续」改为「在输入框继续」（英文 Continue in the composer），tooltip 说明只移焦点、不重放；Context 模型调用表头 `Prompt` 改 `提示词`。
+- **窄窗检查器**：右检查器打开且窗口不足时自动把左侧栏渲染为 64 DIP rail（临时布局态，不写用户折叠偏好），1024×720/900×600 下检查器改为 docked（内容 ≥520、检查器 ≥260）；窗口变宽/关闭检查器自动恢复。
+- **后台完成通知静默**：新增可选 `contracts.ForegroundSession`（uiroot 提供、host 接线），只在「当前屏幕是会话且该会话在前台」时静默；洞察/自动化/插件/设置页的后台完成不再漏报；headless 回退旧行为。
+- **输入框工具栏去边框**：附件/模型/会话设置放进官方 `ui.Toolbar`（默认无边框，hover/pressed/focus 原生），发送/排队/停止仍在 Toolbar 外；附件 chip 改浅底无描边。
+- **附件入口收敛**：附件按钮直接打开原生文件选择器；删除「选择文件… / 手动输入路径…」菜单与手动路径对话框（session/home），保留拖入与粘贴；picker 不可用时提示拖入/粘贴，不再要求手输路径。废弃 `uikit.attachment_paths` helper。
+- **Context / 属性表**：Context 与对话/Goal dock/子会话 banner 同轴；概览/分段合计改用 `PropertySheet`；About/Diagnostics/Network/Update 同步迁移，删除各页手写 160px 标签列。
+- **Insights**：7/30 天 switch 改用 `uikit.SegmentedControl`；会话排行选中行按 `row.Selected()` 切 AccentText，亮/暗对比 ≥4.5:1。
+
+### Verification
+
+- `gofmt` 空；`go build ./...`、`go vet ./...`、`go tool mygo vet .`、`go test ./... -count=1` 全绿；`go test -race`（agent/toolkit/session/uiroot/uikit/settings/toolcards/insights）通过。
+- `designlint --strict --baseline` 0 new / 0 blocking；`scripts/design-check.sh` 6/6。
+- `ui-drive` 全量 **93/93 PASS**（`.cache/impl-drive-final2/drive-report.md`），含极窄 composer、1024 自动 rail + docked 检查器、900×600、通知动作、设置深链/分组、工具/团队步骤。
+- `ui-snapshot` **122 PNG**（`.cache/impl-shots-final/`；`p1-chat.png`（`‹ 自动化` 返回）、`p1-trajectory.png`、`p2-palette.png`、`p2-context.png`、`p2-approval-diff.png`、`p2-insights.png`、`p2-model-settings.png`（数据与通知/保存）、`p2-team-overlay.png`、`narrow/narrow-session-inspector.png`）。
+
 ## [0.2.37] - 2026-11-15
+
 
 依赖维护发布：rig 从 v0.16.3 内树 fork 切回已发布模块 **v0.17.1**，删除 `third_party/zeokeel-rig` 与 `replace`。
 

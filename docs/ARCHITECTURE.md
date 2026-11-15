@@ -156,7 +156,10 @@ if _, err := ctx.Effect(func() cordis.Effect {
 ```
 
 服务键：`KeyUIRuntime`、`KeyNavigator`、`KeyTheme`、`KeyLocale`、`KeySettings`、
-`KeyAppInfo`、`KeyLogger`、`KeyScreenLister`。
+`KeyAppInfo`、`KeyLogger`、`KeyScreenLister`；可选服务还包括 `KeyForegroundSession`
+（uiroot 提供，供后台完成通知判断当前前台会话）、`KeyExecutionHistory`（toolkit 提供，只读
+durable 执行域历史）与 `KeySessionFocus`（session 模块提供，侧栏搜索命中交接过话到消息定位；
+sidebar 消费，无服务时仅打开会话）。
 
 ## 7. 装配
 

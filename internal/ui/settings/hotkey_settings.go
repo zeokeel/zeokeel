@@ -198,7 +198,7 @@ func (st *appearanceState) syncHotkeyDraft(locale contracts.LocaleService) {
 // buildGlobalHotkeySection renders the hotkey section: the current/applied
 // state first, then one row holding the draft input and its 录入 (record)
 // button, then the quick presets. The section is the page's one explicit-save
-// field, so it says so in one short line ("点「应用」并重启后生效") instead of
+// field, so it says so in one short line ("点「保存」并重启后生效") instead of
 // burying the action below the fold (R9).
 func buildGlobalHotkeySection(c *ui.Context, t *design.Tokens, state *appearanceState,
 	store contracts.SettingsService, locale contracts.LocaleService) {
@@ -258,8 +258,8 @@ func buildGlobalHotkeySection(c *ui.Context, t *design.Tokens, state *appearance
 				}
 			})
 		}).Description(localized(locale,
-			"留空关闭；点「应用」并重启后生效。",
-			"Empty disables it; applies after Apply and a restart.")).
+			"留空关闭；点「保存」并重启后生效。",
+			"Empty disables it; applies after Save and a restart.")).
 			Error(state.hotkeyError)
 		if state.capturing {
 			design.Apply(ui.Text(c, localized(locale, "按下组合键，Esc 取消",

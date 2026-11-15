@@ -72,14 +72,40 @@ func (st *state) refreshSessionContext(sessionID string) {
 	st.contextLoaded = true
 }
 
+// The Context tables' column measures. design has no table-column scale yet, so
+// the widths are named here, in one place, instead of bare numbers repeated at
+// every column: the numeric columns hold counts/bytes/costs right aligned, the
+// text columns take what is left.
+const (
+	// contextNumColWidth is one numeric column: tokens, bytes, cache, cost.
+	contextNumColWidth float32 = 76
+	// contextTimeColWidth holds a compact HH:MM clock.
+	contextTimeColWidth float32 = 56
+	// contextIterColWidth holds the iteration ordinal.
+	contextIterColWidth float32 = 48
+	// contextPromptColWidth holds the prompt token count.
+	contextPromptColWidth float32 = 88
+	// contextSourceColWidth holds a prompt-section source name.
+	contextSourceColWidth float32 = 92
+	// contextModelMinWidth/contextModelMaxWidth bound the model-name column so a
+	// long model id ellipsizes instead of squeezing the numeric columns.
+	contextModelMinWidth float32 = 120
+	contextModelMaxWidth float32 = 280
+)
+
 // buildContextPane renders the Context tab's body on the reading measure.
 func buildContextPane(c *ui.Context, t *design.Tokens, st *state, chatSession contracts.ChatSession, hasSession bool) {
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
 		ui.Scroll(c).FillWidth().Grow(1).Children(func() {
-			ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
-				design.Apply(ui.Column(c), func(el ui.Element) ui.Element { return el.Gap(design.Space5) }).
-					Width(design.TranscriptWidth).MaxWidthPercent(92).Grow(1).
-					PaddingX(design.Space4).PaddingY(design.Space5).Children(func() {
+			// The body builds on the shared reading column (960 DIP centered,
+			// capped at 92% of the pane, never grown), so its text column is the
+			// transcript's and the composer dock's. The pane used to add its own
+			// Grow(1), which widened the column ~13% and moved its left edge
+			// (~64 DIP against the conversation), so switching tabs jumped the
+			// text column.
+			uikit.ReadingColumn(c, func(body *ui.Context) {
+				ui.Column(body).FillWidth().Gap(design.Space5).
+					PaddingY(design.Space5).Children(func() {
 					switch {
 					case !hasSession:
 						uikit.EmptyStateBlock(c,
@@ -123,15 +149,21 @@ func contextDataEmpty(data contracts.SessionContext) bool {
 // and the most recent request snapshot.
 func buildContextOverview(c *ui.Context, t *design.Tokens, st *state, data contracts.SessionContext) {
 	uikit.Section(c, st.tr("概览", "Overview"), func(body *ui.Context) {
-		rows := []uikit.KeyValue{
-			{Key: st.tr("上下文用量", "Context used"), Value: contextUsageText(st, data.Used, data.Window)},
+		rows := []uikit.PropertyRow{
+			{Label: st.tr("上下文用量", "Context used"),
+				Value: contextUsageText(st, data.Used, data.Window)},
 		}
 		if data.CostKnown {
-			rows = append(rows, uikit.KeyValue{
-				Key: st.tr("累计成本", "Total cost"), Value: formatContextUSD(data.TotalCostUSD),
+			rows = append(rows, uikit.PropertyRow{
+				Label: st.tr("累计成本", "Total cost"), Value: formatContextUSD(data.TotalCostUSD),
 			})
 		}
-		uikit.KeyValueRows(body, rows)
+		// The overview is a property sheet: one 160 DIP label column and a
+		// bounded, left-aligned value, not a label/value pair stretched across
+		// the whole reading column.
+		uikit.PropertySheet(body, uikit.PropertySheetOptions{
+			Rows: rows, Key: "context.overview",
+		})
 
 		snapshot := data.Snapshot
 		if snapshot.At.IsZero() {
@@ -144,33 +176,35 @@ func buildContextOverview(c *ui.Context, t *design.Tokens, st *state, data contr
 			design.Apply(ui.Text(body, st.tr("最近一次请求", "Most recent request")),
 				t.Font(design.TypeXXS)).FontWeight(design.WeightSemibold).TextColor(t.LabelSecondary)
 			history := snapshot.History
-			snapshotRows := []uikit.KeyValue{
-				{Key: st.tr("时间", "Time"), Value: formatTimestamp(st.locale, snapshot.At)},
-				{Key: st.tr("模型", "Model"), Value: firstNonEmpty(snapshot.Model, st.tr("未知", "Unknown"))},
+			snapshotRows := []uikit.PropertyRow{
+				{Label: st.tr("时间", "Time"), Value: formatTimestamp(st.locale, snapshot.At)},
+				{Label: st.tr("模型", "Model"), Value: firstNonEmpty(snapshot.Model, st.tr("未知", "Unknown"))},
 			}
 			if snapshot.Window > 0 {
-				snapshotRows = append(snapshotRows, uikit.KeyValue{
-					Key: st.tr("窗口", "Window"), Value: uikit.FormatCompactCount(snapshot.Window) + " tokens",
+				snapshotRows = append(snapshotRows, uikit.PropertyRow{
+					Label: st.tr("窗口", "Window"), Value: uikit.FormatCompactCount(snapshot.Window) + " tokens",
 				})
 			}
 			snapshotRows = append(snapshotRows,
-				uikit.KeyValue{
-					Key: st.tr("系统提示", "System prompt"),
+				uikit.PropertyRow{
+					Label: st.tr("系统提示", "System prompt"),
 					Value: formatContextBytes(snapshot.SystemPromptBytes) + " · " +
 						uikit.FormatCompactCount(snapshot.SystemPromptTokens) + " tokens",
 				},
-				uikit.KeyValue{
-					Key:   st.tr("估算输入", "Estimated prompt"),
+				uikit.PropertyRow{
+					Label: st.tr("估算输入", "Estimated prompt"),
 					Value: uikit.FormatCompactCount(snapshot.EstimatedPrompt) + " tokens",
 				},
-				uikit.KeyValue{
-					Key: st.tr("历史消息", "History"),
+				uikit.PropertyRow{
+					Label: st.tr("历史消息", "History"),
 					Value: fmt.Sprintf(st.tr("%d 条（用户 %d / 助手 %d / 工具 %d）",
 						"%d messages (user %d / assistant %d / tool %d)"),
 						history.Messages, history.User, history.Assistant, history.Tool),
 				},
 			)
-			uikit.KeyValueRows(body, snapshotRows)
+			uikit.PropertySheet(body, uikit.PropertySheetOptions{
+				Rows: snapshotRows, Key: "context.snapshot",
+			})
 			buildContextToolsRow(body, t, st, snapshot.Tools)
 			buildContextInjectedRow(body, t, st, snapshot.Injected)
 		})
@@ -270,9 +304,9 @@ func buildContextSections(c *ui.Context, t *design.Tokens, st *state, snapshot c
 		}
 		columns := []ui.TableColumn{
 			{Title: st.tr("分段", "Section")},
-			{Title: st.tr("来源", "Source"), Width: 92},
-			{Title: st.tr("字节", "Bytes"), Width: 76, Align: ui.End},
-			{Title: "Tokens", Width: 76, Align: ui.End},
+			{Title: st.tr("来源", "Source"), Width: contextSourceColWidth},
+			{Title: st.tr("字节", "Bytes"), Width: contextNumColWidth, Align: ui.End},
+			{Title: "Tokens", Width: contextNumColWidth, Align: ui.End},
 		}
 		ui.Table(c, &st.contextSections, columns, count, func(row, col int) {
 			section := sections[row]
@@ -301,7 +335,8 @@ func buildContextSections(c *ui.Context, t *design.Tokens, st *state, snapshot c
 				}
 				cell.Tooltip(tip)
 			}
-		}).Label(st.tr("系统提示分段列表", "System prompt sections")).MaxHeight(design.Space6 * 7)
+		}).Label(st.tr("系统提示分段列表", "System prompt sections")).
+			MaxWidth(design.TranscriptWidth).MaxHeight(design.Space6 * 7)
 
 		// The section sums are the prompt's real size; the estimated-prompt share
 		// only appears when the window is known, so no fake percentage is drawn.
@@ -310,25 +345,27 @@ func buildContextSections(c *ui.Context, t *design.Tokens, st *state, snapshot c
 			totalBytes += section.Bytes
 			totalTokens += section.Tokens
 		}
-		rows := []uikit.KeyValue{{
-			Key: st.tr("分段合计", "Section total"),
+		rows := []uikit.PropertyRow{{
+			Label: st.tr("分段合计", "Section total"),
 			Value: formatContextBytes(totalBytes) + " · " +
 				uikit.FormatCompactCount(totalTokens) + " tokens",
 		}}
 		if estimate, window := snapshot.EstimatedPrompt, snapshot.Window; estimate > 0 && window > 0 {
 			percent := int(float64(estimate) / float64(window) * 100)
-			rows = append(rows, uikit.KeyValue{
-				Key: st.tr("估算输入占比", "Estimated prompt share"),
+			rows = append(rows, uikit.PropertyRow{
+				Label: st.tr("估算输入占比", "Estimated prompt share"),
 				Value: uikit.FormatCompactCount(estimate) + " / " +
 					uikit.FormatCompactCount(window) + fmt.Sprintf(" tokens (%d%%)", percent),
 			})
 		} else if estimate > 0 {
-			rows = append(rows, uikit.KeyValue{
-				Key:   st.tr("估算输入", "Estimated prompt"),
+			rows = append(rows, uikit.PropertyRow{
+				Label: st.tr("估算输入", "Estimated prompt"),
 				Value: uikit.FormatCompactCount(estimate) + " tokens",
 			})
 		}
-		uikit.KeyValueRows(body, rows)
+		uikit.PropertySheet(body, uikit.PropertySheetOptions{
+			Rows: rows, Key: "context.sections",
+		})
 	})
 }
 
@@ -385,16 +422,18 @@ func buildContextRequests(c *ui.Context, t *design.Tokens, st *state, data contr
 		rows := data.Requests
 		count := len(rows)
 		columns := []ui.TableColumn{
-			{Title: st.tr("轮次", "Iter"), Width: 48, Align: ui.End},
-			{Title: st.tr("模型", "Model"), MinWidth: 120, MaxWidth: 280},
-			{Title: "Prompt", Width: 88, Align: ui.End},
-			{Title: st.tr("完成", "Completion"), Width: 76, Align: ui.End},
-			{Title: st.tr("缓存", "Cached"), Width: 76, Align: ui.End},
-			{Title: st.tr("上下文", "Context"), Width: 76, Align: ui.End},
-			{Title: st.tr("时间", "Time"), Width: 56, Align: ui.End},
+			{Title: st.tr("轮次", "Iter"), Width: contextIterColWidth, Align: ui.End},
+			{Title: st.tr("模型", "Model"), MinWidth: contextModelMinWidth, MaxWidth: contextModelMaxWidth},
+			{Title: st.tr("提示词", "Prompt"), Width: contextPromptColWidth, Align: ui.End},
+			{Title: st.tr("完成", "Completion"), Width: contextNumColWidth, Align: ui.End},
+			{Title: st.tr("缓存", "Cached"), Width: contextNumColWidth, Align: ui.End},
+			{Title: st.tr("上下文", "Context"), Width: contextNumColWidth, Align: ui.End},
+			{Title: st.tr("时间", "Time"), Width: contextTimeColWidth, Align: ui.End},
 		}
 		if data.CostKnown {
-			columns = append(columns, ui.TableColumn{Title: st.tr("成本", "Cost"), Width: 76, Align: ui.End})
+			columns = append(columns, ui.TableColumn{
+				Title: st.tr("成本", "Cost"), Width: contextNumColWidth, Align: ui.End,
+			})
 		}
 		st.contextRequests.Key = func(index int) any {
 			if index < 0 || index >= count {
@@ -445,7 +484,8 @@ func buildContextRequests(c *ui.Context, t *design.Tokens, st *state, data contr
 				}
 			}
 			design.Apply(ui.Text(c, value), t.Font(design.TypeXS)).TextColor(color).NoWrap()
-		}).Label(st.tr("模型调用列表", "Model calls")).MaxHeight(design.Space6 * 9)
+		}).Label(st.tr("模型调用列表", "Model calls")).
+			MaxWidth(design.TranscriptWidth).MaxHeight(design.Space6 * 9)
 	})
 }
 
@@ -477,6 +517,7 @@ func buildContextEvents(c *ui.Context, t *design.Tokens, st *state, data contrac
 		}
 		ui.List(c, &st.contextEvents, count).
 			Label(st.tr("上下文事件列表", "Context events")).
+			MaxWidth(design.TranscriptWidth).
 			MaxHeight(design.Space6 * 7).
 			Rows(func(row ui.ListRow) {
 				event := events[count-1-row.Index]

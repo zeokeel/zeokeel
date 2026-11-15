@@ -12,6 +12,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
@@ -264,4 +266,34 @@ func newGoalHarnessSeeded(t *testing.T, chat *fakeChat, goals *fakeGoalService) 
 	t.Helper()
 	h, _ := newGoalHarnessWithService(t, chat, goals)
 	return h
+}
+
+// TestGoalDockClearEntryMeetsIconHitTarget covers AP-17 in the goal dock: the
+// hover-only clear entry is an icon button, so it goes through uikit.IconButton
+// and gets its 24 DIP hit target (the dock used to paint a bare 20x20
+// ui.Button). It still opens the destructive confirmation.
+func TestGoalDockClearEntryMeetsIconHitTarget(t *testing.T) {
+	h, goals := newGoalHarness(t, goalChat())
+	goals.seedGoal("sess-goal", "Ship release", contracts.GoalPhaseActive,
+		contracts.GoalActivationArmed, 1, contracts.DefaultMaxGoalRounds)
+	tester := h.tester()
+	tester.Frame()
+
+	objective, ok := tester.Find("Ship release")
+	if !ok {
+		t.Fatalf("the goal dock objective is missing; texts = %v", tester.Texts())
+	}
+	// The clear entry shows while the pointer is on the dock.
+	tester.Move(objective.X+objective.W/2, objective.Y+objective.H/2)
+	tester.Frame()
+	info, ok := tester.AccessByRole(ui.RoleButton, "清除目标")
+	if !ok {
+		t.Fatalf("the goal dock clear entry is not a named button; texts = %v", tester.Texts())
+	}
+	if info.Bounds.W < 24 || info.Bounds.H < 24 {
+		t.Fatalf("the goal dock clear hit target is %v, want at least 24x24 DIP", info.Bounds)
+	}
+	tester.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+	tester.Frame()
+	h.assertTexts(tester, "确认清除")
 }

@@ -7,6 +7,7 @@ package uikit_test
 // queue counter and the bounded raw-arguments disclosure — plus the copy.
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -645,4 +646,316 @@ func TestApprovalSummaryFallbackFromArguments(t *testing.T) {
 			t.Fatalf("unparseable arguments have no summary preview; texts = %v", tester.Texts())
 		}
 	})
+}
+
+// --- change preview on the approval card ------------------------------------
+
+// TestApprovalInlineCardShowsWriteDiff covers the write_file shape: the card
+// shows the "将改动" block between the summary and the raw arguments, with the
+// path, the +N −M counts and the official unified diff of the content the
+// arguments carry (the approval never reads the file).
+func TestApprovalInlineCardShowsWriteDiff(t *testing.T) {
+	_, tester := approvalInlineHarness(t,
+		approvalTestRequest("w1", "write_file", "写入 internal/app.go",
+			`{"path":"internal/app.go","content":"package main\n\nfunc main() {}\n"}`),
+		1, uikit.ApprovalLabels{}, nil)
+	for _, want := range []string{"将改动", "internal/app.go", "+3", "−0"} {
+		if !tester.HasText(want) {
+			t.Fatalf("the change block does not show %q; texts = %v", want, tester.Texts())
+		}
+	}
+	info, ok := tester.Access("New text")
+	if !ok {
+		t.Fatalf("the change block is not exposed as the diff's new text; texts = %v", tester.Texts())
+	}
+	if !strings.Contains(info.Value, "func main()") {
+		t.Fatalf("the diff does not show the written content; a11y value = %q", info.Value)
+	}
+	// The block sits after the summary and before the raw arguments.
+	summary, ok := tester.Find("摘要")
+	if !ok {
+		t.Fatalf("the summary label is missing; texts = %v", tester.Texts())
+	}
+	change, ok := tester.Find("将改动")
+	if !ok {
+		t.Fatalf("the change label is missing; texts = %v", tester.Texts())
+	}
+	arguments, ok := tester.Find("原始参数")
+	if !ok {
+		t.Fatalf("the raw arguments disclosure is missing; texts = %v", tester.Texts())
+	}
+	if !(summary.Y < change.Y && change.Y < arguments.Y) {
+		t.Fatalf("section order y = summary %.1f, change %.1f, arguments %.1f; want summary < change < arguments",
+			summary.Y, change.Y, arguments.Y)
+	}
+}
+
+// TestApprovalInlineCardShowsEditDiff covers the edit_file shape: the old_string
+// → new_string pair becomes the unified diff, counted as one addition and one
+// deletion, with the path in the header.
+func TestApprovalInlineCardShowsEditDiff(t *testing.T) {
+	_, tester := approvalInlineHarness(t,
+		approvalTestRequest("e1", "edit_file", "编辑 internal/app.go",
+			`{"path":"internal/app.go","old_string":"old line\n","new_string":"new line\n"}`),
+		1, uikit.ApprovalLabels{}, nil)
+	for _, want := range []string{"将改动", "internal/app.go", "+1", "−1"} {
+		if !tester.HasText(want) {
+			t.Fatalf("the change block does not show %q; texts = %v", want, tester.Texts())
+		}
+	}
+	info, ok := tester.Access("New text")
+	if !ok {
+		t.Fatalf("the change block is not exposed as the diff's new text; texts = %v", tester.Texts())
+	}
+	if !strings.Contains(info.Value, "new line") {
+		t.Fatalf("the diff does not show the new line; a11y value = %q", info.Value)
+	}
+}
+
+// TestApprovalInlineCardShowsEditorCreateDiff covers str_replace_editor's create
+// command: the file_text is the whole new file, so the block is an all-added
+// diff like write_file.
+func TestApprovalInlineCardShowsEditorCreateDiff(t *testing.T) {
+	_, tester := approvalInlineHarness(t,
+		approvalTestRequest("c1", "str_replace_editor", "创建 notes.txt",
+			`{"command":"create","path":"notes.txt","file_text":"one\ntwo\n"}`),
+		1, uikit.ApprovalLabels{}, nil)
+	for _, want := range []string{"将改动", "notes.txt", "+2"} {
+		if !tester.HasText(want) {
+			t.Fatalf("the change block does not show %q; texts = %v", want, tester.Texts())
+		}
+	}
+}
+
+// TestApprovalInlineCardShowsEditorReplaceDiff covers str_replace_editor's
+// str_replace command and its old_str/new_str argument names.
+func TestApprovalInlineCardShowsEditorReplaceDiff(t *testing.T) {
+	_, tester := approvalInlineHarness(t,
+		approvalTestRequest("r1", "str_replace_editor", "替换坐标",
+			`{"command":"str_replace","path":"view.go","old_str":"x := 1\n","new_str":"x := 2\n"}`),
+		1, uikit.ApprovalLabels{}, nil)
+	for _, want := range []string{"将改动", "view.go", "+1", "−1"} {
+		if !tester.HasText(want) {
+			t.Fatalf("the change block does not show %q; texts = %v", want, tester.Texts())
+		}
+	}
+}
+
+// TestApprovalInlineCardChangeFallbacks covers the honest fallbacks: arguments
+// the card cannot turn into a diff explain themselves instead of showing a
+// blank or fake diff, and calls with nothing to show omit the block.
+func TestApprovalInlineCardChangeFallbacks(t *testing.T) {
+	t.Run("unparseable arguments", func(t *testing.T) {
+		_, tester := approvalInlineHarness(t,
+			approvalTestRequest("u1", "write_file", "写入文件", "not-json-arguments"),
+			1, uikit.ApprovalLabels{}, nil)
+		if !tester.HasText("将改动") || !tester.HasText("无法解析参数") {
+			t.Fatalf("the unparseable-arguments fallback is missing; texts = %v", tester.Texts())
+		}
+		if !tester.HasText("not-json-arguments") {
+			t.Fatalf("the unparseable-arguments fallback has no bounded preview; texts = %v", tester.Texts())
+		}
+		if _, ok := tester.Access("New text"); ok {
+			t.Fatal("unparseable arguments were rendered as a diff")
+		}
+	})
+
+	t.Run("insert cannot be diffed from arguments", func(t *testing.T) {
+		_, tester := approvalInlineHarness(t,
+			approvalTestRequest("i1", "str_replace_editor", "插入代码",
+				`{"command":"insert","path":"view.go","insert_line":4,"new_str":"inserted line\n"}`),
+			1, uikit.ApprovalLabels{}, nil)
+		if !tester.HasText("将改动") || !tester.HasText("插入位置") {
+			t.Fatalf("the insert fallback has no honest explanation; texts = %v", tester.Texts())
+		}
+		if !tester.HasText("inserted line") {
+			t.Fatalf("the insert fallback has no preview of the inserted text; texts = %v", tester.Texts())
+		}
+	})
+
+	t.Run("view command has no block", func(t *testing.T) {
+		_, tester := approvalInlineHarness(t,
+			approvalTestRequest("v1", "str_replace_editor", "查看文件",
+				`{"command":"view","path":"view.go"}`),
+			1, uikit.ApprovalLabels{}, nil)
+		if tester.HasText("将改动") {
+			t.Fatalf("a read-only view command rendered a change block; texts = %v", tester.Texts())
+		}
+	})
+
+	t.Run("empty arguments have no block", func(t *testing.T) {
+		_, tester := approvalInlineHarness(t,
+			approvalTestRequest("n1", "write_file", "写入文件", "{}"),
+			1, uikit.ApprovalLabels{}, nil)
+		if tester.HasText("将改动") {
+			t.Fatalf("empty arguments rendered a change block; texts = %v", tester.Texts())
+		}
+	})
+
+	t.Run("incomplete arguments have no block", func(t *testing.T) {
+		_, tester := approvalInlineHarness(t,
+			approvalTestRequest("n2", "write_file", "写入文件", `{"path":"x"}`),
+			1, uikit.ApprovalLabels{}, nil)
+		if tester.HasText("将改动") {
+			t.Fatalf("arguments without content rendered a change block; texts = %v", tester.Texts())
+		}
+	})
+
+	t.Run("unknown tool has no block", func(t *testing.T) {
+		_, tester := approvalInlineHarness(t,
+			approvalTestRequest("n3", "bash", "运行命令", `{"command":"ls"}`),
+			1, uikit.ApprovalLabels{}, nil)
+		if tester.HasText("将改动") {
+			t.Fatalf("a non-file tool rendered a change block; texts = %v", tester.Texts())
+		}
+	})
+}
+
+// TestApprovalInlineCardOversizeChangeFallsBack covers the size guard: a huge
+// write is summarized with a bounded mono preview and the honest reason instead
+// of trying to diff it inside the card.
+func TestApprovalInlineCardOversizeChangeFallsBack(t *testing.T) {
+	var content strings.Builder
+	for index := 0; index <= uikit.DiffPreviewMaxLines; index++ {
+		content.WriteString("generated line x\n")
+	}
+	arguments := `{"path":"generated.txt","content":` + quoteApprovalJSON(t, content.String()) + `}`
+	_, tester := approvalInlineHarness(t,
+		approvalTestRequest("o1", "write_file", "写入 generated.txt", arguments),
+		1, uikit.ApprovalLabels{}, nil)
+	if _, ok := tester.Access("New text"); ok {
+		t.Fatal("an oversized write was rendered as a diff")
+	}
+	if !tester.HasText("改动过大") || !tester.HasText("无法生成 diff") {
+		t.Fatalf("the oversized change has no honest explanation; texts = %v", tester.Texts())
+	}
+}
+
+// TestApprovalInlineCardChangeKeepsSafeDecision covers the unchanged safety
+// contract with a change block present: the footer order stays deny → always →
+// allow, nothing is auto-focused, a stray Enter decides nothing and the inline
+// card still leaves Escape to the session screen.
+func TestApprovalInlineCardChangeKeepsSafeDecision(t *testing.T) {
+	state, tester := approvalInlineHarness(t,
+		approvalTestRequest("s1", "write_file", "写入文件",
+			`{"path":"internal/app.go","content":"package main\n"}`),
+		1, uikit.ApprovalLabels{}, nil)
+	deny, ok := tester.Find("拒绝")
+	if !ok {
+		t.Fatalf("deny action missing; texts = %v", tester.Texts())
+	}
+	always, ok := tester.Find("本会话内始终允许")
+	if !ok {
+		t.Fatalf("session-scoped allow action missing; texts = %v", tester.Texts())
+	}
+	allow, ok := tester.Find("允许")
+	if !ok {
+		t.Fatalf("allow action missing; texts = %v", tester.Texts())
+	}
+	if !(deny.X < always.X && always.X < allow.X) {
+		t.Fatalf("footer order x = deny %.1f, always %.1f, allow %.1f; want deny < always < allow",
+			deny.X, always.X, allow.X)
+	}
+	if tester.Focused("拒绝") || tester.Focused("允许") || tester.Focused("本会话内始终允许") {
+		t.Fatalf("the card autofocused an action next to the change block; texts = %v", tester.Texts())
+	}
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if len(state.decisions) != 0 {
+		t.Fatalf("a stray Enter decided with a change block present: %v", state.decisions)
+	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	if len(state.decisions) != 0 {
+		t.Fatalf("the diff block made the inline card handle Escape: %v", state.decisions)
+	}
+}
+
+// TestApprovalInlineCardChangeFitsNarrowCard covers the width contract: the
+// change block stays inside a 320 DIP window (the card's narrow share) and does
+// not push the decisions out of reach.
+func TestApprovalInlineCardChangeFitsNarrowCard(t *testing.T) {
+	state := &approvalTestState{}
+	arguments, err := json.Marshal(map[string]string{
+		"path":    "internal/a-very-long-file-name-with-many-segments.go",
+		"content": strings.Repeat("long content line xxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", 3),
+	})
+	if err != nil {
+		t.Fatalf("encode narrow-card arguments: %v", err)
+	}
+	options := uikit.ApprovalDialogOptions{
+		Request: approvalTestRequest("narrow1", "write_file", "写入文件", string(arguments)),
+		Pending: 1,
+		Inline:  true,
+		OnResolve: func(decision contracts.ApprovalDecision) {
+			state.decisions = append(state.decisions, decision)
+		},
+	}
+	tester := ui.NewTester(func(c *ui.Context) {
+		ui.Text(c, "主屏幕")
+		uikit.ApprovalDialog(c, options)
+	}, 320, 700)
+	tester.Frame()
+	info, ok := tester.Access("New text")
+	if !ok {
+		t.Fatalf("the narrow card has no diff; texts = %v", tester.Texts())
+	}
+	if right := info.Bounds.X + info.Bounds.W; right > 320.5 || info.Bounds.X < -0.5 {
+		t.Fatalf("the diff spans x=%g..%g, want inside 0..320", info.Bounds.X, right)
+	}
+	for _, label := range []string{"拒绝", "本会话内始终允许", "允许"} {
+		if _, ok := tester.Find(label); !ok {
+			t.Fatalf("the narrow card hides %q behind the diff; texts = %v", label, tester.Texts())
+		}
+	}
+	if err := tester.Click("拒绝"); err != nil {
+		t.Fatalf("click deny in the narrow card: %v; texts = %v", err, tester.Texts())
+	}
+	if len(state.decisions) != 1 || state.decisions[0] != contracts.ApprovalDeny {
+		t.Fatalf("decisions = %v, want [deny]", state.decisions)
+	}
+}
+
+// TestApprovalDialogShowsWriteDiff covers the Modal presentation: it shares the
+// card's anatomy, so the change block is there too, and Escape still denies.
+func TestApprovalDialogShowsWriteDiff(t *testing.T) {
+	state, tester := approvalOpenHarness(t,
+		approvalTestRequest("m1", "write_file", "写入 internal/app.go",
+			`{"path":"internal/app.go","content":"package main\n"}`), 1)
+	for _, want := range []string{"将改动", "internal/app.go", "+1"} {
+		if !tester.HasText(want) {
+			t.Fatalf("the modal change block does not show %q; texts = %v", want, tester.Texts())
+		}
+	}
+	tester.Key(0, ui.KeyEscape)
+	if len(state.decisions) != 1 || state.decisions[0] != contracts.ApprovalDeny {
+		t.Fatalf("decisions after Escape = %v, want [deny]", state.decisions)
+	}
+	if state.open {
+		t.Fatal("Escape did not close the Modal")
+	}
+}
+
+// TestApprovalInlineCardChangeLabelEnglish covers the localized block label.
+func TestApprovalInlineCardChangeLabelEnglish(t *testing.T) {
+	_, tester := approvalInlineHarness(t,
+		approvalTestRequest("en1", "write_file", "Write file",
+			`{"path":"notes.txt","content":"hello\n"}`),
+		1, uikit.ApprovalLabels{}, &entryDialogTestLocale{lang: "en"})
+	for _, want := range []string{"Changes", "notes.txt", "+1"} {
+		if !tester.HasText(want) {
+			t.Fatalf("the English change block does not show %q; texts = %v", want, tester.Texts())
+		}
+	}
+}
+
+// quoteApprovalJSON renders s as a JSON string literal, for the huge-arguments
+// test whose payload is generated rather than written by hand.
+func quoteApprovalJSON(t *testing.T, s string) string {
+	t.Helper()
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("encode JSON string: %v", err)
+	}
+	return string(encoded)
 }

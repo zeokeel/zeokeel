@@ -511,6 +511,141 @@
         "scaled-headings"
       ],
       "doc": "docs/DESIGN.md §6.2"
+    },
+    {
+      "id": "layout.reading-column",
+      "entry": "uikit.ReadingColumn",
+      "package": "internal/uikit",
+      "states": [
+        "default",
+        "narrow-92pct"
+      ],
+      "allowed": [
+        "uikit.ReadingColumn",
+        "ui.Row",
+        "ui.Column"
+      ],
+      "forbidden": [
+        "grow-reading-column",
+        "second-reading-width"
+      ],
+      "rules": [
+        "reading-width-960",
+        "no-grow",
+        "shared-horizontal-padding"
+      ],
+      "doc": "docs/DESIGN.md §6.2 / docs/AGENT-SURFACES.md S1/S10"
+    },
+    {
+      "id": "layout.property-sheet",
+      "entry": "uikit.PropertySheet",
+      "package": "internal/uikit",
+      "states": [
+        "value",
+        "empty-placeholder",
+        "mono",
+        "copy"
+      ],
+      "allowed": [
+        "uikit.PropertySheet"
+      ],
+      "forbidden": [
+        "right-aligned-property-values",
+        "per-page-property-sheet"
+      ],
+      "rules": [
+        "label-column-160",
+        "value-left-aligned",
+        "row-32",
+        "row-divider"
+      ],
+      "doc": "docs/DESIGN.md §6.2 / docs/AGENT-SURFACES.md S10"
+    },
+    {
+      "id": "control.segmented",
+      "entry": "uikit.SegmentedControl",
+      "package": "internal/uikit",
+      "states": [
+        "selected",
+        "unselected",
+        "focus",
+        "disabled"
+      ],
+      "allowed": [
+        "uikit.SegmentedControl",
+        "ui.SegmentedBase"
+      ],
+      "forbidden": [
+        "accent-filled-segment",
+        "duplicate-segmented-look"
+      ],
+      "rules": [
+        "selected-visible",
+        "radio-semantics",
+        "arrow-keys"
+      ],
+      "doc": "docs/DESIGN.md §6.2 / docs/AGENT-SURFACES.md S11"
+    },
+    {
+      "id": "content.diff-preview",
+      "entry": "uikit.DiffPreview",
+      "package": "internal/uikit",
+      "states": [
+        "modified",
+        "added",
+        "empty",
+        "binary",
+        "oversized",
+        "fallback"
+      ],
+      "allowed": [
+        "uikit.DiffPreview",
+        "editor.DiffView",
+        "editor.NewBuffer",
+        "editor.DiffState"
+      ],
+      "forbidden": [
+        "hand-drawn-diff",
+        "unbounded-diff-height"
+      ],
+      "rules": [
+        "official-diff-view",
+        "bounded-height",
+        "honest-fallback"
+      ],
+      "doc": "docs/DESIGN.md §6.2 / docs/AGENT-SURFACES.md S4"
+    },
+    {
+      "id": "shell.composer-toolbar",
+      "entry": "uikit.ComposerToolbar",
+      "package": "internal/uikit",
+      "states": [
+        "idle",
+        "hover",
+        "pressed",
+        "focus",
+        "overflow",
+        "busy-attach"
+      ],
+      "allowed": [
+        "uikit.ComposerToolbar",
+        "uikit.ComposerAttachButton",
+        "ui.Toolbar",
+        "ui.Button",
+        "ui.PopoverMenuButton"
+      ],
+      "forbidden": [
+        "bordered-composer-chips",
+        "primary-action-in-toolbar",
+        "manual-attachment-path"
+      ],
+      "rules": [
+        "toolbar-quiet-controls",
+        "send-outside-toolbar",
+        "attach-direct-picker",
+        "single-tab-stop"
+      ],
+      "doc": "docs/DESIGN.md §6.2 / docs/AGENT-SURFACES.md S7"
     }
   ],
   "scenarios": [

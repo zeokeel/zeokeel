@@ -6,6 +6,7 @@ package session_test
 // an honest empty state, reads per session and localizes in English.
 
 import (
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -144,6 +145,40 @@ func contextSessionChat() *fakeChat {
 	return chat
 }
 
+// TestContextBodyAlignsWithChatReadingColumn pins the Context pane's axis fix:
+// the pane used to add its own Grow(1) to the reading column, which widened the
+// column ~13% and moved its left edge (~64 DIP against the conversation), so
+// switching tabs jumped the text column. Both panes now build on
+// uikit.ReadingColumn and share one left edge at wide and narrow widths.
+func TestContextBodyAlignsWithChatReadingColumn(t *testing.T) {
+	for _, size := range [][2]int{{1512, 900}, {1024, 720}} {
+		chat := contextSessionChat()
+		inspector := newFakeContextInspector()
+		inspector.set("sess-ctx", fullContextData())
+		h := newContextHarness(t, chat, inspector)
+		tester := h.tester()
+		tester.SetSize(size[0], size[1])
+		tester.Frame()
+		// The assistant reply is drawn at the transcript column's left edge.
+		chatBody, ok := tester.Find("完成")
+		if !ok {
+			t.Fatalf("%dx%d: chat body text missing; texts = %v", size[0], size[1], tester.Texts())
+		}
+		openContextTab(t, h, tester)
+		contextBody, ok := tester.Find("概览")
+		if !ok {
+			t.Fatalf("%dx%d: Context body section missing; texts = %v", size[0], size[1], tester.Texts())
+		}
+		if math.Abs(float64(chatBody.X-contextBody.X)) > 1 {
+			t.Fatalf("%dx%d: Context body left = %v, chat body left = %v; the tab panes do not share the reading column",
+				size[0], size[1], contextBody.X, chatBody.X)
+		}
+		if contextBody.X <= 0 {
+			t.Fatalf("%dx%d: Context body has no visible left edge (%v)", size[0], size[1], contextBody.X)
+		}
+	}
+}
+
 func TestContextPaneRendersOverviewSnapshotRequestsAndEvents(t *testing.T) {
 	chat := contextSessionChat()
 	inspector := newFakeContextInspector()
@@ -157,9 +192,12 @@ func TestContextPaneRendersOverviewSnapshotRequestsAndEvents(t *testing.T) {
 		"累计成本", "$0.0033", "最近一次请求", "系统提示", "2.0 KB", "512 tokens",
 		"估算输入", "900 tokens", "4 条（用户 2 / 助手 1 / 工具 1）",
 		"工具目录", "2 个 · bash, read_file", "注入来源", "AGENTS.md", "记忆")
-	// Requests table: headers + both calls (newest first, but both present).
-	h.assertTexts(tester, "模型调用", "轮次", "模型", "Prompt", "完成", "缓存", "上下文", "时间", "成本",
+	// Requests table: headers + both calls (newest first, but both present). The
+	// prompt column header is localized like every other column, never the raw
+	// English "Prompt" (P3-5 residue).
+	h.assertTexts(tester, "模型调用", "轮次", "模型", "提示词", "完成", "缓存", "上下文", "时间", "成本",
 		"1.2K", "1.6K", "80", "90", "100", "900", "$0.0012", "$0.0021")
+	h.assertNoTexts(tester, "Prompt")
 	// Events: exact compaction, inferred compaction and the spill path/bytes.
 	h.assertTexts(tester, "上下文事件", "压缩", "压缩（推断）", "溢出",
 		"12.3K → 3.2K tokens", "消息 12 → 4", "/tmp/zeokeel/spill-1.txt · 1.5 KB")
@@ -579,6 +617,7 @@ func TestContextEnglishCopy(t *testing.T) {
 	}
 	tester.Frame()
 	h.assertTexts(tester, "Overview", "Context used", "Total cost", "Most recent request",
-		"System prompt", "Tool catalog", "Injected", "Model calls", "Completion",
+		"System prompt", "Tool catalog", "Injected", "Model calls", "Prompt", "Completion",
 		"Context events", "Compaction", "Spill")
+	h.assertNoTexts(tester, "提示词")
 }

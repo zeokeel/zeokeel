@@ -6,6 +6,7 @@ package session_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -102,7 +103,7 @@ func TestAssistantMetaRowEnglishCopy(t *testing.T) {
 // --- message copy -----------------------------------------------------------
 
 func TestAssistantCopyWritesClipboard(t *testing.T) {
-	chat := usageChat(contracts.ChatMessage{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "可复制的回答"})
+	chat := usageChat(contracts.ChatMessage{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "可复制的回答", CreatedAt: time.Date(2026, 11, 15, 9, 0, 0, 0, time.Local)})
 	h := newHarness(t, chat)
 	tester := h.tester()
 	// The copy action lives in the ⋯ menu of the compact meta row.

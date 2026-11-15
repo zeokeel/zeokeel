@@ -20,6 +20,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -76,15 +77,10 @@ type homeComposerState struct {
 	// nextStepErr is the empty-state action failure (adding a workspace).
 	nextStepErr string
 	// attachBusy is true while the native picker runs off the UI thread
-	// (mygo's dialog blocks its caller): the attach actions show
-	// 选择中…/Choosing… and stay disabled until the posted result stages the
+	// (mygo's dialog blocks its caller): the attach action shows
+	// 选择中…/Choosing… and stays disabled until the posted result stages the
 	// files.
 	attachBusy bool
-	// attachPathsOpen/attachPathDraft/attachPathErr drive the manual path-entry
-	// fallback for environments without a working native picker (ZK-09).
-	attachPathsOpen bool
-	attachPathDraft string
-	attachPathErr   string
 }
 
 // homeAttachmentMIME maps a picked file to the attachment content type.
@@ -186,135 +182,16 @@ func startHomeAttachmentPick(runtime contracts.UIRuntime, st *homeComposerState,
 		runtime.Post(func() {
 			st.attachBusy = false
 			if err != nil {
-				st.attachErr = tr("无法打开文件选择器：", "Could not open the file picker: ") + err.Error()
+				// No manual path fallback: name the picker failure and the paths
+				// that still work (drag and drop, pasting an image).
+				st.attachErr = tr("无法打开文件选择器：", "Could not open the file picker: ") + err.Error() +
+					tr("；请拖入文件或粘贴图片", "; drag files in or paste an image instead")
 			} else {
 				stageHomeAttachments(st, paths, tr)
 			}
 			runtime.Invalidate()
 		})
 	}()
-}
-
-// homeManualAttachmentErrors localizes the rejected entries of the manual path
-// fallback, one line per entry, so a typo names the exact path.
-func homeManualAttachmentErrors(invalid []uikit.InvalidAttachmentPath, tr func(zh, en string) string) []string {
-	messages := make([]string, 0, len(invalid))
-	for _, entry := range invalid {
-		switch {
-		case entry.Relative:
-			messages = append(messages, tr("路径必须是绝对路径：", "Path must be absolute: ")+entry.Path)
-		default:
-			messages = append(messages, tr("文件不存在或不可读：", "File does not exist or is not readable: ")+entry.Path)
-		}
-	}
-	return messages
-}
-
-// applyHomeManualAttachmentPaths validates and stages one manual path-entry
-// submission. Valid paths go through the ordinary staging path; invalid entries
-// and staging errors stay inline in the dialog, which therefore does not close
-// on a partial failure. It reports whether the dialog should close.
-func applyHomeManualAttachmentPaths(st *homeComposerState, raw string, tr func(zh, en string) string) bool {
-	if strings.TrimSpace(raw) == "" {
-		st.attachPathErr = tr("请输入至少一个文件路径", "Enter at least one file path")
-		return false
-	}
-	valid, invalid := uikit.ResolveAttachmentPaths(raw)
-	messages := homeManualAttachmentErrors(invalid, tr)
-	if len(valid) > 0 {
-		before := len(st.attachments)
-		stageHomeAttachments(st, valid, tr)
-		if len(st.attachments) == before && st.attachErr == "" {
-			// Defensive: the resolver said the paths exist but staging read none
-			// of them, so tell the user instead of closing silently.
-			messages = append(messages, tr("未能添加所选文件", "None of the files could be added"))
-		}
-		// The staging error belongs to this dialog while it is open; showing it
-		// again under the composer would duplicate it.
-		if st.attachErr != "" {
-			messages = append(messages, st.attachErr)
-			st.attachErr = ""
-		}
-	}
-	if len(messages) == 0 {
-		st.attachPathErr = ""
-		return true
-	}
-	st.attachPathErr = strings.Join(messages, "; ")
-	return false
-}
-
-// buildHomeAttachmentPathDialog is Home's manual path-entry fallback (ZK-09): a
-// native Modal for environments where the native file chooser is unavailable or
-// blocks. It shares Home's staging path, so chips/MIME behave identically.
-func buildHomeAttachmentPathDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
-	st *homeComposerState, tr func(zh, en string) string) {
-	if !st.attachPathsOpen {
-		return
-	}
-	add := func() {
-		if applyHomeManualAttachmentPaths(st, st.attachPathDraft, tr) {
-			st.attachPathsOpen = false
-			st.attachPathDraft = ""
-		}
-		runtime.Invalidate()
-	}
-	closeDialog := func() {
-		st.attachPathsOpen = false
-		st.attachPathDraft = ""
-		st.attachPathErr = ""
-		runtime.Invalidate()
-	}
-	ui.Modal(c, &st.attachPathsOpen, func() {
-		dialogEnter(c, add)
-		design.Apply(ui.Column(c).Width(design.DialogWidthCompact).Gap(design.Space4), func(el ui.Element) ui.Element {
-			return el.PaddingX(design.Space6).PaddingY(design.Space2)
-		}).Children(func() {
-			design.Apply(ui.Text(c, tr("手动添加附件", "Add attachments by path")), t.Font(design.TypeL)).
-				FontWeight(600).TextColor(t.LabelPrimary)
-			design.Apply(ui.Text(c, tr(
-				"输入文件的绝对路径，每行一个（Shift+Enter 换行）；也可以用逗号或分号分隔。",
-				"Enter absolute file paths, one per line (Shift+Enter for a newline); commas or semicolons also work.")),
-				t.TextMuted(design.TypeXS)).MaxLines(2)
-			ui.TextArea(c, &st.attachPathDraft).Label(tr("文件路径", "File paths")).
-				Placeholder("/home/you/notes.txt").FillWidth().MinHeight(design.Space6 * 3).
-				OnTextKey(func(k ui.TextKey) bool {
-					// Shift+Enter keeps the multiline list; a bare Enter adds.
-					if k.Key != ui.KeyEnter || k.Mods != 0 {
-						return false
-					}
-					add()
-					return true
-				})
-			if st.attachPathErr != "" {
-				uikit.ErrorLine(c, st.attachPathErr)
-			}
-			ui.Divider(c)
-			uikit.DialogFooter(c, []uikit.DialogAction{
-				{Label: tr("取消", "Cancel"), OnClick: closeDialog},
-				{Label: tr("添加", "Add"), Primary: true,
-					Disabled: strings.TrimSpace(st.attachPathDraft) == "",
-					OnClick:  add},
-			})
-		})
-	})
-}
-
-// dialogEnter runs a modal's primary action on Enter from the overlay scope, so
-// the key reaches it wherever the focus is; a focused text area takes Enter
-// through its own OnTextKey first (see the path dialog).
-func dialogEnter(c *ui.Context, action func()) {
-	if action == nil {
-		return
-	}
-	c.OnShortcut(0, ui.KeyEnter, action)
-}
-
-// openHomeAttachmentPathDialog requests the manual path-entry fallback modal.
-func openHomeAttachmentPathDialog(st *homeComposerState, runtime contracts.UIRuntime) {
-	st.attachPathsOpen = true
-	st.attachPathErr = ""
-	runtime.Invalidate()
 }
 
 // addHomeWorkspace opens the native folder picker and registers the chosen
@@ -386,32 +263,6 @@ func openHomeSettingsPage(nav contracts.Navigator, pageID string) {
 		}
 	}
 	nav.ToggleSettings()
-}
-
-// buildHomeModelControl is the composer's model picker: the model catalog's
-// presets write the default chat model for new conversations; without a catalog
-// the control deep-links to the provider settings page.
-// buildHomeAttachmentMenu is Home's single attach control: choose files through
-// the native picker (off the UI thread) or enter absolute paths manually from
-// the same menu.
-func buildHomeAttachmentMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
-	st *homeComposerState, tr func(zh, en string) string) {
-	label := tr("附件", "Attach")
-	tip := tr("添加文件或图片，或手动输入路径", "Add files or images, or enter a path")
-	if st.attachBusy {
-		label = tr("选择中…", "Choosing…")
-		tip = tr("文件选择器打开中…", "The file picker is open…")
-	}
-	button := ui.PopoverMenuButton(c, label, func(m *ui.Menu) {
-		if m.Item(tr("选择文件…", "Choose files…")).Disabled(st.attachBusy).Chosen() {
-			startHomeAttachmentPick(runtime, st, tr)
-		}
-		if m.Item(tr("手动输入路径…", "Enter a path manually…")).
-			Disabled(st.attachBusy).Chosen() {
-			openHomeAttachmentPathDialog(st, runtime)
-		}
-	}).Tooltip(tip)
-	design.Apply(button, t.TextMuted(design.TypeXS))
 }
 
 // buildHomeWorkspaceControl is Home's workspace chip: it names the workspace a
@@ -503,6 +354,9 @@ func homeChipLabel(label string) string {
 	return string(runes[:maxRunes-1]) + "…"
 }
 
+// buildHomeModelControl is the composer's model picker: the model catalog's
+// presets write the default chat model for new conversations; without a catalog
+// the control deep-links to the provider settings page.
 func buildHomeModelControl(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	nav contracts.Navigator, chat contracts.ChatService, kctx cordis.Context,
 	settings contracts.SettingsService, st *homeComposerState, english bool,
@@ -826,6 +680,11 @@ func buildHomeComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 	if st.sending {
 		sendLabel = tr("发送中…", "Sending…")
 	}
+	attachLabel := tr("附件", "Attach")
+	attachTip := tr("添加文件或图片", "Add files or images")
+	if st.attachBusy {
+		attachLabel = tr("选择中…", "Choosing…")
+	}
 	errors := make([]string, 0, 4)
 	for _, text := range []string{st.attachErr, st.workspaceErr, st.modelErr, st.sendErr} {
 		if strings.TrimSpace(text) != "" {
@@ -846,21 +705,40 @@ func buildHomeComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 			return true
 		},
 		Attachments: func(ic *ui.Context) {
+			if st.attachBusy {
+				// The picker blocks its caller but runs off the UI thread: the
+				// composer stays live and says what it is waiting for, like the
+				// conversation composer's attachments slot.
+				ui.Row(ic).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+					ui.Spinner(ic).Label(tr("选择中…", "Choosing…")).
+						Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+					design.Apply(ui.Text(ic, tr("选择中…", "Choosing…")), t.TextMuted(design.TypeXXS))
+				})
+			}
 			if len(st.attachments) == 0 {
 				return
 			}
+			// The staged chip is a quiet fill with no outline (P2-12), matching
+			// the conversation composer's chips: 28 DIP tall, RadiusSM, and the
+			// shared 24 DIP icon button for the removal target.
 			ui.Row(ic).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 				for _, attachment := range st.attachments {
 					attachment := attachment
-					design.Apply(ui.Row(ic).AlignItems(ui.Center).Gap(design.Space1).
-						Padding(design.Space1, design.Space2).Radius(design.RadiusSM).
-						Border(1, t.BorderL2), func(el ui.Element) ui.Element { return el }).Children(func() {
+					ui.Row(ic).AlignItems(ui.Center).Gap(design.Space1).
+						Height(design.ControlCompactHeight).PaddingX(design.Space2).
+						Background(t.BgStrong).Radius(design.RadiusSM).Children(func() {
 						design.Apply(ui.Text(ic, attachment.Name+" · "+formatHomeAttachmentSize(len(attachment.Data))),
 							t.Font(design.TypeXXS)).TextColor(t.LabelSecondary).MaxLines(1).Ellipsis("…")
-						if ui.Button(ic, tr("移除", "Remove")).Clicked() {
-							removeHomeAttachment(st, attachment.ID)
-							runtime.Invalidate()
-						}
+						uikit.IconButton(ic, uikit.IconButtonOptions{
+							Label:   tr("移除附件 ", "Remove attachment ") + attachment.Name,
+							Tooltip: tr("移除附件", "Remove attachment"),
+							Icon:    icons.Close(),
+							Size:    design.IconSizeS,
+							OnClick: func() {
+								removeHomeAttachment(st, attachment.ID)
+								runtime.Invalidate()
+							},
+						})
 					})
 				}
 			})
@@ -876,17 +754,28 @@ func buildHomeComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 			}
 		},
 		Toolbar: func(ic *ui.Context) {
-			buildHomeAttachmentMenu(ic, t, runtime, st, tr)
-			if st.attachBusy {
-				// The picker runs off the UI thread: the official spinner shows
-				// the wait next to the menu whose label also says 选择中….
-				ui.Spinner(ic).Label(tr("选择中…", "Choosing…")).
-					Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
-			}
-			buildHomeWorkspaceControl(ic, t, runtime, kctx, st, tr)
-			buildHomeModelControl(ic, t, runtime, navigator, chat, kctx, settings, st,
-				uikit.Language(locale) == "en", tr)
-			buildHomeModeControl(ic, t, runtime, settings, tr)
+			// Home's own switchers ride the same quiet official toolbar as the
+			// conversation composer (no bordered boxes); send stays in the
+			// shell's action row, outside the toolbar and its overflow menu.
+			uikit.ComposerToolbar(ic, uikit.ComposerToolbarOptions{
+				Key:    "home.composer.toolbar",
+				Label:  tr("输入框工具栏", "Composer toolbar"),
+				Locale: locale,
+				Items: func(ic *ui.Context) {
+					uikit.ComposerAttachButton(ic, uikit.ComposerAttachOptions{
+						Key:     "home.composer.attach",
+						Label:   attachLabel,
+						Tooltip: attachTip,
+						Locale:  locale,
+						Busy:    st.attachBusy,
+						OnPick:  func() { startHomeAttachmentPick(runtime, st, tr) },
+					})
+					buildHomeWorkspaceControl(ic, t, runtime, kctx, st, tr)
+					buildHomeModelControl(ic, t, runtime, navigator, chat, kctx, settings, st,
+						uikit.Language(locale) == "en", tr)
+					buildHomeModeControl(ic, t, runtime, settings, tr)
+				},
+			})
 		},
 		SendEnabled: chat != nil && !st.sending && strings.TrimSpace(st.draft) != "",
 		SendLabel:   sendLabel,
@@ -897,7 +786,4 @@ func buildHomeComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 		Errors: errors,
 		Notice: st.notice,
 	})
-	// The manual attachment-path fallback is a Modal above the composer, as on
-	// the conversation screen.
-	buildHomeAttachmentPathDialog(c, t, runtime, st, tr)
 }

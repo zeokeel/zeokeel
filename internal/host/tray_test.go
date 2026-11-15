@@ -34,17 +34,22 @@ func (f *fakeTrayWindow) OnClose(fn func(*mygo.CloseEvent)) func() {
 	return func() {}
 }
 
-// fakeTrayHandle records the tray listeners.
+// fakeTrayHandle records the tray listeners and the live chrome the host
+// updates after creation (tooltip and menu).
 type fakeTrayHandle struct {
 	onClick   func()
 	destroyed bool
+	toolTip   string
+	menu      *mygo.Menu
 }
 
 func (f *fakeTrayHandle) OnClick(fn func()) func() {
 	f.onClick = fn
 	return func() {}
 }
-func (f *fakeTrayHandle) Destroy() { f.destroyed = true }
+func (f *fakeTrayHandle) Destroy()                { f.destroyed = true }
+func (f *fakeTrayHandle) SetToolTip(tip string)   { f.toolTip = tip }
+func (f *fakeTrayHandle) SetMenu(menu *mygo.Menu) { f.menu = menu }
 
 // fakeTrayFactory captures the options and returns the configured handle/error.
 type fakeTrayFactory struct {

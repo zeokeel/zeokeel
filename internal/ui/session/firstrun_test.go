@@ -114,22 +114,40 @@ func TestFirstRunChecklistEnglish(t *testing.T) {
 		"No API key yet", "Configure API key", "No workspace open", "Add workspace")
 }
 
-// TestHeroNewChatFocusesComposerInsteadOfDuplicating covers FR-30: on an
-// already-empty conversation the hero's 新对话 button focuses the composer
+// TestHeroStartTypingFocusesComposerInsteadOfDuplicating covers FR-30: on an
+// already-empty conversation the hero's 开始输入 button focuses the composer
 // instead of creating a second empty session.
-func TestHeroNewChatFocusesComposerInsteadOfDuplicating(t *testing.T) {
+func TestHeroStartTypingFocusesComposerInsteadOfDuplicating(t *testing.T) {
 	chat := newFakeChat()
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "空会话"}, true)
 	h := newHarness(t, chat)
 	tester := h.tester()
 
 	before := len(chat.newSessionIDs())
-	h.click(tester, "新对话")
+	h.click(tester, "开始输入")
 	if got := len(chat.newSessionIDs()); got != before {
 		t.Fatalf("NewSession calls after clicking the hero button = %d, want %d (no duplicate empty session)", got, before)
 	}
 	if !tester.Focused("输入消息…") && !tester.Focused("Ask ZeoKeel…") {
 		t.Fatalf("the hero button did not focus the composer; texts = %v", tester.Texts())
+	}
+}
+
+// TestHeroExamplesFillTheDraft covers the empty conversation's starter prompts:
+// a prompt stages the draft and focuses the composer without sending.
+func TestHeroExamplesFillTheDraft(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "空会话"}, true)
+	h := newHarness(t, chat)
+	tester := h.tester()
+
+	prompt := "检查当前工作区并给出摘要"
+	h.click(tester, prompt)
+	if sends := chat.sends(); len(sends) != 0 {
+		t.Fatalf("clicking a hero example sent a prompt: %v", sends)
+	}
+	if !tester.Focused("输入消息…") && !tester.Focused("Ask ZeoKeel…") {
+		t.Fatalf("hero example did not focus the composer; texts = %v", tester.Texts())
 	}
 }
 

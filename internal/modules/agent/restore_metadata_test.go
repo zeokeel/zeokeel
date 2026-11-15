@@ -178,3 +178,252 @@ func TestInterruptedRunFlagRestoredFromCheckpoint(t *testing.T) {
 		t.Fatal("interrupted hint survived a new run")
 	}
 }
+
+// appendDurableEventAt records one durable session event at an explicit time, so
+// restore-time backfill is asserted against deterministic clocks.
+func appendDurableEventAt(t *testing.T, store *fakeStore, sessionID, eventType string,
+	at time.Time, payload map[string]any) {
+	t.Helper()
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("encode %s: %v", eventType, err)
+	}
+	if err := store.AppendEvent(context.Background(), rig.SessionEvent{
+		SessionID: sessionID, Type: eventType, Time: at, Payload: encoded,
+	}); err != nil {
+		t.Fatalf("append %s: %v", eventType, err)
+	}
+}
+
+// appendUserMessageAt records one durable human user_message event at a time.
+func appendUserMessageAt(t *testing.T, store *fakeStore, sessionID, text string, at time.Time) {
+	t.Helper()
+	appendDurableEventAt(t, store, sessionID, "user_message", at, map[string]any{
+		"text": text, "origin": contracts.AgentRunOriginUser,
+	})
+}
+
+// appendRunEndAt records one durable run_end event at a time.
+func appendRunEndAt(t *testing.T, store *fakeStore, sessionID string, at time.Time) {
+	t.Helper()
+	appendDurableEventAt(t, store, sessionID, "run_end", at, map[string]any{
+		"ok": true, "error": "", "finishReason": "stop",
+	})
+}
+
+// TestRestoreBackfillsUserAndTurnEndTimes covers the honest backfill: a restored
+// user message takes its durable user_message clock, and the turn's final
+// assistant message takes the run_end clock of the run that ended that turn.
+func TestRestoreBackfillsUserAndTurnEndTimes(t *testing.T) {
+	store := newFakeStore()
+	settings := newFakeSettings(map[string]string{contracts.SettingsChatModel: "test-model"})
+	first := newQueueService(t, store, settings, &captureProvider{})
+	sessionID, err := first.NewSession("times")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	t1 := time.Date(2026, 11, 15, 9, 30, 0, 0, time.Local)
+	t2 := t1.Add(90 * time.Second)
+	t3 := t2.Add(2 * time.Minute)
+	t4 := t3.Add(45 * time.Second)
+	history := []rig.Message{
+		rig.NewMessage(rig.RoleUser, "第一条"),
+		rig.NewMessage(rig.RoleAssistant, "答案一"),
+		rig.NewMessage(rig.RoleUser, "第二条"),
+		rig.NewMessage(rig.RoleAssistant, "答案二"),
+	}
+	if err := store.ReplaceHistory(context.Background(), sessionID, history); err != nil {
+		t.Fatalf("ReplaceHistory: %v", err)
+	}
+	appendUserMessageAt(t, store, sessionID, "第一条", t1)
+	appendRunEndAt(t, store, sessionID, t2)
+	appendUserMessageAt(t, store, sessionID, "第二条", t3)
+	appendRunEndAt(t, store, sessionID, t4)
+
+	second := newQueueService(t, store, settings, &captureProvider{})
+	second.restore(context.Background())
+	session := mustSession(t, second, sessionID)
+	if len(session.Messages) != 4 {
+		t.Fatalf("restored messages = %d, want 4", len(session.Messages))
+	}
+	want := []time.Time{t1, t2, t3, t4}
+	for index, expected := range want {
+		if !session.Messages[index].CreatedAt.Equal(expected) {
+			t.Fatalf("message %d CreatedAt = %v, want %v", index, session.Messages[index].CreatedAt, expected)
+		}
+	}
+}
+
+// TestRestoreAssistantTimeOnlyOnTurnFinalStep pins the honest granularity: the
+// run_end clock belongs to the step that ended the turn, not to the tool steps
+// in the middle of it.
+func TestRestoreAssistantTimeOnlyOnTurnFinalStep(t *testing.T) {
+	store := newFakeStore()
+	settings := newFakeSettings(map[string]string{contracts.SettingsChatModel: "test-model"})
+	first := newQueueService(t, store, settings, &captureProvider{})
+	sessionID, err := first.NewSession("steps")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	userAt := time.Date(2026, 11, 15, 10, 0, 0, 0, time.Local)
+	endAt := userAt.Add(3 * time.Minute)
+	history := []rig.Message{
+		rig.NewMessage(rig.RoleUser, "跑一下测试"),
+		rig.NewMessage(rig.RoleAssistant, "先读文件"),
+		rig.NewMessage(rig.RoleAssistant, "测试通过"),
+	}
+	if err := store.ReplaceHistory(context.Background(), sessionID, history); err != nil {
+		t.Fatalf("ReplaceHistory: %v", err)
+	}
+	appendUserMessageAt(t, store, sessionID, "跑一下测试", userAt)
+	appendRunEndAt(t, store, sessionID, endAt)
+
+	second := newQueueService(t, store, settings, &captureProvider{})
+	second.restore(context.Background())
+	session := mustSession(t, second, sessionID)
+	if !session.Messages[0].CreatedAt.Equal(userAt) {
+		t.Fatalf("user CreatedAt = %v, want %v", session.Messages[0].CreatedAt, userAt)
+	}
+	if !session.Messages[1].CreatedAt.IsZero() {
+		t.Fatalf("intermediate step got a fabricated clock: %v", session.Messages[1].CreatedAt)
+	}
+	if !session.Messages[2].CreatedAt.Equal(endAt) {
+		t.Fatalf("final assistant CreatedAt = %v, want %v", session.Messages[2].CreatedAt, endAt)
+	}
+}
+
+// TestRestoreWithoutDurableEventsKeepsZeroTimes covers the honest empty case: a
+// history without durable timing events must not invent clocks.
+func TestRestoreWithoutDurableEventsKeepsZeroTimes(t *testing.T) {
+	store := newFakeStore()
+	settings := newFakeSettings(map[string]string{contracts.SettingsChatModel: "test-model"})
+	first := newQueueService(t, store, settings, &captureProvider{})
+	sessionID, err := first.NewSession("no events")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	history := []rig.Message{
+		rig.NewMessage(rig.RoleUser, "没有事件"),
+		rig.NewMessage(rig.RoleAssistant, "也没有时钟"),
+	}
+	if err := store.ReplaceHistory(context.Background(), sessionID, history); err != nil {
+		t.Fatalf("ReplaceHistory: %v", err)
+	}
+
+	second := newQueueService(t, store, settings, &captureProvider{})
+	second.restore(context.Background())
+	session := mustSession(t, second, sessionID)
+	for index, message := range session.Messages {
+		if !message.CreatedAt.IsZero() {
+			t.Fatalf("message %d got a clock without a durable event: %v", index, message.CreatedAt)
+		}
+	}
+}
+
+// TestRestoreCompactedTurnsDoNotMismatchTimes covers compaction: durable turns
+// that are no longer in the history must not hand their clocks to the surviving
+// text, and the surviving turn still takes its own clocks.
+func TestRestoreCompactedTurnsDoNotMismatchTimes(t *testing.T) {
+	store := newFakeStore()
+	settings := newFakeSettings(map[string]string{contracts.SettingsChatModel: "test-model"})
+	first := newQueueService(t, store, settings, &captureProvider{})
+	sessionID, err := first.NewSession("compacted times")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	oldUserAt := time.Date(2026, 11, 15, 8, 0, 0, 0, time.Local)
+	oldEndAt := oldUserAt.Add(time.Minute)
+	keptUserAt := time.Date(2026, 11, 15, 11, 0, 0, 0, time.Local)
+	keptEndAt := keptUserAt.Add(2 * time.Minute)
+	appendUserMessageAt(t, store, sessionID, "被压缩掉的旧问题", oldUserAt)
+	appendRunEndAt(t, store, sessionID, oldEndAt)
+	appendUserMessageAt(t, store, sessionID, "保留下来的问题", keptUserAt)
+	appendRunEndAt(t, store, sessionID, keptEndAt)
+
+	history := []rig.Message{
+		rig.NewMessage(rig.RoleUser, "保留下来的问题"),
+		rig.NewMessage(rig.RoleAssistant, "保留的回答"),
+	}
+	if err := store.ReplaceHistory(context.Background(), sessionID, history); err != nil {
+		t.Fatalf("ReplaceHistory: %v", err)
+	}
+	second := newQueueService(t, store, settings, &captureProvider{})
+	second.restore(context.Background())
+	session := mustSession(t, second, sessionID)
+	if !session.Messages[0].CreatedAt.Equal(keptUserAt) {
+		t.Fatalf("user CreatedAt = %v, want the kept turn's %v", session.Messages[0].CreatedAt, keptUserAt)
+	}
+	if !session.Messages[1].CreatedAt.Equal(keptEndAt) {
+		t.Fatalf("assistant CreatedAt = %v, want the kept turn's end %v", session.Messages[1].CreatedAt, keptEndAt)
+	}
+}
+
+// TestRestoreRewindDoesNotTakeLaterTurnTimes covers a rewound/forked history: a
+// turn that the durable log still knows but the history no longer shows must not
+// rewind a later clock onto the surviving turn.
+func TestRestoreRewindDoesNotTakeLaterTurnTimes(t *testing.T) {
+	store := newFakeStore()
+	settings := newFakeSettings(map[string]string{contracts.SettingsChatModel: "test-model"})
+	first := newQueueService(t, store, settings, &captureProvider{})
+	sessionID, err := first.NewSession("rewound times")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	firstUserAt := time.Date(2026, 11, 15, 9, 0, 0, 0, time.Local)
+	firstEndAt := firstUserAt.Add(time.Minute)
+	laterUserAt := firstEndAt.Add(10 * time.Minute)
+	laterEndAt := laterUserAt.Add(time.Minute)
+	appendUserMessageAt(t, store, sessionID, "保留的这一轮", firstUserAt)
+	appendRunEndAt(t, store, sessionID, firstEndAt)
+	appendUserMessageAt(t, store, sessionID, "回退掉的下一轮", laterUserAt)
+	appendRunEndAt(t, store, sessionID, laterEndAt)
+
+	history := []rig.Message{
+		rig.NewMessage(rig.RoleUser, "保留的这一轮"),
+		rig.NewMessage(rig.RoleAssistant, "保留的回答"),
+	}
+	if err := store.ReplaceHistory(context.Background(), sessionID, history); err != nil {
+		t.Fatalf("ReplaceHistory: %v", err)
+	}
+	second := newQueueService(t, store, settings, &captureProvider{})
+	second.restore(context.Background())
+	session := mustSession(t, second, sessionID)
+	if !session.Messages[0].CreatedAt.Equal(firstUserAt) {
+		t.Fatalf("user CreatedAt = %v, want %v", session.Messages[0].CreatedAt, firstUserAt)
+	}
+	if !session.Messages[1].CreatedAt.Equal(firstEndAt) {
+		t.Fatalf("assistant CreatedAt = %v, want the first turn's end %v (not the later turn)", session.Messages[1].CreatedAt, firstEndAt)
+	}
+}
+
+// TestRestoreIgnoresRunEndWithoutUserMessage covers a bounded event window whose
+// start cuts off the user_message: a run_end with no turn to end is ignored.
+func TestRestoreIgnoresRunEndWithoutUserMessage(t *testing.T) {
+	store := newFakeStore()
+	settings := newFakeSettings(map[string]string{contracts.SettingsChatModel: "test-model"})
+	first := newQueueService(t, store, settings, &captureProvider{})
+	sessionID, err := first.NewSession("orphan run end")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	history := []rig.Message{
+		rig.NewMessage(rig.RoleUser, "历史里的问题"),
+		rig.NewMessage(rig.RoleAssistant, "历史里的回答"),
+	}
+	if err := store.ReplaceHistory(context.Background(), sessionID, history); err != nil {
+		t.Fatalf("ReplaceHistory: %v", err)
+	}
+	appendRunEndAt(t, store, sessionID, time.Date(2026, 11, 15, 12, 0, 0, 0, time.Local))
+
+	second := newQueueService(t, store, settings, &captureProvider{})
+	second.restore(context.Background())
+	session := mustSession(t, second, sessionID)
+	for index, message := range session.Messages {
+		if !message.CreatedAt.IsZero() {
+			t.Fatalf("message %d got a clock from an orphan run_end: %v", index, message.CreatedAt)
+		}
+	}
+}

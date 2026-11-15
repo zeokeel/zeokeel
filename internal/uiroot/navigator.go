@@ -57,6 +57,18 @@ func (n *navigator) Back() bool {
 	return true
 }
 
+// BackTarget returns the screen Back would show, or "" when there is none.
+// It is an optional extension of contracts.Navigator so a screen can label a
+// back affordance with where it leads without widening the shared interface.
+func (n *navigator) BackTarget() string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if len(n.stack) < 2 {
+		return ""
+	}
+	return n.stack[len(n.stack)-2]
+}
+
 // CanGoBack reports whether Back would change the screen, for the chrome's
 // back affordance and its shortcut.
 func (n *navigator) CanGoBack() bool {

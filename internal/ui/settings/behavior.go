@@ -218,41 +218,50 @@ func saveBehaviorSetting(st *behaviorState, runtime contracts.UIRuntime,
 // ui.workSteps.* and the workspace instruction file saves as it is edited.
 func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 	store contracts.SettingsService, locale contracts.LocaleService, st *behaviorState,
-	sandboxService contracts.SandboxService) {
+	sandboxService contracts.SandboxService, search *pageSearch) {
 	t := design.Of(c)
+	// The message-size and workspace-instruction settings live inside the
+	// collapsed 更多对话设置 disclosure: a search hit on either opens it before
+	// they build, so the reveal can scroll the found region into view in this
+	// frame (contracts.SettingsPageSpec.Reveal runs before Build).
+	if search.targetedAt("behavior.message-size") || search.targetedAt("behavior.workspace-instructions") {
+		st.moreOpen = true
+	}
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		uikit.PageHeader(c, localized(locale, "行为", "Behavior"), "")
-		uikit.Section(c, localized(locale, "默认代理权限", "Default agent permission"), func(*ui.Context) {
-			current := agentPermissionMode(store.Get(contracts.SettingAgentPermission, ""))
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				design.Apply(ui.Text(c, localized(locale, "当前：", "Current: ")+
-					behaviorPermissionLabel(locale, current)), t.Font(design.TypeXS)).
-					TextColor(t.LabelSecondary)
-				ui.Spacer(c).Grow(1)
-				if st.status != "" {
-					statusBadge(c, t, st.status, st.statusErr)
-				}
-			})
-			// A menu is a chip, not a form field: a row keeps it at its natural
-			// width instead of stretching it across the content column.
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-				ui.PopoverMenuButton(c, behaviorPermissionLabel(locale, current), func(m *ui.Menu) {
-					for _, choice := range behaviorPermissions {
-						choice := choice
-						item := m.Item(localized(locale, choice.zh, choice.en))
-						item.Checked(choice.value == current)
-						if item.Chosen() && choice.value != current {
-							if err := store.Set(contracts.SettingAgentPermission, choice.value); err != nil {
-								st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
-								st.statusErr = true
-							} else {
-								st.status = localized(locale, "已保存", "Saved")
-								st.statusErr = false
-							}
-							runtime.Invalidate()
-						}
+		search.region(c, "behavior.permission", func(c *ui.Context) {
+			uikit.Section(c, localized(locale, "默认代理权限", "Default agent permission"), func(*ui.Context) {
+				current := agentPermissionMode(store.Get(contracts.SettingAgentPermission, ""))
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+					design.Apply(ui.Text(c, localized(locale, "当前：", "Current: ")+
+						behaviorPermissionLabel(locale, current)), t.Font(design.TypeXS)).
+						TextColor(t.LabelSecondary)
+					ui.Spacer(c).Grow(1)
+					if st.status != "" {
+						statusBadge(c, t, st.status, st.statusErr)
 					}
-				}).Tooltip(localized(locale, "选择默认权限模式", "Choose the default permission mode"))
+				})
+				// A menu is a chip, not a form field: a row keeps it at its natural
+				// width instead of stretching it across the content column.
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+					ui.PopoverMenuButton(c, behaviorPermissionLabel(locale, current), func(m *ui.Menu) {
+						for _, choice := range behaviorPermissions {
+							choice := choice
+							item := m.Item(localized(locale, choice.zh, choice.en))
+							item.Checked(choice.value == current)
+							if item.Chosen() && choice.value != current {
+								if err := store.Set(contracts.SettingAgentPermission, choice.value); err != nil {
+									st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+									st.statusErr = true
+								} else {
+									st.status = localized(locale, "已保存", "Saved")
+									st.statusErr = false
+								}
+								runtime.Invalidate()
+							}
+						}
+					}).Tooltip(localized(locale, "选择默认权限模式", "Choose the default permission mode"))
+				})
 			})
 		})
 		// OS sandbox: the always-on kernel-level file-effect enforcement that
@@ -264,28 +273,36 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 		// and when finished steps fold (DSH-aligned). This stays visible next to
 		// the daily permission choice; it is a display preference, not a
 		// low-frequency knob.
-		uikit.Section(c, localized(locale, "工作步骤", "Work details"), func(*ui.Context) {
-			modeIndex := workStepsModeIndex(contracts.NormalizeWorkStepsMode(
-				store.Get(contracts.SettingWorkStepsMode, "")))
-			ui.Field(c, localized(locale, "工作步骤展示", "Work details"), func() {
-				if buildSegmentedControl(c, t, &modeIndex,
-					localized(locale, "工作步骤展示", "Work details"),
-					workStepsModeLabels(locale)...) {
-					saveBehaviorSetting(st, runtime, store, locale,
-						contracts.SettingWorkStepsMode, workStepsModeValue(modeIndex))
-				}
-			})
-			collapseIndex := workStepsCollapseIndex(contracts.NormalizeWorkStepsCollapse(
-				store.Get(contracts.SettingWorkStepsCollapse, "")))
-			ui.Field(c, localized(locale, "工作步骤收起时机", "When to collapse work details"),
-				func() {
-					if buildSegmentedControl(c, t, &collapseIndex,
-						localized(locale, "工作步骤收起时机", "When to collapse work details"),
-						workStepsCollapseLabels(locale)...) {
+		search.region(c, "behavior.work-details", func(c *ui.Context) {
+			uikit.Section(c, localized(locale, "工作步骤", "Work details"), func(*ui.Context) {
+				modeIndex := workStepsModeIndex(contracts.NormalizeWorkStepsMode(
+					store.Get(contracts.SettingWorkStepsMode, "")))
+				ui.Field(c, localized(locale, "工作步骤展示", "Work details"), func() {
+					if uikit.SegmentedControl(c, uikit.SegmentedOptions{
+						Key:      "settings.behavior.workSteps",
+						Label:    localized(locale, "工作步骤展示", "Work details"),
+						Labels:   workStepsModeLabels(locale),
+						Selected: &modeIndex,
+					}) {
 						saveBehaviorSetting(st, runtime, store, locale,
-							contracts.SettingWorkStepsCollapse, workStepsCollapseValue(collapseIndex))
+							contracts.SettingWorkStepsMode, workStepsModeValue(modeIndex))
 					}
 				})
+				collapseIndex := workStepsCollapseIndex(contracts.NormalizeWorkStepsCollapse(
+					store.Get(contracts.SettingWorkStepsCollapse, "")))
+				ui.Field(c, localized(locale, "工作步骤收起时机", "When to collapse work details"),
+					func() {
+						if uikit.SegmentedControl(c, uikit.SegmentedOptions{
+							Key:      "settings.behavior.workStepsCollapse",
+							Label:    localized(locale, "工作步骤收起时机", "When to collapse work details"),
+							Labels:   workStepsCollapseLabels(locale),
+							Selected: &collapseIndex,
+						}) {
+							saveBehaviorSetting(st, runtime, store, locale,
+								contracts.SettingWorkStepsCollapse, workStepsCollapseValue(collapseIndex))
+						}
+					})
+			})
 		})
 		// Progressive disclosure (settings-complexity audit P4): only the daily
 		// permission choice and the work-details preference stay visible; the
@@ -295,43 +312,47 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 		// controls.
 		ui.Collapsible(c, localized(locale, "更多对话设置", "More conversation settings"), &st.moreOpen, func() {
 			ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-				uikit.Section(c, localized(locale, "消息字号", "Message text size"), func(*ui.Context) {
-					current := chatFontSizeSetting(store)
-					ui.PopoverMenuButton(c, chatFontSizeLabel(locale, current), func(m *ui.Menu) {
-						for _, choice := range chatFontSizes {
-							choice := choice
-							item := m.Item(localized(locale, choice.zh, choice.en))
-							item.Checked(choice.value == current)
-							if item.Chosen() && choice.value != current {
-								if err := store.Set(contracts.SettingChatFontSize, choice.value); err != nil {
-									st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
-									st.statusErr = true
-								} else {
-									st.status = localized(locale, "已保存", "Saved")
-									st.statusErr = false
+				search.region(c, "behavior.message-size", func(c *ui.Context) {
+					uikit.Section(c, localized(locale, "消息字号", "Message text size"), func(*ui.Context) {
+						current := chatFontSizeSetting(store)
+						ui.PopoverMenuButton(c, chatFontSizeLabel(locale, current), func(m *ui.Menu) {
+							for _, choice := range chatFontSizes {
+								choice := choice
+								item := m.Item(localized(locale, choice.zh, choice.en))
+								item.Checked(choice.value == current)
+								if item.Chosen() && choice.value != current {
+									if err := store.Set(contracts.SettingChatFontSize, choice.value); err != nil {
+										st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+										st.statusErr = true
+									} else {
+										st.status = localized(locale, "已保存", "Saved")
+										st.statusErr = false
+									}
+									runtime.Invalidate()
 								}
-								runtime.Invalidate()
 							}
-						}
-					}).Label(localized(locale, "消息字号：", "Text size: ") +
-						chatFontSizeLabel(locale, current)).
-						Tooltip(localized(locale, "选择对话文字大小", "Choose the conversation text size"))
+						}).Label(localized(locale, "消息字号：", "Text size: ") +
+							chatFontSizeLabel(locale, current)).
+							Tooltip(localized(locale, "选择对话文字大小", "Choose the conversation text size"))
+					})
 				})
-				uikit.Section(c, localized(locale, "工作区指令", "Workspace instructions"), func(*ui.Context) {
-					if !st.agentsFileLoaded {
-						st.agentsFileLoaded = true
-						st.agentsFile = store.Get(contracts.SettingAgentsFile, "AGENTS.md")
-					}
-					ui.Field(c, localized(locale, "工作区指令文件", "Workspace instructions file"), func() {
-						input := ui.TextInput(c, &st.agentsFile).
-							Label(localized(locale, "工作区指令文件", "Workspace instructions file")).
-							Placeholder("AGENTS.md").FillWidth()
-						if input.Changed() {
-							saveAgentsFile(st, store, locale)
+				search.region(c, "behavior.workspace-instructions", func(c *ui.Context) {
+					uikit.Section(c, localized(locale, "工作区指令", "Workspace instructions"), func(*ui.Context) {
+						if !st.agentsFileLoaded {
+							st.agentsFileLoaded = true
+							st.agentsFile = store.Get(contracts.SettingAgentsFile, "AGENTS.md")
 						}
-					}).Description(localized(locale,
-						"留空关闭；下次运行生效。",
-						"Empty disables it; applies on the next run."))
+						ui.Field(c, localized(locale, "工作区指令文件", "Workspace instructions file"), func() {
+							input := ui.TextInput(c, &st.agentsFile).
+								Label(localized(locale, "工作区指令文件", "Workspace instructions file")).
+								Placeholder("AGENTS.md").FillWidth()
+							if input.Changed() {
+								saveAgentsFile(st, store, locale)
+							}
+						}).Description(localized(locale,
+							"留空关闭；下次运行生效。",
+							"Empty disables it; applies on the next run."))
+					})
 				})
 			})
 		})

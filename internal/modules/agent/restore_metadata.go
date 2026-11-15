@@ -51,6 +51,7 @@ func (s *service) restoreSessionMetadata(ctx context.Context, sessionID string, 
 	var (
 		queued        []contracts.QueuedPrompt
 		rounds        []restoredGoalRound
+		turns         []restoredTurnTime
 		observability []rig.SessionEvent
 		hasQueueRow   bool
 	)
@@ -67,7 +68,7 @@ func (s *service) restoreSessionMetadata(ctx context.Context, sessionID string, 
 			event.Type == compactEvent, event.Type == compactArchiveEventType,
 			event.Type == spillEvent, event.Type == contextRecoveryEventType:
 			observability = append(observability, event)
-		case event.Type == "user_message":
+		case event.Type == restoreUserMessageEvent:
 			var payload struct {
 				Text      string                   `json:"text"`
 				GoalRound *contracts.GoalRoundInfo `json:"goalRound"`
@@ -75,10 +76,16 @@ func (s *service) restoreSessionMetadata(ctx context.Context, sessionID string, 
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
 				continue
 			}
-			if payload.GoalRound == nil {
-				continue
+			turns = append(turns, restoredTurnTime{text: payload.Text, userAt: event.Time})
+			if payload.GoalRound != nil {
+				rounds = append(rounds, restoredGoalRound{text: payload.Text, round: payload.GoalRound})
 			}
-			rounds = append(rounds, restoredGoalRound{text: payload.Text, round: payload.GoalRound})
+		case event.Type == restoreRunEndEvent:
+			// The run_end ends the turn its user_message opened; a run_end whose
+			// user_message fell outside the bounded window has no turn to end.
+			if len(turns) > 0 {
+				turns[len(turns)-1].endAt = event.Time
+			}
 		}
 	}
 	if hasQueueRow && len(queued) > 0 {
@@ -86,6 +93,7 @@ func (s *service) restoreSessionMetadata(ctx context.Context, sessionID string, 
 	}
 	s.foldRestoredContextEvents(sessionID, observability)
 	hydrateGoalRoundsLocked(state, rounds)
+	hydrateRestoredTimes(state, turns)
 }
 
 // hydrateGoalRoundsLocked applies the durable goal-round markers to the restored

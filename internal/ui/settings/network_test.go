@@ -120,6 +120,13 @@ func TestNetworkPageEnglish(t *testing.T) {
 
 	h.assertTexts(tester, "Network", "Currently applied", "Proxy URL", "NO_PROXY",
 		"Direct", "Restart the app to apply changes", "Save")
+	// The footer primary is disabled while nothing is pending (P2-11); a typed
+	// proxy enables it and the save reports its result.
+	requireFooterDisabled(t, tester, "Save", true, "network clean (en)")
+	h.focusInput(tester, "Proxy URL input")
+	tester.Type("http://127.0.0.1:7890")
+	tester.Frame()
+	requireFooterDisabled(t, tester, "Save", false, "network dirty (en)")
 	h.click(tester, "Save")
 	h.assertTexts(tester, "Saved")
 }

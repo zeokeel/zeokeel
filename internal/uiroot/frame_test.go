@@ -140,6 +140,14 @@ func TestSettingsSurface(t *testing.T) {
 	if !nav.SettingsOpen() {
 		t.Fatal("ToggleSettings did not open the settings surface")
 	}
+	// The settings surface is a dialog and its navigation a tree: assistive
+	// technology needs both named, not just the page contents.
+	if _, ok := tt.AccessByRole(ui.RoleDialog, "设置"); !ok {
+		t.Fatalf("the settings dialog has no accessible name; accessibility tree = %+v", tt.AccessAll())
+	}
+	if _, ok := tt.AccessByRole(ui.RoleTree, "设置导航"); !ok {
+		t.Fatalf("the settings navigation tree has no accessible name; accessibility tree = %+v", tt.AccessAll())
+	}
 	// The settings sidebar groups pages by section (the general group first),
 	// before the settings.sidebar extension slot.
 	requireTextBefore(t, tt, "外观设置", "账户设置", "settings-sidebar-extra")
@@ -580,7 +588,7 @@ func TestInspectorDrawerIsModal(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("session", "会话", "body-session", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
-	tt := newTestTester(t, r, 1000, 720)
+	tt := newTestTester(t, r, 800, 720)
 	tt.Frame()
 	if _, ok := tt.Find("body-session"); !ok {
 		t.Fatalf("body-session not found; texts: %v", tt.Texts())
@@ -718,9 +726,9 @@ func TestContentAreaFillsHeightWithDockedInspector(t *testing.T) {
 	// The narrow window keeps the drawer path: the content column never lost
 	// its height there, and the drawer overlays it as a modal dialog.
 	r.SetSidebarCollapsed(false)
-	narrow := newTestTester(t, r, 1024, 720)
+	narrow := newTestTester(t, r, 800, 720)
 	narrow.Frame()
-	requireInBottomBand(t, narrow, 1024, 720, "screen-bottom")
+	requireInBottomBand(t, narrow, 800, 720, "screen-bottom")
 	requireHasText(t, narrow, "inspector-pane")
 	requireHasText(t, narrow, "检查器")
 	if _, ok := narrow.AccessByRole(ui.RoleDialog, "检查器"); !ok {
@@ -810,14 +818,17 @@ func TestCollapsedSidebarStartupResolvesDefaultScreen(t *testing.T) {
 
 // TestSettingsSearchMatchesSettingNames covers R2: the navigation search must
 // find a setting by the name users know it by ("密钥", "主题"), not only by the
-// page title. The alias table is host-owned and keyed by the stable page IDs.
+// page title. The aliases come from the page's own spec (module-declared), which
+// keeps the words next to the page instead of in a host-side table.
 func TestSettingsSearchMatchesSettingNames(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
 	mustPage(t, r, contracts.SettingsPageSpec{ID: "model", Section: "general", Title: "模型设置", Order: 10,
-		Build: func(c *ui.Context) { ui.Text(c, "settings-model-body") }})
+		Keywords: []string{"密钥", "api key", "模型"},
+		Build:    func(c *ui.Context) { ui.Text(c, "settings-model-body") }})
 	mustPage(t, r, contracts.SettingsPageSpec{ID: "appearance", Section: "general", Title: "外观设置", Order: 20,
-		Build: func(c *ui.Context) { ui.Text(c, "settings-appearance-body") }})
+		Keywords: []string{"主题", "theme", "深色"},
+		Build:    func(c *ui.Context) { ui.Text(c, "settings-appearance-body") }})
 	tt := newTestTester(t, r, 1400, 900)
 	r.Navigator().ToggleSettings()
 	tt.Frame()
@@ -869,7 +880,7 @@ func TestInspectorDrawerReservesContentWidth(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("session", "会话", "screen-body", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "session.panel", "panel-body", 10))
-	tt := newTestTester(t, r, 1024, 720)
+	tt := newTestTester(t, r, 800, 720)
 	tt.Frame()
 	r.SetRightPanelOpen(true)
 	tt.Frame()
@@ -881,7 +892,7 @@ func TestInspectorDrawerReservesContentWidth(t *testing.T) {
 	if !ok {
 		t.Fatalf("session body missing; texts = %v", tt.Texts())
 	}
-	drawerLeft := float32(1024 - design.InspectorWidth)
+	drawerLeft := float32(800 - design.InspectorWidth)
 	if body.X+body.W > drawerLeft+1 {
 		t.Fatalf("content column right edge %.1f runs under the drawer at %.1f", body.X+body.W, drawerLeft)
 	}

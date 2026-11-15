@@ -551,16 +551,14 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 			t.Fatalf("english settings missing %q; texts = %v", want, tester.Texts())
 		}
 	}
-	// The low-frequency group is folded while a daily page shows; open it before
-	// looking for its pages (the group follows the selected page's section).
-	if err := tester.Click("Advanced"); err != nil {
-		t.Fatalf("expand Advanced: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	for _, want := range []string{"Diagnostics", "Update", "Import"} {
-		if !tester.HasText(want) {
-			t.Fatalf("english settings advanced pages missing %q; texts = %v", want, tester.Texts())
+	// The low-frequency pages live in different groups now (Diagnostics in
+	// Advanced, Update/Import in Data & notifications); open them by deep link
+	// so the assertion does not depend on the navigation scroll position.
+	for _, page := range []string{"diagnostics", "update", "import"} {
+		if err := uiRoot.OpenSettingsPage(page); err != nil {
+			t.Fatalf("OpenSettingsPage(%s): %v", page, err)
 		}
+		tester.Frame()
 	}
 	if err := uiRoot.OpenSettingsPage("about"); err != nil {
 		t.Fatalf("open english about page: %v", err)

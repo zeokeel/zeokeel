@@ -949,6 +949,10 @@ func main() {
 	// states (running/error/cancelled) draw the 3px gutter, success stays quiet;
 	// the mono input summary is visible in every row.
 	renderToolRowSpecimen(outDir)
+	// A component specimen for the approval card's "将改动" diff section
+	// (write_file): the inline card in light and dark, independent of the
+	// scripted conversation's team_task_create request.
+	renderApprovalSpecimen(outDir)
 	// A component specimen for the reading column's Markdown theme: headings,
 	// prose, nested lists, quote, fence and table in light and dark.
 	renderMarkdownSpecimen(outDir)
@@ -2236,4 +2240,67 @@ func renderMarkdownSpecimen(outDir string) {
 	}
 	render(design.Light(), filepath.Join(outDir, "p2-markdown-specimen.png"))
 	render(design.Dark(), filepath.Join(outDir, "p2-markdown-specimen-dark.png"))
+}
+
+// renderApprovalSpecimen renders the inline approval card's "将改动" diff
+// section for a write_file request, in light and dark. It is a component
+// specimen, not a product conversation frame: the scripted conversation's
+// approval is a team_task_create, which has no file diff.
+func renderApprovalSpecimen(outDir string) {
+	content := strings.Join([]string{
+		"package session",
+		"",
+		"// send submits the composer draft when a model is configured.",
+		"func (s *state) send() bool {",
+		"\tif s.draft == \"\" {",
+		"\t\treturn false",
+		"\t}",
+		"\treturn s.sendPrompt(s.draft)",
+		"}",
+		"",
+	}, "\n")
+	arguments, err := json.Marshal(map[string]string{
+		"path":    "internal/ui/session/view.go",
+		"content": content,
+	})
+	if err != nil {
+		fail("approval specimen arguments", err)
+	}
+	request := contracts.ApprovalRequest{
+		ID:        "specimen-approval-write",
+		Tool:      "write_file",
+		Summary:   "写入发布检查清单",
+		Arguments: string(arguments),
+		SessionID: "specimen-session",
+	}
+	render := func(tokens *design.Tokens, path string) {
+		tester := ui.NewTester(func(c *ui.Context) {
+			c.SetTheme(tokens.Theme())
+			ui.Column(c).FillWidth().FillHeight().Background(tokens.BgBase).Padding(design.Space4).Children(func() {
+				ui.Column(c).Width(design.TranscriptWidth).MaxWidthPercent(96).Children(func() {
+					uikit.ApprovalDialog(c, uikit.ApprovalDialogOptions{
+						Request:   request,
+						Pending:   1,
+						Inline:    true,
+						Origin:    "来自会话：发布检查",
+						OnResolve: func(contracts.ApprovalDecision) {},
+					})
+				})
+			})
+		}, 1000, 720)
+		tester.SetLocale("zh-Hans")
+		tester.Frame()
+		img := tester.Image()
+		file, err := os.Create(path)
+		if err != nil {
+			fail("create "+path, err)
+		}
+		if err := png.Encode(file, img); err != nil {
+			fail("encode "+path, err)
+		}
+		_ = file.Close()
+		fmt.Println("wrote", path, img.Bounds().Size())
+	}
+	render(design.Light(), filepath.Join(outDir, "p2-approval-diff.png"))
+	render(design.Dark(), filepath.Join(outDir, "p2-approval-diff-dark.png"))
 }

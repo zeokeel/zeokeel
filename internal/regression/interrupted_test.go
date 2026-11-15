@@ -35,17 +35,17 @@ func countLabels(tester interface {
 func TestInterruptedNoticeActionsAndClear(t *testing.T) {
 	harness := startSessionUI(t, interruptedAuditSession("sess-int", "恢复会话"))
 	requireHasText(t, harness.tester, "上次运行被中断")
-	requireHasText(t, harness.tester, "未重放；请检查工作区状态后继续。")
-	requireHasText(t, harness.tester, "继续")
+	requireHasText(t, harness.tester, "未重放；请检查工作区状态，然后在输入框继续。")
+	requireHasText(t, harness.tester, "在输入框继续")
 	// The notice has exactly one home (above the transcript): no sidebar copy and
 	// no duplicate banner.
 	if got := countLabels(harness.tester, "上次运行被中断"); got != 1 {
 		t.Fatalf("interrupted notice rendered %d times, want once in the session body", got)
 	}
 
-	// 继续 hands the composer the keyboard without replaying anything.
-	if err := harness.tester.Click("继续"); err != nil {
-		t.Fatalf("click 继续: %v; texts = %v", err, harness.tester.Texts())
+	// 在输入框继续 hands the composer the keyboard without replaying anything.
+	if err := harness.tester.Click("在输入框继续"); err != nil {
+		t.Fatalf("click 在输入框继续: %v; texts = %v", err, harness.tester.Texts())
 	}
 	harness.tester.Frame()
 	if sends := harness.chat.recordedSends(); len(sends) != 0 {

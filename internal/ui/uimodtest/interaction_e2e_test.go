@@ -217,21 +217,21 @@ func TestSettingsFixedFooterAndClose(t *testing.T) {
 	}
 	dialog := settingsDialogBounds(1280, 800)
 	// No body scrolling: the fixed footer already shows the page's action.
-	apply, ok := tester.Find("应用")
+	apply, ok := tester.Find("保存")
 	if !ok {
-		t.Fatalf("fixed-footer primary action「应用」missing without scrolling; texts = %v", tester.Texts())
+		t.Fatalf("fixed-footer primary action「保存」missing without scrolling; texts = %v", tester.Texts())
 	}
 	if !rectInside(dialog, apply) {
-		t.Fatalf("「应用」outside the settings dialog: rect=%+v dialog=%+v", apply, dialog)
+		t.Fatalf("「保存」outside the settings dialog: rect=%+v dialog=%+v", apply, dialog)
 	}
 	if !windowHasRect(1280, 800, apply) {
-		t.Fatalf("「应用」outside the window: %+v", apply)
+		t.Fatalf("「保存」outside the window: %+v", apply)
 	}
 	if apply.Y < dialog.Y+dialog.H*0.55 {
-		t.Fatalf("「应用」is not in the dialog's bottom footer: rect=%+v dialog=%+v", apply, dialog)
+		t.Fatalf("「保存」is not in the dialog's bottom footer: rect=%+v dialog=%+v", apply, dialog)
 	}
-	if err := tester.Click("应用"); err != nil {
-		t.Fatalf("fixed-footer primary action「应用」is not clickable: %v", err)
+	if err := tester.Click("保存"); err != nil {
+		t.Fatalf("fixed-footer primary action「保存」is not clickable: %v", err)
 	}
 	tester.Frame()
 

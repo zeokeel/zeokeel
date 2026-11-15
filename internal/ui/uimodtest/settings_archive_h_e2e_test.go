@@ -27,7 +27,7 @@ func TestSettingsDeepLinksAndNavigationSearch(t *testing.T) {
 	if !product.uiRoot.Navigator().SettingsOpen() {
 		t.Fatalf("settings surface did not open")
 	}
-	for _, want := range []string{"外观模式", "界面语言", "应用", "搜索设置"} {
+	for _, want := range []string{"外观模式", "界面语言", "保存", "搜索设置"} {
 		if !tester.HasText(want) {
 			t.Fatalf("appearance page missing %q; texts = %v", want, tester.Texts())
 		}

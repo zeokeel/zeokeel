@@ -67,6 +67,11 @@ type ApprovalLabels struct {
 	// "原始参数"/"Raw arguments"). It is the one label of the disclosure: the
 	// summary above already names what the call does.
 	ArgumentsLabel string
+	// ChangeLabel labels the "what will change" block of a file write/edit
+	// (default "将改动"/"Changes"). The block sits between the summary and the
+	// raw arguments: the diff is the thing being judged, so it comes before
+	// the raw payload.
+	ChangeLabel string
 	// AllowLabel permits this one call (default "允许"/"Allow").
 	AllowLabel string
 	// AllowAlwaysLabel permits this tool for the rest of the session (default
@@ -82,6 +87,7 @@ func (l ApprovalLabels) resolved(locale contracts.LocaleService) ApprovalLabels 
 		Title:            approvalFirstNonEmpty(l.Title, T(locale, "需要审批", "Approval required")),
 		ToolLabel:        approvalFirstNonEmpty(l.ToolLabel, T(locale, "工具", "Tool")),
 		ArgumentsLabel:   approvalFirstNonEmpty(l.ArgumentsLabel, T(locale, "原始参数", "Raw arguments")),
+		ChangeLabel:      approvalFirstNonEmpty(l.ChangeLabel, T(locale, "将改动", "Changes")),
 		AllowLabel:       approvalFirstNonEmpty(l.AllowLabel, T(locale, "允许", "Allow")),
 		AllowAlwaysLabel: approvalFirstNonEmpty(l.AllowAlwaysLabel, T(locale, "本会话内始终允许", "Always allow in this session")),
 		DenyLabel:        approvalFirstNonEmpty(l.DenyLabel, T(locale, "拒绝", "Deny")),
@@ -218,6 +224,9 @@ func approvalInlineCard(c *ui.Context, o ApprovalDialogOptions, labels ApprovalL
 			approvalOriginRow(c, t, o)
 			approvalImpactLine(c, t, o.Locale)
 			approvalSummarySection(c, t, o, summary, arguments)
+			// The change itself, before the raw payload: a file write/edit is
+			// judged by what it will do to the file, not by its JSON.
+			approvalChangeSection(c, t, o, labels, arguments)
 			approvalArgumentsSection(c, t, o, labels, request, arguments, argsOpen)
 			// The middle choice is session-scoped, not run-scoped: say so once
 			// in quiet copy, including where the user can take it back.
@@ -294,6 +303,9 @@ func approvalRequestBody(c *ui.Context, o ApprovalDialogOptions, labels Approval
 		approvalOriginRow(c, t, o)
 		approvalImpactLine(c, t, o.Locale)
 		approvalSummarySection(c, t, o, summary, arguments)
+		// The change itself, before the raw payload: a file write/edit is
+		// judged by what it will do to the file, not by its JSON.
+		approvalChangeSection(c, t, o, labels, arguments)
 		approvalArgumentsSection(c, t, o, labels, request, arguments, argsOpen)
 		ui.Divider(c)
 		// The product's one dialog action bar: the destructive Deny first, the
@@ -518,6 +530,202 @@ func approvalFirstLine(text string) string {
 		return strings.TrimSpace(trimmed[:index])
 	}
 	return trimmed
+}
+
+// approvalChangeSection renders the "what will change" block of a file
+// write/edit between the summary and the raw arguments: the path, the +N −M
+// line counts and the official unified diff of the content the arguments
+// already carry. It never reads the file: an approval request must decide on
+// what the call will write, and the arguments hold exactly that. A call whose
+// arguments cannot be turned into an honest diff shows a bounded mono preview
+// with the reason instead (uikit.DiffPreview), never a blank or fake diff.
+func approvalChangeSection(c *ui.Context, t *design.Tokens, o ApprovalDialogOptions,
+	labels ApprovalLabels, arguments string) {
+	change := approvalChangeFor(o.Locale, o.Request.Tool, arguments)
+	if !change.show {
+		return
+	}
+	design.Apply(ui.Text(c, labels.ChangeLabel), t.TextMuted(design.TypeXS))
+	DiffPreview(c, DiffPreviewOptions{
+		Key:          "approval.change." + o.Request.ID,
+		Path:         change.path,
+		Old:          change.old,
+		New:          change.new,
+		FallbackText: change.fallback,
+		FallbackNote: change.note,
+		Locale:       o.Locale,
+	})
+}
+
+// approvalChange is the file change a write/edit approval will make, as far as
+// the call's arguments describe it: the path and the texts the official diff
+// compares, or the bounded fallback copy when no diff can be built.
+type approvalChange struct {
+	// show reports that the card has a change block to draw. An unknown tool,
+	// a read-only command (str_replace_editor view), or arguments that name no
+	// write at all leave it false.
+	show bool
+	// path is the file the call writes (path/file_path/file).
+	path string
+	// old and new are the compared texts: write_file's content is the whole
+	// new file (old empty), edit_file's old_string/new_string are the replaced
+	// region.
+	old, new string
+	// fallback is a bounded mono preview for a change no diff can show, and
+	// note the honest one-line reason above it.
+	fallback, note string
+}
+
+// approvalChangeTools are the tools whose arguments describe a file write the
+// approval card can preview. Unknown tools (including a host-registered
+// apply_patch with its own patch format) deliberately get no diff: the card
+// shows only what it can read honestly.
+var approvalChangeTools = map[string]bool{
+	"write_file":         true,
+	"edit_file":          true,
+	"str_replace_editor": true,
+}
+
+// approvalChange resolves the change plan of one write/edit call. Arguments are
+// the raw JSON the backend captured (a JSON object, or a JSON string holding
+// one); empty and unparseable arguments take the fallback path so the card
+// explains itself instead of showing nothing.
+func approvalChangeFor(locale contracts.LocaleService, tool, arguments string) approvalChange {
+	key := strings.ToLower(strings.TrimSpace(tool))
+	if !approvalChangeTools[key] {
+		return approvalChange{}
+	}
+	trimmed := strings.TrimSpace(arguments)
+	if approvalEmptyArguments(trimmed) {
+		return approvalChange{}
+	}
+	values, ok := approvalArgumentObject(trimmed)
+	if !ok {
+		return approvalChange{
+			show:     true,
+			fallback: approvalTruncate(trimmed, approvalMaxArgumentsRunes),
+			note: T(locale, "无法解析参数，无法生成 diff。",
+				"The arguments cannot be parsed, so no diff can be shown."),
+		}
+	}
+	path := approvalStringArgument(values, "path", "file_path", "file")
+	switch key {
+	case "write_file":
+		content, contentOK := approvalFirstStringArgument(values, "content")
+		if !contentOK {
+			return approvalChange{}
+		}
+		return approvalChange{show: true, path: path, new: content}
+	case "edit_file":
+		return approvalEditChange(path, values, []string{"old_string"}, []string{"new_string"})
+	case "str_replace_editor":
+		return approvalEditorChange(locale, path, values)
+	}
+	return approvalChange{}
+}
+
+// approvalEditChange resolves the old/new pair of an edit. A payload missing
+// either side is no readable edit (the tool itself rejects it), so the card
+// omits the block rather than guessing.
+func approvalEditChange(path string, values map[string]any, oldKeys, newKeys []string) approvalChange {
+	oldText, oldOK := approvalFirstStringArgument(values, oldKeys...)
+	newText, newOK := approvalFirstStringArgument(values, newKeys...)
+	if !oldOK || !newOK {
+		return approvalChange{}
+	}
+	return approvalChange{show: true, path: path, old: oldText, new: newText}
+}
+
+// approvalEditorChange resolves str_replace_editor's command: create writes a
+// whole file, str_replace replaces an exact snippet, insert's position lives in
+// the file so no diff can be built from the arguments alone, and view changes
+// nothing.
+func approvalEditorChange(locale contracts.LocaleService, path string, values map[string]any) approvalChange {
+	command := strings.ToLower(strings.TrimSpace(approvalStringArgument(values, "command")))
+	switch command {
+	case "view":
+		return approvalChange{}
+	case "create":
+		text, ok := approvalFirstStringArgument(values, "file_text")
+		if !ok {
+			return approvalChange{}
+		}
+		return approvalChange{show: true, path: path, new: text}
+	case "insert":
+		text, ok := approvalFirstStringArgument(values, "new_str")
+		if !ok {
+			return approvalChange{}
+		}
+		return approvalChange{
+			show:     true,
+			path:     path,
+			fallback: text,
+			note: T(locale,
+				"插入位置取决于文件现有内容，无法仅凭参数生成 diff；以下是将插入的文本。",
+				"The insertion point is in the file, so the arguments alone cannot make a diff; showing the text to insert."),
+		}
+	case "str_replace", "":
+		// An empty command is treated as a replacement: the arguments carry the
+		// old/new pair the tool's str_replace uses.
+		return approvalEditChange(path, values,
+			[]string{"old_str", "old_string"}, []string{"new_str", "new_string"})
+	default:
+		return approvalChange{}
+	}
+}
+
+// approvalArgumentObject decodes the argument JSON into an object. The contract
+// stores the raw arguments as a string, but a host that handed the card a
+// JSON-encoded string is read through once more; anything that is not an object
+// reports false so the caller can fall back honestly.
+func approvalArgumentObject(arguments string) (map[string]any, bool) {
+	decode := func(text string) (any, bool) {
+		decoder := json.NewDecoder(strings.NewReader(text))
+		decoder.UseNumber()
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			return nil, false
+		}
+		return value, true
+	}
+	value, ok := decode(arguments)
+	if !ok {
+		return nil, false
+	}
+	if text, isString := value.(string); isString {
+		value, ok = decode(text)
+		if !ok {
+			return nil, false
+		}
+	}
+	object, isObject := value.(map[string]any)
+	if !isObject || len(object) == 0 {
+		return nil, false
+	}
+	return object, true
+}
+
+// approvalStringArgument returns the first string value under keys, or "".
+func approvalStringArgument(values map[string]any, keys ...string) string {
+	text, _ := approvalFirstStringArgument(values, keys...)
+	return text
+}
+
+// approvalFirstStringArgument returns the first string value under keys and
+// reports whether one was found.
+func approvalFirstStringArgument(values map[string]any, keys ...string) (string, bool) {
+	for _, key := range keys {
+		raw, present := values[key]
+		if !present {
+			continue
+		}
+		text, isString := raw.(string)
+		if !isString {
+			continue
+		}
+		return text, true
+	}
+	return "", false
 }
 
 // approvalArgumentsSection renders the raw arguments as details: a divider, then

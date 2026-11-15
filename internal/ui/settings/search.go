@@ -67,14 +67,20 @@ func buildSearchPage(c *ui.Context, kctx cordis.Context, st *searchState, locale
 
 		uikit.Section(c, localized(locale, "搜索后端", "Search backend"), func(*ui.Context) {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				// The backend configuration states are statuses: the shared
+				// StatusBadge anatomy (AP-21) — Success when configured, the
+				// neutral status tint for a backend still waiting for its
+				// endpoint (not a failure), Success again for the stored key.
 				if configured {
-					design.Apply(ui.Badge(c, localized(locale, "已配置", "Configured")), t.Badge()).
-						TextColor(t.SuccessText)
+					uikit.StatusBadge(c, t, uikit.StatusSuccess,
+						localized(locale, "已配置", "Configured"))
 				} else {
-					design.Apply(ui.Badge(c, localized(locale, "未配置", "Not configured")), t.Badge())
+					uikit.StatusBadge(c, t, uikit.StatusPending,
+						localized(locale, "未配置", "Not configured"))
 				}
 				if apiKeySet {
-					design.Apply(ui.Badge(c, localized(locale, "API Key 已设置", "API key set")), t.Badge())
+					uikit.StatusBadge(c, t, uikit.StatusSuccess,
+						localized(locale, "API Key 已设置", "API key set"))
 				}
 			})
 			ui.Field(c, localized(locale, "搜索端点", "Search endpoint"), func() {

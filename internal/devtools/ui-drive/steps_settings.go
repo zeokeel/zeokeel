@@ -26,7 +26,7 @@ type settingsPageSpec struct {
 // groups them by Section; the advanced pages live behind a collapsed group).
 var settingsPages = []settingsPageSpec{
 	{"settings-page-model", "model", "模型", []string{"模型列表", "添加模型", "系统提示词"}},
-	{"settings-page-appearance", "appearance", "外观", []string{"外观模式", "界面语言", "应用"}},
+	{"settings-page-appearance", "appearance", "外观", []string{"外观模式", "界面语言", "保存"}},
 	{"settings-page-skills", "skills", "技能", []string{"新建技能", "刷新"}},
 	{"settings-page-shortcuts", "shortcuts", "快捷键", []string{"快捷键", "Ctrl + B"}},
 	{"settings-page-diagnostics", "diagnostics", "诊断", []string{"工具数", "会话数"}},
@@ -59,26 +59,42 @@ func (d *drive) runSettingsSteps() {
 		})
 
 	d.step("settings-advanced-group", "settings", "设置：高级分组默认折叠",
-		"设置导航默认只显示日常页；「高级」分组默认折叠，点击后展开诊断/更新/导入/归档等低频页，再次点击收起", func(c *check) {
+		"设置导航默认显示日常页与「数据与通知」组；「高级」分组默认折叠，点击后只展开诊断（通知/归档/导入/更新已在数据与通知中），再次点击收起", func(c *check) {
 			if !d.openSettingsFromNeutralScreen() {
 				c.failf("打开设置失败")
 				return
 			}
 			c.require(c.has("常用"), "设置导航缺少「常用」分组")
 			c.require(c.has("行为"), "设置导航缺少「行为」")
+			c.require(c.has("数据与通知"), "设置导航缺少「数据与通知」分组")
+			c.require(c.has("通知") && c.has("归档"), "日常「数据与通知」组未显示通知/归档")
 			c.require(c.has("高级"), "设置导航缺少「高级」分组标题")
 			c.require(!c.has("诊断"), "「高级」分组默认展开（应折叠）")
-			if !c.click("高级") {
+			// The navigation is longer now (数据与通知 before 高级), so the
+			// collapsed group can sit below the dialog fold. A deep link opens
+			// the page and auto-expands its group; close/reopen then verifies
+			// the default collapsed state again.
+			if err := d.openSettingsPageID("diagnostics"); err != nil {
+				c.failf("打开诊断深链失败：%v", err)
 				return
 			}
 			d.drain(2)
-			c.require(c.has("诊断") && c.has("数据与隐私"), "展开「高级」后低频页仍不可见")
+			c.require(c.has("诊断") && c.has("工具数"), "展开「高级」后诊断页仍不可见")
 			c.shot("settings-advanced-expanded")
-			if !c.click("高级") {
+			// Return to a daily page before closing: reopening the settings
+			// surface remembers the selected page, and the advanced group is
+			// expanded only while its page is selected.
+			if err := d.openSettingsPageID("model"); err != nil {
+				c.failf("回到模型页失败：%v", err)
 				return
 			}
+			d.uiRoot.Navigator().CloseSettings()
 			d.drain(2)
-			c.require(!c.has("诊断"), "收起「高级」后低频页仍显示")
+			if !d.openSettingsFromNeutralScreen() {
+				c.failf("重开设置失败")
+				return
+			}
+			c.require(!c.has("诊断"), "默认「高级」分组未折叠/诊断页仍显示")
 		})
 
 	for _, page := range settingsPages {
@@ -406,6 +422,26 @@ func (c *check) checkSettingsControls(page settingsPageSpec) {
 	if len(missing) > 0 {
 		c.failf("界面缺少文本：%v", missing)
 	}
+}
+
+// ensureSettingsNavVisible scrolls the settings navigation column (left of the
+// 200 DIP page body) until label's rect is inside the dialog. The grouped nav
+// can be longer than the dialog once 数据与通知 moved above 高级.
+func (d *drive) ensureSettingsNavVisible(label string) bool {
+	panel := d.settingsPanelRect()
+	for attempt := 0; attempt < 12; attempt++ {
+		rect, ok := d.find(label)
+		if ok && rect.Y > panel.Y+40 && rect.Y+rect.H < panel.Y+panel.H-20 {
+			return true
+		}
+		dy := float32(180)
+		if ok && rect.Y > panel.Y+panel.H/2 {
+			dy = -360
+		}
+		d.tester.Scroll(panel.X+100, panel.Y+panel.H*0.5, 0, dy)
+		d.frame()
+	}
+	return false
 }
 
 // ensureSettingsVisible scrolls the settings page body until label's rect is

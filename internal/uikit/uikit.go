@@ -98,9 +98,14 @@ type KeyValue struct {
 }
 
 // KeyValueRows draws label/value rows with the label muted on the left and the
-// value right-aligned. It is the read-only "property sheet" pattern used by
-// the About and Diagnostics pages. Values are selectable, as mygo's text guide
-// recommends for identifiers and paths the user may copy elsewhere.
+// value right-aligned.
+//
+// Deprecated: use PropertySheet (propertysheet.go) for a label/value table. The
+// right-aligned form is not the product's property-sheet shape: it throws the
+// value to the page's right edge (the Context overview measured ~1050 DIP
+// between a label and its value) and has no divider or bounded measure. This
+// helper stays only for the callers the shared-layer migration has not reached
+// yet (the inspector and the plugins page).
 func KeyValueRows(c *ui.Context, rows []KeyValue) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {

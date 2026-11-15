@@ -138,6 +138,23 @@ func buildScreen(
 		st.agents.childSendErr = ""
 		st.agents.childSendSeq++
 	}
+	// Find in the conversation (Cmd/Ctrl+F) is a screen-level chord: the bar
+	// belongs to the transcript, so it opens on the conversation tab even when
+	// the user is reading another tab.
+	registerFindShortcut(c, st, runtime)
+	if st.findOpen && !chatSession.Running {
+		// Idle Esc belongs to the composer and its suggestion menu; only an open
+		// find bar adds a screen-level Esc, and it still yields to a suggestion
+		// menu (its first Esc closes the menu).
+		c.OnShortcut(0, ui.KeyEscape, func() {
+			if !st.findOpen || suggestionMenuOpen(st) {
+				return
+			}
+			st.findOpen = false
+			st.focusComposer = true
+			runtime.Invalidate()
+		})
+	}
 	// Keyboard interrupt of the running turn: Esc / Cmd+. stop generation the
 	// way the 停止 control does. The composer's suggestion menus consume Esc
 	// first (composerTextKey), and this scope refuses to interrupt while one is
@@ -186,9 +203,6 @@ func buildScreen(
 		buildPlanDialog(c, t, runtime, st)
 		buildMemoryDialog(c, t, runtime, st)
 		buildHelpDialog(c, t, runtime, st)
-		// The attachment path fallback modal (ZK-09) is not command-family but
-		// also lives above the screen, next to the composer it stages into.
-		buildAttachmentPathDialog(c, t, runtime, st)
 		// The goal actions' destructive confirmation is the native AlertDialog:
 		// it lives above the whole screen (the goal menu itself is in the dock).
 		buildGoalMenuActions(c, runtime, st)
@@ -281,14 +295,14 @@ func suggestionMenuOpen(st *state) bool {
 }
 
 // sessionDialogOpen reports whether a modal dialog of the conversation screen
-// owns Esc right now (command dialogs, the attachment path fallback, memory
-// confirm/edit). Esc must close those first, never interrupt a run behind them.
+// owns Esc right now (command dialogs, memory confirm/edit). Esc must close
+// those first, never interrupt a run behind them.
 func sessionDialogOpen(st *state) bool {
 	if st == nil {
 		return false
 	}
 	return st.goalOpen || st.planOpen || st.memOpen ||
-		st.helpOpen || st.attachPathsOpen || st.memoryEditOpen || st.memoryClearOpen
+		st.helpOpen || st.memoryEditOpen || st.memoryClearOpen
 }
 
 // denyPendingApproval answers the oldest pending approval as denied, the way the
@@ -337,6 +351,15 @@ func registerInterruptShortcuts(c *ui.Context, chat contracts.ChatService, st *s
 		return
 	}
 	interruptEsc := func() {
+		// The find bar is the innermost focused surface: Esc closes it and never
+		// stops the turn. The bar's field consumes the key when it has the focus;
+		// this keeps the same promise when the focus sits on another control of
+		// the bar (or the bar's Esc already closed it this frame).
+		if st.findOpen {
+			st.findOpen = false
+			runtime.Invalidate()
+			return
+		}
 		// A child conversation is a read-only detour: Esc returns to the parent
 		// conversation instead of blind-denying the parent's approval card (the
 		// banner stays visible in the child view, but the user returns to the
@@ -388,12 +411,59 @@ func buildScreenHeaderSlot(c *ui.Context, t *design.Tokens, st *state, chat cont
 		if strings.TrimSpace(st.agents.childID) != "" {
 			buildChildBreadcrumb(c, t, st, chat, cfg)
 		} else {
+			buildBackToScreen(c, t, st)
 			buildConversationTitle(c, t, st, chat, cfg)
 		}
 		buildAgentRunBand(c, t, st, chat)
 		ui.Spacer(c).Grow(1)
 	})
 	st.headerWidth = row.Bounds().W
+}
+
+// backTargetNavigator is the optional half of the host navigator a session header
+// uses to show where Back leads; a host without it simply has no back action.
+type backTargetNavigator interface {
+	CanGoBack() bool
+	BackTarget() string
+}
+
+// backTargetLabel localizes the screen a back button returns to. Unknown
+// screens fall back to a plain Back label rather than exposing a raw ID.
+func backTargetLabel(st *state, screenID string) string {
+	switch screenID {
+	case "insights":
+		return st.tr("洞察", "Insights")
+	case "automation":
+		return st.tr("自动化", "Automation")
+	case "plugins":
+		return st.tr("插件", "Plugins")
+	default:
+		return st.tr("返回", "Back")
+	}
+}
+
+// buildBackToScreen draws the header's back affordance when the session was
+// reached from another screen (insights/automation/plugins). It is a quiet
+// secondary control before the title; the sidebar remains the primary
+// navigation.
+func buildBackToScreen(c *ui.Context, t *design.Tokens, st *state) {
+	if st == nil || st.navigator == nil {
+		return
+	}
+	back, ok := st.navigator.(backTargetNavigator)
+	if !ok || !back.CanGoBack() {
+		return
+	}
+	target := back.BackTarget()
+	if target == "" || target == ScreenID {
+		return
+	}
+	label := "‹ " + backTargetLabel(st, target)
+	button := design.Apply(ui.Button(c, label), t.SecondaryButton()).
+		Height(design.RowCompactHeight).Shrink(0).Label(label)
+	if button.Clicked() {
+		st.navigator.Back()
+	}
 }
 
 // buildConversationTitle is the header's title in the parent conversation: the
@@ -455,9 +525,10 @@ func buildConversationActionsButton(c *ui.Context, t *design.Tokens, st *state,
 }
 
 // buildConversationActionsMenu fills the ⋯ menu: the clipboard and export
-// commands of the conversation (the /export command remains the keyboard entry)
-// and the archive action. Actions are grouped: clipboard first, the export
-// formats next, archiving last.
+// commands of the conversation (the /export command remains the keyboard entry),
+// the goal entry (设置目标 at zero state, 编辑目标 once a goal exists) and the
+// archive action. Actions are grouped: clipboard first, the export formats, the
+// goal, archiving last.
 func buildConversationActionsMenu(m *ui.Menu, c *ui.Context, st *state,
 	runtime contracts.UIRuntime, cfg Config, chatSession contracts.ChatSession) {
 	if m.Item(st.tr("复制会话 ID", "Copy session ID")).Chosen() {
@@ -472,6 +543,19 @@ func buildConversationActionsMenu(m *ui.Menu, c *ui.Context, st *state,
 	}
 	if m.Item(st.tr("导出 JSONL", "Export JSONL")).Chosen() {
 		exportSessionJSONL(st, chatSession, cfg)
+	}
+	// The goal entry: the dock only exists while a goal does, so the ⋯ menu
+	// carries the zero-value entry too. One entry only — the dock's own menu
+	// owns pause/resume/complete/clear once a goal is there.
+	if st.goalService != nil {
+		label := st.tr("设置目标", "Set goal")
+		if st.goal != nil {
+			label = st.tr("编辑目标", "Edit goal")
+		}
+		m.Separator()
+		if m.Item(label).ID("session.conversation.goal").Chosen() {
+			openGoalDialog(st, runtime)
+		}
 	}
 	// Archiving moved to the settings data page, but the conversation keeps its
 	// own action; success is a toast with Undo (restores the flag).
@@ -542,11 +626,13 @@ func buildHeaderWorkspace(c *ui.Context, t *design.Tokens, st *state) {
 // measure: the active goal (badge, text, ⋯ menu) first, then the host slot the
 // approval module draws its inline card into. The transcript itself stays above.
 func buildComposerDock(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
-	ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
-		ui.Column(c).Width(design.TranscriptWidth).MaxWidthPercent(92).Gap(design.Space2).Children(func() {
-			buildGoalDock(c, t, runtime, st)
-			runtime.RenderSlot(c, contracts.SlotSessionBanner)
-		})
+	// The goal dock and the approval banner sit on the shared reading column, so
+	// they line up with the transcript and the composer card instead of a
+	// hand-rolled 960 frame (context-ui-dev's uikit.ReadingColumn owns the 92%
+	// cap and the horizontal padding).
+	uikit.ReadingColumn(c, func(c *ui.Context) {
+		buildGoalDock(c, t, runtime, st)
+		runtime.RenderSlot(c, contracts.SlotSessionBanner)
 	})
 }
 
@@ -555,10 +641,9 @@ func buildComposerDock(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 // measure: a pending parent approval must stay visible and reachable while the
 // user reads a child, since the inline card is the product's only approval UI.
 func buildChildBannerDock(c *ui.Context, runtime contracts.UIRuntime) {
-	ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
-		ui.Column(c).Width(design.TranscriptWidth).MaxWidthPercent(92).Children(func() {
-			runtime.RenderSlot(c, contracts.SlotSessionBanner)
-		})
+	// Same reading column as the transcript and the composer dock.
+	uikit.ReadingColumn(c, func(c *ui.Context) {
+		runtime.RenderSlot(c, contracts.SlotSessionBanner)
 	})
 }
 
@@ -794,6 +879,22 @@ func mergeChildNotices(messages []contracts.ChatMessage, notices []contracts.Cha
 	return merged
 }
 
+// noticeChildID returns the child conversation a derived transcript receipt
+// links to. The receipt messages are derived from the child-session read model
+// with the "child-notice-" ID prefix (childNoticeMessages); any other notice —
+// a host's plain receipt — has no child to open.
+func noticeChildID(message contracts.ChatMessage) (string, bool) {
+	if message.Role != contracts.ChatRoleNotice {
+		return "", false
+	}
+	const prefix = "child-notice-"
+	if !strings.HasPrefix(message.ID, prefix) {
+		return "", false
+	}
+	childID := strings.TrimSpace(strings.TrimPrefix(message.ID, prefix))
+	return childID, childID != ""
+}
+
 // childNoticeText is the localized one-line receipt of one finished child.
 func childNoticeText(st *state, agent contracts.ChildAgent) (string, bool) {
 	kind := st.tr("子智能体", "Subagent")
@@ -891,19 +992,19 @@ func buildChatPane(
 	// conversation render as quiet transcript rows. They are derived (not stored
 	// in model history), so a reload shows the same rows; mergeChildNotices keeps
 	// the live ordering and puts them above the streaming answer.
-	messages = mergeChildNotices(messages, childNoticeMessages(st, chat.ActiveSession()), chatSession.Running)
+	threadMessages := transcriptMessages(st, chatSession)
 	// A restored run that never finished is not replayed by the backend: say so
 	// above the transcript (and only there — the sidebar stays free of a
 	// transient badge) with a continue/dismiss pair.
 	buildInterruptedNotice(c, t, runtime, st, chatSession)
 	// verbose keeps the whole timeline and never bundles steps; the other modes
 	// fold a multi-step turn into one process row.
-	var sameTurn func(prev, next contracts.ChatMessage) bool
-	if policy.mode != contracts.WorkStepsVerbose {
-		sameTurn = assistantTurnContinues
+	sameTurn := st.transcriptSameTurn()
+	if st.findOpen {
+		buildFindBar(c, st, threadMessages, sameTurn)
 	}
 	uikit.SessionThread(c, uikit.SessionThreadOptions{
-		Messages:  messages,
+		Messages:  threadMessages,
 		Running:   chatSession.Running,
 		State:     &st.chatList,
 		Locale:    st.locale,
@@ -958,20 +1059,52 @@ func buildHero(c *ui.Context, t *design.Tokens, cfg Config, runtime contracts.UI
 			"还没有消息，开始一段新对话吧。",
 			"No messages yet. Start a new conversation.")),
 			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
-		button := design.Apply(ui.PrimaryButton(c, st.tr("新对话", "New conversation")), t.PrimaryButton())
+		buttonLabel := st.tr("新对话", "New conversation")
+		if hasSession {
+			// The hero is already the empty conversation: the primary action
+			// starts typing in it, not another empty conversation.
+			buttonLabel = st.tr("开始输入", "Start typing")
+		}
+		button := design.Apply(ui.PrimaryButton(c, buttonLabel), t.PrimaryButton())
 		if button.Clicked() {
 			if hasSession {
-				// Already on an empty conversation: focus the input the user
-				// is about to type into instead of leaving a duplicate empty
-				// row in the sidebar (the sidebar's 新对话 stays the explicit
-				// "another conversation" path).
 				st.focusComposer = true
 				runtime.Invalidate()
 			} else {
 				startNewSession(st, chat, navigator)
 			}
 		}
+		buildHeroExamples(c, t, runtime, st)
 		buildFirstRunChecklist(c, t, runtime, navigator, chat, st)
+	})
+}
+
+// heroExamplePrompts are the empty conversation's three starter prompts. They
+// fill the draft without sending, so the user can edit before committing: the
+// hero teaches the shape of a useful prompt instead of only naming the input.
+func (st *state) heroExamplePrompts() []string {
+	return []string{
+		st.tr("检查当前工作区并给出摘要", "Inspect the current workspace and summarize it"),
+		st.tr("把这次讨论整理成发布清单", "Turn this discussion into a release checklist"),
+		st.tr("找出最近的编译错误并修复", "Find the recent build errors and fix them"),
+	}
+}
+
+// buildHeroExamples draws the starter prompts as quiet secondary buttons. A
+// click only stages the prompt in the composer (focusComposer) — it never
+// sends on the user's behalf.
+func buildHeroExamples(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+	prompts := st.heroExamplePrompts()
+	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).Children(func() {
+		for _, prompt := range prompts {
+			button := design.Apply(ui.Button(c, prompt), t.SecondaryButton()).
+				MaxWidth(design.DialogWidthM).Label(prompt)
+			if button.Clicked() {
+				st.draft = prompt
+				st.focusComposer = true
+				runtime.Invalidate()
+			}
+		}
 	})
 }
 
@@ -1081,11 +1214,30 @@ func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 			glyph = icons.AlertTriangle()
 			color = t.DangerText
 		}
+		// A derived child receipt links back to the child's conversation: the
+		// row's trailing action opens it, so a finished teammate/subagent is one
+		// click away instead of hidden behind the child switcher.
+		childID, linksChild := noticeChildID(message)
 		ui.Row(c.Key("session.message." + message.ID)).FillWidth().
 			AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			ui.Icon(c, glyph).Size(design.Space4, design.Space4).TextColor(color)
-			design.Apply(ui.Text(c, message.Text), t.Font(design.TypeXXS)).
-				TextColor(color).Selectable().MaxLines(2).Ellipsis("…")
+			// The body is two lines at most; the tooltip keeps the full receipt
+			// readable (a truncated receipt is still the whole story on hover).
+			body := design.Apply(ui.Text(c, message.Text), t.Font(design.TypeXXS)).
+				TextColor(color).Selectable().MaxLines(2).Ellipsis("…").Tooltip(message.Text)
+			if linksChild {
+				// The action sits at the row's end; the body takes the free room.
+				body.Grow(1).Shrink(1).MinWidthPercent(0)
+				label := st.tr("打开子会话", "Open child conversation")
+				uikit.IconButton(c, uikit.IconButtonOptions{
+					Key:     "session.notice.open." + childID,
+					Label:   label,
+					Tooltip: label,
+					Icon:    icons.Message(),
+					Size:    design.IconSizeS,
+					OnClick: func() { st.openChildView(childID) },
+				})
+			}
 		})
 	case contracts.ChatRoleTool, contracts.ChatRoleSystem:
 		// The role badge is localized copy, never the raw protocol value
@@ -1532,7 +1684,7 @@ func buildAssistantToolRow(c *ui.Context, t *design.Tokens, runtime contracts.UI
 		StatusColor:   uikit.StatusColor(t, statusKind),
 		State:         statusKind,
 		Running:       statusKind == uikit.StatusRunning,
-		Preview:       uikit.ToolPreview(summary, 96),
+		Preview:       toolcards.Preview(st.locale, call),
 		Open:          open,
 		InlineChevron: inBand,
 		MarkerColumn:  inBand,
@@ -1604,10 +1756,13 @@ func buildAssistantMetaContent(c *ui.Context, t *design.Tokens, runtime contract
 	// only reports time/usage (no actions that would judge an unfinished answer).
 	hasMenu := strings.TrimSpace(message.Error) == "" && (hasText || regenerate || hasUsage)
 	hasTime := !message.CreatedAt.IsZero()
-	if !hasTime && !hasMenu {
+	summary := usageSummaryText(st, message.Usage)
+	// A row with no clock and no usage would be an isolated ⋯ (a restored turn
+	// whose durable boundary could not be mapped honestly): draw no meta row at
+	// all instead of an actions-only one.
+	if !hasTime && summary == "" {
 		return false
 	}
-	summary := usageSummaryText(st, message.Usage)
 	if hasTime {
 		buildMessageTime(c, t, st.locale, message.CreatedAt)
 	}
@@ -1633,13 +1788,24 @@ func buildAssistantMetaContent(c *ui.Context, t *design.Tokens, runtime contract
 
 // buildAssistantMetaRow wraps the meta content in a right-aligned row. It is the
 // header line of a turn without a folded process summary, so a finished turn
-// never ends with an isolated ⋯ row.
+// never ends with an isolated ⋯ row: a turn without a clock and without usage
+// draws no row at all (buildAssistantMetaContent would draw nothing but the
+// actions menu).
 func buildAssistantMetaRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	st *state, message contracts.ChatMessage, canRegenerate bool) {
+	if !assistantMetaHasContent(message) {
+		return
+	}
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).Children(func() {
 		ui.Spacer(c).Grow(1)
 		buildAssistantMetaContent(c, t, runtime, st, message, canRegenerate)
 	})
+}
+
+// assistantMetaHasContent reports whether a finished turn's meta row has
+// something to say beyond its actions menu: the clock or the usage summary.
+func assistantMetaHasContent(message contracts.ChatMessage) bool {
+	return !message.CreatedAt.IsZero() || message.Usage != nil
 }
 
 // buildAssistantActionsMenu fills the ⋯ menu of a finished turn: copy, regenerate
@@ -1712,25 +1878,23 @@ func usageSummaryText(st *state, usage *contracts.MessageUsage) string {
 // buildUserMessageMeta is the compact meta row under a user bubble: the message
 // time and one ⋯ menu with copy (original text) and edit. Edit fills the draft
 // and asks for the keyboard, but never sends: the user reviews and submits the
-// edited message themselves. A message with only attachments keeps its time.
+// edited message themselves. A message whose durable clock could not be mapped
+// (a restored history without the event) draws no row: a lone ⋯ under the
+// bubble is exactly the metadata noise the audit found, so copy/edit for that
+// message are unavailable rather than hidden behind an unlabelled dot.
 func buildUserMessageMeta(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	st *state, message contracts.ChatMessage) {
 	hasText := strings.TrimSpace(message.Text) != ""
-	hasTime := !message.CreatedAt.IsZero()
-	if !hasText && !hasTime {
+	if message.CreatedAt.IsZero() {
 		return
 	}
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).Children(func() {
 		ui.Spacer(c).Grow(1)
-		if hasTime {
-			buildMessageTime(c, t, st.locale, message.CreatedAt)
-		}
+		buildMessageTime(c, t, st.locale, message.CreatedAt)
 		if !hasText {
 			return
 		}
-		if hasTime {
-			metaSeparator(c, t)
-		}
+		metaSeparator(c, t)
 		buildMessageMoreButton(c, t, "session.actions."+message.ID,
 			// A distinct name from the assistant meta row's 消息操作: assistive
 			// technology (and frame tests) can tell the two ⋯ entries apart when
@@ -1953,8 +2117,12 @@ func buildToolCard(c *ui.Context, st *state, call contracts.ToolCall, key string
 
 // trajectoryItem is one tool call of the tool timeline.
 type trajectoryItem struct {
-	key  string
-	tool contracts.ToolCall
+	key string
+	// messageID is the message that made the call: the jump back to the
+	// conversation scrolls to the List row that renders it (a merged child
+	// receipt shifts message indexes, so the id is the stable identity).
+	messageID string
+	tool      contracts.ToolCall
 }
 
 // trajectoryItems flattens the session's tool calls in message order.
@@ -1963,8 +2131,9 @@ func trajectoryItems(chatSession contracts.ChatSession) []trajectoryItem {
 	for messageIndex, message := range chatSession.Messages {
 		for toolIndex, tool := range message.Tools {
 			items = append(items, trajectoryItem{
-				key:  fmt.Sprintf("%d-%d-%s", messageIndex, toolIndex, tool.ID),
-				tool: tool,
+				key:       fmt.Sprintf("%d-%d-%s", messageIndex, toolIndex, tool.ID),
+				messageID: message.ID,
+				tool:      tool,
 			})
 		}
 	}
@@ -1980,8 +2149,12 @@ func buildTrajectoryPane(c *ui.Context, t *design.Tokens, chatSession contracts.
 	items := trajectoryItems(chatSession)
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
 		if len(items) > 0 {
-			design.Apply(ui.Text(c, fmt.Sprintf(st.tr("%d 个工具调用", "%d tool calls"), len(items))),
-				t.TextMuted(design.TypeXXS)).PaddingX(design.Space5)
+			// The count line sits on the transcript's reading measure, so it lines
+			// up with the cards below and with the conversation's prose.
+			uikit.ReadingColumn(c, func(body *ui.Context) {
+				design.Apply(ui.Text(body, fmt.Sprintf(st.tr("%d 个工具调用", "%d tool calls"), len(items))),
+					t.TextMuted(design.TypeXXS))
+			})
 		}
 		switch {
 		case !hasSession:
@@ -2008,23 +2181,62 @@ func buildTrajectoryPane(c *ui.Context, t *design.Tokens, chatSession contracts.
 				return firstNonEmpty(uikit.ToolDisplayName(st.locale, items[index].tool.Name),
 					st.tr("工具调用", "Tool call"))
 			}
-			ui.List(c, &st.trajList, len(items)).
+			// The timeline follows the streaming end: a call appended while the
+			// turn runs comes into view at the bottom, as the transcript does. The
+			// List stops following when the reader scrolls away from the end.
+			st.trajList.FollowEnd = true
+			if st.trajSelected < -1 || st.trajSelected >= len(items) {
+				st.trajSelected = -1
+			}
+			st.trajList.Selected = &st.trajSelected
+			list := ui.List(c, &st.trajList, len(items)).
 				Label(st.tr("工具调用轨迹", "Tool call trajectory")).
 				Gap(design.Space3).
 				PaddingY(design.Space5).
 				Grow(1).
 				Rows(func(row ui.ListRow) {
 					item := items[row.Index]
-					ui.Row(row.Context).FillWidth().Justify(ui.Center).AlignItems(ui.Start).Children(func() {
-						design.Apply(ui.Column(row.Context), t.Gap(design.Space3)).
-							Width(design.TranscriptWidth).MaxWidthPercent(92).Children(func() {
-							buildToolCard(row.Context, st, item.tool, "session.trajectory."+item.key, row.Index+1,
+					uikit.ReadingColumn(row.Context, func(body *ui.Context) {
+						ui.Column(body).FillWidth().Gap(design.Space1).Children(func() {
+							buildToolCard(body, st, item.tool, "session.trajectory."+item.key, row.Index+1,
 								uikit.ToolCallCardNormal)
+							// The jump is an explicit row action; a click on the row
+							// itself (the List's choice) and Enter on the chosen row do
+							// the same, so the timeline works with the pointer and the
+							// keyboard.
+							ui.Row(body).FillWidth().Justify(ui.End).Children(func() {
+								toolName := firstNonEmpty(uikit.ToolDisplayName(st.locale, item.tool.Name),
+									st.tr("工具调用", "Tool call"))
+								agentRowAction(body, t, st.tr("在对话中查看", "Show in conversation"),
+									st.tr("在对话中定位 ", "Locate in conversation ")+toolName,
+									func() { st.jumpToTrajectoryMessage(chatSession, item) })
+							})
 						})
 					})
 				})
+			// Enter (or a double click) on the chosen row jumps, as the explicit
+			// card action does. Arrow keys only move the choice: navigating the
+			// timeline must not switch tabs under the reader.
+			if st.trajSelected >= 0 && st.trajSelected < len(items) && list.Submitted() {
+				st.jumpToTrajectoryMessage(chatSession, items[st.trajSelected])
+			}
 		}
 	})
+}
+
+// jumpToTrajectoryMessage returns to the conversation at the message that made
+// one tool call: the transcript List scrolls the mapped row into view (the
+// grouping-aware row the uikit mapping reports) and the trajectory selection is
+// cleared, so the next visit starts at the followed end again.
+func (st *state) jumpToTrajectoryMessage(chatSession contracts.ChatSession, item trajectoryItem) {
+	row := transcriptRowForMessageID(st, chatSession, item.messageID)
+	if row < 0 {
+		return
+	}
+	st.tab = tabChat
+	st.chatList.ScrollIntoView(row)
+	st.trajSelected = -1
+	st.runtime.Invalidate()
 }
 
 // markdownCache keeps the renderer options for one appearance so the Markdown
@@ -2761,53 +2973,58 @@ func composerVisibleHint(st *state, running, slashMenuActive, queueAllowed, mode
 	return st.tr("Enter 发送 · Shift+Enter 换行", "Enter to send · Shift+Enter newline")
 }
 
-// buildComposerToolbar is the composer's action row: one attach menu, the
-// model chip and one session menu, followed by the fixed send/stop control.//
-// The row used to expose model, permission, agent mode, persona and 会话设置 as
-// separate chips plus standalone "/" and "路径" buttons: eight equally weighted
-// controls under one input read as visual noise and gave the security/model
-// state too much chrome. The current layout keeps at most four controls and
-// folds the low-frequency choices into the session menu. Non-default security
-// or mode states stay visible on the menu button itself (e.g. 所有权限, 计划),
-// so hiding the chips never hides a state the user must notice.
+// buildComposerToolbar is the composer's quiet action row: one attach button,
+// the model chip and the single 会话设置 menu, all inside one official
+// ui.Toolbar. In a toolbar mygo gives those controls no face of their own until
+// hovered/pressed/focused (P2-12 replaced the row of small bordered boxes with
+// no hand-written state), and the controls that do not fit fold into the
+// toolbar's trailing overflow menu. The send/queue/stop control is drawn by
+// ComposerShell outside this toolbar, so overflow can never take it.
+//
+// The row keeps at most four controls and folds the low-frequency choices into
+// the session menu. Non-default security or mode states stay visible on the
+// menu button itself (e.g. 所有权限, 计划), so hiding the chips never hides a
+// state the user must notice.
 func buildComposerToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	navigator contracts.Navigator, chat contracts.ChatService, st *state, running, compactControls, veryCompact bool) {
 	activeID := chat.ActiveSession()
-	// The attach menu stays available while a turn runs: with queue-while-
-	// running the next message may be typed already, and its files must be
-	// stageable too (only the picker itself being busy disables the action).
-	buildAttachmentMenu(c, t, runtime, st, running)
-	if !veryCompact {
-		buildModelChip(c, t, runtime, navigator, chat, st, compactControls, veryCompact)
-	}
-	buildSessionMenu(c, t, runtime, navigator, chat, st, activeID, veryCompact)
+	uikit.ComposerToolbar(c, uikit.ComposerToolbarOptions{
+		Key:    "session.composer.toolbar",
+		Label:  st.tr("输入框工具栏", "Composer toolbar"),
+		Locale: st.locale,
+		Items: func(ic *ui.Context) {
+			buildAttachButton(ic, t, runtime, st, running)
+			if !veryCompact {
+				buildModelChip(ic, t, runtime, navigator, chat, st, compactControls, veryCompact)
+			}
+			buildSessionMenu(ic, t, runtime, navigator, chat, st, activeID, veryCompact)
+		},
+	})
 }
 
-// buildAttachmentMenu is the composer's single attach control: choosing files
-// through the native picker or entering absolute paths manually are two items
-// of one menu instead of two competing toolbar buttons. The picker itself runs
-// off the UI thread (startAttachmentPick), so this button never blocks.
-func buildAttachmentMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, running bool) {
+// buildAttachButton is the composer's single attach control: one click opens
+// the native file picker (startAttachmentPick) with no menu in between; drag
+// and drop and image pasting stay the other attachment paths. When the picker
+// is unavailable it reports the reason and the remaining paths in the
+// composer's error row instead of asking for a typed path.
+func buildAttachButton(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, running bool) {
 	label := st.tr("附件", "Attach")
-	tip := st.tr("添加文件或图片，或手动输入路径", "Add files or images, or enter a path")
+	tip := st.tr("添加文件或图片", "Add files or images")
 	if running {
-		tip = st.tr("添加文件或图片，或手动输入路径；本轮结束后仍会保留",
-			"Add files or images, or enter a path; they stay staged for your next message")
+		tip = st.tr("添加文件或图片；本轮结束后仍会保留",
+			"Add files or images; they stay staged for your next message")
 	}
 	if st.attachBusy {
 		label = st.tr("选择中…", "Choosing…")
-		tip = st.tr("文件选择器打开中…", "The file picker is open…")
 	}
-	button := ui.PopoverMenuButton(c, label, func(m *ui.Menu) {
-		if m.Item(st.tr("选择文件…", "Choose files…")).Disabled(st.attachBusy).Chosen() {
-			startAttachmentPick(runtime, st)
-		}
-		if m.Item(st.tr("手动输入路径…", "Enter a path manually…")).
-			Disabled(st.attachBusy).Chosen() {
-			openAttachmentPathDialog(st, runtime)
-		}
-	}).Tooltip(tip)
-	design.Apply(button, t.TextMuted(design.TypeXS))
+	uikit.ComposerAttachButton(c, uikit.ComposerAttachOptions{
+		Key:     "session.composer.attach",
+		Label:   label,
+		Tooltip: tip,
+		Locale:  st.locale,
+		Busy:    st.attachBusy,
+		OnPick:  func() { startAttachmentPick(runtime, st) },
+	})
 }
 
 // buildSessionMenu groups the low-frequency session choices (permission, agent
@@ -3289,15 +3506,6 @@ func buildModelChip(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 			openSettingsPage(navigator, settingsPageModel)
 		}
 	}
-}
-
-// openAttachmentPathDialog opens the manual path-entry fallback (ZK-09): the
-// native picker still runs off the UI thread, but when it is unavailable the
-// user can stage absolute paths directly from a native Modal.
-func openAttachmentPathDialog(st *state, runtime contracts.UIRuntime) {
-	st.attachPathsOpen = true
-	st.attachPathErr = ""
-	runtime.Invalidate()
 }
 
 // buildAgentPresetMenuItems adds the persona picker rows to the 会话设置 menu,
@@ -4535,4 +4743,165 @@ func startNewSession(st *state, chat contracts.ChatService, navigator contracts.
 		return
 	}
 	_ = navigator.Push(ScreenID)
+}
+
+// --- find in the conversation (Cmd/Ctrl+F) ---------------------------------
+
+// findMatch is one transcript match: the message index in the merged transcript
+// and the List row that renders it (assistant steps of one turn share a row).
+type findMatch struct {
+	message int
+	row     int
+}
+
+// registerFindShortcut binds Cmd/Ctrl+F to the conversation find bar. The bar
+// belongs to the transcript, so the chord switches to the conversation tab first
+// when the user is reading another tab; a child conversation has no transcript
+// of its own, so the chord does nothing there.
+func registerFindShortcut(c *ui.Context, st *state, runtime contracts.UIRuntime) {
+	if c == nil || st == nil {
+		return
+	}
+	c.OnShortcut(ui.Cmd, ui.KeyF, func() {
+		if strings.TrimSpace(st.agents.childID) != "" {
+			return
+		}
+		if st.tab != tabChat {
+			st.tab = tabChat
+		}
+		st.findOpen = true
+		st.findScrollPending = true
+		runtime.Invalidate()
+	})
+}
+
+// buildFindBar draws the official ui.FindBar over the transcript and keeps its
+// state: the query is matched against every message's prose and reasoning, the
+// matches map to the transcript's List rows, and the current match's row is
+// scrolled into view whenever the query or the match moves. The bar owns its
+// keyboard (Enter/Shift+Enter/previous/next/Done/Esc); the screen owns Esc as
+// well, so closing the bar never stops the running turn.
+func buildFindBar(c *ui.Context, st *state, messages []contracts.ChatMessage,
+	sameTurn func(prev, next contracts.ChatMessage) bool) {
+	if st == nil {
+		return
+	}
+	signature := findSignature(st.findQuery, messages)
+	if st.findSig != signature {
+		st.findMatches = findMessageMatches(st.findQuery, messages,
+			uikit.BuildSessionRowMap(messages, sameTurn))
+		st.findSig = signature
+		st.clampFindCurrent()
+	}
+	before := st.findQuery
+	bar := ui.FindBar(c, &st.findOpen, &st.findQuery, len(st.findMatches), &st.findCurrent)
+	queryChanged := st.findQuery != before
+	if queryChanged {
+		// The input of this pass typed into the field: recompute now so the
+		// scroll (and the next frame's count) use the new query.
+		st.findMatches = findMessageMatches(st.findQuery, messages,
+			uikit.BuildSessionRowMap(messages, sameTurn))
+		st.findSig = findSignature(st.findQuery, messages)
+		st.findCurrent = 0
+	}
+	if !st.findOpen {
+		// The bar was closed by Esc or Done in this pass: hand the keyboard back
+		// to the composer (the bar's field is gone, and a closed bar must not
+		// leave the window without a focus owner — the next Cmd/Ctrl+F would be
+		// dropped otherwise).
+		st.focusComposer = true
+		return
+	}
+	if (bar.Changed() || queryChanged || st.findScrollPending) && len(st.findMatches) > 0 {
+		st.findScrollPending = false
+		st.clampFindCurrent()
+		if row := st.findMatches[st.findCurrent].row; row >= 0 {
+			st.chatList.ScrollIntoView(row)
+		}
+	}
+}
+
+// clampFindCurrent keeps the current match inside the match list.
+func (st *state) clampFindCurrent() {
+	if len(st.findMatches) == 0 {
+		st.findCurrent = 0
+		return
+	}
+	if st.findCurrent < 0 {
+		st.findCurrent = 0
+	}
+	if st.findCurrent >= len(st.findMatches) {
+		st.findCurrent = len(st.findMatches) - 1
+	}
+}
+
+// findSignature identifies what the cached matches were computed from: the query
+// and the transcript's message identities and text sizes. A stable frame reuses
+// the cache; a streaming reply, a merged receipt or an edited message changes it.
+func findSignature(query string, messages []contracts.ChatMessage) string {
+	var builder strings.Builder
+	builder.WriteString(query)
+	for _, message := range messages {
+		builder.WriteByte('\x00')
+		builder.WriteString(message.ID)
+		builder.WriteByte(':')
+		builder.WriteString(strconv.Itoa(len(message.Text) + len(message.Reasoning)))
+	}
+	return builder.String()
+}
+
+// findMessageMatches lists the messages whose prose or reasoning contains the
+// query, case-insensitively, mapped to their transcript List rows. One message
+// counts once even when both its prose and its reasoning match.
+func findMessageMatches(query string, messages []contracts.ChatMessage,
+	mapping uikit.SessionRowMap) []findMatch {
+	if query == "" {
+		return nil
+	}
+	needle := strings.ToLower(query)
+	matches := make([]findMatch, 0, 8)
+	for index, message := range messages {
+		haystack := message.Text
+		if message.Reasoning != "" {
+			haystack += "\n" + message.Reasoning
+		}
+		if strings.Contains(strings.ToLower(haystack), needle) {
+			matches = append(matches, findMatch{message: index, row: mapping.RowOf(index)})
+		}
+	}
+	return matches
+}
+
+// transcriptMessages returns the messages the transcript renders: the durable
+// child-completion receipts merged into the persisted history in order.
+func transcriptMessages(st *state, chatSession contracts.ChatSession) []contracts.ChatMessage {
+	return mergeChildNotices(chatSession.Messages,
+		childNoticeMessages(st, chatSession.ID), chatSession.Running)
+}
+
+// transcriptSameTurn returns the grouping rule the transcript List uses, or nil
+// when the work-steps mode keeps every step its own row (verbose). Find and the
+// trajectory jump must map messages to rows with the same rule.
+func (st *state) transcriptSameTurn() func(prev, next contracts.ChatMessage) bool {
+	if st.workStepsPolicyFor().mode == contracts.WorkStepsVerbose {
+		return nil
+	}
+	return assistantTurnContinues
+}
+
+// transcriptRowForMessageID maps one persisted message id to the transcript's
+// List row that renders it, or -1 when the message is not in the transcript.
+func transcriptRowForMessageID(st *state, chatSession contracts.ChatSession, messageID string) int {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return -1
+	}
+	messages := transcriptMessages(st, chatSession)
+	mapping := uikit.BuildSessionRowMap(messages, st.transcriptSameTurn())
+	for index, message := range messages {
+		if message.ID == messageID {
+			return mapping.RowOf(index)
+		}
+	}
+	return -1
 }

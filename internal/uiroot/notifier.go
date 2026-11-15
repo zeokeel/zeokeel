@@ -49,7 +49,19 @@ type notifierService struct {
 	// osNotify shows one notification on the OS. Nil means the platform has no
 	// usable notification support (the settings page disables its switch).
 	osNotify func(id, title, body string) error
+	// openSession opens the conversation a session-tagged notification belongs
+	// to when the in-app toast's action button runs; nil leaves the toast plain.
+	// Root installs it (Root.openNotifiedSession), so the OS notification click
+	// and the in-app toast share one path.
+	openSession func(sessionID string)
+	// sessionActionLabel localizes the session action's button. Nil falls back
+	// to the product's Chinese default, used by bare notifier services.
+	sessionActionLabel func() string
 }
+
+// defaultSessionActionLabel is the session action's copy when no localizer is
+// installed (a notifierService built without a Root).
+const defaultSessionActionLabel = "打开会话"
 
 // newNotifierService returns an empty notifier bridge. settings and appName feed
 // the optional OS mirror; both may be zero values.
@@ -73,6 +85,18 @@ func (s *notifierService) SetHandler(fn func(contracts.Notification)) {
 func (s *notifierService) setOSNotifier(notify func(id, title, body string) error) {
 	s.mu.Lock()
 	s.osNotify = notify
+	s.mu.Unlock()
+}
+
+// setSessionOpener installs the in-app "open conversation" action of
+// session-tagged toasts: open switches to the conversation and shows the
+// session screen, label localizes the action button (nil keeps the default
+// copy). The Root calls it once during construction, so both notification
+// channels share one implementation.
+func (s *notifierService) setSessionOpener(open func(sessionID string), label func() string) {
+	s.mu.Lock()
+	s.openSession = open
+	s.sessionActionLabel = label
 	s.mu.Unlock()
 }
 
@@ -114,8 +138,9 @@ func (s *notifierService) NotifyAction(level, text, actionLabel string, action f
 }
 
 // notify builds and delivers one notification. system mirrors it to the OS
-// sink; sessionID tags the conversation a click should open; the in-app toast is
-// unchanged by either.
+// sink; sessionID tags the conversation a click should open and gives the
+// in-app toast the same "open conversation" action the OS notification click
+// performs (when the caller supplied no action of its own).
 func (s *notifierService) notify(level, text, actionLabel string, action func(), system bool, sessionID string) contracts.Notification {
 	notification := contracts.Notification{
 		ID:          notificationID(s.nextID.Add(1), sessionID),
@@ -126,6 +151,21 @@ func (s *notifierService) notify(level, text, actionLabel string, action func(),
 		Action:      action,
 	}
 	s.mu.Lock()
+	openSession, actionLabelFn := s.openSession, s.sessionActionLabel
+	if notification.SessionID != "" && notification.Action == nil && openSession != nil {
+		// The action runs on the UI thread: the toast overlay executes OnAction
+		// inside its frame (and contains a panic). openNotifiedSession does the
+		// session switch and the screen push, so a toast click and an OS
+		// notification click cannot drift apart.
+		sessionID := notification.SessionID
+		notification.Action = func() { openSession(sessionID) }
+		notification.ActionLabel = defaultSessionActionLabel
+		if actionLabelFn != nil {
+			if label := strings.TrimSpace(actionLabelFn()); label != "" {
+				notification.ActionLabel = label
+			}
+		}
+	}
 	if notification.Text != "" {
 		if s.active == nil {
 			s.active = make(map[string]contracts.Notification)
@@ -234,9 +274,53 @@ func (r *Root) Notifier() *notifierService { return r.notifier }
 // resolves a click on a notification from an earlier run too — mygo reports the
 // click of the notification that launched the app, when no in-process record
 // exists any more. Plain notifications return ok=false and the click only
-// surfaces the window.
+// surfaces the window. The in-app toast's "open conversation" action goes
+// through openNotifiedSession with the same session tag.
 func (r *Root) NotificationSession(notificationID string) (string, bool) {
 	return decodeNotificationSession(notificationID)
+}
+
+// openNotifiedSession opens the conversation a session-tagged notification
+// belongs to, as the host's OS notification click does: switch the active
+// session and show the conversation screen. The host's click router
+// (internal/host/notification_click.go) owns the same protection, but uiroot
+// cannot import host; the semantics are mirrored here — a missing chat service,
+// an unknown (deleted) session or a failing switch falls back to only having
+// brought the window to the front, and never raises an error.
+//
+// It runs on the UI thread: the toast overlay executes the action inside its
+// frame, and the host calls it from the mygo notification-click listener.
+func (r *Root) openNotifiedSession(sessionID string) {
+	if r == nil {
+		return
+	}
+	const what = "notification open session"
+	runHandlerSafely(what, func() {
+		sessionID = strings.TrimSpace(sessionID)
+		if sessionID == "" {
+			return
+		}
+		r.mu.Lock()
+		chat := r.chatService
+		kernel := r.kernelContext
+		r.mu.Unlock()
+		if chat == nil {
+			if fromKernel, ok := kernel.Get(contracts.KeyChat); ok {
+				chat = fromKernel
+			}
+		}
+		if chat == nil {
+			return
+		}
+		if _, ok := chat.Session(sessionID); !ok {
+			return
+		}
+		if err := chat.SetActiveSession(sessionID); err != nil {
+			return
+		}
+		_ = r.shortcutNavigator(kernel).Push(sessionScreenID)
+		r.requestFrame()
+	})
 }
 
 // SetOSNotifier installs the OS notification sink the notifier mirrors

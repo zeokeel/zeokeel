@@ -16,8 +16,10 @@ import (
 )
 
 // notifyBackgroundRunFinished posts the completion notification for one settled
-// run. It stays quiet for the active session (the user is already watching it)
-// and for a user Stop (Cancel is an explicit action, not news).
+// run. It stays quiet for the conversation the user is watching — the desktop
+// host's foreground session when it provides one, the backend's active session
+// otherwise (headless products, tests) — and for a user Stop (Cancel is an
+// explicit action, not news).
 func (s *service) notifyBackgroundRunFinished(sessionID string, runErr error, runCtx context.Context) {
 	if s == nil || s.notifier == nil {
 		return
@@ -27,12 +29,24 @@ func (s *service) notifyBackgroundRunFinished(sessionID string, runErr error, ru
 	}
 	s.mu.Lock()
 	active := s.active
+	foreground := s.foreground
 	title := ""
 	if state, ok := s.sessions[sessionID]; ok {
 		title = strings.TrimSpace(state.title)
 	}
 	s.mu.Unlock()
-	if active == sessionID {
+	// The active session is the fallback read model; it cannot tell that the
+	// user moved to another screen, so a host-provided foreground session takes
+	// over the decision: quiet only for the conversation actually on screen, and
+	// news for everything else (including the active session when another screen
+	// is showing). The call runs after s.mu is released: the foreground service
+	// may read the backend's active session.
+	quiet := active == sessionID
+	if foreground != nil {
+		frontID, front := foreground.ForegroundSession()
+		quiet = front && frontID == sessionID
+	}
+	if quiet {
 		return
 	}
 	failed := runErr != nil

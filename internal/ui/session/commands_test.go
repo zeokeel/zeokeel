@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
@@ -202,7 +203,7 @@ func TestSessionSlashCommandExportSeam(t *testing.T) {
 func TestRegenerateInMessageActionsMenuAndCallsBackend(t *testing.T) {
 	chat := newExtendedChat()
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "重生成", Messages: []contracts.ChatMessage{
-		{ID: "m2", Role: "assistant", Text: "你好呀"},
+		{ID: "m2", Role: "assistant", Text: "你好呀", CreatedAt: time.Date(2026, 11, 15, 9, 0, 0, 0, time.Local)},
 	}}, true)
 	h := newCommandHarness(t, chat)
 	tester := h.tester()
@@ -247,7 +248,7 @@ func TestRegenerateHiddenWithoutRegeneratorOrWhileRunning(t *testing.T) {
 	plain := newFakeChat()
 	plain.addSession(contracts.ChatSession{ID: "sess-1", Title: "普通", Messages: []contracts.ChatMessage{
 		{ID: "m1", Role: "user", Text: "你好"},
-		{ID: "m2", Role: "assistant", Text: "你好呀"},
+		{ID: "m2", Role: "assistant", Text: "你好呀", CreatedAt: time.Date(2026, 11, 15, 9, 0, 0, 0, time.Local)},
 	}}, true)
 	h := newHarness(t, plain)
 	tester := h.tester()
@@ -272,7 +273,7 @@ func TestRegenerateHiddenWithoutRegeneratorOrWhileRunning(t *testing.T) {
 func TestEmptyReplyCanBeRetried(t *testing.T) {
 	chat := newExtendedChat()
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "空回复", Messages: []contracts.ChatMessage{
-		{ID: "m2", Role: "assistant", Text: ""},
+		{ID: "m2", Role: "assistant", Text: "", CreatedAt: time.Date(2026, 11, 15, 9, 0, 0, 0, time.Local)},
 	}}, true)
 	h := newCommandHarness(t, chat)
 	tester := h.tester()
@@ -290,7 +291,7 @@ func TestRegenerateErrorShown(t *testing.T) {
 	chat := newExtendedChat()
 	chat.regenErr = errors.New("backend unavailable")
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "错误", Messages: []contracts.ChatMessage{
-		{ID: "m2", Role: "assistant", Text: "你好呀"},
+		{ID: "m2", Role: "assistant", Text: "你好呀", CreatedAt: time.Date(2026, 11, 15, 9, 0, 0, 0, time.Local)},
 	}}, true)
 	h := newCommandHarness(t, chat)
 	tester := h.tester()

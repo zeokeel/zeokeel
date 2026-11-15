@@ -347,9 +347,11 @@ func buildToastViewport(c *ui.Context, st *state, viewport ui.Element, toasts []
 		buildToast(c, st, toast)
 	}
 	if queued := len(st.queue); queued > 0 {
+		// A sentence, not a kbd or micro label: the metadata step (TypeXXS),
+		// never TypeXXXS's 11 DIP line (DESIGN.md §5.3).
 		design.Apply(ui.Text(c, st.tr(
 			"+ "+strconv.Itoa(queued)+" 条通知排队", "+ "+strconv.Itoa(queued)+" more queued")),
-			design.Of(c).Font(design.TypeXXXS)).TextColor(design.Of(c).LabelTertiary).NoWrap()
+			design.Of(c).Font(design.TypeXXS)).TextColor(design.Of(c).LabelTertiary).NoWrap()
 	}
 }
 

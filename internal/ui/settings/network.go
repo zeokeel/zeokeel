@@ -52,12 +52,17 @@ func buildNetworkPage(c *ui.Context, store contracts.SettingsService, st *networ
 		effectiveProxy := strings.TrimSpace(store.Get(contracts.SettingNetProxy, ""))
 		effectiveNoProxy := strings.TrimSpace(store.Get(contracts.SettingNetNoProxy, ""))
 
-		uikit.Section(c, localized(locale, "当前生效", "Currently applied"), func(*ui.Context) {
-			buildPropertySheet(c, t, []uikit.KeyValue{
-				{Key: localized(locale, "代理地址", "Proxy URL"),
-					Value: firstNonEmpty(effectiveProxy, localized(locale, "直连", "Direct"))},
-				{Key: "NO_PROXY",
-					Value: firstNonEmpty(effectiveNoProxy, localized(locale, "未设置", "Not set"))},
+		uikit.Section(c, localized(locale, "当前生效", "Currently applied"), func(body *ui.Context) {
+			// The applied proxy values are a property sheet (DESIGN.md §5.2),
+			// not the page's own 160 DIP label column.
+			uikit.PropertySheet(body, uikit.PropertySheetOptions{
+				Rows: []uikit.PropertyRow{
+					{Label: localized(locale, "代理地址", "Proxy URL"),
+						Value: firstNonEmpty(effectiveProxy, localized(locale, "直连", "Direct"))},
+					{Label: "NO_PROXY",
+						Value: firstNonEmpty(effectiveNoProxy, localized(locale, "未设置", "Not set"))},
+				},
+				Key: "network.applied", Locale: locale,
 			})
 		})
 

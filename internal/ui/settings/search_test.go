@@ -41,9 +41,9 @@ func TestSearchPageRendersConfiguredState(t *testing.T) {
 
 	h.assertTexts(tester, "搜索", "搜索后端", "已配置", "API Key 已设置",
 		"搜索端点", "API Key")
-	// Saving an untouched form keeps the stored rows.
-	h.click(tester, "保存")
-	h.assertTexts(tester, "已保存")
+	// The footer primary is disabled while the drafts match the stored rows
+	// (P2-11): an untouched form cannot overwrite them.
+	requireFooterDisabled(t, tester, "保存", true, "search clean")
 	if got := store.get(contracts.SettingWebSearchEndpoint); got != "https://search.example.com/search" {
 		t.Fatalf("endpoint = %q, want the stored value", got)
 	}

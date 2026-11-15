@@ -95,7 +95,8 @@ func SessionThread(c *ui.Context, o SessionThreadOptions) {
 			state = &ui.ListState{}
 		}
 		messages := o.Messages
-		runs := sessionRowRuns(messages, o.SameTurn)
+		mapping := BuildSessionRowMap(messages, o.SameTurn)
+		runs := mapping.runs
 		state.Key = func(index int) any {
 			if index < 0 || index >= len(runs) {
 				return nil
@@ -125,36 +126,30 @@ func SessionThread(c *ui.Context, o SessionThreadOptions) {
 			PaddingY(design.Space5).
 			FillWidth().Grow(1)
 		if len(runs) == 0 && o.Empty != nil {
+			// The first-run hero sits on the same reading measure as the rows.
 			list.Children(func() {
-				ui.Row(c).FillWidth().Justify(ui.Center).AlignItems(ui.Start).Children(func() {
-					design.Apply(ui.Column(c), t.Gap(design.Space5)).
-						Width(design.TranscriptWidth).MaxWidthPercent(92).
-						Children(func() {
-							o.Empty(c)
-						})
-				})
+				ReadingColumn(c, o.Empty)
 			})
 		}
+		// Rows build on the shared reading column: the transcript, the Context
+		// pane and the composer dock keep one left edge and one line length.
 		list.Rows(func(row ui.ListRow) {
 			run := runs[row.Index]
-			ui.Row(row.Context).FillWidth().Justify(ui.Center).AlignItems(ui.Start).Children(func() {
-				design.Apply(ui.Column(row.Context), t.Gap(design.Space5)).
-					Width(design.TranscriptWidth).MaxWidthPercent(92).Children(func() {
-					if len(run) > 1 && o.GroupRow != nil {
-						group := make([]contracts.ChatMessage, 0, len(run))
-						for _, index := range run {
-							group = append(group, messages[index])
-						}
-						o.GroupRow(row.Context, group)
-						return
+			ReadingColumn(row.Context, func(body *ui.Context) {
+				if len(run) > 1 && o.GroupRow != nil {
+					group := make([]contracts.ChatMessage, 0, len(run))
+					for _, index := range run {
+						group = append(group, messages[index])
 					}
-					message := messages[run[0]]
-					if o.Row != nil {
-						o.Row(row.Context, message)
-						return
-					}
-					sessionDefaultRow(row.Context, t, o, message)
-				})
+					o.GroupRow(body, group)
+					return
+				}
+				message := messages[run[0]]
+				if o.Row != nil {
+					o.Row(body, message)
+					return
+				}
+				sessionDefaultRow(body, t, o, message)
 			})
 		})
 		// AtEnd reads the last laid-out frame, so the first layout uses the
@@ -206,6 +201,52 @@ func sessionBackToLatest(c *ui.Context, t *design.Tokens, state *ui.ListState,
 			c.Invalidate()
 		}
 	})
+}
+
+// SessionRowMap is the transcript's message→List-row mapping: SessionThread
+// folds a run of consecutive SameTurn messages into one List row, so a caller
+// that wants to scroll to a message (a find result, a trajectory jump) needs the
+// row the message renders in, not the message index.
+type SessionRowMap struct {
+	runs  [][]int
+	rowOf []int
+}
+
+// BuildSessionRowMap computes the mapping for messages under the same SameTurn
+// rule SessionThread uses (nil keeps one row per message). The zero value maps
+// nothing: Rows is 0 and RowOf reports -1, as it does for an out-of-range
+// message.
+func BuildSessionRowMap(messages []contracts.ChatMessage,
+	sameTurn func(prev, next contracts.ChatMessage) bool) SessionRowMap {
+	runs := sessionRowRuns(messages, sameTurn)
+	rowOf := make([]int, len(messages))
+	for row, run := range runs {
+		for _, index := range run {
+			rowOf[index] = row
+		}
+	}
+	return SessionRowMap{runs: runs, rowOf: rowOf}
+}
+
+// Rows reports the List's row count (grouped runs count once).
+func (m SessionRowMap) Rows() int { return len(m.runs) }
+
+// RowOf reports the List row that renders message, or -1 when the message is
+// outside the transcript.
+func (m SessionRowMap) RowOf(message int) int {
+	if message < 0 || message >= len(m.rowOf) {
+		return -1
+	}
+	return m.rowOf[message]
+}
+
+// FirstMessage reports the first message index of a row, or -1 when the row is
+// outside the transcript.
+func (m SessionRowMap) FirstMessage(row int) int {
+	if row < 0 || row >= len(m.runs) {
+		return -1
+	}
+	return m.runs[row][0]
 }
 
 // sessionRowRuns groups message indexes into transcript rows: a run starts at

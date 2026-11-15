@@ -170,6 +170,11 @@ func Module() *module.Descriptor[Config] {
 		if notifier, ok := ctx.Get(contracts.KeyNotifier); ok && notifier != nil {
 			svc.notifier = notifier
 		}
+		if foreground, ok := ctx.Get(contracts.KeyForegroundSession); ok && foreground != nil {
+			// Optional: only the desktop host provides the foreground read model;
+			// a headless product or a test keeps the active-session rule.
+			svc.foreground = foreground
+		}
 		if goalService, ok := ctx.Get(contracts.KeyGoal); ok && goalService != nil {
 			// Optional: without the goal backend there is no engine-side
 			// continuation, and the DSH goal tools report an unavailable backend.
@@ -417,6 +422,11 @@ type service struct {
 	// notifier is the optional host toast/OS-notification bridge used for
 	// background run completion (nil in headless products).
 	notifier contracts.Notifier
+	// foreground is the optional desktop foreground read model: the conversation
+	// the user is actually watching, when the host can tell. A background-run
+	// notification stays quiet only for that conversation; nil keeps the
+	// previous active-session rule (headless products, tests).
+	foreground contracts.ForegroundSession
 	// coldMu guards coldResumes, the live overlay of cold-resumed historical
 	// child sessions (see cold_resume.go).
 	coldMu sync.Mutex
@@ -3094,6 +3104,11 @@ func dataURLMIME(dataURL string) string {
 	return ""
 }
 
+// messageTime reports one durable Rig history message's clock. Rig's persisted
+// history carries no per-message timestamps, so it is always the zero time here;
+// restore backfills the honest clocks from the durable turn-boundary events
+// afterwards (restore_times.go), and messages without a matching event stay
+// zero rather than inventing one.
 func messageTime(rig.Message) time.Time { return time.Time{} }
 
 // snapshot returns a deep copy of the session read model.

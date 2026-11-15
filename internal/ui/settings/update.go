@@ -182,9 +182,14 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 				})
 		}
 
-		uikit.Section(c, localized(locale, "当前版本", "Current version"), func(*ui.Context) {
-			uikit.KeyValueRows(c, []uikit.KeyValue{
-				{Key: localized(locale, "版本", "Version"), Value: current},
+		uikit.Section(c, localized(locale, "当前版本", "Current version"), func(body *ui.Context) {
+			// The running build is a one-row property sheet, the same shape the
+			// other read-only pages draw (DESIGN.md §5.2).
+			uikit.PropertySheet(body, uikit.PropertySheetOptions{
+				Rows: []uikit.PropertyRow{
+					{Label: localized(locale, "版本", "Version"), Value: current, Mono: true},
+				},
+				Key: "update.current", Locale: locale,
 			})
 		})
 

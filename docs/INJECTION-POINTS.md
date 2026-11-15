@@ -84,8 +84,9 @@ headless 产品不挂 UI 子组即可（当前无 UI 模块时 `Root.Validate()`
   home 回退到"还没有渲染器"空态。
 - **设置面扩展**：`ui/about` 的 `settings.header` 贡献出现在所有设置页页头；dispose 后设置面
   回空态。
-- **共享 UI 库**：`internal/uikit`（`PageHeader` / `Section` / `Bullet` / `KeyValueRows` /
-  `EmptyState`），全部由 mygo 原生控件组合，模块不再复制布局代码。
+- **共享 UI 库**：`internal/uikit`（`PageHeader` / `Section` / `Bullet` / `PropertySheet` /
+  `ReadingColumn` / `SegmentedControl` / `DiffPreview` / `ComposerToolbar` / `EmptyState`），全部由 mygo
+  原生控件组合，模块不再复制布局代码；`KeyValueRows` 为 Deprecated 旧属性表。
 
 ## 6. 测试
 

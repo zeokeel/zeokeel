@@ -89,11 +89,7 @@ func TestNotificationsSettingsPageToggle(t *testing.T) {
 	h.ui.Navigator().ToggleSettings()
 	tester := h.tester(1280, 800)
 	tester.Frame()
-	// 通知 lives in the collapsed 高级 settings group.
-	if err := tester.Click("高级"); err != nil {
-		t.Fatalf("expand advanced settings: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
+	// 通知 lives in the always-visible 数据与通知 group.
 	if err := tester.Click("通知"); err != nil {
 		t.Fatalf("open notifications page: %v; texts = %v", err, tester.Texts())
 	}

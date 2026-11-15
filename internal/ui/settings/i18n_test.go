@@ -53,12 +53,14 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 
-	// Shell title and host-rendered page navigation. The advanced pages are
-	// behind the collapsed Advanced group, so the daily navigation is the
-	// visible set (the group header is the discoverable entry point).
+	// Shell title and host-rendered page navigation. The frequent data and
+	// notification pages sit in their own always-visible group (P2-11); only
+	// the low-frequency advanced group is collapsed (its header is the
+	// discoverable entry point).
 	h.assertTexts(tester, "Common", "Model", "Behavior",
-		"Presets", "Appearance & skills", "Appearance", "Skills", "Shortcuts",
-		"Integrations", "MCP", "Search", "Network", "Advanced")
+		"Presets", "Appearance & language", "Appearance", "Skills", "Shortcuts",
+		"Integrations", "MCP", "Search", "Network",
+		"Data & notifications", "Notifications", "Memory", "Archived", "Advanced")
 	h.assertNoTexts(tester, "模型", "外观", "技能", "快捷键", "诊断", "更新", "导入")
 	h.click(tester, "Advanced")
 	h.assertTexts(tester, "Diagnostics", "Update", "Import", "Notifications", "Archived")
@@ -68,12 +70,12 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 	h.click(tester, "Model")
 	h.assertTexts(tester, "Model", "Models (apply immediately)", "Add model",
 		"Prompt & runtime (saved by the footer)", "System prompt",
-		"Save prompt & runtime", "Default model", "Not configured", "No models yet")
+		"Save", "Default model", "Not configured", "No models yet")
 
 	// Appearance page.
 	h.click(tester, "Appearance")
 	h.assertTexts(tester, "Appearance", "Theme", "Appearance mode", "Light", "Dark", "System",
-		"Language", "Interface language", "Apply")
+		"Language", "Interface language", "Save")
 
 	// Shortcuts page.
 	h.click(tester, "Shortcuts")
@@ -97,12 +99,16 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 	// Switch back to Chinese: navigation and content follow on the next frame.
 	h.uiRoot.Locale().SetLanguage("zh")
 	tester.Frame()
-	h.assertTexts(tester, "设置", "常用", "模型", "行为", "预设", "外观与技能",
-		"外观", "技能", "快捷键", "集成", "MCP", "搜索", "网络", "高级")
-	h.assertNoTexts(tester, "Settings", "Providers", "Appearance", "Shortcuts", "Diagnostics")
+	h.assertTexts(tester, "设置", "常用", "模型", "行为", "预设", "外观",
+		"外观", "技能", "快捷键", "集成", "MCP", "搜索", "网络",
+		"数据与通知", "通知", "记忆", "归档", "高级")
+	// The module-declared group's title follows the language switch with the
+	// page titles; the English value must not linger.
+	h.assertNoTexts(tester, "Settings", "Providers", "Appearance", "Shortcuts",
+		"Diagnostics", "Data & notifications")
 	h.click(tester, "模型")
 	h.assertTexts(tester, "模型列表（即时生效）", "添加模型",
-		"提示词与运行参数（页脚保存）", "保存提示词与运行参数", "还没有模型")
+		"提示词与运行参数（页脚保存）", "保存", "还没有模型")
 }
 
 // TestSettingsEnglishConfigOverrides pins that explicit assembly labels still

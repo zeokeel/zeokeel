@@ -148,19 +148,16 @@ func TestVeryNarrowComposerToolsMenu(t *testing.T) {
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
 
-	// A single attach menu carries both picker and manual-path entries.
-	if err := tester.Click("附件"); err != nil {
-		t.Fatalf("open 附件 menu: %v; texts = %v", err, tester.Texts())
+	// The attach control opens the native picker directly; the old menu with
+	// its manual path entry is gone (P2-12).
+	if !tester.HasText("附件") {
+		t.Fatalf("very narrow composer is missing the attach control; texts = %v", tester.Texts())
 	}
-	tester.Frame()
-	tester.Frame()
-	for _, want := range []string{"选择文件…", "手动输入路径…"} {
-		if !tester.HasText(want) {
-			t.Fatalf("附件 menu missing %q; texts = %v", want, tester.Texts())
+	for _, gone := range []string{"选择文件…", "手动输入路径…"} {
+		if tester.HasText(gone) {
+			t.Fatalf("old attach menu entry %q is still present; texts = %v", gone, tester.Texts())
 		}
 	}
-	tester.Key(0, ui.KeyEscape)
-	tester.Frame()
 
 	// Typing "/" still opens the command menu even though the chip is hidden.
 	if err := tester.Click("输入消息…"); err != nil {

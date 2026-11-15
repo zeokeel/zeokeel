@@ -126,7 +126,9 @@ func TestSettingsCloseButtonAndAdaptiveSize(t *testing.T) {
 }
 
 // TestRightPanelDrawerOnNarrowWindow covers the responsive inspector: docked on
-// a wide window, a drawer over the content on a narrow one.
+// a wide window, docked again on a mid-width window through the temporary rail,
+// and a drawer over the content only when even the rail cannot keep the
+// inspector usable.
 func TestRightPanelDrawerOnNarrowWindow(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("session", "会话", "body-session", 10))
@@ -139,7 +141,22 @@ func TestRightPanelDrawerOnNarrowWindow(t *testing.T) {
 	requireHasText(t, wide, "inspector-body")
 	requireNoText(t, wide, "检查器") // docked: the pane contributes its own header
 
-	narrow := newTestTester(t, r, 1024, 720)
+	// 1024x720 cannot hold the expanded sidebar plus a usable inspector, so the
+	// shell temporarily shows the rail and docks the inspector instead of
+	// covering the content with the modal drawer.
+	mid := newTestTester(t, r, 1024, 720)
+	mid.Frame()
+	mid.Frame()
+	requireHasText(t, mid, "inspector-body")
+	if _, ok := mid.AccessByRole(ui.RoleDialog, "检查器"); ok {
+		t.Fatalf("1024x720 fell back to the modal drawer; texts: %v", mid.Texts())
+	}
+	if _, ok := mid.AccessByRole(ui.RoleButton, "展开侧边栏"); !ok {
+		t.Fatalf("1024x720 did not take the temporary rail; texts: %v", mid.Texts())
+	}
+
+	// A truly narrow window still needs the modal drawer.
+	narrow := newTestTester(t, r, 800, 720)
 	narrow.Frame()
 	requireHasText(t, narrow, "inspector-body")
 	requireHasText(t, narrow, "检查器") // the drawer names itself
@@ -166,7 +183,7 @@ func TestSettingsNavGroups(t *testing.T) {
 	// general before 外观 before 高级 before 关于; the 高级 group is collapsed
 	// by default (settings-complexity simplification), so its pages are hidden
 	// behind the group header.
-	requireTextBefore(t, tt, "通用", "行为页", "外观与技能", "外观页", "高级", "关于", "关于页")
+	requireTextBefore(t, tt, "通用", "行为页", "外观与语言", "外观页", "高级", "关于", "关于页")
 	requireNoText(t, tt, "记忆页")
 	// The first business page is selected, not the About page.
 	requireHasText(t, tt, "behavior-body")
@@ -238,7 +255,7 @@ func TestInspectorCloseFocusReturnKeepsScroll(t *testing.T) {
 	})
 	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotScreenHeader, "hdr", "screen-title", 10))
-	tt := newTestTester(t, r, 900, 700)
+	tt := newTestTester(t, r, 800, 700)
 	tt.Frame()
 
 	// Scroll the conversation, then open the inspector drawer.

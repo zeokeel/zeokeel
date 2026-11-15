@@ -78,14 +78,14 @@ func TestSessionI18nEmptyHero(t *testing.T) {
 	chat.addSession(contracts.ChatSession{ID: "sess-empty", Title: "空会话"}, true)
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.assertTexts(tester, "开始新对话", "还没有消息，开始一段新对话吧。", "新对话")
+	h.assertTexts(tester, "开始新对话", "还没有消息，开始一段新对话吧。", "开始输入")
 
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
 	h.assertTexts(tester,
 		"Start a new conversation",
 		"No messages yet. Start a new conversation.",
-		"New conversation",
+		"Start typing",
 		"Ask ZeoKeel…", "Send")
 	h.assertNoTexts(tester, "开始新对话")
 }

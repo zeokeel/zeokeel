@@ -22,11 +22,15 @@ type Notification struct {
 	Level string
 	// Text is the toast copy.
 	// SessionID optionally names the conversation a click should open. The
-	// desktop host records it when the notifier supports SessionNotifier.
+	// desktop host records it when the notifier supports SessionNotifier, and
+	// the in-app toast then offers an "open conversation" action with the same
+	// behavior as the OS notification click.
 	SessionID string
 	Text      string
 	// ActionLabel names the optional action button ("Undo"); Action runs on the
 	// UI thread when it is pressed. Both empty/zero for a plain notification.
+	// A session-tagged notification gets both filled by the desktop notifier
+	// when the caller supplies no action of its own.
 	ActionLabel string
 	Action      func()
 }
@@ -73,7 +77,9 @@ type SystemNotifier interface {
 
 // SessionNotifier is the optional half of a Notifier that keeps the
 // notification's originating session, so a click can open that conversation
-// instead of only bringing the window to the front.
+// instead of only bringing the window to the front. The desktop host also puts
+// the same "open conversation" action on the in-app toast, so the toast is a
+// working entry point while the window is in front.
 type SessionNotifier interface {
 	// NotifySystemFor posts one OS-mirrored notification tagged with sessionID.
 	// An empty sessionID behaves like NotifySystem.

@@ -167,27 +167,19 @@ func clickHome(t *testing.T, tester *ui.Tester, label string) {
 	tester.Frame()
 }
 
-// clickHomeAttachmentMenu opens the composer's single 附件 menu: the redesign
-// folded the file picker and the manual path fallback into it, replacing the old
-// standalone 路径 button.
-func clickHomeAttachmentMenu(t *testing.T, tester *ui.Tester) {
+// clickHomeAttachment opens the composer's attach control, which starts the
+// native picker directly (P2-12 removed the 选择文件…/手动输入路径… menu); the
+// picker runs off the UI thread, so callers drive frames for the posted result.
+func clickHomeAttachment(t *testing.T, tester *ui.Tester) {
 	t.Helper()
 	clickHome(t, tester, "附件")
 }
 
-// chooseHomeAttachmentFiles picks 选择文件… from the 附件 menu; the native picker
-// then runs off the UI thread, so callers drive frames for the posted result.
+// chooseHomeAttachmentFiles clicks 附件; the native picker then runs off the UI
+// thread, so callers drive frames for the posted result.
 func chooseHomeAttachmentFiles(t *testing.T, tester *ui.Tester) {
 	t.Helper()
-	clickHomeAttachmentMenu(t, tester)
-	clickHome(t, tester, "选择文件…")
-}
-
-// openHomeManualPathDialog picks 手动输入路径… from the 附件 menu.
-func openHomeManualPathDialog(t *testing.T, tester *ui.Tester) {
-	t.Helper()
-	clickHomeAttachmentMenu(t, tester)
-	clickHome(t, tester, "手动输入路径…")
+	clickHomeAttachment(t, tester)
 }
 
 // assertHomeBottomRow checks the redesigned single action row: the 附件 menu, the
@@ -276,8 +268,9 @@ func TestHomeComposerRendersAndChips(t *testing.T) {
 	// standalone 路径 button stay gone.
 	assertHomeBottomRow(t, tester)
 	h.assertNoTexts(tester, "Enter 发送", "Shift+Enter", "路径", "开始新对话")
-	// The attach menu is a popup: its choices appear only after opening it.
-	h.assertNoTexts(tester, "选择文件…", "手动输入路径…")
+	// The removed attach menu and manual path dialog never render: the attach
+	// control opens the picker directly.
+	h.assertNoTexts(tester, "选择文件…", "手动输入路径…", "手动添加附件", "文件路径")
 	// With a model configured and no conversations, the empty state offers the
 	// first conversation.
 	h.assertTexts(tester, "新对话")
@@ -365,13 +358,12 @@ func TestHomeComposerAttachments(t *testing.T) {
 	activate(t, h, home.Module(), home.Config{})
 	tester := ui.NewTester(h.ui.View, 1200, 800)
 	tester.Frame()
-	// The single 附件 menu offers both the native picker and the manual fallback.
-	clickHomeAttachmentMenu(t, tester)
-	h.assertTexts(tester, "选择文件…", "手动输入路径…")
-	clickHome(t, tester, "选择文件…")
-	waitHome(t, tester, "notes.txt", "pic.png", "5 B", "4 B", "移除")
+	// One click on 附件 opens the native picker; the picked files stage as chips.
+	h.assertNoTexts(tester, "选择文件…", "手动输入路径…", "手动添加附件")
+	clickHomeAttachment(t, tester)
+	waitHome(t, tester, "notes.txt", "pic.png", "5 B", "4 B", "移除附件 notes.txt")
 
-	clickHome(t, tester, "移除")
+	clickHome(t, tester, "移除附件 notes.txt")
 	clickHome(t, tester, "问点什么…")
 	tester.Type("with attachment")
 	tester.Frame()
@@ -432,9 +424,9 @@ func TestHomeComposerNoChatAndEnglish(t *testing.T) {
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
 	h.assertTexts(tester, "Ask anything…", "Send", "Attach")
-	// The attach menu's two choices are localized with the rest of the composer.
-	clickHome(t, tester, "Attach")
-	h.assertTexts(tester, "Choose files…", "Enter a path manually…")
+	// The attach control opens the picker directly: the removed menu items never
+	// render in either language.
+	h.assertNoTexts(tester, "Choose files…", "Enter a path manually…", "Add attachments by path")
 }
 
 // TestHomeContextControlsSwitchModelAndMode covers H13's interactive context
@@ -573,8 +565,8 @@ func TestHomeComposerAttachmentPickerOffThreadBusy(t *testing.T) {
 	tester.Frame()
 	chooseHomeAttachmentFiles(t, tester)
 	// The picker is still blocked in its goroutine: the frame must show the
-	// busy label on the 附件 menu button instead of freezing (a synchronous
-	// picker would hang).
+	// busy label on the 附件 button instead of freezing (a synchronous picker
+	// would hang).
 	h.assertTexts(tester, "选择中…")
 	if info, ok := tester.AccessByRole(ui.RoleProgress, "选择中…"); !ok || info.Role != ui.RoleProgress {
 		t.Fatalf("home picker busy state is not a progress indicator: %+v found %v", info, ok)
@@ -586,75 +578,107 @@ func TestHomeComposerAttachmentPickerOffThreadBusy(t *testing.T) {
 	h.assertNoTexts(tester, "选择中…")
 }
 
-func TestHomeComposerManualPathStaging(t *testing.T) {
-	dir := t.TempDir()
-	first := filepath.Join(dir, "first.txt")
-	second := filepath.Join(dir, "second.txt")
-	for _, path := range []string{first, second} {
-		if err := os.WriteFile(path, []byte("hello"), 0o600); err != nil {
-			t.Fatalf("write %s: %v", path, err)
-		}
-	}
-	chat := &composerChat{fakeChat: &fakeChat{config: contracts.ChatConfig{Model: "m"}}}
-	h := newComposerHarness(t, chat, nil, nil)
-	activate(t, h, home.Module(), home.Config{})
-	tester := ui.NewTester(h.ui.View, 1200, 800)
-	tester.Frame()
-
-	// The manual path fallback stages a single absolute path.
-	openHomeManualPathDialog(t, tester)
-	h.assertTexts(tester, "手动添加附件", "文件路径")
-	clickHome(t, tester, "文件路径")
-	tester.Type(first)
-	tester.Frame()
-	clickHome(t, tester, "添加")
-	waitHome(t, tester, "first.txt")
-	h.assertNoTexts(tester, "手动添加附件")
-
-	// Multiple paths on one line, comma separated, all stage at once.
-	openHomeManualPathDialog(t, tester)
-	clickHome(t, tester, "文件路径")
-	tester.Type(first + ", " + second)
-	tester.Frame()
-	clickHome(t, tester, "添加")
-	waitHome(t, tester, "second.txt")
-	h.assertNoTexts(tester, "手动添加附件")
-}
-
-func TestHomeComposerManualPathRejectsRelative(t *testing.T) {
-	chat := &composerChat{fakeChat: &fakeChat{config: contracts.ChatConfig{Model: "m"}}}
-	h := newComposerHarness(t, chat, nil, nil)
-	activate(t, h, home.Module(), home.Config{})
-	tester := ui.NewTester(h.ui.View, 1200, 800)
-	tester.Frame()
-
-	openHomeManualPathDialog(t, tester)
-	clickHome(t, tester, "文件路径")
-	tester.Type(filepath.Join("relative", "note.txt"))
-	tester.Frame()
-	clickHome(t, tester, "添加")
-	h.assertTexts(tester, "手动添加附件", "路径必须是绝对路径：relative/note.txt")
-	settleHome(tester)
-	h.assertNoTexts(tester, "移除")
-}
-
-func TestHomeComposerManualPathCancelStagesNothing(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "note.txt")
-	if err := os.WriteFile(path, []byte("hello"), 0o600); err != nil {
+// TestHomeComposerAttachButtonOpensPickerDirectly covers the P2-12 entry: one
+// click on 附件 starts the native picker itself, with no 选择文件…/手动输入路径…
+// menu and no manual path dialog, and the picked file stages as a chip.
+func TestHomeComposerAttachButtonOpensPickerDirectly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "direct.txt")
+	if err := os.WriteFile(path, []byte("hi"), 0o600); err != nil {
 		t.Fatalf("write temp file: %v", err)
 	}
+	calls := 0
+	oldPicker := home.AttachmentPicker
+	home.AttachmentPicker = func() ([]string, error) {
+		calls++
+		return []string{path}, nil
+	}
+	t.Cleanup(func() { home.AttachmentPicker = oldPicker })
+
 	chat := &composerChat{fakeChat: &fakeChat{config: contracts.ChatConfig{Model: "m"}}}
 	h := newComposerHarness(t, chat, nil, nil)
 	activate(t, h, home.Module(), home.Config{})
 	tester := ui.NewTester(h.ui.View, 1200, 800)
 	tester.Frame()
 
-	openHomeManualPathDialog(t, tester)
-	clickHome(t, tester, "文件路径")
-	tester.Type(path)
+	for _, gone := range []string{"选择文件…", "手动输入路径…", "手动添加附件", "文件路径"} {
+		if tester.HasText(gone) {
+			t.Fatalf("frame still shows %q; texts = %v", gone, tester.Texts())
+		}
+	}
+	clickHomeAttachment(t, tester)
+	waitHome(t, tester, "direct.txt")
+	if calls != 1 {
+		t.Fatalf("picker calls = %d, want 1", calls)
+	}
+	h.assertNoTexts(tester, "选择文件…", "手动输入路径…", "手动添加附件")
+}
+
+// TestHomeComposerAttachPickerUnavailableExplains covers a picker that cannot
+// open: Home reports the reason and the drag/paste paths instead of asking for a
+// typed path, and the next click retries the picker.
+func TestHomeComposerAttachPickerUnavailableExplains(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "retry.txt")
+	if err := os.WriteFile(path, []byte("ok"), 0o600); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	oldPicker := home.AttachmentPicker
+	home.AttachmentPicker = func() ([]string, error) { return nil, errors.New("no file dialog") }
+	t.Cleanup(func() { home.AttachmentPicker = oldPicker })
+
+	chat := &composerChat{fakeChat: &fakeChat{config: contracts.ChatConfig{Model: "m"}}}
+	h := newComposerHarness(t, chat, nil, nil)
+	activate(t, h, home.Module(), home.Config{})
+	tester := ui.NewTester(h.ui.View, 1200, 800)
 	tester.Frame()
-	clickHome(t, tester, "取消")
-	h.assertNoTexts(tester, "手动添加附件")
-	settleHome(tester)
-	h.assertNoTexts(tester, "移除")
+
+	clickHomeAttachment(t, tester)
+	waitHome(t, tester, "无法打开文件选择器：no file dialog", "请拖入文件或粘贴图片")
+	h.assertNoTexts(tester, "手动输入路径…", "手动添加附件", "文件路径")
+	h.assertTexts(tester, "附件")
+
+	home.AttachmentPicker = func() ([]string, error) { return []string{path}, nil }
+	clickHomeAttachment(t, tester)
+	waitHome(t, tester, "retry.txt")
+	h.assertNoTexts(tester, "无法打开文件选择器")
+}
+
+// TestHomeComposerNarrowKeepsSend covers the narrow windows (900/1024): the
+// toolbar fits its controls inside the composer card and sending still works
+// with a typed draft.
+func TestHomeComposerNarrowKeepsSend(t *testing.T) {
+	for _, width := range []int{900, 1024} {
+		chat := &composerChat{fakeChat: &fakeChat{config: contracts.ChatConfig{Model: "m"}}}
+		h := newComposerHarness(t, chat, nil, nil)
+		activate(t, h, home.Module(), home.Config{})
+		tester := ui.NewTester(h.ui.View, width, 800)
+		tester.Frame()
+		tester.Frame()
+
+		bar, ok := tester.AccessByRole(ui.RoleToolbar, "输入框工具栏")
+		if !ok {
+			t.Fatalf("%d: Home composer toolbar missing; texts = %v", width, tester.Texts())
+		}
+		if bar.Bounds.X < 0 || bar.Bounds.X+bar.Bounds.W > float32(width) {
+			t.Fatalf("%d: toolbar at %.1f..%.1f escaped the window", width, bar.Bounds.X, bar.Bounds.X+bar.Bounds.W)
+		}
+		send, ok := tester.AccessByRole(ui.RoleButton, "发送")
+		if !ok {
+			t.Fatalf("%d: send control missing; texts = %v", width, tester.Texts())
+		}
+		if send.Bounds.X < 0 || send.Bounds.X+send.Bounds.W > float32(width) {
+			t.Fatalf("%d: send at %.1f..%.1f escaped the window", width, send.Bounds.X, send.Bounds.X+send.Bounds.W)
+		}
+		clickHome(t, tester, "发送")
+		if _, sends, _ := chat.snapshot(); len(sends) != 0 {
+			t.Fatalf("%d: an empty draft sent %v", width, sends)
+		}
+
+		clickHome(t, tester, "问点什么…")
+		tester.Type("narrow home")
+		tester.Frame()
+		clickHome(t, tester, "发送")
+		if _, sends, _ := chat.snapshot(); len(sends) != 1 || sends[0].prompt != "narrow home" {
+			t.Fatalf("%d: send calls = %v, want the typed draft", width, sends)
+		}
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
+	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/brand"
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -82,7 +83,7 @@ func (r *Root) view(c *ui.Context) {
 	r.announceNavigation(c)
 
 	ui.Row(c).Fill().Background(tokens.BgBase).Children(func() {
-		if r.sidebarCollapsed {
+		if r.effectiveSidebarCollapsed(c) {
 			r.sidebarRail(c)
 			r.contentArea(c)
 			return
@@ -277,6 +278,12 @@ func (r *Root) sidebarRail(c *ui.Context) {
 			Size:    design.IconSizeM,
 			OnClick: func() { r.newSessionShortcut() },
 		})
+		// The rail does not render the expanded sidebar's conversation tree
+		// (that lives in a module slot), so the rail keeps a conversation entry
+		// of its own: a native popover with the recent conversations, their
+		// running/unread state, a search field and the way back to the expanded
+		// sidebar. It adds no screen.
+		r.railSessionsEntry(c, t)
 		for _, spec := range visibleScreens(r.rt.screenSpecs()) {
 			spec := spec
 			// The rail navigates screens, not conversations: the session screen
@@ -322,6 +329,134 @@ func (r *Root) sidebarRail(c *ui.Context) {
 			},
 		})
 	})
+}
+
+// railSessionLimit bounds the recent conversations the rail popover lists (the
+// popover is a quick switcher, not the expanded sidebar's full tree).
+const railSessionLimit = 8
+
+// railSessionsEntry is the collapsed rail's conversation entry: a toggle-like
+// icon button that opens a native popover listing the recent conversations (with
+// their running/unread state), a search field and the "expand sidebar" action.
+// Choosing a conversation opens it and leaves the rail as it is; the popover adds
+// no screen and no second conversation list.
+func (r *Root) railSessionsEntry(c *ui.Context, t *design.Tokens) {
+	label := r.tr("会话", "Sessions")
+	anchor := uikit.IconButton(c, uikit.IconButtonOptions{
+		Key:      "chrome.rail.sessions",
+		Label:    label,
+		Tooltip:  label,
+		Icon:     icons.Message(),
+		Size:     design.IconSizeM,
+		Toggle:   true,
+		Selected: r.railSessionsOpen,
+		OnClick: func() {
+			r.railSessionsOpen = !r.railSessionsOpen
+			if r.railSessionsOpen {
+				r.railSessionsQuery = ""
+			}
+			r.requestFrame()
+		},
+	})
+	if !r.railSessionsOpen {
+		return
+	}
+	ui.Popover(c, anchor, &r.railSessionsOpen, func() {
+		ui.Column(c).Width(design.DialogWidthXS).Gap(design.Space2).Children(func() {
+			ui.TextInput(c, &r.railSessionsQuery).
+				Label(r.tr("搜索会话", "Search conversations")).
+				Placeholder(r.tr("搜索会话…", "Search conversations…")).
+				FillWidth()
+			sessions := r.railSessions()
+			if len(sessions) == 0 {
+				design.Apply(ui.Text(c,
+					r.tr("没有匹配的会话", "No matching conversations")),
+					t.TextMuted(design.TypeXS)).MaxLines(2)
+			}
+			for _, session := range sessions {
+				r.railSessionRow(c, t, session)
+			}
+			ui.Divider(c)
+			expandLabel := r.tr("展开侧栏", "Expand sidebar")
+			if ui.Button(c, expandLabel).Label(expandLabel).Clicked() {
+				r.railSessionsOpen = false
+				r.SetSidebarCollapsed(false)
+			}
+		})
+	})
+}
+
+// railSessionRow is one conversation row of the rail popover: its title, a
+// running (success) or unread (accent) dot, and the same state in the row's
+// accessible name so assistive technology hears it too. A click opens the
+// conversation and closes the popover.
+func (r *Root) railSessionRow(c *ui.Context, t *design.Tokens, session contracts.ChatSessionInfo) {
+	title := strings.TrimSpace(session.Title)
+	if title == "" {
+		title = r.tr("未命名会话", "Untitled conversation")
+	}
+	rowLabel := title
+	switch {
+	case session.Running:
+		rowLabel += " · " + r.tr("运行中", "Running")
+	case session.Unread:
+		rowLabel += " · " + r.tr("未读", "Unread")
+	}
+	row := ui.ButtonBase(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+		Padding(design.Space2, design.Space3).Radius(design.RadiusSM).Label(rowLabel)
+	if row.Hovered() {
+		row = row.Background(t.BgHover)
+	}
+	row.Children(func() {
+		design.Apply(ui.Text(c, title), t.Font(design.TypeXS)).TextColor(t.LabelPrimary).
+			Grow(1).MaxLines(1).Ellipsis("…")
+		switch {
+		case session.Running:
+			ui.Box(c).Size(design.Space2, design.Space2).Radius(design.Space1).Background(t.Success)
+		case session.Unread:
+			ui.Box(c).Size(design.Space2, design.Space2).Radius(design.Space1).Background(t.Accent)
+		}
+	})
+	if row.Clicked() {
+		r.railSessionsOpen = false
+		r.openNotifiedSession(session.ID)
+		r.requestFrame()
+	}
+}
+
+// railSessions returns the recent user conversations the rail popover lists,
+// filtered by its search draft. Archived and automation/subagent conversations
+// stay out, as in the sidebar; the newest conversations first (the chat
+// service's order), bounded by railSessionLimit.
+func (r *Root) railSessions() []contracts.ChatSessionInfo {
+	r.mu.Lock()
+	chat := r.chatService
+	kernel := r.kernelContext
+	r.mu.Unlock()
+	if chat == nil && kernel != (cordis.Context{}) {
+		if fromKernel, ok := kernel.Get(contracts.KeyChat); ok {
+			chat = fromKernel
+		}
+	}
+	if chat == nil {
+		return nil
+	}
+	query := strings.ToLower(strings.TrimSpace(r.railSessionsQuery))
+	sessions := chat.Sessions()
+	recent := make([]contracts.ChatSessionInfo, 0, len(sessions))
+	for _, session := range sessions {
+		if session.Archived || session.Origin != contracts.SessionOriginUser {
+			continue
+		}
+		if query != "" && !strings.Contains(strings.ToLower(session.Title), query) {
+			continue
+		}
+		recent = append(recent, session)
+		if len(recent) == railSessionLimit {
+			break
+		}
+	}
+	return recent
 }
 
 // screenIcon maps a registered screen id to the shell's icon. The icon set must
@@ -403,8 +538,11 @@ func (r *Root) screen(c *ui.Context) {
 }
 
 // contentArea renders the main column, and the docked inspector beside it in a
-// second native split view when the window is wide enough to dock it. A narrow
-// window shows the inspector as a modal drawer over the content instead.
+// second native split view when the window is wide enough to dock it. The
+// effective sidebar width (optionally the temporary rail the responsive
+// inspector needs) is already reflected by contentColumnWidth; only a window
+// that cannot dock the inspector even with the rail falls back to the modal
+// drawer over the content.
 func (r *Root) contentArea(c *ui.Context) {
 	main := func() {
 		ui.Column(c).FillHeight().Grow(1).Shrink(1).MinWidth(0).
@@ -438,8 +576,11 @@ func (r *Root) contentArea(c *ui.Context) {
 	// ui.Split sizes its *first* pane, so the split's size is the content
 	// column's width: the inspector keeps its own width on the right and the
 	// content takes the rest (a dragged divider updates the inspector width).
+	// inspectorLayoutWidth shrinks the pane to what the column can afford while
+	// the content keeps ContentMinWidth, so the temporary rail's narrow window
+	// still docks a usable inspector instead of a clipped one.
 	contentWidth := r.contentColumnWidth(c)
-	contentPaneWidth := contentWidth - r.inspectorWidth
+	contentPaneWidth := contentWidth - r.inspectorLayoutWidth(c)
 	if contentPaneWidth < design.Space6 {
 		contentPaneWidth = design.Space6
 	}
@@ -452,11 +593,16 @@ func (r *Root) contentArea(c *ui.Context) {
 	// screen renders at its intrinsic height: an empty conversation floats the
 	// composer in the middle of the window, and a long transcript grows the
 	// page past the window so the composer is pushed offscreen and the
-	// transcript List has no bounded height to scroll (the reported bug).
+	// transcript List has no bounded height to scroll (the reported bug). It
+	// also grows into the content column's width: with the collapsed rail the
+	// split is the sidebar row's second child directly (no outer split pane to
+	// stretch it), and without Grow it would size itself to the first pane
+	// plus the inspector's intrinsic content instead of the window.
 	split := ui.Split(c, &contentPaneWidth, main, func() {
 		r.inspectorDockedPane(c)
 	}).SplitReset(contentWidth - design.InspectorWidth).
-		Label(r.tr("右侧栏宽度可调", "Resizable right panel")).FillHeight()
+		Label(r.tr("右侧栏宽度可调", "Resizable right panel")).
+		Grow(1).Shrink(1).FillHeight()
 	if split.Changed() {
 		width := clampWidth(contentWidth-contentPaneWidth, minInspectorWidth, maxInspectorWidth)
 		if width != r.inspectorWidth {
@@ -476,23 +622,101 @@ func (r *Root) inspectorAvailable() bool {
 	return r.nav.Current() == sessionScreenID && r.hasAnySlot(contracts.SlotSessionPanelRight)
 }
 
+// preferredSidebarWidth is the expanded sidebar's width: the width the user
+// dragged and saved, or the brand default before the first frame loads it.
+func (r *Root) preferredSidebarWidth() float32 {
+	if r.widthsLoaded && r.sidebarWidth > 0 {
+		return r.sidebarWidth
+	}
+	return design.SidebarWidth
+}
+
+// preferredInspectorWidth is the docked inspector's preferred width: the width
+// the user dragged and saved, or the brand default before the first frame loads
+// it.
+func (r *Root) preferredInspectorWidth() float32 {
+	if r.widthsLoaded && r.inspectorWidth > 0 {
+		return r.inspectorWidth
+	}
+	return design.InspectorWidth
+}
+
+// inspectorDrawerAt reports whether an open inspector would take the modal
+// drawer form with base as the sidebar's width: the same decision
+// rightPanelDrawerOpen makes, with the sidebar width as a parameter so the
+// responsive rail can ask what the rail would afford. The drawer is the last
+// resort: a docked inspector below InspectorMinWidth would cover the content
+// with a scrim and block the composer.
+func (r *Root) inspectorDrawerAt(c *ui.Context, base float32) bool {
+	width, _ := c.Size()
+	dockW := r.preferredInspectorWidth()
+	if width > 0 {
+		if avail := width - base - design.ContentMinWidth - design.Space6; avail < dockW {
+			dockW = avail
+		}
+	}
+	return dockW < design.InspectorMinWidth
+}
+
+// inspectorNeedsRail reports whether the open inspector can dock only with the
+// sidebar's 64 DIP rail: the expanded sidebar would leave the inspector under
+// InspectorMinWidth (or squeeze the content under ContentMinWidth), while the
+// rail leaves both minima satisfiable. It is a layout state only — the user's
+// collapsed preference is never written.
+func (r *Root) inspectorNeedsRail(c *ui.Context) bool {
+	if !r.rightOpen || !r.inspectorAvailable() || r.sidebarCollapsed {
+		return false
+	}
+	return r.inspectorDrawerAt(c, r.preferredSidebarWidth()) &&
+		!r.inspectorDrawerAt(c, design.SidebarRailWidth)
+}
+
+// effectiveSidebarCollapsed reports whether this frame renders the sidebar as
+// the icon rail: the user's own Cmd/Ctrl+B state, or the temporary rail an open
+// inspector needs on a window too narrow for the expanded sidebar plus a usable
+// inspector. Closing the inspector or widening the window drops the temporary
+// part automatically, because it is derived from the layout every frame.
+func (r *Root) effectiveSidebarCollapsed(c *ui.Context) bool {
+	return r.sidebarCollapsed || r.inspectorNeedsRail(c)
+}
+
+// effectiveSidebarWidth is the width this frame's sidebar takes: the rail when
+// effectiveSidebarCollapsed, else the preferred expanded width.
+func (r *Root) effectiveSidebarWidth(c *ui.Context) float32 {
+	if r.effectiveSidebarCollapsed(c) {
+		return design.SidebarRailWidth
+	}
+	return r.preferredSidebarWidth()
+}
+
 // contentColumnWidth estimates the room the content column and the docked
-// inspector share: the window less the sidebar (or its rail) and the outer
-// split's divider. The inner split only needs it to keep the inspector's width
-// fixed while the content flexes.
+// inspector share: the window less the effective sidebar (the user's rail, the
+// temporary responsive rail, or the expanded column) and the outer split's
+// divider. The inner split only needs it to keep the inspector's width fixed
+// while the content flexes.
 func (r *Root) contentColumnWidth(c *ui.Context) float32 {
 	width, _ := c.Size()
-	sidebar := design.SidebarWidth
-	if r.widthsLoaded && r.sidebarWidth > 0 {
-		sidebar = r.sidebarWidth
-	}
-	if r.sidebarCollapsed {
-		sidebar = design.SidebarRailWidth
-	}
+	sidebar := r.effectiveSidebarWidth(c)
 	if width <= 0 {
-		return design.ContentMinWidth + r.inspectorWidth
+		return design.ContentMinWidth + r.preferredInspectorWidth()
 	}
 	return width - sidebar - design.Space1
+}
+
+// inspectorLayoutWidth resolves the width the docked inspector pane takes: the
+// user's preferred width when the content column can afford it, else the widest
+// width down to InspectorMinWidth that still leaves the content its
+// ContentMinWidth. It never writes the saved width, so the user's drag is
+// restored when the window widens again.
+func (r *Root) inspectorLayoutWidth(c *ui.Context) float32 {
+	inspector := r.preferredInspectorWidth()
+	if avail := r.contentColumnWidth(c) - design.ContentMinWidth; avail < inspector {
+		inspector = avail
+	}
+	if inspector < design.InspectorMinWidth {
+		inspector = design.InspectorMinWidth
+	}
+	return clampWidth(inspector, minInspectorWidth, maxInspectorWidth)
 }
 
 // inspectorDocked reports whether the open inspector renders as a docked pane:
@@ -772,6 +996,9 @@ func (r *Root) hasAnySlot(names ...string) bool {
 // it, Escape closes it — the promise the old hand-built row list only printed.
 func (r *Root) palette(c *ui.Context) {
 	if !r.paletteOpen {
+		// A closed palette forgets that it drew: the next opening scrolls the
+		// list back to the first row (paletteShown, below).
+		r.paletteShown = false
 		return
 	}
 	t := design.Of(c)
@@ -820,57 +1047,84 @@ func (r *Root) palette(c *ui.Context) {
 				// nothing without it.
 				r.paletteList.Selected = &r.paletteSelected
 				r.paletteList.Choose(0)
+				// The first match must also be the row the viewport shows: the
+				// List keeps the previous query's place, which can leave the new
+				// first row above the visible range.
+				r.paletteList.ScrollTo(0, ui.Start)
+				r.paletteReveal = 0
 			}
-			matches := make([]contracts.CommandSpec, 0, 16)
-			seen := make(map[string]bool, 16)
-			for _, cmd := range r.rt.commandSpecs() {
-				if cmd.Enabled != nil && !cmd.Enabled() {
-					continue
-				}
-				if needle != "" {
-					haystack := strings.ToLower(cmd.Title + "\x00" + cmd.ID + "\x00" + cmd.Hint)
-					if !strings.Contains(haystack, needle) {
-						continue
-					}
-				}
-				// Two modules can register one visible command (the old
-				// "设置"/"打开设置" pair); the palette shows the action once.
-				if seen[cmd.Title] {
-					continue
-				}
-				seen[cmd.Title] = true
-				matches = append(matches, cmd)
-			}
+			matches := r.paletteCommands(needle)
 			if len(matches) == 0 {
 				// No match: the arrows must not keep moving a choice of the
 				// previous query (the stale count also scheduled frames for
 				// nothing, fix round SH-08).
 				r.paletteCount = 0
 				design.Apply(ui.Text(c, r.tr("没有匹配的命令", "No matching commands")), t.TextMuted(design.TypeXS))
-				design.Apply(ui.Text(c, r.tr("Esc 关闭", "Esc to close")), t.TextMuted(design.TypeXXXS))
+				// Instruction copy, not a kbd-only micro-label: the metadata step
+				// keeps it out of TypeXXXS's 11 DIP size (DESIGN.md §5.3).
+				design.Apply(ui.Text(c, r.tr("Esc 关闭", "Esc to close")), t.TextMuted(design.TypeXXS))
 				return
 			}
+			entries, rows := r.paletteEntries(matches)
 			r.paletteCount = len(matches)
-			r.paletteList.Key = func(row int) any { return matches[row].ID }
-			r.paletteList.Label = func(row int) string { return matches[row].Title }
-			r.paletteList.Selected = &r.paletteSelected
 			// Keep the fallback clamp (Enabled changes can shrink the rows
 			// without any filter change), but make it an app choice through
 			// Choose as well: the stale Key memory must not move the choice to
 			// another command's row while the index is only being repaired.
+			r.paletteList.Selected = &r.paletteSelected
 			if r.paletteSelected >= len(matches) {
 				r.paletteList.Choose(len(matches) - 1)
 			} else if r.paletteSelected < 0 {
 				r.paletteList.Choose(0)
 			}
+			// The first frame of an opening shows the list from the top: a
+			// reopened palette reuses the ListState and would otherwise keep the
+			// previous opening's scroll place, leaving the chosen first row off
+			// screen while Enter still ran it (the SH-02 class of invisible
+			// target).
+			if !r.paletteShown {
+				r.paletteShown = true
+				r.paletteList.ScrollTo(0, ui.Start)
+				r.paletteReveal = r.paletteSelected
+			}
+			// The chosen row follows the keyboard: when it moved since the last
+			// layout, scroll it into view. The request is set before the List
+			// builds so this frame measures the rows around it, and the painted
+			// target is always the row Enter runs.
+			reveal := rows[r.paletteSelected]
+			if r.paletteReveal != r.paletteSelected {
+				r.paletteList.ScrollIntoView(reveal)
+				r.paletteReveal = r.paletteSelected
+			}
+			// The List's Selected is a row of this frame's grouped rows; the app
+			// keeps the command ordinal, so the two are translated through rows
+			// (the group headings occupy rows of their own).
+			r.paletteList.Selected = &reveal
+			r.paletteList.Key = func(row int) any { return entries[row].key }
+			r.paletteList.Label = func(row int) string { return entries[row].title }
+			r.paletteList.Header = func(row int) bool { return entries[row].header }
+
 			// The search field keeps the keyboard focus while the list shows the
 			// choice; ActiveDescendant points assistive technology at the row
 			// the arrows are on (mygo accessibility.md: a list box a text field
 			// drives with ActiveDescendant).
 			var activeRow ui.Element
-			list := ui.List(c, &r.paletteList, len(matches)).
+			list := ui.List(c, &r.paletteList, len(entries)).
 				Label(r.tr("命令", "Commands")).Rows(func(row ui.ListRow) {
-				cmd := matches[row.Index]
+				entry := entries[row.Index]
+				if entry.header {
+					// A group heading, not a command: the List marks it as a
+					// header, so the pointer and the keys skip it and it pins to
+					// the top while its group scrolls under it. The opaque fill
+					// is the modal panel's own color, so pinned headings cover
+					// the rows scrolling beneath instead of stacking on them.
+					ui.Row(row.Context).FillWidth().Background(t.BgBase).
+						Padding(design.Space1, design.Space1).Children(func() {
+						design.Apply(ui.Text(row.Context, entry.title), t.SectionLabel())
+					})
+					return
+				}
+				cmd := entry.cmd
 				chosen := row.Selected()
 				// The row is a native button so a single click runs the command,
 				// as in a desktop palette; the List around it still owns Up/Down
@@ -916,16 +1170,22 @@ func (r *Root) palette(c *ui.Context) {
 					r.runPaletteCommand(cmd)
 				}
 			}).MaxHeight(320)
-			// A List follows the chosen command by Key and drops it when its item
-			// left the list, writing -1 back during this build (mygo list.md: the
-			// choice is gone with its item); a command's Enabled state can take
-			// its row out between frames. A command palette always chooses some
-			// row, so Choose the first match and repaint once: otherwise the list
-			// paints no chosen row while Enter still runs one, which is exactly
-			// the invisible target the fix round's SH-02 reported.
-			if r.paletteSelected < 0 || r.paletteSelected >= len(matches) {
+			// Reconcile after the List built. A List follows the command it
+			// chose by Key and drops it when its item left the list (mygo
+			// list.md): an Enabled change can reorder the rows between frames
+			// without a filter change, and the List writes the painted row back
+			// into reveal, or -1 when the command is gone. Keep the app ordinal
+			// on the painted row so Enter runs what the user sees (the SH-02
+			// class of invisible target), and repair a dropped choice with a
+			// fresh Choose so some row is always painted.
+			switch {
+			case reveal < 0 || reveal >= len(entries) || entries[reveal].header:
+				r.paletteList.Selected = &r.paletteSelected
+				r.paletteSelected = 0
 				r.paletteList.Choose(0)
 				c.Invalidate()
+			case entries[reveal].ordinal != r.paletteSelected:
+				r.paletteSelected = entries[reveal].ordinal
 			}
 			if activeRow.Valid() {
 				search.ActiveDescendant(activeRow)
@@ -942,8 +1202,157 @@ func (r *Root) palette(c *ui.Context) {
 	})
 }
 
+// paletteEntry is one row of the palette's List: a group heading or one
+// command. Headings are List headers — skipped by the choice and pinned while
+// their group scrolls — so the List's row index differs from the command
+// ordinal the palette tracks (paletteSelected).
+type paletteEntry struct {
+	title   string
+	key     string
+	header  bool
+	ordinal int
+	cmd     contracts.CommandSpec
+}
+
+// paletteCommands returns the commands the palette offers for one query: the
+// registered command surface plus the host-generated navigation ("前往 …") and
+// settings ("设置：…") commands, filtered by the query and deduplicated by
+// title. Disabled commands are dropped; the registry's order is preserved
+// inside a category.
+func (r *Root) paletteCommands(needle string) []contracts.CommandSpec {
+	all := r.paletteCommandList()
+	matches := make([]contracts.CommandSpec, 0, len(all))
+	seen := make(map[string]bool, len(all))
+	for _, cmd := range all {
+		if cmd.Enabled != nil && !cmd.Enabled() {
+			continue
+		}
+		if !paletteCommandMatches(cmd, needle) {
+			continue
+		}
+		// Two modules can register one visible command (the old
+		// "设置"/"打开设置" pair); the palette shows the action once.
+		if seen[cmd.Title] {
+			continue
+		}
+		seen[cmd.Title] = true
+		matches = append(matches, cmd)
+	}
+	return matches
+}
+
+// paletteCommandList returns every palette command before filtering. The
+// registered command surface is the actions group; the navigation and settings
+// groups are derived from the registries each frame, so a screen or settings
+// page that is unregistered (or hidden by its Visible hook) loses its palette
+// command with it.
+func (r *Root) paletteCommandList() []contracts.CommandSpec {
+	registered := r.rt.commandSpecs()
+	all := make([]contracts.CommandSpec, 0, len(registered)+16)
+	all = append(all, registered...)
+	for _, spec := range visibleScreens(r.rt.screenSpecs()) {
+		spec := spec
+		title := r.screenLabel(spec)
+		all = append(all, contracts.CommandSpec{
+			ID:       "uiroot.goto." + spec.ID,
+			Title:    r.tr("前往 ", "Go to ") + title,
+			Category: contracts.CommandCategoryGoTo,
+			// The screen id and title are search aliases: users type the
+			// destination's name, not the generated command's ID.
+			Keywords: []string{spec.ID, title},
+			Run:      func() error { return r.nav.Push(spec.ID) },
+		})
+	}
+	for _, page := range flattenSettingsGroups(groupSettingsPages(visiblePages(r.rt.settingsPages()))) {
+		page := page
+		keywords := append([]string{page.Title, r.settingsSectionTitle(page.Section)},
+			settingsPageSearchTerms(page)...)
+		all = append(all, contracts.CommandSpec{
+			ID:       "uiroot.settings." + page.ID,
+			Title:    r.tr("设置：", "Settings: ") + page.Title,
+			Category: contracts.CommandCategorySettings,
+			// The page's own search terms (its module declares them) make
+			// "主题"/"theme" reach the page with the same words the settings
+			// navigation's search accepts.
+			Keywords: keywords,
+			Run:      func() error { return r.nav.OpenSettingsPage(page.ID) },
+		})
+	}
+	return all
+}
+
+// paletteCommandMatches reports whether cmd matches the lower-case needle on
+// its title, ID, hint or keywords.
+func paletteCommandMatches(cmd contracts.CommandSpec, needle string) bool {
+	if needle == "" {
+		return true
+	}
+	haystack := strings.ToLower(cmd.Title + "\x00" + cmd.ID + "\x00" + cmd.Hint)
+	for _, keyword := range cmd.Keywords {
+		haystack += "\x00" + strings.ToLower(keyword)
+	}
+	return strings.Contains(haystack, needle)
+}
+
+// paletteCategoryOf normalizes a command's category to one the palette shows:
+// the goto and settings categories keep their heading, and an unknown or empty
+// category joins the actions group so a module that sets something new still
+// renders its command.
+func paletteCategoryOf(cmd contracts.CommandSpec) string {
+	switch cmd.Category {
+	case contracts.CommandCategoryGoTo, contracts.CommandCategorySettings:
+		return cmd.Category
+	default:
+		return contracts.CommandCategoryActions
+	}
+}
+
+// paletteEntries lays the matching commands out in the palette's row order: the
+// actions, navigation and settings groups, each under its heading. rows maps a
+// command ordinal (the index in matches) to its List row.
+func (r *Root) paletteEntries(matches []contracts.CommandSpec) (entries []paletteEntry, rows []int) {
+	groups := []struct{ id, label string }{
+		{contracts.CommandCategoryActions, r.tr("操作", "Actions")},
+		{contracts.CommandCategoryGoTo, r.tr("前往", "Go to")},
+		{contracts.CommandCategorySettings, r.tr("设置", "Settings")},
+	}
+	counts := make(map[string]int, len(groups))
+	categories := make([]string, len(matches))
+	for ordinal, cmd := range matches {
+		categories[ordinal] = paletteCategoryOf(cmd)
+		counts[categories[ordinal]]++
+	}
+	entries = make([]paletteEntry, 0, len(matches)+len(groups))
+	rows = make([]int, len(matches))
+	for _, group := range groups {
+		if counts[group.id] == 0 {
+			continue
+		}
+		entries = append(entries, paletteEntry{
+			title:   group.label,
+			key:     "header:" + group.id,
+			header:  true,
+			ordinal: -1,
+		})
+		for ordinal, cmd := range matches {
+			if categories[ordinal] != group.id {
+				continue
+			}
+			rows[ordinal] = len(entries)
+			entries = append(entries, paletteEntry{
+				title:   cmd.Title,
+				key:     "command:" + cmd.ID,
+				ordinal: ordinal,
+				cmd:     cmd,
+			})
+		}
+	}
+	return entries, rows
+}
+
 // movePaletteSelection moves the palette's choice while the search field has
-// the keyboard focus.
+// the keyboard focus. The next frame scrolls the choice into view (palette's
+// paletteReveal check), so the painted target is always the row Enter runs.
 func (r *Root) movePaletteSelection(delta int) {
 	if !r.paletteOpen || r.paletteCount == 0 {
 		return
@@ -977,7 +1386,9 @@ func (r *Root) runPaletteCommand(cmd contracts.CommandSpec) {
 func (r *Root) overlays(c *ui.Context) {
 	if r.nav.SettingsOpen() {
 		open := true
-		ui.Modal(c, &open, func() { r.settings(c, &open) })
+		// Name the dialog for assistive technology: the modal is a dialog of
+		// navigation + page, and a screen reader announces its name on open.
+		ui.Modal(c, &open, func() { r.settings(c, &open) }).Label(r.tr("设置", "Settings"))
 		if !open {
 			// A dirty page keeps the surface open and asks once; a clean page
 			// (including one the user saved while the bar was showing) closes.
@@ -1029,31 +1440,15 @@ func (r *Root) discardSettingsDrafts() {
 }
 
 // rightPanelDrawerOpen reports whether the inspector is open as a drawer (the
-// window is too narrow to dock it beside the content). Mirror of rightPanel's
-// sizing decision, used to reserve the drawer's width in the content column.
+// window is too narrow to dock it beside the content even with the effective
+// sidebar width). Mirror of rightPanel's sizing decision, used to reserve the
+// drawer's width in the content column. The decision reads
+// effectiveSidebarWidth so a window that gets the temporary rail docks instead.
 func (r *Root) rightPanelDrawerOpen(c *ui.Context) bool {
 	if !r.rightOpen || !r.inspectorAvailable() {
 		return false
 	}
-	width, _ := c.Size()
-	base := design.SidebarWidth
-	if r.widthsLoaded && r.sidebarWidth > 0 {
-		base = r.sidebarWidth
-	}
-	if r.sidebarCollapsed {
-		base = design.SidebarRailWidth
-	}
-	inspector := design.InspectorWidth
-	if r.widthsLoaded && r.inspectorWidth > 0 {
-		inspector = r.inspectorWidth
-	}
-	dockW := inspector
-	if width > 0 {
-		if avail := width - base - design.ContentMinWidth - design.Space6; avail < dockW {
-			dockW = avail
-		}
-	}
-	return dockW < design.InspectorMinWidth
+	return r.inspectorDrawerAt(c, r.effectiveSidebarWidth(c))
 }
 
 // commandShortcut adds the host-known chord for commands whose modules do not
@@ -1093,15 +1488,18 @@ var settingsSectionRank = map[string]int{
 }
 
 // settingsPageMatches reports whether a settings page matches the navigation
-// search needle. It matches the page title, its section's localized title and
-// the page's keyword aliases: users search for the setting's name ("密钥",
-// "主题", "字体"), which is rarely the page title (report R2).
+// search needle. It matches the page title, its section's localized title, the
+// keywords the page's own module declared, and the labels/keywords of the
+// page's searchable items: users search for the setting's name ("密钥",
+// "主题", "字号"), which is rarely the page title (report R2). The terms come
+// from the module through contracts.SettingsPageSpec, so the host keeps no alias
+// table that can drift away from the page.
 func (r *Root) settingsPageMatches(page contracts.SettingsPageSpec, needle string) bool {
 	haystack := []string{
 		strings.ToLower(page.Title),
 		strings.ToLower(r.settingsSectionTitle(page.Section)),
 	}
-	haystack = append(haystack, settingsPageKeywords(page.ID)...)
+	haystack = append(haystack, settingsPageSearchTerms(page)...)
 	for _, text := range haystack {
 		if text != "" && strings.Contains(text, needle) {
 			return true
@@ -1110,57 +1508,65 @@ func (r *Root) settingsPageMatches(page contracts.SettingsPageSpec, needle strin
 	return false
 }
 
-// settingsPageKeywords lists the search aliases of a settings page: the field
-// labels and synonyms users know it by, in Chinese and English. The page IDs
-// are the stable contract with the modules (contracts.SettingsPageSpec.ID), so
-// the alias table stays host-owned and a module cannot drift it.
-func settingsPageKeywords(id string) []string {
-	switch id {
-	case "model":
-		return []string{"密钥", "api key", "apikey", "base url", "地址", "端点", "服务商", "provider",
-			"模型", "model", "上下文", "context", "最大迭代", "iterations", "提示词", "prompt",
-			"温度", "temperature", "top p", "思考", "推理", "reasoning", "测试连接", "目录", "catalog", "生成参数"}
-	case "appearance":
-		return []string{"主题", "theme", "深色", "dark", "浅色", "light", "跟随系统", "语言", "language",
-			"中文", "英文", "字体", "font", "字号", "text size", "缩放", "scale", "热键", "hotkey",
-			"快捷键", "shortcut", "托盘", "tray", "开机", "启动", "autostart", "单实例"}
-	case "behavior":
-		return []string{"行为", "工作步骤", "steps", "详细", "verbose", "精简", "minimal", "创作", "creative",
-			"模式", "mode", "权限", "permission", "沙箱", "sandbox"}
-	case "presets":
-		return []string{"预设", "preset", "人设", "persona", "提示词模板", "template", "agent"}
-	case "skills":
-		return []string{"技能", "skill", "skill.md", "扫描", "scan", "全局", "工作区", "workspace"}
-	case "shortcuts":
-		return []string{"快捷键", "shortcut", "键位", "keybinding", "恢复默认", "restore default"}
-	case "mcp":
-		return []string{"mcp", "插件", "plugin", "服务器", "server", "工具", "tool", "连接", "connection"}
-	case "search":
-		return []string{"搜索", "search", "网络搜索", "web", "引擎", "engine", "api key"}
-	case "network":
-		return []string{"网络", "network", "代理", "proxy", "超时", "timeout", "证书", "certificate", "tls"}
-	case "notifications":
-		return []string{"通知", "notification", "气泡", "toast", "声音", "sound", "桌面"}
-	case "archive":
-		return []string{"归档", "archive", "恢复", "restore", "已归档"}
-	case "import":
-		return []string{"导入", "import", "dsh", "迁移", "migrate", "数据目录", "data dir"}
-	case "update":
-		return []string{"更新", "update", "版本", "version", "检查更新", "自动更新", "changelog"}
-	case "diagnostics":
-		return []string{"诊断", "diagnostic", "日志", "log", "信息", "info", "提交", "commit",
-			"构建", "build", "复制", "copy", "运行时"}
-	case "memory":
-		return []string{"记忆", "memory", "提取", "extract", "去重", "tidy", "全局", "global"}
-	case "lsp":
-		return []string{"lsp", "语言服务", "language server", "补全", "completion", "诊断", "diagnostics"}
-	case "data-privacy":
-		return []string{"数据", "data", "隐私", "privacy", "导出", "export", "清除", "清空",
-			"备份", "backup", "重置", "reset"}
-	case "about":
-		return []string{"关于", "about", "版本", "version", "许可", "license", "架构", "architecture"}
+// settingsPageSearchTerms returns everything a page's module declared for the
+// navigation search: the page's own keywords plus each searchable item's label
+// and keywords, lower-cased.
+func settingsPageSearchTerms(page contracts.SettingsPageSpec) []string {
+	terms := make([]string, 0, len(page.Keywords)+3*len(page.SearchItems))
+	for _, keyword := range page.Keywords {
+		if keyword != "" {
+			terms = append(terms, strings.ToLower(keyword))
+		}
 	}
-	return nil
+	for _, item := range page.SearchItems {
+		if item.Label != "" {
+			terms = append(terms, strings.ToLower(item.Label))
+		}
+		for _, keyword := range item.Keywords {
+			if keyword != "" {
+				terms = append(terms, strings.ToLower(keyword))
+			}
+		}
+	}
+	return terms
+}
+
+// settingsSearchHit finds the first searchable item the needle matches, in the
+// pages' display order: that page is selected and its Reveal hook is asked for
+// the item's anchor key, so a search for "压缩" lands on the context-budget
+// field instead of only the model page. ok=false covers a page-level match (the
+// page's title, section or own keywords) and no match at all.
+func settingsSearchHit(pages []contracts.SettingsPageSpec, needle string) (
+	page contracts.SettingsPageSpec, item contracts.SettingsSearchItem, ok bool,
+) {
+	if needle == "" {
+		return contracts.SettingsPageSpec{}, contracts.SettingsSearchItem{}, false
+	}
+	for _, candidate := range pages {
+		for _, searchItem := range candidate.SearchItems {
+			if settingsSearchItemMatches(searchItem, needle) {
+				return candidate, searchItem, true
+			}
+		}
+	}
+	return contracts.SettingsPageSpec{}, contracts.SettingsSearchItem{}, false
+}
+
+// settingsSearchItemMatches reports whether one searchable item matches the
+// needle on its label or one of its keywords.
+func settingsSearchItemMatches(item contracts.SettingsSearchItem, needle string) bool {
+	if needle == "" {
+		return false
+	}
+	if strings.Contains(strings.ToLower(item.Label), needle) {
+		return true
+	}
+	for _, keyword := range item.Keywords {
+		if keyword != "" && strings.Contains(strings.ToLower(keyword), needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // settingsSectionTitle localizes a page section name for the navigation.
@@ -1173,7 +1579,7 @@ func (r *Root) settingsSectionTitle(section string) string {
 	case "模型":
 		return r.tr("模型与对话", "Models & chat")
 	case "外观":
-		return r.tr("外观与技能", "Appearance & skills")
+		return r.tr("外观与语言", "Appearance & language")
 	case "键盘":
 		return r.tr("键盘", "Keyboard")
 	case "集成":
@@ -1323,7 +1729,8 @@ func (r *Root) settingsNavColumn(c *ui.Context, t *design.Tokens, selected *stri
 				}
 			}
 			r.slot(c, contracts.SlotSettingsSidebar)
-		}).Grow(1).Shrink(1).FillWidth().PaddingY(design.Space1)
+		}).Label(r.tr("设置导航", "Settings navigation")).
+			Grow(1).Shrink(1).FillWidth().PaddingY(design.Space1)
 	})
 }
 
@@ -1437,6 +1844,18 @@ func (r *Root) settings(c *ui.Context, open *bool) {
 	if !visibleSelected {
 		displaySelected = ordered[0].ID
 	}
+	// A search hit on one of a page's items selects that page and asks the page
+	// to reveal the item's region (scroll into view + transient highlight). The
+	// request is made when the query changes, so it runs once per search instead
+	// of re-scrolling on every frame and fighting the user.
+	if needle != r.settingsRevealedQuery {
+		r.settingsRevealedQuery = needle
+		r.settingsRevealPage, r.settingsRevealAnchor = "", ""
+		if hitPage, hitItem, ok := settingsSearchHit(ordered, needle); ok && hitItem.AnchorKey != "" {
+			r.settingsRevealPage, r.settingsRevealAnchor = hitPage.ID, hitItem.AnchorKey
+			displaySelected = hitPage.ID
+		}
+	}
 	current := allOrdered[r.settingsTab]
 	dirty := r.settingsHasUnsaved()
 	if !dirty {
@@ -1459,6 +1878,17 @@ func (r *Root) settings(c *ui.Context, open *bool) {
 				ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
 					r.slot(c, contracts.SlotSettingsHeader)
 					r.slot(c, contracts.SlotSettingsPageBody)
+					// Hand a pending item hit to the page before it builds: the
+					// page expands the disclosure around the region and scrolls
+					// it into view in the same frame (contracts.SettingsPageSpec
+					// .Reveal). The hit page is usually selected one frame before
+					// its body builds, so the request waits here for it.
+					if r.settingsRevealPage == current.ID && r.settingsRevealAnchor != "" {
+						if current.Reveal != nil {
+							current.Reveal(c, r.settingsRevealAnchor)
+						}
+						r.settingsRevealPage, r.settingsRevealAnchor = "", ""
+					}
 					r.safeBuild(c, current.Build)
 				})
 			})

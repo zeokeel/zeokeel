@@ -61,7 +61,7 @@
 | `internal/uiroot/frame.go` 命令面板行按钮 | 单次点击即执行命令，且需要 `RoleButton` a11y 名称（`uiroot/conformance_test.go` 钉住）；List 行角色是 listitem，官方 List 不提供按钮行语义 |
 | `internal/ui/sidebar` 新对话以外的图标/行按钮（添加工作区、工作区组标题、会话 ⋯、设置行） | 官方 Sidebar/Outline 只提供源列表与大纲语义，行内自定义内容与 ⋯ 菜单仍用 `ButtonBase`（custom-widgets）；品牌「新对话」已改官方 `PrimaryButton` |
 | `internal/ui/rightpanel` 检查器关闭、artifact 标题切换、任务 ⋯ | 无原生外观的独立图标按钮；`rowTint` 自绘状态属官方允许的 base 用法 |
-| composer 动作行（Plain Row + 3 个 PopoverMenuButton） | `ui.Toolbar` 溢出菜单会吞掉发送按钮；官方 Toolbar 不适合该组合 |
+| composer 动作行（Shell 的 Row：左半 `uikit.ComposerToolbar` + hint + 右侧发送/排队/停止） | `ui.Toolbar` 溢出菜单会吞掉发送按钮，故主操作留在 Toolbar 外；左半控件本身已是官方 `ui.Toolbar`（`uikit.ComposerToolbar`），不再手搓按钮状态 |
 | slash/@ 富行建议面板 | 行内含图标/标题/说明多段富文本，官方 Autocomplete 仅纯文本；已按官方 accessibility suggestions 模式实现 RoleListBox/RoleOption/PositionInSet/ActiveDescendant 与完整键盘 |
 | transcript 消息内 hover 动作行 | 消息级悬停交互，官方列表行不提供 |
 | 会话「回到最新」浮层 | 行为用官方 `ScrollToEnd`；浮层是 List 之外的必要 affordance |

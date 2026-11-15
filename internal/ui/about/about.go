@@ -59,6 +59,10 @@ func (p *aboutPage) register() error {
 		Section: "关于",
 		Title:   p.pageTitle(),
 		Order:   900,
+		// The page declares its own search aliases (the settings navigation
+		// matches them): the words users know the About page by, in both UI
+		// languages, live next to the page instead of in a host-side table.
+		Keywords: []string{"关于", "about", "版本", "version", "许可", "license", "架构", "architecture"},
 		Build: func(c *ui.Context) {
 			p.sync()
 			buildAboutPage(c, p.info, p.title, p.locale, &p.devOpen)
@@ -109,12 +113,18 @@ func buildAboutPage(c *ui.Context, info contracts.AppInfo, title string,
 	ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
 		uikit.PageHeader(c, heading, "")
 		uikit.Section(c, uikit.T(locale, "构建信息", "Build information"), func(c *ui.Context) {
-			buildPropertySheet(c, []uikit.KeyValue{
-				{Key: uikit.T(locale, "名称", "Name"), Value: aboutValue(locale, info.Name)},
-				{Key: uikit.T(locale, "版本", "Version"), Value: aboutValue(locale, info.Version)},
-				{Key: uikit.T(locale, "提交", "Commit"), Value: aboutValue(locale, info.Commit)},
-				{Key: uikit.T(locale, "构建时间", "Build time"), Value: aboutValue(locale, info.BuildTime)},
-				{Key: "Go", Value: aboutValue(locale, info.GoVersion)},
+			// One property sheet shape (DESIGN.md §5.2): the build metadata is
+			// a label/value table, not the right-aligned row list the page used
+			// to draw with its own 160 DIP label column.
+			uikit.PropertySheet(c, uikit.PropertySheetOptions{
+				Rows: []uikit.PropertyRow{
+					{Label: uikit.T(locale, "名称", "Name"), Value: aboutValue(locale, info.Name)},
+					{Label: uikit.T(locale, "版本", "Version"), Value: aboutValue(locale, info.Version)},
+					{Label: uikit.T(locale, "提交", "Commit"), Value: aboutValue(locale, info.Commit)},
+					{Label: uikit.T(locale, "构建时间", "Build time"), Value: aboutValue(locale, info.BuildTime)},
+					{Label: "Go", Value: aboutValue(locale, info.GoVersion)},
+				},
+				Key: "about.build", Locale: locale,
 			})
 		})
 		uikit.Section(c, uikit.T(locale, "开发信息", "Development information"), func(c *ui.Context) {
@@ -191,29 +201,6 @@ func own(ctx cordis.Context, register func() (func(), error)) error {
 		return err
 	}
 	return nil
-}
-
-// buildPropertySheet draws the product's property sheet (DESIGN.md §5.2): a
-// fixed 160 DIP label column, the value left-aligned on a 32 DIP row and a
-// divider between rows; the Diagnostics, Network and About pages share the
-// shape.
-func buildPropertySheet(c *ui.Context, rows []uikit.KeyValue) {
-	t := design.Of(c)
-	ui.Column(c).FillWidth().Gap(design.Space0).Children(func() {
-		for index, row := range rows {
-			if index > 0 {
-				ui.Divider(c)
-			}
-			ui.Row(c).FillWidth().Height(design.Space8).
-				AlignItems(ui.Center).Gap(design.Space3).Children(func() {
-				design.Apply(ui.Text(c, row.Key), t.TextMuted(design.TypeXS)).
-					Width(design.Space8 * 5).Shrink(0)
-				design.Apply(ui.Text(c, row.Value), t.Font(design.TypeXS)).
-					TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…").
-					Tooltip(row.Value).Selectable()
-			})
-		}
-	})
 }
 
 func firstNonEmpty(values ...string) string {

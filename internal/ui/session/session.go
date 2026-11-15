@@ -169,13 +169,40 @@ type state struct {
 	// fold opened in a message (list.md HoldPlace): the clicked line stays under
 	// the pointer instead of being pushed by the growing row.
 	chatHoldPlace bool
+	// messageFocusPending is the one-shot "open the conversation at this
+	// message" handoff from a search surface (contracts.SessionFocus, provided
+	// as KeySessionFocus). The screen build consumes it before the transcript
+	// lays out, so the List scrolls to the message's row instead of the
+	// followed end; messageFocusTarget is a durable locator from a
+	// MessageSearchHit (or a live chat message id).
+	messageFocusPending bool
+	messageFocusSession string
+	messageFocusTarget  string
 
 	// memoryList backs the Memory tab's official List; the pane opens at its
 	// top and a new search query resets the list.
 	memoryList ui.ListState
 	// trajList backs the trajectory pane's official List: the tool cards are a
-	// collection, so the List virtualizes and keys them by tool ID.
-	trajList      ui.ListState
+	// collection, so the List virtualizes and keys them by tool ID. trajSelected
+	// is the List's chosen row (-1 for none): a click or Enter on a row jumps to
+	// the conversation row that made the call.
+	trajList     ui.ListState
+	trajSelected int
+
+	// Find-in-conversation state (Cmd/Ctrl+F): the official ui.FindBar's open
+	// flag, the query kept after closing, the matches of the merged transcript
+	// (message + transcript List row) and the current match. findSig identifies
+	// what findMatches was computed from (query + transcript shape), so a stable
+	// frame never rescans the messages.
+	findOpen    bool
+	findQuery   string
+	findMatches []findMatch
+	findCurrent int
+	findSig     string
+	// findScrollPending makes the next find-bar build scroll to the current
+	// match (set when the bar opens, so reopening returns to the search result).
+	findScrollPending bool
+
 	scrollSession string
 
 	// Memory tab state: the search query, the add-input draft, the last store
@@ -261,11 +288,6 @@ type state struct {
 	// attach actions show 选择中…/Choosing… and stay disabled until the result
 	// is posted back, because mygo's dialog blocks its caller.
 	attachBusy bool
-	// attachPathsOpen/attachPathDraft/attachPathErr drive the manual path-entry
-	// fallback for environments without a working native picker (ZK-09).
-	attachPathsOpen bool
-	attachPathDraft string
-	attachPathErr   string
 
 	// md caches the Markdown renderer options for the current appearance (the
 	// library keeps its parse state per view root and the options must stay
@@ -487,7 +509,17 @@ func Module() *module.Descriptor[Config] {
 			thumbnails:           make(map[string]*ui.Bitmap),
 			interruptedDismissed: make(map[string]bool),
 			chatFollowEnd:        true,
+			trajSelected:         -1,
 			ctx:                  ctx,
+		}
+
+		// Search surfaces (the sidebar's message hits) locate one message
+		// through this optional handoff: the provider consumes the target before
+		// the next screen build. It is provided before any screen can render, so
+		// a sidebar click in the same frame still finds it.
+		if _, err := ctx.Provide(contracts.KeySessionFocus,
+			contracts.SessionFocus(sessionFocusHandoff{state: moduleState, runtime: runtime})); err != nil {
+			return err
 		}
 
 		// The context inspector is optional: without it the Context tab is not
@@ -581,6 +613,10 @@ func Module() *module.Descriptor[Config] {
 				Title: config.Title,
 				Order: 20,
 				Build: func(c *ui.Context) {
+					// A search-hit handoff is consumed before the transcript
+					// lays out: the first frame after the click already shows
+					// the target row.
+					moduleState.consumeMessageFocus(chat)
 					buildScreen(c, runtime, navigator, chat, config, moduleState)
 				},
 			})
@@ -637,6 +673,128 @@ func Module() *module.Descriptor[Config] {
 		AddRequires(module.Requires(contracts.KeyNavigator)).
 		AddRequires(module.Requires(contracts.KeyChat)).
 		WithName("ZeoKeel conversation screen")
+}
+
+// sessionFocusHandoff is the session module's contracts.SessionFocus provider
+// (KeySessionFocus): a search surface hands it the conversation and the durable
+// message locator to show, and the next screen build scrolls the transcript
+// there. It only records the target on the UI thread; the build consumes it.
+type sessionFocusHandoff struct {
+	state   *state
+	runtime contracts.UIRuntime
+}
+
+var _ contracts.SessionFocus = sessionFocusHandoff{}
+
+// FocusMessage implements contracts.SessionFocus.
+func (h sessionFocusHandoff) FocusMessage(sessionID, messageID string) {
+	sessionID, messageID = strings.TrimSpace(sessionID), strings.TrimSpace(messageID)
+	if h.state == nil || sessionID == "" || messageID == "" {
+		return
+	}
+	h.state.messageFocusPending = true
+	h.state.messageFocusSession = sessionID
+	h.state.messageFocusTarget = messageID
+	if h.runtime != nil {
+		h.runtime.Invalidate()
+	}
+}
+
+// consumeMessageFocus applies one pending search-hit target before the screen
+// builds: it switches to the conversation tab and scrolls the transcript List to
+// the target message's row (the grouping-aware row, not the raw message index).
+// An unresolvable target is dropped without moving the list: opening the wrong
+// conversation position is worse than opening at the followed end.
+func (st *state) consumeMessageFocus(chat contracts.ChatService) {
+	if st == nil || !st.messageFocusPending {
+		return
+	}
+	targetSession, target := st.messageFocusSession, st.messageFocusTarget
+	st.messageFocusPending = false
+	st.messageFocusSession = ""
+	st.messageFocusTarget = ""
+	if chat == nil || targetSession == "" || target == "" {
+		return
+	}
+	if strings.TrimSpace(chat.ActiveSession()) != targetSession {
+		// The click activates the session before navigating; a stale handoff
+		// for another conversation must not scroll this one.
+		return
+	}
+	chatSession, ok := chat.Session(targetSession)
+	if !ok {
+		return
+	}
+	row := transcriptRowForMessageLocator(st, chatSession, target)
+	if row < 0 {
+		return
+	}
+	st.tab = tabChat
+	st.chatFollowEnd = false
+	st.chatList.ScrollIntoView(row)
+	st.trajSelected = -1
+}
+
+// transcriptRowForMessageLocator maps a search hit's message locator to the
+// transcript List's row. A live chat message id matches first (a backend that
+// keeps ids); otherwise the durable 1-based stored-history position is
+// translated to the transcript message position, through the same grouping row
+// map the transcript and the trajectory jump use.
+func transcriptRowForMessageLocator(st *state, chatSession contracts.ChatSession, locator string) int {
+	if row := transcriptRowForMessageID(st, chatSession, locator); row >= 0 {
+		return row
+	}
+	ordinal, ok := contracts.ParseMessageOrdinalLocator(locator)
+	if !ok {
+		return -1
+	}
+	messages := transcriptMessages(st, chatSession)
+	index := st.transcriptIndexForDurableOrdinal(chatSession, ordinal)
+	if index < 0 || index >= len(messages) {
+		return -1
+	}
+	mapping := uikit.BuildSessionRowMap(messages, st.transcriptSameTurn())
+	return mapping.RowOf(index)
+}
+
+// transcriptIndexForDurableOrdinal maps a 1-based position in the stored
+// history to the index of the transcript message that renders it. The stored
+// history keeps the tool result messages the transcript folds into the
+// assistant turn (agent.chatMessagesFromRig), so the durable position is counted
+// through the transcript's user/assistant subset. Without a durable store (a
+// test host or a headless surface) the stored order is taken as the transcript
+// order. It returns -1 when the position is not resolvable.
+func (st *state) transcriptIndexForDurableOrdinal(chatSession contracts.ChatSession, ordinal int) int {
+	if ordinal <= 0 {
+		return -1
+	}
+	// The resolver runs once per search-hit click, not per frame: one durable
+	// history read translates the position, and a failure falls back to the
+	// order assumption instead of losing the jump.
+	if st != nil {
+		if store, ok := st.ctx.Get(contracts.KeyStore); ok && store != nil {
+			history, err := store.History().Load(context.Background(), chatSession.ID)
+			if err == nil {
+				if ordinal > len(history) {
+					return -1
+				}
+				index := 0
+				for position := 0; position < ordinal; position++ {
+					// rig roles are lower-case strings; the module boundary keeps
+					// the UI off the rig import, so the role is read as text.
+					switch strings.ToLower(strings.TrimSpace(string(history[position].Role))) {
+					case "user", "assistant":
+						index++
+					}
+				}
+				if index == 0 {
+					return -1
+				}
+				return index - 1
+			}
+		}
+	}
+	return ordinal - 1
 }
 
 // workStepsPolicy is the transcript's work-steps presentation for one frame:

@@ -4,19 +4,17 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.29 — thirty-fourth public release** (2026-11-11). Native, compile-time
-> modular AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary,
-> no webview. Windows sandbox patch: the ACL helper now takes its private temp
-> directory from Windows' own mechanisms (`GetTempPath2W`/`GetTempPathW`, the
-> user's `LocalAppData\Temp` Known Folder, then `os.TempDir()`), so a stripped
-> `TEMP/TMP` environment can no longer leave the candidate list empty and block
-> every command with exit 127. Non-secret Windows locator variables are allowed
-> through the sandbox command environment, and `job_start` checks the allowlist
-> by the shell's bare name. Upgrades to zeokeel-rig **v0.15.1**.
-> Final verification: `scripts/verify.sh` **13/13 PASS** — full test suite green
-> (incl. `-race`), regression **276 PASS / 0 FAIL**, `ui-snapshot` **101 steps /
-> 100 PNGs**, three-product smokes PASS, designlint **0 new / 0 blocking**,
-> design-check **6/6**. See [CHANGELOG.md](CHANGELOG.md).
+> **v0.2.38 — UI/UX 升级小版本** (2026-11-15). Native, compile-time modular
+> AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
+> webview. 本版按 [UI/UX 升级评估](docs/UI-UX-UPGRADE-2026-11-15.md) 收口设计债：
+> 输入框去小方块/附件直连 picker、审批内联 diff、命令面板首屏与分组、
+> 团队/子代理停止与执行域历史、后台完成通知静默、窄窗自动 rail + docked 检查器、
+> 会话 FindBar/轨迹定位、设置条目级搜索、搜索命中定位、rail 会话入口、
+> 窗口标题/托盘运行态、恢复会话元信息、状态/字号/a11y 收尾，并抽出
+> `uikit.ComposerToolbar`/`DiffPreview`/`PropertySheet`/`ReadingColumn`/`SegmentedControl`。
+> Final verification: `go test ./...` green (incl. key-package `-race`),
+> `ui-drive` **93/93 PASS**, `ui-snapshot` **122 PNG**, designlint
+> **0 new / 0 blocking**, design-check **6/6**. See [CHANGELOG.md](CHANGELOG.md).
 
 > **v0.2.24 主要变化**：按 `docs/PRODUCT-BUG-REVIEW-2026-11-11.md` 做 TDD 修复——
 > ① 安全/权限：MCP 多 server 重名 panic、`settings_get` 明文凭据、自动化只读越权、只读预设 destructive memory、LSP 初始化与沙箱路径、损坏数据文件隔离、后端工具开关生效；

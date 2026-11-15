@@ -1,5 +1,45 @@
 # Verification log (final)
 
+## 0.2.38 — 2026-11-15 (UI/UX 升级小版本)
+
+`go version go1.27.3 linux/amd64`
+
+```
+$ gofmt -l internal cmd
+(empty)
+
+$ go build ./...
+OK
+$ CGO_ENABLED=0 go build ./...
+OK
+$ go vet ./...
+OK
+$ go tool mygo vet .
+OK
+$ go test ./... -count=1
+all packages ok
+$ go test -race ./internal/modules/agent ./internal/modules/toolkit ./internal/modules/sessionstore \
+    ./internal/ui/session ./internal/uiroot ./internal/ui/settings ./internal/uikit -count=1
+all packages ok (race)
+$ go run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
+306 files, 90 violations (all baseline): 0 error, 0 warn, 0 new, 0 blocking
+$ bash scripts/design-check.sh
+6 passed, 0 failed
+$ go run ./internal/devtools/ui-drive --out .cache/impl-drive-final2
+93 PASS / 0 FAIL / 0 WARN / 0 BLOCKED
+$ go run ./internal/devtools/ui-snapshot .cache/impl-shots-final
+122 PNG
+$ make release
+built dist/zeokeel v0.2.38
+$ ./dist/zeokeel --version
+ZeoKeel v0.2.38 (commit 1f66af321407, built 2026-11-15T04:41:37Z, linux/amd64, go1.27.3)
+```
+
+Evidence: `.cache/impl-shots-final/` (122 PNG), `.cache/impl-drive-final2/drive-report.md`
+(93/93), `.cache/impl-shots-final/narrow/narrow-session-inspector.png`,
+`.cache/impl-shots-final/p1-chat.png` (back breadcrumb),
+`.cache/impl-shots-final/p1-trajectory.png`, `.cache/impl-shots-final/p2-model-settings.png`.
+
 Date: 2026-11-08 (Asia/Shanghai) · commit: c2b2f92
 
 ## Build, vet, tests

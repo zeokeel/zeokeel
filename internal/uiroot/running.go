@@ -75,3 +75,50 @@ func (r *Root) activeGoal(kernel cordis.Context, sessions []contracts.ChatSessio
 	}
 	return false
 }
+
+// ActivityStatus is the live background state the desktop host mirrors into the
+// window title and the system tray: how many conversations run and how many
+// approvals wait. It is the same view of the backend the close guard uses
+// (RunningWork), so the chrome and the guard cannot disagree about "busy".
+type ActivityStatus struct {
+	// Running is the number of conversations with a run in flight.
+	Running int
+	// Approvals is the number of tool approvals waiting for the user.
+	Approvals int
+}
+
+// Activity reports the live run/approval counters. It reads the live services
+// from the kernel context instead of the UI modules, so the desktop host can
+// refresh its window title and tray without knowing which module owns a run.
+// Missing services (a stripped product) report no activity.
+//
+// It is safe to call from any goroutine; the host calls it from its activity
+// refresh, which runs on the UI thread.
+func (r *Root) Activity() ActivityStatus {
+	if r == nil {
+		return ActivityStatus{}
+	}
+	r.mu.Lock()
+	chat := r.chatService
+	kernel := r.kernelContext
+	r.mu.Unlock()
+	if chat == nil && kernel != (cordis.Context{}) {
+		if fromKernel, ok := kernel.Get(contracts.KeyChat); ok {
+			chat = fromKernel
+		}
+	}
+	var status ActivityStatus
+	if chat != nil {
+		for _, session := range chat.Sessions() {
+			if session.Running {
+				status.Running++
+			}
+		}
+	}
+	if kernel != (cordis.Context{}) {
+		if approvals, ok := kernel.Get(contracts.KeyApprovals); ok && approvals != nil {
+			status.Approvals = len(approvals.Pending())
+		}
+	}
+	return status
+}

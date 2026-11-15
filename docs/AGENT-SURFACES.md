@@ -102,6 +102,10 @@ func SessionThread(c *ui.Context, o SessionThreadOptions)
 
 **当前实现**：`internal/ui/session/view.go` `buildChatPane`（List + ListState + FollowEnd + HoldPlace）与 `buildAssistantMessage`/`buildMessage`/过程折叠/元信息行。过程带：思考与非决策工具行以 16px 标记列（sparkles/工具分类图标/运行中 Spinner）+ 动作名 + 状态 + `·` 预览 + 内联 chevron 组成的一条缩进行距活动带；完成且过程 ≥2 行时折叠为一行摘要（`过程 · 思考 · N 个工具调用 · 用时`，流式展开），展开恢复完整时间线；决策卡（ask_user/plan_review/exit_plan_mode）不受折叠影响。帧测试：`internal/ui/session/transcript_window_test.go:32`（虚拟化）、`scroll_follow_test.go:35,65`（跟随）、`interaction_batch_a_test.go:123`（streaming 隐藏动作）、`chrome_b3_test.go`（B3 顶栏/⋯ 会话操作/目标 dock/审批 banner 槽/Esc 审批优先）。
 
+**落地补充（2026-11-15 收尾）**：空会话 hero 在已有空会话时主按钮「开始输入/Start typing」只聚焦 composer，另给 3 个示例 prompt（点击仅填草稿）；从洞察/自动化/插件进入会话时页头 `‹ 来源屏` 走 `nav.Back()`，非会话屏不再双高亮活动会话行；恢复会话从 durable `user_message`/`run_end` 回填 user 与 turn 最终 assistant 时间（压缩/rewind 不错配、不伪造），无时钟且无 usage 的恢复回合不渲染孤立 ⋯。子代理完成回执行尾「打开子会话」；会话 ⋯ 菜单在无目标时给「设置目标」、有目标时「编辑目标」；冷恢复空草稿发送按钮为 DisabledPrimary；活动行 kind 词不重复。窗口标题/托盘 tooltip 显示 `运行中 N` / `等待审批`（`Root.Activity()`，Chat/Approvals/语言事件刷新）。
+
+**查找与轨迹定位（2026-11-15）**：Cmd/Ctrl+F 打开官方 `ui.FindBar`（自动切到「对话」；子会话忽略），匹配每条消息的正文+推理（大小写不敏感，每条消息计 1 次），显示计数并用 `uikit.BuildSessionRowMap` 把消息映射到 transcript 分组行后 `ScrollIntoView`；Enter/Shift+Enter/上一/下一/Done/Esc 走官方控件；Esc 分层——字段自己消费，运行中 `interruptEsc` 先关 FindBar 且不停止 run，空闲时仅 findOpen 注册 screen Esc 并让位 slash 菜单；关闭保留 query/current，重开回到当前匹配，键盘交还 composer。轨迹页：`trajList.FollowEnd` 跟随流式新调用；计数行在 `uikit.ReadingColumn` 与卡片同轴；每卡「在对话中查看」（可及名「在对话中定位 <工具>」），方向键只移动选中、Enter/双击才切回对话并滚动到该消息行。
+
 **迁移步骤**：① 把 `buildChatPane` 的 List 配置/空态/回到最新抽成 `uikit.SessionThread`；② 消息体渲染保留为可插拔 `func(*ui.Context)`（业务 slot）；③ 用现有 transcript/scroll 测试作回归；④ 新增快照 `uikit-session-thread.png`。
 
 **验收**：`TestSessionThreadVirtualizesLongConversation`、`TestSessionThreadFollowAndBackToLatest`、`TestSessionThreadDefaultRows`（uikit）；流式隐藏动作由业务 Row 实现，由 session `TestStreamingMessageHidesActions` 覆盖；+ 快照。
@@ -188,7 +192,7 @@ func ToolCallCard(c *ui.Context, o ToolCallCardOptions)
 func ToolRow(c *ui.Context, o uikit.ToolRowOptions) // 已有
 ```
 
-**布局**：紧凑行（图标/名/状态/单行预览/chevron）用于普通调用；决策类工具在 transcript 用完整卡（图标+名+状态+步骤+详情）；轨迹 pane 复用同一卡。详情段统一：输入（命令/路径/前后内容/JSON）→ 输出；可复制；mono 8 行上限 + 截断提示。团队类工具不再提供跨模块 footer：团队/子代理从会话头部入口进入，工具卡只保留输入/输出与状态。
+**布局**：紧凑行（图标/名/状态/单行预览/chevron）用于普通调用；预览由 `toolcards.Preview` 的本地化模板按工具名从 arguments 生成（team_task_*/job_*/terminal_*/web_*/file/shell 等），未知工具或字段缺失回退后端 summary，统一单行+96 runes 截断；决策类工具在 transcript 用完整卡（图标+名+状态+步骤+详情）；轨迹 pane 复用同一卡。详情段统一：输入（命令/路径/前后内容/JSON）→ 输出；可复制；mono 8 行上限 + 截断提示。团队类工具不再提供跨模块 footer：团队/子代理从会话头部入口进入，工具卡只保留输入/输出与状态。
 
 **交互/键盘**：trigger 可聚焦，Enter/Space 展开；hover/focus 背景 `BgHover`；详情内复制按钮可 Tab 到；状态变化自动更新但**不移动已展开区域**。
 
@@ -235,7 +239,7 @@ type ApprovalDialogOptions struct {
 func ApprovalDialog(c *ui.Context, o ApprovalDialogOptions)
 ```
 
-**布局（固定，V3 强调）**：内联卡（`Border(1, Warning)` + `RadiusLG`）→ 顶部警示横幅（Shield + 加粗「需要审批」+ 工具友好名 + 队列计数 + 「Esc 拒绝」，`Warning.Alpha(0.22)` 底、`WarningText` 前景）→ 中性卡体：**来源行（有 `SessionID` 时：会话标题 + 来源 + 跨会话「打开该会话」）** → 一行影响声明 → 摘要优先（shell/终端类工具标「命令」，其余工具标「摘要」；mono 框）→ 「参数」折叠（Scroll 140）→ 会话级允许提示 → `uikit.DialogFooter`：**拒绝 → 本会话内始终允许 → 允许(Primary 最右)**；无 Default、无 AutoFocus。卡片整体用警示色描边/横幅，和 transcript 工具卡、composer 明显区分，不允许被看漏或误认。
+**布局（固定，V3 强调）**：内联卡（`Border(1, Warning)` + `RadiusLG`）→ 顶部警示横幅（Shield + 加粗「需要审批」+ 工具友好名 + 队列计数 + 「Esc 拒绝」，`Warning.Alpha(0.22)` 底、`WarningText` 前景）→ 中性卡体：**来源行（有 `SessionID` 时：会话标题 + 来源 + 跨会话「打开该会话」）** → 一行影响声明 → 摘要优先（shell/终端类工具标「命令」，其余工具标「摘要」；mono 框）→ 「将改动」（write/edit，`uikit.DiffPreview` 显示 unified diff，块头路径 + `+N −M`；无法生成时诚实回退）→ 「参数」折叠（Scroll 140）→ 会话级允许提示 → `uikit.DialogFooter`：**拒绝 → 本会话内始终允许 → 允许(Primary 最右)**；无 Default、无 AutoFocus。卡片整体用警示色描边/横幅，和 transcript 工具卡、composer 明显区分，不允许被看漏或误认。
 
 **交互/键盘**：Tab 循环；Enter 只有在焦点落到某按钮时才触发该按钮；Esc = deny 最早一条（有文本焦点时也由 session 的审批优先路径处理，且不中断本轮）；内联模式没有 backdrop。不设默认焦点。
 
@@ -243,7 +247,7 @@ func ApprovalDialog(c *ui.Context, o ApprovalDialogOptions)
 
 **禁止**：默认焦点落在允许或拒绝（真实事故：发消息后 Enter 误触拒绝）；普通 Button + 中性文案；把审批塞进 `AlertDialog`（末位默认语义）；把队列叠成多层 Modal；审批动作图标化无文字。
 
-**当前实现**：`uikit.ApprovalDialog`（`Inline` 模式为产品默认的 V3 内联卡；`Inline=false` 保留旧 Modal 渲染给 embedder/兼容）；`internal/ui/approval/approval.go` 注册 `session.banner` 槽、维护 FIFO/settle 状态并在非会话屏自动切回会话。测试：`internal/ui/approval/*_test.go`（inline 渲染/队列计数/三种决定/自动切屏）、`internal/uikit/approval_test.go`、`internal/ui/session/chrome_b3_test.go`（Esc 审批优先）。
+**当前实现**：`uikit.ApprovalDialog`（`Inline` 模式为产品默认的 V3 内联卡；`Inline=false` 保留旧 Modal 渲染给 embedder/兼容；「将改动」由 `uikit.DiffPreview` 渲染）；`internal/ui/approval/approval.go` 注册 `session.banner` 槽、维护 FIFO/settle 状态并在非会话屏自动切回会话。测试：`internal/ui/approval/*_test.go`（inline 渲染/队列计数/三种决定/自动切屏）、`internal/uikit/approval_test.go`、`internal/ui/session/chrome_b3_test.go`（Esc 审批优先）。
 
 **迁移步骤**：抽 `uikit.ApprovalDialog`（保留当前行为逐字一致：footer 顺序、无 Default、Esc=deny、影响声明、队列计数）；新增帧测试断言"打开后无焦点按钮/Enter 不产生决定"。
 
@@ -378,17 +382,17 @@ type ComposerOptions struct {
 func ComposerShell(c *ui.Context, o ComposerOptions)
 ```
 
-**布局**：composer 上方 dock（阅读列宽度居中、`session.banner` 槽）：目标条（有目标时）→ 审批内联卡（有 pending 时）→ 卡片 `t.Composer()`；输入 `ui.TextArea`（MinHeight Space9、MaxHeight Space8*6、边框透明、聚焦 accent 边）；工具条一行（附件菜单 + 模型 chip + 会话设置菜单；窄宽度折叠低频 chip 进菜单，veryCompact 时模型 chip 折进会话设置菜单并保留「模型：…／推理等级」回退入口）；右侧发送/停止固定，**不进溢出菜单**；键位提示在宽 composer 显示、窄 composer 放 tooltip。模型 chip 打开**两级紧凑菜单**：一级只有「模型」「推理等级」两行（Trailing 当前值）+「打开模型设置…」；catalog 已注册但列表为空、而 `Config().Model` 非空时（装配默认模型，FR-26），chip 文案为「<model>（默认模型，尚未配置连接）」并在菜单顶部加一行「默认模型来自装配，添加模型行后可覆盖」；「模型」二级按服务商分组（`MatchProviderPreset`，未匹配“自定义服务”）列出模型；「推理等级」二级为「跟随模型默认（…）」+ 该模型模式；模型级 `DefaultThinking` 在 Home composer 的「推理等级」与设置页编辑弹窗配置。
+**布局**：composer 上方 dock（阅读列宽度居中、`session.banner` 槽）：目标条（有目标时）→ 审批内联卡（有 pending 时）→ 卡片 `t.Composer()`；输入 `ui.TextArea`（MinHeight Space9、MaxHeight Space8*6、边框透明、聚焦 accent 边）；工具条一行：`uikit.ComposerToolbar`（官方 `ui.Toolbar`，默认无边框、hover 才显底色，单 Tab stop、左右键）包住附件按钮 + 模型菜单 + 会话设置菜单；附件按钮 `uikit.ComposerAttachButton` 直连原生文件选择器（无「手动输入路径…」菜单/对话框，拖入/粘贴保留）；窄宽度折叠低频 chip 进菜单，veryCompact 时模型 chip 折进会话设置菜单并保留「模型：…／推理等级」回退入口；右侧发送/停止固定，**不进溢出菜单**；键位提示在宽 composer 显示、窄 composer 放 tooltip。模型 chip 打开**两级紧凑菜单**：一级只有「模型」「推理等级」两行（Trailing 当前值）+「打开模型设置…」；catalog 已注册但列表为空、而 `Config().Model` 非空时（装配默认模型，FR-26），chip 文案为「<model>（默认模型，尚未配置连接）」并在菜单顶部加一行「默认模型来自装配，添加模型行后可覆盖」；「模型」二级按服务商分组（`MatchProviderPreset`，未匹配“自定义服务”）列出模型；「推理等级」二级为「跟随模型默认（…）」+ 该模型模式；模型级 `DefaultThinking` 在 Home composer 的「推理等级」与设置页编辑弹窗配置。
 
 **交互/键盘**：Enter 发送、Shift+Enter 换行、Cmd+Enter 发送；运行中 Esc 中断；slash/@ 菜单优先级最高；Tab 顺序：输入 → 菜单项 → 发送 → 停止。
 
 **a11y**：输入有 Label；图标按钮 Label+Tooltip；运行态 `RoleStatus`/`Announce`；队列 Badge 可读。
 
-**禁止**：两个 composer 各自维护宽度/发送样式；把发送藏进 Toolbar 溢出；在 build 里做 I/O；每帧 `input.Focus()` 对抗失焦（用 `c.Key`/FocusBind）；伪造"已发送"。
+**禁止**：两个 composer 各自维护宽度/发送样式；把发送藏进 Toolbar 溢出；在 build 里做 I/O；每帧 `input.Focus()` 对抗失焦（用 `c.Key`/FocusBind）；伪造"已发送"；给附件留手动路径输入（选择文件器 + 拖入/粘贴即可）。
 
 **当前实现**：会话 `internal/ui/session/view.go` `buildComposer`（含 queue/stop/slash/@/Enter 语义）；首页 `internal/ui/home/composer.go`。共用 `design.Tokens.Composer()`。差异清单见 [DESIGN.md](DESIGN.md) §1.3 与 ui-inventory 报告 §C6。
 
-**迁移步骤**：① 抽 `uikit.ComposerShell`（卡片+输入+工具条槽+发送/停止槽+错误行）；② 会话/首页各自提供 toolbar slot 与发送逻辑；③ 统一宽度（`design.TranscriptWidth`/容器宽）与发送控件外观；④ 帧测试覆盖 Enter/Shift+Enter/运行中 Esc/排队/附件路径对话框。
+**迁移步骤**：① 抽 `uikit.ComposerShell`（卡片+输入+工具条槽+发送/停止槽+错误行）；② 会话/首页各自提供 toolbar slot 与发送逻辑；③ 统一宽度（`design.TranscriptWidth`/容器宽）与发送控件外观；④ 帧测试覆盖 Enter/Shift+Enter/运行中 Esc/排队/附件直连 picker。
 
 **验收**：`TestComposerEnterSends`、`TestComposerShiftEnterNewline`、`TestComposerEscapeInterrupts`、`TestComposerQueueDuringRun` + 快照 `chat-composer.png`。
 
@@ -434,7 +438,7 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 
 **禁止**：伪造进度条；把"停止"和"发送"并排同权重；运行中每帧重排布局（几何稳定）；用常驻 badge 代替 toast/错误；用 `ui.Toggle` 表达忙碌状态。
 
-**当前实现**：session 生成中 Spinner/文本、queue Badge/popover、stop 按钮、消息元信息行（时间 + `FormatCompactCount` 紧凑用量 + ⋯ 用量明细）、`buildRetryAction`；toasts 模块（`c.AddToast` + `ToastViewportBase`，2 条上限 + 合并 ×N）。测试：`queue_send_test.go`、`usage_test.go`、`toasts_test.go`。
+**当前实现**：session 生成中 Spinner/文本、queue Badge/popover、stop 按钮、消息元信息行（时间 + `FormatCompactCount` 紧凑用量 + ⋯ 用量明细）、`buildRetryAction`；后台完成通知静默由可选 `contracts.ForegroundSession`（uiroot 提供、host 接线）判定：只有当前屏幕=会话且该会话在前台才静默，其他屏幕的后台完成照常通知；无该服务（headless）回退 agent active 会话判定。toasts 模块（`c.AddToast` + `ToastViewportBase`，2 条上限 + 合并 ×N）。测试：`queue_send_test.go`、`usage_test.go`、`toasts_test.go`。
 
 **迁移步骤**：抽 `uikit.RunStatus`（状态行/队列/停止/重试/用量）；保留通知通道不变；帧测试覆盖排队/停止/重试/用量折叠。
 
@@ -467,22 +471,22 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 **入口结构**：
 
 - 会话头第一行（`screen.header`/`screen.actions` 槽）：`标题/面包屑 → Agent Run Band（运行中 → 智能体团队 → 子智能体 N → 后台任务 → 待审批）→ spacer → ⋯`；Band 是一行原生入口按钮（无外层容器/双重描边），团队/子代理零值常显但不显示 0 计数，后台任务/待审批只在有内容时出现；各入口都是 `ui.PopoverBase` 原生浮层（Esc/点外关闭/焦点归还），不占右栏。
-- 团队浮层：成员卡（状态点/名字/模型/最新活动/「打开」）+ 共享任务卡（subject/状态/owner/依赖/写入范围）；空态说明「暂无共享任务」；已结束的持久记录按「已结束」分组展示：`Resumable` 行带「历史 · 可继续」与「继续此队友」动作，不可恢复行带「历史 · 只读」（打开仍只读）。
+- 团队浮层：成员卡（状态点/名字/模型/最新活动/「打开」）+ 共享任务卡（subject/状态/owner/依赖/写入范围）；running 成员提供「停止」（`TeamService.Interrupt`，中性 cancelled），行尾 ⋯ danger 菜单「关闭成员」走 `uikit.ConfirmDanger`（取消 Default）；空态说明「暂无共享任务」；已结束的持久记录按「已结束」分组展示：`Resumable` 行带「历史 · 可继续」与「继续此队友」动作，不可恢复行带「历史 · 只读」（打开仍只读）。
 - 子智能体浮层：子代理/队友列表；选中进入主栏子会话。
-- 后台任务浮层：`JobService.Jobs()` 的行（状态/命令/用时/退出码）+ 停止（`KillJob`）。
+- 后台任务浮层：`JobService.Jobs()` 的行（状态/命令/用时/退出码）+ 停止（`KillJob`）；下方「历史」分组读取 durable `execution/*`（`contracts.ExecutionHistoryService`）：job/terminal 开始/结束/中断、命令/cwd/root/模式，明确「输出不会持久化」，interrupted 用中性状态，live job 同 ID 去重；无 live job 但有历史时入口仍出现（重启后可达）。
 
 **布局与交互**：
 
 - 子会话在主栏渲染：标题变为 `父标题 › 子智能体名` 面包屑，点父标题返回父会话；内容区显示任务（prompt）、状态、输出与活动时间线；可继续成员底部有消息输入框（`SendChildAgent`），一次性成员只读；重启后可冷恢复的历史记录同样有输入框（placeholder「继续该队友/子代理…」，发送后 hint 说明冷恢复），不可恢复历史明示只读原因。
-- 团队浮层只读，成员/任务数据来自 `TeamService`/`TaskBoard`；任务完成/指派由工具或服务调用完成，浮层在打开时读取一次任务快照（关闭重开刷新）。
+- 团队浮层的数据只读，但 running 成员可停止/关闭（控制动作）；成员/任务数据来自 `TeamService`/`TaskBoard`；任务完成/指派由工具或服务调用完成，浮层在打开时读取一次任务快照（关闭重开刷新）。
 - 头部窄带（阅读列 < 2/3）退化为图标+计数，可及名保留全称。
 - a11y：入口按钮 Label 为全称；状态文案可读（不只靠颜色）；浮层为 native popover/dialog 语义。
 
 **禁止**：把团队/子代理塞进侧边栏或右栏常驻页签；`active` 当 running；伪造子代理活动时间线；一次性子代理显示可发送输入框。
 
-**当前实现**：`internal/ui/session/agentsurface.go`（三入口 + 三个 Popover 浮层 + 子会话视图 + 回合尾文件卡）、`internal/modules/agent/childagents.go`（统一 `ChildAgentService` 读模型）、`internal/modules/agent/child_sessions.go`（持久子会话 `child-sessions.json`）、`internal/modules/agent/child_notices.go`（完成回执：下一轮模型上下文，仅队友）、`internal/ui/session/view.go`（transcript 的 `ChatRoleNotice` 回执行：live 按时间合入、运行中放在流式回答上方；重启恢复的消息无时间戳时按 `Finished` 追加）、`internal/modules/toolkit/jobs_service.go`（`JobService`）。旧 `internal/uikit/team.go` / `rightpanel` 团队/任务 pane 已删除。
+**当前实现**：`internal/ui/session/agentsurface.go`（三入口 + 三个 Popover 浮层 + 子会话视图 + 回合尾文件卡）、`internal/modules/agent/childagents.go`（统一 `ChildAgentService` 读模型）、`internal/modules/agent/child_sessions.go`（持久子会话 `child-sessions.json`）、`internal/modules/agent/child_notices.go`（完成回执：下一轮模型上下文，仅队友）、`internal/ui/session/view.go`（transcript 的 `ChatRoleNotice` 回执行：live 按时间合入、运行中放在流式回答上方；重启恢复的消息无时间戳时按 `Finished` 追加）、`internal/modules/toolkit/jobs_service.go`（`JobService`）、`internal/modules/toolkit/execution_history.go`（`ExecutionHistoryService`，durable `execution/*` 有界折叠）。旧 `internal/uikit/team.go` / `rightpanel` 团队/任务 pane 已删除。
 
-**验收**：`internal/ui/session/agentsurface_test.go`（帧测试：header 顺序、团队浮层、switcher、子会话面包屑/返回、双向不可用、jobs 停止、文件卡预览回调、历史分组/只读历史会话/冷恢复历史继续发送）、`internal/modules/agent/childagents_test.go`、`internal/modules/agent/child_sessions_test.go`（重启后同一身份、文档往返、v1 迁移、损坏隔离、保留上限）、`internal/modules/agent/child_notices_test.go`（回执只注入一次、失败重试、跨重启/Close 重写、跨会话归属）、`internal/modules/toolkit/jobs_service_test.go`、uimodtest 新 E2E（团队浮层 / 文件页 / 终端页 / 快捷键 / 冷恢复发送）、`ui-drive` team 步骤（含 `team-history`）。
+**验收**：`internal/ui/session/agentsurface_test.go`（帧测试：header 顺序、团队浮层、switcher、子会话面包屑/返回、双向不可用、jobs 停止、running 成员停止/关闭确认、子会话停止、执行历史分组、文件卡预览回调、历史分组/只读历史会话/冷恢复历史继续发送）、`internal/modules/agent/childagents_test.go`、`internal/modules/agent/child_sessions_test.go`（重启后同一身份、文档往返、v1 迁移、损坏隔离、保留上限）、`internal/modules/agent/child_notices_test.go`（回执只注入一次、失败重试、跨重启/Close 重写、跨会话归属）、`internal/modules/toolkit/jobs_service_test.go`、uimodtest 新 E2E（团队浮层 / 文件页 / 终端页 / 快捷键 / 冷恢复发送）、`ui-drive` team 步骤（含 `team-history`）。
 
 ### S10 ContextInspector（会话 Context 页签）
 
@@ -490,10 +494,10 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 
 **入口**：会话页签条在「对话 / 轨迹 / 记忆」后追加「上下文 / Context」；**仅当 `ctx.Get(contracts.KeyContext)` 存在时注册**（无后端不显示，保持三页签兼容）。子会话视图不显示该页签（无独立会话上下文，进入子会话时回到对话页签）。
 
-**布局**：阅读列（`design.TranscriptWidth`，MaxWidthPercent 92）内三段 `uikit.Section`（概览 / 模型调用 / 上下文事件），页面用 `ui.Scroll`；集合一律官方组件——模型调用用 `ui.Table`（列：轮次/模型/Prompt/完成/缓存/上下文/时间[/成本]，虚拟化、`MaxHeight` 有界、窄窗横向滚动不换行），事件用 `ui.List`（`MaxHeight` 有界）。
+**布局**：`uikit.ReadingColumn`（960 居中、`MaxWidthPercent(92)`、无 `Grow`、PaddingX 16 / Gap 20；与对话/Goal dock/子会话 banner 同轴）内三段 `uikit.Section`（概览 / 模型调用 / 上下文事件），页面用 `ui.Scroll`；集合一律官方组件——模型调用用 `ui.Table`（列：轮次/模型/输入/完成/缓存/上下文/时间[/成本]，虚拟化、`MaxWidth(TranscriptWidth)`、`MaxHeight` 有界、窄窗横向滚动不换行），事件用 `ui.List`（`MaxHeight` 有界）。
 
-- 概览（价格在「设置 → 模型」编辑，按当前价格重算）：`uikit.KeyValueRows` 展示「上下文用量」（`used / window tokens (n%)`；window 未知时只显示 used，不伪造百分比）与仅在 `CostKnown` 时出现的「累计成本」；最近一次快照另起小节展示时间/模型/窗口/系统提示（bytes · tokens）/估算输入/历史消息（用户/助手/工具）以及工具目录（数量 + 名称摘要，tooltip 全量）与注入来源 chips（AGENTS.md/预设/记忆/技能，只显示实际存在的）。
-- 系统提示分段（`Snapshot.Sections` 非空才出现，旧快照整段隐藏，不伪造）：`ui.Table` 按 section 显示本地化名称（identity/environment/…/tool-guidance 映射，未知 ID 回退记录 label/ID，工具 tips 带 ID+Hash）、来源、字节与估算 tokens；表下 `KeyValueRows` 给「分段合计」以及（window 已知时）「估算输入占比 xK / yK (n%)」，并说明「正文不进入事件，仅元数据」。
+- 概览（价格在「设置 → 模型」编辑，按当前价格重算）：`uikit.PropertySheet`（160 DIP 标签列 + 值左对齐 + 32 行 + Divider）展示「上下文用量」（`used / window tokens (n%)`；window 未知时只显示 used，不伪造百分比）与仅在 `CostKnown` 时出现的「累计成本」；最近一次快照另起小节展示时间/模型/窗口/系统提示（bytes · tokens）/估算输入/历史消息（用户/助手/工具）以及工具目录（数量 + 名称摘要，tooltip 全量）与注入来源 chips（AGENTS.md/预设/记忆/技能，只显示实际存在的）。
+- 系统提示分段（`Snapshot.Sections` 非空才出现，旧快照整段隐藏，不伪造）：`ui.Table` 按 section 显示本地化名称（identity/environment/…/tool-guidance 映射，未知 ID 回退记录 label/ID，工具 tips 带 ID+Hash）、来源、字节与估算 tokens；表下 `uikit.PropertySheet` 给「分段合计」以及（window 已知时）「估算输入占比 xK / yK (n%)」，并说明「正文不进入事件，仅元数据」。
 - 模型调用：最新在前；每行 iteration/model/prompt/completion/cached/context tokens/时间；成本列仅在会话 `CostKnown` 时存在，行级未知成本显示「—」而不是 0。
 - 上下文事件：最新在前；compact 分四类展示：`Inferred=true` →「压缩（推断）」；`Inferred=false` 且 `Detail=manual` →「压缩」；`Inferred=false` 且 `Outcome==""` →「自动压缩」（运行前 exact，显示 before→after tokens 与消息数 `Replaced → Saved`）；`Outcome!=""` →「自动压缩跳过/失败：failed|no-reduction|archive-failed|replace-failed」+ 本地化原因（历史未修改），**只显示 before→after tokens，不显示会误导的消息 delta，绝不显示「已压缩」**；未知 Outcome 回退原文。spill 显示路径 + 磁盘字节；`recovery` kind 标注「自动压缩重试（成功/失败/压缩失败）」+ 本地化说明 + before→after tokens（其 Saved 是重试次数，不显示成消息数）；`archive` kind 标注「归档/归档（截断）」，说明归档 N 条、超上限省略 M 条（截断）与原始正文不在事件中，meta 显示归档字节 + before→after tokens；archive 与 compact 各自独立成行，不合并/不重复计数。手动 `/compact` 的 `ErrCompactArchive`（归档失败、历史未修改）走本地化失败提示，绝不显示「已压缩」。
 - 系统提示分段：仅 `Snapshot.Sections` 非空时显示「系统提示分段」表（本地化名称/来源/字节/估算 Tokens），下方显示分段合计与（window 已知时）估算输入占比；空快照整段隐藏，正文不进入事件；未知 section ID 回退 Label/ID，hash 仅 tooltip。
@@ -515,12 +519,12 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 **入口**：一级侧栏入口——`RegisterScreen(ScreenSpec{ID:"insights", Order:25})` + `sidebar.ScreenNavSpec("insights") = (icons.Activity, "洞察", "Insights")`；位于「自动化」与「插件」之间。顶栏贡献 `insights.title`（`screen.header`，TypeM/600）与 `insights.actions`（`screen.actions`，唯一的即时动作「刷新」图标按钮，加载中 disabled）。不新增右栏常驻页、不在会话页签内重复。
 
 **布局**（`internal/ui/insights/view.go`，页面用 `ui.Scroll`，正文不叠第二行 header）：
-- 工具栏：`ui.SegmentedBase` 主题化分段控件「7 天 / 30 天」（radio 组语义、方向键、`Label`「时间范围」；选中段用 `BgRaised`+border，不用 accent 填充）；右侧为弱化的范围/更新时间（`11-09 – 11-15 · 更新于 HH:MM`）。
+- 工具栏：`uikit.SegmentedControl` 分段控件「7 天 / 30 天」（radio 组语义、方向键、`Label`「时间范围」；选中段 `BgSelected` + `LabelPrimary` + 600 + 2 DIP Accent 下划线，无 accent 填充）；右侧为弱化的范围/更新时间（`11-09 – 11-15 · 更新于 HH:MM`）。
 - KPI 行：四个扁平指标列（label TypeXXS 弱化 / value TypeL·600 / 一行 TypeXXS 细节），无卡片、无底色：`tokens`（输入·输出）、`成本`（仅 `PricedCalls>0` 时出现；部分未定价标「部分模型未定价」）、`会话`（轮次·步数）、`工具调用`（压缩·溢出）。强调色预算：本页 0 个 accent 填充、0 个 primary 按钮。
 - 按天：`ui.Table`（日期/tokens/成本/会话/工具；成本列仅当某天有价时出现；空日整行「—」而不是假 0；最新在前；`MaxHeight` 有界）。
 - 按模型：`ui.Table`（模型/调用/tokens/缓存/成本；未知模型显示「未知模型」，无价行成本「—」）。
 - 按工作区：`ui.Table`（工作区/会话/tokens/成本），仅当存在已关联工作区时显示；未关联组显示「未关联工作区」，名称由后端按工作区服务解析。
-- 会话排行：`ui.List`（标题 + 模型/工作区/更新时间元信息 + tokens + 可选成本），行内单点（`ObserveInput`）打开会话，Enter/双击走 List `Submitted`；打开 = `ChatService.SetActiveSession` + `Navigator.Push("session")`，失败留在本页并以 `ErrorLine` 显示。
+- 会话排行：`ui.List`（标题 + 模型/工作区/更新时间元信息 + tokens + 可选成本），行内单点（`ObserveInput`）打开会话，Enter/双击走 List `Submitted`；行内文字/成本在 `row.Selected()` 时切 `t.AccentText`（选中行对比 ≥4.5:1，亮/暗）；打开 = `ChatService.SetActiveSession` + `Navigator.Push("session")`，失败留在本页并以 `ErrorLine` 显示。
 
 **状态**：加载态 = `Spinner` + 「正在汇总用量…」（不渲染骨架 0 值）；空态 = 「还没有可统计的用量」/「这个时间范围内还没有用量」+ 说明；错误态 = `uikit.ErrorLine` + 重试（首次失败只显示错误与重试，已有数据时错误行下方保留旧数据）；无后端 = 「洞察后端未启用」空块（screen 仍注册）。
 

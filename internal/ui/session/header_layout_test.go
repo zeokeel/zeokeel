@@ -6,6 +6,7 @@ package session_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -87,7 +88,7 @@ func TestMessageMetaRowIsResident(t *testing.T) {
 	chat.addSession(contracts.ChatSession{
 		ID: "sess-1", Title: "动作行",
 		Messages: []contracts.ChatMessage{
-			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "可以复制的回答"},
+			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "可以复制的回答", CreatedAt: time.Date(2026, 11, 15, 9, 0, 0, 0, time.Local)},
 		},
 	}, true)
 	h := newHarness(t, chat)
@@ -115,7 +116,7 @@ func TestRegenerateLivesInMessageActionsMenu(t *testing.T) {
 	chat.addSession(contracts.ChatSession{
 		ID: "sess-1", Title: "重生成",
 		Messages: []contracts.ChatMessage{
-			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "回答"},
+			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "回答", CreatedAt: time.Date(2026, 11, 15, 9, 0, 0, 0, time.Local)},
 		},
 	}, true)
 	h := newCommandHarness(t, chat)
@@ -134,7 +135,7 @@ func TestRegenerateActionCallsBackend(t *testing.T) {
 	chat.addSession(contracts.ChatSession{
 		ID: "sess-regen", Title: "重生成",
 		Messages: []contracts.ChatMessage{
-			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "回答"},
+			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "回答", CreatedAt: time.Date(2026, 11, 15, 9, 0, 0, 0, time.Local)},
 		},
 	}, true)
 	h := newCommandHarness(t, chat)

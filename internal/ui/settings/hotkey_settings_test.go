@@ -24,7 +24,7 @@ func TestAppearanceGlobalHotkeyDefaultsEmpty(t *testing.T) {
 
 	h.assertTexts(tester, "全局热键", "组合键 输入", "录入")
 	joined := strings.Join(tester.Texts(), " ")
-	for _, want := range []string{"留空关闭", "点「应用」并重启后生效"} {
+	for _, want := range []string{"留空关闭", "点「保存」并重启后生效"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("hotkey help does not mention %q; texts = %v", want, tester.Texts())
 		}
@@ -42,7 +42,7 @@ func TestAppearanceGlobalHotkeySavesTrimmedValue(t *testing.T) {
 	h.focusInput(tester, "组合键 输入")
 	tester.Type("  Ctrl+Shift+K  ")
 	tester.Frame()
-	h.click(tester, "应用")
+	h.click(tester, "保存")
 
 	if got := store.get(contracts.SettingGlobalHotkey); got != "Ctrl+Shift+K" {
 		t.Fatalf("%s = %q, want the trimmed accelerator", contracts.SettingGlobalHotkey, got)
@@ -61,7 +61,7 @@ func TestAppearanceGlobalHotkeyRejectsInvalidValue(t *testing.T) {
 	h.focusInput(tester, "组合键 输入")
 	tester.Type("not-a-hotkey")
 	tester.Frame()
-	h.click(tester, "应用")
+	h.click(tester, "保存")
 
 	h.assertTexts(tester, "全局热键格式无效")
 	if !strings.Contains(strings.Join(tester.Texts(), " "), "保存失败：") {
@@ -92,7 +92,7 @@ func TestAppearanceGlobalHotkeyEnglish(t *testing.T) {
 
 	h.assertTexts(tester, "Global hotkey", "Shortcut input", "Record")
 	joined := strings.Join(tester.Texts(), " ")
-	for _, want := range []string{"Empty disables it", "after Apply and a restart"} {
+	for _, want := range []string{"Empty disables it", "after Save and a restart"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("hotkey help does not mention %q; texts = %v", want, tester.Texts())
 		}
@@ -100,7 +100,7 @@ func TestAppearanceGlobalHotkeyEnglish(t *testing.T) {
 	h.focusInput(tester, "Shortcut input")
 	tester.Type("CmdOrCtrl+Shift+Space")
 	tester.Frame()
-	h.click(tester, "Apply")
+	h.click(tester, "Save")
 	if got := h.settings.get(contracts.SettingGlobalHotkey); got != "CmdOrCtrl+Shift+Space" {
 		t.Fatalf("%s = %q", contracts.SettingGlobalHotkey, got)
 	}
@@ -122,7 +122,7 @@ func TestHotkeyRecordCapture(t *testing.T) {
 	tester.Frame()
 	h.assertNoTexts(tester, "按下组合键，Esc 取消")
 	h.assertTexts(tester, uikit.FormatShortcut("cmdorctrl+shift+k"), "未应用")
-	h.click(tester, "应用")
+	h.click(tester, "保存")
 	if got := store.get(contracts.SettingGlobalHotkey); got != "CmdOrCtrl+Shift+K" {
 		t.Fatalf("recorded hotkey = %q, want CmdOrCtrl+Shift+K", got)
 	}
@@ -147,7 +147,7 @@ func TestHotkeyPresetChips(t *testing.T) {
 	h.click(tester, "外观")
 	h.click(tester, uikit.FormatShortcut("cmdorctrl+alt+space"))
 	h.assertTexts(tester, "未应用")
-	h.click(tester, "应用")
+	h.click(tester, "保存")
 	if got := store.get(contracts.SettingGlobalHotkey); got != "CmdOrCtrl+Alt+Space" {
 		t.Fatalf("preset hotkey = %q", got)
 	}

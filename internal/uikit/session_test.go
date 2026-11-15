@@ -304,3 +304,104 @@ func TestSessionThreadGroupsConsecutiveRuns(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildSessionRowMapGroupsSameTurn pins the message→List-row mapping the
+// find bar and the trajectory jump use: it must be the same grouping the thread
+// renders (consecutive SameTurn messages share one row), so scrolling to the
+// mapped row lands on the message.
+func TestBuildSessionRowMapGroupsSameTurn(t *testing.T) {
+	messages := []contracts.ChatMessage{
+		{ID: "u1", Role: contracts.ChatRoleUser},
+		{ID: "a1", Role: contracts.ChatRoleAssistant},
+		{ID: "a2", Role: contracts.ChatRoleAssistant},
+		{ID: "a3", Role: contracts.ChatRoleAssistant},
+		{ID: "u2", Role: contracts.ChatRoleUser},
+	}
+	sameTurn := func(prev, next contracts.ChatMessage) bool {
+		return prev.Role == contracts.ChatRoleAssistant && next.Role == contracts.ChatRoleAssistant
+	}
+	mapping := uikit.BuildSessionRowMap(messages, sameTurn)
+	if got := mapping.Rows(); got != 3 {
+		t.Fatalf("Rows() = %d, want 3 (u1 | a1 a2 a3 | u2)", got)
+	}
+	for message, want := range map[int]int{0: 0, 1: 1, 2: 1, 3: 1, 4: 2} {
+		if got := mapping.RowOf(message); got != want {
+			t.Fatalf("RowOf(%d) = %d, want %d", message, got, want)
+		}
+	}
+	if got := mapping.FirstMessage(1); got != 1 {
+		t.Fatalf("FirstMessage(1) = %d, want 1", got)
+	}
+	if got := mapping.RowOf(-1); got != -1 {
+		t.Fatalf("RowOf(-1) = %d, want -1", got)
+	}
+	if got := mapping.RowOf(len(messages)); got != -1 {
+		t.Fatalf("RowOf(%d) = %d, want -1", len(messages), got)
+	}
+	if got := mapping.FirstMessage(9); got != -1 {
+		t.Fatalf("FirstMessage(9) = %d, want -1", got)
+	}
+}
+
+// TestBuildSessionRowMapWithoutGrouping covers the plain case: one row per
+// message when the thread keeps every message its own row (verbose mode), and
+// every message maps to itself.
+func TestBuildSessionRowMapWithoutGrouping(t *testing.T) {
+	messages := []contracts.ChatMessage{
+		{ID: "u1", Role: contracts.ChatRoleUser},
+		{ID: "a1", Role: contracts.ChatRoleAssistant},
+		{ID: "a2", Role: contracts.ChatRoleAssistant},
+	}
+	mapping := uikit.BuildSessionRowMap(messages, nil)
+	if got := mapping.Rows(); got != len(messages) {
+		t.Fatalf("Rows() = %d, want %d", got, len(messages))
+	}
+	for message := range messages {
+		if got := mapping.RowOf(message); got != message {
+			t.Fatalf("RowOf(%d) = %d, want itself", message, got)
+		}
+	}
+	if got := uikit.BuildSessionRowMap(nil, nil).Rows(); got != 0 {
+		t.Fatalf("Rows() of an empty transcript = %d, want 0", got)
+	}
+}
+
+// TestSessionThreadRowsMatchMapping pins that the thread renders exactly the
+// rows the exported mapping reports, so a caller can scroll to RowOf(message):
+// the first message is row 0 and the grouped assistant run is row 1.
+func TestSessionThreadRowsMatchMapping(t *testing.T) {
+	messages := []contracts.ChatMessage{
+		{ID: "u1", Role: contracts.ChatRoleUser, Text: "一"},
+		{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "二"},
+		{ID: "a2", Role: contracts.ChatRoleAssistant, Text: "三"},
+	}
+	sameTurn := func(prev, next contracts.ChatMessage) bool {
+		return prev.Role == contracts.ChatRoleAssistant && next.Role == contracts.ChatRoleAssistant
+	}
+	mapping := uikit.BuildSessionRowMap(messages, sameTurn)
+	if got := mapping.Rows(); got != 2 {
+		t.Fatalf("Rows() = %d, want 2", got)
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		uikit.SessionThread(c, uikit.SessionThreadOptions{
+			Messages: messages,
+			State:    &ui.ListState{},
+			SameTurn: sameTurn,
+			Row:      func(c *ui.Context, m contracts.ChatMessage) { ui.Text(c, "row:"+m.ID) },
+			GroupRow: func(c *ui.Context, group []contracts.ChatMessage) {
+				ui.Text(c, "group:"+group[0].ID+"-"+group[len(group)-1].ID)
+			},
+		})
+	}, 800, 500)
+	tt.Frame()
+	if !tt.HasText("row:u1") || !tt.HasText("group:a1-a2") {
+		t.Fatalf("thread rows differ from the mapping; texts = %v", tt.Texts())
+	}
+	// The List's own row labels number the same rows: message 0 is 用户 1 and
+	// the grouped run is 助手 2–3 (mapping row 1).
+	for _, label := range []string{"用户 1", "助手 2–3"} {
+		if _, ok := tt.AccessByRole(ui.RoleListItem, label); !ok {
+			t.Fatalf("list row %q missing; texts = %v", label, tt.Texts())
+		}
+	}
+}

@@ -237,3 +237,38 @@ func TestDefaultDataDirEnvOverride(t *testing.T) {
 		t.Fatalf("defaultDataDir() kept surrounding spaces: %q", got)
 	}
 }
+
+// TestProvideServicesForegroundSession checks the desktop host advertises the
+// foreground-session read model the agent uses to silence background-run
+// notifications for the conversation actually on screen, and that the headless
+// product, which has no window, does not.
+func TestProvideServicesForegroundSession(t *testing.T) {
+	root := cordis.Root()
+	t.Cleanup(func() { _ = root.DisposeAll() })
+	settings, err := NewSettings(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSettings: %v", err)
+	}
+	uiRoot := uiroot.New(uiroot.Config{AppName: appName})
+	if err := provideServices(root, t.TempDir(), settings, NewLogger(""), uiRoot); err != nil {
+		t.Fatalf("provideServices: %v", err)
+	}
+	foreground, ok := root.Get(contracts.KeyForegroundSession)
+	if !ok {
+		t.Fatal("desktop host did not provide KeyForegroundSession")
+	}
+	if foreground == nil {
+		t.Fatal("desktop host provided a nil ForegroundSession")
+	}
+
+	// The headless product has no foreground read model: the backend keeps its
+	// own active-session rule.
+	headless := cordis.Root()
+	t.Cleanup(func() { _ = headless.DisposeAll() })
+	if err := provideServices(headless, t.TempDir(), settings, NewLogger(""), nil); err != nil {
+		t.Fatalf("headless provideServices: %v", err)
+	}
+	if _, ok := headless.Get(contracts.KeyForegroundSession); ok {
+		t.Fatal("headless host provided KeyForegroundSession")
+	}
+}

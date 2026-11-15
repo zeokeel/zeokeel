@@ -420,3 +420,190 @@ func TestNotifierNotifySystemForEmptySessionIsUntagged(t *testing.T) {
 		t.Fatalf("id %q has a session marker although the session is empty", notification.ID)
 	}
 }
+
+// notifyChat is a minimal contracts.ChatService for the in-app "open
+// conversation" action tests: a fixed session set, the switch it recorded, and
+// an optional failure so the protection path is testable.
+type notifyChat struct {
+	sessions map[string]bool
+	setCalls []string
+	setErr   error
+	active   string
+}
+
+func newNotifyChat(ids ...string) *notifyChat {
+	chat := &notifyChat{sessions: make(map[string]bool, len(ids))}
+	for _, id := range ids {
+		chat.sessions[id] = true
+	}
+	return chat
+}
+
+func (c *notifyChat) Config() contracts.ChatConfig          { return contracts.ChatConfig{} }
+func (c *notifyChat) Sessions() []contracts.ChatSessionInfo { return nil }
+func (c *notifyChat) ActiveSession() string                 { return c.active }
+func (c *notifyChat) Session(sessionID string) (contracts.ChatSession, bool) {
+	return contracts.ChatSession{ID: sessionID}, c.sessions[sessionID]
+}
+func (c *notifyChat) SetActiveSession(sessionID string) error {
+	c.setCalls = append(c.setCalls, sessionID)
+	if c.setErr != nil {
+		return c.setErr
+	}
+	c.active = sessionID
+	return nil
+}
+func (c *notifyChat) NewSession(string) (string, error) { return "", nil }
+func (c *notifyChat) DeleteSession(string) error        { return nil }
+func (c *notifyChat) Send(string, string) error         { return nil }
+func (c *notifyChat) Cancel(string) error               { return nil }
+func (c *notifyChat) Subscribe(func(string)) (func(), error) {
+	return func() {}, nil
+}
+
+// captureNotifications installs a recording handler and returns the latest
+// notification the toast overlay would receive.
+func captureNotifications(root *Root) func() contracts.Notification {
+	var latest contracts.Notification
+	root.Notifier().SetHandler(func(notification contracts.Notification) {
+		latest = notification
+	})
+	return func() contracts.Notification { return latest }
+}
+
+// TestNotifierSessionToastCarriesOpenSessionAction covers the in-app half of a
+// session-tagged notification: the toast offers "打开会话" and running its
+// action switches the active session and shows the conversation screen, the
+// same semantics as the host's OS notification click (internal/host).
+func TestNotifierSessionToastCarriesOpenSessionAction(t *testing.T) {
+	chat := newNotifyChat("sess-1")
+	root := New(Config{AppName: "ZeoKeelTest", Chat: chat})
+	mustScreen(t, root, textScreen("session", "对话", "session-body", 20))
+	latest := captureNotifications(root)
+
+	notification := root.Notifier().NotifySystemFor(contracts.NotifySuccess, "自动化完成", "sess-1")
+	if notification.ActionLabel != "打开会话" || notification.Action == nil {
+		t.Fatalf("session notification action = (%q, %v), want the open-conversation action",
+			notification.ActionLabel, notification.Action != nil)
+	}
+	// The toast module renders the notification the handler receives, so the
+	// action must be on that copy as well.
+	received := latest()
+	if received.ActionLabel != "打开会话" || received.Action == nil {
+		t.Fatalf("toast notification action = (%q, %v), want the open-conversation action",
+			received.ActionLabel, received.Action != nil)
+	}
+	received.Action()
+	if len(chat.setCalls) != 1 || chat.setCalls[0] != "sess-1" {
+		t.Fatalf("SetActiveSession calls = %v, want [sess-1]", chat.setCalls)
+	}
+	if chat.active != "sess-1" {
+		t.Fatalf("active session = %q, want sess-1", chat.active)
+	}
+	if got := root.Navigator().Current(); got != "session" {
+		t.Fatalf("navigator current = %q after the toast action, want session", got)
+	}
+}
+
+// TestNotifierPlainToastHasNoOpenSessionAction pins the other half: a plain
+// toast (no session tag) and an empty-session NotifySystemFor keep the plain
+// notification, so the toast shows no action button.
+func TestNotifierPlainToastHasNoOpenSessionAction(t *testing.T) {
+	root := New(Config{AppName: "ZeoKeelTest", Chat: newNotifyChat("sess-1")})
+	plain := root.Notifier().Notify(contracts.NotifySuccess, "已复制")
+	system := root.Notifier().NotifySystem(contracts.NotifyError, "失败")
+	untagged := root.Notifier().NotifySystemFor(contracts.NotifyInfo, "完成", "   ")
+	for name, notification := range map[string]contracts.Notification{
+		"plain": plain, "system": system, "untagged": untagged,
+	} {
+		if notification.ActionLabel != "" || notification.Action != nil {
+			t.Fatalf("%s notification action = (%q, %v), want none",
+				name, notification.ActionLabel, notification.Action != nil)
+		}
+	}
+}
+
+// TestNotifierOpenSessionIgnoresDeletedSession covers the click protection: a
+// session that was deleted meanwhile (or a failing switch) only leaves the
+// window where it is — the action never raises and never switches.
+func TestNotifierOpenSessionIgnoresDeletedSession(t *testing.T) {
+	chat := newNotifyChat() // no sessions
+	root := New(Config{Chat: chat})
+	mustScreen(t, root, textScreen("session", "对话", "session-body", 20))
+	latest := captureNotifications(root)
+	root.Notifier().NotifySystemFor(contracts.NotifyError, "已删除会话的失败", "sess-gone")
+	received := latest()
+	if received.Action == nil {
+		t.Fatal("session notification has no action")
+	}
+	received.Action() // must not panic
+	if len(chat.setCalls) != 0 {
+		t.Fatalf("SetActiveSession calls for a deleted session = %v, want none", chat.setCalls)
+	}
+	if got := root.Navigator().Current(); got != "" {
+		t.Fatalf("navigator current = %q after a deleted session, want unchanged", got)
+	}
+}
+
+// TestNotifierOpenSessionSwitchFailureIsQuiet covers the other failure path:
+// the session exists but the switch fails, so no screen is pushed and the
+// action stays quiet.
+func TestNotifierOpenSessionSwitchFailureIsQuiet(t *testing.T) {
+	chat := newNotifyChat("sess-1")
+	chat.setErr = errors.New("switch failed")
+	root := New(Config{Chat: chat})
+	mustScreen(t, root, textScreen("session", "对话", "session-body", 20))
+	latest := captureNotifications(root)
+	root.Notifier().NotifySystemFor(contracts.NotifyError, "自动化失败", "sess-1")
+	received := latest()
+	received.Action()
+	if len(chat.setCalls) != 1 {
+		t.Fatalf("SetActiveSession calls = %v, want one attempt", chat.setCalls)
+	}
+	if got := root.Navigator().Current(); got != "" {
+		t.Fatalf("navigator current = %q after a failed switch, want unchanged", got)
+	}
+}
+
+// TestNotifierRunFinishedOnInsightsScreenCarriesOpenSession covers the toast a
+// background run raises while the user is on the insights screen: the
+// notification reaches the in-app toast with its session action, and pressing
+// it opens the conversation that finished.
+func TestNotifierRunFinishedOnInsightsScreenCarriesOpenSession(t *testing.T) {
+	chat := newNotifyChat("sess-1")
+	root := New(Config{AppName: "ZeoKeelTest", Chat: chat})
+	mustScreen(t, root, textScreen("session", "对话", "session-body", 20))
+	mustScreen(t, root, textScreen("insights", "洞察", "insights-body", 30))
+	tt := newTestTester(t, root, 1200, 800)
+	tt.Frame()
+	if err := root.Navigator().Push("insights"); err != nil {
+		t.Fatalf("Push(insights): %v", err)
+	}
+	tt.Frame()
+	requireHasText(t, tt, "insights-body")
+	latest := captureNotifications(root)
+
+	contracts.NotifyRunFinishedForSession(root.Notifier(), "后台运行完成", false, "sess-1")
+	received := latest()
+	if received.SessionID != "sess-1" || received.Action == nil {
+		t.Fatalf("run-finished notification = %+v, want the tagged session and its action",
+			received)
+	}
+	received.Action()
+	tt.Frame()
+	if got := root.Navigator().Current(); got != "session" {
+		t.Fatalf("navigator current = %q after the toast action, want session", got)
+	}
+	requireHasText(t, tt, "session-body")
+}
+
+// TestNotifierSessionActionFollowsLanguage covers the toast chrome's
+// localization: the action label uses the product language like the rest of the
+// host copy.
+func TestNotifierSessionActionFollowsLanguage(t *testing.T) {
+	root := New(Config{Language: "en", Chat: newNotifyChat("sess-1")})
+	notification := root.Notifier().NotifySystemFor(contracts.NotifySuccess, "run finished", "sess-1")
+	if notification.ActionLabel != "Open conversation" {
+		t.Fatalf("action label = %q, want the English copy", notification.ActionLabel)
+	}
+}
