@@ -150,7 +150,12 @@ func Module() *module.Descriptor[Config] {
 		group.events = &executionEvents{store: executionStore, logf: logf}
 		rootScoped := group.initial()
 		tools := append([]rig.Tool(nil), group.proxies(rootScoped)...)
-		tools = append(tools, misc.NewTodoTool(misc.NewTodoStore()))
+		// Keep the todo store the model-facing tool writes to: the session's Todo
+		// dock reads the same store through contracts.KeyTodo. The store is
+		// process-level in this build (one list for the whole product), not
+		// per-session; the contract and the UI say so instead of faking scoping.
+		todoStore := misc.NewTodoStore()
+		tools = append(tools, misc.NewTodoTool(todoStore))
 		if memoryStore, ok := ctx.Get(contracts.KeyMemory); ok {
 			// The memory backend provides the durable rig.MemoryStore; without
 			// it the memory tools fall back to their in-memory default. The
@@ -370,6 +375,16 @@ func Module() *module.Descriptor[Config] {
 			group.close()
 			return err
 		}
+		// The session's Todo dock reads the agent's todo_write list through this
+		// optional service. It is one process-level list (see contracts.TodoService
+		// for the limitation), refreshed by each frame's light snapshot read.
+		if _, err := ctx.Provide(contracts.KeyTodo,
+			contracts.TodoService(todoService{store: todoStore})); err != nil {
+			closeLSP()
+			runtime.close()
+			group.close()
+			return err
+		}
 		if _, err := ctx.Effect(func() cordis.Effect {
 			return cordis.Effect{cordis.CleanupOf(closeLSP)}
 		}); err != nil {
@@ -383,7 +398,36 @@ func Module() *module.Descriptor[Config] {
 		module.Provides(contracts.KeyTaskBoard),
 		module.Provides(contracts.KeyJobs),
 		module.Provides(contracts.KeyExecutionHistory),
+		module.Provides(contracts.KeyTodo),
 	).WithName("ZeoKeel Rig toolset")
+}
+
+// todoService adapts the rig todo store (the model-facing todo_write tool's
+// state) to contracts.TodoService. The toolkit keeps ONE store for the process,
+// so the list is process-level today — one conversation's todo_write replaces
+// what another conversation sees; the contract documents that limitation and a
+// per-session store can replace this adapter without touching the UI.
+type todoService struct {
+	store *misc.TodoStore
+}
+
+var _ contracts.TodoService = todoService{}
+
+// Todos implements contracts.TodoService: a copied, contract-typed snapshot.
+func (s todoService) Todos() []contracts.TodoItem {
+	if s.store == nil {
+		return nil
+	}
+	todos := s.store.Todos()
+	out := make([]contracts.TodoItem, 0, len(todos))
+	for _, todo := range todos {
+		out = append(out, contracts.TodoItem{
+			ID:      todo.ID,
+			Content: todo.Content,
+			Status:  todo.Status,
+		})
+	}
+	return out
 }
 
 // permissionSandboxMode maps a stored/logged agent.permission preset onto the

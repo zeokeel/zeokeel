@@ -90,6 +90,93 @@ func (service *jobService) KillJob(id string) error {
 	return nil
 }
 
+// jobOutputTailLines is how many trailing output lines one UI read asks for:
+// the panel shows the newest output of a chatty job, not its whole history.
+const jobOutputTailLines = 200
+
+// JobOutput returns the newest output of one retained job through the
+// model-facing job_output tool. The read asks for a tail rather than the
+// default "new output since the last read", so it never consumes the model's
+// output cursor; the returned body is bounded to
+// contracts.JobOutputMaxBytes (newest bytes kept) and the contract's stable
+// errors are wrapped for the UI to localize.
+func (service *jobService) JobOutput(id string) (string, error) {
+	if service == nil || service.invoker == nil {
+		return "", contracts.ErrJobUnavailable
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", errors.New("job output: job id is required")
+	}
+	arguments, err := json.Marshal(struct {
+		JobID string `json:"job_id"`
+		Tail  int    `json:"tail"`
+	}{JobID: id, Tail: jobOutputTailLines})
+	if err != nil {
+		return "", fmt.Errorf("job output %q: encode arguments: %w", id, err)
+	}
+	result, invokeErr := service.invoker.invokeJobTool(context.Background(), jobs.ToolJobOutput, string(arguments))
+	if invokeErr != nil {
+		return "", fmt.Errorf("job output %q: %w", id, invokeErr)
+	}
+	if result.IsError {
+		content := strings.TrimSpace(result.Content)
+		if jobToolReportedUnknown(content) {
+			return "", fmt.Errorf("%w: %s", contracts.ErrJobNotFound, content)
+		}
+		return "", fmt.Errorf("job output %q: %s", id, content)
+	}
+	return boundJobOutput(parseJobOutput(result.Content)), nil
+}
+
+// jobToolReportedUnknown reports the manager's unknown-job diagnostic, so the
+// service can map it to the contract's stable sentinel.
+func jobToolReportedUnknown(content string) bool {
+	return strings.Contains(strings.ToLower(content), "unknown job")
+}
+
+// parseJobOutput extracts the output body from Rig's job_output text:
+//
+//	job_id: … / kind: … / command: … / state: … / status: … / exit_code: … /
+//	duration_ms: … / output: <body> | output: (none)
+//
+// CRLF is normalized to LF, and CRLF-terminated output keeps its final newline.
+func parseJobOutput(text string) string {
+	normalized := strings.ReplaceAll(text, "\r\n", "\n")
+	// The metadata values (command, label) are single-line free text, so the
+	// first line that IS "output:" is the body's header — a command that ends
+	// with the word "output:" cannot be mistaken for it.
+	lines := strings.Split(normalized, "\n")
+	for index, line := range lines {
+		switch line {
+		case "output: (none)":
+			return ""
+		case "output:":
+			return strings.Join(lines[index+1:], "\n")
+		}
+	}
+	return ""
+}
+
+// boundJobOutput keeps the newest contracts.JobOutputMaxBytes of one read and
+// prefixes the contract's truncation marker when older bytes were dropped. The
+// cut moves to a line boundary so the panel starts at a whole line (a single
+// very long line has none within the budget and still cuts).
+func boundJobOutput(text string) string {
+	if len(text) <= contracts.JobOutputMaxBytes {
+		return text
+	}
+	cut := text[len(text)-contracts.JobOutputMaxBytes:]
+	// Start at the first whole line, unless one giant line (a minified build, a
+	// progress bar without newlines) would eat most of the budget: then the new
+	// bytes are the honest choice over an empty panel.
+	if index := strings.IndexByte(cut, '\n'); index >= 0 &&
+		len(cut)-index-1 >= contracts.JobOutputMaxBytes/2 {
+		cut = cut[index+1:]
+	}
+	return contracts.JobOutputTruncatedMarker + cut
+}
+
 // parseJobList decodes the stable text format emitted by Rig's job_list tool
 // (tools/jobs/tools.go, listTool):
 //

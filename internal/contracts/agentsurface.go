@@ -11,6 +11,7 @@ package contracts
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -120,14 +121,40 @@ type BackgroundJob struct {
 	Running  bool
 }
 
+const (
+	// JobOutputMaxBytes bounds one JobService.JobOutput read (64 KiB): the
+	// output panel keeps the newest bytes of a huge job rather than shipping
+	// megabytes through a frame.
+	JobOutputMaxBytes = 64 * 1024
+	// JobOutputTruncatedMarker prefixes a bounded read whose older bytes were
+	// dropped. The UI strips it and shows its own localized truncation hint;
+	// the machine marker never reaches the user.
+	JobOutputTruncatedMarker = "…[earlier output truncated]\n"
+)
+
+var (
+	// ErrJobNotFound reports a job id the backend no longer retains (evicted
+	// after finishing, or owned by another workspace build). The UI localizes
+	// it instead of showing the backend's diagnostic.
+	ErrJobNotFound = errors.New("job not found")
+	// ErrJobUnavailable reports a product without the background-job backend;
+	// the output panel explains that instead of failing the frame.
+	ErrJobUnavailable = errors.New("background jobs are unavailable")
+)
+
 // JobService is the read/control surface behind the header's job chip. The
-// toolkit module exposes the rig job manager through it (list/kill only; the
+// toolkit module exposes the rig job manager through it (list/output/kill; the
 // tool-facing job_* tools stay the model's API).
 type JobService interface {
 	// Jobs lists the manager's retained jobs, oldest first.
 	Jobs() []BackgroundJob
 	// KillJob stops a running job. Unknown or finished ids return an error.
 	KillJob(id string) error
+	// JobOutput returns the newest output of one retained job, bounded to
+	// JobOutputMaxBytes with JobOutputTruncatedMarker when the older bytes were
+	// cut. An empty string means the job produced no output yet. Unknown ids
+	// wrap ErrJobNotFound and a missing backend wraps ErrJobUnavailable.
+	JobOutput(id string) (string, error)
 }
 
 // KeyJobs is provided by the toolkit module and consumed by the session header.

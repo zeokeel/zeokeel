@@ -631,6 +631,9 @@ func buildComposerDock(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 	// hand-rolled 960 frame (context-ui-dev's uikit.ReadingColumn owns the 92%
 	// cap and the horizontal padding).
 	uikit.ReadingColumn(c, func(c *ui.Context) {
+		// DSH order: the ambient todo plan first, then the goal driver, then the
+		// blocking approval banner — each on the shared reading measure.
+		buildTodoDock(c, t, runtime, st)
 		buildGoalDock(c, t, runtime, st)
 		runtime.RenderSlot(c, contracts.SlotSessionBanner)
 	})

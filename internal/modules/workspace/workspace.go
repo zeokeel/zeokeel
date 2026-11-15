@@ -180,6 +180,7 @@ type Service struct {
 var (
 	_ contracts.WorkspaceService = (*Service)(nil)
 	_ contracts.WorkspaceDiffer  = (*Service)(nil)
+	_ contracts.WorkspaceRenamer = (*Service)(nil)
 )
 
 // newService resolves the registry path and loads the existing document. A
@@ -588,6 +589,53 @@ func (s *Service) fallbackCurrentLocked() string {
 		}
 	}
 	return selected
+}
+
+// RenameWorkspace implements contracts.WorkspaceRenamer: it changes one
+// workspace's display name and persists the registry atomically. The ID, root
+// and creation time are preserved, and so is the current selection (renaming
+// the open workspace does not open or close anything). An empty name and a name
+// another workspace already uses (trimmed, case-insensitive) are rejected with
+// the exported contracts sentinels so a UI can localize them; a rejected rename
+// writes nothing.
+func (s *Service) RenameWorkspace(ctx context.Context, id, name string) (contracts.Workspace, error) {
+	if err := contextErr(ctx); err != nil {
+		return contracts.Workspace{}, err
+	}
+	id = strings.TrimSpace(id)
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return contracts.Workspace{}, fmt.Errorf("%w: %q", contracts.ErrWorkspaceNameEmpty, id)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	index := -1
+	for position, workspace := range s.workspaces {
+		if workspace.ID == id {
+			index = position
+			break
+		}
+	}
+	if index < 0 {
+		return contracts.Workspace{}, fmt.Errorf("%w: %q", ErrWorkspaceNotFound, id)
+	}
+	for _, other := range s.workspaces {
+		if other.ID == id {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(other.Name), name) {
+			return contracts.Workspace{}, fmt.Errorf("%w: %q", contracts.ErrWorkspaceNameTaken, name)
+		}
+	}
+	previous := cloneWorkspaces(s.workspaces)
+	renamed := s.workspaces[index]
+	renamed.Name = name
+	s.workspaces[index] = renamed
+	if err := s.persistLocked(); err != nil {
+		s.workspaces = previous
+		return contracts.Workspace{}, err
+	}
+	return cloneWorkspace(renamed), nil
 }
 
 // currentWorkspaceRoot returns the current workspace and its canonical root.

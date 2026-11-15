@@ -20,6 +20,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -62,6 +63,15 @@ const (
 // the next one: fine-grained enough to show a completion promptly, slow enough
 // to stay cheap while the user is idle.
 const jobsPollInterval = 500 * time.Millisecond
+
+const (
+	// jobOutputPanelHeight is the expanded output panel's fixed height (256
+	// DIP): a chatty job scrolls inside it instead of stretching the overlay.
+	jobOutputPanelHeight float32 = design.Space8 * 8
+	// jobStopConfirmWindow is how long an armed stop waits for its second
+	// press; after it the row resets to 停止 and nothing was stopped.
+	jobStopConfirmWindow = 3 * time.Second
+)
 
 // agentSurface is the UI-thread state of the agent surfaces: the overlay open
 // flags and their scroll/list state, the cached task-board snapshot (loaded
@@ -116,6 +126,15 @@ type agentSurface struct {
 	// is in flight (its stop action is disabled), jobErr the last failure.
 	jobKilling string
 	jobErr     string
+	// jobStopArmed is the job whose stop waits for the second press, and
+	// jobStopAt is when it was armed. The arm resets after
+	// jobStopConfirmWindow (or when the overlay closes or the job ends), so a
+	// stray press can never stop a process.
+	jobStopArmed string
+	jobStopAt    time.Time
+	// jobOutputs holds each job row's expanded output panel, keyed by job id:
+	// its open flag, the bounded output read's state and the panel's scroll.
+	jobOutputs map[string]*jobOutputPanel
 
 	// Team controls: teamStopping/teamClosing are the member ids of the control
 	// action in flight (its row action is disabled); teamErr is the last failure
@@ -163,14 +182,34 @@ type agentSurface struct {
 	lastVisitSet   bool
 }
 
+// jobOutputPanel is one job row's expanded output panel state: whether it is
+// open, the bounded read's result (and when it started, for the live poll) and
+// the panel's scroll offset, kept across frames and reads.
+type jobOutputPanel struct {
+	open   bool
+	loaded bool
+	busy   bool
+	seq    uint64
+	text   string
+	err    string
+	at     time.Time
+	// running is whether the job ran when the last read started: a job that
+	// finished since then (possibly while the overlay was closed) gets one
+	// final read for its complete output.
+	running bool
+	scroll  ui.ScrollState
+}
+
 // closeAgentPopovers closes every transient agent overlay (team, child switcher,
-// jobs). It is called when the conversation screen is left/returned to, when the
-// conversation switches, and when a child conversation opens or closes.
+// jobs, workbench). It is called when the conversation screen is left/returned
+// to, when the conversation switches, and when a child conversation opens or
+// closes. An armed job stop belongs to the closed overlay and resets with it.
 func (st *state) closeAgentPopovers() {
 	st.agents.teamOpen = false
 	st.agents.childOpen = false
 	st.agents.jobsOpen = false
 	st.agents.workbenchOpen = false
+	st.agents.jobStopArmed = ""
 }
 
 // noteScreenVisit closes the transient overlays when the conversation screen
@@ -1346,6 +1385,8 @@ func buildJobsEntry(c *ui.Context, t *design.Tokens, st *state, sessionID string
 		st.agents.jobsOpen = !st.agents.jobsOpen
 		if st.agents.jobsOpen {
 			st.openExecutionHistory(sessionID)
+		} else {
+			st.agents.jobStopArmed = ""
 		}
 		st.runtime.Invalidate()
 	}
@@ -1363,6 +1404,9 @@ func buildJobsEntry(c *ui.Context, t *design.Tokens, st *state, sessionID string
 // durable execution history (lifecycle only; the output is not persisted).
 func buildJobsPanel(c *ui.Context, t *design.Tokens, st *state, jobs contracts.JobService,
 	list []contracts.BackgroundJob, running int, history []contracts.ExecutionRecord) {
+	// An arm older than the confirmation window (or whose job ended) resets
+	// before the rows build, so the row shows 停止 again and Enter does nothing.
+	st.expireJobStopArm(c, list)
 	agentPanelHeader(c, t, icons.Clock(), st.tr("后台任务", "Background jobs"),
 		fmt.Sprintf(st.tr("%d 个任务 · %d 个运行中", "%d jobs · %d running"), len(list), running))
 	if len(list) == 0 && len(history) == 0 {
@@ -1454,42 +1498,262 @@ func backgroundJobExitLabel(job contracts.BackgroundJob) string {
 }
 
 // buildBackgroundJobRow is one job row: status badge, command, duration, exit
-// code and the stop action of a running job.
+// code, the output panel toggle and the two-stage stop of a running job. The
+// expanded panel reads the job's bounded output through JobService.JobOutput
+// (off the UI thread) and refreshes it while the job runs.
 func buildBackgroundJobRow(c *ui.Context, t *design.Tokens, st *state,
 	jobs contracts.JobService, job contracts.BackgroundJob) {
 	kind, label := backgroundJobStatus(st, job)
-	row := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
-		Background(t.BgBase).Border(1, t.BorderL2).Radius(design.RadiusMD).
-		Padding(design.Space2, design.Space3)
-	row.Children(func() {
-		uikit.StatusBadge(c, t, kind, label)
-		command := backgroundJobCommand(job, st)
-		design.Apply(ui.Text(c, command), t.MonoText(design.TypeXXS)).
-			TextColor(t.LabelSecondary).Grow(1).Shrink(1).MinWidthPercent(0).
-			MaxLines(1).Ellipsis("…").Tooltip(command)
-		if job.Duration > 0 {
-			design.Apply(ui.Text(c, st.tr("用时 ", "Took ")+formatUsageDuration(job.Duration.Milliseconds())),
+	panel := st.jobOutputPanelFor(job.ID)
+	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+		row := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+			Background(t.BgBase).Border(1, t.BorderL2).Radius(design.RadiusMD).
+			Padding(design.Space2, design.Space3)
+		row.Children(func() {
+			uikit.StatusBadge(c, t, kind, label)
+			command := backgroundJobCommand(job, st)
+			design.Apply(ui.Text(c, command), t.MonoText(design.TypeXXS)).
+				TextColor(t.LabelSecondary).Grow(1).Shrink(1).MinWidthPercent(0).
+				MaxLines(1).Ellipsis("…").Tooltip(command)
+			if job.Duration > 0 {
+				design.Apply(ui.Text(c, st.tr("用时 ", "Took ")+formatUsageDuration(job.Duration.Milliseconds())),
+					t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).NoWrap()
+			}
+			design.Apply(ui.Text(c, st.tr("退出码 ", "Exit ")+backgroundJobExitLabel(job)),
 				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).NoWrap()
-		}
-		design.Apply(ui.Text(c, st.tr("退出码 ", "Exit ")+backgroundJobExitLabel(job)),
-			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).NoWrap()
-		if job.Running {
-			stopText := st.tr("停止", "Stop")
-			if st.agents.jobKilling == job.ID {
-				stopText = st.tr("停止中…", "Stopping…")
+			outputText := st.tr("输出", "Output")
+			outputLabel := st.tr("查看任务输出 ", "Show task output ") + job.ID
+			if panel.open {
+				outputText = st.tr("收起", "Hide")
+				outputLabel = st.tr("收起任务输出 ", "Hide task output ") + job.ID
 			}
-			// Stopping a background job terminates its process: the same danger
-			// semantic as the composer's stop, not a neutral secondary (R6/A6).
-			stop := ui.Button(c, stopText).Label(st.tr("停止后台任务 ", "Stop background task ") + job.ID).
-				Tooltip(st.tr("停止会终止该任务的进程，无法撤销", "Stopping ends the job's process and cannot be undone"))
-			design.Apply(stop, t.DangerButton(), t.Font(design.TypeXXS)).
-				Height(agentRowActionHeight).PaddingX(design.Space2).Shrink(0)
-			stop.Disabled(st.agents.jobKilling != "")
-			if stop.Clicked() {
-				st.killBackgroundJob(jobs, job.ID)
+			agentRowActionTooltip(c, t, outputText, outputLabel, st.tr(
+				"展开该任务的输出（等宽文本、可滚动、可复制）",
+				"Show this task's output (mono text, scrollable, copyable)"),
+				func() {
+					panel.open = !panel.open
+					st.runtime.Invalidate()
+				})
+			if job.Running {
+				armed := st.agents.jobStopArmed == job.ID
+				stopText := st.tr("停止", "Stop")
+				stopLabel := st.tr("停止后台任务 ", "Stop background task ") + job.ID
+				tooltip := st.tr("停止会终止该任务的进程，无法撤销；再按一次确认",
+					"Stopping ends the job's process and cannot be undone; press again to confirm")
+				switch {
+				case armed:
+					stopText = st.tr("确认停止", "Confirm stop")
+					stopLabel = st.tr("确认停止后台任务 ", "Confirm stop of background task ") + job.ID
+					tooltip = st.tr("再按一次以终止该任务（3 秒内有效，超时自动取消）",
+						"Press again to end this task (valid for 3 seconds, then it resets)")
+				case st.agents.jobKilling == job.ID:
+					stopText = st.tr("停止中…", "Stopping…")
+				}
+				// Stopping a background job terminates its process: the same danger
+				// semantic as the composer's stop, not a neutral secondary (R6/A6).
+				stop := ui.Button(c, stopText).Label(stopLabel).Tooltip(tooltip)
+				design.Apply(stop, t.DangerButton(), t.Font(design.TypeXXS)).
+					Height(agentRowActionHeight).PaddingX(design.Space2).Shrink(0)
+				stop.Disabled(st.agents.jobKilling != "")
+				if stop.Clicked() {
+					if armed {
+						// The second press within the window stops the job.
+						st.agents.jobStopArmed = ""
+						st.killBackgroundJob(jobs, job.ID)
+					} else {
+						st.armJobStop(c, job.ID)
+					}
+				}
 			}
+		})
+		if panel.open {
+			st.buildJobOutputPanel(c, t, job, panel)
 		}
 	})
+	if panel.open && jobs != nil {
+		// Guarded async read: at most one per job in flight, at most one per
+		// poll interval while the job runs (a finished job is read once).
+		st.ensureJobOutput(c, jobs, job, panel)
+	}
+}
+
+// jobOutputPanelFor returns (creating on first use) one job row's output panel
+// state.
+func (st *state) jobOutputPanelFor(jobID string) *jobOutputPanel {
+	if st.agents.jobOutputs == nil {
+		st.agents.jobOutputs = make(map[string]*jobOutputPanel)
+	}
+	panel := st.agents.jobOutputs[jobID]
+	if panel == nil {
+		panel = &jobOutputPanel{}
+		st.agents.jobOutputs[jobID] = panel
+	}
+	return panel
+}
+
+// armJobStop starts the two-stage stop: the row shows 确认停止 and this frame
+// schedules the reset frame after the confirmation window.
+func (st *state) armJobStop(c *ui.Context, jobID string) {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return
+	}
+	st.agents.jobStopArmed = jobID
+	st.agents.jobStopAt = c.Now()
+	c.After(jobStopConfirmWindow)
+	st.runtime.Invalidate()
+}
+
+// expireJobStopArm clears an arm that timed out or whose job is no longer
+// running, so an old confirmation can never stop a later process.
+func (st *state) expireJobStopArm(c *ui.Context, list []contracts.BackgroundJob) {
+	armed := st.agents.jobStopArmed
+	if armed == "" {
+		return
+	}
+	if c.Now().Sub(st.agents.jobStopAt) >= jobStopConfirmWindow {
+		st.agents.jobStopArmed = ""
+		return
+	}
+	for _, job := range list {
+		if job.ID == armed && job.Running {
+			return
+		}
+	}
+	st.agents.jobStopArmed = ""
+}
+
+// ensureJobOutput starts one bounded output read off the UI thread when the
+// panel needs it: the first read, then one per poll interval while the job
+// runs. The frame never waits for it; the result lands through UIRuntime.Post.
+func (st *state) ensureJobOutput(c *ui.Context, jobs contracts.JobService, job contracts.BackgroundJob, panel *jobOutputPanel) {
+	if jobs == nil || panel == nil || !panel.open || panel.busy {
+		return
+	}
+	now := c.Now()
+	if panel.loaded {
+		if !job.Running && !panel.running {
+			// A finished job's output no longer changes.
+			return
+		}
+		if job.Running && now.Sub(panel.at) < jobsPollInterval {
+			return
+		}
+	}
+	panel.busy = true
+	panel.seq++
+	sequence := panel.seq
+	panel.at = now
+	panel.running = job.Running
+	runtime := st.runtime
+	jobID := job.ID
+	go func() {
+		text, err := jobs.JobOutput(jobID)
+		runtime.Post(func() {
+			panel.busy = false
+			if panel.seq != sequence {
+				// A newer read superseded this one.
+				return
+			}
+			// A failed read counts as loaded: the error shows, and a live job
+			// retries at the poll interval instead of every frame.
+			panel.loaded = true
+			if err != nil {
+				panel.err = st.tr("读取输出失败：", "Failed to read the output: ") + st.jobOutputErrorText(err)
+			} else {
+				panel.err = ""
+				panel.text = text
+			}
+			runtime.Invalidate()
+		})
+	}()
+}
+
+// buildJobOutputPanel draws one expanded output panel: the honest states
+// (loading, failure, empty, truncated, stopped), the command/output copy
+// actions and the bounded mono body.
+func (st *state) buildJobOutputPanel(c *ui.Context, t *design.Tokens,
+	job contracts.BackgroundJob, panel *jobOutputPanel) {
+	if panel.err != "" {
+		uikit.ErrorLine(c, panel.err)
+		return
+	}
+	if !panel.loaded {
+		ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			ui.Spinner(c).Label(st.tr("读取输出", "Loading output")).
+				Size(design.Space3, design.Space3).TextColor(t.LabelTertiary)
+			design.Apply(ui.Text(c, st.tr("读取输出…", "Loading output…")),
+				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+		})
+		return
+	}
+	text := panel.text
+	truncated := strings.HasPrefix(text, contracts.JobOutputTruncatedMarker)
+	if truncated {
+		text = strings.TrimPrefix(text, contracts.JobOutputTruncatedMarker)
+	}
+	if truncated {
+		agentHint(c, t, st.tr("输出已截断，仅显示最近部分。",
+			"Output truncated: only the recent part is shown."))
+	}
+	if stoppedJobOutput(job) {
+		agentHint(c, t, st.tr("任务已停止，以下为停止前的输出。",
+			"The task was stopped; this is its output before the stop."))
+	}
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		ui.Spacer(c)
+		agentRowActionTooltip(c, t, st.tr("复制命令", "Copy command"),
+			st.tr("复制任务命令 ", "Copy task command ")+job.ID,
+			st.tr("复制该任务的命令行", "Copy this task's command line"),
+			func() { c.WriteClipboard(backgroundJobCommand(job, st)) })
+		agentRowActionTooltip(c, t, st.tr("复制输出", "Copy output"),
+			st.tr("复制任务输出 ", "Copy task output ")+job.ID,
+			st.tr("复制当前显示的任务输出", "Copy the task output shown here"),
+			func() { c.WriteClipboard(text) })
+	})
+	if strings.TrimSpace(text) == "" {
+		design.Apply(ui.Text(c, st.tr("暂无输出", "No output yet")),
+			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+		return
+	}
+	scroll := ui.ScrollBoth(c).Height(jobOutputPanelHeight).FillWidth()
+	scroll.TrackScroll(&panel.scroll)
+	design.Apply(scroll, func(el ui.Element) ui.Element {
+		return el.Background(t.BgBase).Border(1, t.BorderL2).
+			Radius(design.RadiusSM).Padding(design.Space2)
+	}).Children(func() {
+		design.Apply(ui.Text(c, text), t.MonoText(design.TypeXXS)).
+			TextColor(t.LabelSecondary).NoWrap().Selectable()
+	})
+}
+
+// stoppedJobOutput reports whether a job's output is final because the job was
+// stopped (killed) or timed out: the panel says so instead of letting the user
+// wait for more.
+func stoppedJobOutput(job contracts.BackgroundJob) bool {
+	if job.Running {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(job.State)) {
+	case "killed", "timed_out", "interrupted":
+		return true
+	}
+	return false
+}
+
+// jobOutputErrorText localizes the JobService read errors; unknown failures
+// keep their diagnostic after the caller's localized prefix.
+func (st *state) jobOutputErrorText(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, contracts.ErrJobNotFound):
+		return st.tr("该后台任务已不存在。", "The background task no longer exists.")
+	case errors.Is(err, contracts.ErrJobUnavailable):
+		return st.tr("后台任务不可用。", "Background jobs are unavailable.")
+	default:
+		return err.Error()
+	}
 }
 
 // killBackgroundJob stops one job off the UI thread (the job tool waits a
@@ -1504,6 +1768,7 @@ func (st *state) killBackgroundJob(jobs contracts.JobService, jobID string) {
 		return
 	}
 	st.agents.jobKilling = jobID
+	st.agents.jobStopArmed = ""
 	st.agents.jobErr = ""
 	runtime := st.runtime
 	go func() {

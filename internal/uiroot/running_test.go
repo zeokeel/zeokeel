@@ -27,8 +27,9 @@ type fakeJobs struct {
 	jobs []contracts.BackgroundJob
 }
 
-func (f fakeJobs) Jobs() []contracts.BackgroundJob { return f.jobs }
-func (f fakeJobs) KillJob(string) error            { return nil }
+func (f fakeJobs) Jobs() []contracts.BackgroundJob  { return f.jobs }
+func (f fakeJobs) KillJob(string) error             { return nil }
+func (f fakeJobs) JobOutput(string) (string, error) { return "", nil }
 
 // kernelWith builds a disposable kernel root, provides via fn and returns it.
 func kernelWith(t *testing.T, fn func(cordis.Context)) cordis.Context {

@@ -803,3 +803,127 @@ func TestDeleteCurrentTieBreakIsDeterministic(t *testing.T) {
 	assertCurrent(t, service, "ws-c")
 	assertCurrent(t, newDirectService(t, dataDir, Config{}), "ws-c")
 }
+
+// --- workspace rename (contracts.WorkspaceRenamer) -------------------------
+
+// mustRenamer type-asserts the optional rename half of the service.
+func mustRenamer(t *testing.T, service contracts.WorkspaceService) contracts.WorkspaceRenamer {
+	t.Helper()
+	renamer, ok := service.(contracts.WorkspaceRenamer)
+	if !ok {
+		t.Fatalf("the workspace service does not implement contracts.WorkspaceRenamer")
+	}
+	return renamer
+}
+
+// TestRenameWorkspaceKeepsIdentityAndCurrent covers the successful rename: the
+// display name changes and is persisted, while the ID, root, creation time and
+// the current workspace selection stay exactly as they were.
+func TestRenameWorkspaceKeepsIdentityAndCurrent(t *testing.T) {
+	dataDir := t.TempDir()
+	h := mustLoadWorkspace(t, dataDir, nil)
+	renamer := mustRenamer(t, h.service)
+	first := mustCreate(t, h.service, "one", t.TempDir())
+	second := mustCreate(t, h.service, "two", t.TempDir()) // becomes current
+
+	renamed, err := renamer.RenameWorkspace(context.Background(), first.ID, "  项目甲  ")
+	if err != nil {
+		t.Fatalf("RenameWorkspace: %v", err)
+	}
+	if renamed.ID != first.ID {
+		t.Fatalf("renamed ID = %q, want %q", renamed.ID, first.ID)
+	}
+	if renamed.Name != "项目甲" {
+		t.Fatalf("renamed name = %q, want the trimmed 项目甲", renamed.Name)
+	}
+	if renamed.Root != first.Root || !renamed.CreatedAt.Equal(first.CreatedAt) {
+		t.Fatalf("rename changed identity fields: got root %q created %v, want %q / %v",
+			renamed.Root, renamed.CreatedAt, first.Root, first.CreatedAt)
+	}
+
+	// Persisted: a fresh service over the same data directory reads the new
+	// name, and the current workspace is still the second one.
+	reopened := newDirectService(t, dataDir, Config{})
+	listed, err := reopened.List(context.Background())
+	if err != nil {
+		t.Fatalf("List after reopen: %v", err)
+	}
+	found := false
+	for _, ws := range listed {
+		if ws.ID == first.ID {
+			found = true
+			if ws.Name != "项目甲" {
+				t.Fatalf("persisted name = %q, want 项目甲", ws.Name)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("renamed workspace %q missing from the reopened registry: %v", first.ID, listed)
+	}
+	current, ok, err := reopened.Current(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("Current after reopen = (%v, %v)", ok, err)
+	}
+	if current.ID != second.ID {
+		t.Fatalf("current workspace after the rename = %q, want %q (rename must not change it)",
+			current.ID, second.ID)
+	}
+
+	// Renaming the current workspace updates its display name without moving
+	// the selection.
+	if _, err := renamer.RenameWorkspace(context.Background(), second.ID, "当前项目"); err != nil {
+		t.Fatalf("RenameWorkspace(current): %v", err)
+	}
+	current, ok, err = h.service.Current(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("Current after renaming the current workspace = (%v, %v)", ok, err)
+	}
+	if current.ID != second.ID || current.Name != "当前项目" {
+		t.Fatalf("current workspace = %q %q, want %q 当前项目", current.ID, current.Name, second.ID)
+	}
+}
+
+// TestRenameWorkspaceValidation covers the error contract: an empty name and a
+// name another workspace already uses (trimmed, case-insensitive) are rejected
+// with the exported sentinels, an unknown ID is not found, and a rejected
+// rename leaves the registry untouched (including on disk).
+func TestRenameWorkspaceValidation(t *testing.T) {
+	dataDir := t.TempDir()
+	h := mustLoadWorkspace(t, dataDir, nil)
+	renamer := mustRenamer(t, h.service)
+	alpha := mustCreate(t, h.service, "alpha", t.TempDir())
+	beta := mustCreate(t, h.service, "beta", t.TempDir())
+
+	for _, name := range []string{"", "   ", "\t\n"} {
+		if _, err := renamer.RenameWorkspace(context.Background(), alpha.ID, name); !errors.Is(err, contracts.ErrWorkspaceNameEmpty) {
+			t.Fatalf("RenameWorkspace(name %q) error = %v, want ErrWorkspaceNameEmpty", name, err)
+		}
+	}
+	for _, name := range []string{"beta", "  BETA ", "Beta"} {
+		if _, err := renamer.RenameWorkspace(context.Background(), alpha.ID, name); !errors.Is(err, contracts.ErrWorkspaceNameTaken) {
+			t.Fatalf("RenameWorkspace(taken name %q) error = %v, want ErrWorkspaceNameTaken", name, err)
+		}
+	}
+	if _, err := renamer.RenameWorkspace(context.Background(), "ws-missing", "gamma"); !errors.Is(err, ErrWorkspaceNotFound) {
+		t.Fatalf("RenameWorkspace(unknown id) error = %v, want ErrWorkspaceNotFound", err)
+	}
+	// Renaming a workspace to its own name is a no-op, not a duplicate.
+	if updated, err := renamer.RenameWorkspace(context.Background(), alpha.ID, " alpha "); err != nil || updated.Name != "alpha" {
+		t.Fatalf("RenameWorkspace(self name) = %q, %v; want alpha, nil", updated.Name, err)
+	}
+
+	// Nothing above was persisted: alpha still carries its old name and beta is
+	// untouched.
+	reopened := newDirectService(t, dataDir, Config{})
+	listed, err := reopened.List(context.Background())
+	if err != nil {
+		t.Fatalf("List after reopen: %v", err)
+	}
+	names := map[string]string{}
+	for _, ws := range listed {
+		names[ws.ID] = ws.Name
+	}
+	if names[alpha.ID] != "alpha" || names[beta.ID] != "beta" {
+		t.Fatalf("names after the rejected renames = %v, want alpha/beta", names)
+	}
+}

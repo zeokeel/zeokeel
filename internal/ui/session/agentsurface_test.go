@@ -85,6 +85,14 @@ type fakeJobs struct {
 	jobs    []contracts.BackgroundJob
 	kills   []string
 	killErr error
+
+	// JobOutput scripting: outputs/outputErrs by id, or an outputFn that may
+	// block (the off-thread test) or change per read (the live-refresh test);
+	// outputCalls records every read.
+	outputs     map[string]string
+	outputErrs  map[string]error
+	outputFn    func(id string) (string, error)
+	outputCalls []string
 }
 
 func (f *fakeJobs) Jobs() []contracts.BackgroundJob {
@@ -100,10 +108,45 @@ func (f *fakeJobs) KillJob(id string) error {
 	return f.killErr
 }
 
+func (f *fakeJobs) JobOutput(id string) (string, error) {
+	f.mu.Lock()
+	f.outputCalls = append(f.outputCalls, id)
+	fn := f.outputFn
+	text, scripted := f.outputs[id]
+	err := f.outputErrs[id]
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(id)
+	}
+	if err != nil {
+		return "", err
+	}
+	if !scripted {
+		return "", nil
+	}
+	return text, nil
+}
+
 func (f *fakeJobs) killed() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.kills...)
+}
+
+func (f *fakeJobs) outputReads() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.outputCalls...)
+}
+
+// setOutput changes the scripted output between reads (the live-refresh test).
+func (f *fakeJobs) setOutput(id, text string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.outputs == nil {
+		f.outputs = map[string]string{}
+	}
+	f.outputs[id] = text
 }
 
 // --- fake FilePreviewer -----------------------------------------------------
@@ -668,7 +711,13 @@ func TestJobsOverlayAndKill(t *testing.T) {
 	h.assertTexts(tester, "后台任务", "npm test --watch", "go build ./...",
 		"运行中", "完成", "用时 6.2s", "退出码 0", "退出码 —")
 
+	// Stopping is two-stage: the first press arms 确认停止, the second stops.
 	h.click(tester, "停止后台任务 job-1")
+	h.assertTexts(tester, "确认停止")
+	if killed := jobs.killed(); len(killed) != 0 {
+		t.Fatalf("the first stop press already killed the job: %v", killed)
+	}
+	h.click(tester, "确认停止后台任务 job-1")
 	waitFor(t, tester, func() bool { return len(jobs.killed()) == 1 }, "KillJob call")
 	if killed := jobs.killed(); killed[0] != "job-1" {
 		t.Fatalf("KillJob(%q), want job-1", killed[0])

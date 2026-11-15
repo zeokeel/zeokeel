@@ -73,6 +73,7 @@ package sidebar
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -143,6 +144,14 @@ type paneState struct {
 	workspaceDeleteID   string
 	workspaceDeleteName string
 	workspaceDeleteErr  string
+
+	// Pending rename of one workspace opened from its row menu: the name draft
+	// the dialog input holds and its inline error. The menu entry exists only
+	// when the backend implements contracts.WorkspaceRenamer.
+	workspaceRenameOpen  bool
+	workspaceRenameID    string
+	workspaceRenameDraft string
+	workspaceRenameErr   string
 
 	// hoveredTreeGroup is the workspace group whose row the pointer is over in
 	// the last frame. The row prefix draws the folder/chevron swap from it: the
@@ -311,8 +320,17 @@ func Module() *module.Descriptor[Config] {
 				buildWorkspaceDeleteDialog(c, workspace, runtime, state)
 			},
 		}
+		workspaceRenameDialog := contracts.SlotItem{
+			Slot:  contracts.SlotOverlayDialogs,
+			ID:    "sidebar.workspace.rename.dialog",
+			Order: 25,
+			Build: func(c *ui.Context) {
+				workspace, _ := state.ctx.Get(contracts.KeyWorkspace)
+				buildWorkspaceRenameDialog(c, design.Of(c), workspace, runtime, state)
+			},
+		}
 
-		for _, item := range []contracts.SlotItem{primary, navSlot, footer, renameDialog, workspaceDialog} {
+		for _, item := range []contracts.SlotItem{primary, navSlot, footer, renameDialog, workspaceRenameDialog, workspaceDialog} {
 			if err := own(ctx, func() (func(), error) { return runtime.RegisterSlotItem(item) }); err != nil {
 				return err
 			}
@@ -1421,9 +1439,12 @@ func buildWorkspaceNewChatAction(c *ui.Context, t *design.Tokens,
 
 // workspaceGroupMenu is the one menu the workspace row's ⋯ button and its
 // right-click share, as mygo recommends for a row action and its context menu.
+// Rename appears only when the backend implements the optional
+// contracts.WorkspaceRenamer, so a host without it keeps open/delete unchanged.
 func workspaceGroupMenu(state *paneState, runtime contracts.UIRuntime,
 	workspace contracts.WorkspaceService, tree *workspaceTreeGroups, key, name string) func(m *ui.Menu) {
 	ws := tree.workspace[key]
+	renamer, _ := workspace.(contracts.WorkspaceRenamer)
 	return func(m *ui.Menu) {
 		if m.Item(state.T("打开工作区", "Open workspace")).ID("open").Chosen() {
 			if _, err := workspace.Open(context.Background(), ws.ID); err != nil {
@@ -1432,6 +1453,15 @@ func workspaceGroupMenu(state *paneState, runtime contracts.UIRuntime,
 				state.workspaceDeleteErr = ""
 			}
 			runtime.Invalidate()
+		}
+		if renamer != nil {
+			if m.Item(state.T("重命名工作区", "Rename workspace")).ID("rename").Chosen() {
+				state.workspaceRenameOpen = true
+				state.workspaceRenameID = ws.ID
+				state.workspaceRenameDraft = firstNonEmpty(strings.TrimSpace(ws.Name), name)
+				state.workspaceRenameErr = ""
+				runtime.Invalidate()
+			}
 		}
 		m.Separator()
 		remove := m.Item(state.T("删除工作区", "Delete workspace")).ID("delete").Danger()
@@ -2285,6 +2315,84 @@ func buildRenameDialog(c *ui.Context, t *design.Tokens, renamer contracts.Sessio
 			})
 		})
 	})
+}
+
+// buildWorkspaceRenameDialog renames a registered workspace from its row menu:
+// one native name input (focused as the dialog opens, Enter saves, Escape or
+// Cancel dismisses), the same explicit save/cancel footer the session rename
+// uses, and an inline localized error. A successful rename keeps the
+// workspace's ID, root, creation time and current selection; the tree reads the
+// registry again on the next frame, so the row and the current workspace title
+// show the new name.
+func buildWorkspaceRenameDialog(c *ui.Context, t *design.Tokens,
+	workspace contracts.WorkspaceService, runtime contracts.UIRuntime, state *paneState) {
+	if !state.workspaceRenameOpen || workspace == nil {
+		return
+	}
+	renamer, ok := workspace.(contracts.WorkspaceRenamer)
+	if !ok {
+		// The backend lost the optional half (or never had it): no dialog, and
+		// the menu entry could not have been offered.
+		state.workspaceRenameOpen = false
+		return
+	}
+	target := state.workspaceRenameID
+	save := func() {
+		name := strings.TrimSpace(state.workspaceRenameDraft)
+		switch {
+		case name == "":
+			// Local validation keeps the empty name off the backend entirely.
+			state.workspaceRenameErr = state.T("名称不能为空", "Name cannot be empty")
+		case target == "":
+			state.workspaceRenameErr = state.T("工作区不存在", "Workspace not found")
+		default:
+			if _, err := renamer.RenameWorkspace(context.Background(), target, name); err != nil {
+				state.workspaceRenameErr = workspaceRenameErrorText(state, err)
+			} else {
+				state.workspaceRenameOpen = false
+				state.workspaceRenameErr = ""
+				state.addWorkspaceStatus = state.T("已重命名工作区", "Workspace renamed")
+			}
+		}
+		runtime.Invalidate()
+	}
+	ui.Modal(c, &state.workspaceRenameOpen, func() {
+		ui.Column(c).Width(design.DialogWidthXS).Gap(design.Space3).Children(func() {
+			design.Apply(ui.Text(c, state.T("重命名工作区", "Rename workspace")),
+				t.Text(design.TypeM)).FontWeight(design.WeightSemibold)
+			// One line of input, focused as the dialog opens; Enter saves in
+			// place while the input keeps the keyboard.
+			ui.TextInput(c, &state.workspaceRenameDraft).
+				Label(state.T("工作区名称", "Workspace name")).
+				FillWidth().AutoFocus().OnTextKey(uikit.EnterTo(save))
+			if state.workspaceRenameErr != "" {
+				design.Apply(ui.Text(c, state.workspaceRenameErr), t.TextMuted(design.TypeXS)).
+					TextColor(t.DangerText)
+			}
+			uikit.DialogFooter(c, []uikit.DialogAction{
+				{Label: state.T("取消", "Cancel"), OnClick: func() {
+					state.workspaceRenameOpen = false
+					state.workspaceRenameErr = ""
+					runtime.Invalidate()
+				}},
+				{Label: state.T("保存", "Save"), Primary: true, OnClick: save},
+			})
+		})
+	})
+}
+
+// workspaceRenameErrorText localizes the rename errors the backend reports
+// through the contracts sentinels; any other error keeps the backend's own
+// message after the localized prefix.
+func workspaceRenameErrorText(state *paneState, err error) string {
+	switch {
+	case errors.Is(err, contracts.ErrWorkspaceNameEmpty):
+		return state.T("名称不能为空", "Name cannot be empty")
+	case errors.Is(err, contracts.ErrWorkspaceNameTaken):
+		return state.T("已有同名工作区", "A workspace with this name already exists")
+	default:
+		return state.T("重命名工作区失败：", "Could not rename the workspace: ") + err.Error()
+	}
 }
 
 // sessionTitleByID looks a session up and returns its display title.

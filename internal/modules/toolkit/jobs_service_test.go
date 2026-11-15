@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"runtime"
 	"strings"
@@ -452,5 +453,184 @@ func TestParseJobListFreeTextFields(t *testing.T) {
 		got.ExitCode != -1 || got.Duration != 1503*time.Millisecond ||
 		got.Command != "echo command=ok" {
 		t.Fatalf("row = %+v, want the real trailing fields", got)
+	}
+}
+
+// --- JobService.JobOutput: the UI's bounded output read --------------------
+
+// TestJobServiceJobOutputPassesIDAndTail pins the read path: JobOutput drives
+// the model-facing job_output tool with a tail request (so the model's own
+// output cursor is never consumed), and returns just the output body.
+func TestJobServiceJobOutputPassesIDAndTail(t *testing.T) {
+	output := &jobServiceStubTool{
+		name: jobs.ToolJobOutput,
+		result: rig.ToolResult{Content: "job_id: job-a\nkind: bash\ncommand: sleep 30\n" +
+			"state: running\nstatus: running (running)\nexit_code: -1\nduration_ms: 1503\n" +
+			"output:\nline one\nline two\n"},
+	}
+	group := &rebindGroup{rootOf: func() string { return "" }, current: jobServiceScopedBuild("", output)}
+
+	text, err := newJobService(group).JobOutput("job-a")
+	if err != nil {
+		t.Fatalf("JobOutput: %v", err)
+	}
+	if text != "line one\nline two\n" {
+		t.Fatalf("JobOutput = %q, want the output body", text)
+	}
+	if output.calls != 1 || output.lastCall.Name != jobs.ToolJobOutput {
+		t.Fatalf("job_output calls = %d (call %+v), want 1", output.calls, output.lastCall)
+	}
+	var args struct {
+		JobID string `json:"job_id"`
+		Tail  int    `json:"tail"`
+	}
+	if err := json.Unmarshal([]byte(output.lastCall.Arguments), &args); err != nil {
+		t.Fatalf("job_output arguments %q are not JSON: %v", output.lastCall.Arguments, err)
+	}
+	if args.JobID != "job-a" {
+		t.Fatalf("job_output job_id = %q, want job-a", args.JobID)
+	}
+	if args.Tail <= 0 {
+		t.Fatalf("job_output tail = %d, want a positive tail (a plain read would consume the model's cursor)", args.Tail)
+	}
+}
+
+// TestJobServiceJobOutputEmpty covers a job with no output yet: the manager's
+// "output: (none)" sentinel is the empty string, not that literal text.
+func TestJobServiceJobOutputEmpty(t *testing.T) {
+	output := &jobServiceStubTool{
+		name:   jobs.ToolJobOutput,
+		result: rig.ToolResult{Content: "job_id: job-b\nstate: running\noutput: (none)\n"},
+	}
+	group := &rebindGroup{rootOf: func() string { return "" }, current: jobServiceScopedBuild("", output)}
+	text, err := newJobService(group).JobOutput("job-b")
+	if err != nil {
+		t.Fatalf("JobOutput: %v", err)
+	}
+	if text != "" {
+		t.Fatalf("JobOutput with no output = %q, want empty", text)
+	}
+}
+
+// TestJobServiceJobOutputBounds covers the bounded read: output larger than the
+// contract's cap keeps its newest bytes and starts with the truncation marker,
+// so the panel can say the start is missing without shipping megabytes.
+func TestJobServiceJobOutputBounds(t *testing.T) {
+	// Enough "line NNNNNN" lines to exceed the byte cap several times over.
+	var body strings.Builder
+	const lineCount = 9000
+	for index := 0; index < lineCount; index++ {
+		fmt.Fprintf(&body, "line %06d\n", index)
+	}
+	output := &jobServiceStubTool{
+		name:   jobs.ToolJobOutput,
+		result: rig.ToolResult{Content: "job_id: job-c\nstate: running\noutput:\n" + body.String()},
+	}
+	group := &rebindGroup{rootOf: func() string { return "" }, current: jobServiceScopedBuild("", output)}
+	text, err := newJobService(group).JobOutput("job-c")
+	if err != nil {
+		t.Fatalf("JobOutput: %v", err)
+	}
+	if !strings.HasPrefix(text, contracts.JobOutputTruncatedMarker) {
+		t.Fatalf("bounded JobOutput does not start with the truncation marker: %.40q", text)
+	}
+	trimmed := strings.TrimPrefix(text, contracts.JobOutputTruncatedMarker)
+	if len(trimmed) > contracts.JobOutputMaxBytes {
+		t.Fatalf("bounded JobOutput keeps %d bytes, want at most %d", len(trimmed), contracts.JobOutputMaxBytes)
+	}
+	// The newest output survives, the oldest bytes are what was dropped.
+	if !strings.Contains(trimmed, fmt.Sprintf("line %06d\n", lineCount-1)) {
+		t.Fatalf("bounded JobOutput lost its newest line: ...%.60q", trimmed[len(trimmed)-60:])
+	}
+	if strings.Contains(trimmed, "line 000000\n") {
+		t.Fatal("bounded JobOutput kept the oldest bytes instead of the newest")
+	}
+}
+
+// TestJobServiceJobOutputErrors covers the read's error cases: an empty id is
+// rejected without a tool call, an unknown job is the contract's sentinel (the
+// UI localizes it), a missing backend is the unavailable sentinel and tool /
+// invoke failures surface.
+func TestJobServiceJobOutputErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		id        string
+		result    rig.ToolResult
+		invokeErr error
+		wantErr   error
+		want      string
+		wantCalls int
+	}{
+		{name: "empty id", id: "  ", want: "required"},
+		{
+			name:      "unknown job",
+			id:        "nope",
+			result:    rig.ToolResult{Content: `jobs: unknown job "nope"`, IsError: true},
+			wantErr:   contracts.ErrJobNotFound,
+			want:      "unknown job",
+			wantCalls: 1,
+		},
+		{
+			name:      "tool failure",
+			id:        "job-a",
+			result:    rig.ToolResult{Content: "manager exploded", IsError: true},
+			want:      "manager exploded",
+			wantCalls: 1,
+		},
+		{
+			name:      "invoke failure",
+			id:        "job-a",
+			invokeErr: errors.New("invoke exploded"),
+			want:      "invoke exploded",
+			wantCalls: 1,
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			output := &jobServiceStubTool{name: jobs.ToolJobOutput, result: testCase.result, err: testCase.invokeErr}
+			group := &rebindGroup{rootOf: func() string { return "" }, current: jobServiceScopedBuild("", output)}
+			_, err := newJobService(group).JobOutput(testCase.id)
+			if err == nil {
+				t.Fatalf("JobOutput(%q) error = nil, want one containing %q", testCase.id, testCase.want)
+			}
+			if !strings.Contains(err.Error(), testCase.want) {
+				t.Fatalf("JobOutput(%q) error = %q, want one containing %q", testCase.id, err, testCase.want)
+			}
+			if testCase.wantErr != nil && !errors.Is(err, testCase.wantErr) {
+				t.Fatalf("JobOutput(%q) error = %v, want it to wrap %v", testCase.id, err, testCase.wantErr)
+			}
+			if output.calls != testCase.wantCalls {
+				t.Fatalf("job_output invoked %d times, want %d", output.calls, testCase.wantCalls)
+			}
+		})
+	}
+}
+
+// TestJobServiceJobOutputUnavailable covers a stripped product: no invoker is
+// the contract's unavailable sentinel, so the overlay can explain itself.
+func TestJobServiceJobOutputUnavailable(t *testing.T) {
+	if _, err := newJobService(nil).JobOutput("job-a"); !errors.Is(err, contracts.ErrJobUnavailable) {
+		t.Fatalf("JobOutput without a backend error = %v, want ErrJobUnavailable", err)
+	}
+}
+
+// TestJobServiceJobOutputStripsMetadataAndCRLF covers the parser boundary: the
+// metadata header before "output:" never leaks into the panel and CRLF line
+// endings are normalized to LF.
+func TestJobServiceJobOutputStripsMetadataAndCRLF(t *testing.T) {
+	output := &jobServiceStubTool{
+		name: jobs.ToolJobOutput,
+		// The command itself ends with the word "output:", which must not be
+		// mistaken for the body's header.
+		result: rig.ToolResult{Content: "job_id: job-d\ncommand: echo output:\nstate: exited\noutput:\r\n" +
+			"build ok\r\n"},
+	}
+	group := &rebindGroup{rootOf: func() string { return "" }, current: jobServiceScopedBuild("", output)}
+	text, err := newJobService(group).JobOutput("job-d")
+	if err != nil {
+		t.Fatalf("JobOutput: %v", err)
+	}
+	if text != "build ok\n" {
+		t.Fatalf("JobOutput = %q, want the LF-normalized output body", text)
 	}
 }

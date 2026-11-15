@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -65,6 +66,32 @@ type FileChange struct {
 	// Diff is the unified diff for this file ("" for untracked/binary files).
 	Diff string
 }
+
+// WorkspaceRenamer is the optional part of the workspace service that renames a
+// registered workspace. UI modules type-assert it so a host without rename
+// support still shows the rest of the workspace menu (and hides only the rename
+// entry). The workspace keeps its ID, root, creation time and current selection.
+type WorkspaceRenamer interface {
+	// RenameWorkspace changes one workspace's display name.
+	//
+	// It returns ErrWorkspaceNameEmpty for an empty (or whitespace-only) name
+	// and ErrWorkspaceNameTaken when another workspace already uses the name
+	// (trimmed, case-insensitive); the registry is unchanged on either error.
+	// An unknown ID reports a not-found error. The returned workspace carries
+	// the new name with its identity and root preserved.
+	RenameWorkspace(ctx context.Context, id, name string) (Workspace, error)
+}
+
+// The errors RenameWorkspace may report, so a UI can localize them instead of
+// printing an English backend message (UI modules cannot import the workspace
+// backend module).
+var (
+	// ErrWorkspaceNameEmpty reports a workspace rename with no display name.
+	ErrWorkspaceNameEmpty = errors.New("workspace: name is empty")
+	// ErrWorkspaceNameTaken reports a display name another workspace already
+	// uses (trimmed, case-insensitive).
+	ErrWorkspaceNameTaken = errors.New("workspace: name already used")
+)
 
 // WorkspaceDiffer is the optional part of the workspace service that reports
 // the uncommitted changes of the current workspace. UI modules type-assert it
