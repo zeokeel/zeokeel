@@ -56,7 +56,7 @@
 | P2-6 团队工作台 | **不做（产品决策）** | 不新增右栏常驻团队页；Run Band/浮层/子会话已覆盖 |
 | P3 TableColumn token / plugins 首页 / 暗色证据债 | **部分** | release 快照覆盖主要亮/暗/窄窗；TableColumn token 与 plugins 新首页留待后续版本 |
 
-验证：`go test ./... -count=1` 全绿；`go vet ./...` / `go tool mygo vet .` 干净；`designlint --strict --baseline` 0 new / 0 blocking；`scripts/design-check.sh` 6/6；`go test -race`（agent/toolkit/session/uiroot/uikit/insights）通过；真实帧在 `.cache/impl-shots-final/`（`p1-chat.png`、`p1-trajectory.png`、`p2-palette.png`、`p2-context.png`、`p2-approval-diff.png`、`p2-insights.png`、`p2-team-overlay.png`、`narrow/narrow-session-inspector.png`）。
+验证（v0.2.38 发布前）：`go test ./... -count=1` 全绿；`go vet ./...` / `go tool mygo vet .` 干净；`designlint --strict --baseline` 0 new / 0 blocking；`scripts/design-check.sh` 6/6；`go test -race`（agent/toolkit/sessionstore/session/uiroot/settings/uikit）通过；`ui-drive` 93/93、`ui-snapshot` 122 PNG；真实帧在 `.cache/impl-shots-final/`（`p1-chat.png`、`p1-trajectory.png`、`p2-palette.png`、`p2-context.png`、`p2-approval-diff.png`、`p2-insights.png`、`p2-team-overlay.png`、`narrow/narrow-session-inspector.png`）。
 
 ---
 
