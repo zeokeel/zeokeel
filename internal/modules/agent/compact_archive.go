@@ -21,15 +21,13 @@ package agent
 // this task (each event is bounded; the store own cleanup policy applies).
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
-
-	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
 const (
@@ -121,66 +119,44 @@ func (s *service) archiveReplacedHistory(ctx context.Context, sessionID, kind st
 	if err != nil {
 		return fmt.Errorf("agent: encode compact archive: %w", err)
 	}
+	at := time.Now()
 	if err := s.store.AppendEvent(ctx, rig.SessionEvent{
 		SessionID: sessionID,
 		Type:      compactArchiveEventType,
-		Time:      time.Now(),
+		Time:      at,
 		Payload:   encoded,
 	}); err != nil {
 		return fmt.Errorf("agent: append compact archive: %w", err)
 	}
-	s.applyCompactArchive(sessionID, encoded, time.Now())
+	// The store assigns the durable sequence, so read the fresh event back by its
+	// exact payload: the folded archive event carries that sequence, which is how
+	// the Context UI addresses the raw-history read-back (also after a restart).
+	seq := s.lookupCompactArchiveSeq(ctx, sessionID, encoded)
+	s.applyContextEvent(sessionID, compactArchiveEventType, encoded, at, seq)
 	return nil
 }
 
-// applyCompactArchive folds the archive metadata (never the message text) into
-// the context timeline.
-func (s *service) applyCompactArchive(sessionID string, payload []byte, at time.Time) {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" || len(payload) == 0 {
-		return
+// lookupCompactArchiveSeq finds the durable sequence of the archive event just
+// appended. The store assigns sequences, and another event of the same session
+// may be appended in between (a queue change, a notification), so the newest
+// window is matched on the event type and the exact payload; a miss (0) leaves
+// the folded event without a sequence rather than guessing one.
+func (s *service) lookupCompactArchiveSeq(ctx context.Context, sessionID string, payload []byte) int64 {
+	events, err := s.store.Last(ctx, sessionID, 32)
+	if err != nil {
+		return 0
 	}
-	var metadata struct {
-		Kind             string `json:"kind"`
-		MessageCount     int    `json:"messageCount"`
-		RetainedMessages int    `json:"retainedMessages"`
-		Bytes            int    `json:"bytes"`
-		Truncated        bool   `json:"truncated"`
-		OmittedMessages  int    `json:"omittedMessages"`
-		BeforeTokens     int    `json:"beforeTokens"`
-		AfterTokens      int    `json:"afterTokens"`
+	var seq int64
+	for _, event := range events {
+		if event.Type != compactArchiveEventType || len(event.Payload) == 0 {
+			continue
+		}
+		if !bytes.Equal(event.Payload, payload) {
+			continue
+		}
+		if event.Seq > seq {
+			seq = event.Seq
+		}
 	}
-	if err := json.Unmarshal(payload, &metadata); err != nil {
-		return
-	}
-	detail := fmt.Sprintf("%s archive: %d messages archived", metadata.Kind, metadata.RetainedMessages)
-	if metadata.Truncated {
-		detail += fmt.Sprintf(", %d omitted (truncated)", metadata.OmittedMessages)
-	}
-	s.contextMu.Lock()
-	defer s.contextMu.Unlock()
-	if s.contextTimelines == nil {
-		s.contextTimelines = make(map[string]*contextTimeline)
-	}
-	timeline := s.contextTimelines[sessionID]
-	if timeline == nil {
-		timeline = &contextTimeline{}
-		s.contextTimelines[sessionID] = timeline
-	}
-	timeline.revision++
-	timeline.events = append(timeline.events, contracts.ContextEvent{
-		Kind:             contracts.ContextEventArchive,
-		At:               at,
-		Detail:           detail,
-		Before:           metadata.BeforeTokens,
-		After:            metadata.AfterTokens,
-		Replaced:         metadata.MessageCount,
-		Saved:            metadata.RetainedMessages,
-		ArchivedMessages: metadata.RetainedMessages,
-		ArchivedBytes:    metadata.Bytes,
-		Truncated:        metadata.Truncated,
-	})
-	if len(timeline.events) > contextTimelineEvents {
-		timeline.events = append([]contracts.ContextEvent(nil), timeline.events[len(timeline.events)-contextTimelineEvents:]...)
-	}
+	return seq
 }

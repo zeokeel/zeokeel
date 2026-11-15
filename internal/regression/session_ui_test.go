@@ -366,7 +366,7 @@ func TestSessionGoalDockDrivesTheDurableGoal(t *testing.T) {
 		t.Fatalf("CreateGoal: %v", err)
 	}
 	ui.tester.Frame()
-	requireHasText(t, ui.tester, "目标进行中")
+	requireHasText(t, ui.tester, "目标执行中")
 	requireHasText(t, ui.tester, "ship the audit")
 
 	if err := ui.tester.Click("目标操作"); err != nil {

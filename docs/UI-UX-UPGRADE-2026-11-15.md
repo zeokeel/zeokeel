@@ -1,4 +1,4 @@
-# UI/UX 升级空间评估（v0.2.38 · 2026-11-15）
+# UI/UX 升级空间评估（v0.2.39 · 2026-11-15）
 
 > **问题**：按照当前功能规划（长任务 DSH 对齐、Goal v2、PromptQueue/inbox、Context、Insights、冷恢复、系统通知），UI/UX 还有哪些升级空间？
 >
@@ -55,8 +55,9 @@
 | P3 状态三层/a11y/图标/字号 | **已实现（第四批）** | AP-21 残留 StatusBadge；Modal/Sidebar 可访问名；goal IconButton 24 DIP；成句 11px→TypeXXS；Insights 4 档 |
 | P2-6 团队工作台 | **不做（产品决策）** | 不新增右栏常驻团队页；Run Band/浮层/子会话已覆盖 |
 | P3 TableColumn token / plugins 首页 / 暗色证据债 | **部分** | release 快照覆盖主要亮/暗/窄窗；TableColumn token 与 plugins 新首页留待后续版本 |
+| 半闭环收口（0.2.39） | **已实现** | Goal 状态词/⋯ 入口；中断 toast+Announce；团队工作台 Modal；Context 压缩/设置/归档原文；Insights 限宽/空天/筛选；闭环表见 §1 |
 
-验证（v0.2.38 发布前）：`go test ./... -count=1` 全绿；`go vet ./...` / `go tool mygo vet .` 干净；`designlint --strict --baseline` 0 new / 0 blocking；`scripts/design-check.sh` 6/6；`go test -race`（agent/toolkit/sessionstore/session/uiroot/settings/uikit）通过；`ui-drive` 93/93、`ui-snapshot` 122 PNG；真实帧在 `.cache/impl-shots-final/`（`p1-chat.png`、`p1-trajectory.png`、`p2-palette.png`、`p2-context.png`、`p2-approval-diff.png`、`p2-insights.png`、`p2-team-overlay.png`、`narrow/narrow-session-inspector.png`）。
+验证（v0.2.39 发布前）：`go test ./... -count=1` 全绿；`go vet ./...` / `go tool mygo vet .` 干净；`designlint --strict --baseline` 0 new / 0 blocking；`scripts/design-check.sh` 6/6；`go test -race`（agent/toolkit/sessionstore/session/uiroot/settings/uikit）通过；`ui-drive` 93/93、`ui-snapshot` 122 PNG；真实帧在 `.cache/impl-shots-halfclosed/`（`p1-chat.png`、`p1-trajectory.png`、`p2-palette.png`、`p2-context.png`、`p2-approval-diff.png`、`p2-insights.png`、`p2-team-overlay.png`、`narrow/narrow-session-inspector.png`）。
 
 ---
 
@@ -65,15 +66,15 @@
 | 已落地能力 | 当前 UI 面 | 闭环度 | 主要缺口 |
 |---|---|---|---|
 | 会话/流式/工具/推理/审批/计划/提问 | transcript、Run Band、inline 审批、计划/提问 Modal | **基本闭环** | 审批无 diff；计划/提问提示行在 footer 之后（V2 残留） |
-| Goal v2 | composer 上方 goal dock + `/goal` 命令 | **半闭环** | 只在已有目标时可见；创建/编辑只在命令面板；状态词与「运行中」撞词 |
+| Goal v2 | composer 上方 goal dock + ⋯「设置/编辑目标」 | **闭环** | 零值从会话 ⋯ 可创建；状态词「目标执行中」+ tooltip/a11y 明确「目标阶段≠运行状态」 |
 | PromptQueue / inbox | composer 排队 chip + popover | **闭环** | Stop 后不自动 drain（已有文案，可接受） |
-| 中断恢复 | transcript 顶部 pin 条 | **半闭环** | 「继续」只聚焦输入框，无可见反馈 |
-| 冷恢复 / 团队 / 子代理 | 页头 chip + 浮层 + 主栏子会话 | **半闭环** | 成员**不可停止/关闭**；完成回执是死链；无持久工作台 |
-| 执行域（job / terminal） | 页头「后台任务」浮层（仅 live，list/kill） | **未闭环** | 没有作业/终端历史面；durable execution 事件无人读；模型 terminal 只活在工具卡里 |
-| Context 观测 | 会话第 4 个页签 | **半闭环** | 与对话不同轴；属性表值甩到最右；无「压缩/去设置」动作；压缩原文不可看 |
-| Insights | 侧栏一级「洞察」页 | **半闭环** | 键盘选中行不可读；宽窗表格数值贴右/空行多；无下钻/筛选 |
-| 通知 / 常驻 | 右上 toast + OS 通知 + 托盘 | **未闭环** | toast 遮挡新表面；无历史/分级/可操作；托盘与窗口标题无状态；静默判定错误 |
-| 设置 / 自动化 / 插件 / 记忆 / 技能 | 设置 18 页 5 组 + 3 个一级页 | **基本闭环** | 搜索只到页面级且别名漂移；保存语义三种动词；日常页埋在折叠「高级」 |
+| 中断恢复 | transcript 顶部 pin 条 | **闭环** | 「在输入框继续」只聚焦不重放；点击有 toast+Announce 可见反馈；忽略/Esc/下一轮语义不变 |
+| 冷恢复 / 团队 / 子代理 | 页头 chip + 浮层 + 主栏子会话 + 团队工作台 | **闭环** | running 可停止、⋯ 关闭确认；回执可打开子会话；工作台 Modal 持久查看成员/任务（不新增右栏常驻页） |
+| 执行域（job / terminal） | 页头「后台任务」浮层 + durable 历史分组 | **闭环** | live 停止 + durable execution 历史（重启可看，明确输出不持久）；interrupted 中性 |
+| Context 观测 | 会话第 4 个页签 | **闭环** | ReadingColumn/PropertySheet 同轴；页头「压缩上下文/上下文设置」；durable 归档原文只读 Modal（Seq 持久、truncated 明示） |
+| Insights | 侧栏一级「洞察」页 | **闭环** | 选中行 AccentText 可读；阅读列限宽；空天过滤；会话排行本地筛选+点击/Enter 下钻 |
+| 通知 / 常驻 | 右上 toast + OS 通知 + 托盘/标题 | **基本闭环** | 「打开会话」动作；前台会话静默；托盘/标题运行态；toast 位置按用户要求保持右上（历史/分级仍 deferred） |
+| 设置 / 自动化 / 插件 / 记忆 / 技能 | 设置 19 页 6 组 + 3 个一级页 | **闭环** | 条目级搜索/锚点高亮；数据与通知组常显；4 页脚统一「保存」+ clean Disabled；插件/工作区仍为后续 P3 |
 
 > 结论：**「能不能用」已经不是主要问题；「敢不敢信、能不能控、找不找得到」才是。**
 

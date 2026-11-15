@@ -93,9 +93,41 @@ const (
 	contextModelMaxWidth float32 = 280
 )
 
+// contextArchiveView is the Context pane's archived-history viewer state. It is
+// ui.Local state owned by the pane, not a module field: the pane never stores an
+// element, and the viewer only exists while this pane does. sessionID/seq are the
+// read currently shown, so a stale read that lands after another archive was
+// opened is dropped instead of opening the wrong history.
+type contextArchiveView struct {
+	open      bool
+	sessionID string
+	seq       int64
+	loading   bool
+	loaded    bool
+	ok        bool
+	archive   contracts.ContextArchive
+	list      ui.ListState
+}
+
+// Context page header actions: the settings page/anchor the pane talks about.
+const (
+	contextSettingsPageID    = "model"
+	contextSettingsAnchorKey = "model.context-budget"
+)
+
 // buildContextPane renders the Context tab's body on the reading measure.
 func buildContextPane(c *ui.Context, t *design.Tokens, st *state, chatSession contracts.ChatSession, hasSession bool) {
-	ui.Column(c).FillWidth().Grow(1).Children(func() {
+	pane := ui.Column(c).FillWidth().Grow(1)
+	archiveView := ui.Local(pane, "session.context.archive", func() contextArchiveView {
+		return contextArchiveView{}
+	})
+	if archiveView != nil && archiveView.sessionID != "" &&
+		archiveView.sessionID != st.contextSessionID {
+		// The open archive belonged to another conversation: a session switch
+		// starts a fresh viewer instead of showing another session's history.
+		*archiveView = contextArchiveView{}
+	}
+	pane.Children(func() {
 		ui.Scroll(c).FillWidth().Grow(1).Children(func() {
 			// The body builds on the shared reading column (960 DIP centered,
 			// capped at 92% of the pane, never grown), so its text column is the
@@ -106,6 +138,7 @@ func buildContextPane(c *ui.Context, t *design.Tokens, st *state, chatSession co
 			uikit.ReadingColumn(c, func(body *ui.Context) {
 				ui.Column(body).FillWidth().Gap(design.Space5).
 					PaddingY(design.Space5).Children(func() {
+					buildContextHeader(c, t, st, hasSession)
 					switch {
 					case !hasSession:
 						uikit.EmptyStateBlock(c,
@@ -130,12 +163,126 @@ func buildContextPane(c *ui.Context, t *design.Tokens, st *state, chatSession co
 						buildContextOverview(c, t, st, data)
 						buildContextSections(c, t, st, data.Snapshot)
 						buildContextRequests(c, t, st, data)
-						buildContextEvents(c, t, st, data)
+						buildContextEvents(c, t, st, data, archiveView)
 					}
 				})
 			})
 		})
+		if archiveView != nil && archiveView.open {
+			buildContextArchiveModal(c, t, st, archiveView)
+		}
 	})
+}
+
+// buildContextHeader is the tab's page header: the page title and its two
+// page-level actions (compact the context now, open the setting that sizes it).
+// The header is the one home of the pane's actions (DESIGN.md §5: page actions
+// at the page header, never floating in the body).
+func buildContextHeader(c *ui.Context, t *design.Tokens, st *state, hasSession bool) {
+	uikit.PageHeaderAction(c, st.tr("上下文", "Context"), "", func(actions *ui.Context) {
+		ui.Row(actions).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			buildContextCompactAction(actions, t, st, hasSession)
+			buildContextSettingsAction(actions, t, st)
+		})
+	})
+}
+
+// contextChatService returns the chat service the pane's actions use (the
+// compaction command is its optional contracts.SessionCompactor half). The
+// session module requires contracts.KeyChat, so the lookup cannot miss in a
+// working assembly; a stripped test host simply gets no action.
+func contextChatService(st *state) contracts.ChatService {
+	if st == nil {
+		return nil
+	}
+	raw, ok := st.ctx.Get(contracts.KeyChat)
+	if !ok || raw == nil {
+		return nil
+	}
+	chat, _ := raw.(contracts.ChatService)
+	return chat
+}
+
+// buildContextCompactAction draws the page's compact action. It only appears
+// when the backend implements contracts.SessionCompactor; it is disabled while
+// the session runs or a compaction is in flight, and the reason lives on the
+// wrapper (a disabled control shows no tip of its own, tooltip.md).
+func buildContextCompactAction(c *ui.Context, t *design.Tokens, st *state, hasSession bool) {
+	if !hasSession {
+		return
+	}
+	chat := contextChatService(st)
+	if _, ok := chat.(contracts.SessionCompactor); !ok {
+		return
+	}
+	label := st.tr("压缩上下文", "Compact context")
+	if compactCommandEnabled(chat, st) {
+		button := design.Apply(ui.Button(c, label), t.SecondaryButton())
+		if button.Clicked() {
+			runCompactCommand(chat, st, st.runtime)
+			c.Invalidate()
+		}
+		return
+	}
+	reason := contextCompactDisabledReason(st, chat)
+	if reason == "" {
+		return
+	}
+	// The action is disabled and explains why. A disabled element shows no tip of
+	// its own (mygo tooltip.md), so the tip lives on the wrapper the pointer
+	// hovers; Description carries the same reason to assistive technology.
+	ui.Row(c).Tooltip(reason).Children(func() {
+		design.Apply(ui.Button(c, label), t.SecondaryButton()).Disabled(true).
+			Description(reason)
+	})
+}
+
+// contextCompactDisabledReason explains why the compact action cannot run now.
+func contextCompactDisabledReason(st *state, chat contracts.ChatService) string {
+	if st != nil && st.compacting {
+		return st.tr("正在压缩上下文…", "Compacting the context…")
+	}
+	if chat == nil {
+		return ""
+	}
+	sessionID := chat.ActiveSession()
+	if session, ok := chat.Session(sessionID); ok && session.Running {
+		return st.tr("会话正在运行，结束后才能压缩上下文",
+			"The session is running; compact the context when it settles")
+	}
+	if session, ok := chat.Session(sessionID); !ok || len(session.Messages) == 0 {
+		return st.tr("还没有可压缩的内容", "There is nothing to compact yet")
+	}
+	return ""
+}
+
+// buildContextSettingsAction draws the deep link to the setting that sizes the
+// context: the model page's context-budget field. The host opens the page and
+// reveals the field's anchor when it supports the anchored deep link.
+func buildContextSettingsAction(c *ui.Context, t *design.Tokens, st *state) {
+	label := st.tr("上下文设置", "Context settings")
+	button := design.Apply(ui.Button(c, label), t.SecondaryButton())
+	if button.Clicked() {
+		openSettingsPageAt(st.navigator, contextSettingsPageID, contextSettingsAnchorKey)
+		c.Invalidate()
+	}
+}
+
+// openSettingsPageAt opens a settings page and reveals one searchable item's
+// anchor. The anchored deep link is an optional host capability (navigator
+// .OpenSettingsPageAt, the same locate path as a navigation-search hit); a host
+// without it falls back to the existing page-level deep link, so the action still
+// opens the right page (it just cannot scroll to the field).
+func openSettingsPageAt(navigator contracts.Navigator, pageID, anchorKey string) {
+	if navigator == nil {
+		return
+	}
+	if opener, ok := navigator.(interface{ OpenSettingsPageAt(string, string) error }); ok {
+		if err := opener.OpenSettingsPageAt(pageID, anchorKey); err == nil {
+			return
+		}
+	}
+	openSettingsPage(navigator, pageID)
 }
 
 // contextDataEmpty reports a fold with nothing recorded. It guards against a
@@ -492,7 +639,8 @@ func buildContextRequests(c *ui.Context, t *design.Tokens, st *state, data contr
 // buildContextEvents draws the compact/spill audit timeline, newest first: an
 // exact compaction is a plain result, a heuristic token-drop compaction is
 // labelled 推断, and a spill shows its path and on-disk size.
-func buildContextEvents(c *ui.Context, t *design.Tokens, st *state, data contracts.SessionContext) {
+func buildContextEvents(c *ui.Context, t *design.Tokens, st *state, data contracts.SessionContext,
+	archiveView *contextArchiveView) {
 	uikit.Section(c, st.tr("上下文事件", "Context events"), func(body *ui.Context) {
 		if len(data.Events) == 0 {
 			uikit.EmptyState(body, st.tr("还没有压缩或溢出事件。",
@@ -501,6 +649,7 @@ func buildContextEvents(c *ui.Context, t *design.Tokens, st *state, data contrac
 		}
 		events := data.Events
 		count := len(events)
+		archiver, _ := st.contextService.(contracts.ContextArchiveService)
 		st.contextEvents.Key = func(index int) any {
 			if index < 0 || index >= count {
 				return nil
@@ -520,15 +669,47 @@ func buildContextEvents(c *ui.Context, t *design.Tokens, st *state, data contrac
 			MaxWidth(design.TranscriptWidth).
 			MaxHeight(design.Space6 * 7).
 			Rows(func(row ui.ListRow) {
-				event := events[count-1-row.Index]
-				buildContextEventRow(row.Context, t, st, event)
+				index := count - 1 - row.Index
+				event := events[index]
+				buildContextEventRow(row.Context, t, st, event,
+					contextArchiveSeq(events, index), archiveView, archiver)
 			})
 	})
 }
 
+// contextArchiveSeq names the durable compact_archive event a timeline row can
+// open the raw history of: the archive row itself, or the compaction/recovery
+// row whose archive is the event recorded immediately before it. 0 means the row
+// has no archive (no action).
+func contextArchiveSeq(events []contracts.ContextEvent, index int) int64 {
+	if index < 0 || index >= len(events) {
+		return 0
+	}
+	event := events[index]
+	if event.Kind == contracts.ContextEventArchive {
+		if event.Seq > 0 {
+			return event.Seq
+		}
+		return 0
+	}
+	if event.Kind != contracts.ContextEventCompact && event.Kind != contracts.ContextEventRecovery {
+		return 0
+	}
+	if index == 0 {
+		return 0
+	}
+	previous := events[index-1]
+	if previous.Kind == contracts.ContextEventArchive && previous.Seq > 0 {
+		return previous.Seq
+	}
+	return 0
+}
+
 // buildContextEventRow is one audit entry: the kind badge, the detail, the
-// before/after or path/bytes meta line and the time.
-func buildContextEventRow(c *ui.Context, t *design.Tokens, st *state, event contracts.ContextEvent) {
+// before/after or path/bytes meta line, the time and — for a row whose archive is
+// readable — the action that opens the archived raw history.
+func buildContextEventRow(c *ui.Context, t *design.Tokens, st *state, event contracts.ContextEvent,
+	archiveSeq int64, archiveView *contextArchiveView, archiver contracts.ContextArchiveService) {
 	ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(design.Space2).PaddingY(design.Space1).Children(func() {
 		design.Apply(ui.Badge(c, contextEventKindLabel(st, event)), t.Badge()).
 			TextColor(t.LabelSecondary)
@@ -561,6 +742,18 @@ func buildContextEventRow(c *ui.Context, t *design.Tokens, st *state, event cont
 			design.Apply(ui.Text(c, clock), t.Font(design.TypeXXXS)).
 				TextColor(t.LabelTertiary).NoWrap().
 				Tooltip(uikit.FormatDateTime(st.locale, event.At))
+		}
+		// The archive's raw history is readable only when the backend offers the
+		// optional read-back and the folded row carries the durable archive
+		// sequence: a row without one shows no action (never a dead button).
+		if archiveSeq > 0 && archiver != nil && archiveView != nil {
+			label := st.tr("查看归档", "View archive")
+			button := design.Apply(ui.Button(c, label), t.SecondaryButton()).
+				Height(design.RowCompactHeight)
+			if button.Clicked() {
+				startContextArchiveRead(st, archiveView, archiver, st.contextSessionID, archiveSeq)
+				c.Invalidate()
+			}
 		}
 	})
 }
@@ -843,4 +1036,210 @@ func formatContextUSD(amount float64) string {
 	default:
 		return fmt.Sprintf("$%.4f", amount)
 	}
+}
+
+// startContextArchiveRead opens the archive viewer and reads one archive off the
+// UI thread. The durable read is bounded (one archive event, the contract's read
+// caps); the result comes back through UIRuntime.Post so build never blocks on
+// the store, and a result for an archive that was replaced while it read is
+// dropped.
+func startContextArchiveRead(st *state, view *contextArchiveView,
+	archiver contracts.ContextArchiveService, sessionID string, seq int64) {
+	if st == nil || view == nil || archiver == nil || sessionID == "" || seq <= 0 {
+		return
+	}
+	view.open = true
+	view.sessionID = sessionID
+	view.seq = seq
+	view.loading = true
+	view.loaded = false
+	view.ok = false
+	view.archive = contracts.ContextArchive{}
+	view.list = ui.ListState{}
+	runtime := st.runtime
+	go func() {
+		archive, ok := archiver.ContextArchive(sessionID, seq)
+		runtime.Post(func() {
+			if view.sessionID != sessionID || view.seq != seq || !view.open {
+				return
+			}
+			view.loading = false
+			view.loaded = true
+			view.ok = ok
+			view.archive = archive
+			runtime.Invalidate()
+		})
+	}()
+}
+
+// buildContextArchiveModal renders the archived history as a native read-only
+// modal: the dialog header carries the archive's provenance (kind, message count,
+// size, truncation), the body is a virtualized official List of role/text/tool
+// call rows, and the footer closes it.
+func buildContextArchiveModal(c *ui.Context, t *design.Tokens, st *state, view *contextArchiveView) {
+	ui.Modal(c, &view.open, func() {
+		design.Apply(ui.Column(c.Key("session.context.archive")), t.Panel()).
+			Width(design.DialogWidthL).Padding(design.Space4).Gap(design.Space3).
+			Children(func() {
+				uikit.DialogHeader(c, uikit.DialogHeaderOptions{
+					Key:        "session.context.archive",
+					Title:      st.tr("归档原文", "Archived history"),
+					Subtitle:   contextArchiveSubtitle(st, view),
+					CloseLabel: st.tr("关闭", "Close"),
+					OnClose: func() {
+						view.open = false
+						c.Invalidate()
+					},
+				})
+				switch {
+				case view.loading:
+					reading := st.tr("读取归档原文…", "Reading the archived history…")
+					ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+						ui.Spinner(c).Label(reading)
+						design.Apply(ui.Text(c, reading), t.TextMuted(design.TypeXS))
+					})
+				case !view.ok:
+					uikit.EmptyState(c, st.tr("没有找到归档原文。",
+						"No archived history was found."))
+				default:
+					buildContextArchiveList(c, t, st, view)
+				}
+				uikit.DialogFooter(c, []uikit.DialogAction{{
+					Label: st.tr("关闭", "Close"), Default: true,
+					OnClick: func() {
+						view.open = false
+						c.Invalidate()
+					},
+				}})
+			})
+	})
+}
+
+// contextArchiveSubtitle is the modal's provenance line: the archive kind, the
+// replaced message count, the serialized size and — when the archive event hit
+// its bound — how many messages were not kept. It is empty until the read lands.
+func contextArchiveSubtitle(st *state, view *contextArchiveView) string {
+	if view == nil || !view.loaded || !view.ok {
+		return ""
+	}
+	archive := view.archive
+	parts := make([]string, 0, 4)
+	if kind := contextArchiveKindLabel(st, archive.Kind); kind != "" {
+		parts = append(parts, kind)
+	}
+	if archive.RawMessageCount > 0 {
+		parts = append(parts, fmt.Sprintf(st.tr("%d 条消息", "%d messages"), archive.RawMessageCount))
+	}
+	if archive.Bytes > 0 {
+		parts = append(parts, formatContextBytes(archive.Bytes))
+	}
+	if archive.Truncated {
+		parts = append(parts, fmt.Sprintf(st.tr("归档已截断：另有 %d 条未保留",
+			"Archive truncated: %d more messages were not kept"), archive.OmittedMessages))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// contextArchiveKindLabel localizes the compaction kind the archive recorded; an
+// unknown kind stays raw instead of being guessed.
+func contextArchiveKindLabel(st *state, kind string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "manual":
+		return st.tr("手动压缩", "Manual compaction")
+	case "auto":
+		return st.tr("自动压缩", "Automatic compaction")
+	case "recovery":
+		return st.tr("溢出恢复", "Overflow recovery")
+	default:
+		return strings.TrimSpace(kind)
+	}
+}
+
+// contextArchiveRoleLabel names one archived message's author role.
+func contextArchiveRoleLabel(st *state, role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "user":
+		return st.tr("用户", "User")
+	case "assistant":
+		return st.tr("助手", "Assistant")
+	case "tool":
+		return st.tr("工具", "Tool")
+	case "system":
+		return st.tr("系统", "System")
+	case "", "unknown":
+		return st.tr("消息", "Message")
+	default:
+		return role
+	}
+}
+
+// buildContextArchiveList is the archive body: the official List virtualizes the
+// archived messages (one bounded row each), so a long archived history stays
+// scrollable inside the dialog's bounded body.
+func buildContextArchiveList(c *ui.Context, t *design.Tokens, st *state, view *contextArchiveView) {
+	messages := view.archive.Messages
+	if len(messages) == 0 {
+		uikit.EmptyState(c, st.tr("归档里没有可显示的原文。",
+			"The archive holds no readable history."))
+		return
+	}
+	count := len(messages)
+	view.list.Key = func(index int) any {
+		if index < 0 || index >= count {
+			return nil
+		}
+		return fmt.Sprintf("%d-%d", view.archive.Seq, index)
+	}
+	view.list.Label = func(index int) string {
+		if index < 0 || index >= count {
+			return ""
+		}
+		return fmt.Sprintf(st.tr("第 %d 条消息，%s", "Message %d, %s"),
+			index+1, contextArchiveRoleLabel(st, messages[index].Role))
+	}
+	ui.List(c, &view.list, count).
+		Label(st.tr("归档原文列表", "Archived history list")).
+		FillWidth().MaxHeight(design.DialogBodyMax).
+		Rows(func(row ui.ListRow) {
+			buildContextArchiveRow(row.Context, t, st, messages[row.Index])
+		})
+}
+
+// buildContextArchiveRow is one archived message: its role badge, the raw text
+// (selectable, shown in full up to the read bound) and the tool calls it carried.
+// The truncation the reader applied to the text or the arguments is stated next
+// to it, never silently dropped.
+func buildContextArchiveRow(c *ui.Context, t *design.Tokens, st *state, message contracts.ContextArchiveMessage) {
+	ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(design.Space2).PaddingY(design.Space1).Children(func() {
+		design.Apply(ui.Badge(c, contextArchiveRoleLabel(st, message.Role)), t.Badge()).
+			TextColor(t.LabelSecondary)
+		ui.Column(c).Grow(1).Gap(design.Space1).Children(func() {
+			text := strings.TrimSpace(message.Text)
+			if text == "" {
+				text = st.tr("（无文本）", "(no text)")
+			}
+			design.Apply(ui.Text(c, text), t.Font(design.TypeXXS)).
+				TextColor(t.LabelSecondary).Selectable()
+			if len(message.ToolCalls) > 0 {
+				names := make([]string, 0, len(message.ToolCalls))
+				arguments := make([]string, 0, len(message.ToolCalls))
+				for _, call := range message.ToolCalls {
+					names = append(names, call.Name)
+					if argumentsText := strings.TrimSpace(call.Arguments); argumentsText != "" {
+						arguments = append(arguments, argumentsText)
+					}
+				}
+				calls := design.Apply(ui.Text(c, st.tr("工具调用：", "Tool calls: ")+
+					strings.Join(names, ", ")), t.Font(design.TypeXXS)).
+					TextColor(t.LabelTertiary).NoWrap().Ellipsis("…")
+				if len(arguments) > 0 {
+					calls.Tooltip(strings.Join(arguments, "\n"))
+				}
+			}
+			if message.Truncated {
+				design.Apply(ui.Text(c, st.tr("（文本已截断）", "(text truncated)")),
+					t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+			}
+		})
+	})
 }

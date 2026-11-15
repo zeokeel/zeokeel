@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.38 — UI/UX 升级小版本** (2026-11-15). Native, compile-time modular
+> **v0.2.39 — 半闭环收口补丁** (2026-11-15). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. 本版按 [UI/UX 升级评估](docs/UI-UX-UPGRADE-2026-11-15.md) 收口设计债：
 > 输入框去小方块/附件直连 picker、审批内联 diff、命令面板首屏与分组、

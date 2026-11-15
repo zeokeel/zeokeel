@@ -39,29 +39,33 @@ func goalDockStatus(st *state, goal contracts.Goal) (label string, kind uikit.St
 		return st.tr("目标已完成", "Goal completed"), uikit.StatusSuccess
 	default:
 		if goal.Activation == contracts.GoalActivationArmed {
-			return st.tr("目标进行中", "Goal active"), uikit.StatusInProgress
+			// "执行中" (not 进行中): a goal phase is not the conversation's run
+			// state, and the dock must not read as a second "运行中" badge.
+			return st.tr("目标执行中", "Goal running"), uikit.StatusInProgress
 		}
 		return st.tr("等待继续", "Waiting to continue"), uikit.StatusPending
 	}
 }
 
 // goalActivationTooltip explains the activation observation: whether the
-// engine may advance this goal in this process without the human acting.
+// engine may advance this goal in this process without the human acting. The
+// first sentence of each phase names the difference between the goal phase and
+// the conversation's run state, so "目标执行中" is never read as "运行中".
 func goalActivationTooltip(st *state, goal contracts.Goal) string {
 	switch goal.Phase {
 	case contracts.GoalPhaseActive:
 		if goal.Activation == contracts.GoalActivationArmed {
-			return st.tr("引擎会自动续跑该目标；停止或重启后需要手动继续。",
-				"The engine continues this goal automatically; after a stop or restart you continue it manually.")
+			return st.tr("这是目标阶段，不等于会话的运行状态；引擎会自动续跑该目标，停止或重启后需要手动继续。",
+				"This is the goal phase, not the session's run state. The engine continues this goal automatically; after a stop or restart you continue it manually.")
 		}
-		return st.tr("自动续跑已关闭；点「继续目标」恢复。",
-			"Automatic continuation is off; choose Continue goal to resume it.")
+		return st.tr("这是目标阶段，不等于会话的运行状态；自动续跑已关闭，点「继续目标」恢复。",
+			"This is the goal phase, not the session's run state. Automatic continuation is off; choose Continue goal to resume it.")
 	case contracts.GoalPhasePaused:
-		return st.tr("目标已暂停，不会自动续跑；点「继续目标」恢复。",
-			"The goal is paused and is not continued automatically; choose Continue goal to resume it.")
+		return st.tr("这是目标阶段，不等于会话的运行状态；目标已暂停，不会自动续跑，点「继续目标」恢复。",
+			"This is the goal phase, not the session's run state. The goal is paused and is not continued automatically; choose Continue goal to resume it.")
 	case contracts.GoalPhaseBlocked:
-		return st.tr("目标受阻，不会自动续跑；处理阻塞后可继续。",
-			"The goal is blocked and is not continued automatically; continue it after resolving the block.")
+		return st.tr("这是目标阶段，不等于会话的运行状态；目标受阻，不会自动续跑，处理阻塞后可继续。",
+			"This is the goal phase, not the session's run state. The goal is blocked and is not continued automatically; continue it after resolving the block.")
 	case contracts.GoalPhaseComplete:
 		return st.tr("目标已完成，没有自动续跑。", "The goal is complete; nothing continues it.")
 	default:
@@ -338,7 +342,11 @@ func buildGoalDock(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 			ui.Row(c).Height(t.Scale(th.Space(7))).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 				badge := uikit.StatusBadge(c, t, kind, label)
 				if tooltip := goalActivationTooltip(st, goal); tooltip != "" {
-					badge.Tooltip(tooltip)
+					// The phase badge is a status region: naming it (and giving it
+					// the status role) carries the tooltip to assistive technology
+					// as its description, so the goal-phase-vs-run-state
+					// distinction is not pointer-only.
+					badge.Role(ui.RoleStatus).Label(label).Tooltip(tooltip)
 				}
 				if objective := strings.TrimSpace(goal.Objective); objective != "" {
 					design.Apply(ui.Text(c, objective), t.Font(design.TypeXXS)).

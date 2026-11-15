@@ -51,7 +51,7 @@ func TestGoalDialogCreatesGoalForActiveSession(t *testing.T) {
 		t.Fatalf("CreateGoal call = %+v, want the active session and the typed objective", creates[0])
 	}
 	h.assertNoTexts(tester, "目标内容")
-	h.assertTexts(tester, "目标进行中", "Ship release")
+	h.assertTexts(tester, "目标执行中", "Ship release")
 }
 
 func TestGoalDialogEmptySaveDisabled(t *testing.T) {
@@ -271,7 +271,7 @@ func TestGoalDialogEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 
-	openGoalActions(t, h, tester, "Goal active")
+	openGoalActions(t, h, tester, "Goal running")
 	h.click(tester, "Edit goal")
 	h.assertTexts(tester, "Goal", "Goal text", "Round cap", "Save", "Cancel", "Delete goal record")
 }

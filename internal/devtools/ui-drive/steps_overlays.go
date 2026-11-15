@@ -459,7 +459,7 @@ func (d *drive) runOverlaySteps() {
 			c.require(ok && goal.Phase == contracts.GoalPhaseActive &&
 				goal.Activation == contracts.GoalActivationArmed,
 				"继续目标后 goal=%+v（ok=%v），期望 active+armed", goal, ok)
-			c.require(d.has("目标进行中"), "继续目标后目标条没有显示「目标进行中」")
+			c.require(d.has("目标执行中"), "继续目标后目标条没有显示「目标执行中」")
 
 			// The /goal dialog is reachable through the slash command surface; an
 			// existing goal opens as edit (objective + round cap).

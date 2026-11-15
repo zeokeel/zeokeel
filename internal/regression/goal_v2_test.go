@@ -29,7 +29,7 @@ func TestGoalDockIsPerSession(t *testing.T) {
 	goals.seed("sess-b", contracts.GoalPhasePaused, contracts.GoalActivationDisarmed, 0, 0)
 	ui := startGoalUI(t, goals, auditSession("sess-a", "A"), auditSession("sess-b", "B"))
 
-	requireHasText(t, ui.tester, "目标进行中")
+	requireHasText(t, ui.tester, "目标执行中")
 	requireHasText(t, ui.tester, "2/256 轮")
 	requireNoText(t, ui.tester, "目标已暂停")
 
@@ -39,7 +39,7 @@ func TestGoalDockIsPerSession(t *testing.T) {
 	ui.tester.Frame()
 	requireHasText(t, ui.tester, "目标已暂停")
 	requireHasText(t, ui.tester, "继续目标")
-	requireNoText(t, ui.tester, "目标进行中")
+	requireNoText(t, ui.tester, "目标执行中")
 }
 
 func TestGoalDockActionsGoThroughGoalService(t *testing.T) {

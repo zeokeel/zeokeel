@@ -10,6 +10,7 @@ package session_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -24,10 +25,10 @@ func TestGoalDockShowsActiveGoalRoundsAndActivation(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 
-	h.assertTexts(tester, "目标进行中", "Ship release", "3/256 轮", "目标操作")
+	h.assertTexts(tester, "目标执行中", "Ship release", "3/256 轮", "目标操作")
 	h.assertNoTexts(tester, "继续目标", "等待继续")
 
-	openGoalActions(t, h, tester, "目标进行中")
+	openGoalActions(t, h, tester, "目标执行中")
 	h.assertTexts(tester, "暂停目标", "完成目标", "编辑目标", "清除目标记录")
 	h.assertNoTexts(tester, "继续目标")
 }
@@ -49,7 +50,7 @@ func TestGoalDockDisarmedOffersContinue(t *testing.T) {
 	if got := goals.wantGoal("sess-goal"); got.Activation != contracts.GoalActivationArmed {
 		t.Fatalf("activation after continue = %q, want armed", got.Activation)
 	}
-	h.assertTexts(tester, "目标进行中")
+	h.assertTexts(tester, "目标执行中")
 	h.assertNoTexts(tester, "等待继续")
 }
 
@@ -71,7 +72,7 @@ func TestGoalDockPausedResume(t *testing.T) {
 		got.Activation != contracts.GoalActivationArmed {
 		t.Fatalf("goal after continue = %+v, want active+armed", got)
 	}
-	h.assertTexts(tester, "目标进行中")
+	h.assertTexts(tester, "目标执行中")
 }
 
 func TestGoalDockPauseAndComplete(t *testing.T) {
@@ -80,7 +81,7 @@ func TestGoalDockPauseAndComplete(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 
-	openGoalActions(t, h, tester, "目标进行中")
+	openGoalActions(t, h, tester, "目标执行中")
 	h.click(tester, "暂停目标")
 	tester.Frame()
 	if got := goals.wantGoal("sess-goal"); got.Phase != contracts.GoalPhasePaused {
@@ -143,7 +144,7 @@ func TestGoalDockClearConfirmsAndDeletes(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 
-	openGoalActions(t, h, tester, "目标进行中")
+	openGoalActions(t, h, tester, "目标执行中")
 	h.click(tester, "清除目标记录")
 	h.assertTexts(tester, "清除目标", "取消", "确认清除")
 	h.click(tester, "确认清除")
@@ -155,7 +156,7 @@ func TestGoalDockClearConfirmsAndDeletes(t *testing.T) {
 	if _, ok := goals.Goal("sess-goal"); ok {
 		t.Fatal("the goal survived the confirmed clear")
 	}
-	h.assertNoTexts(tester, "目标进行中", "Ship release", "清除目标记录")
+	h.assertNoTexts(tester, "目标执行中", "Ship release", "清除目标记录")
 }
 
 func TestGoalDockIsPerSession(t *testing.T) {
@@ -196,7 +197,7 @@ func TestGoalDockInitializesFromExistingGoal(t *testing.T) {
 	h := newGoalHarnessSeeded(t, goalChat(), goals)
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "目标进行中", "Existing goal")
+	h.assertTexts(tester, "目标执行中", "Existing goal")
 }
 
 func TestGoalDockEnglish(t *testing.T) {
@@ -207,8 +208,8 @@ func TestGoalDockEnglish(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 
-	h.assertTexts(tester, "Goal active", "Ship release", "1/256 rounds")
-	openGoalActions(t, h, tester, "Goal active")
+	h.assertTexts(tester, "Goal running", "Ship release", "1/256 rounds")
+	openGoalActions(t, h, tester, "Goal running")
 	h.assertTexts(tester, "Pause goal", "Complete goal", "Edit goal", "Delete goal record")
 }
 
@@ -216,7 +217,7 @@ func TestGoalDockWithoutGoalService(t *testing.T) {
 	h := newHarness(t, goalChat())
 	tester := h.tester()
 	tester.Frame()
-	h.assertNoTexts(tester, "目标操作", "Goal actions", "目标进行中", "Goal active")
+	h.assertNoTexts(tester, "目标操作", "Goal actions", "目标执行中", "Goal running")
 }
 
 func TestGoalDockPauseFailureIsLocalizedDanger(t *testing.T) {
@@ -228,7 +229,7 @@ func TestGoalDockPauseFailureIsLocalizedDanger(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 
-	openGoalActions(t, h, tester, "目标进行中")
+	openGoalActions(t, h, tester, "目标执行中")
 	h.click(tester, "暂停目标")
 	tester.Frame()
 	h.assertTexts(tester, "暂停目标失败：goal store down")
@@ -296,4 +297,59 @@ func TestGoalDockClearEntryMeetsIconHitTarget(t *testing.T) {
 	tester.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
 	tester.Frame()
 	h.assertTexts(tester, "确认清除")
+}
+
+// accessDescriptionContains reports whether any element of the last frame is
+// described (tooltip) with text containing fragment.
+func accessDescriptionContains(tester *ui.Tester, fragment string) bool {
+	for _, node := range tester.AccessAll() {
+		if strings.Contains(node.Description, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestGoalDockStatusWordDistinctFromRunState covers the status-word collision:
+// an armed goal says 目标执行中, never the run state's 运行中, and its tooltip
+// says the goal phase is not the session's run state.
+func TestGoalDockStatusWordDistinctFromRunState(t *testing.T) {
+	h, goals := newGoalHarness(t, goalChat())
+	goals.seedGoal("sess-goal", "Ship release", contracts.GoalPhaseActive,
+		contracts.GoalActivationArmed, 2, contracts.DefaultMaxGoalRounds)
+	tester := h.tester()
+	tester.Frame()
+
+	h.assertTexts(tester, "目标执行中", "Ship release", "2/256 轮", "目标操作")
+	h.assertNoTexts(tester, "目标进行中", "Goal active")
+	if !accessDescriptionContains(tester, "不等于会话的运行状态") {
+		for _, node := range tester.AccessAll() {
+			if node.Description != "" || node.Name == "目标执行中" {
+				t.Logf("DEBUG access: role=%v name=%q value=%q desc=%q", node.Role, node.Name, node.Value, node.Description)
+			}
+		}
+		t.Fatalf("goal dock tooltip does not say the phase is not the run state; texts = %v", tester.Texts())
+	}
+
+	// The ⋯ lifecycle menu stays on the dock.
+	openGoalActions(t, h, tester, "目标执行中")
+	h.assertTexts(tester, "暂停目标", "完成目标", "编辑目标", "清除目标记录")
+}
+
+// TestGoalDockStatusWordEnglish covers the same rename in the English UI.
+func TestGoalDockStatusWordEnglish(t *testing.T) {
+	h, goals := newGoalHarness(t, goalChat())
+	h.ui.Locale().SetLanguage("en")
+	goals.seedGoal("sess-goal", "Ship release", contracts.GoalPhaseActive,
+		contracts.GoalActivationArmed, 1, contracts.DefaultMaxGoalRounds)
+	tester := h.tester()
+	tester.Frame()
+
+	h.assertTexts(tester, "Goal running", "Ship release", "1/256 rounds")
+	h.assertNoTexts(tester, "Goal active")
+	if !accessDescriptionContains(tester, "not the session's run state") {
+		t.Fatalf("English goal dock tooltip does not say the phase is not the run state; texts = %v", tester.Texts())
+	}
+	openGoalActions(t, h, tester, "Goal running")
+	h.assertTexts(tester, "Pause goal", "Complete goal", "Edit goal", "Delete goal record")
 }

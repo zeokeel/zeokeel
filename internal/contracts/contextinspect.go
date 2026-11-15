@@ -256,3 +256,85 @@ type ContextInspector interface {
 
 // KeyContext is provided by the agent module and consumed by the context UI.
 var KeyContext = cordis.NewServiceKey[ContextInspector]("zeokeel/context")
+
+// --- compaction archive (raw history read-back) -----------------------------
+//
+// A compaction replaces the session's message rows. The backend preserves the
+// replaced raw history in one bounded durable `compact_archive` event BEFORE the
+// replacement (fail-closed), and the folded timeline shows that event's metadata
+// only (kind/counts/bytes/truncated). ContextArchiveService is the optional
+// read-back half: it returns the archived messages themselves, addressed by the
+// session and the durable event sequence the folded event reports.
+//
+// The archive is a read-only audit copy. It is never injected into a model
+// request: nothing in the agent's prompt assembly reads this service.
+
+// ContextArchiveToolCall is one tool call carried by an archived assistant
+// message: the model-visible name and the raw JSON arguments (bounded).
+type ContextArchiveToolCall struct {
+	// Name is the tool name the assistant called.
+	Name string
+	// Arguments is the raw JSON arguments, cut at
+	// ContextArchiveReadMaxArgumentsBytes.
+	Arguments string
+}
+
+// ContextArchiveMessage is one raw message preserved by a compaction archive.
+type ContextArchiveMessage struct {
+	// Role is the message role: user, assistant, tool or system.
+	Role string
+	// Text is the raw message text, cut at ContextArchiveReadMaxTextBytes.
+	Text string
+	// ToolCalls are the tool calls the message carries (assistant messages).
+	ToolCalls []ContextArchiveToolCall
+	// Truncated reports the reader cut this message's text or arguments at the
+	// read bound, so the list shows a bounded excerpt instead of the full text.
+	Truncated bool
+}
+
+// ContextArchive is the raw history one compact_archive event preserved,
+// returned as a bounded, read-only view.
+type ContextArchive struct {
+	// Seq is the durable sequence number of the compact_archive event.
+	Seq int64
+	// Kind is "manual" (/compact), "auto" (automatic pre-run) or "recovery"
+	// (context-overflow recovery).
+	Kind string
+	// At is when the archive was recorded.
+	At time.Time
+	// Messages are the retained archived messages, oldest first.
+	Messages []ContextArchiveMessage
+	// RawMessageCount is the replaced history's message count; RetainedMessages
+	// is how many the archive event kept; OmittedMessages is the gap its bound
+	// dropped.
+	RawMessageCount  int
+	RetainedMessages int
+	OmittedMessages  int
+	// Bytes is the serialized size of the retained messages.
+	Bytes int
+	// Truncated reports the archive event itself hit its bound: Messages holds
+	// the kept subset and OmittedMessages the gap (never a silent loss).
+	Truncated bool
+}
+
+// Read bounds of ContextArchiveService: the archive event is already bounded
+// (2 MiB / 200 messages), but a reader bounds what it hands to a UI again.
+const (
+	// ContextArchiveReadMaxMessages bounds the messages one read returns.
+	ContextArchiveReadMaxMessages = 200
+	// ContextArchiveReadMaxTextBytes bounds one archived message's text.
+	ContextArchiveReadMaxTextBytes = 8 << 10
+	// ContextArchiveReadMaxArgumentsBytes bounds one tool call's arguments.
+	ContextArchiveReadMaxArgumentsBytes = 1 << 10
+)
+
+// ContextArchiveService reads one compaction archive's raw history. It is an
+// optional capability of the backend that provides ContextInspector (contracts
+// .KeyContext): a host that records no durable archive simply does not implement
+// it, and the Context UI hides the 「查看归档」 action then. The folded event's
+// Seq (contracts.ContextEvent.Seq) addresses the archive; ok is false for an
+// unknown session, an unknown sequence, an event that is not a compact_archive,
+// or a backend without a durable store.
+type ContextArchiveService interface {
+	ContextArchive(sessionID string, seq int64) (ContextArchive, bool)
+}

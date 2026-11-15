@@ -541,12 +541,12 @@ func (d *drive) openSettingsFromNeutralScreen() bool {
 	return d.uiRoot.Navigator().SettingsOpen()
 }
 
-// goalChipLabel returns the current goal dock's status label (目标进行中 /
+// goalChipLabel returns the current goal dock's status label (目标执行中 /
 // 等待继续 / 目标已暂停 / 目标受阻 / 目标已完成), or "" when no dock is shown.
 func (d *drive) goalChipLabel() string {
 	for _, text := range d.texts() {
 		switch strings.TrimSpace(text) {
-		case "目标进行中", "等待继续", "目标已暂停", "目标受阻", "目标已完成":
+		case "目标执行中", "等待继续", "目标已暂停", "目标受阻", "目标已完成":
 			return strings.TrimSpace(text)
 		}
 	}

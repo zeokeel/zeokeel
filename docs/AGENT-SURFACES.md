@@ -471,6 +471,7 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 **入口结构**：
 
 - 会话头第一行（`screen.header`/`screen.actions` 槽）：`标题/面包屑 → Agent Run Band（运行中 → 智能体团队 → 子智能体 N → 后台任务 → 待审批）→ spacer → ⋯`；Band 是一行原生入口按钮（无外层容器/双重描边），团队/子代理零值常显但不显示 0 计数，后台任务/待审批只在有内容时出现；各入口都是 `ui.PopoverBase` 原生浮层（Esc/点外关闭/焦点归还），不占右栏。
+- 团队工作台：团队浮层底部「打开工作台」→ 原生 `ui.Modal`（DialogWidthXL），左列成员（状态/模型/最新活动/打开/停止 running/已结束历史）、右列共享任务（subject/状态/owner/依赖/写入范围），列内各自有界滚动；Esc/关闭/点外部回到团队浮层，浮层展开状态、滚动位置与任务快照保留，焦点归还入口；不新增右栏常驻页。
 - 团队浮层：成员卡（状态点/名字/模型/最新活动/「打开」）+ 共享任务卡（subject/状态/owner/依赖/写入范围）；running 成员提供「停止」（`TeamService.Interrupt`，中性 cancelled），行尾 ⋯ danger 菜单「关闭成员」走 `uikit.ConfirmDanger`（取消 Default）；空态说明「暂无共享任务」；已结束的持久记录按「已结束」分组展示：`Resumable` 行带「历史 · 可继续」与「继续此队友」动作，不可恢复行带「历史 · 只读」（打开仍只读）。
 - 子智能体浮层：子代理/队友列表；选中进入主栏子会话。
 - 后台任务浮层：`JobService.Jobs()` 的行（状态/命令/用时/退出码）+ 停止（`KillJob`）；下方「历史」分组读取 durable `execution/*`（`contracts.ExecutionHistoryService`）：job/terminal 开始/结束/中断、命令/cwd/root/模式，明确「输出不会持久化」，interrupted 用中性状态，live job 同 ID 去重；无 live job 但有历史时入口仍出现（重启后可达）。
@@ -492,6 +493,8 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 
 **职责**：把后端 `contracts.ContextInspector`（`contracts.KeyContext`）折叠出的会话上下文事实如实呈现：当前 used/window、最近一次请求快照、逐模型调用 token/成本、压缩/溢出事件。仅在会话页签内展示，不做跨会话洞察。
 
+**页头动作**：Context 页头承载「压缩上下文」（仅会话空闲可用；运行中/compacting disabled+原因 tooltip，复用 `/compact` 的 `runCompactCommand`）与「上下文设置」（`OpenSettingsPageAt("model","model.context-budget")` 打开模型页并展开上下文预算；无该 optional 接口时回退打开模型页）。
+
 **入口**：会话页签条在「对话 / 轨迹 / 记忆」后追加「上下文 / Context」；**仅当 `ctx.Get(contracts.KeyContext)` 存在时注册**（无后端不显示，保持三页签兼容）。子会话视图不显示该页签（无独立会话上下文，进入子会话时回到对话页签）。
 
 **布局**：`uikit.ReadingColumn`（960 居中、`MaxWidthPercent(92)`、无 `Grow`、PaddingX 16 / Gap 20；与对话/Goal dock/子会话 banner 同轴）内三段 `uikit.Section`（概览 / 模型调用 / 上下文事件），页面用 `ui.Scroll`；集合一律官方组件——模型调用用 `ui.Table`（列：轮次/模型/输入/完成/缓存/上下文/时间[/成本]，虚拟化、`MaxWidth(TranscriptWidth)`、`MaxHeight` 有界、窄窗横向滚动不换行），事件用 `ui.List`（`MaxHeight` 有界）。
@@ -499,7 +502,7 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 - 概览（价格在「设置 → 模型」编辑，按当前价格重算）：`uikit.PropertySheet`（160 DIP 标签列 + 值左对齐 + 32 行 + Divider）展示「上下文用量」（`used / window tokens (n%)`；window 未知时只显示 used，不伪造百分比）与仅在 `CostKnown` 时出现的「累计成本」；最近一次快照另起小节展示时间/模型/窗口/系统提示（bytes · tokens）/估算输入/历史消息（用户/助手/工具）以及工具目录（数量 + 名称摘要，tooltip 全量）与注入来源 chips（AGENTS.md/预设/记忆/技能，只显示实际存在的）。
 - 系统提示分段（`Snapshot.Sections` 非空才出现，旧快照整段隐藏，不伪造）：`ui.Table` 按 section 显示本地化名称（identity/environment/…/tool-guidance 映射，未知 ID 回退记录 label/ID，工具 tips 带 ID+Hash）、来源、字节与估算 tokens；表下 `uikit.PropertySheet` 给「分段合计」以及（window 已知时）「估算输入占比 xK / yK (n%)」，并说明「正文不进入事件，仅元数据」。
 - 模型调用：最新在前；每行 iteration/model/prompt/completion/cached/context tokens/时间；成本列仅在会话 `CostKnown` 时存在，行级未知成本显示「—」而不是 0。
-- 上下文事件：最新在前；compact 分四类展示：`Inferred=true` →「压缩（推断）」；`Inferred=false` 且 `Detail=manual` →「压缩」；`Inferred=false` 且 `Outcome==""` →「自动压缩」（运行前 exact，显示 before→after tokens 与消息数 `Replaced → Saved`）；`Outcome!=""` →「自动压缩跳过/失败：failed|no-reduction|archive-failed|replace-failed」+ 本地化原因（历史未修改），**只显示 before→after tokens，不显示会误导的消息 delta，绝不显示「已压缩」**；未知 Outcome 回退原文。spill 显示路径 + 磁盘字节；`recovery` kind 标注「自动压缩重试（成功/失败/压缩失败）」+ 本地化说明 + before→after tokens（其 Saved 是重试次数，不显示成消息数）；`archive` kind 标注「归档/归档（截断）」，说明归档 N 条、超上限省略 M 条（截断）与原始正文不在事件中，meta 显示归档字节 + before→after tokens；archive 与 compact 各自独立成行，不合并/不重复计数。手动 `/compact` 的 `ErrCompactArchive`（归档失败、历史未修改）走本地化失败提示，绝不显示「已压缩」。
+- 上下文事件：最新在前；compact 分四类展示：`Inferred=true` →「压缩（推断）」；`Inferred=false` 且 `Detail=manual` →「压缩」；`Inferred=false` 且 `Outcome==""` →「自动压缩」（运行前 exact，显示 before→after tokens 与消息数 `Replaced → Saved`）；`Outcome!=""` →「自动压缩跳过/失败：failed|no-reduction|archive-failed|replace-failed」+ 本地化原因（历史未修改），**只显示 before→after tokens，不显示会误导的消息 delta，绝不显示「已压缩」**；未知 Outcome 回退原文。spill 显示路径 + 磁盘字节；`recovery` kind 标注「自动压缩重试（成功/失败/压缩失败）」+ 本地化说明 + before→after tokens（其 Saved 是重试次数，不显示成消息数）；`archive` kind 标注「归档/归档（截断）」，说明归档 N 条、超上限省略 M 条（截断），meta 显示归档字节 + before→after tokens；archive/compact 行在存在 durable 归档时给「查看归档」→ 原生 Modal 只读 `ui.List`（角色 Badge/原文/工具调用，截断明示）；读取走可选 `contracts.ContextArchiveService`（agent 按 sessionID+event seq 读 `compact_archive`，有界 200 条/8 KiB 文本/1 KiB 参数，只读审计、绝不注入模型；Seq 由折叠事件持久化，重启后可读）。archive 与 compact 各自独立成行，不合并/不重复计数。手动 `/compact` 的 `ErrCompactArchive`（归档失败、历史未修改）走本地化失败提示，绝不显示「已压缩」。
 - 系统提示分段：仅 `Snapshot.Sections` 非空时显示「系统提示分段」表（本地化名称/来源/字节/估算 Tokens），下方显示分段合计与（window 已知时）估算输入占比；空快照整段隐藏，正文不进入事件；未知 section ID 回退 Label/ID，hash 仅 tooltip。
 
 **状态**：`has=false`（或折叠数据全空）显示空态「本会话还没有上下文数据」+ 说明运行一轮后出现，绝不渲染 0 值概览；无会话显示「还没有会话」空态；无后端不注册页签（防御分支有空态文案）。
@@ -520,11 +523,11 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 
 **布局**（`internal/ui/insights/view.go`，页面用 `ui.Scroll`，正文不叠第二行 header）：
 - 工具栏：`uikit.SegmentedControl` 分段控件「7 天 / 30 天」（radio 组语义、方向键、`Label`「时间范围」；选中段 `BgSelected` + `LabelPrimary` + 600 + 2 DIP Accent 下划线，无 accent 填充）；右侧为弱化的范围/更新时间（`11-09 – 11-15 · 更新于 HH:MM`）。
-- KPI 行：四个扁平指标列（label TypeXXS 弱化 / value TypeL·600 / 一行 TypeXXS 细节），无卡片、无底色：`tokens`（输入·输出）、`成本`（仅 `PricedCalls>0` 时出现；部分未定价标「部分模型未定价」）、`会话`（轮次·步数）、`工具调用`（压缩·溢出）。强调色预算：本页 0 个 accent 填充、0 个 primary 按钮。
-- 按天：`ui.Table`（日期/tokens/成本/会话/工具；成本列仅当某天有价时出现；空日整行「—」而不是假 0；最新在前；`MaxHeight` 有界）。
+- KPI 行：四个扁平指标列（label TypeXXS 弱化 / value TypeM·600 / 一行 TypeXXS 细节），无卡片、无底色：`tokens`（输入·输出）、`成本`（仅 `PricedCalls>0` 时出现；部分未定价标「部分模型未定价」）、`会话`（轮次·步数）、`工具调用`（压缩·溢出）。强调色预算：本页 0 个 accent 填充、0 个 primary 按钮。
+- 按天：`ui.Table`（日期/tokens/成本/会话/工具；成本列仅当某天有价时出现；只列有活动的天（空天不出现），全空时该节空态；最新在前；`MaxHeight` 有界）。
 - 按模型：`ui.Table`（模型/调用/tokens/缓存/成本；未知模型显示「未知模型」，无价行成本「—」）。
 - 按工作区：`ui.Table`（工作区/会话/tokens/成本），仅当存在已关联工作区时显示；未关联组显示「未关联工作区」，名称由后端按工作区服务解析。
-- 会话排行：`ui.List`（标题 + 模型/工作区/更新时间元信息 + tokens + 可选成本），行内单点（`ObserveInput`）打开会话，Enter/双击走 List `Submitted`；行内文字/成本在 `row.Selected()` 时切 `t.AccentText`（选中行对比 ≥4.5:1，亮/暗）；打开 = `ChatService.SetActiveSession` + `Navigator.Push("session")`，失败留在本页并以 `ErrorLine` 显示。
+- 页面正文统一包在 `uikit.ReadingColumn`（960/92% 居中），宽窗表格不再被拉到屏幕最右。会话排行：`ui.List`（标题 + 模型/工作区/更新时间元信息 + tokens + 可选成本）+ `SearchField` 本地筛选（标题/模型/工作区显示名与 ID），行内单点（`ObserveInput`）打开会话，Enter/双击走 List `Submitted`；行内文字/成本在 `row.Selected()` 时切 `t.AccentText`（选中行对比 ≥4.5:1，亮/暗）；打开 = `ChatService.SetActiveSession` + `Navigator.Push("session")`，失败留在本页并以 `ErrorLine` 显示。
 
 **状态**：加载态 = `Spinner` + 「正在汇总用量…」（不渲染骨架 0 值）；空态 = 「还没有可统计的用量」/「这个时间范围内还没有用量」+ 说明；错误态 = `uikit.ErrorLine` + 重试（首次失败只显示错误与重试，已有数据时错误行下方保留旧数据）；无后端 = 「洞察后端未启用」空块（screen 仍注册）。
 

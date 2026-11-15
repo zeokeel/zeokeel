@@ -61,7 +61,11 @@ func buildScreen(c *ui.Context, cfg Config, st *state) {
 	st.ensureLoaded()
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
 		ui.Scroll(c).FillWidth().Grow(1).Children(func() {
-			ui.Column(c).FillWidth().Gap(design.Space5).Children(func() {
+			// The page reads on the product's reading measure (the transcript's
+			// 960 DIP column, capped at 92% of the content area): a wide window
+			// centers it instead of stretching the tables' numeric columns to the
+			// screen's far right.
+			uikit.ReadingColumn(c, func(c *ui.Context) {
 				buildToolbar(c, t, st)
 				switch {
 				case st.service == nil:
@@ -226,8 +230,15 @@ func kpiCell(c *ui.Context, t *design.Tokens, label, value, hint string) {
 // as "—" rather than a fake zero row.
 func buildDailySection(c *ui.Context, t *design.Tokens, st *state, data contracts.Insights) {
 	uikit.Section(c, st.tr("按天", "By day"), func(body *ui.Context) {
-		days := data.Daily
+		// Only days with activity are listed: a placeholder "—" row for every
+		// day the user did not use the app was noise, not information.
+		days := activeDays(data.Daily)
 		count := len(days)
+		if count == 0 {
+			uikit.EmptyState(body, st.tr("这个时间范围内没有按天用量。",
+				"No daily usage in this time range."))
+			return
+		}
 		columns := []ui.TableColumn{
 			{Title: st.tr("日期", "Day"), MinWidth: design.Space8 * 4, MaxWidth: design.Space8 * 6},
 			{Title: "tokens", Width: design.Space8 * 3, Align: ui.End},
@@ -406,11 +417,23 @@ func buildWorkspaceSection(c *ui.Context, t *design.Tokens, st *state, data cont
 // conversation; Enter opens the keyboard-chosen row.
 func buildSessionSection(c *ui.Context, t *design.Tokens, st *state, data contracts.Insights) {
 	uikit.Section(c, st.tr("会话排行", "Top conversations"), func(body *ui.Context) {
-		rows := data.Sessions
-		count := len(rows)
-		if count == 0 {
+		if len(data.Sessions) == 0 {
 			uikit.EmptyState(body, st.tr("这个时间范围内没有会话活动。",
 				"No conversation activity in this time range."))
+			return
+		}
+		// A local filter over the rows already on screen: the range read is not
+		// repeated for a query. The click and Enter paths below run over the
+		// filtered slice, so a filtered row still opens its conversation.
+		ui.SearchField(body, &st.sessionQuery).
+			Label(st.tr("筛选会话", "Filter conversations")).
+			Placeholder(st.tr("标题、模型或工作区…", "Title, model or workspace…")).
+			FillWidth()
+		workspaceNames := st.workspaceNames(data.Workspaces)
+		rows := filterSessions(st, data.Sessions, workspaceNames)
+		count := len(rows)
+		if count == 0 {
+			uikit.EmptyState(body, st.tr("没有匹配的会话。", "No conversations match the filter."))
 			return
 		}
 		st.sessionList.Key = func(index int) any {
@@ -426,7 +449,11 @@ func buildSessionSection(c *ui.Context, t *design.Tokens, st *state, data contra
 			return st.sessionLabel(rows[index])
 		}
 		st.sessionList.Selected = &st.sessionChosen
-		workspaceNames := st.workspaceNames(data.Workspaces)
+		// A filter can shrink the rows under the keyboard choice: keep the app
+		// choice inside them instead of leaving Enter on a stale index.
+		if st.sessionChosen >= count {
+			st.sessionList.Choose(count - 1)
+		}
 		list := ui.List(body, &st.sessionList, count).
 			Label(st.tr("会话排行列表", "Top conversations list")).
 			MaxHeight(design.Space8 * 12).
@@ -437,6 +464,39 @@ func buildSessionSection(c *ui.Context, t *design.Tokens, st *state, data contra
 			st.openSession(rows[st.sessionChosen].SessionID)
 		}
 	})
+}
+
+// activeDays keeps the days with activity: the table then lists only days the
+// product was used, without padding the window with zero rows.
+func activeDays(days []contracts.InsightsDay) []contracts.InsightsDay {
+	active := make([]contracts.InsightsDay, 0, len(days))
+	for _, day := range days {
+		if day.TotalTokens == 0 && day.ToolCalls == 0 && day.Sessions == 0 && day.Turns == 0 {
+			continue
+		}
+		active = append(active, day)
+	}
+	return active
+}
+
+// filterSessions narrows the leaderboard by its local query: the title, the
+// model and the workspace (its display name and its ID) are matched, so
+// "model-a" or a workspace name finds its conversations.
+func filterSessions(st *state, sessions []contracts.InsightsSession,
+	workspaceNames map[string]string) []contracts.InsightsSession {
+	needle := strings.ToLower(strings.TrimSpace(st.sessionQuery))
+	if needle == "" {
+		return sessions
+	}
+	filtered := make([]contracts.InsightsSession, 0, len(sessions))
+	for _, session := range sessions {
+		haystack := strings.ToLower(session.Title + "\x00" + session.Model + "\x00" +
+			session.WorkspaceID + "\x00" + workspaceNames[session.WorkspaceID])
+		if strings.Contains(haystack, needle) {
+			filtered = append(filtered, session)
+		}
+	}
+	return filtered
 }
 
 // buildSessionRow is one leaderboard row: the conversation title and its muted

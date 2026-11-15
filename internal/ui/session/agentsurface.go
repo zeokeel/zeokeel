@@ -51,6 +51,11 @@ const (
 	// titles (600): the type roles carry no heading weight yet (DESIGN.md D6),
 	// so the surfaces name it once instead of repeating a raw literal.
 	agentHeadingWeight = 600
+	// workbenchSectionMaxHeight bounds each team-workbench column: with the
+	// modal's header and footer, two columns at DialogBodyMax would exceed the
+	// desktop's minimum window height; the lists scroll inside their column
+	// instead.
+	workbenchSectionMaxHeight float32 = design.Space8 * 10 // 320 DIP
 )
 
 // jobsPollInterval is how often a frame with a running background job asks for
@@ -121,6 +126,28 @@ type agentSurface struct {
 	teamErr      string
 	closeMember  string
 
+	// workbenchOpen is the persistent team workbench's open flag: a native modal
+	// with the members and the conversation's shared task board. Opening it
+	// leaves the team popover's own state (open flag, scroll offsets, cached
+	// task snapshot) untouched, so closing the workbench returns to the same
+	// overlay; navigating away closes both.
+	workbenchOpen bool
+	// workbenchReturnFocus asks the next frame to hand the keyboard focus back
+	// to the 打开工作台 entry after the modal closed (Escape or its close
+	// button); the native modal restores the focus too, and this covers the
+	// close-button path.
+	workbenchReturnFocus bool
+	// workbenchTrigger is the 打开工作台 button the focus returns to.
+	workbenchTrigger ui.Handle
+	// The workbench's own list and scroll state: it is built while the team
+	// popover is still open, so it cannot share the popover's handles (one
+	// handle bound to two controls in one build panics).
+	workbenchMembers       ui.ListState
+	workbenchHistory       ui.ListState
+	workbenchTasks         ui.ListState
+	workbenchMembersScroll ui.ScrollState
+	workbenchTasksScroll   ui.ScrollState
+
 	// Execution history: the durable lifecycle records of the active
 	// conversation. historySession scopes the cache to the session on screen;
 	// the read happens off the UI thread and publishes through UIRuntime.Post.
@@ -143,6 +170,7 @@ func (st *state) closeAgentPopovers() {
 	st.agents.teamOpen = false
 	st.agents.childOpen = false
 	st.agents.jobsOpen = false
+	st.agents.workbenchOpen = false
 }
 
 // noteScreenVisit closes the transient overlays when the conversation screen
@@ -341,6 +369,10 @@ func buildAgentRunBand(c *ui.Context, t *design.Tokens, st *state, chat contract
 			if st.agents.closeMember != "" {
 				buildTeamMemberCloseConfirm(c, st, teamMembers)
 			}
+			// The persistent team workbench is a native modal over the band: it
+			// gives the members and the shared board the room the compact popover
+			// lacks, without a permanent right-panel page.
+			buildTeamWorkbench(c, t, st, teamMembers, teamRunning)
 		})
 }
 
@@ -630,6 +662,32 @@ func buildTeamPanel(c *ui.Context, t *design.Tokens, st *state, members []contra
 			buildSharedTasksList(c, t, st)
 		})
 	})
+	// The workbench entry: the persisted read surface for the team, kept out of
+	// the right panel (AGENTS.md: team/subagent surfaces stay in the conversation
+	// flow). It opens over this popover, which keeps its state underneath.
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		ui.Spacer(c)
+		open := design.Apply(ui.Button(c, st.tr("打开工作台", "Open workbench")),
+			t.SecondaryButton()).Height(design.RowCompactHeight).Shrink(0).
+			Bind(&st.agents.workbenchTrigger).
+			Tooltip(st.tr("在原生窗口里查看成员与共享任务", "See the members and shared tasks in a dialog"))
+		if st.agents.workbenchReturnFocus {
+			// The workbench closed: the entry that opened it takes the keyboard
+			// back, so Escape never drops the focus on the page behind.
+			st.agents.workbenchReturnFocus = false
+			st.agents.workbenchTrigger.Focus(c)
+		}
+		if open.Clicked() {
+			// The native modal cannot take pointer input while this popover's
+			// overlay is above it (mygo routes the press to the popover first, as
+			// the close-member confirmation found), so the popover closes as the
+			// modal opens. Its own state — scroll offsets, the cached task
+			// snapshot — stays in st.agents and is shown again on close.
+			st.agents.teamOpen = false
+			st.agents.workbenchOpen = true
+			st.runtime.Invalidate()
+		}
+	})
 	agentHint(c, t, st.tr("点击成员在面板中打开会话 · Esc 关闭",
 		"Open a member here · Esc closes"))
 }
@@ -746,6 +804,13 @@ func sharedTasksScrollHint(st *state) string {
 // read error and the empty state stay explicit instead of rendering a blank
 // section.
 func buildSharedTasksList(c *ui.Context, t *design.Tokens, st *state) {
+	buildSharedTasksListState(c, t, st, &st.agents.teamTasks)
+}
+
+// buildSharedTasksListState is buildSharedTasksList with the caller's list
+// state: the team popover and the workbench both show the same cached snapshot
+// and must not bind one handle to two controls in a build.
+func buildSharedTasksListState(c *ui.Context, t *design.Tokens, st *state, list *ui.ListState) {
 	board := st.taskBoard()
 	if board == nil {
 		design.Apply(ui.Text(c, st.tr("任务板未启用", "Task board is not enabled")),
@@ -771,19 +836,19 @@ func buildSharedTasksList(c *ui.Context, t *design.Tokens, st *state) {
 			t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
 		return
 	}
-	st.agents.teamTasks.Key = func(index int) any {
+	list.Key = func(index int) any {
 		if index < 0 || index >= len(tasks) {
 			return nil
 		}
 		return tasks[index].ID
 	}
-	st.agents.teamTasks.Label = func(index int) string {
+	list.Label = func(index int) string {
 		if index < 0 || index >= len(tasks) {
 			return ""
 		}
 		return tasks[index].Subject
 	}
-	ui.List(c, &st.agents.teamTasks, len(tasks), func(index int) {
+	ui.List(c, list, len(tasks), func(index int) {
 		buildSharedTaskCard(c, t, st, tasks[index], index)
 	}).FillWidth().Gap(design.Space2)
 }
@@ -864,6 +929,115 @@ func taskOwnerDisplay(st *state, owner string) string {
 func agentTaskMeta(c *ui.Context, t *design.Tokens, text string) {
 	design.Apply(ui.Text(c, text), t.Font(design.TypeXXS)).
 		TextColor(t.LabelTertiary).NoWrap()
+}
+
+// buildTeamWorkbench renders the persistent team workbench: a native modal, wide
+// enough for two columns, with every visible member (state, model, latest
+// activity, open and stop while running) and the conversation's shared task
+// board (subject, status, owner, blockers, write scopes). It is built from the
+// band, not from inside the team popover, so the popover keeps its state
+// underneath; the modal itself owns the keyboard (Esc closes it) and hands the
+// focus back to the entry that opened it.
+func buildTeamWorkbench(c *ui.Context, t *design.Tokens, st *state,
+	members []contracts.TeamMember, running int) {
+	if st == nil || !st.agents.workbenchOpen {
+		return
+	}
+	el := ui.Modal(c, &st.agents.workbenchOpen, func() {
+		design.Apply(ui.Column(c).Width(design.DialogWidthXL).Gap(design.Space3),
+			func(el ui.Element) ui.Element { return el.Padding(design.Space4) }).
+			Children(func() {
+				agentPanelHeader(c, t, icons.Users(), st.tr("团队工作台", "Team workbench"),
+					teamMemberCounts(st, members, running))
+				if st.agents.teamErr != "" {
+					uikit.ErrorLine(c, st.agents.teamErr)
+				}
+				// Two same-screen sections: the members on the left, the shared
+				// task board on the right. Each column scrolls on its own, so a
+				// long team never pushes the board out of the dialog.
+				ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(design.Space4).Children(func() {
+					buildWorkbenchMembersSection(c, t, st, members)
+					buildWorkbenchTasksSection(c, t, st)
+				})
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+					design.Apply(ui.Text(c, st.tr(
+						"Esc 关闭工作台；团队浮层保持打开。",
+						"Esc closes the workbench; the team overlay stays open.")),
+						t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).Grow(1)
+					closeButton := design.Apply(ui.Button(c, st.tr("关闭", "Close")),
+						t.SecondaryButton()).Height(design.RowCompactHeight).Shrink(0).
+						Label(st.tr("关闭团队工作台", "Close team workbench"))
+					if closeButton.Clicked() {
+						st.closeTeamWorkbench()
+						st.runtime.Invalidate()
+					}
+				})
+			})
+	})
+	if el.Dismissed() {
+		// Escape or a click outside: reopen the team overlay it was opened from
+		// (the scroll offsets and the cached task snapshot never left st.agents)
+		// and return the focus to the entry on the next frame.
+		st.closeTeamWorkbench()
+		st.runtime.Invalidate()
+	}
+}
+
+// closeTeamWorkbench leaves the workbench and returns to the team overlay: the
+// overlay's state is preserved because only the two open flags change.
+func (st *state) closeTeamWorkbench() {
+	if st == nil {
+		return
+	}
+	st.agents.workbenchOpen = false
+	st.agents.workbenchReturnFocus = true
+	st.agents.teamOpen = true
+}
+
+// buildWorkbenchMembersSection is the workbench's member column: the live
+// members and, below them, the restored (finished) records, each row the shared
+// member card (state, model, activity, open and stop while running).
+func buildWorkbenchMembersSection(c *ui.Context, t *design.Tokens, st *state,
+	members []contracts.TeamMember) {
+	live, history := splitTeamMembers(members)
+	ui.Column(c).Grow(1).Shrink(1).MinWidthPercent(0).Gap(design.Space2).Children(func() {
+		agentSectionLabel(c, t, fmt.Sprintf(st.tr("成员 · %d", "Members · %d"), len(members)))
+		ui.Scroll(c).FillWidth().MaxHeight(workbenchSectionMaxHeight).
+			TrackScroll(&st.agents.workbenchMembersScroll).Children(func() {
+			ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
+				switch {
+				case len(live) > 0:
+					buildTeamMembersList(c, t, st, &st.agents.workbenchMembers, live)
+				case len(members) == 0:
+					design.Apply(ui.Text(c, st.tr("还没有队友", "No teammates yet")),
+						t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+				default:
+					design.Apply(ui.Text(c, st.tr("没有正在运行的队友", "No teammate is running")),
+						t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+				}
+				if len(history) > 0 {
+					agentSectionLabel(c, t, st.tr("已结束", "Finished"))
+					buildTeamMembersList(c, t, st, &st.agents.workbenchHistory, history)
+				}
+			})
+		})
+	})
+}
+
+// buildWorkbenchTasksSection is the workbench's board column: the same cached
+// snapshot the team overlay shows, with the card count in its section label.
+func buildWorkbenchTasksSection(c *ui.Context, t *design.Tokens, st *state) {
+	label := st.tr("共享任务", "Shared tasks")
+	if st.agents.tasksLoaded && st.agents.tasksErr == "" {
+		label = fmt.Sprintf(st.tr("共享任务 · %d", "Shared tasks · %d"), len(st.agents.tasks))
+	}
+	ui.Column(c).Grow(1).Shrink(1).MinWidthPercent(0).Gap(design.Space2).Children(func() {
+		agentSectionLabel(c, t, label)
+		ui.Scroll(c).FillWidth().MaxHeight(workbenchSectionMaxHeight).
+			TrackScroll(&st.agents.workbenchTasksScroll).Children(func() {
+			buildSharedTasksListState(c, t, st, &st.agents.workbenchTasks)
+		})
+	})
 }
 
 // buildSubagentEntry is the header's 子智能体 N chip: the count of the active
@@ -1101,6 +1275,7 @@ func (st *state) exitChildView() {
 	st.agents.childOpen = false
 	st.agents.teamOpen = false
 	st.agents.jobsOpen = false
+	st.agents.workbenchOpen = false
 	st.agents.childSending = false
 	st.agents.childSendErr = ""
 	st.agents.childSendSeq++

@@ -70,7 +70,7 @@ func TestCompactHeaderKeepsTitleAndGoalDock(t *testing.T) {
 		t.Fatalf("narrow header dropped the conversation title; texts = %v", tester.Texts())
 	}
 	// The goal status badge and the goal body live above the composer.
-	if !tester.HasText("目标进行中") {
+	if !tester.HasText("目标执行中") {
 		t.Fatalf("goal strip lacks the status badge; texts = %v", tester.Texts())
 	}
 	if got := containingLabels(tester, goalText); got < 1 {

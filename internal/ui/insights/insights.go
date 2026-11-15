@@ -83,6 +83,10 @@ type state struct {
 	workspaceTable ui.ListState
 	sessionList    ui.ListState
 	sessionChosen  int
+	// sessionQuery is the leaderboard's local filter draft (title, model or
+	// workspace). It filters the rows on screen only: the aggregate and its
+	// per-range read are untouched.
+	sessionQuery string
 }
 
 // Module registers the Insights screen.

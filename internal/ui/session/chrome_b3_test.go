@@ -71,7 +71,7 @@ func TestGoalStripAboveComposer(t *testing.T) {
 	}
 
 	// The ⋯ menu keeps the goal lifecycle actions.
-	openGoalActions(t, h, tester, "目标进行中")
+	openGoalActions(t, h, tester, "目标执行中")
 	h.assertTexts(tester, "暂停目标", "完成目标", "编辑目标", "清除目标记录")
 }
 

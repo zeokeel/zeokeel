@@ -4,6 +4,32 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.39] - 2026-11-15
+
+「半闭环」收口补丁：把 Long-task/Goal/Context/Insights 里「功能已存在、体验未闭环」的最后一段补上。
+
+### Added
+
+- **持久团队工作台**：团队浮层「打开工作台」→ 原生 `ui.Modal`（DialogWidthXL）成员/共享任务两列；成员状态/模型/最新活动/打开/停止（running），任务 subject/状态/owner/依赖/写入范围；Esc/关闭/点外部回到浮层，展开状态/滚动/任务快照保留，焦点归还；不新增右栏常驻页。
+- **Context 归档原文**：`contracts.ContextArchiveService`（agent 按 sessionID+durable seq 读 `compact_archive`，有界 200 条/8 KiB 文本/1 KiB 参数，只读审计、绝不注入模型）；Context 事件行「查看归档」→ 原生 Modal 只读列表（角色/原文/工具调用，truncated 明示）；折叠事件持久化 `Seq`，重启后仍可读。
+- **Context 页头动作**：「压缩上下文」（空闲可用；运行中/compacting disabled+原因 tooltip）与「上下文设置」（`OpenSettingsPageAt("model","model.context-budget")` 打开模型页并展开上下文预算，无接口时回退）。
+- **Insights 会话筛选**：会话排行 `SearchField`（标题/模型/工作区显示名与 ID，本地过滤），点击/Enter 仍打开会话；过滤后选中行收敛。
+
+### Changed
+
+- **Goal 状态词**：「目标进行中」→「目标执行中/Goal running」；tooltip 与 `RoleStatus` 描述明确「这是目标阶段，不等于会话运行状态」；⋯ 设置/编辑目标入口保留。
+- **中断恢复可见反馈**：「在输入框继续」点击后 toast + `c.Announce`「已把光标放到输入框，发送内容由你决定」，仍只聚焦不重放。
+- **Insights 宽窗/空行**：整页包 `uikit.ReadingColumn`（960/92% 居中），数值列不再贴屏幕最右；按天表只列有活动天，全空给空态；KPI 保持 TypeM/600 四档。
+- **团队/子代理**：工作台复用现有成员/任务行；running 停止、关闭确认、回执回链保持。
+
+### Verification
+
+- `gofmt` 空；`go build ./...`、`CGO_ENABLED=0 go build ./...`、`go vet ./...`、`go tool mygo vet .` 通过
+- `go test ./... -count=1` 全绿；`go test -race`（agent/sessionstore/session/uiroot/insights）通过
+- `designlint --strict --baseline` 0 new / 0 blocking；`scripts/design-check.sh` 6/6
+- `ui-drive` **93/93 PASS**（`.cache/impl-drive-halfclosed/drive-report.md`）
+- `ui-snapshot` **122 PNG**（`.cache/impl-shots-halfclosed/`）
+
 ## [0.2.38] - 2026-11-15
 
 UI/UX 升级小版本：按 [UI/UX 升级评估](docs/UI-UX-UPGRADE-2026-11-15.md) 收口 P1/P2 与 P3 高价值项，并抽出共享组件。

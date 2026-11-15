@@ -719,7 +719,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	if !ok || goal.Objective != "完成 Q4 发布清单" {
 		t.Fatalf("goal = %+v (ok %v), want the created goal", goal, ok)
 	}
-	if !tester.HasText("目标进行中") || !tester.HasText("完成 Q4 发布清单") {
+	if !tester.HasText("目标执行中") || !tester.HasText("完成 Q4 发布清单") {
 		t.Fatalf("goal dock missing; texts = %v", tester.Texts())
 	}
 	if err := tester.Click("目标操作"); err != nil {

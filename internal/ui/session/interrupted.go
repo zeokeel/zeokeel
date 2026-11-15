@@ -56,8 +56,15 @@ func buildInterruptedNotice(c *ui.Context, t *design.Tokens, runtime contracts.U
 				if cont.Clicked() {
 					// Continuing is the user's call: hand them the composer with
 					// the history intact instead of replaying a side-effecting
-					// turn on their behalf.
+					// turn on their behalf. The action gets two visible feedback
+					// layers (an in-app toast and a screen-reader announcement):
+					// a focus move alone is invisible when the composer already
+					// looks focused, and the click must never read as a no-op.
 					st.focusComposer = true
+					feedback := st.tr("已把光标放到输入框，发送内容由你决定",
+						"The cursor is in the composer; what to send is your call")
+					st.toast(contracts.NotifyInfo, feedback)
+					c.Announce(feedback)
 					runtime.Invalidate()
 				}
 				uikit.IconButton(c, uikit.IconButtonOptions{

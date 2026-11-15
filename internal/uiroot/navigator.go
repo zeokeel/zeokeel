@@ -133,6 +133,37 @@ func (n *navigator) OpenSettingsPage(pageID string) error {
 	return &UnknownSettingsPageError{ID: pageID}
 }
 
+// OpenSettingsPageAt shows one settings page and reveals one of its searchable
+// items in the same visit: the deep link a non-settings surface uses to hand the
+// user to the control it talks about ("上下文设置" → the model page's context
+// budget). The page's Reveal hook (contracts.SettingsPageSpec.Reveal) opens the
+// disclosure around the anchor, scrolls it into view and tints it briefly, the
+// same path a navigation-search hit uses. The pending navigation search state is
+// cleared, so a stale query neither consumes the request nor hides the page.
+func (n *navigator) OpenSettingsPageAt(pageID, anchorKey string) error {
+	ordered := flattenSettingsGroups(groupSettingsPages(visiblePages(n.rt.settingsPages())))
+	for index, page := range ordered {
+		if page.ID != pageID {
+			continue
+		}
+		n.mu.Lock()
+		n.settings = true
+		n.root.settingsTab = index
+		if page.Section == "高级" {
+			n.root.settingsAdvancedOpen = true
+		}
+		n.root.settingsScrollToSelected = true
+		n.root.settingsQuery = ""
+		n.root.settingsRevealedQuery = ""
+		n.root.settingsRevealPage = pageID
+		n.root.settingsRevealAnchor = anchorKey
+		n.mu.Unlock()
+		n.root.requestFrame()
+		return nil
+	}
+	return &UnknownSettingsPageError{ID: pageID}
+}
+
 // CloseSettings hides the settings surface.
 func (n *navigator) CloseSettings() {
 	n.mu.Lock()

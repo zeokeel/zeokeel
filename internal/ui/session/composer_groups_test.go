@@ -175,7 +175,7 @@ func TestNarrowHeaderAndToolbarWithInspectorDrawer(t *testing.T) {
 	if title.W < 100 {
 		t.Fatalf("title width %.1f at 1024+inspector, want ≥100 (N1)", title.W)
 	}
-	goalChip, ok := tester.Find("目标进行中")
+	goalChip, ok := tester.Find("目标执行中")
 	if !ok {
 		t.Fatalf("goal chip missing; texts = %v", tester.Texts())
 	}

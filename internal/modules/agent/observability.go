@@ -224,13 +224,17 @@ func (s *service) appendObservedEvent(ctx context.Context, sessionID, eventType 
 		s.logger.Printf("[agent] append %s event: %v", eventType, err)
 		return
 	}
-	s.applyContextEvent(sessionID, eventType, encoded, time.Now())
+	s.applyContextEvent(sessionID, eventType, encoded, time.Now(), 0)
 }
 
 // applyContextEvent folds one durable event into the session timeline. It is
 // used live (right after the append) and by restore (replaying the durable log),
-// so the folded view is identical after a restart.
-func (s *service) applyContextEvent(sessionID, eventType string, payload []byte, at time.Time) {
+// so the folded view is identical after a restart. seq is the durable sequence of
+// the event: the read model carries it on the folded snapshot/request/event so a
+// UI can address backend reads by it (the compaction archive read-back asks for
+// the archive event by this sequence). Live appends whose sequence is not needed
+// pass 0.
+func (s *service) applyContextEvent(sessionID, eventType string, payload []byte, at time.Time, seq int64) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" || len(payload) == 0 {
 		return
@@ -259,6 +263,7 @@ func (s *service) applyContextEvent(sessionID, eventType string, payload []byte,
 		}
 		timeline.snapshot = contracts.ContextSnapshot{
 			At:                 now,
+			Seq:                seq,
 			Model:              strings.TrimSpace(decoded.Model),
 			Window:             decoded.Window,
 			SystemPromptBytes:  decoded.SystemPromptBytes,
@@ -286,6 +291,7 @@ func (s *service) applyContextEvent(sessionID, eventType string, payload []byte,
 			return
 		}
 		request := contracts.ContextRequest{
+			Seq:           seq,
 			Iteration:     decoded.Iteration,
 			At:            now,
 			Model:         strings.TrimSpace(decoded.Model),
@@ -332,6 +338,7 @@ func (s *service) applyContextEvent(sessionID, eventType string, payload []byte,
 			detail += fmt.Sprintf(", %d omitted (truncated)", metadata.OmittedMessages)
 		}
 		timeline.events = append(timeline.events, contracts.ContextEvent{
+			Seq:              seq,
 			Kind:             contracts.ContextEventArchive,
 			At:               now,
 			Detail:           detail,
@@ -354,6 +361,7 @@ func (s *service) applyContextEvent(sessionID, eventType string, payload []byte,
 			detail = "manual"
 		}
 		timeline.events = append(timeline.events, contracts.ContextEvent{
+			Seq:      seq,
 			Kind:     contracts.ContextEventCompact,
 			At:       now,
 			Detail:   detail,
@@ -377,6 +385,7 @@ func (s *service) applyContextEvent(sessionID, eventType string, payload []byte,
 			return
 		}
 		timeline.events = append(timeline.events, contracts.ContextEvent{
+			Seq:    seq,
 			Kind:   contracts.ContextEventRecovery,
 			At:     now,
 			Detail: decoded.Kind,
@@ -393,6 +402,7 @@ func (s *service) applyContextEvent(sessionID, eventType string, payload []byte,
 			return
 		}
 		timeline.events = append(timeline.events, contracts.ContextEvent{
+			Seq:    seq,
 			Kind:   contracts.ContextEventSpill,
 			At:     now,
 			Detail: strings.TrimSpace(decoded.Tool),
@@ -567,7 +577,7 @@ func (s *service) foldRestoredContextEvents(sessionID string, events []rig.Sessi
 			if eventTime.IsZero() {
 				eventTime = time.Now()
 			}
-			s.applyContextEvent(sessionID, event.Type, event.Payload, eventTime)
+			s.applyContextEvent(sessionID, event.Type, event.Payload, eventTime, event.Seq)
 		}
 	}
 }

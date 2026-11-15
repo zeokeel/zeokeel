@@ -716,3 +716,196 @@ func TestKPIValuesUseThePageTypeScale(t *testing.T) {
 			value.H)
 	}
 }
+
+// --- P2-2 half-closed loop: reading measure, active days, leaderboard filter --
+
+// readingColumnBounds resolves the horizontal band of the screen's reading
+// measure on a windows-wide window: the centered 960 DIP column (capped at 92%
+// of the content area) and the table band inside its Space4 padding.
+func readingColumnBounds(width int) (tableLeft, tableRight float32) {
+	contentLeft := float32(design.SidebarWidth)
+	contentWidth := float32(width) - contentLeft
+	columnWidth := design.TranscriptWidth
+	if limit := contentWidth * 0.92; limit < columnWidth {
+		columnWidth = limit
+	}
+	columnLeft := contentLeft + (contentWidth-columnWidth)/2
+	return columnLeft + design.Space4, columnLeft + columnWidth - design.Space4
+}
+
+// requireInsideReadingColumn asserts text's right edge stays inside the reading
+// measure's table band: a wide window centers the tables instead of stretching
+// their columns to the screen's far right.
+func requireInsideReadingColumn(t *testing.T, tester *ui.Tester, width int, text string) ui.Rect {
+	t.Helper()
+	rect, ok := tester.Find(text)
+	if !ok {
+		t.Fatalf("frame does not show %q; texts = %v", text, tester.Texts())
+	}
+	_, tableRight := readingColumnBounds(width)
+	if right := rect.X + rect.W; right > tableRight+2 {
+		t.Fatalf("%q ends at x=%.1f, beyond the reading measure's table edge %.1f (window %d)",
+			text, right, tableRight, width)
+	}
+	return rect
+}
+
+// requireLastColumnAtMeasureRight asserts a table's last column ends at the
+// reading measure's table edge: the measure, not the window, is the table's
+// width.
+func requireLastColumnAtMeasureRight(t *testing.T, tester *ui.Tester, width int, text string) ui.Rect {
+	t.Helper()
+	rect := requireInsideReadingColumn(t, tester, width, text)
+	_, tableRight := readingColumnBounds(width)
+	if right := rect.X + rect.W; right < tableRight-48 {
+		t.Fatalf("%q ends at x=%.1f, far inside the reading measure's table edge %.1f (window %d)",
+			text, right, tableRight, width)
+	}
+	return rect
+}
+
+// TestWideWindowKeepsTablesInReadingColumn covers the wide window: the tables'
+// numeric columns end at the centered 960 DIP measure, not at the screen edge.
+func TestWideWindowKeepsTablesInReadingColumn(t *testing.T) {
+	service := &fakeInsights{result: sampleInsights()}
+	h := newHarness(t, service, nil)
+	tester := h.tester(2200, 1000)
+	h.waitForText(tester, "发布检查")
+
+	// The daily table's last (right-aligned) numeric column ends at the measure's
+	// edge; the model table's numeric columns stay inside it.
+	requireLastColumnAtMeasureRight(t, tester, 2200, "工具")
+	requireInsideReadingColumn(t, tester, 2200, "缓存")
+
+	// The whole measure is centered: the section titles start at its left edge.
+	tableLeft, _ := readingColumnBounds(2200)
+	title, ok := tester.Find("按天")
+	if !ok {
+		t.Fatalf("the daily section is missing; texts = %v", tester.Texts())
+	}
+	if title.X < tableLeft-2 || title.X > tableLeft+design.Space8*2 {
+		t.Fatalf("the daily section starts at x=%.1f, want the reading measure's left edge %.1f (window 2200)",
+			title.X, tableLeft)
+	}
+}
+
+// TestDailyTableSkipsInactiveDays covers the empty-day rows: only days with
+// activity are listed, so the table has no "—" placeholder rows for the days the
+// user did not use the app.
+func TestDailyTableSkipsInactiveDays(t *testing.T) {
+	service := &fakeInsights{result: sampleInsights()}
+	h := newHarness(t, service, nil)
+	tester := h.tester(1280, 800)
+	h.waitForText(tester, "发布检查")
+
+	// The sample's active days are 11-13/14/15; 11-09..11-12 are empty.
+	for _, day := range []string{"11-09", "11-10", "11-11", "11-12"} {
+		if rect, ok := tester.Find(day); ok {
+			t.Fatalf("empty day %q still renders a row at %+v; texts = %v", day, rect, tester.Texts())
+		}
+	}
+	for _, day := range []string{"11-13", "11-14", "11-15"} {
+		if _, ok := tester.Find(day); !ok {
+			t.Fatalf("active day %q is missing from the daily table; texts = %v", day, tester.Texts())
+		}
+	}
+}
+
+// TestDailyTableEmptyStateWithoutActiveDays covers a window whose every day is
+// empty but whose totals still hold older data: the daily section says so
+// instead of rendering a table of dashes.
+func TestDailyTableEmptyStateWithoutActiveDays(t *testing.T) {
+	data := sampleInsights()
+	for index := range data.Daily {
+		data.Daily[index] = contracts.InsightsDay{Day: data.Daily[index].Day}
+	}
+	service := &fakeInsights{result: data}
+	h := newHarness(t, service, nil)
+	tester := h.tester(1280, 800)
+	h.waitForText(tester, "发布检查")
+	h.assertTexts(tester, "按天", "这个时间范围内没有按天用量。")
+	h.assertNoTexts(tester, "—")
+}
+
+// filterLeaderboard focuses the leaderboard's filter field and types query.
+func filterLeaderboard(t *testing.T, tester *ui.Tester, query string) {
+	t.Helper()
+	if err := tester.Click("筛选会话"); err != nil {
+		t.Fatalf("focus the leaderboard filter: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Key(0, ui.KeyBackspace)
+	tester.Frame()
+	if query != "" {
+		tester.Type(query)
+	}
+	tester.Frame()
+}
+
+// TestSessionLeaderboardFilters covers the local leaderboard filter: the rows
+// narrow by title/model/workspace, a click on a remaining row still opens the
+// conversation, and a query with no match shows the empty state.
+func TestSessionLeaderboardFilters(t *testing.T) {
+	service := &fakeInsights{result: sampleInsights()}
+	chat := &fakeChat{}
+	h := newHarness(t, service, chat)
+	tester := h.tester(1280, 800)
+	h.waitForText(tester, "发布检查")
+
+	// By title.
+	filterLeaderboard(t, tester, "市场")
+	h.assertTexts(tester, "市场调研")
+	h.assertNoTexts(tester, "发布检查", "临时问题")
+	// The remaining row still opens its conversation.
+	h.clickInScroll(tester, "市场调研")
+	if got := chat.activeIDs(); len(got) != 1 || got[0] != "s2" {
+		t.Fatalf("opened sessions = %v, want [s2]", got)
+	}
+
+	// By model and by workspace display name (same harness: the screen reopened).
+	tester = h.tester(1280, 800)
+	h.waitForText(tester, "市场调研")
+	filterLeaderboard(t, tester, "model-a")
+	h.assertTexts(tester, "发布检查")
+	h.assertNoTexts(tester, "市场调研", "临时问题")
+
+	filterLeaderboard(t, tester, "ZeoKeel")
+	h.assertTexts(tester, "发布检查", "市场调研")
+	h.assertNoTexts(tester, "临时问题")
+
+	// A query that matches nothing shows the empty state; clearing restores.
+	filterLeaderboard(t, tester, "zzz-no-such-conversation")
+	h.assertTexts(tester, "没有匹配的会话。")
+	h.assertNoTexts(tester, "发布检查", "市场调研", "临时问题")
+	filterLeaderboard(t, tester, "")
+	h.assertTexts(tester, "发布检查", "市场调研", "临时问题")
+}
+
+// TestFilteredLeaderboardKeyboardStillReadable covers the keyboard path with a
+// filter applied: the chosen row still reads as selected and Enter opens it.
+func TestFilteredLeaderboardKeyboardStillReadable(t *testing.T) {
+	service := &fakeInsights{result: sampleInsights()}
+	chat := &fakeChat{}
+	h := newHarness(t, service, chat)
+	tester := h.tester(1280, 800)
+	h.waitForText(tester, "发布检查")
+
+	filterLeaderboard(t, tester, "model-a")
+	h.assertTexts(tester, "发布检查")
+	focusSessionLeaderboard(t, tester)
+	tester.Key(0, ui.KeyDown)
+	tester.Frame()
+	row, ok := tester.AccessByRole(ui.RoleListItem, "")
+	if !ok {
+		t.Fatalf("the filtered leaderboard row is not in the accessibility tree; texts = %v", tester.Texts())
+	}
+	if !row.Selected {
+		t.Fatalf("the filtered leaderboard's chosen row does not read as selected; %+v", row)
+	}
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if got := chat.activeIDs(); len(got) != 1 || got[0] != "s1" {
+		t.Fatalf("Enter on the filtered row opened %v, want [s1]", got)
+	}
+}

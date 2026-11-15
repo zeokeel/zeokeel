@@ -105,6 +105,14 @@ func TestInterruptedRestoreE2E(t *testing.T) {
 	}
 
 	// 忽略 hides only the notice (the read model hint stays until the next run).
+	// The continue toast sits at the same top-right corner and would intercept
+	// the click, so close it first as a user would.
+	if tester.HasText("关闭通知") {
+		if err := tester.Click("关闭通知"); err != nil {
+			t.Fatalf("close continue toast: %v; texts = %v", err, tester.Texts())
+		}
+		tester.Frame()
+	}
 	if err := tester.Click("忽略上次运行中断提示"); err != nil {
 		t.Fatalf("dismiss interrupted notice: %v; texts = %v", err, tester.Texts())
 	}

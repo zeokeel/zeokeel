@@ -1,5 +1,39 @@
 # Verification log (final)
 
+## 0.2.39 — 2026-11-15 (半闭环收口补丁)
+
+`go version go1.27.3 linux/amd64`
+
+```
+$ gofmt -l internal cmd
+(empty)
+$ go build ./...
+OK
+$ CGO_ENABLED=0 go build ./...
+OK
+$ go vet ./...
+OK
+$ go tool mygo vet .
+OK
+$ go test ./... -count=1
+all packages ok
+$ go test -race ./internal/modules/agent ./internal/modules/sessionstore \
+    ./internal/ui/session ./internal/uiroot ./internal/ui/insights -count=1
+all packages ok (race)
+$ go run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
+307 files, 90 violations (all baseline): 0 error, 0 warn, 0 new, 0 blocking
+$ bash scripts/design-check.sh
+6 passed, 0 failed
+$ go run ./internal/devtools/ui-drive --out .cache/impl-drive-halfclosed
+93 PASS / 0 FAIL / 0 WARN / 0 BLOCKED
+$ go run ./internal/devtools/ui-snapshot .cache/impl-shots-halfclosed
+122 PNG
+```
+
+Evidence: `.cache/impl-shots-halfclosed/` (122 PNG), `.cache/impl-drive-halfclosed/drive-report.md`
+(93/93), `p2-context.png` (Context 页头动作), `p2-insights.png` (阅读列/空天/筛选),
+`p1-chat.png` (interrupted/back), `p2-team-overlay.png`.
+
 ## 0.2.38 — 2026-11-15 (UI/UX 升级小版本)
 
 `go version go1.27.3 linux/amd64`

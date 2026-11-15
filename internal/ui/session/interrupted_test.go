@@ -8,6 +8,7 @@ package session_test
 // session never shows it.
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -158,5 +159,73 @@ func TestInterruptedNoticeEnglish(t *testing.T) {
 	}
 	if _, ok := tester.Access("Dismiss the interrupted-run notice"); !ok {
 		t.Fatalf("English interrupted notice lacks the dismiss action; texts = %v", tester.Texts())
+	}
+}
+
+// announcementContains reports whether the frame asked screen readers to read
+// text containing fragment.
+func announcementContains(tester *ui.Tester, fragment string) bool {
+	for _, announcement := range tester.Announcements() {
+		if strings.Contains(announcement, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestInterruptedContinueGivesVisibleFeedback covers the two feedback layers of
+// "在输入框继续": an in-app toast and a screen-reader announcement, so the action
+// never reads as a no-op.
+func TestInterruptedContinueGivesVisibleFeedback(t *testing.T) {
+	notifier := &fakeSessionNotifier{}
+	h := newToastHarness(t, interruptedChat(), notifier)
+	tester := h.tester()
+	tester.Frame()
+	h.assertTexts(tester, "在输入框继续")
+
+	h.click(tester, "在输入框继续")
+	tester.Frame()
+
+	if !tester.Focused("输入消息…") {
+		t.Fatalf("在输入框继续 did not focus the composer; texts = %v", tester.Texts())
+	}
+	want := "已把光标放到输入框，发送内容由你决定"
+	toasts := notifier.toasts()
+	if len(toasts) == 0 {
+		t.Fatalf("continue action raised no toast")
+	}
+	last := toasts[len(toasts)-1]
+	if last.text != want {
+		t.Fatalf("continue toast = %q, want %q", last.text, want)
+	}
+	if !announcementContains(tester, want) {
+		t.Fatalf("continue action made no screen-reader announcement; announcements = %v", tester.Announcements())
+	}
+	// The notice stays (only the backend clears it) and nothing was replayed.
+	h.assertTexts(tester, "上次运行被中断")
+	if sends := h.chat.sends(); len(sends) != 0 {
+		t.Fatalf("在输入框继续 replayed a prompt: %v", sends)
+	}
+}
+
+// TestInterruptedContinueFeedbackEnglish covers the same feedback in English.
+func TestInterruptedContinueFeedbackEnglish(t *testing.T) {
+	notifier := &fakeSessionNotifier{}
+	h := newToastHarness(t, interruptedChat(), notifier)
+	h.ui.Locale().SetLanguage("en")
+	tester := h.tester()
+	tester.Frame()
+	h.assertTexts(tester, "Continue in the composer")
+
+	h.click(tester, "Continue in the composer")
+	tester.Frame()
+
+	want := "The cursor is in the composer; what to send is your call"
+	toasts := notifier.toasts()
+	if len(toasts) == 0 || toasts[len(toasts)-1].text != want {
+		t.Fatalf("English continue toast = %+v, want %q", toasts, want)
+	}
+	if !announcementContains(tester, want) {
+		t.Fatalf("English continue action made no announcement; announcements = %v", tester.Announcements())
 	}
 }
