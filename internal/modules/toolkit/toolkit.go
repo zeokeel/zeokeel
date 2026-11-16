@@ -75,6 +75,8 @@ type MCPServer struct {
 	Headers map[string]string `json:"headers,omitempty"`
 	// TimeoutMs bounds one request (0 = 30s).
 	TimeoutMs int `json:"timeoutMs,omitempty"`
+	// Auth is the HTTP authentication mode for this row (nil = none).
+	Auth *contracts.MCPAuthConfig `json:"auth,omitempty"`
 }
 
 // Config is the module's typed assembly config.
@@ -283,11 +285,26 @@ func Module() *module.Descriptor[Config] {
 			}
 		}
 
+		// OAuth connectors need a rig OAuth client before they can start (and
+		// even when their startup fails: the client is what later performs the
+		// interactive authorization). The adapter is also the UI-facing
+		// contracts.MCPAuthService.
+		authRuntime := newMCPAuthRuntime(settingsService, logf)
+		for _, server := range servers {
+			if !authOAuth2(server.config()) {
+				continue
+			}
+			if _, err := authRuntime.clientForServer(server); err != nil {
+				logf("[toolkit] mcp %q: OAuth setup: %v", server.Name, err)
+			}
+		}
+
 		// MCP servers start concurrently under one bounded budget; every
 		// connection is managed at runtime so a session expiry or a dead stdio
 		// child process reconnects on the next call and the Plugins read model
-		// follows the live connection.
-		runtime := newMCPRuntime(logf, disabledTools, cfg.MaxOutputBytes)
+		// follows the live connection. A failed startup is registered too, so
+		// an OAuth authorization can reconnect it without restarting.
+		runtime := newMCPRuntime(logf, disabledTools, cfg.MaxOutputBytes, authRuntime)
 		plans := prepareMCPServerPlans(servers, logf)
 		outcomes := runtime.startMCPServers(context.Background(), plans)
 		pluginEntries := make([]pluginEntry, 0, len(plans))
@@ -298,9 +315,13 @@ func Module() *module.Descriptor[Config] {
 				pluginEntries = append(pluginEntries, entry)
 				continue
 			}
+			managed := runtime.registerServer(plan, index)
 			outcome := outcomes[index]
 			if outcome.err != nil {
 				entry.plugin.Status = statusConnectFailed + outcome.err.Error()
+				if authStatus := authRuntime.failureStatus(plan.server); authStatus != "" {
+					entry.plugin.Status = authStatus
+				}
 				pluginEntries = append(pluginEntries, entry)
 				logf("[toolkit] mcp %q: connect failed: %v", entry.plugin.Name, outcome.err)
 				continue
@@ -311,8 +332,7 @@ func Module() *module.Descriptor[Config] {
 			entry.plugin.Version = outcome.serverVer
 			entry.plugin.Protocol = outcome.protocolVer
 			entry.plugin.Status = statusConnected
-			pluginIndex := len(pluginEntries)
-			wrapped, regularTools := runtime.attachServer(pluginIndex, plan, outcome, mcpSeen)
+			wrapped, regularTools := runtime.attachOutcome(managed, outcome, mcpSeen)
 			entry.plugin.Tools = regularTools
 			tools = append(tools, wrapped...)
 			pluginEntries = append(pluginEntries, entry)
@@ -342,6 +362,9 @@ func Module() *module.Descriptor[Config] {
 
 		registry := newToolRegistry(tools, logf)
 		runtime.bindRegistry(registry)
+		// After a completed OAuth flow the adapter asks the runtime to rebuild
+		// that connector's connection (the registry is bound by now).
+		authRuntime.onAuthorized = func(name string) { runtime.reconnectByName(name) }
 		if _, err := ctx.Provide(contracts.KeyToolkit, registry); err != nil {
 			closeLSP()
 			runtime.close()
@@ -350,6 +373,12 @@ func Module() *module.Descriptor[Config] {
 		}
 		_, err := ctx.Provide(contracts.KeyPlugins, contracts.PluginsService(plugins))
 		if err != nil {
+			closeLSP()
+			runtime.close()
+			group.close()
+			return err
+		}
+		if _, err := ctx.Provide(contracts.KeyMCPAuth, contracts.MCPAuthService(authRuntime)); err != nil {
 			closeLSP()
 			runtime.close()
 			group.close()
@@ -407,6 +436,7 @@ func Module() *module.Descriptor[Config] {
 		module.Provides(contracts.KeyJobs),
 		module.Provides(contracts.KeyExecutionHistory),
 		module.Provides(contracts.KeyTodo),
+		module.Provides(contracts.KeyMCPAuth),
 	).WithName("ZeoKeel Rig toolset")
 }
 

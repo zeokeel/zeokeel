@@ -103,7 +103,7 @@
 | Fork | ✅ | agent SessionForker + sidebar 行菜单 | 深拷贝消息/附件/tools、持久化历史/事件 |
 | Export | ✅ | session 导出 Markdown + 复制对话 + JSONL + toast | 缺跨重启导出历史（非目标） |
 | Automation 页 | ✅ | `internal/ui/automation` + module | 列表/新建（含可选模型）/运行/删除/after/every/cron + 运行历史折叠/展开 + 任务模型 Badge |
-| 能力页（Capabilities） | ✅ | `internal/ui/plugins` + toolkit + ModuleLister | 页级 Tabs（技能｜连接器，未来工作流为第三 Tab）+ 3 列官方 `ui.GridView` 卡片（技能卡 128 高、连接器卡 176 高；失败连接器卡含红色错误摘要 +「查看报错详情」+「重试」）；技能/连接器的新建/编辑/删除、测试连接、移除、传输/args/env 配置、server 级启停（`mcp.disabledServers`）、工作区 `mcp.json` opt-in；页底「诊断与设置」保留内置模块清单 + **扩展设置（已接线设置） section**；**无工具目录/工具开关**（工具默认开启）；第三方插件市场为明确非目标 |
+| 能力页（Capabilities） | ✅ | `internal/ui/plugins` + toolkit + ModuleLister | 页级 Tabs（技能｜连接器，未来工作流为第三 Tab）+ 3 列官方 `ui.GridView` 卡片（技能卡 128 高、连接器卡 176 高；失败连接器卡含红色错误摘要 +「查看报错详情」+「重试」）；技能/连接器的新建/编辑/删除、测试连接、移除、传输/args/env 配置、server 级启停（`mcp.disabledServers`）、工作区 `mcp.json` opt-in；**连接器 OAuth 2.1**：认证方式（无/Bearer/OAuth 2.1）、卡片「需要授权/授权已失效」状态、两阶段浏览器授权 modal、授权/重新授权/撤销、settings 令牌存储（`mcp.oauth.*` 脱敏）、授权后自动重连；页底「诊断与设置」保留内置模块清单 + **扩展设置（已接线设置） section**；**无工具目录/工具开关**（工具默认开启）；第三方插件市场为明确非目标 |
 | 技能 Tab（能力页） | ✅ | 能力页「技能」Tab + skills 模块 | 发现/roots/预览/刷新 + **额外技能目录（`skills.dirs`）** + **发现警告（同名遮蔽/扫描上限）** + **新建/编辑（dataDir）/删除（含确认）** + 卡片「查看内容」Markdown 预览；workspace 技能只读展示（设计约束） |
 | Memory 页 | ✅ | session Memory tab + 设置「记忆」页 | 会话工作区记忆管理（Tab 在 store 变更时自动刷新）+ 设置页**全工作区**列表/搜索/添加/编辑/删除/整理/清空/上限保留期策略 + **模型提取开关与手动提取入口（隐私/成本提示、防重复、部分失败显示已写入条数）** + **损坏文件恢复提示** |
 | Workspace→Session 树/分组/计数 | ✅ | sidebar workspace tree | 多 workspace 分组、未分组、计数、搜索、折叠、置顶/归档 |

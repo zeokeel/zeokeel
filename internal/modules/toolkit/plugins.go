@@ -110,6 +110,27 @@ func (s *pluginsService) Refresh(ctx context.Context) []contracts.MCPPlugin {
 		index  int
 		client *mcp.Client
 	}
+	// A server whose startup failed has no client yet: try to rebuild it here so
+	// the page's Reconnect action also recovers connectors that were waiting for
+	// OAuth authorization.
+	s.mu.Lock()
+	var pending []int
+	reconnect := s.reconnect
+	for index, entry := range s.entries {
+		if entry.client == nil {
+			pending = append(pending, index)
+		}
+	}
+	s.mu.Unlock()
+	for _, index := range pending {
+		if ctx.Err() != nil {
+			break
+		}
+		if reconnect != nil {
+			reconnect(index)
+		}
+	}
+
 	s.mu.Lock()
 	targets := make([]target, 0, len(s.entries))
 	for index, entry := range s.entries {
@@ -179,6 +200,9 @@ const (
 	statusConnected = "已连接"
 	// statusConnectFailed prefixes every failure status.
 	statusConnectFailed = "连接失败: "
+	// statusAuthRequired is shown when an OAuth connector needs (re)authorization
+	// instead of a generic connection failure.
+	statusAuthRequired = "需要授权"
 )
 
 // pluginDisplayName resolves the server identity used by the Plugins list:

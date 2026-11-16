@@ -186,6 +186,10 @@ func pluginStatusLabel(st *state, status string) string {
 func pluginStatusKind(status string) uikit.StatusKind {
 	lower := strings.ToLower(strings.TrimSpace(status))
 	switch {
+	case strings.Contains(lower, "需要授权"), strings.Contains(lower, "authorization needed"),
+		strings.Contains(lower, "授权已失效"), strings.Contains(lower, "authorization expired"),
+		strings.Contains(lower, "授权中"), strings.Contains(lower, "authorizing"):
+		return uikit.StatusNeedsAction
 	case strings.Contains(lower, "已连接"), strings.Contains(lower, "connected"),
 		strings.Contains(lower, "ok"), strings.Contains(lower, "成功"):
 		return uikit.StatusSuccess

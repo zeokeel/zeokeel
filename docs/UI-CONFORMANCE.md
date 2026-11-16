@@ -16,6 +16,7 @@
 | 抽屉/浮层 | `ui.Overlay` + `Row…Modal()` + `Role(RoleDialog)` + `PressedOutside` + `OverlayShortcut(Esc)` | overlays.md「A drawer on the right」 | 自绘 drawer 必须走这个 recipe（Esc/焦点陷阱/焦点归还） |
 | 长列表/日志/会话 | `ui.List` + `ListState`（Key/Selected/FollowEnd/HoldPlace/Label/Header/Choose） | list.md | 集合行不再用 `Scroll`+全量循环；测试用 `Rows`/`ItemKey`；分组列表用 `Header` 段头+计数（任务板），选中行用 `Selected`/`Submitted` 展开详情，详情渲染在列表**下方**的独立面板（选中行有 accent 背景，详情放行内会不可读） |
 | 表格 | `ui.Table` / `TableColumn` / `CellSelect` | table.md | 多列可排序数据用 Table，不用 Row 手排 |
+| 状态徽章OAuth | `uikit.StatusBadge` + `StatusKind(StatusNeedsAction)` | status.md | OAuth「需要授权/授权已失效」用 warning 语义徽章 + 必填标签；授权中是浮层内 spinner，不要用 `StatusBadge` 伪装 running；授权 modal 用 `ui.Modal` + `uikit.DialogFooter` |
 | 卡片网格 | `ui.GridView` + `GridState` | grid-view.md | 独立对象集合（能力页技能/连接器卡）用官方 `ui.GridView`：3 列、卡片固定高度（技能卡 128 / 连接器卡 176，4 DIP token）、卡片用 `t.Panel()`；禁止自绘卡片 / `Scroll`+Row 循环分列；设置式管理列表仍用平铺行（AP-25） |
 | 树/大纲 | `ui.Outline[T]` / `ui.Tree` / `OutlineState` | outline.md / tree.md | 工作区/文件树用 Outline |
 | 菜单 | `PopoverMenuButton` / `PopoverMenuButtonOptions{At,Self,Open}` / `MenuItem.Danger/Radio/ID/Subtitle/Trailing/Content/MaxWidth` / `MenuBase` | menu-button.md / context-menu.md | 行尾⋯菜单右对齐；删除项 `Danger()`；单选 `Radio()`；稳定选择 `ID()`；自绘菜单迁移 `MenuBase` |

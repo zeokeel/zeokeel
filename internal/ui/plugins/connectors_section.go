@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -74,6 +75,19 @@ type connectorCard struct {
 	ServerName string
 	Version    string
 	Protocol   string
+
+	// OAuth 2.1 authorization state of a stored connector (zero for STDIO and
+	// unauthenticated HTTP rows).
+	AuthMode    contracts.MCPAuthMode
+	AuthState   contracts.MCPAuthState
+	AuthMessage string
+	AuthCode    string
+	AuthIssuer  string
+	AuthScopes  []string
+	AuthExpires time.Time
+	// AuthAction marks a row that should offer the secondary "Authorize" /
+	// "Re-authorize" action instead of the generic retry.
+	AuthAction bool
 }
 
 // connectorsState is the Connectors tab's UI state (only touched on the UI
@@ -127,6 +141,34 @@ type connectorsState struct {
 	// removeOpen/removeIndex are the destructive remove confirmation's state.
 	removeOpen  bool
 	removeIndex int
+
+	// OAuth form fields (HTTP rows only): the mode selector plus the static
+	// bearer token and the optional OAuth overrides.
+	authMode         string
+	authToken        string
+	authScopes       string
+	authClientID     string
+	authServer       string
+	authResource     string
+	authAdvancedOpen bool
+
+	// Interactive authorization modal state. The flow is prepared off the UI
+	// thread, the browser is opened on the main thread, then Wait runs off the
+	// UI thread; authFlow/authServer identify the pending flow.
+	authOpen        bool
+	authPreparing   bool
+	authWaiting     bool
+	authFlow        contracts.MCPAuthFlow
+	authSeq         int
+	authConfigIndex int
+	authServerCfg   contracts.MCPServerConfig
+	authError       string
+	authNotice      string
+	authStatus      contracts.MCPAuthStatus
+
+	// revokeOpen/revokeServer confirm revoking one connector's token.
+	revokeOpen   bool
+	revokeServer contracts.MCPServerConfig
 }
 
 // newConnectorsState returns an empty connectors tab state.
@@ -141,6 +183,8 @@ func newConnectorsState() *connectorsState {
 // buildConnectorsTab renders the Connectors tab's page body for one frame.
 func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 	p := st.connectors
+	authService, hasAuth := st.ctx.Get(contracts.KeyMCPAuth)
+	hasAuth = hasAuth && authService != nil
 	settings, hasSettings := st.ctx.Get(contracts.KeySettings)
 	hasSettings = hasSettings && settings != nil
 	service, hasPlugins := st.ctx.Get(contracts.KeyPlugins)
@@ -152,7 +196,7 @@ func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 			p.loadStorage(st, settings)
 		}
 	}
-	cards := p.connectorCards(st, service, hasPlugins)
+	cards := p.connectorCards(st, service, hasPlugins, authService, hasAuth)
 
 	p.buildCollectionRow(c, t, st, service, hasPlugins, settings, hasSettings, len(cards))
 	if p.parseErr != "" {
@@ -199,7 +243,7 @@ func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 			return cards[index].Name
 		}
 		ui.GridView(c, &p.grid, len(cards), cardGridMinWidth, connectorCardHeight, func(index int) {
-			p.buildCard(c, t, st, cards[index], settings, service, hasPlugins)
+			p.buildCard(c, t, st, cards[index], settings, service, hasPlugins, authService, hasAuth)
 		}).
 			Label(st.tr("MCP 连接器列表", "MCP connectors list")).
 			MaxHeight(cardGridViewportTwoRows)
@@ -224,6 +268,8 @@ func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 	if p.detailOpen {
 		p.buildDetailModal(c, t, st, cards)
 	}
+	p.buildConnectorAuthModal(c, t, st, authService)
+	p.buildRevokeConfirm(c, t, st, authService)
 	p.buildRemoveConfirm(c, t, st, settings)
 }
 
@@ -308,7 +354,7 @@ func (p *connectorsState) loadStorage(st *state, settings contracts.SettingsServ
 // then the live-only assembly/workspace servers follow sorted by name. A stored
 // row matches a live server by name (or the handshake's server name).
 func (p *connectorsState) connectorCards(st *state, service contracts.PluginsService,
-	hasPlugins bool) []connectorCard {
+	hasPlugins bool, auth contracts.MCPAuthService, hasAuth bool) []connectorCard {
 	var live []contracts.MCPPlugin
 	if hasPlugins {
 		live = service.MCP()
@@ -332,7 +378,7 @@ func (p *connectorsState) connectorCards(st *state, service contracts.PluginsSer
 		if matched >= 0 {
 			used[matched] = true
 		}
-		cards = append(cards, buildStoredConnectorCard(st, row, index, live, matched, nameCounts))
+		cards = append(cards, buildStoredConnectorCard(st, row, index, live, matched, nameCounts, auth, hasAuth))
 	}
 
 	liveOnly := make([]contracts.MCPPlugin, 0)
@@ -360,7 +406,8 @@ func (p *connectorsState) connectorCards(st *state, service contracts.PluginsSer
 // buildStoredConnectorCard builds the card of one settings row merged with its
 // live state (matched is the live slice index, or -1).
 func buildStoredConnectorCard(st *state, row contracts.MCPServerConfig, index int,
-	live []contracts.MCPPlugin, matched int, nameCounts map[string]int) connectorCard {
+	live []contracts.MCPPlugin, matched int, nameCounts map[string]int,
+	auth contracts.MCPAuthService, hasAuth bool) connectorCard {
 	transport := connectorRowTransport(row)
 	address := connectorRowAddress(row)
 	name := strings.TrimSpace(row.Name)
@@ -405,10 +452,59 @@ func buildStoredConnectorCard(st *state, row contracts.MCPServerConfig, index in
 		card.StatusLabel = st.tr("待重启", "Restart needed")
 		card.StatusTooltip = st.tr("保存后需重启连接", "Connects after a restart")
 	}
+	applyConnectorAuthStatus(st, &card, row, auth, hasAuth)
 	if card.Failure {
 		card.FailureSummary = mcpFailureSummary(st, card.RawStatus)
 	}
 	return card
+}
+
+// applyConnectorAuthStatus folds the toolkit's read-only OAuth snapshot onto one
+// stored connector card. Authorization states take precedence over the generic
+// connection failure copy: the user action is "authorize", not "retry".
+func applyConnectorAuthStatus(st *state, card *connectorCard, row contracts.MCPServerConfig,
+	auth contracts.MCPAuthService, hasAuth bool) {
+	if st == nil || card == nil || !hasAuth || auth == nil || row.Auth == nil {
+		return
+	}
+	card.AuthMode = row.Auth.Mode
+	if row.Auth.Mode != contracts.MCPAuthOAuth2 {
+		return
+	}
+	status := auth.Status(row)
+	card.AuthMode = contracts.MCPAuthOAuth2
+	card.AuthState = status.State
+	card.AuthMessage = status.Message
+	card.AuthCode = status.Code
+	card.AuthIssuer = status.Issuer
+	card.AuthScopes = append([]string(nil), status.Scopes...)
+	card.AuthExpires = status.ExpiresAt
+	if !card.Enabled {
+		return
+	}
+	switch status.State {
+	case contracts.MCPAuthStateRequired:
+		card.StatusKind = uikit.StatusNeedsAction
+		card.StatusLabel = st.tr("需要授权", "Authorization needed")
+		card.StatusTooltip = firstNonEmpty(status.Message, st.tr("OAuth 2.1 授权尚未完成", "OAuth 2.1 authorization is not complete"))
+		card.Failure = false
+		card.AuthAction = true
+		card.FailureSummary = st.tr("需要授权（OAuth 2.1）", "Authorization needed (OAuth 2.1)")
+	case contracts.MCPAuthStateExpired:
+		card.StatusKind = uikit.StatusNeedsAction
+		card.StatusLabel = st.tr("授权已失效", "Authorization expired")
+		card.StatusTooltip = firstNonEmpty(status.Message, st.tr("需要重新授权", "Re-authorization required"))
+		card.Failure = false
+		card.AuthAction = true
+		card.FailureSummary = st.tr("授权已失效，请重新授权", "Authorization expired; re-authorize to reconnect")
+	case contracts.MCPAuthStateAuthorizing:
+		card.StatusKind = uikit.StatusNeedsAction
+		card.StatusLabel = st.tr("授权中", "Authorizing")
+		card.StatusTooltip = st.tr("正在等待浏览器授权", "Waiting for browser authorization")
+		card.Failure = false
+		card.AuthAction = true
+		card.FailureSummary = st.tr("等待浏览器授权…", "Waiting for browser authorization…")
+	}
 }
 
 // buildLiveConnectorCard builds a read-only card for a live-only assembly or
@@ -454,7 +550,7 @@ func buildLiveConnectorCard(st *state, plugin contracts.MCPPlugin, index int) co
 // with details/retry; the metadata row; and the server-level enable switch.
 func (p *connectorsState) buildCard(c *ui.Context, t *design.Tokens, st *state,
 	card connectorCard, settings contracts.SettingsService, service contracts.PluginsService,
-	hasPlugins bool) {
+	hasPlugins bool, auth contracts.MCPAuthService, hasAuth bool) {
 	design.Apply(ui.Column(c).Key("connector/"+card.Key), t.Panel()).
 		FillWidth().FillHeight().Padding(design.Space3).Gap(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -483,6 +579,26 @@ func (p *connectorsState) buildCard(c *ui.Context, t *design.Tokens, st *state,
 				if card.ConfigIndex < 0 {
 					return
 				}
+				if card.AuthMode == contracts.MCPAuthOAuth2 || card.AuthMode == contracts.MCPAuthBearer {
+					authLabel := st.tr("授权", "Authorize")
+					if card.AuthState == contracts.MCPAuthStateExpired || card.AuthState == contracts.MCPAuthStateAuthorized {
+						authLabel = st.tr("重新授权", "Re-authorize")
+					}
+					if m.Item(authLabel).Chosen() {
+						p.startConnectorAuth(st, auth, card.ConfigIndex)
+						c.Invalidate()
+					}
+					if card.AuthState == contracts.MCPAuthStateAuthorized {
+						revoke := m.Item(st.tr("撤销授权", "Revoke authorization"))
+						revoke.Danger()
+						if revoke.Chosen() {
+							p.revokeServer = p.servers[card.ConfigIndex]
+							p.revokeOpen = true
+							c.Invalidate()
+						}
+					}
+					m.Separator()
+				}
 				if m.Item(st.tr("编辑", "Edit")).Chosen() {
 					p.openEditConnector(card)
 					c.Invalidate()
@@ -500,10 +616,14 @@ func (p *connectorsState) buildCard(c *ui.Context, t *design.Tokens, st *state,
 		address := firstNonEmpty(card.Address, mcpDetailValue(""))
 		design.Apply(ui.Text(c, address), t.MonoText(design.TypeXXS)).
 			TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…").Tooltip(card.Address)
-		if card.Failure {
+		switch {
+		case card.Failure:
 			rawStatus := strings.TrimSpace(card.RawStatus)
 			design.Apply(ui.Text(c, card.FailureSummary), t.Font(design.TypeXXS)).
 				TextColor(t.DangerText).MaxLines(1).Ellipsis("…").Tooltip(rawStatus)
+		case card.AuthAction && card.FailureSummary != "":
+			design.Apply(ui.Text(c, card.FailureSummary), t.Font(design.TypeXXS)).
+				TextColor(t.WarningText).MaxLines(1).Ellipsis("…").Tooltip(card.AuthMessage)
 		}
 
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -512,6 +632,23 @@ func (p *connectorsState) buildCard(c *ui.Context, t *design.Tokens, st *state,
 			design.Apply(ui.Text(c, connectorToolCountLabel(st, card.Tools)),
 				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).NoWrap()
 			ui.Spacer(c).Grow(1)
+			if card.AuthAction {
+				authLabel := st.tr("授权", "Authorize")
+				if card.AuthState == contracts.MCPAuthStateExpired || card.AuthState == contracts.MCPAuthStateAuthorized {
+					authLabel = st.tr("重新授权", "Re-authorize")
+				}
+				if design.Apply(ui.Button(c, authLabel), t.SecondaryButton()).Clicked() {
+					p.startConnectorAuth(st, auth, card.ConfigIndex)
+					c.Invalidate()
+				}
+				if design.Apply(ui.Button(c, st.tr("查看详情", "View details")),
+					t.SecondaryButton()).Clicked() {
+					p.detailOpen = true
+					p.detailKey = card.Key
+					c.Invalidate()
+				}
+				return
+			}
 			if !card.Failure {
 				return
 			}

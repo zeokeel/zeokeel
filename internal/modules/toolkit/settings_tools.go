@@ -77,12 +77,18 @@ func (t maskedSettingsGet) Invoke(ctx context.Context, call rig.ToolCall) (rig.T
 // internal/ui/settings/redact.go so the model-facing and export-facing
 // redaction agree; the backend cannot import the UI module.
 var credentialMarkers = []string{
-	"apikey", "api_key", "token", "secret", "password", "authorization",
+	"apikey", "api_key", "api-key", "access_key", "private_key",
+	"token", "secret", "password", "authorization",
 }
 
 // hasCredentialMarker reports whether text looks credential-named.
 func hasCredentialMarker(text string) bool {
 	lower := strings.ToLower(text)
+	// OAuth token records are opaque rig JSON; hide the whole value from the
+	// model even though individual fields also carry "token"-named keys.
+	if strings.HasPrefix(lower, contracts.MCPAuthSettingPrefix) {
+		return true
+	}
 	for _, marker := range credentialMarkers {
 		if strings.Contains(lower, marker) {
 			return true
@@ -135,6 +141,10 @@ func redactJSONValue(value any) any {
 				redacted[key] = "***"
 				continue
 			}
+			if strings.EqualFold(key, "headers") || strings.EqualFold(key, "header") {
+				redacted[key] = maskHeaderValue(item)
+				continue
+			}
 			redacted[key] = redactJSONValue(item)
 		}
 		return redacted
@@ -154,5 +164,43 @@ func redactJSONValue(value any) any {
 		return typed
 	default:
 		return value
+	}
+}
+
+// maskHeaderValue hides every value of an HTTP header object: header names are
+// user-chosen, so credential markers cannot catch e.g. X-Api-Key.
+func maskHeaderValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		masked := make(map[string]any, len(typed))
+		for key, item := range typed {
+			if text, ok := item.(string); ok && strings.Contains(text, "Bearer ") {
+				masked[key] = "Bearer ***"
+				continue
+			}
+			masked[key] = "***"
+		}
+		return masked
+	case []any:
+		masked := make([]any, len(typed))
+		for index, item := range typed {
+			text, ok := item.(string)
+			if !ok {
+				masked[index] = "***"
+				continue
+			}
+			switch {
+			case strings.Contains(text, "Bearer "):
+				masked[index] = "Bearer ***"
+			case strings.Contains(text, ":"):
+				key, _, _ := strings.Cut(text, ":")
+				masked[index] = strings.TrimSpace(key) + ": ***"
+			default:
+				masked[index] = "***"
+			}
+		}
+		return masked
+	default:
+		return "***"
 	}
 }

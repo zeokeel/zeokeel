@@ -47,6 +47,51 @@ func transportValue(display string) string {
 	return connectorTransportHTTP
 }
 
+// Auth mode selector values (the stored strings are contracts.MCPAuthMode).
+const (
+	authModeNoneDisplay   = "无认证"
+	authModeBearerDisplay = "Bearer 令牌"
+	authModeOAuthDisplay  = "OAuth 2.1"
+)
+
+// authModeDisplay maps the stored mode to the selector's display text.
+func authModeDisplay(st *state, mode string) string {
+	switch contracts.MCPAuthMode(mode) {
+	case contracts.MCPAuthBearer:
+		return st.tr(authModeBearerDisplay, "Bearer token")
+	case contracts.MCPAuthOAuth2:
+		return st.tr(authModeOAuthDisplay, "OAuth 2.1")
+	default:
+		return st.tr(authModeNoneDisplay, "No authentication")
+	}
+}
+
+// authModeValue maps the selector's display text back to the stored mode.
+func authModeValue(st *state, display string) string {
+	switch display {
+	case st.tr(authModeBearerDisplay, "Bearer token"):
+		return string(contracts.MCPAuthBearer)
+	case st.tr(authModeOAuthDisplay, "OAuth 2.1"):
+		return string(contracts.MCPAuthOAuth2)
+	default:
+		return ""
+	}
+}
+
+// splitAuthScopes accepts comma/space/newline separated scopes.
+func splitAuthScopes(raw string) []string {
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == ' ' || r == '\n' || r == '\t'
+	})
+	out := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if trimmed := strings.TrimSpace(field); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
 // openAddConnector opens the form in add mode with a clean HTTP draft.
 func (p *connectorsState) openAddConnector() {
 	p.formOpen = true
@@ -66,6 +111,21 @@ func (p *connectorsState) openEditConnector(card connectorCard) {
 	p.transport = connectorRowTransport(row)
 	p.name = strings.TrimSpace(row.Name)
 	p.url = strings.TrimSpace(row.URL)
+	p.authMode = ""
+	p.authToken = ""
+	p.authScopes = ""
+	p.authClientID = ""
+	p.authServer = ""
+	p.authResource = ""
+	p.authAdvancedOpen = false
+	if auth := row.Auth; auth != nil {
+		p.authMode = string(auth.Mode)
+		p.authToken = auth.Token
+		p.authScopes = strings.Join(auth.Scopes, ", ")
+		p.authClientID = auth.ClientID
+		p.authServer = auth.AuthorizationServer
+		p.authResource = auth.Resource
+	}
 	p.command = strings.TrimSpace(row.Command)
 	p.args = strings.Join(row.Args, " ")
 	p.env = strings.Join(row.Env, "\n")
@@ -85,6 +145,13 @@ func (p *connectorsState) resetFormDraft() {
 	p.editIndex = -1
 	p.name = ""
 	p.url = ""
+	p.authMode = ""
+	p.authToken = ""
+	p.authScopes = ""
+	p.authClientID = ""
+	p.authServer = ""
+	p.authResource = ""
+	p.authAdvancedOpen = false
 	p.command = ""
 	p.args = ""
 	p.env = ""
@@ -120,90 +187,146 @@ func (p *connectorsState) buildFormModal(c *ui.Context, t *design.Tokens, st *st
 					c.Invalidate()
 				},
 			})
-			ui.Field(c, st.tr("传输", "Transport"), func() {
-				choice := transportDisplay(p.transport)
-				selector := ui.Select(c, &choice, []string{"HTTP", "STDIO"}).
-					Label(inputLabel(st, st.tr("传输", "Transport")))
-				if selector.Changed() {
-					p.transport = transportValue(choice)
-					c.Invalidate()
-				}
-			})
-			ui.Field(c, st.tr("名称", "Name"), func() {
-				ui.TextInput(c, &p.name).
-					Label(inputLabel(st, st.tr("名称", "Name"))).
-					Placeholder(st.tr("例如：files", "For example: files")).
-					FillWidth().AutoFocus()
-			})
-			if stdio {
-				ui.Fieldset(c, st.tr("STDIO 进程", "STDIO process"), func() {
-					ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
-						ui.Column(c).FillWidth().Grow(1).Children(func() {
-							ui.Field(c, st.tr("命令", "Command"), func() {
-								ui.TextInput(c, &p.command).
-									Label(inputLabel(st, st.tr("命令", "Command"))).
-									Placeholder(st.tr("例如：npx", "For example: npx")).FillWidth()
-							})
-						})
-						ui.Column(c).FillWidth().Grow(2).Children(func() {
-							ui.Field(c, st.tr("参数", "Arguments"), func() {
-								ui.TextInput(c, &p.args).
-									Label(inputLabel(st, st.tr("参数", "Arguments"))).
-									Placeholder(st.tr("空格分隔，例如：-y server-github",
-										"Space-separated, e.g. -y server-github")).FillWidth()
-							}).Description(st.tr("空格分隔。", "Space-separated."))
-						})
-					})
-					ui.Field(c, st.tr("环境变量", "Environment"), func() {
-						envInput := ui.TextArea(c, &p.env).
-							Label(inputLabel(st, st.tr("环境变量", "Environment"))).
-							Placeholder(st.tr("每行 KEY=VALUE，例如：GITHUB_TOKEN=abc",
-								"One KEY=VALUE per line, e.g. GITHUB_TOKEN=abc")).
-							MinHeight(design.Space6 * 2).FillWidth()
-						if envInput.Changed() {
-							p.envErr = ""
-						}
-					}).Description(st.tr("每行一个 KEY=VALUE；值可以包含空格。",
-						"One KEY=VALUE per line; values may contain spaces.")).
-						Error(p.envErr)
-				})
-			} else {
-				ui.Field(c, "URL", func() {
-					ui.TextInput(c, &p.url).Label(inputLabel(st, "URL")).
-						Placeholder("https://mcp.example.com/mcp").FillWidth()
-				})
-			}
-			// The optional per-server timeout applies to both transports: one
-			// request/handshake bound, blank (or 0) keeps the toolkit default.
-			ui.Field(c, st.tr("超时 (ms)", "Timeout (ms)"), func() {
-				ui.TextInput(c, &p.timeoutMs).
-					Label(inputLabel(st, st.tr("超时 (ms)", "Timeout (ms)"))).
-					Placeholder(st.tr("留空 = 默认 30 秒", "Blank = default 30s")).FillWidth()
-			}).Description(st.tr("毫秒；0 或留空使用默认 30 秒。",
-				"Milliseconds; 0 or blank uses the default 30s."))
-			if p.formErr != "" {
-				uikit.ErrorLine(c, p.formErr)
-			}
-			if p.testStatus != "" {
-				if p.testErr {
-					uikit.ErrorLine(c, p.testStatus)
-				} else {
-					design.Apply(ui.Text(c, p.testStatus), t.Font(design.TypeXS)).
-						TextColor(t.SuccessText).MaxLines(2)
-				}
-			}
-			if p.testing {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					ui.Spinner(c).Label(st.tr("正在测试…", "Testing…")).
-						Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
-					design.Apply(ui.Text(c, st.tr("正在测试…", "Testing…")),
-						t.Font(design.TypeXXS)).TextColor(t.LabelSecondary)
-				})
-			}
 			testLabel := st.tr("测试连接", "Test connection")
 			if p.testing {
 				testLabel = st.tr("正在测试…", "Testing…")
 			}
+			ui.Scroll(c).FillWidth().MaxHeight(design.DialogBodyMax).Children(func() {
+				ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
+					ui.Field(c, st.tr("传输", "Transport"), func() {
+						choice := transportDisplay(p.transport)
+						selector := ui.Select(c, &choice, []string{"HTTP", "STDIO"}).
+							Label(inputLabel(st, st.tr("传输", "Transport")))
+						if selector.Changed() {
+							p.transport = transportValue(choice)
+							c.Invalidate()
+						}
+					})
+					ui.Field(c, st.tr("名称", "Name"), func() {
+						ui.TextInput(c, &p.name).
+							Label(inputLabel(st, st.tr("名称", "Name"))).
+							Placeholder(st.tr("例如：files", "For example: files")).
+							FillWidth().AutoFocus()
+					})
+					if stdio {
+						ui.Fieldset(c, st.tr("STDIO 进程", "STDIO process"), func() {
+							ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
+								ui.Column(c).FillWidth().Grow(1).Children(func() {
+									ui.Field(c, st.tr("命令", "Command"), func() {
+										ui.TextInput(c, &p.command).
+											Label(inputLabel(st, st.tr("命令", "Command"))).
+											Placeholder(st.tr("例如：npx", "For example: npx")).FillWidth()
+									})
+								})
+								ui.Column(c).FillWidth().Grow(2).Children(func() {
+									ui.Field(c, st.tr("参数", "Arguments"), func() {
+										ui.TextInput(c, &p.args).
+											Label(inputLabel(st, st.tr("参数", "Arguments"))).
+											Placeholder(st.tr("空格分隔，例如：-y server-github",
+												"Space-separated, e.g. -y server-github")).FillWidth()
+									}).Description(st.tr("空格分隔。", "Space-separated."))
+								})
+							})
+							ui.Field(c, st.tr("环境变量", "Environment"), func() {
+								envInput := ui.TextArea(c, &p.env).
+									Label(inputLabel(st, st.tr("环境变量", "Environment"))).
+									Placeholder(st.tr("每行 KEY=VALUE，例如：GITHUB_TOKEN=abc",
+										"One KEY=VALUE per line, e.g. GITHUB_TOKEN=abc")).
+									MinHeight(design.Space6 * 2).FillWidth()
+								if envInput.Changed() {
+									p.envErr = ""
+								}
+							}).Description(st.tr("每行一个 KEY=VALUE；值可以包含空格。",
+								"One KEY=VALUE per line; values may contain spaces.")).
+								Error(p.envErr)
+						})
+					} else {
+						ui.Field(c, "URL", func() {
+							ui.TextInput(c, &p.url).Label(inputLabel(st, "URL")).
+								Placeholder("https://mcp.example.com/mcp").FillWidth()
+						})
+						ui.Field(c, st.tr("认证方式", "Authentication"), func() {
+							choice := authModeDisplay(st, p.authMode)
+							selector := ui.Select(c, &choice, []string{
+								st.tr(authModeNoneDisplay, "No authentication"),
+								st.tr(authModeBearerDisplay, "Bearer token"),
+								st.tr(authModeOAuthDisplay, "OAuth 2.1"),
+							}).Label(inputLabel(st, st.tr("认证方式", "Authentication")))
+							if selector.Changed() {
+								p.authMode = authModeValue(st, choice)
+								c.Invalidate()
+							}
+						}).Description(st.tr(
+							"Bearer 令牌作为 Authorization 头发送；OAuth 2.1 在保存后于卡片上完成浏览器授权。",
+							"Bearer tokens are sent as the Authorization header; OAuth 2.1 authorizes in the browser from the saved card."))
+						switch contracts.MCPAuthMode(p.authMode) {
+						case contracts.MCPAuthBearer:
+							ui.Field(c, st.tr("Bearer 令牌", "Bearer token"), func() {
+								ui.TextInput(c, &p.authToken).
+									Label(inputLabel(st, st.tr("Bearer 令牌", "Bearer token"))).
+									Placeholder(st.tr("粘贴访问令牌", "Paste the access token")).
+									FillWidth().Password()
+							}).Description(st.tr("令牌保存在设置中，诊断与模型读取时会被隐藏。",
+								"The token is stored in settings and redacted from diagnostics/model reads."))
+						case contracts.MCPAuthOAuth2:
+							ui.Collapsible(c, st.tr("OAuth 2.1 高级选项", "OAuth 2.1 options"), &p.authAdvancedOpen, func() {
+								ui.Field(c, st.tr("作用域", "Scopes"), func() {
+									ui.TextInput(c, &p.authScopes).
+										Label(inputLabel(st, st.tr("作用域", "Scopes"))).
+										Placeholder(st.tr("留空使用服务器要求（逗号或空格分隔）",
+											"Blank uses the server challenge (comma/space separated)")).
+										FillWidth()
+								})
+								ui.Field(c, st.tr("客户端 ID（可选）", "Client ID (optional)"), func() {
+									ui.TextInput(c, &p.authClientID).
+										Label(inputLabel(st, st.tr("客户端 ID（可选）", "Client ID (optional)"))).
+										Placeholder(st.tr("留空使用动态注册", "Blank uses dynamic registration")).
+										FillWidth()
+								})
+								ui.Field(c, st.tr("授权服务器（可选）", "Authorization server (optional)"), func() {
+									ui.TextInput(c, &p.authServer).
+										Label(inputLabel(st, st.tr("授权服务器（可选）", "Authorization server (optional)"))).
+										Placeholder(st.tr("留空从服务器元数据发现", "Blank discovers from server metadata")).
+										FillWidth()
+								})
+								ui.Field(c, st.tr("资源标识（可选）", "Resource (optional)"), func() {
+									ui.TextInput(c, &p.authResource).
+										Label(inputLabel(st, st.tr("资源标识（可选）", "Resource (optional)"))).
+										Placeholder(st.tr("留空使用连接器 URL", "Blank uses the connector URL")).
+										FillWidth()
+								})
+							})
+						}
+					}
+					// The optional per-server timeout applies to both transports: one
+					// request/handshake bound, blank (or 0) keeps the toolkit default.
+					ui.Field(c, st.tr("超时 (ms)", "Timeout (ms)"), func() {
+						ui.TextInput(c, &p.timeoutMs).
+							Label(inputLabel(st, st.tr("超时 (ms)", "Timeout (ms)"))).
+							Placeholder(st.tr("留空 = 默认 30 秒", "Blank = default 30s")).FillWidth()
+					}).Description(st.tr("毫秒；0 或留空使用默认 30 秒。",
+						"Milliseconds; 0 or blank uses the default 30s."))
+					if p.formErr != "" {
+						uikit.ErrorLine(c, p.formErr)
+					}
+					if p.testStatus != "" {
+						if p.testErr {
+							uikit.ErrorLine(c, p.testStatus)
+						} else {
+							design.Apply(ui.Text(c, p.testStatus), t.Font(design.TypeXS)).
+								TextColor(t.SuccessText).MaxLines(2)
+						}
+					}
+					if p.testing {
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+							ui.Spinner(c).Label(st.tr("正在测试…", "Testing…")).
+								Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+							design.Apply(ui.Text(c, st.tr("正在测试…", "Testing…")),
+								t.Font(design.TypeXXS)).TextColor(t.LabelSecondary)
+						})
+					}
+				})
+			})
 			uikit.DialogFooter(c, []uikit.DialogAction{
 				{Label: testLabel, Disabled: p.testing, OnClick: func() {
 					p.startConnectorTest(st)
@@ -249,11 +372,39 @@ func (p *connectorsState) saveConnector(st *state, settings contracts.SettingsSe
 		st.statusErr = true
 		return
 	}
+	// A changed OAuth connector must not keep a token issued for its old
+	// identity/URL/scopes: delete the stale record best-effort.
+	if p.editIndex >= 0 && p.editIndex < len(previous) {
+		old := previous[p.editIndex]
+		if oauthRecordMustBeDropped(old, row) {
+			_ = settings.Set(contracts.MCPAuthSettingKey(old.Name), "")
+		}
+	}
 	p.servers = rows
 	p.formOpen = false
 	p.resetFormDraft()
 	st.status = st.tr("已保存，重启生效", "Saved; restart applies")
 	st.statusErr = false
+}
+
+// oauthRecordMustBeDropped reports whether editing a connector invalidates its
+// persisted OAuth token (mode/name/URL/client/scopes/AS changed).
+func oauthRecordMustBeDropped(previous, next contracts.MCPServerConfig) bool {
+	if previous.Auth == nil || previous.Auth.Mode != contracts.MCPAuthOAuth2 {
+		return false
+	}
+	if next.Auth == nil || next.Auth.Mode != contracts.MCPAuthOAuth2 {
+		return true
+	}
+	if !strings.EqualFold(strings.TrimSpace(previous.Name), strings.TrimSpace(next.Name)) {
+		return true
+	}
+	if strings.TrimSpace(previous.URL) != strings.TrimSpace(next.URL) ||
+		strings.TrimSpace(previous.Auth.ClientID) != strings.TrimSpace(next.Auth.ClientID) ||
+		strings.TrimSpace(previous.Auth.AuthorizationServer) != strings.TrimSpace(next.Auth.AuthorizationServer) {
+		return true
+	}
+	return strings.Join(previous.Auth.Scopes, "\x00") != strings.Join(next.Auth.Scopes, "\x00")
 }
 
 // connectorDraft validates the form and returns the settings row. Problems are
@@ -272,6 +423,9 @@ func (p *connectorsState) connectorDraft(st *state, checkDuplicates bool) (contr
 		return contracts.MCPServerConfig{}, false
 	}
 	row := contracts.MCPServerConfig{Name: name, TimeoutMs: timeoutMs}
+	if p.editIndex >= 0 && p.editIndex < len(p.servers) {
+		row.Headers = p.servers[p.editIndex].Headers
+	}
 
 	if p.transport == connectorTransportStdio {
 		command := strings.TrimSpace(p.command)
@@ -341,7 +495,46 @@ func (p *connectorsState) connectorDraft(st *state, checkDuplicates bool) (contr
 	}
 	// HTTP rows keep the legacy {name,url} shape (no transport field).
 	row.URL = urlValue
+	if auth, authErr := p.authDraft(st); authErr != "" {
+		p.formErr = authErr
+		return contracts.MCPServerConfig{}, false
+	} else if auth != nil {
+		row.Auth = auth
+	}
 	return row, true
+}
+
+// authDraft validates the authentication section of one HTTP draft. A blank
+// bearer token means "no authentication" (historical rows keep working).
+func (p *connectorsState) authDraft(st *state) (*contracts.MCPAuthConfig, string) {
+	switch contracts.MCPAuthMode(p.authMode) {
+	case contracts.MCPAuthBearer:
+		token := strings.TrimSpace(p.authToken)
+		if token == "" {
+			return nil, ""
+		}
+		return &contracts.MCPAuthConfig{Mode: contracts.MCPAuthBearer, Token: token}, ""
+	case contracts.MCPAuthOAuth2:
+		if !validOAuthEndpoint(p.url) {
+			return nil, st.tr("OAuth 仅支持 https URL（本机回环地址可用 http）",
+				"OAuth requires an https URL (loopback http is allowed)")
+		}
+		server := strings.TrimSpace(p.authServer)
+		if server != "" {
+			if !validOAuthEndpoint(server) {
+				return nil, st.tr("授权服务器必须使用 https（本机回环地址可用 http）",
+					"The authorization server must use https (loopback http is allowed)")
+			}
+		}
+		return &contracts.MCPAuthConfig{
+			Mode:                contracts.MCPAuthOAuth2,
+			Scopes:              splitAuthScopes(p.authScopes),
+			ClientID:            strings.TrimSpace(p.authClientID),
+			AuthorizationServer: server,
+		}, ""
+	default:
+		return nil, ""
+	}
 }
 
 // duplicateName reports whether another stored row already uses name.
@@ -355,6 +548,23 @@ func (p *connectorsState) duplicateName(name string) bool {
 		}
 	}
 	return false
+}
+
+// validOAuthEndpoint accepts https, or http only for loopback hosts.
+func validOAuthEndpoint(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "https":
+		return true
+	case "http":
+		host := strings.ToLower(strings.Trim(parsed.Hostname(), "[]"))
+		return host == "127.0.0.1" || host == "::1" || host == "localhost"
+	default:
+		return false
+	}
 }
 
 // validSearchEndpoint reports whether raw is an absolute http(s) URL with a
@@ -422,6 +632,10 @@ func parseConnectorTimeout(st *state, value string) (int, string) {
 	return ms, ""
 }
 
+// errMCPOAuthAuthorizationRequired marks an OAuth target whose live probe needs
+// a browser authorization first (there is no token in the unsaved draft).
+var errMCPOAuthAuthorizationRequired = errors.New("OAuth authorization required")
+
 // MCPConnectionTester is the seam behind the async "test connection" action:
 // the default probes the configured endpoint/executable, tests replace it.
 var MCPConnectionTester = defaultMCPConnectionTest
@@ -444,6 +658,9 @@ func defaultMCPConnectionTest(ctx context.Context, cfg contracts.MCPServerConfig
 	if endpoint == "" {
 		return errors.New("url is required")
 	}
+	if cfg.Auth != nil && cfg.Auth.Mode == contracts.MCPAuthOAuth2 {
+		return errMCPOAuthAuthorizationRequired
+	}
 	body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ZeoKeel","version":"probe"}}}`
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body))
 	if err != nil {
@@ -451,6 +668,12 @@ func defaultMCPConnectionTest(ctx context.Context, cfg contracts.MCPServerConfig
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json, text/event-stream")
+	for name, value := range cfg.Headers {
+		request.Header.Set(name, value)
+	}
+	if cfg.Auth != nil && cfg.Auth.Mode == contracts.MCPAuthBearer {
+		request.Header.Set("Authorization", "Bearer "+strings.TrimSpace(cfg.Auth.Token))
+	}
 	client := &http.Client{Timeout: 4 * time.Second}
 	response, err := client.Do(request)
 	if err != nil {
@@ -512,10 +735,13 @@ func mcpTestStatusText(locale contracts.LocaleService, err error) string {
 		strings.Contains(lower, "timed out"):
 		return uikit.T(locale, "连接超时（服务器未及时响应）",
 			"Connection timed out (the server did not answer in time)")
+	case strings.Contains(lower, "oauth authorization required"):
+		return uikit.T(locale, "需要 OAuth 授权：保存后在卡片点击「授权」完成浏览器授权。",
+			"OAuth authorization is required: save the connector, then use Authorize on its card.")
 	case strings.Contains(lower, "401"), strings.Contains(lower, "403"),
 		strings.Contains(lower, "unauthorized"), strings.Contains(lower, "forbidden"):
-		return uikit.T(locale, "鉴权失败（请检查访问令牌）",
-			"Authentication failed (check the access token)")
+		return uikit.T(locale, "鉴权失败（请检查访问令牌或 OAuth 授权）",
+			"Authentication failed (check the token or OAuth authorization)")
 	case strings.Contains(lower, "refused"), strings.Contains(lower, "no such host"),
 		strings.Contains(lower, "dial tcp"), strings.Contains(lower, "connect:"):
 		return uikit.T(locale, "无法连接到服务器", "Could not reach the server")
@@ -607,6 +833,35 @@ func connectorDetailRows(st *state, card connectorCard) []uikit.PropertyRow {
 	if value := strings.TrimSpace(card.Protocol); value != "" {
 		rows = append(rows, uikit.PropertyRow{Label: st.tr("协议", "Protocol"), Value: value, Mono: true})
 	}
+	if card.AuthMode == contracts.MCPAuthOAuth2 {
+		rows = append(rows, uikit.PropertyRow{Label: st.tr("认证", "Authentication"), Value: "OAuth 2.1"})
+		switch card.AuthState {
+		case contracts.MCPAuthStateAuthorized:
+			rows = append(rows, uikit.PropertyRow{Label: st.tr("授权状态", "Authorization"), Value: st.tr("已授权", "Authorized")})
+		case contracts.MCPAuthStateRequired:
+			rows = append(rows, uikit.PropertyRow{Label: st.tr("授权状态", "Authorization"), Value: st.tr("需要授权", "Authorization needed")})
+		case contracts.MCPAuthStateExpired:
+			rows = append(rows, uikit.PropertyRow{Label: st.tr("授权状态", "Authorization"), Value: st.tr("已失效", "Expired")})
+		default:
+			rows = append(rows, uikit.PropertyRow{Label: st.tr("授权状态", "Authorization"), Value: firstNonEmpty(string(card.AuthState), st.tr("未知", "Unknown"))})
+		}
+		if card.AuthIssuer != "" {
+			rows = append(rows, uikit.PropertyRow{Label: st.tr("授权服务器", "Authorization server"), Value: card.AuthIssuer, Mono: true})
+		}
+		if len(card.AuthScopes) > 0 {
+			rows = append(rows, uikit.PropertyRow{Label: st.tr("作用域", "Scopes"), Value: strings.Join(card.AuthScopes, " "), Mono: true})
+		}
+		if !card.AuthExpires.IsZero() {
+			rows = append(rows, uikit.PropertyRow{Label: st.tr("令牌到期", "Token expires"), Value: uikit.FormatDateTime(st.locale, card.AuthExpires)})
+		}
+		if card.AuthCode != "" {
+			rows = append(rows, uikit.PropertyRow{Label: st.tr("错误码", "Error code"), Value: card.AuthCode, Mono: true})
+		}
+	} else if card.AuthMode == contracts.MCPAuthBearer {
+		rows = append(rows, uikit.PropertyRow{Label: st.tr("认证", "Authentication"), Value: st.tr("Bearer 令牌", "Bearer token")})
+	} else if card.Transport == connectorTransportHTTP {
+		rows = append(rows, uikit.PropertyRow{Label: st.tr("认证", "Authentication"), Value: st.tr("无", "None")})
+	}
 	rows = append(rows,
 		uikit.PropertyRow{Label: st.tr("工具数", "Tools"), Value: fmt.Sprintf("%d", card.Tools)},
 		uikit.PropertyRow{Label: st.tr("状态", "Status"), Value: card.StatusLabel},
@@ -662,6 +917,7 @@ func (p *connectorsState) removeConnector(st *state, settings contracts.Settings
 		return
 	}
 	previous := append([]contracts.MCPServerConfig(nil), p.servers...)
+	removed := p.servers[index]
 	kept := make([]contracts.MCPServerConfig, 0, len(p.servers)-1)
 	kept = append(kept, p.servers[:index]...)
 	kept = append(kept, p.servers[index+1:]...)
@@ -674,6 +930,9 @@ func (p *connectorsState) removeConnector(st *state, settings contracts.Settings
 		st.status = st.tr("保存失败：", "Save failed: ") + err.Error()
 		st.statusErr = true
 		return
+	}
+	if removed.Auth != nil && removed.Auth.Mode == contracts.MCPAuthOAuth2 {
+		_ = settings.Set(contracts.MCPAuthSettingKey(removed.Name), "")
 	}
 	p.servers = kept
 	if p.editIndex == index {

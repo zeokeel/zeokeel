@@ -2,8 +2,11 @@ package contracts
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
+	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 )
@@ -59,6 +62,137 @@ type MCPServerConfig struct {
 	// default). A hung endpoint then fails at this budget instead of the 30s
 	// rig request default, so it cannot stall product startup.
 	TimeoutMs int `json:"timeoutMs,omitempty"`
+	// Headers are extra HTTP request headers (assembly-provided or advanced
+	// settings); the OAuth bearer header is injected separately.
+	Headers map[string]string `json:"headers,omitempty"`
+	// Auth configures the HTTP authentication mode. A nil Auth is the
+	// historical unauthenticated row.
+	Auth *MCPAuthConfig `json:"auth,omitempty"`
+}
+
+// MCPAuthMode is the HTTP authentication mode of one connector.
+type MCPAuthMode string
+
+const (
+	// MCPAuthNone means no authentication (the zero value).
+	MCPAuthNone MCPAuthMode = ""
+	// MCPAuthBearer sends a static Bearer token from MCPAuthConfig.Token.
+	MCPAuthBearer MCPAuthMode = "bearer"
+	// MCPAuthOAuth2 runs the OAuth 2.1 authorization-code flow (rig owns the
+	// protocol; the toolkit owns the browser/token wiring).
+	MCPAuthOAuth2 MCPAuthMode = "oauth2"
+)
+
+// MCPAuthConfig is the authentication half of one connector row. OAuth tokens
+// are never stored here: they live in a separate mcp.oauth.<server> settings
+// row owned by the toolkit's TokenStore.
+type MCPAuthConfig struct {
+	Mode MCPAuthMode `json:"mode,omitempty"`
+	// Token is the static Bearer token (Mode=bearer).
+	Token string `json:"token,omitempty"`
+	// Scopes optionally overrides the OAuth scopes; empty uses the server's
+	// 401 challenge / Protected Resource Metadata.
+	Scopes []string `json:"scopes,omitempty"`
+	// AuthorizationServer optionally overrides the discovered authorization
+	// server identifier.
+	AuthorizationServer string `json:"authorizationServer,omitempty"`
+	// ClientID is an optional pre-registered OAuth client; empty uses dynamic
+	// client registration when the AS supports it.
+	ClientID string `json:"clientId,omitempty"`
+	// Resource optionally overrides the canonical OAuth resource URI; empty
+	// uses the connector URL.
+	Resource string `json:"resource,omitempty"`
+}
+
+// MCPAuthState is the connector authorization state surfaced to the UI.
+type MCPAuthState string
+
+const (
+	MCPAuthStateNone        MCPAuthState = "none"
+	MCPAuthStateRequired    MCPAuthState = "required"
+	MCPAuthStateAuthorizing MCPAuthState = "authorizing"
+	MCPAuthStateAuthorized  MCPAuthState = "authorized"
+	MCPAuthStateExpired     MCPAuthState = "expired"
+	MCPAuthStateError       MCPAuthState = "error"
+)
+
+// MCPAuthStatus is a read-only authorization snapshot for one connector.
+type MCPAuthStatus struct {
+	State     MCPAuthState
+	Issuer    string
+	Scopes    []string
+	ExpiresAt time.Time
+	// Code is a stable machine-readable cause (rig OAuthErrorCode when
+	// available); Message is diagnostic text the UI shows in details only.
+	Code    string
+	Message string
+}
+
+// MCPAuthFlow is one prepared interactive authorization. The UI opens AuthURL
+// on the main thread and then waits for the callback through MCPAuthService.
+type MCPAuthFlow struct {
+	AuthURL     string
+	RedirectURI string
+	Issuer      string
+	Scopes      []string
+	ExpiresAt   time.Time
+}
+
+// MCPAuthService owns the product side of MCP OAuth: it builds a rig OAuth
+// client per connector, persists tokens in settings, and reconnects a
+// connector after a successful authorization. The protocol itself lives in
+// rig; this service only adapts it to the product.
+type MCPAuthService interface {
+	// Status is read-only (no I/O) and may be called from the UI thread.
+	Status(cfg MCPServerConfig) MCPAuthStatus
+	// Prepare discovers the authorization server, registers a client, creates
+	// PKCE state and starts the loopback listener. It performs network I/O and
+	// must run off the UI thread.
+	Prepare(ctx context.Context, cfg MCPServerConfig) (MCPAuthFlow, error)
+	// Wait blocks for the loopback callback, exchanges the code and persists
+	// the token; on success it reconnects the connector. Off the UI thread.
+	Wait(ctx context.Context, cfg MCPServerConfig, flow MCPAuthFlow) (MCPAuthStatus, error)
+	// Cancel drops a pending flow (safe on the UI thread; it only closes local
+	// resources).
+	Cancel(cfg MCPServerConfig, flow MCPAuthFlow)
+	// Refresh refreshes the access token (off the UI thread).
+	Refresh(ctx context.Context, cfg MCPServerConfig) (MCPAuthStatus, error)
+	// Revoke calls the revocation endpoint when available and deletes the local
+	// token (off the UI thread; confirm in the UI first).
+	Revoke(ctx context.Context, cfg MCPServerConfig) error
+}
+
+// KeyMCPAuth is provided by the toolkit module and consumed by the
+// Capabilities screen's connectors tab.
+var KeyMCPAuth = cordis.NewServiceKey[MCPAuthService]("zeokeel/mcp/auth")
+
+// MCPAuthSettingPrefix is the settings key prefix of one connector's persisted
+// OAuth token record. The suffix is a stable slug + name hash so two servers
+// that normalize to the same slug cannot overwrite each other.
+const MCPAuthSettingPrefix = "mcp.oauth."
+
+// MCPAuthSettingKey returns the settings key holding one server's OAuth token
+// record. The record format is owned by rig (versioned JSON).
+func MCPAuthSettingKey(server string) string {
+	name := strings.ToLower(strings.TrimSpace(server))
+	sum := sha256.Sum256([]byte(name))
+	var builder strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
+			builder.WriteRune(r)
+		default:
+			builder.WriteByte('_')
+		}
+	}
+	slug := strings.Trim(builder.String(), "_")
+	if slug == "" {
+		slug = "server"
+	}
+	if runes := []rune(slug); len(runes) > 40 {
+		slug = string(runes[:40])
+	}
+	return MCPAuthSettingPrefix + slug + "." + hex.EncodeToString(sum[:4])
 }
 
 // ParseMCPServersJSON decodes the settings mcp.servers raw value. An empty
