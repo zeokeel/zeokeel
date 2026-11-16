@@ -1,5 +1,37 @@
 # Verification log (final)
 
+## 0.2.46 — 2026-11-16 (连接器热重载与 GitHub MCP 修复)
+
+```
+$ gofmt -l internal cmd
+(empty)
+$ CGO_ENABLED=0 go build ./...
+OK
+$ go vet ./...
+OK
+$ go tool mygo vet .
+OK
+$ go test ./... -count=1
+all packages ok
+$ go test -race ./internal/modules/toolkit ./internal/ui/plugins -count=1
+all ok (no data race)
+$ go run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
+designlint: 315 files, 79 violations: 0 error, 0 warn | baseline 156 entries, 10 registered, 0 new, 0 blocking
+$ ./scripts/design-check.sh
+6 passed, 0 failed: PASS
+```
+
+MCP 连接器热重载：toolkit 新增 `contracts.MCPReloader`，设置写入后重建受管连接、
+注销旧工具并注册新工具，`KeyToolkit`/`KeyPlugins`/`KeyMCPAuth` 指针稳定；新增/编辑/
+移除/启停/工作区 opt-in 不再要求重启。OAuth URL 保存/加载/合并时去掉路径尾斜杠，
+修复 GitHub MCP 的 `resource_mismatch`；GitHub 表单与注册失败文案引导使用 Bearer PAT
+（GitHub 无 DCR 且令牌交换需 client secret）。
+测试：toolkit 双 fake MCP server 的 add/remove/disable 热重载与工具注册断言；UI
+保存/移除/启停热重载、失败提示、URL 归一化、GitHub 注册提示帧测试。
+视觉证据：`.cache/mcp-fixes-shots/p2-capabilities-connectors.png`。
+合并前 CI：PR #4 `Build, vet, test` 通过。
+
+
 ## 0.2.45 — 2026-11-16 (MCP OAuth 2.1 与技能卡管理入口)
 
 ```
