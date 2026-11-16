@@ -231,127 +231,10 @@ func Module() *module.Descriptor[Config] {
 			}
 		}
 
-		rawMCPServers := ""
-		if hasSettings {
-			rawMCPServers = settingsService.Get(contracts.SettingMCPServers, "")
-		}
-		servers := mergeMCPServers(cfg.MCPServers, rawMCPServers, logf)
-
-		// Workspace mcp.json is the lowest-priority source and only when the
-		// user explicitly opted in; the workspace module is optional here.
-		workspaceOptIn := false
-		if hasSettings {
-			workspaceOptIn = mcpWorkspaceOptInEnabled(settingsService.Get(contracts.SettingMCPWorkspaceOptIn, ""))
-		}
-		if workspaceOptIn {
-			if workspaceService, ok := ctx.Get(contracts.KeyWorkspace); ok && workspaceService != nil {
-				workspaceRows := readWorkspaceMCPServers(context.Background(), workspaceService, logf)
-				if len(workspaceRows) > 0 {
-					servers = mergeMCPServerRows(servers, workspaceRows, "workspace mcp.json", false, logf)
-				}
-			}
-		}
-
-		// mcp.disabledServers drops whole servers after the assembly/settings/
-		// workspace merge and before any connection is attempted: a disabled
-		// server is not started and its tools are not registered. Bad JSON is a
-		// warning and starts everything (never fails activation).
-		if hasSettings {
-			var skipped int
-			servers, skipped = filterDisabledMCPServers(servers,
-				settingsService.Get(contracts.SettingMCPDisabledServers, ""), logf)
-			if skipped > 0 {
-				logf("[toolkit] skipped %d disabled MCP server(s) (%s)", skipped, contracts.SettingMCPDisabledServers)
-			}
-		}
-
 		// tools.disabled applies to every registry tool; mcp.disabledTools is
-		// kept as a legacy MCP-only alias. The union is applied both while the
-		// MCP clients' tools are collected and once more to the final registry
-		// (built-ins, LSP tools).
-		disabledTools := make(map[string]bool)
-		if hasSettings {
-			for _, key := range []string{contracts.SettingToolsDisabled, contracts.SettingMCPDisabledTools} {
-				disabledNames, err := contracts.ParseStringListJSON(settingsService.Get(key, ""))
-				if err != nil {
-					logf("[toolkit] parse %s: %v", key, err)
-					continue
-				}
-				for _, name := range disabledNames {
-					if trimmed := strings.TrimSpace(name); trimmed != "" {
-						disabledTools[trimmed] = true
-					}
-				}
-			}
-		}
-
-		// OAuth connectors need a rig OAuth client before they can start (and
-		// even when their startup fails: the client is what later performs the
-		// interactive authorization). The adapter is also the UI-facing
-		// contracts.MCPAuthService.
-		authRuntime := newMCPAuthRuntime(settingsService, logf)
-		for _, server := range servers {
-			if !authOAuth2(server.config()) {
-				continue
-			}
-			if _, err := authRuntime.clientForServer(server); err != nil {
-				logf("[toolkit] mcp %q: OAuth setup: %v", server.Name, err)
-			}
-		}
-
-		// MCP servers start concurrently under one bounded budget; every
-		// connection is managed at runtime so a session expiry or a dead stdio
-		// child process reconnects on the next call and the Plugins read model
-		// follows the live connection. A failed startup is registered too, so
-		// an OAuth authorization can reconnect it without restarting.
-		runtime := newMCPRuntime(logf, disabledTools, cfg.MaxOutputBytes, authRuntime)
-		plans := prepareMCPServerPlans(servers, logf)
-		outcomes := runtime.startMCPServers(context.Background(), plans)
-		pluginEntries := make([]pluginEntry, 0, len(plans))
-		mcpSeen := make(map[string]bool)
-		for index, plan := range plans {
-			entry := plan.entry
-			if plan.invalid {
-				pluginEntries = append(pluginEntries, entry)
-				continue
-			}
-			managed := runtime.registerServer(plan, index)
-			outcome := outcomes[index]
-			if outcome.err != nil {
-				entry.plugin.Status = statusConnectFailed + outcome.err.Error()
-				if authStatus := authRuntime.failureStatus(plan.server); authStatus != "" {
-					entry.plugin.Status = authStatus
-				}
-				pluginEntries = append(pluginEntries, entry)
-				logf("[toolkit] mcp %q: connect failed: %v", entry.plugin.Name, outcome.err)
-				continue
-			}
-			entry.client = outcome.client
-			entry.plugin.Name = pluginDisplayName(plan.server.Name, outcome.client)
-			entry.plugin.ServerName = outcome.serverName
-			entry.plugin.Version = outcome.serverVer
-			entry.plugin.Protocol = outcome.protocolVer
-			entry.plugin.Status = statusConnected
-			wrapped, regularTools := runtime.attachOutcome(managed, outcome, mcpSeen)
-			entry.plugin.Tools = regularTools
-			tools = append(tools, wrapped...)
-			pluginEntries = append(pluginEntries, entry)
-			logf("[toolkit] mcp %q connected: %d tool(s), protocol %s",
-				entry.plugin.Name, regularTools, entry.plugin.Protocol)
-		}
-		plugins := newPluginsService(pluginEntries)
-		runtime.bindPlugins(plugins)
-
-		if _, err := ctx.Effect(func() cordis.Effect {
-			return cordis.Effect{cordis.CleanupOf(func() {
-				runtime.close()
-				group.close()
-			})}
-		}); err != nil {
-			runtime.close()
-			group.close()
-			return err
-		}
+		// kept as a legacy MCP-only alias. MCP connections are rebuilt by the
+		// controller below, which applies the same set to their tools.
+		disabledTools := loadDisabledTools(settingsService, hasSettings, logf)
 
 		// Optional single LSP server: its tools join the same registry and the
 		// server is closed when the module unloads.
@@ -361,32 +244,48 @@ func Module() *module.Descriptor[Config] {
 		tools = filterDisabledTools(tools, disabledTools, logf)
 
 		registry := newToolRegistry(tools, logf)
-		runtime.bindRegistry(registry)
-		// After a completed OAuth flow the adapter asks the runtime to rebuild
-		// that connector's connection (the registry is bound by now).
-		authRuntime.onAuthorized = func(name string) { runtime.reconnectByName(name) }
+		// MCP starts after the built-in/LSP registry exists so a hot reload can
+		// register/unregister its tools against the same registry the agent uses.
+		plugins := newPluginsService(nil)
+		authRuntime := newMCPAuthRuntime(settingsService, logf)
+		controller := newMCPController(logf, registry, plugins, authRuntime, cfg.MaxOutputBytes,
+			func() ([]MCPServer, map[string]bool) {
+				return loadMCPServers(ctx, cfg, settingsService, hasSettings, logf)
+			})
+		if _, err := controller.Load(context.Background()); err != nil {
+			controller.close()
+			closeLSP()
+			group.close()
+			return err
+		}
 		if _, err := ctx.Provide(contracts.KeyToolkit, registry); err != nil {
 			closeLSP()
-			runtime.close()
+			controller.close()
 			group.close()
 			return err
 		}
 		_, err := ctx.Provide(contracts.KeyPlugins, contracts.PluginsService(plugins))
 		if err != nil {
 			closeLSP()
-			runtime.close()
+			controller.close()
 			group.close()
 			return err
 		}
 		if _, err := ctx.Provide(contracts.KeyMCPAuth, contracts.MCPAuthService(authRuntime)); err != nil {
 			closeLSP()
-			runtime.close()
+			controller.close()
+			group.close()
+			return err
+		}
+		if _, err := ctx.Provide(contracts.KeyMCPReloader, contracts.MCPReloader(controller)); err != nil {
+			closeLSP()
+			controller.close()
 			group.close()
 			return err
 		}
 		if _, err := ctx.Provide(contracts.KeyTaskBoard, contracts.TaskBoard(taskBoard)); err != nil {
 			closeLSP()
-			runtime.close()
+			controller.close()
 			group.close()
 			return err
 		}
@@ -396,7 +295,7 @@ func Module() *module.Descriptor[Config] {
 		// service can list/kill jobs across a workspace or permission rebuild.
 		if _, err := ctx.Provide(contracts.KeyJobs, contracts.JobService(newJobService(group))); err != nil {
 			closeLSP()
-			runtime.close()
+			controller.close()
 			group.close()
 			return err
 		}
@@ -408,7 +307,7 @@ func Module() *module.Descriptor[Config] {
 		if _, err := ctx.Provide(contracts.KeyExecutionHistory,
 			contracts.ExecutionHistoryService(newExecutionHistoryService(executionStore, groupExecutionLiveness{group: group}))); err != nil {
 			closeLSP()
-			runtime.close()
+			controller.close()
 			group.close()
 			return err
 		}
@@ -418,7 +317,7 @@ func Module() *module.Descriptor[Config] {
 		if _, err := ctx.Provide(contracts.KeyTodo,
 			contracts.TodoService(todoService{store: todoStore})); err != nil {
 			closeLSP()
-			runtime.close()
+			controller.close()
 			group.close()
 			return err
 		}
@@ -437,6 +336,7 @@ func Module() *module.Descriptor[Config] {
 		module.Provides(contracts.KeyExecutionHistory),
 		module.Provides(contracts.KeyTodo),
 		module.Provides(contracts.KeyMCPAuth),
+		module.Provides(contracts.KeyMCPReloader),
 	).WithName("ZeoKeel Rig toolset")
 }
 

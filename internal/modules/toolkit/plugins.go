@@ -88,6 +88,17 @@ func (s *pluginsService) setConnected(index int, client *mcp.Client, status stri
 	}
 }
 
+// replace swaps the whole read model after an MCP reload. The service pointer
+// stays stable (the UI module captured it at activation); indices in the new
+// entries match the freshly built runtime.
+func (s *pluginsService) replace(entries []pluginEntry) {
+	copied := make([]pluginEntry, len(entries))
+	copy(copied, entries)
+	s.mu.Lock()
+	s.entries = copied
+	s.mu.Unlock()
+}
+
 // MCP implements contracts.PluginsService.
 func (s *pluginsService) MCP() []contracts.MCPPlugin {
 	s.mu.Lock()

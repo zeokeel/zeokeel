@@ -71,6 +71,19 @@ func TestMergeMCPServersKeepsAuthAndHeaders(t *testing.T) {
 	}
 }
 
+func TestMergeMCPServersNormalizesOAuthTrailingSlash(t *testing.T) {
+	raw := `[{"name":"github","url":"https://api.githubcopilot.com/mcp/","auth":{"mode":"oauth2"}}]`
+	merged := mergeMCPServers(nil, raw, nil)
+	if len(merged) != 1 || merged[0].URL != "https://api.githubcopilot.com/mcp" {
+		t.Fatalf("merged = %+v, want the normalized OAuth URL", merged)
+	}
+	// Non-OAuth rows keep the URL exactly as entered.
+	merged = mergeMCPServers(nil, `[{"name":"plain","url":"https://example.com/mcp/"}]`, nil)
+	if len(merged) != 1 || merged[0].URL != "https://example.com/mcp/" {
+		t.Fatalf("plain URL = %+v, want unchanged", merged)
+	}
+}
+
 func TestMergeMCPServersDropsBlankBearer(t *testing.T) {
 	raw := `[{"name":"files","url":"https://mcp.example.com/mcp","auth":{"mode":"bearer"}}]`
 	merged := mergeMCPServers(nil, raw, nil)

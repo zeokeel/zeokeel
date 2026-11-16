@@ -94,6 +94,9 @@ func mergeMCPServerRows(base []MCPServer, rows []contracts.MCPServerConfig, sour
 				continue
 			}
 			server.Auth = normalized
+			if server.Auth != nil && server.Auth.Mode == contracts.MCPAuthOAuth2 {
+				server.URL = contracts.NormalizeMCPURL(server.URL)
+			}
 		}
 		switch {
 		case command != "" || transport == "stdio":

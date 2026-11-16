@@ -629,6 +629,8 @@ Agent 客户端的界面不是一次性输出：用户对界面的操作要作�
 - **令牌存储**：每个连接器一条 `mcp.oauth.<slug>.<sha8>` settings 记录（版本化 JSON，由 rig 序列化）；诊断导出与模型 `settings_get` 对该前缀整值隐藏，`headers` 对象/数组的所有值按凭证掩码。
 - **浏览器与线程**：`Prepare` 在后台 goroutine 发现/注册/监听；浏览器只在 UI 主线程打开（`internal/lib/openurl`）；`Wait` 后台等待回调并换 token；授权成功后 toolkit 自动重连该连接器（无需重启）。headless 无浏览器时不提供交互式授权。
 - **安全边界**：workspace `mcp.json` 的 OAuth 配置被忽略并告警；PKCE 必须 S256；MCP 请求只跟随同源重定向；401 单飞刷新重试一次，`invalid_grant` 需重新授权。
+- **热重载（2026-11-16）**：连接器设置写入后，toolkit 经 `contracts.KeyMCPReloader` 重建受管连接、注销旧工具并注册新工具，`contracts.KeyToolkit` / `KeyPlugins` / `KeyMCPAuth` 指针保持稳定；新增/编辑/移除/启停/授权不再要求重启。OAuth 行 URL 在保存与启动前去掉路径尾斜杠（`contracts.NormalizeMCPURL`），避免 PRM resource 尾斜杠误报 `resource_mismatch`。
+- **GitHub 远程 MCP**：`api.githubcopilot.com/mcp` 不提供动态客户端注册，且 GitHub 令牌交换需要 client secret（当前公开客户端不支持）；UI 明确引导选择 **Bearer 令牌 + GitHub PAT**。
 
 ---
 

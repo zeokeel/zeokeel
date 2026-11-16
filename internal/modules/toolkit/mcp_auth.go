@@ -348,7 +348,7 @@ func (a *mcpAuthRuntime) Revoke(ctx context.Context, cfg contracts.MCPServerConf
 // config converts one merged server row back to the contract config used by
 // the UI-facing OAuth service.
 func (s MCPServer) config() contracts.MCPServerConfig {
-	return contracts.MCPServerConfig{
+	return contracts.NormalizeMCPAuthURL(contracts.MCPServerConfig{
 		Name:      s.Name,
 		URL:       s.URL,
 		Transport: s.Transport,
@@ -358,5 +358,5 @@ func (s MCPServer) config() contracts.MCPServerConfig {
 		TimeoutMs: s.TimeoutMs,
 		Headers:   s.Headers,
 		Auth:      s.Auth,
-	}
+	})
 }
