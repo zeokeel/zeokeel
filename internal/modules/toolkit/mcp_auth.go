@@ -67,6 +67,7 @@ func (s mcpOAuthTokenStore) Delete(_ context.Context, server string) error {
 // mcpAuthClientEntry is one cached rig OAuth client plus the configuration it
 // was built from (a changed URL/scope/client id rebuilds it).
 type mcpAuthClientEntry struct {
+	name        string
 	client      *mcp.OAuthClient
 	fingerprint string
 }
@@ -176,7 +177,7 @@ func (a *mcpAuthRuntime) clientForConfig(cfg contracts.MCPServerConfig) (*mcp.OA
 		return current.client, nil
 	}
 	old := a.clients[name]
-	a.clients[name] = &mcpAuthClientEntry{client: created, fingerprint: fingerprint}
+	a.clients[name] = &mcpAuthClientEntry{name: name, client: created, fingerprint: fingerprint}
 	if old != nil {
 		_ = old.client.Close()
 	}
@@ -205,6 +206,52 @@ func (a *mcpAuthRuntime) close() {
 			_ = entry.client.Close()
 		}
 	}
+}
+
+// Background refresh: Proactively rotate access tokens shortly before they
+// expire so a long-running session never hits a 401 mid-tool-call. rig's
+// transport still refreshes on demand (near-expiry and 401), but a background
+// pass keeps idle connectors healthy too.
+const (
+	mcpBackgroundRefreshInterval = 30 * time.Second
+	mcpBackgroundRefreshWindow   = 5 * time.Minute
+)
+
+// refreshDue refreshes every authorized client whose access token expires
+// within window. Calls are serialized by the caller (the controller loop) and
+// rig's refresh is single-flight, so a concurrent tool call shares the result.
+func (a *mcpAuthRuntime) refreshDue(ctx context.Context, window time.Duration) int {
+	if a == nil {
+		return 0
+	}
+	if window <= 0 {
+		window = mcpBackgroundRefreshWindow
+	}
+	a.mu.Lock()
+	entries := make([]*mcpAuthClientEntry, 0, len(a.clients))
+	for _, entry := range a.clients {
+		entries = append(entries, entry)
+	}
+	a.mu.Unlock()
+	refreshed := 0
+	for _, entry := range entries {
+		if entry == nil || entry.client == nil {
+			continue
+		}
+		status := entry.client.Status()
+		if status.State != mcp.OAuthStateAuthorized || status.ExpiresAt.IsZero() {
+			continue
+		}
+		if time.Until(status.ExpiresAt) > window {
+			continue
+		}
+		if _, err := entry.client.Refresh(ctx); err != nil {
+			a.logf("oauth %q: background refresh failed: %v", entry.name, err)
+			continue
+		}
+		refreshed++
+	}
+	return refreshed
 }
 
 // authStatusFromRig folds rig's status onto the product's UI vocabulary.
@@ -324,16 +371,6 @@ func (a *mcpAuthRuntime) Cancel(cfg contracts.MCPServerConfig, flow contracts.MC
 		Scopes:      append([]string(nil), flow.Scopes...),
 		ExpiresAt:   flow.ExpiresAt,
 	})
-}
-
-// Refresh implements contracts.MCPAuthService.
-func (a *mcpAuthRuntime) Refresh(ctx context.Context, cfg contracts.MCPServerConfig) (contracts.MCPAuthStatus, error) {
-	client, err := a.clientForConfig(cfg)
-	if err != nil {
-		return contracts.MCPAuthStatus{}, err
-	}
-	status, err := client.Refresh(ctx)
-	return authStatusFromRig(status), err
 }
 
 // Revoke implements contracts.MCPAuthService.

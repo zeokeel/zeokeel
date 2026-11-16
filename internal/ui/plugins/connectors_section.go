@@ -120,6 +120,11 @@ type connectorsState struct {
 	command   string
 	args      string
 	env       string
+	// headersText/headersOpen are the optional HTTP header draft (Name: value
+	// per line) and its disclosure state. Headers apply to HTTP connectors
+	// only; OAuth/Bearer auth takes precedence over a same-named header.
+	headersText string
+	headersOpen bool
 	// timeoutMs is the optional per-server timeout draft (milliseconds, blank =
 	// the toolkit default 30 s). It is a string so the form can reject a
 	// non-numeric draft instead of silently saving 0.
@@ -137,6 +142,10 @@ type connectorsState struct {
 	// detailOpen/detailKey are the details modal's state.
 	detailOpen bool
 	detailKey  string
+	// Tool list disclosure inside the details modal.
+	toolListOpen bool
+	toolQuery    string
+	toolBusy     bool
 
 	// reloading is true while the toolkit rebuilds MCP after a settings write.
 	reloading bool
@@ -151,7 +160,6 @@ type connectorsState struct {
 	authScopes       string
 	authClientID     string
 	authServer       string
-	authResource     string
 	authAdvancedOpen bool
 
 	// Interactive authorization modal state. The flow is prepared off the UI
@@ -187,6 +195,8 @@ func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 	p := st.connectors
 	authService, hasAuth := st.ctx.Get(contracts.KeyMCPAuth)
 	hasAuth = hasAuth && authService != nil
+	catalog, hasCatalog := st.ctx.Get(contracts.KeyMCPToolCatalog)
+	hasCatalog = hasCatalog && catalog != nil
 	settings, hasSettings := st.ctx.Get(contracts.KeySettings)
 	hasSettings = hasSettings && settings != nil
 	service, hasPlugins := st.ctx.Get(contracts.KeyPlugins)
@@ -268,7 +278,11 @@ func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 		p.buildFormModal(c, t, st, settings)
 	}
 	if p.detailOpen {
-		p.buildDetailModal(c, t, st, cards)
+		var toolCatalog contracts.MCPToolCatalog
+		if hasCatalog {
+			toolCatalog = catalog
+		}
+		p.buildDetailModal(c, t, st, cards, toolCatalog)
 	}
 	p.buildConnectorAuthModal(c, t, st, authService)
 	p.buildRevokeConfirm(c, t, st, authService)
@@ -600,6 +614,8 @@ func (p *connectorsState) buildCard(c *ui.Context, t *design.Tokens, st *state,
 				if m.Item(st.tr("详情", "Details")).Chosen() {
 					p.detailOpen = true
 					p.detailKey = card.Key
+					p.toolListOpen = false
+					p.toolQuery = ""
 					c.Invalidate()
 				}
 				// Only a stored settings row can be edited or removed: a live
@@ -607,14 +623,18 @@ func (p *connectorsState) buildCard(c *ui.Context, t *design.Tokens, st *state,
 				if card.ConfigIndex < 0 {
 					return
 				}
-				if card.AuthMode == contracts.MCPAuthOAuth2 || card.AuthMode == contracts.MCPAuthBearer {
-					authLabel := st.tr("授权", "Authorize")
-					if card.AuthState == contracts.MCPAuthStateExpired || card.AuthState == contracts.MCPAuthStateAuthorized {
-						authLabel = st.tr("重新授权", "Re-authorize")
-					}
-					if m.Item(authLabel).Chosen() {
-						p.startConnectorAuth(st, auth, card.ConfigIndex)
-						c.Invalidate()
+				if card.AuthMode == contracts.MCPAuthOAuth2 {
+					// Tokens refresh automatically (near expiry + background loop);
+					// an authorized connector must not keep suggesting re-auth.
+					if card.AuthState != contracts.MCPAuthStateAuthorized {
+						authLabel := st.tr("授权", "Authorize")
+						if card.AuthState == contracts.MCPAuthStateExpired {
+							authLabel = st.tr("重新授权", "Re-authorize")
+						}
+						if m.Item(authLabel).Chosen() {
+							p.startConnectorAuth(st, auth, card.ConfigIndex)
+							c.Invalidate()
+						}
 					}
 					if card.AuthState == contracts.MCPAuthStateAuthorized {
 						revoke := m.Item(st.tr("撤销授权", "Revoke authorization"))

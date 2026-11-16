@@ -786,6 +786,61 @@ func TestSkillsReadOnlyHintOnlyWithoutEditableSkill(t *testing.T) {
 	h2.assertTexts(tester2, hint)
 }
 
+func TestSkillsDisableToggle(t *testing.T) {
+	skills := newFakeSkills()
+	editor := newFakeSkillsEditor(skills)
+	h, store, _ := newSkillsHarness(t, skills, editor)
+	workspaceRoot := t.TempDir()
+	withWorkspace(t, h, workspaceRoot)
+	skills.setList(contracts.Skill{Name: "alpha", Path: filepath.Join(workspaceRoot, "skills", "alpha", "SKILL.md")})
+	tester := h.tester()
+
+	h.click(tester, "技能操作 alpha")
+	if err := tester.Click("禁用技能"); err != nil {
+		t.Fatalf("disable skill: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if got := store.Get(contracts.SettingSkillsDisabled, ""); got != `["alpha"]` {
+		t.Fatalf("%s = %q, want [\"alpha\"]", contracts.SettingSkillsDisabled, got)
+	}
+	h.assertTexts(tester, "已禁用")
+
+	h.click(tester, "技能操作 alpha")
+	if err := tester.Click("启用技能"); err != nil {
+		t.Fatalf("enable skill: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if got := store.Get(contracts.SettingSkillsDisabled, ""); got != "[]" {
+		t.Fatalf("%s after enable = %q, want []", contracts.SettingSkillsDisabled, got)
+	}
+}
+
+func TestSkillsCopyToEditable(t *testing.T) {
+	skills := newFakeSkills()
+	editor := newFakeSkillsEditor(skills)
+	h, _, _ := newSkillsHarness(t, skills, editor)
+	workspaceRoot := t.TempDir()
+	withWorkspace(t, h, workspaceRoot)
+	skills.setList(contracts.Skill{
+		Name: "alpha", Description: "Alpha desc", Body: "# Alpha body",
+		Path: filepath.Join(workspaceRoot, "skills", "alpha", "SKILL.md"),
+	})
+	skills.bodies["alpha"] = "# Alpha body"
+	tester := h.tester()
+
+	h.click(tester, "技能操作 alpha")
+	if err := tester.Click("复制到我的技能"); err != nil {
+		t.Fatalf("copy skill: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	h.assertTexts(tester, "新建技能", "名称 输入", "内容 输入")
+	h.click(tester, "创建")
+	created := editor.created()
+	if len(created) != 1 || created[0].Name != "alpha-copy" || created[0].Body != "# Alpha body" {
+		t.Fatalf("CreateSkill draft = %+v", created)
+	}
+}
+
 // TestSkillsEnglishCopy covers the localized English surface.
 func TestSkillsEnglishCopy(t *testing.T) {
 	skills := newFakeSkills()

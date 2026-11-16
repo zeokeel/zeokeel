@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -116,7 +117,6 @@ func (p *connectorsState) openEditConnector(card connectorCard) {
 	p.authScopes = ""
 	p.authClientID = ""
 	p.authServer = ""
-	p.authResource = ""
 	p.authAdvancedOpen = false
 	if auth := row.Auth; auth != nil {
 		p.authMode = string(auth.Mode)
@@ -124,8 +124,9 @@ func (p *connectorsState) openEditConnector(card connectorCard) {
 		p.authScopes = strings.Join(auth.Scopes, ", ")
 		p.authClientID = auth.ClientID
 		p.authServer = auth.AuthorizationServer
-		p.authResource = auth.Resource
 	}
+	p.headersText = formatMCPHeadersText(row.Headers)
+	p.headersOpen = strings.TrimSpace(p.headersText) != ""
 	p.command = strings.TrimSpace(row.Command)
 	p.args = strings.Join(row.Args, " ")
 	p.env = strings.Join(row.Env, "\n")
@@ -150,8 +151,9 @@ func (p *connectorsState) resetFormDraft() {
 	p.authScopes = ""
 	p.authClientID = ""
 	p.authServer = ""
-	p.authResource = ""
 	p.authAdvancedOpen = false
+	p.headersText = ""
+	p.headersOpen = false
 	p.command = ""
 	p.args = ""
 	p.env = ""
@@ -299,6 +301,19 @@ func (p *connectorsState) buildFormModal(c *ui.Context, t *design.Tokens, st *st
 								})
 							})
 						}
+					}
+					if !stdio {
+						ui.Collapsible(c, st.tr("HTTP 请求头（可选）", "HTTP headers (optional)"),
+							&p.headersOpen, func() {
+								ui.Field(c, st.tr("请求头", "Headers"), func() {
+									ui.TextArea(c, &p.headersText).
+										Label(inputLabel(st, st.tr("请求头", "Headers"))).
+										Placeholder("X-API-Key: ...").
+										FillWidth()
+								}).Description(st.tr(
+									"每行 Name: value；用于非标准认证/网关头。Authorization 头会被 Bearer/OAuth 认证覆盖；诊断与模型读取时会脱敏。",
+									"One Name: value per line for custom auth/gateway headers. Authorization is overridden by Bearer/OAuth; values are redacted from diagnostics/model reads."))
+							})
 					}
 					// The optional per-server timeout applies to both transports: one
 					// request/handshake bound, blank (or 0) keeps the toolkit default.
@@ -466,6 +481,7 @@ func (p *connectorsState) connectorDraft(st *state, checkDuplicates bool) (contr
 		row.Command = command
 		row.Args = args
 		row.Env = env
+		row.Headers = nil
 		return row, true
 	}
 
@@ -502,7 +518,85 @@ func (p *connectorsState) connectorDraft(st *state, checkDuplicates bool) (contr
 	} else if auth != nil {
 		row.Auth = auth
 	}
+	headers, headersErr := parseMCPHeadersText(p.headersText)
+	if headersErr != "" {
+		p.formErr = headersErr
+		return contracts.MCPServerConfig{}, false
+	}
+	row.Headers = headers
 	return contracts.NormalizeMCPAuthURL(row), true
+}
+
+// formatMCPHeadersText renders the stored header map as one sorted "Name: value"
+// line per entry.
+func formatMCPHeadersText(headers map[string]string) string {
+	if len(headers) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	lines := make([]string, 0, len(names))
+	for _, name := range names {
+		lines = append(lines, name+": "+headers[name])
+	}
+	return strings.Join(lines, "\n")
+}
+
+// validHeaderName accepts RFC 7230 token characters.
+func validHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case strings.ContainsRune("!#$%&'*+-.^_`|~", r):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// parseMCPHeadersText parses "Name: value" lines. Blank lines and # comments
+// are ignored; duplicate names are rejected so a typo cannot silently shadow an
+// authentication header.
+func parseMCPHeadersText(raw string) (map[string]string, string) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, ""
+	}
+	headers := make(map[string]string)
+	for lineNumber, line := range strings.Split(strings.ReplaceAll(trimmed, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		index := strings.Index(line, ":")
+		if index <= 0 {
+			return nil, fmt.Sprintf("请求头第 %d 行格式应为 Name: value", lineNumber+1)
+		}
+		name := strings.TrimSpace(line[:index])
+		value := strings.TrimSpace(line[index+1:])
+		if !validHeaderName(name) {
+			return nil, fmt.Sprintf("请求头第 %d 行名称无效", lineNumber+1)
+		}
+		if value == "" {
+			return nil, fmt.Sprintf("请求头第 %d 行缺少值", lineNumber+1)
+		}
+		canonical := http.CanonicalHeaderKey(name)
+		if _, exists := headers[canonical]; exists {
+			return nil, fmt.Sprintf("请求头 %s 重复", canonical)
+		}
+		headers[canonical] = value
+	}
+	if len(headers) == 0 {
+		return nil, ""
+	}
+	return headers, ""
 }
 
 // authDraft validates the authentication section of one HTTP draft. A blank
@@ -771,7 +865,7 @@ func mcpTestStatusText(locale contracts.LocaleService, err error) string {
 // sheet with the masked environment, and the selectable raw backend error for a
 // failed connection.
 func (p *connectorsState) buildDetailModal(c *ui.Context, t *design.Tokens, st *state,
-	cards []connectorCard) {
+	cards []connectorCard, catalog contracts.MCPToolCatalog) {
 	if !p.detailOpen {
 		return
 	}
@@ -795,6 +889,7 @@ func (p *connectorsState) buildDetailModal(c *ui.Context, t *design.Tokens, st *
 			uikit.PropertySheet(c, uikit.PropertySheetOptions{
 				Rows: connectorDetailRows(st, card), Key: "connectors.detail", Locale: st.locale,
 			})
+			buildConnectorToolList(c, t, st, p, card, catalog)
 			if card.Failure {
 				if raw := strings.TrimSpace(card.RawStatus); raw != "" {
 					design.Apply(ui.Text(c, raw), t.Font(design.TypeXXS)).
@@ -955,4 +1050,82 @@ func (p *connectorsState) removeConnector(st *state, settings contracts.Settings
 		p.editIndex--
 	}
 	st.requestMCPReload(st.tr("已移除连接器", "Connector removed"))
+}
+
+// buildConnectorToolList renders the per-server model-visible tool switches
+// inside the details modal. Toggling writes the existing tools.disabled list
+// and asks the catalog to rebuild; the global shortcut list stays untouched.
+func buildConnectorToolList(c *ui.Context, t *design.Tokens, st *state, p *connectorsState,
+	card connectorCard, catalog contracts.MCPToolCatalog) {
+	if catalog == nil || card.ConfigIndex < 0 {
+		return
+	}
+	tools := catalog.Tools(card.Name)
+	if len(tools) == 0 {
+		return
+	}
+	label := fmt.Sprintf("%s (%d)", st.tr("工具", "Tools"), len(tools))
+	ui.Collapsible(c, label, &p.toolListOpen, func() {
+		filtered := tools
+		if query := strings.TrimSpace(strings.ToLower(p.toolQuery)); query != "" {
+			filtered = make([]contracts.MCPTool, 0, len(tools))
+			for _, tool := range tools {
+				if strings.Contains(strings.ToLower(tool.Name), query) ||
+					strings.Contains(strings.ToLower(tool.Description), query) {
+					filtered = append(filtered, tool)
+				}
+			}
+		}
+		if len(tools) > 8 {
+			ui.SearchField(c, &p.toolQuery).Label(st.tr("搜索工具", "Search tools")).
+				Placeholder(st.tr("按名称或说明过滤…", "Filter by name or description…")).FillWidth()
+		}
+		if p.toolBusy {
+			ui.Spinner(c).Label(st.tr("正在应用工具开关…", "Applying tool switches…")).
+				Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+		}
+		ui.Scroll(c).FillWidth().MaxHeight(design.DialogBodyMax).Children(func() {
+			ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+				for _, tool := range filtered {
+					enabled := tool.Enabled
+					box := ui.Checkbox(c, &enabled, tool.Name).Disabled(p.toolBusy)
+					if description := strings.TrimSpace(tool.Description); description != "" {
+						box.Tooltip(description)
+					}
+					if box.Changed() && !p.toolBusy {
+						p.toggleMCPTool(st, catalog, card.Name, tool.Name, enabled)
+						c.Invalidate()
+					}
+				}
+				if len(filtered) == 0 {
+					design.Apply(ui.Text(c, st.tr("没有匹配的工具", "No matching tools")),
+						t.TextMuted(design.TypeXS))
+				}
+			})
+		})
+	})
+}
+
+// toggleMCPTool applies one tool switch off the UI thread; the catalog rebuilds
+// the MCP runtime and posts the result back.
+func (p *connectorsState) toggleMCPTool(st *state, catalog contracts.MCPToolCatalog,
+	server, tool string, enabled bool) {
+	if p.toolBusy || st == nil || catalog == nil {
+		return
+	}
+	p.toolBusy = true
+	go func() {
+		err := catalog.SetToolEnabled(context.Background(), server, tool, enabled)
+		st.runtime.Post(func() {
+			p.toolBusy = false
+			if err != nil {
+				st.status = st.tr("应用工具开关失败：", "Failed to apply tool switch: ") + err.Error()
+				st.statusErr = true
+			} else {
+				st.status = st.tr("工具开关已应用", "Tool switch applied")
+				st.statusErr = false
+			}
+			st.runtime.Invalidate()
+		})
+	}()
 }

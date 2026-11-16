@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
@@ -56,6 +57,16 @@ type skillsState struct {
 	// the filtered collection, so identity follows a skill across searches.
 	grid ui.GridState
 
+	// Disabled skills (skills.disabled) are hidden from the agent-facing skill
+	// tool but remain listed here so they can be re-enabled.
+	disabled       map[string]bool
+	disabledNames  []string
+	disabledLoaded bool
+
+	// lastScan drives the periodic external-change refresh while the tab is
+	// open (the filesystem has no watcher dependency in this build).
+	lastScan time.Time
+
 	// Lazy per-skill body cache: List returns a bounded excerpt (S-05), so a
 	// preview/edit reads the full file through Read once and reuses it.
 	bodies  map[string]string
@@ -87,6 +98,7 @@ type skillsState struct {
 	editBody         string
 	editErr          string
 	editStatus       string
+	bodyPreviewOpen  bool
 	confirmDelete    bool
 	pendingDelete    string
 }
@@ -118,6 +130,42 @@ func (p *skillsState) load(skills contracts.SkillsService) {
 	p.loaded = true
 	p.skills, p.listErr = skills.List(context.Background())
 	p.roots = skills.Roots()
+	p.lastScan = time.Now()
+}
+
+// skillAutoRefreshInterval bounds how often the open tab rescans for external
+// SKILL.md edits; it is a variable so tests can shorten it.
+var skillAutoRefreshInterval = 5 * time.Second
+
+// autoRefreshDue reports whether the tab should rescan for external changes.
+func (p *skillsState) autoRefreshDue(now time.Time) bool {
+	return !p.lastScan.IsZero() && now.Sub(p.lastScan) >= skillAutoRefreshInterval
+}
+
+// loadDisabledSkills reads skills.disabled once per visit; toggles update the
+// in-memory set immediately.
+func (p *skillsState) loadDisabledSkills(settings contracts.SettingsService) {
+	if p.disabledLoaded || settings == nil {
+		return
+	}
+	p.disabledLoaded = true
+	p.disabledNames = nil
+	p.disabled = make(map[string]bool)
+	names, err := contracts.ParseStringListJSON(settings.Get(contracts.SettingSkillsDisabled, ""))
+	if err != nil {
+		return
+	}
+	for _, name := range names {
+		if trimmed := strings.TrimSpace(name); trimmed != "" {
+			p.disabled[strings.ToLower(trimmed)] = true
+			p.disabledNames = append(p.disabledNames, trimmed)
+		}
+	}
+}
+
+// skillDisabled reports whether name is disabled for the agent-facing tool.
+func (p *skillsState) skillDisabled(name string) bool {
+	return p.disabled[strings.ToLower(strings.TrimSpace(name))]
 }
 
 // skillKey is a skill's stable identity across frames and refreshes.
@@ -145,7 +193,14 @@ func buildSkillsTab(c *ui.Context, t *design.Tokens, st *state) {
 		uikit.EmptyState(c, st.tr("技能后端未启用", "Skills backend is not enabled"))
 		return
 	}
+	if settingsStore, hasSettings := st.ctx.Get(contracts.KeySettings); hasSettings && settingsStore != nil {
+		p.loadDisabledSkills(settingsStore)
+	}
 	p.load(skills)
+	if p.autoRefreshDue(time.Now()) {
+		p.refresh()
+		p.load(skills)
+	}
 
 	workspaceRoot := skillWorkspaceRoot(st.ctx)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
@@ -185,7 +240,7 @@ func buildSkillsTab(c *ui.Context, t *design.Tokens, st *state) {
 				st.tr("还没有发现技能", "No skills discovered yet"),
 				st.tr("在技能目录放置 <name>/SKILL.md 后点击刷新。",
 					"Place <name>/SKILL.md in a skill directory, then refresh."),
-				func() { buildSkillsEmptyAction(c, t, p, st) })
+				nil)
 			return
 		case len(filtered) == 0:
 			uikit.EmptyStateBlock(c,
@@ -255,21 +310,6 @@ func buildSkillsCollectionRow(c *ui.Context, t *design.Tokens, p *skillsState, s
 	})
 }
 
-// buildSkillsEmptyAction is the empty state's next step: rescan the
-// directories. "New skill" stays in the collection row above, so the empty
-// state does not render a second, duplicate create action.
-func buildSkillsEmptyAction(c *ui.Context, t *design.Tokens, p *skillsState, st *state) {
-	label := st.tr("刷新技能", "Refresh skills")
-	uikit.IconButton(c, uikit.IconButtonOptions{
-		Key: "skills.empty.refresh", Label: label, Tooltip: label,
-		Icon: icons.Reload(), Size: design.IconSizeS,
-		OnClick: func() {
-			p.refresh()
-			c.Invalidate()
-		},
-	})
-}
-
 // skillsHaveEditable reports whether at least one skill can be edited/deleted
 // from this page (a directory-form SKILL.md below the data directory).
 func skillsHaveEditable(skills []contracts.Skill, editor contracts.SkillsEditor, dataDir string) bool {
@@ -330,6 +370,11 @@ func buildSkillCard(c *ui.Context, t *design.Tokens, p *skillsState, st *state,
 					MaxLines(1).Ellipsis("…").Tooltip(path)
 			} else {
 				ui.Spacer(c).Grow(1)
+			}
+			if p.skillDisabled(skill.Name) {
+				design.Apply(ui.Badge(c, st.tr("已禁用", "Disabled")), t.Badge()).
+					Tooltip(st.tr("已从模型可用的技能中排除；不会注入会话",
+						"Excluded from model-facing skills; not injected into sessions"))
 			}
 			previewLabel := st.tr("查看内容", "View content")
 			uikit.IconButton(c, uikit.IconButtonOptions{

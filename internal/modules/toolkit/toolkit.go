@@ -180,9 +180,15 @@ func Module() *module.Descriptor[Config] {
 			// The skills backend discovers SKILL.md files from the data dir and
 			// the current workspace; the skill tool lists/searches/loads them.
 			// Workspace-origin skills are repository content, so the wrapper
-			// marks their rendered output as untrusted.
-			for _, tool := range skill.Tools(skillStore) {
-				tools = append(tools, newTrustAwareSkillTool(tool, skillStore, rootOf))
+			// marks their rendered output as untrusted. skills.disabled is
+			// applied at the agent-facing store (the UI still lists disabled
+			// skills so the user can re-enable them).
+			var visibleSkills contracts.SkillsService = skillStore
+			if hasSettings {
+				visibleSkills = filteredSkillStore{inner: skillStore, settings: settingsService}
+			}
+			for _, tool := range skill.Tools(visibleSkills) {
+				tools = append(tools, newTrustAwareSkillTool(tool, visibleSkills, rootOf))
 			}
 		} else {
 			tools = append(tools, skill.Tools(nil)...)
@@ -248,7 +254,7 @@ func Module() *module.Descriptor[Config] {
 		// register/unregister its tools against the same registry the agent uses.
 		plugins := newPluginsService(nil)
 		authRuntime := newMCPAuthRuntime(settingsService, logf)
-		controller := newMCPController(logf, registry, plugins, authRuntime, cfg.MaxOutputBytes,
+		controller := newMCPController(logf, registry, plugins, authRuntime, settingsService, cfg.MaxOutputBytes,
 			func() ([]MCPServer, map[string]bool) {
 				return loadMCPServers(ctx, cfg, settingsService, hasSettings, logf)
 			})
@@ -278,6 +284,12 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		if _, err := ctx.Provide(contracts.KeyMCPReloader, contracts.MCPReloader(controller)); err != nil {
+			closeLSP()
+			controller.close()
+			group.close()
+			return err
+		}
+		if _, err := ctx.Provide(contracts.KeyMCPToolCatalog, contracts.MCPToolCatalog(controller)); err != nil {
 			closeLSP()
 			controller.close()
 			group.close()
@@ -337,6 +349,7 @@ func Module() *module.Descriptor[Config] {
 		module.Provides(contracts.KeyTodo),
 		module.Provides(contracts.KeyMCPAuth),
 		module.Provides(contracts.KeyMCPReloader),
+		module.Provides(contracts.KeyMCPToolCatalog),
 	).WithName("ZeoKeel Rig toolset")
 }
 

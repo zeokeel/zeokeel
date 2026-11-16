@@ -4,6 +4,23 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **MCP 工具治理**：连接器详情新增该 server 的模型可见工具列表（搜索、逐工具开关），开关写入既有 `tools.disabled` 并热重载；266 工具 server 不再只能整台启停。
+- **MCP 自定义 HTTP Headers**：连接器表单新增多行 `Name: value` 编辑器，用于非标准认证/网关头；OAuth/Bearer 的 Authorization 优先级更高，值在诊断/模型读取时脱敏。
+- **OAuth 后台自动刷新**：每 30s 检查授权连接，到期前 5 分钟主动刷新；已授权连接器不再显示「重新授权」入口，只有需要/已失效时才提供授权。
+- **技能禁用/启用**：`skills.disabled` 仅过滤模型侧技能工具，管理页仍列出并可恢复。
+- **技能复制到我的技能**：工作区/额外目录/顶层 `.md` 的只读技能可一键预填新建表单，保存为 dataDir 下可编辑技能。
+- **技能自动刷新与预览**：技能页打开时每 5s 重扫外部 `SKILL.md` 修改；创建/编辑弹窗支持 Markdown 预览。
+
+### Changed
+
+- 移除未使用的 `MCPAuthService.Refresh` 接口方法与连接器表单里已失效的「资源标识」字段。
+- 移除技能空态重复的「刷新技能」按钮（集合行已有刷新）。
+- 移除 Bearer 连接器菜单中的 OAuth「授权」入口（Bearer 令牌应通过编辑表单更新）。
+
 ## [0.2.46] - 2026-11-16
 
 ### Added

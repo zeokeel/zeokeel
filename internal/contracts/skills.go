@@ -32,6 +32,11 @@ type SkillWarnings interface {
 // directory, so a user-installed skill library overrides the shipped one.
 const SettingSkillsDirs = "skills.dirs"
 
+// SettingSkillsDisabled is the JSON array of skill names the user disabled.
+// The user-facing skills page still lists them (so they can be re-enabled), but
+// the agent-facing skill tool filters them out of List and rejects Read.
+const SettingSkillsDisabled = "skills.disabled"
+
 // KeySkills is provided by the skills backend module and consumed by the
 // toolkit (skill tool) and the settings skills page.
 var KeySkills = cordis.NewServiceKey[SkillsService]("zeokeel/skills")
