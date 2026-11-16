@@ -4,6 +4,59 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.43] - 2026-11-16
+
+### Changed
+
+- **能力页（原插件页）**：侧栏「插件」更名为「能力」/Capabilities（screen id 仍为 `plugins`）。页面改为页级 Tabs 骨架：**技能** 与 **连接器** 为两个平行 Tab，未来工作流只需在 `capabilityTabSpecs` 追加一行即可成为第三 Tab，不需要改壳层或新增 screen。
+- **技能管理迁入能力页**：3 列官方 `ui.GridView` 卡片（技能卡 128 高，`t.Panel()`），含名称、描述、来源徽章、相对路径、查看内容图标按钮、行内 ⋯（编辑/删除）；新建/编辑 Modal、Markdown 内容预览、删除确认（安全默认取消）、扫描目录与额外目录（`skills.dirs`）全部保留。
+- **MCP 连接器管理迁入能力页**：连接器 Tab 使用 176 高卡片（状态徽章、传输/工具数、启用开关、⋯ 详情/编辑/移除）；添加/编辑 Modal 支持 HTTP 与 STDIO、命令/参数/环境变量、超时与异步测试连接；失败卡显示产品化错误摘要 +「查看报错详情」+「重试」；详情 Modal 使用 `PropertySheet` 并脱敏环境变量；移除使用危险确认；工作区 `mcp.json` opt-in 收进「连接器选项」折叠区。
+- 设置页删除「技能」「MCP」两页（导航 19 → 17 页）；设置搜索不再命中技能/MCP；「集成」组保留搜索/网络/LSP。
+- 能力页不再渲染工具目录与工具开关（工具默认开启，不属于能力面）；后端 `tools.disabled` 键仍兼容，只是不再暴露 UI。
+- 新增能力页光/暗/窄窗快照与 `ui-drive` 导航步骤；文档（README/ARCHITECTURE/COVERAGE/DESIGN/AGENT-SURFACES/UI-CONFORMANCE/UI-COMPONENT-MIGRATION/SIMPLIFICATION-PLAN）同步。
+- **测试竞态修复**：`uimodtest` 的内存 settings fake 加锁；automation 的 `List/Create/Update/claimRun` 返回 `RunHistory` 深拷贝，避免后台结算与 UI 读模型的数据竞争；`TestRunsReuseBoundSession` 等待第二条 run 记录，消除 `-race` 负载下的假失败。
+- 卡片布局是用户明确要求的例外：卡片只用于独立对象（一个技能/一个连接器），并已在 `docs/DESIGN.md` §2.3/§6.5 登记与 AP-25「管理列表禁卡墙」的边界。
+
+### Added
+
+- `capability_shell.go`：`capabilityTabSpecs` 并行 Tab 注册表、页级 Tab 行（不随内容滚动）、活跃 Tab 状态与页底共享「诊断与设置」区；为后续工作流 Tab 预留一个明确扩展点。
+- 技能 Tab 17 个帧测试、连接器 Tab 22 个帧测试（含 7 个校验子用例）、能力页骨架与设置删除相关测试；全部 TDD（先 RED 后 GREEN）。
+
+### Removed
+
+- `settings/skills.go`、`settings/skills_edit.go`、`settings/mcp.go` 及对应页面测试；`plugins/mcptools.go`（工具开关 UI）。
+- 旧插件页的 MCP 列表/工具目录/Settings MCP 页回归测试（新能力页测试覆盖同等行为）。
+
+### Known limitations
+
+- 标准 1512 窗口 3 列卡片；1024 窄窗按 `GridView` 最小宽自适应为 2 列。
+- 连接器的 live-only stdio 服务器拿不到 command 文本时，地址显示「—」。
+- `mcp.servers` JSON 解析失败时连接器 Tab 按只读空列表处理（显示错误行、禁用添加），不覆盖坏值。
+- 工作区 `mcp.json` 的路径提示在进入页面时读取；中途切换工作区需重进页面刷新提示。
+
+### Verification
+
+```
+$ gofmt -l internal cmd
+(empty)
+$ go build ./...
+OK
+$ go vet ./...
+OK
+$ go tool mygo vet .
+OK
+$ go test ./... -count=1
+all packages ok
+$ go run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
+0 error / 0 warn / 0 new / 0 blocking
+$ ./scripts/design-check.sh
+6 passed, 0 failed
+$ go test -race ./... -count=1
+all packages ok (no data race)
+$ ./scripts/verify.sh
+13 passed, 0 failed (race/regression/snapshot/desktop+headless+ACP smokes)
+```
+
 ## [0.2.42] - 2026-11-16
 
 ### Removed

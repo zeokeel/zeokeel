@@ -249,6 +249,7 @@
 |---|---|
 | 页面头部/小节 | `uikit.PageHeader` / `Section`；页面级动作 `PageHeaderAction`，小节动作 `SectionAction` |
 | 设置列表 | `ui.List`（Key/Label）或 `ui.Form/Field`；禁止卡片墙 |
+| 能力 / 扩展管理页（技能、连接器） | **用户明确要求卡片布局**：页级 `ui.Tabs`（技能｜连接器，未来工作流为第三 Tab）+ 3 列官方 `ui.GridView` 卡片（`t.Panel()`；技能卡 128 高、连接器卡 176 高；卡片内 ⋯/开关；创建动作走分节动作位（`SectionAction` 等价行）的 secondary、页面无 primary）；禁止自绘卡片 / `Scroll`+Row 循环分列。卡片是独立对象（非设置式管理列表），不适用 AP-25「管理列表禁 r16 卡墙」；详见 §6.5 |
 | 命令面板 | `ui.Overlay`/`Modal` + `SearchField` + `List` + `ActiveDescendant` |
 | 查找 | 过滤用 `SearchField`；页内查找用 `FindBar` |
 | 危险确认 | 危险/不可逆 → `ui.Modal` + `uikit.DialogFooter`（危险动作**不得 Default**；安全取消可 Default 承接 Enter）；非危险简单确认 → `ui.AlertDialog` |
@@ -654,6 +655,21 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 - **开放**：内容 slot（`func()`）、标题/文案、数据来源；业务模块不得重排动作顺序或覆写状态色。
 - **唯一出口**：场景内只允许调用入口函数；入口内部才允许直接编排官方件。
 
+### 6.5 能力页（Capabilities）页面骨架与卡片（2026-11-16）
+
+能力页（侧栏「能力」/Capabilities，screen id 仍 `plugins`）是页级 Tabs 骨架：技能｜连接器为两个**平行 Tab**，
+未来工作流作为第三 Tab 只需在 `capabilityTabSpecs` 追加一行，不新增 screen。
+
+| 入口 | 状态 | 说明 |
+|---|---|---|
+| `plugins.capabilityTabs` | **已有**（2026-11-16） | 页级并行 Tab 骨架（`capability_shell.go`）：`capabilityTabSpecs` 注册 技能/连接器，Tab 行不随内容滚动；每个 Tab 拥有自己的整页正文与动作行；页底「诊断与设置」区（内置模块清单/扩展设置（已接线设置））不占 Tab |
+| `插件页技能卡` | **已有**（2026-11-16） | 技能 Tab 的独立对象卡：`t.Panel()` 卡片、固定 128 高、3 列 `ui.GridView`（官方网格虚拟化）；卡片底部「查看内容」图标按钮 + 行内 ⋯；创建走分节动作位（`SectionAction` 等价行）的 secondary（页面无 primary）。来源：设置「技能」页迁入（数据键 `skills.dirs` 不变） |
+| `插件页连接器卡` | **已有**（2026-11-16） | 连接器 Tab 的独立对象卡：固定 176 高、3 列 `ui.GridView`；失败卡含红色错误摘要 +「查看报错详情」+「重试」；添加/编辑/测试连接/移除与 `mcp.servers`、`mcp.disabledServers` 启停、工作区 `mcp.json` opt-in 都在此 Tab。来源：设置「MCP」页迁入（数据键不变） |
+
+> **AP-25 边界**：卡片布局是用户 2026-11-16 的明确要求。技能与连接器是**独立对象**（一张卡 = 一个技能/一台服务器），
+> 不是设置式管理列表，因此使用官方 `ui.GridView` 卡片不违反 AP-25「管理列表禁 r16 卡墙」的初衷；设置页/管理列表
+> 仍按平铺行 + Divider 执行。卡片高度固定以对齐行，`ui.GridView` 负责虚拟化。
+
 ---
 
 ## 7. 自绘白名单与偏离流程
@@ -700,6 +716,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | `ui.CommandPalette` / `SearchDialog` | 不存在 | `Overlay/Modal + SearchField + List` |
 | `ui.Dialog` | 不存在 | `Modal`（有外观）/ `DialogBase`（无外观） |
 | `ui.Section` / `PageHeader` | 不存在 | 本仓库 `uikit.Section/PageHeader` |
+| 能力页卡片用自绘 `Row` 分列，或让卡片高度随内容变化 | `ui.GridView` 是虚拟化网格；行高由调用方固定/对齐，官方没有「自动等高卡片」 | 官方 `ui.GridView` + `t.Panel()` 卡片；技能卡 128 高、连接器卡 176 高（4 DIP token 推导）；卡片内 ⋯/开关复用官方件；不要 `Scroll`+Row 分列 |
 
 ---
 

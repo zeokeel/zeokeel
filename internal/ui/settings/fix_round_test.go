@@ -44,39 +44,6 @@ func assertCloseGuard(t *testing.T, h *harness, tester *ui.Tester) {
 	h.assertTexts(tester, "有未保存的修改", "继续编辑", "放弃修改")
 }
 
-// TestMCPDraftGuardOnClose covers ST-02 for the MCP add form: a half-filled
-// server form is an unsaved draft, so closing the settings surface asks first.
-func TestMCPDraftGuardOnClose(t *testing.T) {
-	store := newFakeSettings(nil)
-	h := newHarness(t, &fakeChat{}, store, settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	openMCPPage(t, h, tester)
-	h.focusInput(tester, "名称 输入")
-	tester.Type("draft-server")
-	tester.Frame()
-	if got := inputValue(t, tester, "名称 输入"); got != "draft-server" {
-		t.Fatalf("name input value = %q, want draft-server", got)
-	}
-
-	assertCloseGuard(t, h, tester)
-	h.click(tester, "继续编辑")
-	if got := inputValue(t, tester, "名称 输入"); got != "draft-server" {
-		t.Fatalf("the draft was lost by 继续编辑: %q", got)
-	}
-	assertCloseGuard(t, h, tester)
-	h.click(tester, "放弃修改")
-	tester.Frame()
-	if h.uiRoot.Navigator().SettingsOpen() {
-		t.Fatal("the settings surface stayed open after Discard")
-	}
-	reopenSettings(h, tester)
-	openMCPPage(t, h, tester)
-	if got := inputValue(t, tester, "名称 输入"); got != "" {
-		t.Fatalf("the discarded draft survived: %q", got)
-	}
-}
-
 // TestLSPDraftGuardOnClose covers ST-02 for the LSP add form.
 func TestLSPDraftGuardOnClose(t *testing.T) {
 	store := newFakeSettings(nil)
@@ -304,34 +271,6 @@ func TestDataPageActionsAlignedRight(t *testing.T) {
 	}
 	if reportRect.X < 600 {
 		t.Fatalf("diagnostic report action is not right-aligned: %v", reportRect)
-	}
-}
-
-// TestMCPFormOrder covers ST-05: the add-server form puts its fields before the
-// action row (Test connection / Add) instead of the actions above the inputs.
-func TestMCPFormOrder(t *testing.T) {
-	store := newFakeSettings(nil)
-	h := newHarness(t, &fakeChat{}, store, settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	openMCPPage(t, h, tester)
-	nameRect, ok := tester.Find("名称 输入")
-	if !ok {
-		t.Fatalf("name input missing; texts = %v", tester.Texts())
-	}
-	testRect, ok := tester.Find("测试连接")
-	if !ok {
-		t.Fatalf("test-connection action missing; texts = %v", tester.Texts())
-	}
-	addRect, ok := tester.Find("添加")
-	if !ok {
-		t.Fatalf("add action missing; texts = %v", tester.Texts())
-	}
-	if testRect.Y < nameRect.Y {
-		t.Fatalf("test-connection action sits above the form fields: name.Y=%v test.Y=%v", nameRect.Y, testRect.Y)
-	}
-	if diff := addRect.Y - testRect.Y; diff > 24 || diff < -24 {
-		t.Fatalf("add action is not in the same row as test connection: test.Y=%v add.Y=%v", testRect.Y, addRect.Y)
 	}
 }
 

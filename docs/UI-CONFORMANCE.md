@@ -16,13 +16,14 @@
 | 抽屉/浮层 | `ui.Overlay` + `Row…Modal()` + `Role(RoleDialog)` + `PressedOutside` + `OverlayShortcut(Esc)` | overlays.md「A drawer on the right」 | 自绘 drawer 必须走这个 recipe（Esc/焦点陷阱/焦点归还） |
 | 长列表/日志/会话 | `ui.List` + `ListState`（Key/Selected/FollowEnd/HoldPlace/Label/Header/Choose） | list.md | 集合行不再用 `Scroll`+全量循环；测试用 `Rows`/`ItemKey`；分组列表用 `Header` 段头+计数（任务板），选中行用 `Selected`/`Submitted` 展开详情，详情渲染在列表**下方**的独立面板（选中行有 accent 背景，详情放行内会不可读） |
 | 表格 | `ui.Table` / `TableColumn` / `CellSelect` | table.md | 多列可排序数据用 Table，不用 Row 手排 |
+| 卡片网格 | `ui.GridView` + `GridState` | grid-view.md | 独立对象集合（能力页技能/连接器卡）用官方 `ui.GridView`：3 列、卡片固定高度（技能卡 128 / 连接器卡 176，4 DIP token）、卡片用 `t.Panel()`；禁止自绘卡片 / `Scroll`+Row 循环分列；设置式管理列表仍用平铺行（AP-25） |
 | 树/大纲 | `ui.Outline[T]` / `ui.Tree` / `OutlineState` | outline.md / tree.md | 工作区/文件树用 Outline |
 | 菜单 | `PopoverMenuButton` / `PopoverMenuButtonOptions{At,Self,Open}` / `MenuItem.Danger/Radio/ID/Subtitle/Trailing/Content/MaxWidth` / `MenuBase` | menu-button.md / context-menu.md | 行尾⋯菜单右对齐；删除项 `Danger()`；单选 `Radio()`；稳定选择 `ID()`；自绘菜单迁移 `MenuBase` |
 | 按钮+相关动作菜单 | `ui.SplitButton` / `ui.PrimarySplitButton`（`SplitButtonParts{Button, Arrow}`） | split-button.md | 主操作带常用变体（保存/另存为、运行/运行方式）；菜单项复用 context menu 语义与 `Chosen()` |
 | 右键菜单 | `Element.ContextMenu(menu)` / `ContextMenuBase` / `Context.SetMenuPresentation(ui.PopoverMenus)` | context-menu.md | 同一 menu 同时供右键与⋯；窗口在 `Root.view` 统一自绘菜单外观 |
 | 命令面板 | `SearchField + List + ActiveDescendant` | accessibility.md / list.md | 列表要有 `Label`，搜索框指向选中行 |
 | 建议菜单（slash/@） | `RoleListBox` + `RoleOption.Checked` + `PositionInSet` + 输入框 `ActiveDescendant` | accessibility.md「Suggestions」 | 不再用无 role 的按钮行 |
-| 表单 | `Form/Field/Fieldset`；`Description/Error`；`LabelledBy`；`NumberInput`/`DecimalInput` | form.md / number-input.md | 数字用官方输入（记忆策略、运行上限、上下文窗口、生成参数已全部迁移，配“使用默认”开关）；错误用 `Error`；分组用 Fieldset（MCP STDIO 已采用）；**多字段对话框（如「新建队友」）用 `Form/Field` 给出可见标签，不能只靠 placeholder** |
+| 表单 | `Form/Field/Fieldset`；`Description/Error`；`LabelledBy`；`NumberInput`/`DecimalInput` | form.md / number-input.md | 数字用官方输入（记忆策略、运行上限、上下文窗口、生成参数已全部迁移，配“使用默认”开关）；错误用 `Error`；分组用 Fieldset（能力页连接器 STDIO 编辑弹窗已采用）；**多字段对话框（如「新建队友」）用 `Form/Field` 给出可见标签，不能只靠 placeholder** |
 | 对话框 | `Modal`/`AlertDialog`；`DialogFooter` + `Default` 焦点 + `Submitted()` 提交 | dialog.md / alert-dialog.md / text-input.md | Enter 提交必须覆盖每个输入对话框；**危险确认（删除任务/关闭队友）用 `ui.Modal` + 自建 footer：取消在前、无 `Default` 动作，避免 `AlertDialog` 末位按钮作为平台默认被 Enter 误触**；安全文案按钮（如取消）可放首位承接焦点 |
 | 请求/提交动作 | `uikit.PageHeaderAction` / `uikit.SectionAction`（基于官方 Row/Button 的共享布局） | layout.md / form.md | 页面级即时动作（新建/刷新/检查更新）在页头同行右侧；小节工具动作（恢复默认/导出报告）在节标题同行右侧；显式保存页只保留宿主 footer 的一个主操作，不在内容底部再放动作行 |
 | 查找 | `FindBar`（文内查找）；`SearchField`（过滤列表） | find-bar.md / search-field.md | 查找≠过滤，按场景选 |
@@ -40,9 +41,10 @@
 ## 1.1 官方组件采用与保留自绘（定期复核）
 
 - 集合一律用 `ui.List`（transcript、轨迹、记忆、自动化、右栏各 pane、侧栏会话/搜索、
-  设置归档/技能/记忆/模型目录/MCP/LSP/预设/诊断、右栏产物历史、composer 排队弹层、
-  插件 MCP/模块/参数/工具、Home 最近、palette）；单文本面/页面容器用 `ui.Scroll`。
-  （2026-11-09 第三轮审计后补齐，证据：`.cache/ui-audit/report.md`、`.cache/migrate-*/report.md`。）
+  设置归档/记忆/模型目录/LSP/预设/诊断、右栏产物历史、composer 排队弹层、
+  能力页「诊断与设置」区的模块清单/扩展设置、Home 最近、palette）；能力页技能/连接器卡片用
+  官方 `ui.GridView`（独立对象卡，不是设置式管理列表）；单文本面/页面容器用 `ui.Scroll`。
+  （2026-11-09 第三轮审计后补齐；2026-11-16 能力页卡片改为 GridView。证据：`.cache/ui-audit/report.md`、`.cache/migrate-*/report.md`。）
 - 控件优先官方：`Sidebar`、`TabsBase`、`Split`、`Toolbar`、`SearchField`、`TokenField`、
   `NumberInput`、`Select`、`Segmented`、`Switch`、`Collapsible`/`CollapsibleBase`、`Spinner`、
   `Breadcrumbs`、`Toggle`/`ToggleGroup`、`Modal`/`AlertDialog`/`DialogFooter`、
@@ -52,6 +54,7 @@
   仅限无官方对应（无边框图标按钮、富行建议菜单、composer 动作行布局、palette 按钮行、
   hover 动作行、回到最新浮层、测试 seam）或产品语义不适用（Rating/Meter 等）。
 - 设置搜索（2026-11-15）：`contracts.SettingsPageSpec` 的可选 `Keywords` / `SearchItems{ID,Label,Keywords,AnchorKey}` / `Reveal(c, anchor)` 是唯一索引来源；host 只匹配这些声明并打开页面，页面在 Build 前自行展开 disclosure、滚动并短暂高亮（1.5s）；不要再往 host 加 page-ID 别名表（已删除，曾漂移）。
+- 设置搜索索引来源（2026-11-16）：设置删除「技能」「MCP」两页后，设置搜索不再索引技能/MCP；技能与连接器管理在能力页（页级 Tabs），不经设置搜索。能力页卡片用官方 `ui.GridView`（见 §1「卡片网格」）。
 - 设置导航的「高级」分组跟随当前页：选中的页面属于高级组时展开，切回日常页时折叠
   （避免上次访问留下的长/短两种导航形态；`internal/uiroot/shell_ux_test.go` 钉住）。
 - 新增 UI 时先查 §1 表与官方 docs；出现新的自绘控件必须在本文件与迁移文档记录理由。

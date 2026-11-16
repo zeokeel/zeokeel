@@ -38,7 +38,7 @@ func (s *fakeSandboxService) Status() contracts.SandboxStatus {
 // provided before the settings module activates.
 func newSandboxHarness(t *testing.T, service contracts.SandboxService) *harness {
 	t.Helper()
-	return newHarnessFull(t, &fakeChat{}, newFakeSettings(nil), settings.Config{}, nil, nil,
+	return newHarnessFull(t, &fakeChat{}, newFakeSettings(nil), settings.Config{}, nil,
 		contracts.AppInfo{}, nil, service)
 }
 

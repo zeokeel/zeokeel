@@ -71,7 +71,7 @@ func newLocaleHarness(t *testing.T, chat contracts.ChatService, cfg sidebar.Conf
 		{ID: "home", Title: "首页", Order: 5, Build: func(c *ui.Context) { ui.Text(c, "home screen") }},
 		{ID: "session", Title: "会话", Order: 20, Build: func(c *ui.Context) { ui.Text(c, "session screen") }},
 		{ID: "automation", Title: "自动化", Order: 30, Build: func(c *ui.Context) { ui.Text(c, "automation screen") }},
-		{ID: "plugins", Title: "插件", Order: 35, Build: func(c *ui.Context) { ui.Text(c, "plugins screen") }},
+		{ID: "plugins", Title: "能力", Order: 35, Build: func(c *ui.Context) { ui.Text(c, "plugins screen") }},
 	} {
 		if _, err := uiRoot.Runtime().RegisterScreen(spec); err != nil {
 			t.Fatalf("register screen %q: %v", spec.ID, err)
@@ -96,7 +96,7 @@ func TestSidebarEnglishCopyAndLanguageSwitch(t *testing.T) {
 	// The Home row is gone (home stays a registered screen only, not a sidebar
 	// destination); the generic module-screen rows remain.
 	h.assertTexts(tester, "New chat", "Search chats and messages", "Settings", "Project Alpha",
-		"Automation", "Plugins")
+		"Automation", "Capabilities")
 	h.assertNoTexts(tester, "Show archived", "Hide archived", "Home")
 	h.assertNoTexts(tester, "新对话", "搜索会话与消息", "设置", "显示已归档", "首页", "自动化", "插件")
 
@@ -128,7 +128,7 @@ func TestSidebarEnglishCopyAndLanguageSwitch(t *testing.T) {
 	h.uiRoot.Locale().SetLanguage("zh")
 	tester.Frame()
 	h.assertTexts(tester, "新对话", "搜索会话与消息", "设置",
-		"自动化", "插件")
+		"自动化", "能力")
 	h.assertNoTexts(tester, "New chat", "Search chats and messages", "Settings", "Show archived",
 		"首页", "Home", "Automation", "Plugins", "显示已归档", "隐藏已归档")
 	openRowMenu(t, tester, "Project Alpha")

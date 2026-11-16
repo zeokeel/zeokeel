@@ -1,12 +1,13 @@
-// Package plugins contributes the Plugins screen: the MCP plugin connections
-// and the product's tool catalogue (the old shell's Plugins/manage surface),
-// rebuilt with mygo's native controls and the brand design system.
-//
-// It is a UI module like ui/automation: a kernel Descriptor that requires the
-// host UI runtime and navigator, registers the "plugins" screen and reads the
-// optional contracts.PluginsService and contracts.KeyToolkit registry (no
-// Requires). Missing backends degrade to per-section empty states. Every
-// action (the MCP Refresh) runs through the service and invalidates the frame.
+// Package plugins contributes the Plugins screen: the product's extension hub.
+// It manages skills (Markdown instruction packs discovered from the workspace
+// and the data directory) and MCP connectors (the external tool servers the
+// toolkit connects at launch), and reports the built-in tool catalogue and the
+// compiled-in module inventory. It is a UI module like ui/automation: a kernel
+// Descriptor that requires the host UI runtime and navigator, registers the
+// "plugins" screen and reads optional contracts.PluginsService,
+// contracts.SkillsService and contracts.KeyToolkit (no Requires). Missing
+// backends degrade to per-section empty states. Every action runs through its
+// service and invalidates the frame.
 package plugins
 
 import (
@@ -29,61 +30,55 @@ const ScreenID = "plugins"
 
 // Config is the module's typed assembly config (all fields have defaults).
 type Config struct {
-	// Title is the screen title and page heading (default "插件").
+	// Title is the screen title and page heading (default "能力").
 	Title string `json:"title"`
 	// Description is the page subtitle.
 	Description string `json:"description"`
-	// MCPSection is the MCP servers section label (default "MCP 插件").
+	// SkillsSection is the skills section label (default "技能").
+	SkillsSection string `json:"skillsSection"`
+	// MCPSection is the connectors tab label (default "连接器").
 	MCPSection string `json:"mcpSection"`
-	// ToolsSection is the tool catalogue section label (default "工具目录").
-	ToolsSection string `json:"toolsSection"`
 }
 
 func (c Config) resolved() Config {
 	return Config{
-		Title:        firstNonEmpty(c.Title, "插件"),
-		Description:  firstNonEmpty(c.Description, "查看已连接的 MCP 服务器与产品内置的工具目录。"),
-		MCPSection:   firstNonEmpty(c.MCPSection, "MCP 插件"),
-		ToolsSection: firstNonEmpty(c.ToolsSection, "工具目录"),
+		Title:         firstNonEmpty(c.Title, "能力"),
+		Description:   firstNonEmpty(c.Description, "管理技能与 MCP 连接器，扩展 ZeoKeel 的能力。"),
+		SkillsSection: firstNonEmpty(c.SkillsSection, "技能"),
+		MCPSection:    firstNonEmpty(c.MCPSection, "连接器"),
 	}
 }
 
-// state is the module's UI state: the tool search query. It is only touched on
-// the UI thread.
+// state is the module's UI state. It is only touched on the UI thread.
 type state struct {
 	ctx   cordis.Context
 	query string
 	// locale localizes the screen copy per frame (zh is the default).
 	locale contracts.LocaleService
 
-	// Tool switches. disabledTools is tools.disabled (all tools);
-	// disabledMCPTools is the legacy mcp.disabledTools. Both load on the first
-	// frame; disabledErr surfaces malformed stored JSON.
-	disabledTools    map[string]bool
-	disabledMCPTools map[string]bool
-	disabledLoaded   bool
+	// runtime is the host UI runtime: async connector work posts results here.
+	runtime contracts.UIRuntime
 	// refreshing is true while an MCP re-connect runs off the UI thread: the
 	// Refresh call pings every client and can block on a hung server, so it
 	// never runs inside the frame's click handler.
 	refreshing bool
-	// toolsDisabledOnly filters the tool catalogue to the currently disabled
-	// tools (a "what did I turn off?" view in a 70-row list).
-	toolsDisabledOnly bool
-	disabledErr       string
-	status            string
-	statusErr         bool
+	status     string
+	statusErr  bool
+
+	// capabilityTab is the chosen page-level tab of the capability shell
+	// (skills, connectors and the future workflow tab are parallel entries).
+	capabilityTab int
 
 	// MCP server-level switches (mcp.disabledServers): parsed once; matching is
-	// trimmed/case-insensitive.
+	// trimmed/case-insensitive. The connectors section reads and writes them.
 	disabledServers       map[string]bool
 	disabledServersLoaded bool
 
-	// Official Lists for the page's collections: MCP servers, the built-in
-	// module inventory, the curated settings rows and the tool catalogue.
-	mcpList     ui.ListState
+	// Official Lists for the diagnostic collections below the tabs: the module
+	// inventory and the curated plugin settings rows. The skills and connector
+	// cards are official GridViews owned by their tabs.
 	modulesList ui.ListState
 	paramsList  ui.ListState
-	toolsList   ui.ListState
 
 	// modulesOpen is the built-in module section's disclosure state.
 	modulesOpen bool
@@ -101,24 +96,22 @@ type state struct {
 	paramNotice    string
 	paramErr       bool
 
-	// mcpExpanded remembers the expanded MCP server cards, keyed by server
-	// identity, so a Refresh preserves the open cards.
-	mcpExpanded map[string]bool
-
-	// startupDisabledTools is the disabled-tool set read at activation. The
-	// toolkit only re-registers tools at process start, so a row shows "restart
-	// needed" while its current switch state differs from this snapshot; a
-	// switch flipped back to its startup state clears the hint again.
-	startupDisabledTools map[string]bool
-
-	// pendingRestartServers marks MCP servers enabled during this visit. The
+	// pendingRestartServers marks MCP connectors enabled during this visit. The
 	// toolkit starts servers at launch, so an enabled settings row is not in
-	// the live service yet: the page synthesizes its card instead of letting it
-	// vanish until the next restart.
+	// the live service yet: the connectors section synthesizes its card instead
+	// of letting it vanish until the next restart.
 	pendingRestartServers map[string]bool
 
-	// navigator is the host navigator (deep links to the settings MCP page).
+	// navigator is the host navigator. It stays available for modules that want
+	// to deep-link from this screen; the screen itself has no settings pages to
+	// open anymore (skills and MCP now live here).
 	navigator contracts.Navigator
+
+	// skills is the skills section's state (skills_section.go/skills_edit.go).
+	skills *skillsState
+	// connectors is the MCP connectors section's state
+	// (connectors_section.go/connectors_edit.go).
+	connectors *connectorsState
 }
 
 // tr returns the localized copy for the current frame's language.
@@ -144,8 +137,7 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		// The navigator is required so the screen is reachable from the host's
-		// navigation surface, and so the empty MCP state can deep-link to the
-		// settings page that configures servers.
+		// navigation surface. The page itself no longer deep-links into settings.
 		navigator, err := ctx.Require(contracts.KeyNavigator)
 		if err != nil {
 			return err
@@ -153,8 +145,9 @@ func Module() *module.Descriptor[Config] {
 		config := cfg.resolved()
 		locale, _ := ctx.Get(contracts.KeyLocale)
 		moduleState := &state{
-			ctx: ctx, locale: locale, navigator: navigator,
-			mcpExpanded:           make(map[string]bool),
+			ctx: ctx, locale: locale, navigator: navigator, runtime: runtime,
+			skills:                newSkillsState(),
+			connectors:            newConnectorsState(),
 			pendingRestartServers: make(map[string]bool),
 		}
 		if err := own(ctx, func() (func(), error) {
@@ -163,24 +156,19 @@ func Module() *module.Descriptor[Config] {
 				Title: config.Title,
 				Order: 30,
 				Build: func(c *ui.Context) {
-					buildScreen(c, runtime, config, moduleState)
+					buildScreen(c, config, moduleState)
 				},
 			})
 		}); err != nil {
 			return err
 		}
-		// The screen's chrome lives in the host's B3 top band: the title
-		// (SlotScreenHeader) and the MCP refresh utility (SlotScreenActions),
-		// beside the host's palette control. The item IDs carry the screen
-		// namespace so the band stays on this screen only.
+		// The screen's chrome lives in the host's B3 top band: only the title.
+		// The page's actions belong to its tabs (each tab carries its own
+		// refresh/create row), so the band does not switch actions with a tab.
 		screenSlots := []contracts.SlotItem{
 			{
 				Slot: contracts.SlotScreenHeader, ID: "plugins.title", Order: 10,
 				Build: func(c *ui.Context) { buildScreenHeaderSlot(c, design.Of(c), config, moduleState) },
-			},
-			{
-				Slot: contracts.SlotScreenActions, ID: "plugins.actions", Order: 10,
-				Build: func(c *ui.Context) { buildScreenActionsSlot(c, design.Of(c), runtime, moduleState) },
 			},
 		}
 		for _, item := range screenSlots {
@@ -196,21 +184,6 @@ func Module() *module.Descriptor[Config] {
 		AddRequires(module.Requires(contracts.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeyNavigator)).
 		WithName("ZeoKeel plugins screen")
-}
-
-// openSettingsPage opens the settings surface on one page through the host's
-// optional deep-link capability, falling back to toggling the surface when the
-// navigator does not implement it.
-func (st *state) openSettingsPage(pageID string) {
-	if st.navigator == nil {
-		return
-	}
-	if opener, ok := st.navigator.(interface{ OpenSettingsPage(string) error }); ok {
-		if err := opener.OpenSettingsPage(pageID); err == nil {
-			return
-		}
-	}
-	st.navigator.ToggleSettings()
 }
 
 // own registers one contribution and ties its unregistration to ctx's effect

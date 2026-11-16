@@ -1,5 +1,37 @@
 # Verification log (final)
 
+## 0.2.43 — 2026-11-16 (能力页：技能与 MCP 连接器)
+
+```
+$ gofmt -l internal cmd
+(empty)
+$ go build ./...
+OK
+$ CGO_ENABLED=0 go build ./...
+OK
+$ go vet ./...
+OK
+$ go tool mygo vet .
+OK
+$ go test ./... -count=1
+all packages ok
+$ go run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
+designlint: 313 files, 84 violations: 0 error, 0 warn | baseline 156 entries, 10 registered, 0 new, 0 blocking
+$ ./scripts/design-check.sh
+6 passed, 0 failed
+$ go test -race ./... -count=1
+all packages ok (no data race)
+$ ./scripts/verify.sh
+13 passed, 0 failed
+  race suite, regression 277 PASS / 0 SKIP / 0 FAIL
+  snapshot 124 steps / 123 PNGs
+  desktop (xvfb) / headless / ACP smokes PASS
+```
+
+TDD：能力页骨架 / 技能 Tab / 连接器 Tab 均先写失败测试再实现——骨架 RED 为 `undefined: capabilityTabSpecs`，技能 RED 为 17 个帧测试全 FAIL，连接器 RED 为 `undefined: plugins.MCPConnectionTester`；GREEN 后技能 17/17、连接器 22 用例（含 7 个校验子用例）全 PASS。
+
+附带修复了两处测试竞态：`uimodtest` 内存 settings fake 未加锁；automation 读模型浅拷贝 `RunHistory`，后台结算与 UI 读取竞争。设置导航 19 → 17 页：删除「技能」「MCP」两页，能力页（原插件页）改为页级 Tabs（技能｜连接器，未来工作流为第三 Tab），卡片使用官方 `ui.GridView`（技能 128 高、连接器 176 高，标准窗口 3 列）。视觉证据：`.cache/ui-conformance/p2-capabilities-skills.png`、`p2-capabilities-connectors.png`、`p2-capabilities-skills-dark.png`、`p2-capabilities-connector-form.png`、`p2-capabilities-connector-details.png`、`narrow/narrow-capabilities.png`。
+
 ## 0.2.42 — 2026-11-16 (工具面收敛与 loop 熔断)
 
 ```

@@ -1,6 +1,7 @@
-// Package settings contributes the model, providers, appearance, skills and
-// shortcuts pages to the settings surface, rebuilt with the ZeoKeel brand design
-// system.
+// Package settings contributes the model, providers, appearance and shortcuts
+// pages to the settings surface, rebuilt with the ZeoKeel brand design system.
+// Capability surfaces (skills and MCP connectors) live on the Capabilities
+// screen, not here.
 //
 // It is a UI module like ui/about: a kernel Descriptor that requires the host UI
 // runtime, the settings store, the chat read model, the theme and the locale, and
@@ -65,16 +66,6 @@ const (
 	DiagnosticsPageSection = "高级"
 	// DiagnosticsPageOrder places it first in the advanced group.
 	DiagnosticsPageOrder = 50
-
-	// SkillsPageID is the skills discovery/preview page.
-	SkillsPageID = "skills"
-	// SkillsPageSection places the skills page in the appearance group; skills
-	// are how the assistant's capabilities look to the user.
-	SkillsPageSection = "外观"
-	// SkillsPageOrder places the page after appearance.
-	SkillsPageOrder = 20
-	// SkillsPageTitle is the page title and heading.
-	SkillsPageTitle = "技能"
 )
 
 // The P2-11 regrouping. The page modules declare the section/order a page had
@@ -89,10 +80,9 @@ const (
 	// built-in groups.
 	dataNotificationsSection = "数据与通知"
 
-	// Order inside 集成: skills and LSP join MCP/Search/Network (capabilities and
-	// integrations), after the three existing entries.
-	skillsOrderInIntegrations = 40
-	lspOrderInIntegrations    = 50
+	// Order inside 集成: LSP joins Search/Network (integration surfaces) after
+	// those entries.
+	lspOrderInIntegrations = 50
 
 	// Order inside 数据与通知.
 	notificationsOrderInData = 10
@@ -714,11 +704,9 @@ func Module() *module.Descriptor[Config] {
 		}
 		shortcuts := &shortcutsState{}
 		archive := &archiveState{sel: -1}
-		skills := newSkillsState()
 		update := newUpdateState()
 		importState := newImportState()
 		search := newSearchState()
-		mcp := newMCPState()
 		presets := newPresetsState()
 		catalog := &catalogState{sel: -1}
 		lsp := &lspState{sel: -1}
@@ -851,15 +839,6 @@ func Module() *module.Descriptor[Config] {
 				},
 			},
 			{
-				ID: SkillsPageID, Section: "集成", Order: skillsOrderInIntegrations,
-				zhTitle: "技能", enTitle: "Skills",
-				keywords: skillsPageKeywords,
-				Build: func(c *ui.Context) {
-					syncer.sync()
-					buildSkillsPage(c, design.Of(c), ctx, skills, locale)
-				},
-			},
-			{
 				ID: UpdatePageID, Section: dataNotificationsSection, Order: updateOrderInData,
 				zhTitle: "更新", enTitle: "Update",
 				keywords: updatePageKeywords,
@@ -903,27 +882,6 @@ func Module() *module.Descriptor[Config] {
 				Dirty: func() bool { return search.dirty(store) },
 				Discard: func() {
 					search.discardDrafts(store)
-				},
-			},
-			{
-				ID: MCPPageID, Section: MCPPageSection, Order: MCPPageOrder,
-				zhTitle: "MCP", enTitle: "MCP",
-				keywords: mcpPageKeywords,
-				Build: func(c *ui.Context) {
-					syncer.sync()
-					if mcp.transient.reentered(runtime) {
-						// The form's result copy belongs to one visit; the draft itself
-						// is guarded by Dirty and survives.
-						mcp.status = ""
-						mcp.statusErr = false
-						mcp.testStatus = ""
-						mcp.testErr = false
-					}
-					buildMCPPage(c, ctx, mcp, locale)
-				},
-				Dirty: func() bool { return mcpDraftDirty(mcp) },
-				Discard: func() {
-					discardMCPDraft(mcp)
 				},
 			},
 			{

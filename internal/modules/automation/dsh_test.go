@@ -57,7 +57,12 @@ func TestRunsReuseBoundSession(t *testing.T) {
 	if chat.sessionCount() != 1 {
 		t.Fatalf("chat sessions = %d, want the one bound session", chat.sessionCount())
 	}
-	second := waitTerminal(t, service, created.ID)
+	// Wait for the second record itself: the first record is already terminal,
+	// so a bare waitTerminal can return the previous snapshot while the second
+	// run is still being recorded (flake under the race detector's load).
+	second := waitTask(t, service, created.ID, func(task contracts.AutomationTask) bool {
+		return len(task.RunHistory) >= 2 && task.RunHistory[0].Terminal()
+	})
 	if len(second.RunHistory) != 2 {
 		t.Fatalf("history = %d records, want 2", len(second.RunHistory))
 	}
@@ -102,7 +107,9 @@ func TestNewSessionPerRunOption(t *testing.T) {
 	if secondCall.SessionID == firstCall.SessionID {
 		t.Fatalf("new-session mode reused %q", firstCall.SessionID)
 	}
-	task := waitTerminal(t, service, created.ID)
+	task := waitTask(t, service, created.ID, func(task contracts.AutomationTask) bool {
+		return len(task.RunHistory) >= 2 && task.RunHistory[0].Terminal()
+	})
 	if task.SessionID != "" {
 		t.Fatalf("new-session task remembered %q, want none", task.SessionID)
 	}

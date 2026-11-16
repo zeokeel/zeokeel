@@ -319,7 +319,7 @@ func TestRailAnnouncesCurrentScreen(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
 	mustScreen(t, r, textScreen("session", "对话", "body-session", 20))
-	mustScreen(t, r, textScreen("plugins", "插件", "body-plugins", 30))
+	mustScreen(t, r, textScreen("plugins", "能力", "body-plugins", 30))
 	tt := newTestTester(t, r, 1280, 800)
 	tt.Frame()
 	r.SetSidebarCollapsed(true)
@@ -334,7 +334,7 @@ func TestRailAnnouncesCurrentScreen(t *testing.T) {
 	if session, ok := tt.AccessByRole(ui.RoleToggleButton, "对话"); ok {
 		t.Fatalf("rail lists the conversation screen as a destination: %+v", session)
 	}
-	plugins, ok := tt.AccessByRole(ui.RoleToggleButton, "插件")
+	plugins, ok := tt.AccessByRole(ui.RoleToggleButton, "能力")
 	if !ok {
 		t.Fatalf("rail Plugins destination is not a toggle-like button; texts: %v", tt.Texts())
 	}
@@ -345,7 +345,7 @@ func TestRailAnnouncesCurrentScreen(t *testing.T) {
 		t.Fatalf("Push(plugins): %v", err)
 	}
 	tt.Frame()
-	if plugins, ok = tt.AccessByRole(ui.RoleToggleButton, "插件"); !ok || !plugins.Checked {
+	if plugins, ok = tt.AccessByRole(ui.RoleToggleButton, "能力"); !ok || !plugins.Checked {
 		t.Fatalf("rail Plugins does not report the current screen: %+v ok=%v", plugins, ok)
 	}
 	// The primary action survives the collapse as an icon action.
@@ -354,7 +354,7 @@ func TestRailAnnouncesCurrentScreen(t *testing.T) {
 	}
 
 	// Navigating from the rail moves the state with the screen.
-	if err := tt.Click("插件"); err != nil {
+	if err := tt.Click("能力"); err != nil {
 		t.Fatalf("click rail Plugins: %v; texts: %v", err, tt.Texts())
 	}
 	tt.Frame()
@@ -362,7 +362,7 @@ func TestRailAnnouncesCurrentScreen(t *testing.T) {
 	if got := r.Navigator().Current(); got != "plugins" {
 		t.Fatalf("screen after the rail click = %q, want plugins", got)
 	}
-	plugins, ok = tt.AccessByRole(ui.RoleToggleButton, "插件")
+	plugins, ok = tt.AccessByRole(ui.RoleToggleButton, "能力")
 	if !ok || !plugins.Checked {
 		t.Fatalf("rail Plugins after navigation = %+v (present=%v), want checked", plugins, ok)
 	}

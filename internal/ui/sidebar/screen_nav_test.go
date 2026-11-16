@@ -64,24 +64,24 @@ func TestSidebarListsPluginsScreen(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, sidebar.Config{})
 	if _, err := h.uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
 		ID:    "plugins",
-		Title: "插件",
+		Title: "能力",
 		Order: 30,
 		Build: func(c *ui.Context) {
-			ui.Text(c, "插件屏幕内容")
+			ui.Text(c, "能力屏幕内容")
 		},
 	}); err != nil {
 		t.Fatalf("register plugins screen: %v", err)
 	}
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "插件")
+	h.assertTexts(tester, "能力")
 	h.assertNoTexts(tester, "首页")
 
-	if err := tester.Click("插件"); err != nil {
+	if err := tester.Click("能力"); err != nil {
 		t.Fatalf("click plugins nav item: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	h.assertTexts(tester, "插件屏幕内容")
+	h.assertTexts(tester, "能力屏幕内容")
 }
 
 // TestScreenNavSpecIsTheSingleSource pins the shared navigation table: the
@@ -99,7 +99,7 @@ func TestScreenNavSpecIsTheSingleSource(t *testing.T) {
 		{"session", "对话", "Chat", true},
 		{"automation", "自动化", "Automation", true},
 		{"insights", "洞察", "Insights", true},
-		{"plugins", "插件", "Plugins", true},
+		{"plugins", "能力", "Capabilities", true},
 		{"settings", "设置", "Settings", true},
 	}
 	for _, tc := range cases {
@@ -128,7 +128,7 @@ func TestExpandedSidebarAndRailAgreeOnModuleScreens(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, sidebar.Config{})
 	for _, spec := range []contracts.ScreenSpec{
 		{ID: "automation", Title: "自动化", Order: 20, Build: func(c *ui.Context) { ui.Text(c, "automation screen") }},
-		{ID: "plugins", Title: "插件", Order: 30, Build: func(c *ui.Context) { ui.Text(c, "plugins screen") }},
+		{ID: "plugins", Title: "能力", Order: 30, Build: func(c *ui.Context) { ui.Text(c, "plugins screen") }},
 	} {
 		if _, err := h.uiRoot.Runtime().RegisterScreen(spec); err != nil {
 			t.Fatalf("register %q: %v", spec.ID, err)

@@ -490,7 +490,7 @@ func (r *Root) screenLabel(spec contracts.ScreenSpec) string {
 	case "automation":
 		return r.tr("自动化", "Automation")
 	case "plugins":
-		return r.tr("插件", "Plugins")
+		return r.tr("能力", "Capabilities")
 	default:
 		return spec.Title
 	}

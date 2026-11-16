@@ -520,7 +520,10 @@ func (s *service) List(ctx context.Context) ([]contracts.AutomationTask, error) 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := append([]contracts.AutomationTask(nil), s.tasks...)
+	out := make([]contracts.AutomationTask, len(s.tasks))
+	for i, task := range s.tasks {
+		out[i] = copyTask(task)
+	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
 			return out[i].CreatedAt.Before(out[j].CreatedAt)
@@ -579,7 +582,7 @@ func (s *service) Create(ctx context.Context, task contracts.AutomationTask) (co
 	}
 	s.mu.Unlock()
 	s.notify()
-	return created, nil
+	return copyTask(created), nil
 }
 
 // Update implements contracts.AutomationService.
@@ -636,7 +639,7 @@ func (s *service) Update(ctx context.Context, task contracts.AutomationTask) (co
 	}
 	s.mu.Unlock()
 	s.notify()
-	return updated, nil
+	return copyTask(updated), nil
 }
 
 // Delete implements contracts.AutomationService; unknown IDs are a no-op.
@@ -852,6 +855,14 @@ func (s *service) execute(taskID string, force bool) {
 	}
 }
 
+// copyTask returns a task whose nested slices are independent of the store, so
+// a caller reading a List/Update/claim snapshot cannot race the background
+// settlement that rewrites RunHistory in place.
+func copyTask(task contracts.AutomationTask) contracts.AutomationTask {
+	task.RunHistory = append([]contracts.AutomationRunRecord(nil), task.RunHistory...)
+	return task
+}
+
 // claimRun takes the in-flight guard for one execution and snapshots the task.
 func (s *service) claimRun(taskID string, force bool) (contracts.AutomationTask, bool) {
 	s.mu.Lock()
@@ -865,7 +876,7 @@ func (s *service) claimRun(taskID string, force bool) (contracts.AutomationTask,
 		return contracts.AutomationTask{}, false
 	}
 	s.inFlight[taskID] = true
-	return task, true
+	return copyTask(task), true
 }
 
 // releaseRun clears the in-flight guard of one execution.

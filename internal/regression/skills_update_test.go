@@ -1,7 +1,7 @@
 package regression
 
 // Adversarial audit: editing data-directory skills (contracts.SkillsEditor
-// UpdateSkill) and the settings edit entry. Negative/boundary cases: rewrite
+// UpdateSkill). Negative/boundary cases: rewrite
 // replaces the old content, the name is immutable, unknown/configured/workspace
 // skills are rejected, the body is required, canceled contexts are safe, and
 // concurrent updates are atomic (-race).
@@ -14,11 +14,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/egoist/mygo/ui"
-
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/modules/skills"
-	settingsui "github.com/zeokeel/zeokeel/internal/ui/settings"
 )
 
 // skillTemps lists leftover atomic-write temp files below one skill directory.
@@ -214,56 +211,5 @@ func TestSkillEditorUpdateConcurrent(t *testing.T) {
 	}
 	if temps := skillTemps(t, filepath.Dir(created.Path)); len(temps) != 0 {
 		t.Fatalf("leftover temp files after concurrent updates: %v", temps)
-	}
-}
-
-// TestSettingsSkillsEditEntry covers the settings page edit entry: the data-dir
-// skill card has 编辑, the modal is prefilled with the read-only name, saving
-// reaches UpdateSkill and the new body is visible in the list.
-func TestSettingsSkillsEditEntry(t *testing.T) {
-	harness := startSkills(t, skills.Config{})
-	ctx := context.Background()
-	if _, err := harness.editor.CreateSkill(ctx, contracts.SkillDraft{
-		Name: "alpha", Description: "first", Body: "old body",
-	}); err != nil {
-		t.Fatalf("CreateSkill: %v", err)
-	}
-	provide(t, harness.h.ctx, contracts.KeyChat, contracts.ChatService(newFakeChat()))
-	activate(t, harness.h.ctx, settingsui.Module(), settingsui.Config{})
-	harness.h.ui.Navigator().ToggleSettings()
-	tester := harness.h.tester(1280, 800)
-	tester.Frame()
-	if err := tester.Click("技能"); err != nil {
-		t.Fatalf("open skills page: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	if err := tester.Click("技能操作"); err != nil {
-		t.Fatalf("open skill row menu: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	if err := tester.Click("编辑技能"); err != nil {
-		t.Fatalf("click 编辑技能: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	requireHasTexts(t, tester, "编辑技能", "alpha", "名称不可修改", "描述", "内容", "保存", "取消")
-
-	// Replace the body text and save. The interactive target is the accessibly
-	// labeled body input ("内容 输入"), not the field's visible label.
-	if err := tester.Click("内容 输入"); err != nil {
-		t.Fatalf("focus body: %v", err)
-	}
-	tester.Frame()
-	tester.Key(ui.Cmd, ui.KeyA)
-	tester.Type("brand new body")
-	tester.Frame()
-	if err := tester.Click("保存"); err != nil {
-		t.Fatalf("click 保存: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	requireHasText(t, tester, "已保存")
-	requireNoText(t, tester, "编辑技能")
-	read, err := harness.service.Read(ctx, "alpha")
-	if err != nil || !strings.Contains(read.Body, "brand new body") || strings.Contains(read.Body, "old body") {
-		t.Fatalf("skill after page edit = %+v, %v", read, err)
 	}
 }

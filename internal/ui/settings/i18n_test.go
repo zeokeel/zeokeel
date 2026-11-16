@@ -58,8 +58,8 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 	// the low-frequency advanced group is collapsed (its header is the
 	// discoverable entry point).
 	h.assertTexts(tester, "Common", "Model", "Behavior",
-		"Presets", "Appearance & language", "Appearance", "Skills", "Shortcuts",
-		"Integrations", "MCP", "Search", "Network",
+		"Presets", "Appearance & language", "Appearance", "Shortcuts",
+		"Integrations", "Search", "Network",
 		"Data & notifications", "Notifications", "Memory", "Archived", "Advanced")
 	h.assertNoTexts(tester, "模型", "外观", "技能", "快捷键", "诊断", "更新", "导入")
 	h.click(tester, "Advanced")
@@ -93,14 +93,11 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 	h.assertTexts(tester, "Update", "Current version", "Update service is not enabled")
 	h.click(tester, "Import")
 	h.assertTexts(tester, "Import", "Import service is not enabled")
-	h.click(tester, "Skills")
-	h.assertTexts(tester, "Skills", "Skills backend is not enabled")
-
 	// Switch back to Chinese: navigation and content follow on the next frame.
 	h.uiRoot.Locale().SetLanguage("zh")
 	tester.Frame()
 	h.assertTexts(tester, "设置", "常用", "模型", "行为", "预设", "外观",
-		"外观", "技能", "快捷键", "集成", "MCP", "搜索", "网络",
+		"外观", "快捷键", "集成", "搜索", "网络",
 		"数据与通知", "通知", "记忆", "归档", "高级")
 	// The module-declared group's title follows the language switch with the
 	// page titles; the English value must not linger.

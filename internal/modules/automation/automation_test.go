@@ -337,6 +337,42 @@ func waitCall(t *testing.T, chat *fakeChat) chatCall {
 }
 
 // mustCreate registers a task and fails on error.
+// TestListSnapshotsDoNotAliasRunHistory pins the read model's independence: the
+// scheduler settles runs on a background goroutine, so a List snapshot must own
+// its RunHistory slice instead of aliasing the store (race detector caught the
+// aliased read in TestModuleWiresOptionalNotifier).
+func TestListSnapshotsDoNotAliasRunHistory(t *testing.T) {
+	service := newTestService(t, t.TempDir(), Config{}, newFakeChat())
+	created := mustCreate(t, service, contracts.AutomationTask{
+		Name: "snapshot", Prompt: "run", Schedule: "every 60s",
+	})
+	service.mu.Lock()
+	for index := range service.tasks {
+		if service.tasks[index].ID == created.ID {
+			service.tasks[index].RunHistory = []contracts.AutomationRunRecord{{
+				ID: "run-1", Status: contracts.AutomationRunSuccess,
+			}}
+		}
+	}
+	service.mu.Unlock()
+
+	snapshot, err := service.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(snapshot) != 1 || len(snapshot[0].RunHistory) != 1 {
+		t.Fatalf("List snapshot = %+v, want one task with one run", snapshot)
+	}
+	snapshot[0].RunHistory[0].Status = "mutated"
+	again, err := service.List(context.Background())
+	if err != nil {
+		t.Fatalf("List again: %v", err)
+	}
+	if again[0].RunHistory[0].Status == "mutated" {
+		t.Fatal("List exposed the store's RunHistory backing array")
+	}
+}
+
 func mustCreate(t *testing.T, service contracts.AutomationService, task contracts.AutomationTask) contracts.AutomationTask {
 	t.Helper()
 	created, err := service.Create(context.Background(), task)

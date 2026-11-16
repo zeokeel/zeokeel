@@ -15,6 +15,7 @@
 | 窗口骨架/分栏 | `ui.Split` + `SplitReset`；`ui.Sidebar`（导航与设置导航） |
 | 右侧检查器 | 官方 overlay recipe（`Row + Absolute + Modal + RoleDialog + Esc`） |
 | 列表/日志/表格行 | 右栏 Files/Log/Tools/Tasks/Agents、侧栏会话、Home 最近会话、palette、设置搜索命中均为 `ui.List` |
+| 卡片网格 | 能力页技能/连接器卡片：官方 `ui.GridView` + `t.Panel()`（3 列，技能卡 128 高、连接器卡 176 高；独立对象卡，非设置式管理列表） |
 | 大纲/树 | 侧栏工作区树 `ui.Outline` |
 | 菜单 | `PopoverMenuButton` / `MenuItem.Danger/Radio/ID/Shortcut/Subtitle`；Files/Tasks 行 `Element.ContextMenu` |
 | 输入 | `TextInput`/`TextArea`/`Select`/`SearchField`/`NumberInput`/`Switch`/`Segmented`/`Select` |
@@ -37,11 +38,11 @@
 | 记忆 pane | ✅ 已完成（固定搜索/管理/添加行 + `ui.List` 条目虚拟化，Key=memory.ID） | — | 记忆搜索/增删/顶部打开测试 |
 | 斜杠/`@` 建议菜单 | **保留自绘（附理由）**：富行（图标/标题/说明）官方 Autocomplete 只支持纯文本；已按官方 accessibility suggestions 模式实现 RoleListBox/RoleOption/PositionInSet/ActiveDescendant 与完整键盘 | — | suggestion 测试已覆盖 |
 | 帮助对话框命令列表 | ✅ 已完成（`ui.List`，Key=命令 ID、行名） | — | help dialog 帧测试 |
-| 设置技能卡列表 | ✅ 已完成（`ui.List`，Key=name+path、行名；卡片为行内容） | — | 搜索过滤/展开/编辑删除测试 |
+| 能力页技能卡（2026-11-16 从设置迁入） | ✅ 已完成（官方 `ui.GridView` + `t.Panel()` 卡片，固定 128 高、3 列；卡片底部「查看内容」图标按钮、行内 ⋯；卡片是独立对象，不是设置式管理列表，故不属于 AP-25 卡墙） | — | 能力页技能 Tab 帧测试/搜索过滤/内容预览/编辑删除 |
 | 归档页会话行 | ✅ 已完成（`ui.List`，Key=session.ID、行名、Changed/Submitted 打开；恢复/删除按钮保留行内） | — | archive 全包测试 |
 | 模型目录思考模式编辑器 | ✅ 已完成（`ui.List`，Key=模式 ID（空 ID 时用行号）、行名；只构建可见行） | — | 模型目录增删/编辑/保存测试 |
 | 自动化任务卡 | ✅ 已完成（`ui.List`，Key=task.ID、行名、过滤后列表） | — | automation 全包测试 |
-| 插件页集合 | ✅ 已完成（MCP 服务器、内置模块、插件参数、工具目录全部 `ui.List` + ListState Key/Label；页面本身保留 Section/Scroll 布局） | — | plugins 全包测试 |
+| 能力页诊断区集合（内置模块/扩展设置） | ✅ 已完成（模块清单、扩展设置仍为 `ui.List` + ListState Key/Label；连接器卡改为 `ui.GridView` + `t.Panel()` 固定 176 高、3 列；工具目录已删除，工具默认开启） | — | plugins 全包测试 |
 
 ### P2 — 语义机会点
 
@@ -65,7 +66,7 @@
 | slash/@ 富行建议面板 | 行内含图标/标题/说明多段富文本，官方 Autocomplete 仅纯文本；已按官方 accessibility suggestions 模式实现 RoleListBox/RoleOption/PositionInSet/ActiveDescendant 与完整键盘 |
 | transcript 消息内 hover 动作行 | 消息级悬停交互，官方列表行不提供 |
 | 会话「回到最新」浮层 | 行为用官方 `ScrollToEnd`；浮层是 List 之外的必要 affordance |
-| `ui.Scroll` 保留处（设置页容器、检查器 pane 容器、终端输出、文件/技能 Markdown 预览、release notes、交互 overlay 文本、插件页 Section 布局） | 都是单文本面/页面滚动容器或表单行，不是「集合」；集合已全部是 `ui.List` |
+| `ui.Scroll` 保留处（设置页容器、检查器 pane 容器、终端输出、文件/技能 Markdown 预览、release notes、交互 overlay 文本、能力页 Section 布局） | 都是单文本面/页面滚动容器或表单行，不是「集合」；集合已用 `ui.List`，能力页卡片用 `ui.GridView`（不是 `Scroll`+Row 分列） |
 | 文件/目录选择器、模型列表等 seam 函数 | 纯测试注入点（无应用状态），官方 API 无对应替换 |
 | `ui.EditableText` | 现有重命名是官方 `Modal + TextInput` 流程；改成列表内联编辑是产品交互变更，不属于「替换手搓组件」 |
 | `ui.Rating`/`ui.Meter`/`ui.Progress`/`ui.Spinner` | 产品没有星标评分/仪表/进度条/等待动画的自绘实现（反馈是 thumbs 按钮、流式状态是文字 Badge），不新增功能 |
@@ -95,7 +96,7 @@ tabs 下划线、思考/工具行 trigger、toast parts、附件 chip、设置�
 ## 3. 迁移顺序与验证
 
 
-1. **P1 列表类**：transcript → 轨迹/记忆 → 建议菜单 → 帮助/技能/归档/模式/自动化/插件。
+1. **P1 列表类**：transcript → 轨迹/记忆 → 建议菜单 → 帮助/技能/归档/模式/自动化/能力页（原插件页）。
 2. **P2 语义类**：TokenField → Meter → EditableText → 代码展示。
 3. 每项：读官方 md + 源码确认 API；改 view + 状态；补/改帧测试；跑
    `go test ./internal/ui/...`、全量 `go test ./...`；必要时更新快照并人工看 PNG。
@@ -112,12 +113,14 @@ tabs 下划线、思考/工具行 trigger、toast parts、附件 chip、设置�
   label 仍是可访问名称）。
 - 侧栏消息搜索命中：`ButtonBase` 行 + Column 分组 → 官方 `ui.List`
   （Key=group/hit 稳定键、行名、Selected/Changed/Submitted 打开会话）。
-- 设置归档页、技能卡列表 → 官方 `ui.List`（Key 稳定、行名；行内按钮保留）。
-- 插件页：MCP 服务器、内置模块、插件参数、工具目录 → 官方 `ui.List`
-  （各自 ListState Key/Label；页面分节仍是 Section 布局）。
-- 新增 List 的 a11y/键盘覆盖：侧栏消息命中、设置归档、技能、记忆、自动化、插件
-  MCP/工具目录的帧测试断言 `RoleList` 名称与 `RoleListItem` 行名（List 的 Label
-  同时供 type-ahead 与屏幕阅读器使用）。
+- 设置归档页 → 官方 `ui.List`（Key 稳定、行名；行内按钮保留）。
+- 能力页技能卡（2026-11-16 从设置迁入）→ 官方 `ui.GridView` + `t.Panel()` 卡片（固定 128 高、3 列；
+  卡片底部「查看内容」图标按钮；卡片是独立对象，不是设置式管理列表）。
+- 能力页诊断区集合：内置模块清单、扩展设置 → 官方 `ui.List`（各自 ListState Key/Label）；
+  连接器卡 → 官方 `ui.GridView` + `t.Panel()`（固定 176 高、3 列；失败卡错误摘要/详情/重试）；
+  工具目录已删除（工具默认开启）。
+- 新增 GridView/List 的 a11y/键盘覆盖：侧栏消息命中、设置归档、记忆、自动化、能力页技能/连接器卡
+  （GridView 的 `RoleList` 名称与卡片行名；List 的 Label 同时供 type-ahead 与屏幕阅读器使用）。
 - 文件预览的源码文件：纯 mono `ui.Text`（40 行截断）→ 官方只读 `editor.View`
   （`editor.State{ReadOnly: true, LineNumbers: On, SoftWrap: true}`，按扩展名
   `editor.LanguageFor` 高亮；超过 256 KiB 仍走缓存截断；测试用 a11y `Value` 断言内容）。

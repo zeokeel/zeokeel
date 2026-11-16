@@ -10,6 +10,7 @@ package uimodtest
 // package: it only consumes its public Load API.
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -22,19 +23,39 @@ import (
 )
 
 // memSettings is the SettingsService the process host provides in the real
-// product; the test keeps it in memory.
-type memSettings struct{ values map[string]string }
+// product; the test keeps it in memory. The product reads settings on the UI
+// thread while background work (prompt queue, jobs) may write them, so the fake
+// carries the same locking the file-backed host store has.
+type memSettings struct {
+	mu     sync.RWMutex
+	values map[string]string
+}
 
 func (s *memSettings) Get(key, fallback string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if value, ok := s.values[key]; ok {
 		return value
 	}
 	return fallback
 }
 
-func (s *memSettings) Set(key, value string) error { s.values[key] = value; return nil }
+func (s *memSettings) Set(key, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.values[key] = value
+	return nil
+}
 
-func (s *memSettings) All() map[string]string { return s.values }
+func (s *memSettings) All() map[string]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[string]string, len(s.values))
+	for key, value := range s.values {
+		out[key] = value
+	}
+	return out
+}
 
 // discardLogger is the Logger the process host provides in the real product.
 type discardLogger struct{}

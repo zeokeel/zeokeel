@@ -105,7 +105,7 @@ cmd (30 行) → host (进程) → assembly (装配) → kernel root
 | --- | --- | --- | --- |
 | Home | `home.hero` / `home.composer` / `home.recent` | 🟡 示例模块将渲染 | 欢迎区、输入框变体、最近会话 |
 | Automation | `automation.toolbar` / `automation.list` | ⬜ 迁入时 | 新建任务、运行历史 |
-| Plugins | `plugins.list` / `plugins.detail` | ⬜ 迁入时 | 插件列表/详情动作 |
+| 能力（Plugins screen） | `plugins.title`（`screen.header`）；页面正文由模块自建 | ✅ 已有 | 能力页标题；正文 = 页级 Tabs（技能/连接器，未来工作流为第三 Tab）+ 3 列 `ui.GridView` 卡片；工具目录/工具开关已删除 |
 
 ### 5.3 对话页（Session）
 
@@ -208,7 +208,8 @@ sidebar 消费，无服务时仅打开会话）。
 - ✅ 可配置 chrome 快捷键（settings `ui.shortcut.*` → 宿主每帧 OnShortcut）
 - ✅ goal 跟踪：GoalTracker 桥 + 会话 header 目标显示/清除
 - ✅ 会话导出：Markdown + JSONL（原生 Save seam）
-- ✅ MCP 用户配置：settings mcp.servers + toolkit 合并 + 设置 MCP 页
+- ✅ MCP 连接器：`mcp.servers` / `mcp.disabledServers` / 工作区 `mcp.json` opt-in + toolkit 合并 +
+  能力页「连接器」Tab（添加/编辑/测试连接/移除/启停/失败重试；设置「MCP」页已删除）
 - ✅ present/plan review 宿主桥 + interaction overlay（工件预览、计划批准）
 - ✅ ask_user 交互桥：UserInteraction + hosttools Asker + overlay.dialogs 原生 Modal
 - ✅ Web search：internal/websearch + 动态 web_search（设置「搜索」页）
@@ -219,6 +220,9 @@ sidebar 消费，无服务时仅打开会话）。
 - ✅ 覆盖矩阵：docs/COVERAGE.md（旧功能面 vs 产品）
 - ✅ i18n：uikit.T；sidebar/session/home/settings/about/rightpanel/automation/plugins/toolcards/approval
   en/zh 动态切换（host chrome/dialog 标题/后端数据仍中文）
+- ✅ 设置：17 页（原 19）——常用（模型/行为/预设）、外观（外观/快捷键）、集成（搜索/网络/LSP/能力（限额））、
+  数据与通知（通知/记忆/归档/数据与隐私/导入/更新）、高级（诊断）、关于；技能/MCP 两页已删除并迁入能力页，
+  设置搜索不再命中技能/MCP。
 - ✅ ACP 模式：`internal/modules/acp` + host `--acp`（stdio JSON-RPC，编辑器接入）
 - ✅ DSH 导入：`internal/modules/importer`（session.v4.jsonl → store）+ 设置导入页
 - ✅ 拖放附件：window.OnFileDrop → KeyFileDrop → composer 附件
@@ -226,10 +230,12 @@ sidebar 消费，无服务时仅打开会话）。
 - ✅ 诊断页：设置「诊断」（运行时/存储/工具/设置键，只读 + 复制）
 - ✅ 命令面板：host Cmd/Ctrl+K palette（UIRuntime.Commands）
 - ✅ 全文搜索：sessionstore `MessageSearcher` + sidebar 消息搜索区
-- ✅ 插件：toolkit `KeyPlugins`（MCP 状态）+ `ui/plugins` 页面（MCP + 工具目录）
+- ✅ 能力：toolkit `KeyPlugins`（MCP 状态）+ `ui/plugins` 能力页（页级 Tabs：技能｜连接器，未来工作流为
+  第三 Tab；每个 Tab = 3 列 `ui.GridView` 卡片；页底保留内置模块清单/扩展设置（已接线设置）；无工具目录/工具开关）
 - ✅ 自动化：`internal/modules/automation`（cron/every/after + 持久化 + 执行）+ `ui/automation` 页面
 - ✅ 会话 fork/导出：`SessionForker` + 侧栏创建副本 + 头部原生保存对话框导出 Markdown
-- ✅ 技能：`internal/modules/skills`（多根 SKILL.md 发现）+ toolkit skill 工具 + 设置技能页
+- ✅ 技能：`internal/modules/skills`（多根 SKILL.md 发现）+ toolkit skill 工具 + 能力页「技能」Tab
+  （从设置迁入：扫描根/`skills.dirs`/新建编辑删除/Markdown 内容预览）
 - ✅ 会话↔工作区：sessionstore `workspace_id` 迁移 + agent 记录 + sidebar workspace→session 树
 - ✅ 工作区变更：`WorkspaceDiffer`（git status/diff）→ `ui/rightpanel` 文件标签内折叠的 diff
 - ✅ 工作区：`internal/modules/workspace`（注册表 + 沙箱 Files/ReadFile/Search）；`ui/rightpanel` 文件页

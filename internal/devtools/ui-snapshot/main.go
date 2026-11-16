@@ -1100,35 +1100,6 @@ func main() {
 			Body:        "# 发布前检查\n\n- 跑测试\n- 更新版本号",
 		})
 	}
-	if err := a.clickSettingsItem("技能"); err != nil {
-		fmt.Println("click skills:", err)
-	}
-	a.render(outDir + "/p2-skills.png")
-	if err := a.tester.Click("删除"); err == nil {
-		a.tester.Frame()
-		a.render(outDir + "/p2-skills-delete.png")
-		if cancel, ok := a.tester.Find("取消"); ok {
-			a.tester.ClickAt(cancel.X+cancel.W/2, cancel.Y+cancel.H/2)
-			a.tester.Frame()
-		}
-	} else {
-		fmt.Println("skills delete:", err)
-	}
-	if err := a.tester.Click("新建技能"); err == nil {
-		a.tester.Frame()
-		a.render(outDir + "/p2-skills-new.png")
-		if ok := a.tester.HasText("创建"); ok {
-			if cancel, found := a.tester.Find("取消"); found {
-				a.tester.ClickAt(cancel.X+cancel.W/2, cancel.Y+cancel.H/2)
-				a.tester.Frame()
-			}
-		}
-	}
-	if err := a.tester.Click("查看内容"); err != nil {
-		fmt.Println("expand skill:", err)
-	}
-	a.tester.Advance(200 * time.Millisecond)
-	a.render(outDir + "/p2-skills-content.png")
 	if err := a.clickSettingsItem("快捷键"); err != nil {
 		fmt.Println("click shortcuts:", err)
 	}
@@ -1156,10 +1127,6 @@ func main() {
 		fmt.Println("click search settings:", err)
 	}
 	a.render(outDir + "/p2-search-settings.png")
-	if err := a.clickSettingsItem("MCP"); err != nil {
-		fmt.Println("click MCP settings:", err)
-	}
-	a.render(outDir + "/p2-mcp-settings.png")
 	if err := a.clickSettingsItem("网络"); err != nil {
 		fmt.Println("click network settings:", err)
 	}
@@ -1236,15 +1203,77 @@ func main() {
 		fmt.Println("push automation:", err)
 	}
 	a.render(outDir + "/p2-automation.png")
+	// The Capabilities screen: two parallel tab pages over one skeleton.
 	if err := a.ui.Navigator().Push("plugins"); err != nil {
-		fmt.Println("push plugins:", err)
+		fmt.Println("push capabilities:", err)
 	}
-	a.render(outDir + "/p2-plugins.png")
-	if rect, ok := a.tester.Find("搜索工具"); ok {
-		a.tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+	a.tester.Frame()
+	// Dismiss the boot/update toasts: the capability page review is about the
+	// page, not the notification overlay.
+	for attempt := 0; attempt < 4; attempt++ {
+		if rect, ok := a.tester.Find("关闭通知"); ok {
+			a.tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+			a.tester.Frame()
+			continue
+		}
+		break
+	}
+	a.render(outDir + "/p2-capabilities-skills.png")
+	a.ui.Theme().SetDark(true)
+	a.tester.Frame()
+	a.render(outDir + "/p2-capabilities-skills-dark.png")
+	a.ui.Theme().SetDark(false)
+	a.tester.Frame()
+	if err := a.tester.Click("查看内容"); err == nil {
 		a.tester.Frame()
-		a.tester.Type("memory")
-		a.render(outDir + "/p2-plugins-search.png")
+		a.render(outDir + "/p2-capabilities-skill-content.png")
+		if closeRect, ok := a.tester.Find("关闭"); ok {
+			a.tester.ClickAt(closeRect.X+closeRect.W/2, closeRect.Y+closeRect.H/2)
+			a.tester.Frame()
+		}
+	} else {
+		fmt.Println("open skill content:", err)
+	}
+	if err := a.tester.Click("连接器"); err == nil {
+		a.tester.Frame()
+		a.render(outDir + "/p2-capabilities-connectors.png")
+		if err := a.tester.Click("查看报错详情"); err == nil {
+			a.tester.Frame()
+			a.render(outDir + "/p2-capabilities-connector-details.png")
+			if closeRect, ok := a.tester.Find("关闭"); ok {
+				a.tester.ClickAt(closeRect.X+closeRect.W/2, closeRect.Y+closeRect.H/2)
+				a.tester.Frame()
+			}
+		}
+		// The boot's update toast sits over the tab's action row; let it dismiss
+		// before clicking there (the toast is not part of this review).
+		a.tester.Advance(6 * time.Second)
+		a.tester.Frame()
+		if err := a.tester.Click("添加连接器"); err == nil {
+			a.tester.Frame()
+			a.render(outDir + "/p2-capabilities-connector-form.png")
+			if cancel, ok := a.tester.Find("取消"); ok {
+				a.tester.ClickAt(cancel.X+cancel.W/2, cancel.Y+cancel.H/2)
+				a.tester.Frame()
+			}
+		} else {
+			fmt.Println("open connector form:", err)
+		}
+		a.tester.SetSize(1024, 720)
+		a.tester.Frame()
+		a.render(outDir + "/narrow/narrow-capabilities.png")
+		if err := a.tester.Click("技能"); err == nil {
+			a.tester.Frame()
+			a.render(outDir + "/narrow/narrow-capabilities-skills.png")
+			if err := a.tester.Click("连接器"); err != nil {
+				fmt.Println("back to connectors:", err)
+			}
+			a.tester.Frame()
+		}
+		a.tester.SetSize(1512, 944)
+		a.tester.Frame()
+	} else {
+		fmt.Println("open connectors tab:", err)
 	}
 
 	// Sidebar full-text message search over the stored sessions.
@@ -1784,13 +1813,11 @@ func boot(baseURL, dataDir string) *app {
 var settingsPageIDs = map[string]string{
 	"模型":    "model",
 	"外观":    "appearance",
-	"技能":    "skills",
 	"快捷键":   "shortcuts",
 	"诊断":    "diagnostics",
 	"更新":    "update",
 	"导入":    "import",
 	"搜索":    "search",
-	"MCP":   "mcp",
 	"网络":    "network",
 	"预设":    "presets",
 	"LSP":   "lsp",

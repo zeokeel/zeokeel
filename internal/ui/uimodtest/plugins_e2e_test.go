@@ -1,8 +1,8 @@
 package uimodtest
 
-// Plugins screen end-to-end: the desktop assembly exposes the toolkit's MCP
-// plugin service (none configured in tests) and the full tool catalog, which
-// the screen lists by category with search.
+// Capabilities screen end-to-end: the desktop assembly mounts the two parallel
+// capability tabs (skills, connectors) on the built-in module inventory and the
+// plugin settings. The tool catalogue is no longer a capability surface.
 
 import (
 	"testing"
@@ -30,40 +30,25 @@ func TestPluginsScreenEndToEnd(t *testing.T) {
 	}
 	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
-	for _, want := range []string{"插件", "MCP 插件", "还没有配置 MCP 服务器", "工具目录", "bash"} {
+	// The page skeleton: title and the two parallel tabs. The skills tab is the
+	// first page; the assembly provides the skills editor, so 新建技能 is there.
+	for _, want := range []string{"能力", "技能", "连接器", "新建技能"} {
 		if !tester.HasText(want) {
-			t.Fatalf("plugins frame missing %q; texts = %v", want, tester.Texts())
+			t.Fatalf("capabilities frame missing %q; texts = %v", want, tester.Texts())
 		}
 	}
-	// The catalogue is a virtualized native List: a tool deep in the list is
-	// reached through the search rather than built up front.
-	searchRect, ok := tester.Find("搜索工具")
-	if !ok {
-		t.Fatalf("tool search field not found; texts = %v", tester.Texts())
+	if tester.HasText("工具目录") {
+		t.Fatalf("the capability page still renders the removed tool catalogue; texts = %v", tester.Texts())
 	}
-	tester.ClickAt(searchRect.X+searchRect.W/2, searchRect.Y+searchRect.H/2)
+	// The connectors tab is a full page of its own, with its own create action.
+	if err := tester.Click("连接器"); err != nil {
+		t.Fatalf("open connectors tab: %v", err)
+	}
 	tester.Frame()
-	for _, name := range []string{"read_file", "memory", "schedule_create", "skill"} {
-		tester.Key(ui.Cmd, ui.KeyA)
-		tester.Key(0, ui.KeyBackspace)
-		tester.Frame()
-		tester.Type(name)
-		tester.Frame()
-		if !tester.HasText(name) {
-			t.Fatalf("search %q did not show the tool; texts = %v", name, tester.Texts())
+	for _, want := range []string{"连接器", "添加连接器"} {
+		if !tester.HasText(want) {
+			t.Fatalf("connectors tab missing %q; texts = %v", want, tester.Texts())
 		}
 	}
-	// The search filters both name and description: a name search hides the
-	// other tools (the previous case narrowed to memory tools).
-	tester.Key(ui.Cmd, ui.KeyA)
-	tester.Key(0, ui.KeyBackspace)
-	tester.Frame()
-	tester.Type("memory")
-	tester.Frame()
-	if !tester.HasText("memory") {
-		t.Fatalf("search did not keep memory tools; texts = %v", tester.Texts())
-	}
-	if tester.HasText("bash") {
-		t.Fatalf("search did not filter out bash; texts = %v", tester.Texts())
-	}
+
 }

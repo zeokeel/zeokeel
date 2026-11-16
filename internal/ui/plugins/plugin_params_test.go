@@ -1,6 +1,6 @@
 package plugins_test
 
-// Tests for the Plugins page's plugin parameter section: only the settings keys
+// Tests for the Capabilities page's plugin parameter section: only the settings keys
 // that are actually consumed are shown, sensitive values are masked, editable
 // rows open a native modal that persists through settings, and read-only rows
 // (restart/compile-time) have no edit action.
@@ -17,7 +17,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/ui/plugins"
 )
 
-// newParamsHarness opens the Plugins page with a settings store.
+// newParamsHarness opens the Capabilities page with a settings store.
 func newParamsHarness(t *testing.T, values map[string]string) (*harness, *fakePluginSettings) {
 	t.Helper()
 	store := newFakePluginSettings(values)
@@ -46,15 +46,16 @@ func TestPluginParamsSectionRendersWiredKeys(t *testing.T) {
 		contracts.SettingWebSearchAPIKey:   "sk-secret-value",
 	})
 	tester := h.tester()
-	h.assertTexts(tester, "插件参数")
+	h.assertTexts(tester, "扩展设置")
 	h.assertNoTexts(tester, "web.search.endpoint", "sk-secret-value")
 
 	h.click(tester, "显示参数")
 	h.assertTexts(tester,
 		"搜索端点", "web.search.endpoint", "https://search.example.com/search",
 		"API Key", "web.search.apiKey", "API Key 已设置",
-		"工作区 mcp.json", "mcp.workspaceOptIn", "需重启",
 		"子代理深度", "子代理并发", "编译期常量")
+	// The workspace mcp.json opt-in moved to the connectors tab.
+	h.assertNoTexts(tester, "工作区 mcp.json", "mcp.workspaceOptIn")
 	h.assertNoTexts(tester, "sk-secret-value")
 }
 
@@ -133,13 +134,13 @@ func TestPluginParamsReadOnlyRowsHaveNoEdit(t *testing.T) {
 	h, _ := newParamsHarness(t, nil)
 	tester := h.tester()
 	h.click(tester, "显示参数")
-	h.assertNoTexts(tester, "编辑 工作区 mcp.json", "编辑 子代理深度", "编辑 子代理并发")
+	h.assertNoTexts(tester, "编辑 子代理深度", "编辑 子代理并发")
 }
 
 func TestPluginParamsHiddenWithoutSettings(t *testing.T) {
 	h := newHarness(t, nil, nil, plugins.Config{})
 	tester := h.tester()
-	h.assertNoTexts(tester, "插件参数", "web.search.endpoint")
+	h.assertNoTexts(tester, "扩展设置", "web.search.endpoint")
 }
 
 func TestPluginParamsEnglish(t *testing.T) {
@@ -147,11 +148,10 @@ func TestPluginParamsEnglish(t *testing.T) {
 	tester := h.tester()
 	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Plugin settings")
+	h.assertTexts(tester, "Extension settings")
 	h.click(tester, "Show parameters")
 	h.assertTexts(tester,
 		"Search endpoint", "web.search.endpoint", "API Key", "API key not set",
-		"Workspace mcp.json", "Restart required",
 		"Delegation depth", "Delegation concurrency", "Compile-time constant")
 	h.click(tester, "Edit Search endpoint")
 	h.assertTexts(tester, "Edit parameter", "Save", "Cancel")

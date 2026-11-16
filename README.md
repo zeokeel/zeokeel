@@ -4,18 +4,24 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.42 — 工具面收敛与 loop 熔断** (2026-11-16). Native, compile-time modular
+> **v0.2.43 — 能力页：技能与 MCP 连接器** (2026-11-16). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
-> webview. 本版把模型工具面从 71 个收敛到 **50 个**：删除 terminal_*、team 旧别名、
-> job_start/job_wait；后台命令统一走 `bash run_in_background`，等待走
-> `job_output {wait:true}`。新增按 run 的 wall-clock/token/重复调用/无文件变更
-> loop 熔断。See [CHANGELOG.md](CHANGELOG.md).
+> webview. 本版把侧栏「插件」升级为 **「能力」/Capabilities**：页级 Tabs 骨架下
+> **技能** 与 **连接器** 是平行的两个 Tab（未来工作流加一行 `capabilityTabSpecs`
+> 即成为第三 Tab，不新增 screen），每个 Tab 用 3 列官方 `ui.GridView` 卡片
+> （技能卡 128 高、连接器卡 176 高；失败连接器卡含红色错误摘要 +「查看报错详情」
+> +「重试」）。技能与 MCP 连接器管理（新建/编辑/删除、Markdown 内容预览、
+> 添加/编辑/测试连接/移除、`mcp.servers`/`mcp.disabledServers` 启停、工作区
+> `mcp.json` opt-in）从设置迁入该页；设置删除「技能」「MCP」两页（17 页），设置
+> 搜索不再命中技能/MCP。能力页不再有工具目录/工具开关（工具默认开启，不属于
+> 能力面）。数据键 `skills.dirs` / `mcp.servers` / `mcp.disabledServers` /
+> `mcp.workspaceOptIn` 不变，无数据迁移。See [CHANGELOG.md](CHANGELOG.md).
 
 > **v0.2.24 主要变化**：按 `docs/PRODUCT-BUG-REVIEW-2026-11-11.md` 做 TDD 修复——
 > ① 安全/权限：MCP 多 server 重名 panic、`settings_get` 明文凭据、自动化只读越权、只读预设 destructive memory、LSP 初始化与沙箱路径、损坏数据文件隔离、后端工具开关生效；
 > ② Loop/上下文：/compact 竞态与读模型不一致、删除运行中会话复活、停止误判失败、Regenerate 丢 @session、截断/迭代错误可识别、AGENTS.md 信任边界与 UTF-8 截断、模式/预设进入提示词与工具面、@session 引用转义、记忆/技能有界注入；
 > ③ MCP/记忆/技能：MCP 重连/启动超时/结果上限、记忆 scope 绑定工作区、提取校验、技能根优先级与 frontmatter 保真、工作区技能信任标记；
-> ④ 产品面：首启检查清单、无模型发送禁用与错误恢复、默认模型文案对齐、审批卡会话归属、会话/自动化/ACP 工具根跟随会话、记忆/技能/MCP 设置页状态与文案。
+> ④ 产品面：首启检查清单、无模型发送禁用与错误恢复、默认模型文案对齐、审批卡会话归属、会话/自动化/ACP 工具根跟随会话、记忆/技能/MCP 管理页状态与文案（技能/MCP 已于 2026-11-16 迁入能力页）。
 > 已在 v0.2.24 明确 Deferred 的项见 CHANGELOG「已知限制」。
 
 ## 下载与运行 / Download and run
@@ -70,14 +76,14 @@ publishes the GitHub release with `SHA256SUMS.txt` and a download table.
 > 网络代理设置、MCP 工具级开关、提示词预设（设置 CRUD + composer 插入）、可编辑模型列表（每模型独立服务商/Base URL/API Key + 思考强度/生成参数 + 默认模型；旧单连接自动迁移）、
 > 消息用量 footer/逐条复制、计划模式 + keep-planning、自动化运行历史、
 > Memory 整理/清空、技能新建/删除、工件下载、系统托盘/关闭到托盘、全局热键、LSP 工具、聊天模式（普通/计划/精简/创作）、
-> Home 真实 composer、/停止 /附加文件 /帮助、数据与隐私页、通知开关、侧栏添加工作区、插件 MCP server 详情；
+> Home 真实 composer、/停止 /附加文件 /帮助、数据与隐私页、通知开关、侧栏添加工作区、能力页 MCP 连接器详情；
 > 反证审计共 283 PASS / 0 SKIP（含最新审计补充），4×P2+4×P3 全部修复。详情：[docs/ADVERSARIAL-AUDIT.md](docs/ADVERSARIAL-AUDIT.md)。
 >
 > **最终验证（2026-11-08，Round 8 · HEAD a7fe576）**：`./scripts/verify.sh` 全量 **10/10 PASS（128s）**；
 > 桌面（xvfb，托盘+全局热键）/headless/ACP 冒烟通过，xfvb 日志确认 **27 module instances、NO_PANIC**；
 > regression **283 PASS / 0 SKIP**（含工作树第十六轮审计）；UI 快照 66 步 / 64 张 PNG。
 > 新功能单测：memory extract **7+8 项**、presets **4+2 项**、spill **8+4 项**、compact **5 项**、
-> goal lifecycle **2 项**、i18n 错误 **3+3 项**、插件参数 **8+1 项**；ACP `session/list`/`session/load`
+> goal lifecycle **2 项**、i18n 错误 **3+3 项**、扩展设置 **8+1 项**；ACP `session/list`/`session/load`
 > 真实帧已验证。旧功能覆盖矩阵见 [docs/COVERAGE.md](docs/COVERAGE.md)
 > （62 项：✅61 / 🟡0 / ❌1（winproc 平台非目标）——旧功能覆盖清单全部关闭）。
 > 验证证据：[docs/VERIFICATION.md](docs/VERIFICATION.md)。
@@ -217,9 +223,9 @@ go test ./...
   `.zeokeel/skills` → 用户配置目录（`skills.dirs`）→ assembly 配置目录 → `dataDir/skills` →
   `$ZEOKEEL_SKILLS` → `~/.zeokeel/skills`；动态 roots、frontmatter 解析、body 去 frontmatter、同名技能
   遮蔽时给出可见警告；List 只读每个 SKILL.md 的前缀（数量/字节有上限），load 才读全文；编辑保留未知
-  frontmatter 键）；toolkit 的 skill 工具改用该持久 store；设置「技能」页：roots、额外目录配置、
-  名称/描述/路径、Collapsible + markdown 预览、刷新/错误/发现警告；截图
-  `p2-skills.png`、`p2-skills-content.png`；desktop 19 / headless 10 实例
+  frontmatter 键）；toolkit 的 skill 工具改用该持久 store；技能管理界面（2026-11-16 起为能力页
+  「技能」Tab，从设置迁入）：扫描 roots、额外技能目录 `skills.dirs`、名称/描述/路径、新建/编辑/删除、
+  Markdown 内容预览、刷新/错误/发现警告；desktop 19 / headless 10 实例（当时）
 - ✅ P3 会话 fork / 导出：`SessionForker.ForkSession`（深拷贝消息/附件/Tools，标题「副本 - …」，持久化历史+事件，
   重启恢复）；会话行「⋯」菜单「创建副本」；会话头部「导出」→ mygo 原生保存对话框写 Markdown（标题/时间/
   transcript，测试 seam 可替换）；截图 `p2-fork.png`
@@ -229,9 +235,11 @@ go test ./...
   RunNow/启停/删除/NextRun/LastError，Subscribe；toolkit schedule_* 工具改绑持久 scheduler）；
   `zeokeel-ui/automation` 自动化页（列表/新建/启停/立即运行/删除/运行会话选择，native 控件）+ 侧栏导航；
   截图 `p2-automation.png`；desktop 21 / headless 11 实例
-- ✅ P3 插件页：toolkit 暴露 `KeyPlugins`（MCP 服务器快照/Ping 刷新/工具数）；`zeokeel-ui/plugins` 插件页
-  （MCP 插件状态卡 + 48 工具目录按分类分组 + 搜索过滤）+ 侧栏「插件」导航；截图 `p2-plugins.png`、
-  `p2-plugins-search.png`；desktop 22 实例
+- ✅ P3 插件页（2026-11-16 起为「能力」页）：toolkit 暴露 `KeyPlugins`（MCP 服务器快照/Ping 刷新/工具数）；
+  `zeokeel-ui/plugins` 页面为页级 Tabs（技能｜连接器，未来工作流为第三 Tab）+ 3 列官方 `ui.GridView`
+  卡片（技能卡 128 高、连接器卡 176 高；失败连接器卡含红色错误摘要 +「查看报错详情」+「重试」），
+  页底保留内置模块清单与扩展设置（已接线设置）；侧栏导航更名「能力」/Capabilities（screen id 仍 `plugins`）；
+  不再有工具目录/工具开关（工具默认开启，不属于能力面）；desktop 22 实例（当时）
 - ✅ P3 全文搜索：sessionstore `MessageSearcher`（跨会话消息 LIKE 搜索、LIKE 字面转义、snippet 去
   Markdown 标记、新旧排序、limit 上限）；侧栏搜索框输入后显示「消息搜索」命中列表（标题/角色/时间/
   片段），点击跳转会话；截图 `p2-search.png`
@@ -243,8 +251,8 @@ go test ./...
   持久化到 `ui.shortcut.*`，宿主每帧解析并注册 OnShortcut（改动下一帧生效、恢复默认）；解析器支持
   cmd/ctrl/alt/shift 组合；E2E 覆盖改键 Alt+B 生效与恢复默认
 - ✅ 设计复核（design-guide）：会话头部三枚等权按钮收敛为⿾更多⿿原生溢出菜单；右侧栏去掉重复「模型」
-  tab（6 tabs），模型配置并入概览同一面板（分隔线+紧凑行）；插件页 48 工具由「每工具卡片」改为紧凑行
-  （分隔线分组），降低视觉噪音；快捷键页可编辑项保持一行一个控件
+  tab（6 tabs），模型配置并入概览同一面板（分隔线+紧凑行）；快捷键页可编辑项保持一行一个控件
+  （插件页的 48 工具紧凑行已随 2026-11-16 能力页方案整节删除：工具默认开启，不属于能力面）
 - ✅ P3 会话置顶：pin 标记持久化到 settings `session.<id>.pinned`（不变 DB schema），`ChatSessionInfo.Pinned`；
   侧栏行菜单「置顶会话/取消置顶」，各组内置顶优先排序 + 「置顶」Badge；设计复核移除冗余「当前」Badge
   （选中态由 tint + accent 图标承担），标题不再被挤断；截图 `p2-pinned.png`
@@ -264,8 +272,9 @@ go test ./...
 - ✅ P4 i18n（第一切片）：`uikit.T(locale, zh, en)`；侧栏与会话界面全部自有文案接入 `LocaleService`
   （en/zh 每帧切换即时生效；导航 screen 标题/设置页仍中文，后续切片）；桌面 assembly 移除显式中文 labels
   以便本地化默认值生效；截图 `p2-english.png`
-- ✅ P4 i18n（第二切片）：设置全部页面（模型/服务商/外观/技能/快捷键/诊断/更新/导入 + Settings 浮层标题，
-  页面标题语言变化动态重注册）+ Home（hero/setup/composer）+ 侧栏导航标题（Home/Automation/Plugins）；
+- ✅ P4 i18n（第二切片）：设置全部页面（当前 17 页：模型/行为/预设/外观/快捷键/搜索/网络/LSP/能力（限额）/
+  通知/记忆/归档/数据与隐私/导入/更新/诊断 + 关于；Settings 浮层标题，页面标题语言变化动态重注册）+
+  Home（hero/setup/composer）+ 侧栏导航标题（Home/Automation/Capabilities）；
   desktop assembly 去掉显式中文 settings title 让本地化默认值生效；截图 `p2-english`/`p2-english-settings.png`
 - ✅ P4 i18n（第三切片）：About 页（内容 + 导航标题动态重注册）、右侧检查栏（Inspector/6 tabs/全部面板）、
   Automation/Plugins 页面、toolcards、approval 全部 en/zh 每帧切换；desktop assembly 去掉 about 显式 title；
@@ -290,9 +299,11 @@ go test ./...
   hosttools Presenter/PlanController 桥接）+ interaction 模块统一 FIFO overlay（工件 markdown 预览、计划待审阅
   批准/取消、ask/artifact/plan 三队列、i18n）；E2E present→artifact 覆盖层、plan_review→批准→planState=approved；
   截图 `p2-artifact.png`、`p2-plan.png`
-- ✅ P5 MCP 用户配置：设置「MCP」页（Streamable HTTP 服务器列表/添加/移除，JSON 持久化 `mcp.servers`，
-  校验/重复拒绝/坏 JSON 提示，重启生效）+ toolkit 启动时合并 assembly 与用户配置（assembly 优先、按 URL 去重、
-  非法行 warning）；截图 `p2-mcp-settings.png`
+- ✅ P5 MCP 用户配置：MCP 连接器管理（2026-11-16 起为能力页「连接器」Tab；设置「MCP」页已删除）——
+  Streamable HTTP/stdio 服务器列表/添加/编辑/测试连接/移除，JSON 持久化 `mcp.servers`，server 级启停写
+  `mcp.disabledServers`，工作区 `mcp.json` opt-in；校验/重复拒绝/坏 JSON 提示，重启生效；连接状态与
+  失败摘要/「查看报错详情」/「重试」同屏；+ toolkit 启动时合并 assembly 与用户配置（assembly 优先、按 URL 去重、
+  非法行 warning）
 - ✅ 会话 JSONL 导出：header 更多菜单「导出 JSONL」（session 头 + 每条 message 一行，含 reasoning/error/tools
   扁平化），独立 native Save 对话框 seam；单测覆盖内容/行数/状态
 - 📊 覆盖审计（最新）：[docs/COVERAGE.md](docs/COVERAGE.md)（✅26 / 🟡27 / ❌9；核心+多数高级 UI 可用，

@@ -70,15 +70,21 @@ func (d *drive) runShellSteps() {
 			c.shot("automation-edit-cancelled")
 		})
 
-	d.step("nav-plugins", "uiroot", "导航：插件",
-		"侧栏点击「插件」→ plugins screen 渲染，显示工具目录", func(c *check) {
-			if !c.click("插件") {
+	d.step("nav-capabilities", "uiroot", "导航：能力",
+		"侧栏点击「能力」→ 能力页渲染，页级 Tabs 显示技能/连接器", func(c *check) {
+			if !c.click("能力") {
 				return
 			}
-			c.mustText("插件", "工具目录")
+			c.mustText("能力", "技能", "连接器")
 			c.require(d.uiRoot.Navigator().Current() == "plugins",
 				"navigator.Current()=%q，期望 plugins", d.uiRoot.Navigator().Current())
-			c.shot("nav-plugins")
+			c.shot("nav-capabilities")
+			if !c.click("连接器") {
+				return
+			}
+			d.drain(2)
+			c.mustText("连接器", "添加连接器")
+			c.shot("nav-capabilities-connectors")
 		})
 
 	d.step("nav-session", "uiroot", "导航：会话",
@@ -181,7 +187,7 @@ func (d *drive) runSidebarSteps() {
 			// Every rail destination must still be a labeled control. The old
 			// 首页 destination is gone: the new-chat landing replaces it.
 			missing := []string{}
-			for _, label := range []string{"新对话", "自动化", "插件", "设置"} {
+			for _, label := range []string{"新对话", "自动化", "能力", "设置"} {
 				if _, ok := d.find(label); !ok {
 					missing = append(missing, label)
 				}

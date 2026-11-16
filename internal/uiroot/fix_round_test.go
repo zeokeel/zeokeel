@@ -284,7 +284,7 @@ func TestRailNewChatActionAndScreenSet(t *testing.T) {
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
 	mustScreen(t, r, textScreen("session", "对话", "body-session", 20))
 	mustScreen(t, r, textScreen("automation", "自动化", "body-automation", 30))
-	mustScreen(t, r, textScreen("plugins", "插件", "body-plugins", 40))
+	mustScreen(t, r, textScreen("plugins", "能力", "body-plugins", 40))
 	var newRan bool
 	mustCommand(t, r, contracts.CommandSpec{ID: "zeokeel.session.new", Title: "新会话", Order: 10,
 		Run: func() error {
@@ -306,7 +306,7 @@ func TestRailNewChatActionAndScreenSet(t *testing.T) {
 	if _, ok := tt.AccessByRole(ui.RoleToggleButton, "对话"); ok {
 		t.Fatalf("rail still lists the conversation screen as a destination; texts = %v", tt.Texts())
 	}
-	for _, want := range []string{"自动化", "插件"} {
+	for _, want := range []string{"自动化", "能力"} {
 		// Destinations are toggle-like so assistive technology hears which
 		// screen the rail is on.
 		if _, ok := tt.AccessByRole(ui.RoleToggleButton, want); !ok {

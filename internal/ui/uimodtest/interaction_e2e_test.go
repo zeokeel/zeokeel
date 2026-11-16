@@ -667,7 +667,7 @@ func TestSidebarCollapseAndFooter(t *testing.T) {
 	}
 	// The rail keeps the nav destinations and the footer entry; Home is no
 	// longer a destination (the session screen is the landing).
-	for _, want := range []string{"新对话", "自动化", "插件", "设置"} {
+	for _, want := range []string{"新对话", "自动化", "能力", "设置"} {
 		if !tester.HasText(want) {
 			t.Fatalf("collapsed rail is missing %q; texts = %v", want, tester.Texts())
 		}

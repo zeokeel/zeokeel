@@ -8,11 +8,10 @@ package plugins
 // Inventory (consumed keys):
 //   - web.search.endpoint / web.search.apiKey: the toolkit's web_search tool
 //     reads them on every call, so edits apply immediately.
-//   - mcp.servers / mcp.workspaceOptIn / mcp.disabledServers /
-//     mcp.disabledTools / tools.disabled: consumed by the toolkit and already
-//     surfaced by the MCP cards and switches above, so they are not duplicated
-//     here (except the workspace opt-in, which has no other UI and is shown
-//     read-only with a restart note).
+//   - mcp.servers / mcp.workspaceOptIn / mcp.disabledServers: consumed by the
+//     toolkit and already surfaced by the connector cards and their options
+//     disclosure, so they are not duplicated here. Tool enable switches are
+//     not a capability surface anymore (tools stay enabled by default).
 //
 // Deliberately absent (no settings key exists, so exposing one would be dead
 // configuration): web search max_results is a per-call tool argument; the shell
@@ -63,11 +62,6 @@ func pluginParamSpecs() []pluginParamSpec {
 			Sensitive: true, Editable: true,
 		},
 		{
-			Key: contracts.SettingMCPWorkspaceOptIn, TitleZH: "工作区 mcp.json", TitleEN: "Workspace mcp.json",
-			DescZH: "允许从工作区的 mcp.json 读取额外 MCP 服务器（重启生效）。",
-			DescEN: "Reads extra MCP servers from the workspace mcp.json (restart applies).",
-		},
-		{
 			TitleZH: "子代理深度", TitleEN: "Delegation depth",
 			DescZH:     "子代理委托的最大深度；编译期常量，不可在设置中修改。",
 			DescEN:     "Maximum nested delegation depth; a compile-time constant, not configurable here.",
@@ -92,7 +86,7 @@ func buildPluginParamsSection(c *ui.Context, t *design.Tokens, st *state,
 		return
 	}
 	specs := pluginParamSpecs()
-	uikit.Section(c, st.tr("插件参数", "Plugin settings"), func(c *ui.Context) {
+	uikit.Section(c, st.tr("扩展设置", "Extension settings"), func(c *ui.Context) {
 		design.Apply(ui.Text(c, st.tr(
 			"只展示已被产品实际消费的设置；敏感值仅显示是否已设置。",
 			"Only settings actually consumed by the product are shown; sensitive values only report whether they are set.")),
@@ -122,7 +116,7 @@ func buildPluginParamsSection(c *ui.Context, t *design.Tokens, st *state,
 				return st.tr(specs[index].TitleZH, specs[index].TitleEN)
 			}
 			ui.List(c, &st.paramsList, len(specs)).
-				Label(st.tr("插件参数列表", "Plugin settings list")).
+				Label(st.tr("扩展设置列表", "Extension settings list")).
 				Gap(design.Space1).
 				Rows(func(row ui.ListRow) {
 					buildPluginParamRow(row.Context, t, st, settings, specs[row.Index])
@@ -183,8 +177,7 @@ func buildPluginParamRow(c *ui.Context, t *design.Tokens, st *state,
 }
 
 // pluginParamValue formats the current value and the read-only note: sensitive
-// rows only report set/unset, compile-time rows their fixed value, the
-// workspace opt-in its boolean state.
+// rows only report set/unset and compile-time rows their fixed value.
 func pluginParamValue(st *state, settings contracts.SettingsService, spec pluginParamSpec) (value, note string) {
 	switch {
 	case spec.FixedValue != "":
@@ -194,15 +187,6 @@ func pluginParamValue(st *state, settings contracts.SettingsService, spec plugin
 			return st.tr("API Key 已设置", "API key set"), ""
 		}
 		return st.tr("API Key 未设置", "API key not set"), ""
-	case spec.Key == contracts.SettingMCPWorkspaceOptIn:
-		raw := strings.ToLower(strings.TrimSpace(settings.Get(spec.Key, "")))
-		// This row has no editor: it is consumed at startup, so a restart note is
-		// the honest status.
-		enabled := raw == "true" || raw == "1" || raw == "yes" || raw == "on"
-		if enabled {
-			return st.tr("已启用", "Enabled"), st.tr("需重启", "Restart required")
-		}
-		return st.tr("未启用", "Disabled"), st.tr("需重启", "Restart required")
 	default:
 		current := strings.TrimSpace(settings.Get(spec.Key, ""))
 		if current == "" {

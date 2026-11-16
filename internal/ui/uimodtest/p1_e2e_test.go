@@ -284,37 +284,29 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	if !containsText(skillList, "release-checklist") {
 		t.Fatalf("skill tool list = %q, want release-checklist", skillList)
 	}
-	uiRoot.Navigator().ToggleSettings()
-	tester.Frame()
-	if err := uiRoot.OpenSettingsPage("skills"); err != nil {
-		t.Fatalf("open skills page: %v", err)
+	// Skills are a parallel tab of the Capabilities screen now, not a settings
+	// page: the screen opens on the skills tab.
+	if err := uiRoot.Navigator().Push("plugins"); err != nil {
+		t.Fatalf("open capabilities screen: %v", err)
 	}
 	tester.Frame()
 	tester.Frame()
-	for _, want := range []string{"release-checklist", "发布前检查清单"} {
+	for _, want := range []string{"技能", "release-checklist", "发布前检查清单"} {
 		if !tester.HasText(want) {
-			t.Fatalf("skills page missing %q; texts = %v", want, tester.Texts())
-		}
-	}
-	// The skills page grew (discovery roots / extra-directory section), so the
-	// per-skill disclosure can sit below the 800 DIP test window. Scroll the
-	// settings body until it is visible, then click.
-	if rect, ok := tester.Find("查看内容"); !ok || rect.Y+rect.H > 780 {
-		for attempt := 0; attempt < 6; attempt++ {
-			tester.Scroll(700, 500, 0, 220)
-			tester.Frame()
-			if rect, ok = tester.Find("查看内容"); ok && rect.Y+rect.H <= 780 {
-				break
-			}
+			t.Fatalf("skills tab missing %q; texts = %v", want, tester.Texts())
 		}
 	}
 	if err := tester.Click("查看内容"); err != nil {
-		t.Fatalf("expand skill: %v; texts = %v", err, tester.Texts())
+		t.Fatalf("open skill content: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
 	if !tester.HasText("发布检查") {
 		t.Fatalf("skill body missing; texts = %v", tester.Texts())
 	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	uiRoot.Navigator().ToggleSettings()
+	tester.Frame()
 	if err := uiRoot.OpenSettingsPage("diagnostics"); err != nil {
 		t.Fatalf("open diagnostics page: %v", err)
 	}
@@ -365,17 +357,26 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 			t.Fatalf("search endpoint = %q", got)
 		}
 	}
-	if err := uiRoot.OpenSettingsPage("mcp"); err != nil {
-		t.Fatalf("open MCP settings: %v", err)
+	uiRoot.Navigator().CloseSettings()
+	tester.Frame()
+	// Connectors are the other parallel tab of the Capabilities screen.
+	if err := uiRoot.Navigator().Push("plugins"); err != nil {
+		t.Fatalf("open capabilities screen: %v", err)
 	}
 	tester.Frame()
+	if err := tester.Click("连接器"); err != nil {
+		t.Fatalf("open connectors tab: %v; texts = %v", err, tester.Texts())
+	}
 	tester.Frame()
-	for _, want := range []string{"MCP", "添加", "还没有配置 MCP 服务器"} {
+	for _, want := range []string{"连接器", "添加连接器"} {
 		if !tester.HasText(want) {
-			t.Fatalf("MCP settings page missing %q; texts = %v", want, tester.Texts())
+			t.Fatalf("connectors tab missing %q; texts = %v", want, tester.Texts())
 		}
 	}
-	uiRoot.Navigator().CloseSettings()
+	tester.Frame()
+	if err := uiRoot.Navigator().Push("session"); err != nil {
+		t.Fatalf("return to the session screen: %v", err)
+	}
 	tester.Frame()
 
 	// The durable memory backend is wired into the product: entries persist and

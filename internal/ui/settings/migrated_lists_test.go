@@ -167,34 +167,6 @@ func TestModelCatalogListSemanticsAndKeyboard(t *testing.T) {
 	h.assertTexts(tester, "编辑模型", "保存模型")
 }
 
-// --- MCP servers ------------------------------------------------------------
-
-func TestMCPListSemanticsAndKeyboard(t *testing.T) {
-	store := newFakeSettings(map[string]string{contracts.SettingMCPServers: mcpTwoJSON})
-	h := newHarness(t, &fakeChat{}, store, settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	openMCPPage(t, h, tester)
-
-	requireList(t, tester, "MCP 服务器列表")
-	requireListItem(t, tester, "files")
-	requireListItem(t, tester, "web")
-
-	chooseListItem(t, h, tester, "files")
-	if !requireListItem(t, tester, "files").Selected {
-		t.Fatalf("clicked MCP row is not selected")
-	}
-	pressFocusedKey(t, tester, ui.KeyDown)
-	if !requireListItem(t, tester, "web").Selected {
-		t.Fatalf("Down did not move the MCP selection; texts = %v", tester.Texts())
-	}
-	// The row's ⋯ remove action keeps its confirmation flow.
-	h.click(tester, "服务器操作")
-	h.click(tester, "移除")
-	h.assertTexts(tester, "移除服务器")
-	h.click(tester, "取消")
-}
-
 // --- LSP servers ------------------------------------------------------------
 
 func TestLSPListSemanticsAndKeyboard(t *testing.T) {

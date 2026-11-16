@@ -191,11 +191,6 @@ func shortcutsPageKeywords() []string {
 	return []string{"快捷键", "shortcut", "键位", "keybinding", "恢复默认", "restore default", "键盘", "keyboard"}
 }
 
-// skillsPageKeywords covers the skills page.
-func skillsPageKeywords() []string {
-	return []string{"技能", "skill", "skill.md", "扫描", "scan", "全局", "工作区", "workspace"}
-}
-
 // updatePageKeywords covers the update page.
 func updatePageKeywords() []string {
 	return []string{"更新", "update", "版本", "version", "检查更新", "自动更新", "changelog", "升级", "upgrade"}
@@ -209,11 +204,6 @@ func importPageKeywords() []string {
 // searchPageKeywords covers the web search page.
 func searchPageKeywords() []string {
 	return []string{"搜索", "search", "网络搜索", "web", "引擎", "engine", "api key", "服务商", "provider"}
-}
-
-// mcpPageKeywords covers the MCP page.
-func mcpPageKeywords() []string {
-	return []string{"mcp", "插件", "plugin", "服务器", "server", "工具", "tool", "连接", "connection"}
 }
 
 // archivePageKeywords covers the archived sessions page.

@@ -16,8 +16,9 @@
     toolbar 菜单 + provider `reasoning_effort`）、**@session 引用**（@ 菜单会话分组、token 持久化、
     agent 注入尾部 20 条/≤8000 rune、`session_refs` 事件）。
   - **MCP 管理深度**：Streamable HTTP + **stdio** 传输、assembly/settings/**workspace mcp.json
-    opt-in** 三源合并（优先级 assembly>settings>workspace，URL/stdio 去重）、settings MCP 页传输/
-    args/env 配置、**工具级开关**（`mcp.disabledTools`，Plugins 页 toggle，重启生效）。
+    opt-in** 三源合并（优先级 assembly>settings>workspace，URL/stdio 去重）、能力页「连接器」Tab 的传输/
+    args/env 配置与连接测试、server 级启停（`mcp.disabledServers`）；工具默认开启，能力页不再提供
+    工具目录/工具开关（`mcp.disabledTools` 仍由后端过滤注册前工具）。
   - **宿主**：单实例锁、XDG autostart、**install-on-restart**（pending.json + 下载 SHA 校验 + Replacer）、
     **toast 通知 overlay**（Notifier 桥 + 4 条上限/TTL/关闭）、**网络代理**（HTTP(S)_PROXY/NO_PROXY
     启动注入 + 设置「网络」页，重启生效）。
@@ -25,7 +26,7 @@
   - **更新**：下载（流式 + SHA-256/size 校验 + 原子暂存）+ install 调度（`ScheduleInstall`/
     `PendingInstall` + 宿主启动 apply，失败保留 plan 待重试）。
   - **既有项复核**：pin/archive（agent + sidebar 行菜单 + show-archived 视图）、i18n 覆盖到新增页面、
-    会话搜索/消息全文搜索、JSONL 导出、共享任务（团队浮层只读）、MCP 工具开关均已可用。
+    会话搜索/消息全文搜索、JSONL 导出、共享任务（团队浮层只读）、MCP 连接器启停均已可用。
 - **presets 已落地**：prompt 片段契约 + composer「预设/Presets」插入菜单 + 设置「预设」页 CRUD（名称/提示词/排序/
   恢复默认）+ 设置「模型」页的模型列表（modelcatalog.settings 动态读取）；旧 agent presets 的 tool allowlist 语义仍未迁移，
   故 presets 记 🟡。
@@ -57,7 +58,7 @@
 | `icons` | ✅ | `internal/icons` | Lucide SVG |
 | `importer` | ✅ | `internal/modules/importer` + settings 导入页 | DSH session.v4.jsonl Scan/Import、文本+reasoning、workspace、symlink 跳过/重复 ID 去重；旧 DSH 私有长尾（attachments/credentials/manifest/zstd 压缩）为明确非目标（预览中计数说明） |
 | `lsp` | ✅ | toolkit lsp.go + 设置 LSP 页 | **多服务器列表 + 活动服务器选择 + workspace `.zeokeel/lsp.json` opt-in**（默认关、显式 allow、settings 优先合并）；启动活动服务器并注册 `lsp_*` 工具，卸载关闭；错误仅警告 |
-| `mcp` | ✅ | toolkit `mcp.Start`（stdio+HTTP）+ settings/workspace 合并 + 工具级开关 | HTTP/stdio 握手/工具注册/失败诊断；assembly>settings>workspace mcp.json（opt-in）；`mcp.disabledTools` 注册前过滤；插件详情/市场在 Shell Plugins 行仍 🟡 |
+| `mcp` | ✅ | 能力页「连接器」Tab + toolkit `mcp.Start`（stdio+HTTP）+ settings/workspace 合并 + server 级启停 | HTTP/stdio 握手/工具注册/失败诊断；assembly>settings>workspace mcp.json（opt-in）；`mcp.servers`/`mcp.disabledServers`/`mcp.workspaceOptIn` 数据键不变；连接器卡展示连接状态、失败摘要/详情/重试；工具目录/工具开关已从能力页删除（工具默认开启）；第三方插件市场为明确非目标 |
 | `memory` | ✅ | `internal/modules/memory` + rig memory tool + session Memory tab + 设置「记忆」页 | JSON MemoryStore/tool/搜索/添加/编辑/整理/清空 + **工作区身份 scope（`workspace:<id>`，List/Search 按当前工作区过滤，`ListAll` 供管理页）+ 统一默认 scope（Config.Scope 生效）** + **损坏 memory.json 隔离备份后空 store 继续（assembly 不失败）** + 确定性 consolidation（上限/保留期，**启动与每次写入自动执行**）+ **模型驱动 extract（opt-in 手动触发，最近 20 条→≤5 条，去重/忙碌守卫/坏 JSON 错误、scope 跟随配置默认、候选长度≤200 rune、密钥硬校验、部分失败返回已写入条目）** |
 | `modelcatalog` | ✅ | `internal/modules/modelcatalog` + composer 模型菜单 + settings「模型」页（模型列表） | **用户配置的模型列表（列表为空时装配默认模型仍生效，UI 标注「默认模型，尚未配置连接」；旧 chat.model/baseURL/apiKey 连接在首次启动时迁移为一行）**、**每模型独立 Base URL/API Key（可同时配置多家服务商）**、per-session 模型切换、**模型 chip 两级菜单（一级「模型／推理等级」，二级模型按服务商分组、推理等级为“跟随模型默认+模式”）**、**每模型默认思考强度（Home composer / 设置编辑弹窗）+ 会话×模型思考覆盖（会话内「推理等级」，默认跟随该模型默认值；切换模型不会串用其他模型的强度）**、自定义模式 JSON 参数、**每模型生成参数（temperature/top_p/max_tokens）**、列表增删改/上下文窗口/默认模型/测试连接、消息元信息行预算显示 |
 | `presets` | ✅ | contracts/presets.go + session presets 菜单/人设选择器 + settings「预设」页 | prompt 片段 CRUD/插入 + **AgentPreset（persona/prompt/tools allowlist/model/order）**：settings 代理预设 CRUD、composer「人设」选择器
@@ -67,7 +68,7 @@
 | `runtime` | ✅ | agent + rig agent/gate/compact | 循环/审批/自动压缩/检查点/多模态 parts/subagent runner/team manager/goal 工具与 goal 桥 + **聊天模式（普通/计划/精简/创作）** + **目标暂停/自动续跑**；PTC/workflow/ralph/review 工具为明确非目标 |
 | `session` | ✅ | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher + usage + 排队发送 + goal 续跑/压缩 + tool spill | 发送/取消/历史/恢复/手动压缩/fork/export/附件/重新生成/会话模型/思考强度（模型级默认 + 按（会话×模型）覆盖，按模型系列与自定义模式）/turn usage/排队发送/消息字号/目标续跑 + **大工具结果落盘（>32KiB→`.zeokeel/tool-results`；rig.SpillPolicy 负责写入/命名/清理，模型看到「前缀+绝对路径+字节数+240B preview」摘要，保留 100 个文件，落盘失败保留原文）** |
 | `sessionreference` | ✅ | composer @ 菜单 + agent `references.go` + contracts/sessionreference.go | token 持久化/注入尾部 20 条/8000 rune/session_refs 事件 + **候选排序（ID 精确→前缀→标题，最近优先，上限 8）** + **sessionref: URI 编解码** + **预算错误分类（messages/runes typed error 与事件 budget 字段）** |
-| `skills` | ✅ | `internal/modules/skills` + settings 技能页 | 多根 List/Read/roots/预览/刷新 + **根优先级：工作区（`skills`/`.agents/skills`/`.zeokeel/skills`）→ `skills.dirs` 用户目录 → assembly 目录 → dataDir → `$ZEOKEEL_SKILLS` → `~/.zeokeel/skills`；同名遮蔽有可见警告** + **List 只读文件前缀（≤8KiB/个、≤500 个、每根 ≤2000 条），load 才读全文（≤1MiB）** + 新建/编辑（dataDir 内原子重写、名称不可改、**保留未知 frontmatter 键**）/删除（仅 dataDir，realpath 校验）；**已超出旧实现（old 只有只读 API）**；workspace 编辑/文件监听为非目标 |
+| `skills` | ✅ | `internal/modules/skills` + 能力页「技能」Tab | 多根 List/Read/roots/预览/刷新 + **根优先级：工作区（`skills`/`.agents/skills`/`.zeokeel/skills`）→ `skills.dirs` 用户目录 → assembly 目录 → dataDir → `$ZEOKEEL_SKILLS` → `~/.zeokeel/skills`；同名遮蔽有可见警告** + **List 只读文件前缀（≤8KiB/个、≤500 个、每根 ≤2000 条），load 才读全文（≤1MiB）** + 新建/编辑（dataDir 内原子重写、名称不可改、**保留未知 frontmatter 键**）/删除（仅 dataDir，realpath 校验）+ 技能卡「查看内容」Markdown 预览；**已超出旧实现（old 只有只读 API）**；workspace 编辑/文件监听为非目标 |
 | `state` | ✅ | ChatService 读模型 + uiroot runtime | old broker/projector 被读模型替代；UI 所需投影可用 |
 | `store` | ✅ | `internal/modules/sessionstore` | sessions/messages/events/checkpoints/search/workspace_id + text/search_text 迁移；旧表功能以等价语义落地：attachments 在消息 parts、automation_runs 在 automations.json runHistory、feedback 在 settings 行、per-session model 在主记录 |
 | `tools` | ✅ | toolkit + hosttools + agent + rig tools | 文件/执行/编辑/图像/jobs/memory/schedule/worktree/skills/settings/web/MCP/session/subagent/subagent_fork/spawn_teammate/list_agents/wait_agent/send_message/interrupt_agent/ask_user/present/plan_review/exit_plan_mode/goal/team_task_*/**lsp_*** 已注册 + **全工具级启停（tools.disabled 并集过滤）**；hosttools 只保留 ask_user/present/plan_review/exit_plan_mode/goal（**ask_user/plan_review/exit_plan_mode/goal 由 rig/tools/hosttools 提供，`present` 是产品的内容 artifact 工具；旧的内存 stub `team` 已移除**，真实团队工具由 agent 的 rig team manager 提供；模型侧 terminal_* 与 team 旧别名已移除）；MCP 普通工具名 `mcp__<server>__<tool>`，资源/prompt 工具名 `mcp__<server>__mcp_list_resources` 等（按 server 命名空间，避免多 server 重名）；workflow/ralph/review/inspect/report/ptc 为明确非目标 |
@@ -86,7 +87,7 @@
 | Composer 深度（/goal /plan /memory/权限/thinking/@session/presets） | ✅ | `sessionCommands` + `command_dialogs.go` + `commands_help.go` + `compact_command.go` | **15 条命令**（/新会话/副本/导出/设置/目标/审阅/记忆/反馈/停止/附加/帮助/**压缩上下文/完成目标/放弃目标**）+ 权限模式、聊天模式、**模型与推理等级（模型 chip 两级菜单：一级「模型／推理等级」，二级选模型/选该模型推理等级；覆盖按（会话×模型）保存、默认跟随模型）**、@session、预设；目标生命周期（完成/放弃/编辑/暂停/恢复/清除）已全量 |
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar + session B3 顶栏 | 280px sidebar、64px rail、Cmd/Ctrl+B、**Cmd/Ctrl+N 新建会话、Cmd/Ctrl+, 设置、Cmd/Ctrl+K 命令面板**、右栏开关、添加工作区、视图选项（排序/分组持久化）、工作区搜索/置顶/归档；**会话 B3 顶栏**：40px 标题/工作区行（TypeM 16px 标题）+ 32px Tabs 行、浅色 band + 单条底边线、无返回/无 Alt+←、⋯ 会话操作（复制/导出/归档）、右上 palette+inspector；无贡献屏无空工具栏；输入框上方 dock（目标条 + 审批内联卡）；通知右上角（header 下方，最多 2 条） |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
-| Settings 外壳与页面 | ✅ | `internal/ui/settings`、about | 17 页（高级分组默认折叠，日常导航 9 项）：常用（模型/行为/预设）、外观（外观/技能/快捷键）、集成（MCP/搜索/网络）、高级（通知/归档/导入/更新/诊断/记忆/LSP/数据与隐私）、关于；**模型页 = 模型列表（每模型服务商/Base URL/API Key/系列/思考模式/生成参数编辑；添加模型弹窗含常用服务商预填、密钥继承与测试连接，可设默认模型）+ 提示词 + 运行参数（最大迭代默认不限制/上下文预算/流完整性）**；**插件参数已落在 Plugins 页（已接线键）**；插件市场为明确非目标 |
+| Settings 外壳与页面 | ✅ | `internal/ui/settings`、about | **17 页**（原 19；高级分组默认折叠）：常用（模型/行为/预设）、外观（外观/快捷键）、集成（搜索/网络/LSP/能力（限额））、数据与通知（通知/记忆/归档/数据与隐私/导入/更新）、高级（诊断）、关于；**技能/MCP 两页已删除并迁入能力页，设置搜索不再命中技能/MCP**；**模型页 = 模型列表（每模型服务商/Base URL/API Key/系列/思考模式/生成参数编辑；添加模型弹窗含常用服务商预填、密钥继承与测试连接，可设默认模型）+ 提示词 + 运行参数（最大迭代默认不限制/上下文预算/流完整性）**；扩展设置在能力页底部「诊断与设置」区（已接线键）；第三方插件市场为明确非目标 |
 | Approval 审批内联卡（V3 强调） | ✅ | `uikit.ApprovalDialog`（Inline）+ `internal/ui/approval` + approvals 模块 | 输入框上方内联卡（警示横幅+警示描边，不遮挡 transcript）；allow/allow-always/deny、无默认焦点、Esc=deny 最早一条且不中断本轮（session 判断审批优先）、多请求计数、非会话屏自动切回会话；旧 Modal 路径保留给 embedder；只读/工作区可写/所有权限三档预设（settings 覆盖；旧 ask/never 存值归一为只读；headless assembly 可配 ask/never 策略） |
 | 右侧栏 | ✅ | rightpanel | 默认收起；多标签：开始引导 / 文件 / 每个打开文件一个可关闭标签；文件页含工作区树、交付区、预览/改动；无概览/工具/日志/变更/团队/任务常驻 pane、无侧边栏终端；en/zh |
 | 文件页 / 文件标签 | ✅ | rightpanel files + workspace | 工作区树/面包屑/文本/Markdown/图片预览/错误态/交付区；打开文件新标签，内容可滚动 |
@@ -103,8 +104,8 @@
 | Fork | ✅ | agent SessionForker + sidebar 行菜单 | 深拷贝消息/附件/tools、持久化历史/事件 |
 | Export | ✅ | session 导出 Markdown + 复制对话 + JSONL + toast | 缺跨重启导出历史（非目标） |
 | Automation 页 | ✅ | `internal/ui/automation` + module | 列表/新建（含可选模型）/运行/删除/after/every/cron + 运行历史折叠/展开 + 任务模型 Badge |
-| Plugins 页 | ✅ | `internal/ui/plugins` + toolkit + ModuleLister | MCP 状态/工具目录/工具级与 server 级开关/详情/连接配置/内置模块清单 + **插件参数 section（仅已接线键：web search endpoint/key、mcp opt-in、子代理编译期常量；避免死配置）**；插件市场为明确非目标 |
-| Skills 页 | ✅ | settings 技能页 + skills 模块 | 发现/roots/预览/刷新 + **额外技能目录（`skills.dirs`）配置** + **发现警告（同名遮蔽/扫描上限）** + **新建/编辑（dataDir）/删除（含确认）**；workspace 技能只读展示（设计约束） |
+| 能力页（Capabilities） | ✅ | `internal/ui/plugins` + toolkit + ModuleLister | 页级 Tabs（技能｜连接器，未来工作流为第三 Tab）+ 3 列官方 `ui.GridView` 卡片（技能卡 128 高、连接器卡 176 高；失败连接器卡含红色错误摘要 +「查看报错详情」+「重试」）；技能/连接器的新建/编辑/删除、测试连接、移除、传输/args/env 配置、server 级启停（`mcp.disabledServers`）、工作区 `mcp.json` opt-in；页底「诊断与设置」保留内置模块清单 + **扩展设置（已接线设置） section**；**无工具目录/工具开关**（工具默认开启）；第三方插件市场为明确非目标 |
+| 技能 Tab（能力页） | ✅ | 能力页「技能」Tab + skills 模块 | 发现/roots/预览/刷新 + **额外技能目录（`skills.dirs`）** + **发现警告（同名遮蔽/扫描上限）** + **新建/编辑（dataDir）/删除（含确认）** + 卡片「查看内容」Markdown 预览；workspace 技能只读展示（设计约束） |
 | Memory 页 | ✅ | session Memory tab + 设置「记忆」页 | 会话工作区记忆管理（Tab 在 store 变更时自动刷新）+ 设置页**全工作区**列表/搜索/添加/编辑/删除/整理/清空/上限保留期策略 + **模型提取开关与手动提取入口（隐私/成本提示、防重复、部分失败显示已写入条数）** + **损坏文件恢复提示** |
 | Workspace→Session 树/分组/计数 | ✅ | sidebar workspace tree | 多 workspace 分组、未分组、计数、搜索、折叠、置顶/归档 |
 | Plan UI（plan_review/exit_plan_mode，rig 官方工具；参数 `content`） | ✅ | interaction plan Modal + /审阅计划 + plan 门禁 + toolcards 计划卡 + **keep-planning 反馈** | Markdown 审阅 + 批准/取消 + 计划模式门禁 + transcript 计划卡 + **「继续规划」反馈（写回当前会话作为下一条用户消息 → 模型修订后重新 plan_review）** |
@@ -123,7 +124,7 @@
 2. **Plan 深度（中高）**：keep-planning + 反馈修订循环、plan mode 工具策略切换、transcript plan 卡；
    当前只有批准/取消两键。
 3. **消息级操作/用量**：已实现元信息行单一 ⋯（复制/重生成/反馈/用量明细）与过程折叠，无缺口。
-4. **管理深度（中）**：插件详情/内置插件开关/配置；memory 后台自动提取（当前为手动触发）；
+4. **管理深度（中）**：第三方插件市场/内置插件开关（明确非目标）；memory 后台自动提取（当前为手动触发）；
    artifact 下载动作。
 5. **编排执行深度（中）**：goal 自动驱动（多轮自动继续）、review/PTC/workflow/ralph 工具接线；
    当前 subagent/team/goal 桥可用，但旧 runtime 的高级编排未全接。团队可见性 M1 已落地
@@ -139,7 +140,7 @@
 
 **功能面覆盖结论：旧应用的用户可见功能均已落地等价实现（✅61/62）**；唯一 ❌ 为 winproc（Windows 平台相关，明确非目标）。
 此前 §5.1 列出的 13 项深度限制已全部关闭：automation 字段、LSP 多服务器+workspace opt-in、memory consolidation+extract、agent presets、
-session tool spill、sessionreference URI/预算、i18n 错误分类、/compact 与 /goal 生命周期、插件参数页、ACP tool_call、skills CRUD。
+session tool spill、sessionreference URI/预算、i18n 错误分类、/compact 与 /goal 生命周期、能力页扩展设置、ACP tool_call、能力页技能 CRUD。
 非目标见 §5.2。
 
 ### 5.1 深度限制（已全部关闭）
@@ -155,12 +156,12 @@ ACP 客户端职责（auth/fs/terminal）、系统级全局热键以外的 OS �
 
 ## 6. 对外表述建议
 
-- 可说："已支持完整对话、工作区/文件/变更检查、17 页设置（模型/诊断/快捷键/外观/技能/更新/导入/
-  搜索/MCP/网络/预设/LSP/数据与隐私/通知/行为/记忆）、审批与权限模式、聊天模式（普通/计划/精简/创作）、
+- 可说："已支持完整对话、工作区/文件/变更检查、17 页设置（模型/行为/预设/外观/快捷键/搜索/网络/LSP/
+  能力（限额）/通知/记忆/归档/数据与隐私/导入/更新/诊断 + 关于）、审批与权限模式、聊天模式（普通/计划/精简/创作）、
   右栏（团队/任务）、搜索/fork/导出（Markdown+JSONL，含反馈）、置顶归档、web search、ask_user/present/plan 审阅、
   keep-planning、真实 subagent/team 编排、per-session 模型与思考强度/自定义模式与上下文预算与最大迭代、@session 引用、
-  MCP HTTP/stdio/工具级/server 级开关/连接配置、桌面单实例/autostart/install-on-restart/toast/代理/托盘/全局热键/主题三态、
-  Home composer、技能编辑、记忆管理、工件下载、ACP list/load、导入/更新下载安装调度。"
+  能力页（技能/连接器页级 Tabs，3 列卡片；MCP HTTP/stdio/server 级开关/连接配置）、桌面单实例/autostart/install-on-restart/toast/代理/托盘/全局热键/主题三态、
+  Home composer、能力页技能编辑、记忆管理、工件下载、ACP list/load、导入/更新下载安装调度。"
 - 不要声称"与 old 实现逐像素/逐内部表结构一致"：深度限制见 §5.1，非目标见 §5.2。
 
 审计方法：`grep`/读代码核对模块注册、assembly、settings 页与 UI 构建函数；计数为本文矩阵行数

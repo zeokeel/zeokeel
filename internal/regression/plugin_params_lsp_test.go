@@ -53,8 +53,8 @@ func startPluginParamsUI(t *testing.T, values map[string]string) (*harness, *ui.
 // sensitive value, read-only compile-time constants, no dead keys, and edits
 // persisting to the settings store.
 func TestPluginParamsSection(t *testing.T) {
-	h, tester := startPluginParamsUI(t, map[string]string{contracts.SettingMCPWorkspaceOptIn: "false"})
-	requireHasTexts(t, tester, "插件参数")
+	h, tester := startPluginParamsUI(t, map[string]string{})
+	requireHasTexts(t, tester, "扩展设置")
 	requireNoText(t, tester, "web.search.endpoint")
 	if err := tester.Click("显示参数"); err != nil {
 		t.Fatalf("expand params: %v; texts = %v", err, tester.Texts())
@@ -63,7 +63,6 @@ func TestPluginParamsSection(t *testing.T) {
 	requireHasTexts(t, tester,
 		"搜索端点", "web.search.endpoint", "https://search.example.test/api",
 		"API Key", "API Key 已设置",
-		"工作区 mcp.json", "未启用", "需重启",
 		"子代理深度", "编译期常量", "子代理并发",
 		"只展示已被产品实际消费的设置；敏感值仅显示是否已设置。")
 	// Sensitive values never appear in the frame.

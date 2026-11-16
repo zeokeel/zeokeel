@@ -1,6 +1,6 @@
 package main
 
-// Settings-surface steps: open, walk all 19 pages with key-control checks and
+// Settings-surface steps: open, walk all 17 pages with key-control checks and
 // screenshots, flip a few switches, scroll long pages to their bottom action,
 // and close via the X and Escape.
 
@@ -22,18 +22,16 @@ type settingsPageSpec struct {
 	controls []string
 }
 
-// settingsPages is the product's settings navigation (20 pages, after the host
+// settingsPages is the product's settings navigation (17 pages, after the host
 // groups them by Section; the advanced pages live behind a collapsed group).
 var settingsPages = []settingsPageSpec{
 	{"settings-page-model", "model", "模型", []string{"模型列表", "添加模型", "系统提示词"}},
 	{"settings-page-appearance", "appearance", "外观", []string{"外观模式", "界面语言", "保存"}},
-	{"settings-page-skills", "skills", "技能", []string{"新建技能", "刷新"}},
 	{"settings-page-shortcuts", "shortcuts", "快捷键", []string{"快捷键", "Ctrl + B"}},
 	{"settings-page-diagnostics", "diagnostics", "诊断", []string{"工具数", "会话数"}},
 	{"settings-page-update", "update", "更新", []string{"当前版本", "检查更新"}},
 	{"settings-page-import", "import", "导入", []string{"DSH 数据目录", "扫描"}},
 	{"settings-page-search", "search", "搜索", []string{"搜索端点", "保存"}},
-	{"settings-page-mcp", "mcp", "MCP", []string{"MCP 服务器", "添加服务器"}},
 	{"settings-page-archive", "archive", "归档", []string{"归档的会话"}},
 	{"settings-page-notifications", "notifications", "通知", []string{"显示通知气泡"}},
 	{"settings-page-behavior", "behavior", "行为", []string{"默认代理权限", "工作步骤", "工作步骤展示"}},

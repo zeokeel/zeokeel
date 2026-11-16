@@ -249,14 +249,7 @@ type harness struct {
 
 func newHarness(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config) *harness {
 	t.Helper()
-	return newHarnessFull(t, chat, store, cfg, nil, nil, contracts.AppInfo{}, nil)
-}
-
-// newHarnessWithSkills is newHarness with an optional skills backend provided
-// as contracts.KeySkills (nil keeps the page's "技能后端未启用" empty state).
-func newHarnessWithSkills(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config, skills contracts.SkillsService) *harness {
-	t.Helper()
-	return newHarnessFull(t, chat, store, cfg, skills, nil, contracts.AppInfo{}, nil)
+	return newHarnessFull(t, chat, store, cfg, nil, contracts.AppInfo{}, nil)
 }
 
 // newHarnessWithUpdate is newHarness with an optional update backend and the
@@ -264,7 +257,7 @@ func newHarnessWithSkills(t *testing.T, chat *fakeChat, store *fakeSettings, cfg
 func newHarnessWithUpdate(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config,
 	update contracts.UpdateService, info contracts.AppInfo) *harness {
 	t.Helper()
-	return newHarnessFull(t, chat, store, cfg, nil, update, info, nil)
+	return newHarnessFull(t, chat, store, cfg, update, info, nil)
 }
 
 // newHarnessFull builds the settings harness with the optional backends.
@@ -272,14 +265,14 @@ func newHarnessWithUpdate(t *testing.T, chat *fakeChat, store *fakeSettings, cfg
 func newHarnessWithImporter(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config,
 	importer contracts.ImporterService) *harness {
 	t.Helper()
-	return newHarnessFull(t, chat, store, cfg, nil, nil, contracts.AppInfo{}, importer)
+	return newHarnessFull(t, chat, store, cfg, nil, contracts.AppInfo{}, importer)
 }
 
 // newHarnessFull builds the settings harness with the optional backends; a
 // trailing sandbox service is provided as contracts.KeySandbox before the
 // settings module activates (the Behavior page reads it optionally).
 func newHarnessFull(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config,
-	skills contracts.SkillsService, update contracts.UpdateService, info contracts.AppInfo,
+	update contracts.UpdateService, info contracts.AppInfo,
 	importer contracts.ImporterService, sandboxes ...contracts.SandboxService) *harness {
 	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
@@ -293,9 +286,6 @@ func newHarnessFull(t *testing.T, chat *fakeChat, store *fakeSettings, cfg setti
 	provide(t, ctx, contracts.KeyScreenLister, uiRoot.ScreenLister())
 	provide(t, ctx, contracts.KeySettings, contracts.SettingsService(store))
 	provide(t, ctx, contracts.KeyChat, contracts.ChatService(chat))
-	if skills != nil {
-		provide[contracts.SkillsService](t, ctx, contracts.KeySkills, skills)
-	}
 	if update != nil {
 		provide[contracts.UpdateService](t, ctx, contracts.KeyUpdate, update)
 	}

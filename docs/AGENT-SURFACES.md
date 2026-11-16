@@ -102,7 +102,7 @@ func SessionThread(c *ui.Context, o SessionThreadOptions)
 
 **当前实现**：`internal/ui/session/view.go` `buildChatPane`（List + ListState + FollowEnd + HoldPlace）与 `buildAssistantMessage`/`buildMessage`/过程折叠/元信息行。过程带：思考与非决策工具行以 16px 标记列（sparkles/工具分类图标/运行中 Spinner）+ 动作名 + 状态 + `·` 预览 + 内联 chevron 组成的一条缩进行距活动带；完成且过程 ≥2 行时折叠为一行摘要（`过程 · 思考 · N 个工具调用 · 用时`，流式展开），展开恢复完整时间线；决策卡（ask_user/plan_review/exit_plan_mode）不受折叠影响。帧测试：`internal/ui/session/transcript_window_test.go:32`（虚拟化）、`scroll_follow_test.go:35,65`（跟随）、`interaction_batch_a_test.go:123`（streaming 隐藏动作）、`chrome_b3_test.go`（B3 顶栏/⋯ 会话操作/目标 dock/审批 banner 槽/Esc 审批优先）。
 
-**落地补充（2026-11-15 收尾）**：空会话 hero 在已有空会话时主按钮「开始输入/Start typing」只聚焦 composer，另给 3 个示例 prompt（点击仅填草稿）；从洞察/自动化/插件进入会话时页头 `‹ 来源屏` 走 `nav.Back()`，非会话屏不再双高亮活动会话行；恢复会话从 durable `user_message`/`run_end` 回填 user 与 turn 最终 assistant 时间（压缩/rewind 不错配、不伪造），无时钟且无 usage 的恢复回合不渲染孤立 ⋯。子代理完成回执行尾「打开子会话」；会话 ⋯ 菜单在无目标时给「设置目标」、有目标时「编辑目标」；冷恢复空草稿发送按钮为 DisabledPrimary；活动行 kind 词不重复。窗口标题/托盘 tooltip 显示 `运行中 N` / `等待审批`（`Root.Activity()`，Chat/Approvals/语言事件刷新）。
+**落地补充（2026-11-15 收尾）**：空会话 hero 在已有空会话时主按钮「开始输入/Start typing」只聚焦 composer，另给 3 个示例 prompt（点击仅填草稿）；从洞察/自动化/能力进入会话时页头 `‹ 来源屏` 走 `nav.Back()`，非会话屏不再双高亮活动会话行；恢复会话从 durable `user_message`/`run_end` 回填 user 与 turn 最终 assistant 时间（压缩/rewind 不错配、不伪造），无时钟且无 usage 的恢复回合不渲染孤立 ⋯。子代理完成回执行尾「打开子会话」；会话 ⋯ 菜单在无目标时给「设置目标」、有目标时「编辑目标」；冷恢复空草稿发送按钮为 DisabledPrimary；活动行 kind 词不重复。窗口标题/托盘 tooltip 显示 `运行中 N` / `等待审批`（`Root.Activity()`，Chat/Approvals/语言事件刷新）。
 
 **0.2.40 DSH 客户端对齐补充**：composer 上方 Todo dock（只读待办，进行中/待处理/已完成，空态隐藏；当前 store 仍为进程级）；消息/暂存图片点击打开原生 Modal 原图画廊（多图翻页、Esc/背景关闭、历史无字节诚实提示）；会话 ⋯「创建提醒/本会话提醒」；⋯「导出原始日志（ZIP）」；轨迹页「已知耗时/最慢工具」与每卡「用时」（未知显示 —）。
 
@@ -503,7 +503,7 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 
 **布局**：`uikit.ReadingColumn`（960 居中、`MaxWidthPercent(92)`、无 `Grow`、PaddingX 16 / Gap 20；与对话/Goal dock/子会话 banner 同轴）内三段 `uikit.Section`（概览 / 模型调用 / 上下文事件），页面用 `ui.Scroll`；集合一律官方组件——模型调用用 `ui.Table`（列：轮次/模型/输入/完成/缓存/上下文/时间[/成本]，虚拟化、`MaxWidth(TranscriptWidth)`、`MaxHeight` 有界、窄窗横向滚动不换行），事件用 `ui.List`（`MaxHeight` 有界）。
 
-- 概览（价格在「设置 → 模型」编辑，按当前价格重算）：`uikit.PropertySheet`（160 DIP 标签列 + 值左对齐 + 32 行 + Divider）展示「上下文用量」（`used / window tokens (n%)`；window 未知时只显示 used，不伪造百分比）与仅在 `CostKnown` 时出现的「累计成本」；最近一次快照另起小节展示时间/模型/窗口/系统提示（bytes · tokens）/估算输入/历史消息（用户/助手/工具）以及工具目录（数量 + 名称摘要，tooltip 全量）与注入来源 chips（AGENTS.md/预设/记忆/技能，只显示实际存在的）。
+- 概览（价格在「设置 → 模型」编辑，按当前价格重算）：`uikit.PropertySheet`（160 DIP 标签列 + 值左对齐 + 32 行 + Divider）展示「上下文用量」（`used / window tokens (n%)`；window 未知时只显示 used，不伪造百分比）与仅在 `CostKnown` 时出现的「累计成本」；最近一次快照另起小节展示时间/模型/窗口/系统提示（bytes · tokens）/估算输入/历史消息（用户/助手/工具）以及工具清单（数量 + 名称摘要，tooltip 全量）与注入来源 chips（AGENTS.md/预设/记忆/技能，只显示实际存在的）。
 - 系统提示分段（`Snapshot.Sections` 非空才出现，旧快照整段隐藏，不伪造）：`ui.Table` 按 section 显示本地化名称（identity/environment/…/tool-guidance 映射，未知 ID 回退记录 label/ID，工具 tips 带 ID+Hash）、来源、字节与估算 tokens；表下 `uikit.PropertySheet` 给「分段合计」以及（window 已知时）「估算输入占比 xK / yK (n%)」，并说明「正文不进入事件，仅元数据」。
 - 模型调用：最新在前；每行 iteration/model/prompt/completion/cached/context tokens/时间；成本列仅在会话 `CostKnown` 时存在，行级未知成本显示「—」而不是 0。
 - 上下文事件：最新在前；compact 分四类展示：`Inferred=true` →「压缩（推断）」；`Inferred=false` 且 `Detail=manual` →「压缩」；`Inferred=false` 且 `Outcome==""` →「自动压缩」（运行前 exact，显示 before→after tokens 与消息数 `Replaced → Saved`）；`Outcome!=""` →「自动压缩跳过/失败：failed|no-reduction|archive-failed|replace-failed」+ 本地化原因（历史未修改），**只显示 before→after tokens，不显示会误导的消息 delta，绝不显示「已压缩」**；未知 Outcome 回退原文。spill 显示路径 + 磁盘字节；`recovery` kind 标注「自动压缩重试（成功/失败/压缩失败）」+ 本地化说明 + before→after tokens（其 Saved 是重试次数，不显示成消息数）；`archive` kind 标注「归档/归档（截断）」，说明归档 N 条、超上限省略 M 条（截断），meta 显示归档字节 + before→after tokens；archive/compact 行在存在 durable 归档时给「查看归档」→ 原生 Modal 只读 `ui.List`（角色 Badge/原文/工具调用，截断明示）；读取走可选 `contracts.ContextArchiveService`（agent 按 sessionID+event seq 读 `compact_archive`，有界 200 条/8 KiB 文本/1 KiB 参数，只读审计、绝不注入模型；Seq 由折叠事件持久化，重启后可读）。archive 与 compact 各自独立成行，不合并/不重复计数。手动 `/compact` 的 `ErrCompactArchive`（归档失败、历史未修改）走本地化失败提示，绝不显示「已压缩」。
@@ -523,7 +523,7 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 
 **数据模型**（`internal/contracts/insights.go`，UI 不 import rig）：`InsightsService.Insights(ctx, InsightsQuery{Days, SessionLimit, ForceRefresh}) (Insights, error)`；`Insights{From,To,GeneratedAt,Totals,Daily,Models,Workspaces,Sessions,Truncated,TruncatedSessions}`。后端 `internal/modules/insights` 只做有界读取（`Store.Sessions()` + 每个窗口内会话一次 `Store.Last()`，默认上限 4000 事件/会话），折叠规则：`model_call`（逐调用）为 token 主源，缺 `model_call` 的旧会话回退 `usage`（逐回合，`iterations` 计步），两者并存时不重复计 token；`turns` 数 `usage`，`steps` 数 `model_call`（回退用 usage.iterations），`tool_calls` 数 `tool_call`，`compactions/spills` 数 `compact/spill`。成本按**当前**模型目录每 1M token 单价现算（与「设置 → 模型」同源）；无单价的模型只计 `UnpricedCalls`，绝不产生 0 成本。日桶按后端配置时区（默认本地，产品为 Asia/Shanghai）的本地日零点切分，窗口含今天；结果按 `(days, sessionLimit)` 缓存 15s（`ForceRefresh` 绕过），刷新在后台 goroutine，不占帧。
 
-**入口**：一级侧栏入口——`RegisterScreen(ScreenSpec{ID:"insights", Order:25})` + `sidebar.ScreenNavSpec("insights") = (icons.Activity, "洞察", "Insights")`；位于「自动化」与「插件」之间。顶栏贡献 `insights.title`（`screen.header`，TypeM/600）与 `insights.actions`（`screen.actions`，唯一的即时动作「刷新」图标按钮，加载中 disabled）。不新增右栏常驻页、不在会话页签内重复。
+**入口**：一级侧栏入口——`RegisterScreen(ScreenSpec{ID:"insights", Order:25})` + `sidebar.ScreenNavSpec("insights") = (icons.Activity, "洞察", "Insights")`；位于「自动化」与「能力」之间。顶栏贡献 `insights.title`（`screen.header`，TypeM/600）与 `insights.actions`（`screen.actions`，唯一的即时动作「刷新」图标按钮，加载中 disabled）。不新增右栏常驻页、不在会话页签内重复。
 
 **布局**（`internal/ui/insights/view.go`，页面用 `ui.Scroll`，正文不叠第二行 header）：
 - 工具栏：`uikit.SegmentedControl` 分段控件「7 天 / 30 天」（radio 组语义、方向键、`Label`「时间范围」；选中段 `BgSelected` + `LabelPrimary` + 600 + 2 DIP Accent 下划线，无 accent 填充）；右侧为弱化的范围/更新时间（`11-09 – 11-15 · 更新于 HH:MM`）。
@@ -613,11 +613,11 @@ Agent 客户端的界面不是一次性输出：用户对界面的操作要作�
 
 ### 2.7 记忆与技能管理（非 surface，事实约定）
 
-记忆 Tab 与设置「记忆」「技能」页不是上述 9 个 Agent surface，但读写同一批 contracts 服务；改动它们时保持以下事实一致：
+记忆 Tab、设置「记忆」页与能力页「技能」Tab 不是上述 9 个 Agent surface，但读写同一批 contracts 服务；改动它们时保持以下事实一致：
 
 - **记忆 scope**：条目保存工作区身份（`workspace:<id>`），`List/Search` 只返回 global + 当前工作区条目；管理页用可选 `MemoryAllLister.ListAll` 看全量。默认 scope 只由 `memory.Config.Scope` 决定（工具/设置页/提取省略 scope 时走它）；会话「记忆」Tab 显式写当前工作区。
 - **记忆恢复**：`memory.json` 损坏时隔离为 `.corrupt-<ts>` 并以空 store 继续；`MemoryRecoveryReporter.RecoveryNotice()` 必须显示在记忆页（不能只写日志）。
-- **技能根**：优先级为工作区（`skills`、`.agents/skills`、`.zeokeel/skills`）→ `skills.dirs` → assembly 目录 → `dataDir/skills` → `$ZEOKEEL_SKILLS` → `~/.zeokeel/skills`；同名遮蔽与扫描上限经 `SkillWarnings.Warnings()` 在技能页可见。
+- **技能根**：优先级为工作区（`skills`、`.agents/skills`、`.zeokeel/skills`）→ `skills.dirs` → assembly 目录 → `dataDir/skills` → `$ZEOKEEL_SKILLS` → `~/.zeokeel/skills`；同名遮蔽与扫描上限经 `SkillWarnings.Warnings()` 在能力页「技能」Tab 可见。
 - **技能内容边界**：`List` 只读每个 `SKILL.md` 的前缀（名称/描述/可搜索摘要），`Read`/`load` 才读全文（≤1MiB）；编辑只重写名称/描述/正文，保留未知 frontmatter 键；写路径仍仅 `<dataDir>/skills`。
 
 ---
