@@ -37,7 +37,7 @@ import (
 	"strings"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
-	"github.com/zeokeel/zeokeel/internal/modules/update"
+	libversion "github.com/zeokeel/zeokeel/internal/lib/version"
 )
 
 // Host-side half of the pending.json schema (the update module writes it).
@@ -941,7 +941,7 @@ func clearInstalledPendingUpdate(dataDir, appVersion string, pending pendingUpda
 	if running == "" || strings.TrimSpace(pending.Version) == "" {
 		return false
 	}
-	comparison, err := update.CompareVersions(running, pending.Version)
+	comparison, err := libversion.CompareVersions(running, pending.Version)
 	if err != nil || comparison < 0 {
 		return false
 	}

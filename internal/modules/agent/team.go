@@ -133,16 +133,23 @@ func (s *service) teamRunnerOptions() rigagent.RunnerOptions {
 }
 
 // teamManagerLocked returns the service's team manager, creating it on first
-// use. The caller holds s.mu. The tracker is registered for both the service
-// and the manager: the module factory builds the manager and the adapter in two
-// separate calls, so neither can carry the other's pointer.
+// use. The caller holds s.mu. The tracker is instance state shared by the
+// manager, the adapter and the wrapped tools (BE-13).
 func (s *service) teamManagerLocked() *rigteam.Manager {
 	if s.teamManager == nil {
-		tracker := teamTrackerForService(s)
+		tracker := s.teamTrackerLocked()
 		s.teamManager = rigteam.NewManager(&dynamicTeamRunner{service: s, tracker: tracker})
-		teamTrackers.Store(s.teamManager, tracker)
 	}
 	return s.teamManager
+}
+
+// teamTrackerLocked returns the service's tracker, creating it on first use.
+// The caller holds s.mu.
+func (s *service) teamTrackerLocked() *teamTracker {
+	if s.teamTracker == nil {
+		s.teamTracker = newTeamTracker(s.notifyTeamChange, s.childSessions)
+	}
+	return s.teamTracker
 }
 
 // teamManager returns the service's team manager.
@@ -173,11 +180,16 @@ func (s *service) notifyTeamChange() {
 }
 
 // teamTrackerForService returns the run/activity tracker shared by the service,
-// its runner and its manager, creating and registering it on first use.
+// its runner and its manager, creating it on first use. Instance state: the
+// tracker dies with the service (BE-13, 2026-11 audit — the old package-level
+// sync.Map retained every disposed service's tracker for the process lifetime).
 func teamTrackerForService(s *service) *teamTracker {
-	return teamTrackerFor(s, func() *teamTracker {
-		return newTeamTracker(s.notifyTeamChange, s.childSessions)
-	})
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.teamTrackerLocked()
 }
 
 // teamService adapts the agent service to contracts.TeamService. The adapter
@@ -642,7 +654,10 @@ func newTeamTools(svc *service, manager *rigteam.Manager) []rig.Tool {
 			tools = append(tools, tool)
 		}
 	}
-	tracker := teamTrackerFor(manager, nil)
+	// The tracker is the service's instance tracker (BE-13): the manager, the
+	// adapter and these wrapped tools all share it. Without a service (focused
+	// unit tests) the tools stay unwrapped.
+	tracker := teamTrackerForService(svc)
 	if tracker == nil {
 		return tools
 	}

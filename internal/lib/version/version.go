@@ -1,39 +1,45 @@
-package update
-
+// Package version compares semver-ish product versions. It lives in the shared
+// library layer because both the update module and the process host need it
+// (2026-11 audit AR-22: the host must not import a backend module for a pure
+// function).
+//
 // Pragmatic semver comparison ported from the old shell's updater:
 // MAJOR[.MINOR[.PATCH]][-prerelease][+build]. Missing components are 0, a
 // prerelease sorts before its release and numeric prerelease identifiers sort
 // before alphanumeric ones.
+package version
 
 import (
 	"fmt"
 	"strings"
 )
 
-// version is one parsed semver-ish version.
-type version struct {
+// Version is one parsed semver-ish version.
+type Version struct {
 	major, minor, patch int
 	pre                 []string
 }
 
-// CompareVersions compares two semver-ish versions.
+// CompareVersions compares two semver-ish versions: -1 when a < b, 0 when
+// equal, +1 when a > b. Invalid input returns an error.
 func CompareVersions(a, b string) (int, error) {
-	left, err := parseVersion(a)
+	left, err := Parse(a)
 	if err != nil {
 		return 0, err
 	}
-	right, err := parseVersion(b)
+	right, err := Parse(b)
 	if err != nil {
 		return 0, err
 	}
 	return compareVersion(left, right), nil
 }
 
-// parseVersion parses MAJOR[.MINOR[.PATCH]][-prerelease][+build]. A leading
-// "v" (the tag convention of the release pipeline) is accepted and ignored, so
-// the running binary's -ldflags version (v1.2.3) compares like 1.2.3.
-func parseVersion(raw string) (version, error) {
-	var parsed version
+// Parse parses MAJOR[.MINOR[.PATCH]][-prerelease][+build]. A leading "v" (the
+// tag convention of the release pipeline) is accepted and ignored, so the
+// running binary's -ldflags version (v1.2.3) compares like 1.2.3. Callers that
+// only validate a version string can discard the returned Version.
+func Parse(raw string) (Version, error) {
+	var parsed Version
 	text := strings.TrimSpace(raw)
 	if text == "" {
 		return parsed, fmt.Errorf("empty version")
@@ -80,7 +86,7 @@ func parseVersion(raw string) (version, error) {
 	return parsed, nil
 }
 
-func compareVersion(left, right version) int {
+func compareVersion(left, right Version) int {
 	if comparison := compareInt(left.major, right.major); comparison != 0 {
 		return comparison
 	}

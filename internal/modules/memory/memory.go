@@ -311,7 +311,10 @@ func (s *Store) load() error {
 		return nil
 	}
 	if err != nil {
-		s.noteRecovery(fmt.Sprintf("memory file %q could not be read (%v); starting with an empty memory store", s.path, err))
+		// BE-09 (2026-11 audit): a non-NotExist READ error quarantines exactly
+		// like a decode error — an empty start with the entry left in place
+		// would let the next persist overwrite it and lose the original bytes.
+		s.quarantine(fmt.Sprintf("memory file %q could not be read (%v)", s.path, err))
 		return nil
 	}
 	entries, err := decodeEntries(data)

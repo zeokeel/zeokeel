@@ -387,12 +387,16 @@ func TestSessionsUnreadReadsSettings(t *testing.T) {
 	if err := settings.Set(key, "true"); err != nil {
 		t.Fatalf("Set unread row: %v", err)
 	}
+	// The product's unread setters notify after the row write (finish /
+	// SetActiveSession); the list cache invalidates on that notify (AR-20).
+	svc.notify(id)
 	if info := sessionInfoOf(t, svc, id); !info.Unread {
 		t.Fatalf("session info = %+v, want Unread read from the settings row", info)
 	}
 	if err := settings.Set(key, "false"); err != nil {
 		t.Fatalf("Set unread row: %v", err)
 	}
+	svc.notify(id)
 	if info := sessionInfoOf(t, svc, id); info.Unread {
 		t.Fatalf("session info = %+v, want Unread=false", info)
 	}

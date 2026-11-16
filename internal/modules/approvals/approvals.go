@@ -315,9 +315,58 @@ func (s *service) Request(ctx context.Context, request contracts.ApprovalRequest
 		}
 	}
 
+	// RG-04 (2026-11 audit, personal-scale ruling): an OPT-IN timeout for
+	// automation-origin requests only. Default 0 = off — interactive approvals
+	// keep waiting exactly as before (the run-level wall-clock breaker still
+	// backstops every run). When configured, an unattended request nobody
+	// answers is auto-denied, recorded and notified instead of parking until
+	// the whole run is cancelled.
+	var timeoutC <-chan time.Time
+	if s.settings != nil && strings.EqualFold(strings.TrimSpace(request.Source), contracts.SessionOriginAutomation) {
+		if seconds := contracts.NormalizeApprovalTimeoutSeconds(
+			s.settings.Get(contracts.SettingAgentApprovalTimeoutSeconds, "")); seconds > 0 {
+			timer := time.NewTimer(time.Duration(seconds) * time.Second)
+			defer timer.Stop()
+			timeoutC = timer.C
+		}
+	}
+
 	select {
 	case resolved := <-entry.result:
 		return resolved.decision, resolved.err
+	case <-timeoutC:
+		s.mu.Lock()
+		timedOut := false
+		if current, ok := s.pending[id]; ok && current == entry {
+			delete(s.pending, id)
+			// Record the deny: a late Resolve stays idempotent, and the gate
+			// reports a normal tool denial the run can continue from.
+			s.rememberAnswerLocked(id, contracts.ApprovalDeny)
+			timedOut = true
+		}
+		s.mu.Unlock()
+		if !timedOut {
+			// A human answer landed between the timer firing and this lock:
+			// deliver it instead of the deny.
+			resolved := <-entry.result
+			return resolved.decision, resolved.err
+		}
+		s.notify()
+		s.logger.Printf("[approvals] request %s (%s, session %s) auto-denied after approval timeout",
+			id, request.Tool, request.SessionID)
+		if s.notifier != nil {
+			text := s.approvalTimeoutText(request)
+			if sessionID := strings.TrimSpace(request.SessionID); sessionID != "" {
+				if sessionNotifier, ok := s.notifier.(contracts.SessionNotifier); ok && sessionNotifier != nil {
+					sessionNotifier.NotifySystemFor(contracts.NotifyWarning, text, sessionID)
+				} else {
+					contracts.NotifyApprovalWaiting(s.notifier, text)
+				}
+			} else {
+				contracts.NotifyApprovalWaiting(s.notifier, text)
+			}
+		}
+		return contracts.ApprovalDeny, nil
 	case <-ctx.Done():
 		s.mu.Lock()
 		if current, ok := s.pending[id]; ok && current == entry {
@@ -330,6 +379,25 @@ func (s *service) Request(ctx context.Context, request contracts.ApprovalRequest
 		}
 		return "", ctx.Err()
 	}
+}
+
+// approvalTimeoutText is the visible copy of the automation approval-timeout
+// auto-deny notification (the waiting notice's sibling): it names the tool by
+// its friendly localized name and says the unattended request was denied
+// because nobody answered within the configured window.
+func (s *service) approvalTimeoutText(request contracts.ApprovalRequest) string {
+	english := uikit.Language(s.locale) == "en"
+	name := uikit.ToolDisplayName(s.locale, request.Tool)
+	if name == "" || name == strings.TrimSpace(request.Tool) {
+		name = "工具调用"
+		if english {
+			name = "a tool call"
+		}
+	}
+	if english {
+		return "Approval timed out and was auto-denied: " + name + " (automation)"
+	}
+	return "审批超时已自动拒绝：" + name + "（自动化）"
 }
 
 // approvalWaitingText is the visible copy of the approval-waiting notification.

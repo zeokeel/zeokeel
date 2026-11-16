@@ -237,6 +237,10 @@ type fakeWorkspace struct {
 	calls      []workspaceCall
 	workspaces []contracts.Workspace
 	createErr  map[string]error
+	// currentID models the real workspace service: Create makes the registered
+	// root current, Open switches back (BE-04 save/restore).
+	currentID string
+	openErr   error
 }
 
 func newFakeWorkspace() *fakeWorkspace {
@@ -252,11 +256,13 @@ func (w *fakeWorkspace) Create(ctx context.Context, name, root string) (contract
 	}
 	for _, workspace := range w.workspaces {
 		if workspace.Root == root {
+			w.currentID = workspace.ID
 			return workspace, nil
 		}
 	}
 	workspace := contracts.Workspace{ID: fmt.Sprintf("ws-%d", len(w.workspaces)+1), Name: name, Root: root, CreatedAt: time.Now()}
 	w.workspaces = append(w.workspaces, workspace)
+	w.currentID = workspace.ID
 	return workspace, nil
 }
 
@@ -267,11 +273,29 @@ func (w *fakeWorkspace) List(context.Context) ([]contracts.Workspace, error) {
 }
 
 func (w *fakeWorkspace) Current(context.Context) (contracts.Workspace, bool, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, workspace := range w.workspaces {
+		if workspace.ID == w.currentID {
+			return workspace, true, nil
+		}
+	}
 	return contracts.Workspace{}, false, nil
 }
 
-func (w *fakeWorkspace) Open(context.Context, string) (contracts.Workspace, error) {
-	return contracts.Workspace{}, errors.New("fake workspace: not implemented")
+func (w *fakeWorkspace) Open(_ context.Context, id string) (contracts.Workspace, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.openErr != nil {
+		return contracts.Workspace{}, w.openErr
+	}
+	for _, workspace := range w.workspaces {
+		if workspace.ID == id {
+			w.currentID = id
+			return workspace, nil
+		}
+	}
+	return contracts.Workspace{}, fmt.Errorf("fake workspace: unknown id %q", id)
 }
 
 func (w *fakeWorkspace) Delete(context.Context, string) error { return nil }

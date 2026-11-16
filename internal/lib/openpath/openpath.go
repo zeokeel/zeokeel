@@ -13,14 +13,24 @@ import (
 	"github.com/egoist/mygo"
 )
 
+// defaultOpenPath is the platform launcher; openPath is the injectable step
+// the seam unit tests replace to observe the constructed command headlessly
+// (AR-21). Production always uses the framework call.
+var defaultOpenPath = func(path string) error { return mygo.Shell.OpenPath(path) }
+var openPath = defaultOpenPath
+
 // Open is the replaceable launcher seam (tests inject a fake).
 var Open = func(path string) error {
-	return mygo.Shell.OpenPath(strings.TrimSpace(path))
+	return openPath(strings.TrimSpace(path))
 }
+
+// defaultShowInFolder / showInFolder mirror the Open pair for the reveal seam.
+var defaultShowInFolder = func(path string) { mygo.Shell.ShowItemInFolder(path) }
+var showInFolder = defaultShowInFolder
 
 // ShowInFolder reveals one path in the platform's file manager (selecting the
 // item when supported). It is a seam for the same reason as Open.
 var ShowInFolder = func(path string) error {
-	mygo.Shell.ShowItemInFolder(strings.TrimSpace(path))
+	showInFolder(strings.TrimSpace(path))
 	return nil
 }

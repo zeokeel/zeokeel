@@ -196,6 +196,72 @@ func TestConfiguredSandboxModeReadsLiveSetting(t *testing.T) {
 	}
 }
 
+// TestConfiguredSandboxModeIgnoresStoredPreset covers the headless asymmetry
+// (2026-11 audit): approvals can pin their mode with ignorePermissionSetting,
+// and the toolkit's OS mode must honor the same flag. Otherwise a desktop
+// leftover agent.permission=full in a SHARED settings store silently turns the
+// headless OS sandbox into passthrough while approvals stay pinned.
+func TestConfiguredSandboxModeIgnoresStoredPreset(t *testing.T) {
+	settings := newMutableSettings(map[string]string{
+		contracts.SettingAgentPermission: contracts.PermissionFull,
+	})
+	if got := configuredSandboxMode(Config{IgnorePermissionSetting: true}, settings); got != rigsandbox.ModeWorkspaceWrite {
+		t.Fatalf("configuredSandboxMode(ignore, stored full) = %q, want workspace-write (no passthrough)", got)
+	}
+	settings.Set(contracts.SettingAgentPermission, contracts.PermissionReadOnly)
+	if got := configuredSandboxMode(Config{IgnorePermissionSetting: true}, settings); got != rigsandbox.ModeWorkspaceWrite {
+		t.Fatalf("configuredSandboxMode(ignore, stored read-only) = %q, want workspace-write", got)
+	}
+	// The assembly-level read-only opt-out still wins over everything.
+	if got := configuredSandboxMode(Config{IgnorePermissionSetting: true, ReadOnly: true}, settings); got != rigsandbox.ModeReadOnly {
+		t.Fatalf("configuredSandboxMode(ignore+readOnly) = %q, want read-only", got)
+	}
+	// Control: without the flag the stored preset still applies (desktop).
+	if got := configuredSandboxMode(Config{}, settings); got != rigsandbox.ModeReadOnly {
+		t.Fatalf("configuredSandboxMode(no ignore, stored read-only) = %q, want read-only", got)
+	}
+}
+
+// TestIgnorePermissionSettingPinsOSModeAtActivation is the end-to-end shape of
+// the same fix: with a stored full preset and ignorePermissionSetting enabled,
+// the activated file tools keep the workspace fence (an absolute path outside
+// the root is denied) instead of passing through. The control activation
+// without the flag reads the outside file (full passthrough), proving the
+// observable distinguishes the two modes.
+func TestIgnorePermissionSettingPinsOSModeAtActivation(t *testing.T) {
+	rootDir := t.TempDir()
+	outsideDir := t.TempDir()
+	outsideFile := filepath.Join(outsideDir, "outside.txt")
+	if err := os.WriteFile(outsideFile, []byte("outside the workspace"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings := newMutableSettings(map[string]string{
+		contracts.SettingAgentPermission: contracts.PermissionFull,
+	})
+	readOutside := func(registry *rigtool.Registry) (rig.ToolResult, error) {
+		return registry.Invoke(context.Background(), rig.ToolCall{
+			Name:      "read_file",
+			Arguments: `{"path":"` + outsideFile + `"}`,
+		})
+	}
+
+	_, pinned, _, _ := activateMCPToolkitWithRoot(t, map[string]any{
+		"root": rootDir, "ignorePermissionSetting": true,
+	}, settings)
+	result, err := readOutside(pinned)
+	if err == nil && !result.IsError {
+		t.Errorf("read outside the root succeeded with ignorePermissionSetting: the stored full preset passed the OS mode through (%q)", result.Content)
+	}
+
+	_, passthrough, _, _ := activateMCPToolkitWithRoot(t, map[string]any{
+		"root": rootDir,
+	}, settings)
+	result, err = readOutside(passthrough)
+	if err != nil || result.IsError {
+		t.Fatalf("control invalid: without the flag the stored full preset must pass through, got %q/%v", result.Content, err)
+	}
+}
+
 // TestNewPolicyModes pins the policy seam: the mode is installed with
 // WithMode and cfg.ReadOnly still forces a read-only policy.
 func TestNewPolicyModes(t *testing.T) {

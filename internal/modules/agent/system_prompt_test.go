@@ -70,7 +70,7 @@ func TestShellToolsPlatformChoice(t *testing.T) {
 // TestEnvironmentBlock starts with the identity line and carries the OS, shell
 // choice, working directory and file policy.
 func TestEnvironmentBlock(t *testing.T) {
-	block := environmentBlock("windows", "amd64", `D:\work\demo`)
+	block := environmentBlock("windows", "amd64", `D:\work\demo`, contracts.PermissionWorkspace)
 	if !strings.HasPrefix(block, agentIdentity+"\n") {
 		t.Fatalf("environment block does not start with the identity line: %q", block)
 	}
@@ -90,7 +90,7 @@ func TestEnvironmentBlock(t *testing.T) {
 		t.Fatalf("windows environment block suggests bash: %q", block)
 	}
 
-	empty := environmentBlock("linux", "arm64", "  ")
+	empty := environmentBlock("linux", "arm64", "  ", contracts.PermissionWorkspace)
 	if !strings.Contains(empty, "no workspace is open") {
 		t.Fatalf("empty root block = %q, want a no-workspace line", empty)
 	}
@@ -208,7 +208,7 @@ func TestToolGuidanceLines(t *testing.T) {
 // TestSystemPromptForRunStructure pins the required order: environment first,
 // then the configured prompt, then tool guidance last.
 func TestSystemPromptForRunStructure(t *testing.T) {
-	prompt := systemPromptForRun("linux", "amd64", "/work/project", contracts.PermissionWorkspace, "",
+	prompt := systemPromptForRun("linux", "amd64", "/work/project", contracts.PermissionWorkspace, contracts.PermissionWorkspace, "",
 		"CONFIGURED-PROMPT", map[string]bool{"read_file": true, "write_file": true})
 	if !strings.HasPrefix(prompt, agentIdentity) {
 		t.Fatalf("prompt does not start with the identity: %q", prompt)
@@ -232,7 +232,7 @@ func TestSystemPromptForRunStructure(t *testing.T) {
 	}
 
 	// No configured prompt: environment and guidance are still present.
-	bare := systemPromptForRun("windows", "arm64", "", contracts.PermissionReadOnly, "", "", map[string]bool{"pwsh": true})
+	bare := systemPromptForRun("windows", "arm64", "", contracts.PermissionReadOnly, contracts.PermissionReadOnly, "", "", map[string]bool{"pwsh": true})
 	if !strings.Contains(bare, "You are ZeoKeel") || !strings.Contains(bare, "Use the pwsh tool for shell commands.") {
 		t.Fatalf("bare prompt lacks environment: %q", bare)
 	}

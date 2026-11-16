@@ -11,6 +11,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 )
 
 // Config is the module's typed assembly config (assembly.json).
@@ -26,22 +27,13 @@ type Config struct {
 func Module() *module.Descriptor[Config] {
 	return module.Define("zeokeel/appinfo", func(ctx cordis.Context, cfg Config) error {
 		info := contracts.AppInfo{
-			Name:      firstNonEmpty(cfg.Name, "ZeoKeel"),
-			Version:   firstNonEmpty(cfg.Version, "dev"),
-			Commit:    firstNonEmpty(cfg.Commit, "unknown"),
-			BuildTime: firstNonEmpty(cfg.BuildTime, "unknown"),
+			Name:      textutil.FirstNonEmpty(cfg.Name, "ZeoKeel"),
+			Version:   textutil.FirstNonEmpty(cfg.Version, "dev"),
+			Commit:    textutil.FirstNonEmpty(cfg.Commit, "unknown"),
+			BuildTime: textutil.FirstNonEmpty(cfg.BuildTime, "unknown"),
 			GoVersion: goruntime.Version(),
 		}
 		_, err := ctx.Provide(contracts.KeyAppInfo, info)
 		return err
 	}).AddProvides(module.Provides(contracts.KeyAppInfo)).WithName("ZeoKeel app info")
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }

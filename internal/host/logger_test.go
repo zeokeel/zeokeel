@@ -51,6 +51,38 @@ func TestLoggerWithoutDataDirWritesOnlyStderr(t *testing.T) {
 	}
 }
 
+// TestLoggerClosePrintfRace pins the teardown contract (2026-11 audit): Close
+// can run while other goroutines are still logging — a run goroutine that
+// outlived the bounded shutdown wait keeps calling Printf after the host's
+// deferred Close. Under -race the unsynchronized nil-ing of the logger inside
+// Close used to report DATA RACE against Printf's read. The existing
+// TestLoggerConcurrentPrintf is the control: concurrent Printf WITHOUT Close
+// was always clean, so the race came from Close alone.
+func TestLoggerClosePrintfRace(t *testing.T) {
+	dir := t.TempDir()
+	logger := NewLogger(dir)
+	var group sync.WaitGroup
+	for worker := 0; worker < 4; worker++ {
+		group.Add(1)
+		go func(worker int) {
+			defer group.Done()
+			for round := 0; round < 200; round++ {
+				logger.Printf("worker %d round %d", worker, round)
+			}
+		}(worker)
+	}
+	group.Add(1)
+	go func() {
+		defer group.Done()
+		if err := logger.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	}()
+	group.Wait()
+	// Printf after Close stays a quiet no-op (never writes into a closed file).
+	logger.Printf("after close")
+}
+
 func TestLoggerConcurrentPrintf(t *testing.T) {
 	dir := t.TempDir()
 	logger := NewLogger(dir)

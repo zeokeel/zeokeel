@@ -81,7 +81,11 @@ type ApprovalDecision string
 const (
 	// ApprovalAllow permits this one tool call.
 	ApprovalAllow ApprovalDecision = "allow"
-	// ApprovalAllowAlways permits this tool from now on for the run.
+	// ApprovalAllowAlways permits this tool from now on, remembered ACROSS
+	// runs: the agent persists it in the session's "always allow" tool set
+	// (SessionAllowedToolsSettingKey) until the user forgets it or the session
+	// is deleted (2026-11 audit BE-12: the old "for the run" wording drifted
+	// from the implementation).
 	ApprovalAllowAlways ApprovalDecision = "allow_always"
 	// ApprovalDeny rejects the tool call; the agent reports a tool error.
 	ApprovalDeny ApprovalDecision = "deny"
@@ -117,7 +121,12 @@ var KeyApprovals = cordis.NewServiceKey[Approvals]("zeokeel/approvals")
 // the agent's gate. Headless products configure Mode "auto" (allow everything
 // the toolkit policy already allows) so runs never block.
 type Approvals interface {
-	// Mode reports the configured policy: "ask", "auto" or "never".
+	// Mode reports the effective policy. Desktop presets resolve to
+	// "read-only", "workspace" or "auto" (the legacy alias of the full
+	// preset); "ask" and "never" are headless assembly policies only. Stored
+	// "ask"/"never" permission rows normalize to read-only (2026-11 audit
+	// BE-12: the old three-value "ask/auto/never" wording drifted from the
+	// implementation).
 	Mode() string
 	// Request blocks until the request is resolved or ctx ends. In "auto" mode
 	// it returns ApprovalAllow immediately; in "never" mode ApprovalDeny.

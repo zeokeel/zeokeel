@@ -368,20 +368,18 @@ func (r *mcpRuntime) reconnectByName(name string) bool {
 	return r.reconnect(target, target.currentClient())
 }
 
-// updatePlugin refreshes the Plugins read model of one server from its live
-// client.
-func (r *mcpRuntime) updatePlugin(server *managedMCPServer, status string, toolCount int) {
-	r.mu.Lock()
-	plugins := r.plugins
-	r.mu.Unlock()
-	if plugins == nil || server == nil {
-		return
-	}
-	plugins.setConnected(server.pluginIndex, server.currentClient(), status, toolCount)
-}
-
 // reconnect rebuilds one dead connection. observed is the client the caller saw
 // fail: when another goroutine already replaced it this is a no-op success.
+//
+// Lifetime guard (2026-11 audit): one runtime belongs to exactly one reload
+// generation, and stop marks it closed under r.mu. A hot reload can stop this
+// runtime while a reconnect is blocked in the server's slow initialize, so the
+// closed flag is re-checked after the blocking steps and the final swap runs
+// under r.mu: either the swap wins (and stop then closes the connection
+// installed here), or stop wins (and the fresh connection is closed right
+// here). A stopped runtime never touches the shared registry or the Plugins
+// read model again — no identity overwrite, no vanished/disabled tool
+// resurrection, no leaked connection.
 func (r *mcpRuntime) reconnect(target *managedMCPServer, observed *mcp.Client) bool {
 	if target == nil {
 		return false
@@ -394,6 +392,9 @@ func (r *mcpRuntime) reconnect(target *managedMCPServer, observed *mcp.Client) b
 	}
 	target.reconnectMu.Lock()
 	defer target.reconnectMu.Unlock()
+	if r.isClosed() {
+		return false
+	}
 	if current := target.currentClient(); current != observed {
 		// Someone else already reconnected (or the first start is still in
 		// flight): report the connection as usable instead of redoing work.
@@ -408,42 +409,68 @@ func (r *mcpRuntime) reconnect(target *managedMCPServer, observed *mcp.Client) b
 	defer cancel()
 	client, err := startMCPClient(ctx, plan.server, r.auth)
 	if err != nil {
-		if plugins != nil {
-			status := statusConnectFailed + err.Error()
-			if authStatus := r.auth.failureStatus(plan.server); authStatus != "" {
-				status = authStatus
-			}
-			plugins.setStatus(target.pluginIndex, status)
-		}
+		r.setReconnectFailureStatus(target, plugins, err)
 		r.logf("[toolkit] mcp %q: reconnect failed: %v", plan.entry.plugin.Name, err)
 		return false
 	}
 	infos, err := client.ListTools(ctx)
 	if err != nil {
 		_ = client.Close()
-		if plugins != nil {
-			status := statusConnectFailed + err.Error()
-			if authStatus := r.auth.failureStatus(plan.server); authStatus != "" {
-				status = authStatus
-			}
-			plugins.setStatus(target.pluginIndex, status)
-		}
+		r.setReconnectFailureStatus(target, plugins, err)
 		r.logf("[toolkit] mcp %q: reconnect list tools failed: %v", plan.entry.plugin.Name, err)
 		return false
 	}
 	fresh, regular := r.buildTools(client, infos)
+	// Final guarded swap: re-check closed under the same lock stop uses, so a
+	// reload that landed during the handshake can never be overwritten by this
+	// stale generation afterwards.
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		_ = client.Close()
+		r.logf("[toolkit] mcp %q: reconnect dropped: runtime was reloaded mid-handshake", plan.entry.plugin.Name)
+		return false
+	}
 	registered := r.swapTools(target, registry, fresh, regular)
 	target.mu.Lock()
+	old := target.client
 	target.client = client
 	target.mu.Unlock()
 	if plugins != nil {
 		plugins.setConnected(target.pluginIndex, client, statusConnected, registered)
 	}
-	if old := observed; old != nil {
+	r.mu.Unlock()
+	if old != nil && old != client {
 		_ = old.Close()
 	}
 	r.logf("[toolkit] mcp %q: reconnected: %d tool(s)", plan.entry.plugin.Name, registered)
 	return true
+}
+
+// isClosed reports whether a reload or unload stopped this runtime generation.
+func (r *mcpRuntime) isClosed() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.closed
+}
+
+// setReconnectFailureStatus reports a reconnect failure on the Plugins row —
+// unless a reload stopped this runtime in the meantime: the row then belongs
+// to the new generation and must keep the status that generation wrote.
+func (r *mcpRuntime) setReconnectFailureStatus(target *managedMCPServer, plugins *pluginsService, err error) {
+	if plugins == nil {
+		return
+	}
+	status := statusConnectFailed + err.Error()
+	if authStatus := r.auth.failureStatus(target.plan.server); authStatus != "" {
+		status = authStatus
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return
+	}
+	plugins.setStatus(target.pluginIndex, status)
 }
 
 // swapTools replaces the server's registry entries with the tools of a fresh
@@ -505,7 +532,10 @@ func (r *mcpRuntime) swapTools(target *managedMCPServer, registry *rigtool.Regis
 
 // stop closes every connection, unregisters this runtime's tools and marks the
 // runtime dead. It does NOT close the shared OAuth adapter: a hot reload reuses
-// that adapter (and its settings TokenStore) for the next runtime.
+// that adapter (and its settings TokenStore) for the next runtime. In-flight
+// reconnects are not waited on: they re-check the closed flag under the same
+// mutex before their final swap, so a reconnect that finishes after stop closes
+// its own fresh connection instead of writing into the new generation.
 func (r *mcpRuntime) stop(registry *rigtool.Registry) {
 	r.mu.Lock()
 	if r.closed {

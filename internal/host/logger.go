@@ -21,8 +21,12 @@ const LogFileName = "zeokeel.log"
 //
 // File logging is best effort: a product must start even when its data
 // directory is unwritable (the About page then explains where logs go). The
-// logger's file handle is shared, so Printf is safe from any goroutine.
+// logger's file handle is shared, so Printf is safe from any goroutine —
+// including against a concurrent Close: mu serializes the write with the
+// teardown, so a line is either fully written before the file closes or
+// dropped as a no-op after it (2026-11 audit).
 type Logger struct {
+	mu     sync.Mutex
 	logger *log.Logger
 	file   *os.File
 	path   string
@@ -77,9 +81,16 @@ func (l *Logger) Path() string {
 	return l.path
 }
 
-// Printf implements contracts.Logger.
+// Printf implements contracts.Logger. The lock is held across the write so a
+// concurrent Close cannot close the file mid-line (or nil the logger between
+// the nil check and the write).
 func (l *Logger) Printf(format string, args ...any) {
-	if l == nil || l.logger == nil {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.logger == nil {
 		return
 	}
 	l.logger.Printf(format, args...)
@@ -91,6 +102,11 @@ func (l *Logger) Close() error {
 		return nil
 	}
 	l.closeOnce.Do(func() {
+		// Serialize with in-flight Printf calls: every line that started before
+		// this point finishes writing before the file is synced and closed, and
+		// every later Printf sees logger == nil and becomes a no-op.
+		l.mu.Lock()
+		defer l.mu.Unlock()
 		if l.file == nil {
 			l.logger = nil
 			return

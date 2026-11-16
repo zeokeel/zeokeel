@@ -40,6 +40,7 @@ import (
 	rig "github.com/zeokeel/zeokeel-rig"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 )
 
 const (
@@ -503,7 +504,7 @@ func skillDescription(content, body string) string {
 			meta[pair.key] = pair.value
 		}
 	}
-	if description := firstNonEmpty(meta["description"], meta["summary"], meta["title"]); description != "" {
+	if description := textutil.FirstNonEmptyTrimmed(meta["description"], meta["summary"], meta["title"]); description != "" {
 		return description
 	}
 	lines := strings.Split(body, "\n")
@@ -551,16 +552,6 @@ func firstTextLine(lines []string) string {
 			continue
 		}
 		return trimmed
-	}
-	return ""
-}
-
-// firstNonEmpty returns the first non-empty trimmed value.
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
 	}
 	return ""
 }

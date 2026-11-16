@@ -379,7 +379,7 @@ func (s *service) runColdResumeAgent(ctx context.Context, record childSessionRec
 		Tools:         withWorkspaceRoot(withAgentScope(childTools, parentID, contracts.AgentRunOriginSubagent), workspaceRoot),
 		Gate:          s.gate(parentID),
 		History:       s.store.History(),
-		Spill:         s.spillPolicy(ctx),
+		Spill:         s.spillPolicy(ctx, workspaceRoot),
 		Logger:        s.logger,
 	}
 	s.withContextBudget(&spec, cfg, provider)

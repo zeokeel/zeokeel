@@ -33,6 +33,10 @@ type fakeGoalService struct {
 	admitErr error
 	// forgets counts Forget calls (agent.DeleteSession).
 	forgets int
+	// rollbacks counts RollbackRound calls (BE-10 send-failure refund);
+	// rollbackRound remembers the last refunded round number.
+	rollbacks     int
+	rollbackRound int
 	// forkCopies records goal copies requested by ForkSession.
 	forkCopies int
 	forkFrom   string
@@ -155,6 +159,28 @@ func (f *fakeGoalService) Forget(string) {
 	f.forgets++
 	f.has = false
 	f.armed = false
+}
+
+// RollbackRound implements the optional BE-10 refund hook: it refunds exactly
+// the admitted round when nothing else advanced the goal (like the durable
+// backend).
+func (f *fakeGoalService) RollbackRound(_ context.Context, _ string, round int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rollbacks++
+	f.rollbackRound = round
+	if f.has && f.goal.Phase == contracts.GoalPhaseActive && f.goal.RoundsStarted == round {
+		f.goal.RoundsStarted--
+		f.goal.Revision++
+	}
+	return nil
+}
+
+// rollbackCount reports how many round refunds the driver requested.
+func (f *fakeGoalService) rollbackCount() (int, int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.rollbacks, f.rollbackRound
 }
 
 func (f *fakeGoalService) Subscribe(func(string)) (func(), error) { return func() {}, nil }

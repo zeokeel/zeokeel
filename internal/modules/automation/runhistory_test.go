@@ -99,6 +99,12 @@ func TestRunHistoryCappedAtTenNewestFirst(t *testing.T) {
 		waitTask(t, service, created.ID, func(task contracts.AutomationTask) bool {
 			return len(task.RunHistory) == want
 		})
+		// The record is written before execute returns (notify/settle run
+		// after the persist, and the in-flight guard releases only on return).
+		// Wait for the guard so the next RunNow is not folded by the overlap
+		// protection — under -race + parallel package load that window widens
+		// enough to starve the next delivery (pre-existing load sensitivity).
+		waitRunIdle(t, service, created.ID)
 	}
 	tasks, err := service.List(context.Background())
 	if err != nil {
@@ -219,4 +225,17 @@ func (s *service) inFlightForTest(taskID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.inFlight[taskID]
+}
+
+// waitRunIdle polls until the task's in-flight guard releases (execute fully
+// returned), so a following RunNow cannot be folded by the overlap protection.
+func waitRunIdle(t *testing.T, s *service, taskID string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for s.inFlightForTest(taskID) && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	if s.inFlightForTest(taskID) {
+		t.Fatalf("task %q still in flight after the run record landed", taskID)
+	}
 }

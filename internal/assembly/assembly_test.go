@@ -186,6 +186,43 @@ func TestProductsAndEntries(t *testing.T) {
 	}
 }
 
+// TestHeadlessPinsPermissionSensitiveModules pins the shared-store contract
+// (2026-11 audit): headless/ACP must not follow a desktop permission preset
+// left in a shared settings store — BOTH the approval gate (approvals) and the
+// OS sandbox mode (toolkit) pin their assembly defaults via
+// ignorePermissionSetting. Desktop keeps following the live preset.
+func TestHeadlessPinsPermissionSensitiveModules(t *testing.T) {
+	configOf := func(entries []module.Entry, id string) map[string]any {
+		t.Helper()
+		for _, entry := range entries {
+			if entry.ID == id {
+				config, _ := entry.Config.(map[string]any)
+				return config
+			}
+		}
+		t.Fatalf("entry %q not found", id)
+		return nil
+	}
+	headless, err := assembly.Entries(assembly.ProductHeadless)
+	if err != nil {
+		t.Fatalf("Entries(headless): %v", err)
+	}
+	for _, id := range []string{"approvals", "toolkit"} {
+		if pinned, _ := configOf(headless, id)["ignorePermissionSetting"].(bool); !pinned {
+			t.Errorf("headless %s must set ignorePermissionSetting=true", id)
+		}
+	}
+	desktop, err := assembly.Entries(assembly.ProductDesktop)
+	if err != nil {
+		t.Fatalf("Entries(desktop): %v", err)
+	}
+	for _, id := range []string{"approvals", "toolkit"} {
+		if pinned, _ := configOf(desktop, id)["ignorePermissionSetting"].(bool); pinned {
+			t.Errorf("desktop %s must keep following the live permission preset", id)
+		}
+	}
+}
+
 func TestRegistryIsExplicit(t *testing.T) {
 	registry := assembly.Registry()
 	for _, id := range []string{

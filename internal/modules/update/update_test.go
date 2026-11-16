@@ -237,42 +237,8 @@ func TestCheckSameOlderAndDevVersions(t *testing.T) {
 	}
 }
 
-func TestCompareVersions(t *testing.T) {
-	cases := []struct {
-		left, right string
-		want        int
-	}{
-		{"1.2.0", "1.2.0", 0},
-		{"1.2", "1.2.0", 0},
-		{"1", "1.0.0", 0},
-		{"1.2.1", "1.2.0", 1},
-		{"1.2.0", "1.2.1", -1},
-		{"2.0.0", "1.9.9", 1},
-		{"1.2.0-rc.1", "1.2.0", -1},
-		{"1.2.0", "1.2.0-rc.1", 1},
-		{"1.2.0-rc.10", "1.2.0-rc.2", 1},
-		{"1.2.0-alpha", "1.2.0-beta", -1},
-		{"1.2.0-alpha.1", "1.2.0-alpha", 1},
-		{"1.2.0+build.5", "1.2.0", 0},
-		{"v1.2.0", "1.2.0", 0},
-		{"V1.2.0", "v1.2.0", 0},
-	}
-	for _, testCase := range cases {
-		got, err := CompareVersions(testCase.left, testCase.right)
-		if err != nil {
-			t.Fatalf("CompareVersions(%q, %q): %v", testCase.left, testCase.right, err)
-		}
-		if got != testCase.want {
-			t.Fatalf("CompareVersions(%q, %q) = %d, want %d", testCase.left, testCase.right, got, testCase.want)
-		}
-	}
-	invalid := []string{"", "x", "1.x", "1.2.3.4", "1.2.0-", "1.2.0-alpha..1", "-1.0.0"}
-	for _, value := range invalid {
-		if _, err := CompareVersions(value, "1.0.0"); err == nil {
-			t.Fatalf("CompareVersions(%q) accepted an invalid version", value)
-		}
-	}
-}
+// TestCompareVersions migrated to internal/lib/version with the helper itself
+// (2026-11 audit AR-22); the update module consumes libversion.CompareVersions.
 
 func TestParseManifestValidation(t *testing.T) {
 	valid := manifestJSON("1.2.3", "notes", []map[string]any{platformAsset()})

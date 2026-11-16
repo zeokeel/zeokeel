@@ -13,10 +13,11 @@ package agent
 //   - the tracker keeps a bounded activity timeline (<=200 rows total, <=30 per
 //     member) and reconciles the wrapped runs with the manager's member IDs.
 //
-// The agent module (which this workstream may not change) builds the manager
-// and the contracts.TeamService adapter in two separate calls, so the tracker
-// is found through a small table keyed by those instances instead of a service
-// field.
+// The agent module builds the manager and the contracts.TeamService adapter in
+// two separate calls; both find the tracker through the service instance
+// (service.teamTracker, created lazily under s.mu), so the tracker is garbage-
+// collected with the service instead of living in a package-level table
+// (BE-13, 2026-11 audit).
 
 import (
 	"context"
@@ -46,27 +47,6 @@ const (
 	// granularity).
 	teamClaimWindow = 2 * time.Second
 )
-
-// teamTrackers maps a *service and its *rigteam.Manager to the tracker they
-// share. Entries live for the process lifetime of the service (a disposed
-// service has no more spawns); the map holds a small struct, no goroutines.
-var teamTrackers sync.Map
-
-// teamTrackerFor returns the registered tracker for key, creating it when the
-// create function is given.
-func teamTrackerFor(key any, create func() *teamTracker) *teamTracker {
-	if value, ok := teamTrackers.Load(key); ok {
-		if tracker, ok := value.(*teamTracker); ok {
-			return tracker
-		}
-	}
-	if create == nil {
-		return nil
-	}
-	tracker := create()
-	actual, _ := teamTrackers.LoadOrStore(key, tracker)
-	return actual.(*teamTracker)
-}
 
 // teamTracker owns the run registry and the activity read model of one agent
 // service (one process-wide team manager). sessions is the durable child-session

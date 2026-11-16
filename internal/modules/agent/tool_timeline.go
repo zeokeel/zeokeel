@@ -17,6 +17,8 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+
+	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
 // restoredToolRef locates one restored tool call in the message read model.
@@ -44,6 +46,11 @@ type toolResultEvent struct {
 	ID      string `json:"id"`
 	Status  string `json:"status"`
 	Content string `json:"content"`
+	// ErrorKind is the persisted classification of a failed call (RG-03). Old
+	// events have no such field; the hydration then classifies the bounded
+	// content itself (a sandbox attribution line cut off by the summary bound
+	// stays unknown rather than guessed).
+	ErrorKind string `json:"error_kind"`
 }
 
 // hydrateToolTimeline replays sessionID's durable tool events onto the restored
@@ -172,6 +179,14 @@ func (s *service) hydrateToolTimeline(ctx context.Context, sessionID string, sta
 				tool.Status = status
 			}
 			tool.Summary = payload.Content
+			// The failure classification survives the restart: the persisted
+			// kind wins; older events classify their bounded content (RG-03).
+			switch {
+			case strings.TrimSpace(payload.ErrorKind) != "":
+				tool.ErrorKind = strings.TrimSpace(payload.ErrorKind)
+			case tool.Status == "error":
+				tool.ErrorKind = contracts.ClassifyError(nil, payload.Content)
+			}
 			// The result event's time ends the call; a zero event time leaves it
 			// unknown (never fabricated).
 			if !event.Time.IsZero() {

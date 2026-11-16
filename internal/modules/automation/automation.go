@@ -52,6 +52,11 @@ const (
 // ErrTaskNotFound reports an unknown automation task ID.
 var ErrTaskNotFound = errors.New("automation: task not found")
 
+// ErrClosed reports a RunNow after Close: the scheduler no longer starts runs
+// (BE-07 — the old path raced the teardown WaitGroup and delivered prompts
+// after Close returned).
+var ErrClosed = errors.New("automation: service is closed")
+
 // Config is the module's typed assembly config.
 type Config struct {
 	// Path is the registry file: absolute, or relative to the product data
@@ -301,7 +306,10 @@ func (s *service) load() error {
 		return nil
 	}
 	if err != nil {
-		s.logRecovery(fmt.Sprintf("automation registry %q could not be read (%v); starting with no tasks", s.path, err))
+		// BE-09 (2026-11 audit): a non-NotExist READ error quarantines exactly
+		// like a decode error — an empty start with the entry left in place
+		// would let the next persist overwrite it and lose the original tasks.
+		s.quarantine(fmt.Sprintf("automation registry %q could not be read (%v)", s.path, err))
 		return nil
 	}
 	var document registryDocument
@@ -669,6 +677,8 @@ func (s *service) Delete(ctx context.Context, id string) error {
 // RunNow implements contracts.AutomationService: it starts the task execution
 // immediately (asynchronously, like a scheduled run) and returns unknown-task
 // and context errors to the caller. Execution failures land in LastError.
+// After Close it returns ErrClosed instead of racing the teardown WaitGroup
+// (BE-07).
 func (s *service) RunNow(ctx context.Context, id string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -680,18 +690,33 @@ func (s *service) RunNow(ctx context.Context, id string) error {
 		return fmt.Errorf("%w: %q", ErrTaskNotFound, id)
 	}
 	s.mu.Unlock()
-	s.startRun(id, true)
+	if !s.startRun(id, true) {
+		return ErrClosed
+	}
 	return nil
 }
 
 // startRun launches one execution and accounts for it so Close waits for the
-// registry writes of in-flight runs.
-func (s *service) startRun(id string, manual bool) {
+// registry writes of in-flight runs. The Add happens UNDER s.mu with a closed
+// check (BE-07, 2026-11 audit): Close sets closed under the same lock before
+// runs.Wait, so an Add can never race a zero-counter Wait — the old
+// unconditional Add panicked ("WaitGroup reused before previous Wait has
+// returned") and, because the panic lands after the atomic increment, left a
+// permanent +1 that hung Close forever. Returns false when the service is
+// closed (no goroutine started).
+func (s *service) startRun(id string, manual bool) bool {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return false
+	}
 	s.runs.Add(1)
+	s.mu.Unlock()
 	go func() {
 		defer s.runs.Done()
 		s.execute(id, manual)
 	}()
+	return true
 }
 
 // Subscribe implements contracts.AutomationService.
@@ -864,6 +889,12 @@ func copyTask(task contracts.AutomationTask) contracts.AutomationTask {
 }
 
 // claimRun takes the in-flight guard for one execution and snapshots the task.
+// No closed check here: an execution ACCEPTED before Close (startRun's guarded
+// Add) must still run and flush its record — Close's runs.Wait waits for it
+// (the regression contract "Close waits for in-flight RunNow"). Post-close
+// dispatch is prevented at the entry point instead: startRun refuses to Add
+// after closed, and Close only returns after every accepted run settled
+// (BE-07, 2026-11 audit).
 func (s *service) claimRun(taskID string, force bool) (contracts.AutomationTask, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

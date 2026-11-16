@@ -13,7 +13,13 @@ import (
 	"github.com/egoist/mygo"
 )
 
+// defaultOpenExternal is the platform browser launcher; openExternal is the
+// injectable step the seam unit tests replace to observe the constructed
+// command headlessly (AR-21). Production always uses the framework call.
+var defaultOpenExternal = func(raw string) error { return mygo.Shell.OpenExternal(raw) }
+var openExternal = defaultOpenExternal
+
 // Open is the replaceable browser launcher seam (tests inject a fake).
 var Open = func(raw string) error {
-	return mygo.Shell.OpenExternal(strings.TrimSpace(raw))
+	return openExternal(strings.TrimSpace(raw))
 }

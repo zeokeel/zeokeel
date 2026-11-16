@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	libversion "github.com/zeokeel/zeokeel/internal/lib/version"
 )
 
 const (
@@ -91,11 +92,11 @@ func (s *service) checkGitHub(ctx context.Context) (contracts.UpdateInfo, error)
 	if version == "" {
 		return contracts.UpdateInfo{}, fmt.Errorf("%w: latest release has no tag_name", ErrManifest)
 	}
-	if _, err := parseVersion(version); err != nil {
+	if _, err := libversion.Parse(version); err != nil {
 		return contracts.UpdateInfo{}, fmt.Errorf("%w: tag_name %q: %v", ErrManifest, release.TagName, err)
 	}
 	currentDisplay, currentComparable := currentVersion(s.appInfo.Version)
-	comparison, err := CompareVersions(currentComparable, version)
+	comparison, err := libversion.CompareVersions(currentComparable, version)
 	if err != nil {
 		return contracts.UpdateInfo{}, fmt.Errorf("%w: version %q: %v", ErrManifest, version, err)
 	}

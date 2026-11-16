@@ -45,6 +45,32 @@ func newJobService(invoker jobToolInvoker) *jobService {
 	return &jobService{invoker: invoker}
 }
 
+// staleJobLister is the rebind group's optional permission-downgrade read model
+// (2026-11 audit RG-09). Test fakes of jobToolInvoker need not implement it.
+type staleJobLister interface {
+	stalePermissionJobs() []contracts.BackgroundJob
+}
+
+// The UI consumes StalePermissionJobs through the optional contracts interface
+// (type assertion on KeyJobs), keeping JobService itself unchanged.
+var _ contracts.JobPermissionReporter = (*jobService)(nil)
+
+// StalePermissionJobs reports the running jobs that still follow an older
+// permission identity after a permission/sandbox rebuild (count = len). The UI
+// shows them as a disclosure hint with a kill entry; KillJob reaches them
+// because job ids route to their owner build. A backend without the rebind
+// group reports none. Downgrade non-retroactivity itself is an OS fact and is
+// intentionally not changed here.
+func (service *jobService) StalePermissionJobs() []contracts.BackgroundJob {
+	if service == nil || service.invoker == nil {
+		return nil
+	}
+	if lister, ok := service.invoker.(staleJobLister); ok {
+		return lister.stalePermissionJobs()
+	}
+	return nil
+}
+
 // Jobs lists the manager's retained jobs, oldest first. The header chip is
 // read-only chrome: a missing manager or a failed listing yields no rows rather
 // than surfacing an error that would fail the session surface.

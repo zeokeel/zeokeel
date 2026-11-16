@@ -206,6 +206,61 @@ func TestSessionsOrderingAndCounts(t *testing.T) {
 	}
 }
 
+// TestSessionsListJoinCorrectnessControl pins the list query's result against
+// the per-session scalar lookup (GetSessionMeta) across a mixed population:
+// empty sessions, multi-message sessions and updated_at ties. The AR-20
+// rewrite (one LEFT JOIN + GROUP BY instead of a COUNT correlated subquery per
+// row) must produce exactly the same rows and ordering.
+func TestSessionsListJoinCorrectnessControl(t *testing.T) {
+	current := openTestStore(t)
+	ctx := context.Background()
+	for _, id := range []string{"empty-1", "empty-2", "busy-1", "busy-2", "one"} {
+		if err := current.CreateSession(ctx, id, "title-"+id); err != nil {
+			t.Fatalf("CreateSession(%q): %v", id, err)
+		}
+	}
+	for i := 0; i < 5; i++ {
+		if err := current.History().Append(ctx, "busy-1", rig.NewMessage(rig.RoleUser, "m")); err != nil {
+			t.Fatalf("Append busy-1: %v", err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		if err := current.History().Append(ctx, "busy-2", rig.NewMessage(rig.RoleAssistant, "m")); err != nil {
+			t.Fatalf("Append busy-2: %v", err)
+		}
+	}
+	if err := current.History().Append(ctx, "one", rig.NewMessage(rig.RoleUser, "m")); err != nil {
+		t.Fatalf("Append one: %v", err)
+	}
+	metas, err := current.Sessions(ctx)
+	if err != nil {
+		t.Fatalf("Sessions: %v", err)
+	}
+	if len(metas) != 5 {
+		t.Fatalf("sessions = %d, want 5 (empty sessions must survive the LEFT JOIN)", len(metas))
+	}
+	for _, meta := range metas {
+		oracle, found, err := current.GetSessionMeta(ctx, meta.ID)
+		if err != nil || !found {
+			t.Fatalf("GetSessionMeta(%q): %v %v", meta.ID, found, err)
+		}
+		if meta.MessageCount != oracle.MessageCount || meta.Title != oracle.Title ||
+			meta.WorkspaceID != oracle.WorkspaceID || !meta.CreatedAt.Equal(oracle.CreatedAt) ||
+			!meta.UpdatedAt.Equal(oracle.UpdatedAt) {
+			t.Fatalf("list row %+v disagrees with the scalar lookup %+v", meta, oracle)
+		}
+	}
+	for i := 1; i < len(metas); i++ {
+		prev, cur := metas[i-1], metas[i]
+		if prev.UpdatedAt.Before(cur.UpdatedAt) {
+			t.Fatalf("ordering broken at %d: %v before %v", i, prev, cur)
+		}
+		if prev.UpdatedAt.Equal(cur.UpdatedAt) && prev.ID > cur.ID {
+			t.Fatalf("tie ordering broken at %d: %q before %q (want ID ASC)", i, prev.ID, cur.ID)
+		}
+	}
+}
+
 func TestHistoryRoundTrip(t *testing.T) {
 	current := openTestStore(t)
 	ctx := context.Background()

@@ -510,6 +510,40 @@ func (g *rebindGroup) drainNotices() []string {
 	return notices
 }
 
+// stalePermissionJobs reports the RUNNING jobs retained in builds whose
+// permission identity (mode + runner-on) differs from the identity resolved for
+// the current workspace root right now (2026-11 audit RG-09). A permission
+// downgrade does not retroactively confine jobs spawned under the old mode —
+// confinement is applied at spawn, an OS fact this read model does not change.
+// It exists so the UI can disclose "N running jobs still use the old permission
+// mode" and offer the kill entry (KillJob routes by id to the owner build).
+//
+// The read is side-effect free: it resolves the current identity WITHOUT
+// creating a build, scopes to the caller's current workspace root (the same
+// scope as the job chip's merged list) and lists each older build's jobs through
+// that build's own manager. Finished jobs are excluded.
+func (g *rebindGroup) stalePermissionJobs() []contracts.BackgroundJob {
+	root := g.contextRoot(nil)
+	mode, runner := g.sandboxState()
+	key := g.buildKey(root, mode, runner)
+	var stale []contracts.BackgroundJob
+	for _, scoped := range g.buildsForRoot(root) {
+		if scoped == nil || scoped.matches(key) {
+			continue
+		}
+		result, err := invokeRootScoped(context.Background(), scoped, rig.ToolCall{Name: jobs.ToolJobList, Arguments: "{}"})
+		if err != nil || result.IsError {
+			continue
+		}
+		for _, row := range parseJobList(result.Content) {
+			if row.Running {
+				stale = append(stale, row)
+			}
+		}
+	}
+	return stale
+}
+
 // boundTool is the stable registry entry for one root-scoped tool.
 type boundTool struct {
 	meta  rig.Tool

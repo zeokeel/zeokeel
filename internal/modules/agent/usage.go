@@ -54,6 +54,7 @@ func (s *service) recordRunUsage(ctx context.Context, sessionID string, result r
 	if state, ok := s.sessions[sessionID]; ok {
 		if message := state.assistantMessage(); message != nil {
 			message.Usage = record
+			s.touchLocked(state)
 		}
 	}
 	s.mu.Unlock()

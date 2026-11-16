@@ -80,7 +80,9 @@ func shellEnvironmentSentenceFor(goos string, toolNames map[string]bool) string 
 
 // environmentBlockFor renders the environment lines for the exact tool surface
 // the run receives (nil means "unknown: use the platform default shell").
-func environmentBlockFor(goos, goarch, workspaceRoot string, toolNames map[string]bool) string {
+// sandboxMode is the effective OS file-sandbox mode (the global permission
+// preset); it drives the working-directory file policy line.
+func environmentBlockFor(goos, goarch, workspaceRoot, sandboxMode string, toolNames map[string]bool) string {
 	shellSentence := shellEnvironmentSentence(goos)
 	if toolNames != nil {
 		shellSentence = shellEnvironmentSentenceFor(goos, toolNames)
@@ -88,7 +90,7 @@ func environmentBlockFor(goos, goarch, workspaceRoot string, toolNames map[strin
 	return strings.Join([]string{
 		agentIdentity,
 		fmt.Sprintf("Environment: %s/%s. %s", goos, goarch, shellSentence),
-		workingDirectoryLine(workspaceRoot),
+		workingDirectoryLine(workspaceRoot, sandboxMode),
 	}, "\n")
 }
 
@@ -96,17 +98,34 @@ func environmentBlockFor(goos, goarch, workspaceRoot string, toolNames map[strin
 // arch, shell choice, working directory + file policy. workspaceRoot "" means
 // no workspace is open. It is the tool-surface-agnostic form kept for tests and
 // callers that have no tool set; runs use environmentBlockFor.
-func environmentBlock(goos, goarch, workspaceRoot string) string {
-	return environmentBlockFor(goos, goarch, workspaceRoot, nil)
+func environmentBlock(goos, goarch, workspaceRoot, sandboxMode string) string {
+	return environmentBlockFor(goos, goarch, workspaceRoot, sandboxMode, nil)
 }
 
-// workingDirectoryLine is the one-line runtime file policy for the tool root.
-func workingDirectoryLine(workspaceRoot string) string {
+// workingDirectoryLine is the one-line runtime file policy for the tool root
+// under the effective OS sandbox mode (2026-11 audit (b): the line used to
+// hardcode workspace-write, overstating read-only and understating full).
+// sandboxMode is normalized to read-only / workspace / full; the mode is the
+// GLOBAL permission preset — a session approval override never changes the OS
+// wall. Under full access with no workspace the line discloses the process-cwd
+// exception instead of the fail-closed promise (RG-07).
+func workingDirectoryLine(workspaceRoot, sandboxMode string) string {
 	root := strings.TrimSpace(workspaceRoot)
+	mode := contracts.NormalizePermissionMode(sandboxMode)
 	if root == "" {
+		if mode == contracts.PermissionFull {
+			return "Working directory: none (no workspace is open). File policy: full-access; the OS file sandbox is bypassed — commands and file tools run unconfined, and relative paths resolve against the process working directory."
+		}
 		return "Working directory: none (no workspace is open). File writes and shell commands fail until the user opens a workspace."
 	}
-	return fmt.Sprintf("Working directory: %s. File policy: workspace-write; the file tools may modify files inside it only.", root)
+	switch mode {
+	case contracts.PermissionReadOnly:
+		return fmt.Sprintf("Working directory: %s. File policy: read-only; the file tools may read files inside it but cannot modify them, and shell commands are disabled.", root)
+	case contracts.PermissionFull:
+		return fmt.Sprintf("Working directory: %s. File policy: full-access; the OS file sandbox is bypassed — file tools and shell commands are not confined to this directory.", root)
+	default:
+		return fmt.Sprintf("Working directory: %s. File policy: workspace-write; the file tools may modify files inside it only.", root)
+	}
 }
 
 // normalizeApprovalMode maps every accepted policy spelling onto the three
@@ -329,8 +348,10 @@ func newPromptSection(id, source, text string) contracts.PromptSection {
 // system prompt for one run. configured carries the already-ordered
 // configuration sections (base system prompt, AGENTS.md, preset, memory, skill
 // catalog); the runtime sections (identity/environment/policy/mode/tool
-// guidance) are prepended/appended here.
-func promptSectionsForRun(goos, goarch, workspaceRoot, approvalMode, mode string,
+// guidance) are prepended/appended here. sandboxMode is the effective OS file
+// policy (global preset); approvalMode is the gate's policy (session override
+// wins) — the two axes are independent (audit (a)/(b)).
+func promptSectionsForRun(goos, goarch, workspaceRoot, sandboxMode, approvalMode, mode string,
 	configured []contracts.PromptSection, toolNames map[string]bool) []contracts.PromptSection {
 	shellSentence := shellEnvironmentSentence(goos)
 	if toolNames != nil {
@@ -340,7 +361,7 @@ func promptSectionsForRun(goos, goarch, workspaceRoot, approvalMode, mode string
 		newPromptSection(PromptSectionIdentity, "builtin", agentIdentity),
 		newPromptSection(PromptSectionEnvironment, "builtin",
 			fmt.Sprintf("Environment: %s/%s. %s", goos, goarch, shellSentence)),
-		newPromptSection(PromptSectionWorkingDirectory, "builtin", workingDirectoryLine(workspaceRoot)),
+		newPromptSection(PromptSectionWorkingDirectory, "builtin", workingDirectoryLine(workspaceRoot, sandboxMode)),
 		newPromptSection(PromptSectionApproval, "policy", approvalPolicyLine(approvalMode)),
 	}
 	if modeLine := modePolicyLine(mode, toolNames); modeLine != "" {
@@ -410,9 +431,10 @@ func renderPromptSections(sections []contracts.PromptSection) string {
 // systemPromptForRun assembles the complete model-facing system prompt for one
 // run. It is a pure function so the environment/platform/mode branches are unit
 // tested without a service. mode is the runtime mode (standard adds no line);
-// toolNames is the exact model-visible tool surface of the run.
-func systemPromptForRun(goos, goarch, workspaceRoot, approvalMode, mode, configuredPrompt string, toolNames map[string]bool) string {
-	return renderPromptSections(promptSectionsForRun(goos, goarch, workspaceRoot, approvalMode, mode,
+// toolNames is the exact model-visible tool surface of the run; sandboxMode is
+// the effective OS file policy and approvalMode the gate's policy.
+func systemPromptForRun(goos, goarch, workspaceRoot, sandboxMode, approvalMode, mode, configuredPrompt string, toolNames map[string]bool) string {
+	return renderPromptSections(promptSectionsForRun(goos, goarch, workspaceRoot, sandboxMode, approvalMode, mode,
 		configuredPromptSections(configuredPrompt), toolNames))
 }
 
@@ -523,6 +545,10 @@ func (s *service) buildRunSystemPromptSections(ctx context.Context, sessionID st
 		runtime.GOOS,
 		runtime.GOARCH,
 		workspaceRoot,
+		// The OS file policy follows the GLOBAL permission preset (the same
+		// source the toolkit's root-scoped build reads); the session approval
+		// override below never changes the OS wall (audit (a)/(b) disclosure).
+		s.effectiveSandboxMode(),
 		s.effectiveApprovalMode(sessionID),
 		s.runtimeMode(),
 		configured,

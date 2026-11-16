@@ -18,9 +18,9 @@ import (
 
 // legacySystemPrompt is the pre-sections assembly, kept here as the byte-level
 // compatibility oracle.
-func legacySystemPrompt(goos, goarch, workspaceRoot, approvalMode, mode, configuredPrompt string, toolNames map[string]bool) string {
+func legacySystemPrompt(goos, goarch, workspaceRoot, sandboxMode, approvalMode, mode, configuredPrompt string, toolNames map[string]bool) string {
 	parts := []string{
-		environmentBlockFor(goos, goarch, workspaceRoot, toolNames),
+		environmentBlockFor(goos, goarch, workspaceRoot, sandboxMode, toolNames),
 		approvalPolicyLine(approvalMode),
 	}
 	if modeLine := modePolicyLine(mode, toolNames); modeLine != "" {
@@ -46,16 +46,19 @@ func TestPromptSectionsRenderMatchesLegacyAssembly(t *testing.T) {
 	}
 	modes := []string{"", contracts.AgentModePlan, contracts.ChatModeMinimal, contracts.ChatModeCreator}
 	configuredPrompts := []string{"", "base system prompt", "line one\nline two\n"}
+	sandboxModes := []string{contracts.PermissionWorkspace, contracts.PermissionReadOnly, contracts.PermissionFull}
 	for _, toolNames := range toolSurfaces {
 		for _, mode := range modes {
 			for _, configured := range configuredPrompts {
-				want := legacySystemPrompt("linux", "amd64", "/work/project", contracts.PermissionWorkspace,
-					mode, configured, toolNames)
-				got := systemPromptForRun("linux", "amd64", "/work/project", contracts.PermissionWorkspace,
-					mode, configured, toolNames)
-				if got != want {
-					t.Fatalf("sections render drifted for mode=%q configured=%q tools=%v:\n got: %q\nwant: %q",
-						mode, configured, toolNames, got, want)
+				for _, sandboxMode := range sandboxModes {
+					want := legacySystemPrompt("linux", "amd64", "/work/project", sandboxMode, contracts.PermissionWorkspace,
+						mode, configured, toolNames)
+					got := systemPromptForRun("linux", "amd64", "/work/project", sandboxMode, contracts.PermissionWorkspace,
+						mode, configured, toolNames)
+					if got != want {
+						t.Fatalf("sections render drifted for mode=%q configured=%q sandbox=%q tools=%v:\n got: %q\nwant: %q",
+							mode, configured, sandboxMode, toolNames, got, want)
+					}
 				}
 			}
 		}
@@ -68,7 +71,7 @@ func TestPromptSectionsShape(t *testing.T) {
 	configured := []contracts.PromptSection{{
 		ID: PromptSectionConfig, Source: "config", Text: "base system prompt",
 	}}
-	sections := promptSectionsForRun("linux", "amd64", "/work", contracts.PermissionWorkspace,
+	sections := promptSectionsForRun("linux", "amd64", "/work", contracts.PermissionWorkspace, contracts.PermissionWorkspace,
 		"", configured, toolNames)
 	ids := make([]string, 0, len(sections))
 	for _, section := range sections {
@@ -89,7 +92,7 @@ func TestPromptSectionsShape(t *testing.T) {
 		t.Fatalf("section order = %v, want %v", ids, wantIDs)
 	}
 	rendered := renderPromptSections(sections)
-	if want := systemPromptForRun("linux", "amd64", "/work", contracts.PermissionWorkspace, "", "base system prompt", toolNames); rendered != want {
+	if want := systemPromptForRun("linux", "amd64", "/work", contracts.PermissionWorkspace, contracts.PermissionWorkspace, "", "base system prompt", toolNames); rendered != want {
 		t.Fatalf("renderPromptSections = %q, want %q", rendered, want)
 	}
 }
@@ -124,7 +127,7 @@ func TestBuildRunSystemPromptSectionsMatchesLegacy(t *testing.T) {
 	// The historical chain: base → AGENTS.md → preset, then the old assembly.
 	legacyCfg := svc.withWorkspaceInstructions(cfg, root)
 	legacyCfg = svc.withPresetInstructions(sessionID, legacyCfg)
-	want := legacySystemPrompt("linux", "amd64", root, svc.effectiveApprovalMode(sessionID),
+	want := legacySystemPrompt("linux", "amd64", root, svc.effectiveSandboxMode(), svc.effectiveApprovalMode(sessionID),
 		svc.runtimeMode(), legacyCfg.SystemPrompt, toolNames)
 	if prompt != want {
 		t.Fatalf("service prompt drifted from the legacy assembly:\n got: %q\nwant: %q", prompt, want)

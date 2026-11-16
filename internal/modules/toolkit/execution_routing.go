@@ -40,10 +40,16 @@ import (
 var (
 	jobExecutionTools = map[string]bool{
 		"bash":             true, // run_in_background starts a job through the same manager
+		"pwsh":             true, // same manager; the only shell tool on Windows
 		jobs.ToolJobOutput: true,
 		jobs.ToolJobKill:   true,
 		jobs.ToolJobList:   true,
 	}
+	// Defensive: the terminal_* tools are not registered by any build today
+	// (the product removed them from the model-facing set). The routing is
+	// kept so a future re-registration keeps ID routing across rebuilds; a
+	// call to an unregistered name still fails with rig's ErrToolNotFound in
+	// invokeRootScoped (2026-11 audit).
 	terminalExecutionTools = map[string]bool{
 		terminal.ToolTerminalOpen:   true,
 		terminal.ToolTerminalSend:   true,
@@ -64,13 +70,16 @@ func (g *rebindGroup) isExecutionTool(name string) bool {
 func (g *rebindGroup) invokeExecutionTool(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
 	name := strings.TrimSpace(call.Name)
 	switch {
-	case name == "bash":
+	case name == "bash" || name == "pwsh":
 		scoped := g.currentForContext(ctx)
 		result, err := invokeRootScoped(ctx, scoped, call)
-		if err == nil && !result.IsError {
-			if strings.HasPrefix(strings.TrimSpace(result.Content), "started background job ") {
-				g.recordJobStarted(ctx, scoped, call, result)
-			}
+		// Both shells start background jobs through the same manager: an
+		// explicit run_in_background ("started background job <id>") OR a
+		// foreground call Rig promotes on timeout ("[still running after Nms;
+		// moved to background job <id>]"). Both shapes must register the owner
+		// so the job stays reachable after a rebuild (2026-11 audit).
+		if err == nil && !result.IsError && shellResultJobID(result.Content) != "" {
+			g.recordJobStarted(ctx, scoped, call, result)
 		}
 		return result, err
 	case name == terminal.ToolTerminalOpen:
@@ -260,14 +269,30 @@ func executionArgument(arguments string, keys ...string) string {
 }
 
 // executionResultID extracts the value of one "key: value" line from a tool
-// result (job_start -> "job_id: ...", terminal_open -> "session_id: ...").
+// result (job_start -> "job_id: ...", terminal_open -> "session_id: ..."), plus
+// the two shell background-job text shapes: the explicit "started background
+// job <id>" prefix and Rig's timeout-promotion marker, which sits mid-text
+// inside "[still running after Nms; moved to background job <id>]" after
+// whatever output the command already produced.
 func executionResultID(content, key string) string {
-	if key == "started background job" {
+	switch key {
+	case "started background job":
 		trimmed := strings.TrimSpace(content)
 		if strings.HasPrefix(trimmed, key+" ") {
 			return strings.TrimSpace(strings.TrimPrefix(trimmed, key+" "))
 		}
 		return ""
+	case "moved to background job":
+		const marker = "moved to background job "
+		index := strings.Index(content, marker)
+		if index < 0 {
+			return ""
+		}
+		rest := content[index+len(marker):]
+		if end := strings.IndexAny(rest, "]\n"); end >= 0 {
+			rest = rest[:end]
+		}
+		return strings.TrimSpace(rest)
 	}
 	prefix := key + ":"
 	for _, line := range strings.Split(content, "\n") {
@@ -277,6 +302,16 @@ func executionResultID(content, key string) string {
 		}
 	}
 	return ""
+}
+
+// shellResultJobID extracts the background-job id from a bash/pwsh result: the
+// explicit run_in_background shape or the timeout-promotion shape. It is the
+// registration gate — a plain foreground result (no job started) returns "".
+func shellResultJobID(content string) string {
+	if id := executionResultID(content, "started background job"); id != "" {
+		return id
+	}
+	return executionResultID(content, "moved to background job")
 }
 
 // --- durable execution lifecycle events ------------------------------------
@@ -322,7 +357,7 @@ func sessionOf(ctx context.Context) string {
 func (g *rebindGroup) recordJobStarted(ctx context.Context, scoped *rootScoped, call rig.ToolCall, result rig.ToolResult) {
 	id := executionResultID(result.Content, "job_id")
 	if id == "" {
-		id = executionResultID(result.Content, "started background job")
+		id = shellResultJobID(result.Content)
 	}
 	if id == "" || scoped == nil {
 		return

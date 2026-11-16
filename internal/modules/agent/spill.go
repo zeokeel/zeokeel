@@ -34,25 +34,24 @@ const (
 
 // spillPolicy builds the run's tool-result spill policy. Dir is absolute:
 // Rig resolves a relative Dir against the host process working directory, not
-// against the workspace.
-func (s *service) spillPolicy(ctx context.Context) *rig.SpillPolicy {
+// against the workspace. workspaceRoot is the run's captured tool root (the
+// SESSION binding, not whichever workspace is current — BE-11, 2026-11 audit:
+// spilling outside the run's sandbox roots made the spilled file unreadable by
+// the model's read_file, WithRoots contract).
+func (s *service) spillPolicy(ctx context.Context, workspaceRoot string) *rig.SpillPolicy {
 	return &rig.SpillPolicy{
-		Dir:            s.spillDir(ctx),
+		Dir:            s.spillDir(ctx, workspaceRoot),
 		ThresholdBytes: spillThresholdBytes,
 		MaxFiles:       spillKeepFiles,
 	}
 }
 
-// spillDir resolves the current workspace's spill directory ("" when no
-// workspace is open or the workspace backend is unavailable).
-func (s *service) spillDir(ctx context.Context) string {
-	if s.workspace != nil {
-		workspace, ok, err := s.workspace.Current(ctx)
-		if err != nil {
-			s.logger.Printf("[agent] spill dir: current workspace: %v", err)
-		} else if ok && strings.TrimSpace(workspace.Root) != "" {
-			return filepath.Join(workspace.Root, filepath.FromSlash(spillDirName))
-		}
+// spillDir resolves the run root's spill directory. An empty root (headless /
+// ACP sessions without a registered workspace) falls back to the product data
+// directory; with neither, Dir stays empty and Rig uses its own temp directory.
+func (s *service) spillDir(ctx context.Context, workspaceRoot string) string {
+	if root := strings.TrimSpace(workspaceRoot); root != "" {
+		return filepath.Join(root, filepath.FromSlash(spillDirName))
 	}
 	// Headless/ACP sessions have no registered workspace; spill under the
 	// product data directory instead of resending oversized tool results in

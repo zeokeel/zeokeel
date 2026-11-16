@@ -438,15 +438,20 @@ func (s *store) SetSessionWorkspace(ctx context.Context, sessionID, workspaceID 
 	return nil
 }
 
-// Sessions implements contracts.Store: newest updated first.
+// Sessions implements contracts.Store: newest updated first. One LEFT JOIN +
+// GROUP BY computes every message count in a single pass (2026-11 audit
+// AR-20: the old COUNT correlated subquery ran once per session row); empty
+// sessions keep their row with a zero count.
 func (s *store) Sessions(ctx context.Context) ([]contracts.SessionMeta, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT s.id, s.workspace_id, s.title, s.created_at, s.updated_at,
-		       (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id)
+		       COUNT(m.id)
 		FROM sessions s
+		LEFT JOIN messages m ON m.session_id = s.id
+		GROUP BY s.id, s.workspace_id, s.title, s.created_at, s.updated_at
 		ORDER BY s.updated_at DESC, s.id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("sessionstore: list sessions: %w", err)

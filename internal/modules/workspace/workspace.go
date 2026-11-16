@@ -261,7 +261,12 @@ func (s *Service) load() error {
 		return nil
 	}
 	if err != nil {
-		s.logRecovery(fmt.Sprintf("workspace registry %q could not be read (%v); starting with no workspaces", s.path, err))
+		// BE-09 (2026-11 audit): a non-NotExist READ error (EIO/ESTALE/ELOOP)
+		// quarantines exactly like a decode error — starting empty while the
+		// entry stays in place would let the next persist overwrite it and lose
+		// the original bytes. Rename is a directory operation, so it succeeds
+		// even when the file itself cannot be read.
+		s.quarantine(fmt.Sprintf("workspace registry %q could not be read (%v)", s.path, err))
 		return nil
 	}
 	document, err := decodeRegistry(data)

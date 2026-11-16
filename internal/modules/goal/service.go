@@ -438,6 +438,58 @@ func (s *service) AdmitRound(ctx context.Context, sessionID string) (contracts.G
 	return snapshot, nil
 }
 
+// RollbackRound refunds one admitted continuation round whose run never
+// started (BE-10, 2026-11 audit): AdmitRound persists RoundsStarted+1 BEFORE
+// the driver starts the send, and a failed send used to leave the round
+// consumed — the goal burned a round on a turn that never ran. The refund
+// applies only when the goal is still active and still sits at exactly the
+// admitted round; a goal that advanced, blocked or completed meanwhile keeps
+// its durable truth (no-op). The refund is persisted as a new revision so a
+// restart agrees, and the activation (armed/disarmed) is preserved.
+func (s *service) RollbackRound(ctx context.Context, sessionID string, round int) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("%w: session id is required", contracts.ErrGoalNotFound)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	state := s.ensureLoadedLocked(ctx, sessionID)
+	if state == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: session %q was deleted", contracts.ErrGoalNotFound, sessionID)
+	}
+	if !state.loaded {
+		s.mu.Unlock()
+		return fmt.Errorf("goal: cannot read the durable goal state of session %q", sessionID)
+	}
+	current := state.goal
+	if current.ID == "" {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: session %q", contracts.ErrGoalNotFound, sessionID)
+	}
+	if round <= 0 || current.Phase != contracts.GoalPhaseActive || current.RoundsStarted != round {
+		// Stale or moved-on: nothing to refund.
+		s.mu.Unlock()
+		return nil
+	}
+	next := current
+	next.RoundsStarted = current.RoundsStarted - 1
+	next.Revision = current.Revision + 1
+	next.UpdatedAt = time.Now()
+	if err := s.commitLocked(ctx, state, next, state.armed); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	s.mu.Unlock()
+	s.notify(sessionID)
+	return nil
+}
+
 // Disarm implements contracts.GoalService: it turns automatic continuation off
 // in this process without touching the persisted phase/revision.
 func (s *service) Disarm(sessionID string) (contracts.Goal, bool) {

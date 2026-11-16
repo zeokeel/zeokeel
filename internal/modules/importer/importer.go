@@ -288,6 +288,20 @@ func (s *service) Import(ctx context.Context, dir string) (contracts.ImportResul
 		existing[meta.ID] = true
 	}
 	registeredWorkspaces := make(map[string]bool)
+	// BE-04 (2026-11 audit): workspace.Create makes the registered root
+	// current, so importing used to silently move the user's current workspace
+	// to the last imported cwd (unbound sessions follow Current for their tool
+	// root). Save the current workspace and restore it after the registration
+	// loop. With no current workspace there is no user project to protect: the
+	// first imported root stays current (the workspace contract has no
+	// "register without switching" API).
+	previousCurrentID := ""
+	if s.workspace != nil {
+		if current, ok, currentErr := s.workspace.Current(ctx); currentErr == nil && ok {
+			previousCurrentID = current.ID
+		}
+	}
+	registeredAny := false
 	for _, item := range scanned {
 		if err := ctx.Err(); err != nil {
 			return contracts.ImportResult{}, err
@@ -329,8 +343,16 @@ func (s *service) Import(ctx context.Context, dir string) (contracts.ImportResul
 						fmt.Sprintf("%s: register workspace %q: %v", item.sourcePath, session.Cwd, err))
 				} else {
 					result.ImportedWorkspaces++
+					registeredAny = true
 				}
 			}
+		}
+	}
+	// Restore the user's current workspace after the registrations switched it
+	// (BE-04). A failed restore is logged, never fatal: the import succeeded.
+	if previousCurrentID != "" && registeredAny {
+		if _, err := s.workspace.Open(ctx, previousCurrentID); err != nil {
+			s.logger.Printf("%s: restore current workspace %q after import: %v", ModuleID, previousCurrentID, err)
 		}
 	}
 	s.logger.Printf("%s: imported %d sessions/%d messages/%d workspaces (%d skipped)",

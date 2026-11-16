@@ -134,7 +134,9 @@ func TestSpillPolicyUsesWorkspaceDir(t *testing.T) {
 	svc, _, _ := newSpillService(t)
 	svc.workspace = workspace
 
-	policy := svc.spillPolicy(context.Background())
+	// The run passes its captured root; an unbound run resolves the current
+	// workspace through the same helper (BE-11 signature).
+	policy := svc.spillPolicy(context.Background(), svc.workspaceRoot(context.Background()))
 	if policy == nil {
 		t.Fatal("spillPolicy = nil, want a policy")
 	}

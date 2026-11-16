@@ -19,6 +19,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	libversion "github.com/zeokeel/zeokeel/internal/lib/version"
 )
 
 const (
@@ -250,7 +251,7 @@ func (s *service) checkManifest(ctx context.Context) (contracts.UpdateInfo, erro
 		return contracts.UpdateInfo{}, err
 	}
 	currentDisplay, currentComparable := currentVersion(s.appInfo.Version)
-	comparison, err := CompareVersions(currentComparable, manifest.Version)
+	comparison, err := libversion.CompareVersions(currentComparable, manifest.Version)
 	if err != nil {
 		return contracts.UpdateInfo{}, fmt.Errorf("%w: version %q: %v", ErrManifest, manifest.Version, err)
 	}
@@ -296,7 +297,7 @@ func currentVersion(raw string) (display, comparable string) {
 	if raw == "" {
 		return "dev", "0.0.0"
 	}
-	if _, err := parseVersion(raw); err != nil {
+	if _, err := libversion.Parse(raw); err != nil {
 		return raw, "0.0.0"
 	}
 	return raw, raw
@@ -311,7 +312,7 @@ func ParseManifest(data []byte) (Manifest, error) {
 	if strings.TrimSpace(manifest.Version) == "" {
 		return Manifest{}, fmt.Errorf("%w: missing version", ErrManifest)
 	}
-	if _, err := parseVersion(manifest.Version); err != nil {
+	if _, err := libversion.Parse(manifest.Version); err != nil {
 		return Manifest{}, fmt.Errorf("%w: version %q: %v", ErrManifest, manifest.Version, err)
 	}
 	return manifest, nil

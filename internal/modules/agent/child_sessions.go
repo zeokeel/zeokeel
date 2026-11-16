@@ -131,8 +131,9 @@ func newChildSessionStore(dataDir string, logger contracts.Logger) *childSession
 }
 
 // load reads the document, migrating the v1 sidecar on first use. Every failure
-// degrades to an empty store (the agent module must still activate); a corrupt
-// document is quarantined.
+// degrades to an empty store (the agent module must still activate); an
+// unreadable OR corrupt document is quarantined (BE-09/VC-01, 2026-11 audit:
+// a read error left in place would be overwritten by the next upsert).
 func (s *childSessionStore) load() {
 	if s == nil || s.path == "" {
 		return
@@ -143,7 +144,7 @@ func (s *childSessionStore) load() {
 			s.migrateLegacy()
 			return
 		}
-		s.logf("read child-session document: %v", err)
+		s.quarantine(fmt.Sprintf("child-session document could not be read: %v", err))
 		return
 	}
 	if len(strings.TrimSpace(string(data))) == 0 {

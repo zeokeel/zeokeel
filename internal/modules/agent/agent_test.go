@@ -1191,13 +1191,13 @@ func TestSendWithAttachmentsImage(t *testing.T) {
 		t.Fatalf("attachment chip = %+v, want the sent attachment", chip)
 	}
 
-	// The read model is a copy: mutating the snapshot must not change the
-	// session or the caller's buffer.
-	session.Messages[0].Attachments[0].Data[0] = 0xff
+	// AR-05: the snapshot is a SHARED READ-ONLY read model — callers must not
+	// mutate it (the old defensive per-call copy is gone). The caller's own
+	// buffer stays isolated: Send cloned the attachment bytes into the model.
 	attachment.Data[0] = 0xff
 	refetched, _ := svc.Session(sessionID)
 	if refetched.Messages[0].Attachments[0].Data[0] != 0x89 {
-		t.Fatalf("read model aliases attachment bytes: %+v", refetched.Messages[0].Attachments[0])
+		t.Fatalf("read model aliases the caller's attachment bytes: %+v", refetched.Messages[0].Attachments[0])
 	}
 
 	userMessage := lastUserMessage(t, provider.lastRequest())
@@ -1673,6 +1673,9 @@ func TestForkSessionCopiesMessages(t *testing.T) {
 	source := svc.sessions[sourceID]
 	source.messages[1].Reasoning = "思考过程"
 	source.messages[1].Tools = []contracts.ToolCall{{ID: "call-1", Name: "memory", Status: "ok"}}
+	// Direct read-model seeding is a test seam: invalidate the snapshot cache
+	// exactly like the product's mutation paths do (AR-05 versioned cache).
+	svc.touchLocked(source)
 	svc.mu.Unlock()
 	sourceBefore, _ := svc.Session(sourceID)
 

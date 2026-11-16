@@ -391,13 +391,23 @@ type service struct {
 	// loaded on demand through the skill tool.
 	skills contracts.SkillsService
 
-	subscribers    []*subscription
-	nextSessionSeq uint64
+	subscribers []*subscription
+	// lastSessionNano is the monotonic floor of issued session-ID nanos: a
+	// coarse or rewound clock never reissues an ID (BE-08). Guarded by s.mu.
+	lastSessionNano int64
+	// sessionIDNow is the ID clock seam (nil uses time.Now().UnixNano); tests
+	// freeze it to prove collision resolution never busy-waits on the clock.
+	sessionIDNow   func() int64
 	nextMessageSeq uint64
 	// nextSubagentSeq names auto-named synchronous subagents (sub-<n>).
 	nextSubagentSeq atomic.Uint64
 	// teamManager owns the session's live teammates (created lazily under mu).
 	teamManager *rigteam.Manager
+	// teamTracker is the run/activity tracker shared by the manager, the team
+	// adapter and the wrapped tools (created lazily under mu). Instance state:
+	// it is garbage-collected with the service (BE-13 — the old package-level
+	// sync.Map had no Delete and retained every disposed service's tracker).
+	teamTracker *teamTracker
 	// subagentActivities is the bounded read model of the synchronous
 	// delegations (contracts.SubagentActivityLister) shown by the inspector's
 	// Agents pane; its own mutex guards it, never s.mu.
@@ -466,6 +476,16 @@ type service struct {
 	// contextTimelines is the folded context view per session, rebuilt from the
 	// durable observability events at restore.
 	contextTimelines map[string]*contextTimeline
+	// listVersion increments on every change the session LIST reflects: a
+	// session-state mutation, a session add/remove, a permission-override
+	// change, and every notify (the pin/archive/unread settings rows change
+	// through their setters, which notify). Sessions() caches the sorted
+	// skeleton against it (2026-11 audit AR-20). Guarded by s.mu.
+	listVersion uint64
+	// listCache is the sorted list skeleton built at listCacheVersion (flags
+	// included, disclosure fields filled per call from cheap global reads).
+	listCache        []contracts.ChatSessionInfo
+	listCacheVersion uint64
 }
 
 var (
@@ -503,6 +523,14 @@ type sessionState struct {
 	cancel  context.CancelFunc
 	// assistant is the index of the streaming assistant placeholder, or -1.
 	assistant int
+	// turnStarted/turnIteration/turnTextOffset track the in-flight model turn
+	// announced by rig's EventTurnStart: the iteration number and the assistant
+	// text length at the turn's start. A reasoning segment of that iteration
+	// carries the recorded offset even when prose arrived before the thinking
+	// (US-01 per-iteration reasoning timeline).
+	turnStarted    bool
+	turnIteration  int
+	turnTextOffset int
 	// compacting marks an in-flight manual compaction (/compact): Send and
 	// Regenerate are rejected while it runs, because the compaction model call
 	// takes seconds and a turn appended halfway through would be erased by the
@@ -512,6 +540,18 @@ type sessionState struct {
 	// durable checkpoint is still requested/tool_pending). Read-model only: the
 	// UI shows a hint, and the next run start clears it.
 	interrupted bool
+	// version increments on every read-model mutation (messages, tools,
+	// attachments, running/error/title/clocks). Session() caches its deep
+	// snapshot against this version so a steady-state frame pays one copy per
+	// change instead of one copy per call (2026-11 audit AR-05). Guarded by
+	// s.mu like every field above.
+	version uint64
+	// snapshotCache is the shared read-only snapshot built at snapshotVersion
+	// for snapshotModel; nil until the first Session() call. Callers receive
+	// the struct by value but share its slices: the read model is read-only.
+	snapshotCache   *contracts.ChatSession
+	snapshotVersion uint64
+	snapshotModel   string
 }
 
 // subscription is one Subscribe callback.
@@ -1063,6 +1103,7 @@ func (s *service) restore(ctx context.Context) {
 		}
 		s.sessions[state.id] = state
 	}
+	s.listVersion++
 	if len(restored) > 0 {
 		s.active = restored[0].state.id
 	}
@@ -1386,6 +1427,7 @@ func (s *service) RenameSession(sessionID, title string) error {
 	}
 	state.title = title
 	state.updatedAt = time.Now()
+	s.touchLocked(state)
 	s.mu.Unlock()
 	if s.store != nil {
 		if err := s.store.RenameSession(context.Background(), sessionID, title); err != nil {
@@ -1556,6 +1598,7 @@ func (s *service) NewSession(title string) (string, error) {
 	}
 	s.sessions[id] = state
 	s.active = id
+	s.listVersion++
 	s.mu.Unlock()
 	if s.store != nil {
 		if err := s.store.CreateSession(context.Background(), id, state.title); err != nil {
@@ -1593,6 +1636,7 @@ func (s *service) ForkSession(sessionID string) (string, error) {
 		copied.ID = s.nextMessageIDLocked()
 		copied.Streaming = false
 		copied.Tools = append([]contracts.ToolCall(nil), message.Tools...)
+		copied.ReasoningSegments = cloneReasoningSegments(message.ReasoningSegments)
 		copied.Attachments = cloneAttachments(message.Attachments)
 		messages = append(messages, copied)
 	}
@@ -1607,6 +1651,7 @@ func (s *service) ForkSession(sessionID string) (string, error) {
 	}
 	s.sessions[newID] = state
 	s.active = newID
+	s.listVersion++
 	s.mu.Unlock()
 
 	if s.store != nil {
@@ -1697,15 +1742,33 @@ func forkHistoryMessages(messages []contracts.ChatMessage) []rig.Message {
 	return out
 }
 
-// newSessionIDLocked generates a unique "sess-<unixnano>" ID.
+// newSessionIDLocked generates a unique "sess-<unixnano>" ID. Collisions
+// (restored sessions, a coarse or rewound clock) resolve by advancing a
+// MONOTONIC sequence — one map lookup per step, never a clock re-read busy
+// wait (BE-08, 2026-11 audit: the old loop spun under the caller-held s.mu
+// until the clock left the occupied region, and never terminates under a
+// frozen clock). The loop is bounded by the number of occupied IDs.
 func (s *service) newSessionIDLocked() string {
+	nano := s.sessionClock()
+	if nano <= s.lastSessionNano {
+		nano = s.lastSessionNano + 1
+	}
 	for {
-		s.nextSessionSeq++
-		id := fmt.Sprintf("sess-%d", time.Now().UnixNano())
+		id := fmt.Sprintf("sess-%d", nano)
 		if _, exists := s.sessions[id]; !exists {
+			s.lastSessionNano = nano
 			return id
 		}
+		nano++
 	}
+}
+
+// sessionClock reads the session-ID clock (the test seam when installed).
+func (s *service) sessionClock() int64 {
+	if s.sessionIDNow != nil {
+		return s.sessionIDNow()
+	}
+	return time.Now().UnixNano()
 }
 
 // DeleteSession removes a session, cancels its run and moves the active session
@@ -1737,6 +1800,7 @@ func (s *service) SetSessionWorkspace(sessionID, workspaceID string) error {
 	if state, exists := s.sessions[sessionID]; exists {
 		state.workspaceID = workspaceID
 		state.updatedAt = time.Now()
+		s.touchLocked(state)
 	}
 	s.mu.Unlock()
 	s.notify(sessionID)
@@ -1768,7 +1832,11 @@ func (s *service) SetSessionPermission(sessionID, mode string) error {
 		return fmt.Errorf("agent: unknown chat session %q", sessionID)
 	}
 	s.sessionPermissions[sessionID] = mode
+	// The list read model discloses the override (PermissionScope /
+	// EffectiveApprovalMode): invalidate the cached list and tell the UI.
+	s.listVersion++
 	s.mu.Unlock()
+	s.notify(sessionID)
 	return nil
 }
 
@@ -1790,6 +1858,7 @@ func (s *service) DeleteSession(sessionID string) error {
 	delete(s.sessions, sessionID)
 	delete(s.sessionPermissions, sessionID)
 	delete(s.sessionPresets, sessionID)
+	s.listVersion++
 	// Tombstone the ID before the run goroutine can observe the cancellation:
 	// the cancelled run still persists the tool round it was in the middle of
 	// (rig uses context.WithoutCancel for history writes for replayability), and
@@ -1855,7 +1924,12 @@ func (s *service) newestSessionLocked() string {
 	return newest
 }
 
-// Session returns one session read model.
+// Session returns one session read model. The returned ChatSession is a
+// SHARED READ-ONLY snapshot: it is deep-copied once per state version and
+// every caller until the next mutation receives the same backing slices
+// (2026-11 audit AR-05 — the session screen used to pay 7–8 full deep copies
+// per frame, attachment bytes included). Callers must never mutate the
+// messages, tools, segments or attachment bytes they receive.
 func (s *service) Session(sessionID string) (contracts.ChatSession, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1863,15 +1937,36 @@ func (s *service) Session(sessionID string) (contracts.ChatSession, bool) {
 	if !ok {
 		return contracts.ChatSession{}, false
 	}
-	return state.snapshot(s.sessionModelLocked(sessionID), s.settings), true
+	model := s.sessionModelLocked(sessionID)
+	if state.snapshotCache != nil && state.snapshotVersion == state.version && state.snapshotModel == model {
+		return *state.snapshotCache, true
+	}
+	snapshot := state.snapshot(model, s.settings)
+	state.snapshotCache = &snapshot
+	state.snapshotVersion = state.version
+	state.snapshotModel = model
+	return snapshot, true
 }
 
-// Sessions lists sessions, newest updated first.
+// Sessions lists sessions, newest updated first. The sorted skeleton (with
+// the persisted pin/archive/unread/origin flags) is cached against the list
+// version; each call returns a shallow copy with the permission-disclosure
+// fields filled from two cheap global reads, so a steady-state frame never
+// re-reads four settings rows per session nor re-sorts (2026-11 audit AR-20).
+// The returned slice belongs to the caller; the ChatSessionInfo values are
+// plain data (no shared slices).
 func (s *service) Sessions() []contracts.ChatSessionInfo {
 	s.mu.Lock()
+	if s.listCache != nil && s.listCacheVersion == s.listVersion {
+		cached := s.listCache
+		s.mu.Unlock()
+		out := append([]contracts.ChatSessionInfo(nil), cached...)
+		s.fillPermissionDisclosure(out)
+		return out
+	}
 	infos := make([]contracts.ChatSessionInfo, 0, len(s.sessions))
 	for _, state := range s.sessions {
-		infos = append(infos, contracts.ChatSessionInfo{
+		info := contracts.ChatSessionInfo{
 			ID:           state.id,
 			WorkspaceID:  state.workspaceID,
 			Title:        state.title,
@@ -1879,9 +1974,17 @@ func (s *service) Sessions() []contracts.ChatSessionInfo {
 			Running:      state.running,
 			Waiting:      state.waiting,
 			UpdatedAt:    state.updatedAt,
-		})
+		}
+		if override := s.sessionPermissions[state.id]; override != "" {
+			info.PermissionScope = contracts.PermissionScopeSession
+			info.EffectiveApprovalMode = normalizeApprovalMode(override)
+		} else {
+			info.PermissionScope = contracts.PermissionScopeGlobal
+		}
+		infos = append(infos, info)
 	}
 	settings := s.settings
+	version := s.listVersion
 	s.mu.Unlock()
 	// The persisted flags are read after unlocking: they live in the settings
 	// store, and a store call must not run while holding s.mu (the same reason
@@ -1898,7 +2001,64 @@ func (s *service) Sessions() []contracts.ChatSessionInfo {
 		}
 		return infos[i].ID > infos[j].ID
 	})
+	s.fillPermissionDisclosure(infos)
+	// Publish the skeleton only when nothing changed while the flags were
+	// read; a concurrent mutation bumps the version and the next call rebuilds.
+	s.mu.Lock()
+	if s.listVersion == version {
+		// The cache owns its copy: the caller's slice must never alias it.
+		s.listCache = append([]contracts.ChatSessionInfo(nil), infos...)
+		s.listCacheVersion = version
+	}
+	s.mu.Unlock()
 	return infos
+}
+
+// fillPermissionDisclosure completes the (a) disclosure fields (2026-11
+// audit): the OS sandbox mode ALWAYS follows the global agent.permission
+// preset (per-session OS modes do not exist), and a session without an
+// override follows the global approval policy too. The global values are read
+// once per call — never per session — and never under s.mu.
+func (s *service) fillPermissionDisclosure(infos []contracts.ChatSessionInfo) {
+	if len(infos) == 0 {
+		return
+	}
+	sandboxMode := s.effectiveSandboxMode()
+	approvalMode := s.globalApprovalMode()
+	for index := range infos {
+		infos[index].EffectiveSandboxMode = sandboxMode
+		if infos[index].PermissionScope != contracts.PermissionScopeSession {
+			infos[index].EffectiveApprovalMode = approvalMode
+		}
+	}
+}
+
+// effectiveSandboxMode resolves the actual OS file-sandbox mode: the global
+// agent.permission preset, normalized. It is the SAME source the toolkit's
+// root-scoped build reads (configuredSandboxMode); a session override never
+// changes it (disclosure route of audit (a) — no per-session OS mode).
+func (s *service) effectiveSandboxMode() string {
+	if s.settings == nil {
+		return contracts.PermissionWorkspace
+	}
+	return contracts.NormalizePermissionMode(s.settings.Get(contracts.SettingAgentPermission, ""))
+}
+
+// globalApprovalMode resolves the global approval policy the gate would use
+// for a session without an override (the approvals service reports its
+// effective mode, including the headless ignorePermissionSetting pin).
+func (s *service) globalApprovalMode() string {
+	if s.approvals == nil {
+		return contracts.PermissionWorkspace
+	}
+	return normalizeApprovalMode(s.approvals.Mode())
+}
+
+// touchLocked records a read-model mutation of state: it invalidates the
+// session's snapshot cache and the session-list cache. The caller holds s.mu.
+func (s *service) touchLocked(state *sessionState) {
+	state.version++
+	s.listVersion++
 }
 
 // ActiveSession returns the session the UI currently shows.
@@ -2053,6 +2213,8 @@ func (s *service) sendWithOptions(sessionID, prompt string, attachments []contra
 		},
 	)
 	state.assistant = len(state.messages) - 1
+	// A fresh run starts a fresh reasoning timeline (US-01 turn tracking).
+	state.turnStarted = false
 	state.running = true
 	// The session is producing output again: an interrupted-run banner from the
 	// previous launch no longer applies.
@@ -2071,6 +2233,7 @@ func (s *service) sendWithOptions(sessionID, prompt string, attachments []contra
 			boundWorkspaceID = current
 		}
 	}
+	s.touchLocked(state)
 	runCtx, cancel := context.WithCancel(context.Background())
 	state.cancel = cancel
 	title := state.title
@@ -2210,12 +2373,15 @@ func (s *service) Regenerate(sessionID string) error {
 	})
 	state.messages = truncated
 	state.assistant = len(state.messages) - 1
+	// A fresh run starts a fresh reasoning timeline (US-01 turn tracking).
+	state.turnStarted = false
 	state.running = true
 	state.interrupted = false
 	// Same waiting window as Send: nothing has streamed yet.
 	state.waiting = true
 	state.err = ""
 	state.updatedAt = now
+	s.touchLocked(state)
 	runCtx, cancel := context.WithCancel(context.Background())
 	state.cancel = cancel
 	s.mu.Unlock()
@@ -2258,6 +2424,7 @@ func (s *service) Regenerate(sessionID string) error {
 				current.cancel = nil
 				current.err = previousErr
 				current.updatedAt = previousUpdatedAt
+				s.touchLocked(current)
 			}
 			s.mu.Unlock()
 			return fmt.Errorf("agent: regenerate history for %q: %w", sessionID, err)
@@ -2477,8 +2644,9 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		History: s.guardedHistory(history),
 		Gate:    s.gate(sessionID),
 		// Oversized tool results are spilled by Rig before the tool message is
-		// recorded (rig.SpillPolicy); the product only resolves the directory.
-		Spill:           s.spillPolicy(ctx),
+		// recorded (rig.SpillPolicy); the product only resolves the directory —
+		// under the run's captured session-bound root (BE-11).
+		Spill:           s.spillPolicy(ctx, workspaceRoot),
 		Logger:          s.logger,
 		CheckpointStore: s.guardedCheckpointStore(s.checkpointStore()),
 	}
@@ -2608,6 +2776,13 @@ func (s *service) appendEvent(ctx context.Context, sessionID, eventType string, 
 // workspaceRoot is the tool root captured at run start (for the tool-call path
 // provenance); turn is the run-local usage tracker (nil is accepted for callers
 // without one).
+//
+// BE-05 (2026-11 audit): the durable event writes are collected under s.mu and
+// executed AFTER the critical section — a store call must not run while
+// holding s.mu (a slow/contended SQLite transaction would otherwise block
+// every reader of the whole read model for up to busy_timeout). The run
+// goroutine emits events sequentially, so the deferred writes keep their
+// emission order.
 func (s *service) handleEvent(ctx context.Context, sessionID, workspaceRoot string, event rig.Event, turn *turnUsage) {
 	// Rig reports one usage event per model call and accumulates the run total
 	// itself; remember the prompt tokens of the newest call so the read model can
@@ -2637,6 +2812,8 @@ func (s *service) handleEvent(ctx context.Context, sessionID, workspaceRoot stri
 		s.mu.Unlock()
 		return
 	}
+	// Durable writes deferred out of the critical section (BE-05), in order.
+	var deferredWrites []func()
 	// The first model output of the run ends the "waiting for a reply" window:
 	// the request is no longer silent, so the sidebar switches from 等待回复 to
 	// 运行中. Usage events do not count (no output yet). A new run can only
@@ -2652,6 +2829,28 @@ func (s *service) handleEvent(ctx context.Context, sessionID, workspaceRoot stri
 			message.Text += event.Text
 		case rig.EventReasoningDelta:
 			message.Reasoning += event.Reasoning
+			// Keep the per-iteration boundaries the flat string loses: the
+			// transcript interleaves thinking with prose/tool cards by the
+			// segments' TextOffset (US-01).
+			appendReasoningDelta(state, message, event.Iteration, event.Reasoning)
+		case rig.EventTurnStart:
+			// A new model iteration begins: record its start position in the
+			// cumulative reply so its reasoning segment keeps the right offset
+			// even when prose arrives before the thinking.
+			state.turnStarted = true
+			state.turnIteration = event.Iteration
+			state.turnTextOffset = len(message.Text)
+		case rig.EventMessage:
+			// The complete per-iteration assistant message is authoritative for
+			// this iteration's reasoning: fill a segment no delta created and
+			// repair a partial one (providers may coalesce deltas).
+			if event.Message != nil {
+				reconcileReasoningSegment(state, message, event.Iteration, event.Message.Reasoning)
+			}
+		case rig.EventTurnEnd:
+			if state.turnStarted && state.turnIteration == event.Iteration {
+				state.turnStarted = false
+			}
 		case rig.EventToolCall:
 			if event.Call != nil {
 				textOffset := len(message.Text)
@@ -2684,7 +2883,9 @@ func (s *service) handleEvent(ctx context.Context, sessionID, workspaceRoot stri
 				if path != "" {
 					fields["path"] = path
 				}
-				s.appendEvent(context.Background(), sessionID, "tool_call", fields)
+				deferredWrites = append(deferredWrites, func() {
+					s.appendEvent(context.Background(), sessionID, "tool_call", fields)
+				})
 			}
 		case rig.EventToolResult:
 			if event.Call != nil && event.Result != nil {
@@ -2717,16 +2918,33 @@ func (s *service) handleEvent(ctx context.Context, sessionID, workspaceRoot stri
 					message.Tools[index].Status = status
 					message.Tools[index].Summary = content
 					message.Tools[index].EndedAt = time.Now()
-					s.appendEvent(context.Background(), sessionID, "tool_result", map[string]any{
+					// Classify a failed call from the RAW result text: rig's
+					// OS-sandbox attribution line trails the output and the bounded
+					// summary may cut it off (RG-03). The kind is persisted so a
+					// restart keeps the attribution without the full output.
+					errorKind := ""
+					if status == "error" {
+						errorKind = contracts.ClassifyError(nil, event.Result.Content)
+					}
+					message.Tools[index].ErrorKind = errorKind
+					resultFields := map[string]any{
 						"id": event.Call.ID, "name": event.Call.Name,
 						"status": status, "content": content,
+					}
+					if errorKind != "" {
+						resultFields["error_kind"] = errorKind
+					}
+					deferredWrites = append(deferredWrites, func() {
+						s.appendEvent(context.Background(), sessionID, "tool_result", resultFields)
 					})
 					// A spilled tool result is a context-management event: record
 					// its structured path/bytes/preview from Rig's stable summary.
 					if spill, ok := parseSpillSummary(event.Result.Content); ok {
 						spill.CallID = event.Call.ID
 						spill.Tool = event.Call.Name
-						s.recordSpillEvent(context.Background(), sessionID, spill)
+						deferredWrites = append(deferredWrites, func() {
+							s.recordSpillEvent(context.Background(), sessionID, spill)
+						})
 					}
 					break
 				}
@@ -2742,7 +2960,12 @@ func (s *service) handleEvent(ctx context.Context, sessionID, workspaceRoot stri
 		}
 	}
 	state.updatedAt = time.Now()
+	s.touchLocked(state)
 	s.mu.Unlock()
+	// The durable writes run outside s.mu, in emission order (BE-05).
+	for _, write := range deferredWrites {
+		write()
+	}
 	s.notify(sessionID)
 }
 
@@ -2852,6 +3075,7 @@ func (s *service) finishWithReason(sessionID string, ctx context.Context, runErr
 	// write below settles).
 	state.waiting = false
 	state.updatedAt = time.Now()
+	s.touchLocked(state)
 	// running/cancel stay set for now: a new run must not start while the
 	// interrupted turn below is still being written.
 	s.mu.Unlock()
@@ -2870,6 +3094,7 @@ func (s *service) finishWithReason(sessionID string, ctx context.Context, runErr
 		current.waiting = false
 		current.cancel = nil
 		current.updatedAt = time.Now()
+		s.touchLocked(current)
 		// A run that finished while the user was looking at another session
 		// leaves an unread completion behind (the active session is being
 		// watched, so it never does). Persist it after unlocking: the settings
@@ -3046,9 +3271,15 @@ func toolCallPath(name, arguments, workspaceRoot string) string {
 // themselves are skipped because the trajectory comes from events.
 func chatMessagesFromRig(messages []rig.Message) []contracts.ChatMessage {
 	out := make([]contracts.ChatMessage, 0, len(messages))
+	// Rig persists one assistant message per model iteration; the iteration
+	// number of a restored message is its assistant position within the current
+	// turn (a user message starts a new turn). The live read model records the
+	// same numbers from rig events, so live and restored segments agree (US-02).
+	iteration := 0
 	for _, message := range messages {
 		switch message.Role {
 		case rig.RoleUser:
+			iteration = 0
 			text, attachments := userMessageContent(message)
 			out = append(out, contracts.ChatMessage{
 				Role:        contracts.ChatRoleUser,
@@ -3057,11 +3288,13 @@ func chatMessagesFromRig(messages []rig.Message) []contracts.ChatMessage {
 				CreatedAt:   messageTime(message),
 			})
 		case rig.RoleAssistant:
+			iteration++
 			chatMessage := contracts.ChatMessage{
-				Role:      contracts.ChatRoleAssistant,
-				Text:      messageText(message),
-				Reasoning: message.Reasoning,
-				CreatedAt: messageTime(message),
+				Role:              contracts.ChatRoleAssistant,
+				Text:              messageText(message),
+				Reasoning:         message.Reasoning,
+				ReasoningSegments: restoredReasoningSegments(message.Reasoning, iteration),
+				CreatedAt:         messageTime(message),
 			}
 			for _, call := range message.ToolCalls {
 				chatMessage.Tools = append(chatMessage.Tools, contracts.ToolCall{
@@ -3176,6 +3409,7 @@ func (state *sessionState) snapshot(model string, settings contracts.SettingsSer
 	for _, message := range state.messages {
 		copied := message
 		copied.Tools = append([]contracts.ToolCall(nil), message.Tools...)
+		copied.ReasoningSegments = cloneReasoningSegments(message.ReasoningSegments)
 		copied.Attachments = cloneAttachments(message.Attachments)
 		out.Messages = append(out.Messages, copied)
 	}
@@ -3236,6 +3470,10 @@ func (s *service) Subscribe(fn func(sessionID string)) (func(), error) {
 // callback must not take the agent run down, so each call is contained.
 func (s *service) notify(sessionID string) {
 	s.mu.Lock()
+	// Every notify follows a change the UI may read: the pin/archive/unread
+	// setters persist their settings rows and notify without touching the
+	// session state, so the list cache invalidates here too (AR-20).
+	s.listVersion++
 	subscribers := append([]*subscription(nil), s.subscribers...)
 	s.mu.Unlock()
 	for _, listener := range subscribers {

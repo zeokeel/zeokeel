@@ -4,11 +4,13 @@
 //
 //   - sandbox policy (roots, read-only, shell allowlist, network, caps)
 //   - built-in file/shell/pwsh tools, editor and image tools
-//   - stateful terminal sessions (PTY when available) and background jobs
+//   - background jobs (the stateful terminal tools were removed from the
+//     product; their ID routing is kept defensively, see execution_routing.go)
 //   - web fetch/search, and remote MCP servers over Streamable HTTP
 //
-// The resulting *tools.Registry is provided as contracts.KeyToolkit; the
-// host-tools module adds product-only tools to the same registry.
+// The resulting *tools.Registry is provided as contracts.KeyToolkit (legacy)
+// and, as the narrow rig-free contracts.ToolCatalog, as contracts.KeyToolCatalog;
+// the host-tools module adds product-only tools to the same registry.
 package toolkit
 
 import (
@@ -88,7 +90,7 @@ type Config struct {
 	Root string `json:"root"`
 	// ShellTimeoutMs bounds shell tool executions (0 = 30s).
 	ShellTimeoutMs int `json:"shellTimeoutMs"`
-	// ReadOnly disables file writes, shell and terminal execution.
+	// ReadOnly disables file writes and shell execution.
 	ReadOnly bool `json:"readOnly"`
 	// Network allows web_fetch and outbound connections from shell tools.
 	Network bool `json:"network"`
@@ -100,13 +102,20 @@ type Config struct {
 	// products that want the agent to run normal development commands enable
 	// it. The command allowlist still applies to the first command of a line.
 	AllowShellOperators bool `json:"allowShellOperators"`
-	// DeniedGlobs hides files (e.g. "**/.env") from every file tool.
+	// DeniedGlobs hides files (e.g. "**/.env") from every file tool. The
+	// opt-in settings row toolkit.deniedGlobs overrides this list (default
+	// empty = nothing hidden). Shell tools can still read denied files — this
+	// is file-surface defense in depth, not a security boundary.
 	DeniedGlobs []string `json:"deniedGlobs"`
 	// MaxOutputBytes caps one tool result (0 = tool default).
 	MaxOutputBytes int `json:"maxOutputBytes"`
-	// TerminalTransport selects the terminal transport: "auto" (default),
-	// "pty" or "pipe".
-	TerminalTransport string `json:"terminalTransport"`
+	// IgnorePermissionSetting pins the OS sandbox mode to the assembly default
+	// (workspace-write, or read-only with ReadOnly) instead of following the
+	// stored agent.permission preset. Headless/ACP products set it so a desktop
+	// preset left in a shared settings store cannot change their OS confinement
+	// — the same contract the approvals module's ignorePermissionSetting pins
+	// for the approval gate (2026-11 audit).
+	IgnorePermissionSetting bool `json:"ignorePermissionSetting"`
 	// MCPServers are remote MCP servers exposed as tools/resources/prompts.
 	MCPServers []MCPServer `json:"mcpServers"`
 }
@@ -128,13 +137,16 @@ func Module() *module.Descriptor[Config] {
 		// tool: the timeout (toolkit.shellTimeoutSeconds, 5–600s) replaces
 		// Config.ShellTimeoutMs and the output cap (toolkit.shellMaxOutputKiB,
 		// 0 = the rig default) replaces Config.MaxOutputBytes for the
-		// root-scoped tools (files, shell, editor, terminal). Both are resolved
+		// root-scoped tools (files, shell, editor). Both are resolved
 		// here, at activation: the settings page says a restart applies them.
-		// policyCfg carries only those two values; the MCP runtime below keeps
-		// the assembly config's own output cap.
+		// policyCfg carries only those values; the MCP runtime below keeps
+		// the assembly config's own output cap. The opt-in denied-globs row
+		// (toolkit.deniedGlobs, default empty) joins the same policy config so
+		// every file-tool build and the LSP path checks hide the same files.
 		timeout := shellTimeout(cfg, settingsService, hasSettings)
 		policyCfg := cfg
 		policyCfg.MaxOutputBytes = shellMaxOutputBytes(cfg, settingsService, hasSettings)
+		policyCfg.DeniedGlobs = resolveDeniedGlobs(cfg, settingsService, hasSettings, logf)
 		// The OS sandbox is optional: an assembly without the sandbox module
 		// keeps the pre-sandbox behavior (nil runner, approval-only boundary).
 		sandboxService, hasSandbox := ctx.Get(contracts.KeySandbox)
@@ -148,9 +160,9 @@ func Module() *module.Descriptor[Config] {
 			}
 			return mode, sandboxService.Runner()
 		}
-		// Root-dependent tools (files, shell, editor, image, terminal, jobs,
-		// worktree, working_directory) follow the workspace that is current at
-		// call time; tools without a filesystem root are registered once below.
+		// Root-dependent tools (files, shell, editor, image, jobs, worktree,
+		// working_directory) follow the workspace that is current at call time;
+		// tools without a filesystem root are registered once below.
 		rootOf := workspaceRootSource(ctx, cfg.Root)
 		group := newRebindGroup(policyCfg, timeout, rootOf, sandboxOf, logf)
 		// Optional durable store: execution lifecycle events (job/terminal
@@ -270,6 +282,16 @@ func Module() *module.Descriptor[Config] {
 			group.close()
 			return err
 		}
+		// The narrow rig-free catalog over the SAME registry (2026-11 audit
+		// AR-06): diagnostics consumers read names/count through it instead of
+		// the concrete rig type. The legacy KeyToolkit stays until every
+		// consumer has switched.
+		if _, err := ctx.Provide(contracts.KeyToolCatalog, contracts.ToolCatalog(toolCatalog{registry: registry})); err != nil {
+			closeLSP()
+			controller.close()
+			group.close()
+			return err
+		}
 		_, err := ctx.Provide(contracts.KeyPlugins, contracts.PluginsService(plugins))
 		if err != nil {
 			closeLSP()
@@ -333,15 +355,28 @@ func Module() *module.Descriptor[Config] {
 			group.close()
 			return err
 		}
+		// The success path must release everything activation started, exactly
+		// like the error paths above: the LSP session, the MCP controller (its
+		// connections and refresh loop) and every retained root-scoped build
+		// (its background-job process groups). All three closes are idempotent,
+		// so the composed effect is safe even if a partial teardown already ran
+		// one of them (2026-11 audit).
 		if _, err := ctx.Effect(func() cordis.Effect {
-			return cordis.Effect{cordis.CleanupOf(closeLSP)}
+			return cordis.Effect{
+				cordis.CleanupOf(closeLSP),
+				cordis.CleanupOf(controller.close),
+				cordis.CleanupOf(group.close),
+			}
 		}); err != nil {
 			closeLSP()
+			controller.close()
+			group.close()
 			return err
 		}
 		return nil
 	}).AddProvides(
 		module.Provides(contracts.KeyToolkit),
+		module.Provides(contracts.KeyToolCatalog),
 		module.Provides(contracts.KeyPlugins),
 		module.Provides(contracts.KeyTaskBoard),
 		module.Provides(contracts.KeyJobs),
@@ -406,12 +441,14 @@ func permissionSandboxMode(permission string) sandbox.Mode {
 // configuredSandboxMode resolves the live mode for the next root-scoped build:
 // the stored agent.permission preset, with the assembly-level cfg.ReadOnly
 // opt-out forcing read-only. It is read on every rebuild, so a permission
-// change applies without a restart.
+// change applies without a restart. cfg.IgnorePermissionSetting skips the
+// stored preset entirely (headless/ACP pin their OS confinement to the assembly
+// default, mirroring the approvals module's flag of the same name).
 func configuredSandboxMode(cfg Config, settings contracts.SettingsService) sandbox.Mode {
 	if cfg.ReadOnly {
 		return sandbox.ModeReadOnly
 	}
-	if settings == nil {
+	if cfg.IgnorePermissionSetting || settings == nil {
 		return sandbox.ModeWorkspaceWrite
 	}
 	return permissionSandboxMode(settings.Get(contracts.SettingAgentPermission, ""))

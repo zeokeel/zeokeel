@@ -38,13 +38,31 @@ const (
 	SettingAgentLoopRepeatLimit = "agent.loopRepeatLimit"
 	// SettingAgentLoopNoDiffCalls cancels a run after this many consecutive
 	// non-mutating tool calls (0 disables; unset keeps 40).
-	SettingAgentLoopNoDiffCalls       = "agent.loopNoDiffCalls"
-	SettingToolkitShellTimeoutSeconds = "toolkit.shellTimeoutSeconds"
+	SettingAgentLoopNoDiffCalls = "agent.loopNoDiffCalls"
+	// SettingAgentApprovalTimeoutSeconds bounds how long an approval request
+	// from an AUTOMATION-origin run may wait before it is automatically denied
+	// (recorded and notified). 0 or unset disables the timeout — the default,
+	// so interactive approvals keep waiting exactly as before; the run-level
+	// wall-clock breaker (SettingAgentLoopWallClockSeconds) still applies.
+	// Personal-scale ruling (2026-11 audit RG-04): unattended runs get an
+	// opt-in per-approval deny instead of a whole-run cancel, humans get no
+	// added friction.
+	SettingAgentApprovalTimeoutSeconds = "agent.approvalTimeoutSeconds"
+	SettingToolkitShellTimeoutSeconds  = "toolkit.shellTimeoutSeconds"
 	// SettingToolkitShellMaxOutputKiB caps one shell tool result in KiB
 	// (0 = the tool default, 1–4096 otherwise; unset keeps the toolkit
 	// Config's maxOutputBytes). The toolkit resolves it at activation, so a
 	// change applies after a restart.
 	SettingToolkitShellMaxOutputKiB = "toolkit.shellMaxOutputKiB"
+	// SettingToolkitDeniedGlobs is the opt-in file-hiding row (2026-11 audit
+	// RG-10): a JSON string list (e.g. ["**/.env","**/*.pem"]) that overrides
+	// the assembly's toolkit Config.DeniedGlobs. Absent/blank keeps the
+	// assembly value; an explicit empty list opts back out. The default is
+	// empty (personal-scale opt-in). Disclosure: the globs hide files from the
+	// FILE tools only — the shell bypass remains, so this is defense in depth,
+	// not a security boundary. The toolkit resolves it once at activation (a
+	// restart applies a change); the settings Data & privacy page edits it.
+	SettingToolkitDeniedGlobs = "toolkit.deniedGlobs"
 )
 
 // Bounds of the capability settings. The settings page validates against them
@@ -64,6 +82,10 @@ const (
 	// CapabilityMaxShellOutputKiB is the largest configurable shell output cap
 	// (4 MiB), so a hand-edited row cannot ask for an unbounded buffer.
 	CapabilityMaxShellOutputKiB = 4096
+	// CapabilityMaxApprovalTimeoutSeconds is the largest configurable
+	// automation approval timeout (24 h); a hand-edited row beyond it falls
+	// back to the default (0 = disabled).
+	CapabilityMaxApprovalTimeoutSeconds = 86400
 )
 
 // NormalizeCapabilityConcurrency parses a stored delegation concurrency limit:
@@ -85,6 +107,14 @@ func NormalizeShellTimeoutSeconds(raw string, fallback int) int {
 // out-of-range values return fallback.
 func NormalizeShellMaxOutputKiB(raw string, fallback int) int {
 	return normalizeIntInRange(raw, CapabilityShellOutputDefaultKiB, CapabilityMaxShellOutputKiB, fallback)
+}
+
+// NormalizeApprovalTimeoutSeconds parses the stored automation approval
+// timeout: 0 (disabled, the default) and 1..CapabilityMaxApprovalTimeoutSeconds
+// win; empty, malformed or out-of-range values disable the timeout (0), so a
+// hand-edited row can never make interactive approvals time out by accident.
+func NormalizeApprovalTimeoutSeconds(raw string) int {
+	return normalizeIntInRange(raw, 0, CapabilityMaxApprovalTimeoutSeconds, 0)
 }
 
 // normalizeIntInRange parses raw and keeps it only when it falls inside

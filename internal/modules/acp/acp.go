@@ -740,10 +740,17 @@ type promptState struct {
 // process emits the new assistant text delta and the new/changed tool-call
 // events of one snapshot, then closes signal when the session is no longer
 // running. Events are emitted in snapshot order: text first, then tools.
+//
+// BE-06 (2026-11 audit): the emission runs INSIDE the same critical section
+// that assigned the delta. Two goroutines call process concurrently (the run
+// goroutine's chat subscription and the prompt goroutine's direct post-Send
+// call); unlocking before emitting let them write frames in the wrong order.
+// The emit callbacks only take the frameWriter leaf lock (never the service
+// lock or this mutex), so holding state.mu across them cannot deadlock.
 func (state *promptState) process(snapshot contracts.ChatSession, emitText func(string), emitTool func(toolEvent)) {
 	state.mu.Lock()
+	defer state.mu.Unlock()
 	if state.finished {
-		state.mu.Unlock()
 		return
 	}
 	text := assistantText(snapshot)
@@ -754,7 +761,6 @@ func (state *promptState) process(snapshot contracts.ChatSession, emitText func(
 	}
 	toolEvents := state.observeToolEventsLocked(snapshot)
 	running := snapshot.Running
-	state.mu.Unlock()
 	if delta != "" {
 		emitText(delta)
 	}
@@ -763,15 +769,10 @@ func (state *promptState) process(snapshot contracts.ChatSession, emitText func(
 			emitTool(event)
 		}
 	}
-	if running {
-		return
-	}
-	state.mu.Lock()
-	if !state.finished {
+	if !running && !state.finished {
 		state.finished = true
 		close(state.signal)
 	}
-	state.mu.Unlock()
 }
 
 // handleCancel implements session/cancel.

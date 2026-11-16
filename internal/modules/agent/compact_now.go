@@ -47,6 +47,7 @@ func (s *service) CompactNow(ctx context.Context, sessionID string) (contracts.C
 	}
 	state.compacting = true
 	state.updatedAt = time.Now()
+	s.touchLocked(state)
 	cfg := s.configForSessionLocked(sessionID)
 	factory := s.compactorFactory
 	s.mu.Unlock()
@@ -150,6 +151,7 @@ func (s *service) endCompaction(sessionID string) {
 	if state, ok := s.sessions[sessionID]; ok {
 		state.compacting = false
 		state.updatedAt = time.Now()
+		s.touchLocked(state)
 	}
 	s.mu.Unlock()
 }

@@ -135,6 +135,18 @@ func (s *service) continueGoalAfterRun(sessionID, origin string, runErr error, r
 		goalRound: round,
 	}); err != nil {
 		s.logger.Printf("[agent] session %s: start goal round %d: %v", sessionID, admitted.RoundsStarted, err)
+		// BE-10 (2026-11 audit): the round was persisted by AdmitRound but the
+		// run never started — refund it so the goal does not burn a round on a
+		// turn that never ran. The optional hook keeps GoalService free of a
+		// rollback-only method (the Forget pattern); a backend without it keeps
+		// the old behavior, logged.
+		if rollbacker, ok := s.goalService.(interface {
+			RollbackRound(context.Context, string, int) error
+		}); ok && rollbacker != nil {
+			if rollbackErr := rollbacker.RollbackRound(context.Background(), sessionID, admitted.RoundsStarted); rollbackErr != nil {
+				s.logger.Printf("[agent] session %s: rollback goal round %d: %v", sessionID, admitted.RoundsStarted, rollbackErr)
+			}
+		}
 		s.notify(sessionID)
 	}
 }

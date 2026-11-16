@@ -16,7 +16,7 @@ import (
 func TestSpillPolicyFallsBackToDataDir(t *testing.T) {
 	svc, _, dataDir := newSpillService(t)
 
-	policy := svc.spillPolicy(context.Background())
+	policy := svc.spillPolicy(context.Background(), "")
 	if policy == nil {
 		t.Fatal("spillPolicy = nil, want a policy")
 	}
@@ -37,10 +37,10 @@ func TestSpillPolicyFallsBackToDataDir(t *testing.T) {
 // temp directory (rig/agent/spill.go) instead of the product writing inline.
 func TestSpillDirWithoutWorkspaceOrDataDir(t *testing.T) {
 	svc := newService(Config{}, nil, newFakeSettings(nil), &fakeLogger{}, newFakeStore(), fakeApprovals{})
-	if dir := svc.spillDir(context.Background()); dir != "" {
+	if dir := svc.spillDir(context.Background(), ""); dir != "" {
 		t.Fatalf("spillDir without workspace/data dir = %q, want empty", dir)
 	}
-	policy := svc.spillPolicy(context.Background())
+	policy := svc.spillPolicy(context.Background(), "")
 	if policy == nil || policy.Dir != "" {
 		t.Fatalf("spillPolicy = %+v, want a policy with an empty Dir", policy)
 	}

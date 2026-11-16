@@ -59,7 +59,17 @@ type ChatMessage struct {
 	// Text is the message body (assistant text streams into it).
 	Text string
 	// Reasoning is the model's thinking text when the provider streams it.
+	// It is the flat concatenation of every iteration's thinking (kept for
+	// compatibility); ReasoningSegments carries the per-iteration boundaries.
 	Reasoning string
+	// ReasoningSegments splits the thinking text by model iteration so the
+	// transcript can interleave thinking with text/tool cards chronologically
+	// (2026-11 audit US-01/US-02). A live run folds all iterations into one
+	// assistant message and records one segment per iteration; a restored
+	// conversation has one assistant message per iteration, each with a single
+	// segment. nil when the message carries no reasoning. Additive read model:
+	// consumers that only know Reasoning keep working.
+	ReasoningSegments []ReasoningSegment `json:"reasoningSegments,omitempty"`
 	// Streaming marks the assistant message currently being produced.
 	Streaming bool
 	// Tools lists the tool calls that belong to this message, in call order.
@@ -80,8 +90,8 @@ type ChatMessage struct {
 	// Error is set when the message (usually an assistant turn) failed.
 	Error string
 	// ErrorKind classifies Error for localized UI copy ("" = unknown/no error,
-	// auth, rate_limit, network, timeout, context, iterations, cancelled or
-	// other).
+	// auth, rate_limit, network, timeout, context, iterations, loop,
+	// sandbox_denied, cancelled or other).
 	ErrorKind string `json:"errorKind,omitempty"`
 	// Truncated reports that the provider cut the answer at the output-token
 	// limit (finish_reason "length"): the streamed text is a partial answer, not
@@ -95,6 +105,27 @@ type ChatMessage struct {
 	GoalRound *GoalRoundInfo `json:"goalRound,omitempty"`
 	// CreatedAt is the message timestamp (local time, display only).
 	CreatedAt time.Time
+}
+
+// ReasoningSegment is one model iteration's reasoning text inside an assistant
+// message (2026-11 audit US-01/US-02). It reuses the ToolCall.TextOffset
+// timeline mechanism: TextOffset says where in the message's cumulative Text
+// this iteration's thinking began, so a renderer can interleave thinking,
+// prose and tool cards in arrival order instead of drawing one aggregated
+// thinking block above the whole reply.
+type ReasoningSegment struct {
+	// Text is this iteration's reasoning text (its concatenated deltas).
+	Text string `json:"text"`
+	// Iteration is the 1-based model iteration within the run that produced
+	// this segment (rig Event.Iteration). Restored messages derive it from
+	// their position in the turn: each persisted assistant message is one
+	// iteration.
+	Iteration int `json:"iteration"`
+	// TextOffset is the assistant text length (in bytes) when this iteration's
+	// reasoning began. Restored single-iteration messages carry 0: their text
+	// belongs to the same iteration and rig history records no intra-iteration
+	// ordering.
+	TextOffset int `json:"textOffset"`
 }
 
 // ChatSession is the read model of one conversation.
@@ -150,7 +181,35 @@ type ChatSessionInfo struct {
 	// (an automation-run session) or "subagent" (a child conversation once
 	// child sessions become durable). Sidebar surfaces hide non-user origins.
 	Origin string
+	// PermissionScope reports where the session's APPROVAL policy comes from:
+	// PermissionScopeGlobal (the global agent.permission preset) or
+	// PermissionScopeSession (a per-session override is active). The override
+	// only changes the approval gate — the OS file sandbox always follows the
+	// global mode (2026-11 audit (a), disclosure route: a session-level "all
+	// permissions" does NOT lift the OS wall).
+	PermissionScope string `json:"permissionScope,omitempty"`
+	// EffectiveApprovalMode is the session's effective approval policy
+	// (read-only / workspace / full): the session override when one is set,
+	// else the global preset. It is the gate's policy, not the OS mode.
+	EffectiveApprovalMode string `json:"effectiveApprovalMode,omitempty"`
+	// EffectiveSandboxMode is the actual OS file-sandbox mode (read-only /
+	// workspace / full). It ALWAYS follows the global agent.permission setting:
+	// per-session OS modes are not implemented, so a session override never
+	// changes this value (disclosure, not a new capability). A read-only
+	// session under a global full preset still runs unconfined at the OS level
+	// (the reverse-leak disclosure of audit (a)).
+	EffectiveSandboxMode string `json:"effectiveSandboxMode,omitempty"`
 }
+
+// Permission scope values for ChatSessionInfo.PermissionScope.
+const (
+	// PermissionScopeGlobal means the session follows the global approval
+	// preset (no per-session override).
+	PermissionScopeGlobal = "global"
+	// PermissionScopeSession means a per-session approval override is active
+	// (approval gate only; the OS sandbox still follows the global mode).
+	PermissionScopeSession = "session"
+)
 
 // Session origin values for ChatSessionInfo.Origin.
 const (
@@ -241,15 +300,21 @@ const (
 	MessageErrorKindIterations = "iterations"
 	// MessageErrorKindLoop marks the product loop breaker (wall-clock, token,
 	// identical-call or no-diff budget) instead of a provider failure.
-	MessageErrorKindLoop      = "loop"
-	MessageErrorKindCancelled = "cancelled"
-	MessageErrorKindOther     = "other"
+	MessageErrorKindLoop = "loop"
+	// MessageErrorKindSandboxDenied marks a failure the OS file sandbox
+	// plausibly caused: rig (v0.18.1+) appends a stable "[sandbox: suspected OS
+	// sandbox denial …]" attribution line to shell/jobs results that match a
+	// known denial dialect (2026-11 audit RG-03). The localized copy should
+	// point at the permission mode / OS wall instead of a generic tool failure.
+	MessageErrorKindSandboxDenied = "sandbox_denied"
+	MessageErrorKindCancelled     = "cancelled"
+	MessageErrorKindOther         = "other"
 )
 
 // ClassifyError maps one backend error (or its message) to a MessageErrorKind
 // by matching the stable provider/network phrases. Rules are checked in order:
-// cancellation, auth, rate limit, timeout, network, context length, iteration
-// budget, then other.
+// cancellation, the rig OS-sandbox attribution line, auth, rate limit, timeout,
+// network, context length, iteration budget, then other.
 func ClassifyError(err error, msg string) string {
 	text := strings.ToLower(strings.TrimSpace(msg))
 	if text == "" && err != nil {
@@ -269,6 +334,13 @@ func ClassifyError(err error, msg string) string {
 	switch {
 	case has("context canceled", "context cancelled", "operation was canceled", "operation was cancelled"):
 		return MessageErrorKindCancelled
+	case has("[sandbox:"):
+		// rig v0.18.1+ appends this stable attribution line to shell/jobs
+		// results whose stderr matched a known OS-sandbox denial dialect
+		// (2026-11 audit RG-03). The explicit marker wins over incidental
+		// phrases in the command output; bare denial dialects without the
+		// marker stay unclassified (the marker is the attribution signal).
+		return MessageErrorKindSandboxDenied
 	case has("401", "403", "invalid api key", "unauthorized", "authentication failed", "incorrect api key"):
 		return MessageErrorKindAuth
 	case has("429", "rate limit", "rate_limit", "quota", "too many requests"):

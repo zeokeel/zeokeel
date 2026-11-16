@@ -126,6 +126,11 @@ type ToolCall struct {
 	// EndedAt is when the result arrived; the zero time means unknown (running
 	// or restored from an event without a timestamp).
 	EndedAt time.Time
+	// ErrorKind classifies a failed call (Status "error") for localized UI copy
+	// using the MessageErrorKind* values ("" = no classification). It is set
+	// from the result text, so a rig OS-sandbox attribution line surfaces as
+	// MessageErrorKindSandboxDenied on the tool card (2026-11 audit RG-03).
+	ErrorKind string `json:"errorKind,omitempty"`
 }
 
 // ToolRenderer draws one tool call (a tool card). Several renderers may match
