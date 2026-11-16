@@ -1,12 +1,12 @@
 package settings_test
 
-// Frame tests for the 能力 / Capabilities settings page: the delegation and shell
-// limits (1–8 concurrency, 5–600s timeout, 0/default or KiB output) load from
-// the stored rows, the fixed footer's Save is disabled while the drafts are
-// clean, saving persists the rows (defaults become clean rows), restore resets
-// the drafts to the product defaults, invalid stored rows fall back to the
-// defaults, and the page states the rig's hardcoded parallel-tool cap instead of
-// pretending it is configurable.
+// Frame tests for the run-limits half of the merged 行为与限额 / Behavior & limits
+// settings page: the delegation and shell limits (1–8 concurrency, 5–600s
+// timeout, 0/default or KiB output) load from the stored rows, the fixed footer's
+// Save is disabled while the drafts are clean, saving persists the rows (defaults
+// become clean rows), restore resets the drafts to the product defaults, invalid
+// stored rows fall back to the defaults, and the page states the rig's hardcoded
+// parallel-tool cap instead of pretending it is configurable.
 
 import (
 	"strconv"
@@ -18,13 +18,11 @@ import (
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
 )
 
-// openCapabilities opens the settings surface and selects the capabilities page.
+// openCapabilities opens the settings surface and selects the merged behavior
+// (run limits) page.
 func openCapabilities(t *testing.T, h *harness, tester *ui.Tester) {
 	t.Helper()
-	if err := tester.Click("能力"); err != nil {
-		t.Fatalf("open the capabilities page: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
+	h.click(tester, "行为与限额")
 }
 
 // saveButton returns the fixed footer's Save control.
@@ -67,7 +65,7 @@ func TestCapabilitiesPageShowsDefaultsAndCleanSave(t *testing.T) {
 	tester.Frame()
 	openCapabilities(t, h, tester)
 
-	h.assertTexts(tester, "能力",
+	h.assertTexts(tester, "行为与限额",
 		"Subagent 并发", "Team member 并发", "Shell 命令超时", "Shell 输出上限")
 	// Product defaults: subagent 2, team 4, shell 30s, output 0 (tool default).
 	requireNumberValue(t, tester, "Subagent 并发", "2")
@@ -138,7 +136,7 @@ func TestCapabilitiesPageCleansDefaultRows(t *testing.T) {
 	requireNumberValue(t, tester, "Subagent 并发", "6")
 	requireNumberValue(t, tester, "Shell 命令超时", "120")
 
-	h.click(tester, "恢复默认")
+	h.click(tester, "恢复限额默认")
 	h.assertTexts(tester, "已恢复默认（未保存）")
 	requireNumberValue(t, tester, "Subagent 并发", "2")
 	requireNumberValue(t, tester, "Team member 并发", "4")

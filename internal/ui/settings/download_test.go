@@ -1,6 +1,6 @@
 package settings_test
 
-// Tests for the update page's download half: the optional UpdateDownloader,
+// Tests for the update section's download half: the optional UpdateDownloader,
 // the download button conditions, the async download with its downloading
 // state, the staged-file result panel, errors and the English copy.
 
@@ -260,7 +260,7 @@ func TestUpdateDownloadEnglishCopy(t *testing.T) {
 	h := newLocaleHarnessWithUpdate(t, "en", update)
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "Update")
+	h.click(tester, "About")
 	h.click(tester, "Check for updates")
 	waitForText(t, tester, "Update available")
 	h.assertTexts(tester, "Download update")

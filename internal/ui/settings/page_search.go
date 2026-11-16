@@ -128,8 +128,6 @@ func behaviorPageKeywords() []string {
 // behaviorPageSearchItems are the behavior page's searchable regions.
 func behaviorPageSearchItems(locale contracts.LocaleService) []contracts.SettingsSearchItem {
 	return []contracts.SettingsSearchItem{
-		{ID: "permission", Label: localized(locale, "默认代理权限", "Default agent permission"), AnchorKey: "behavior.permission",
-			Keywords: []string{"权限", "permission", "审批", "approval", "代理权限", "模式", "mode", "沙箱", "sandbox"}},
 		{ID: "work-details", Label: localized(locale, "工作步骤", "Work details"), AnchorKey: "behavior.work-details",
 			Keywords: []string{"工作步骤", "steps", "详细", "verbose", "精简", "minimal", "折叠", "collapse"}},
 		{ID: "message-size", Label: localized(locale, "消息字号", "Message text size"), AnchorKey: "behavior.message-size",
@@ -219,11 +217,6 @@ func memoryPageKeywords() []string {
 // lspPageKeywords covers the language-server page.
 func lspPageKeywords() []string {
 	return []string{"lsp", "语言服务", "language server", "补全", "completion", "诊断", "diagnostics"}
-}
-
-// presetsPageKeywords covers the presets page.
-func presetsPageKeywords() []string {
-	return []string{"预设", "preset", "人设", "persona", "提示词模板", "template", "agent", "模板"}
 }
 
 // networkPageKeywords covers the network page.

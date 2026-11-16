@@ -49,7 +49,7 @@ func TestBehaviorPageSandboxAlwaysOn(t *testing.T) {
 	h := newSandboxHarness(t, service)
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "行为")
+	h.click(tester, "行为与限额")
 	h.assertTexts(tester, "OS 沙箱", "状态：", "已启用（平台：linux）",
 		"不可关闭")
 	// There is no enable/disable control anymore.
@@ -66,7 +66,7 @@ func TestBehaviorPageSandboxUnavailable(t *testing.T) {
 	h := newSandboxHarness(t, service)
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "行为")
+	h.click(tester, "行为与限额")
 	h.assertTexts(tester, "本机不可用：bwrap not found")
 	h.assertNoTexts(tester, "启用 OS 沙箱")
 }
@@ -77,7 +77,7 @@ func TestBehaviorPageSandboxWithoutService(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "行为")
+	h.click(tester, "行为与限额")
 	h.assertTexts(tester, "OS 沙箱", "未加载 sandbox 模块")
 }
 
@@ -87,7 +87,7 @@ func TestBehaviorPageSandboxEnglish(t *testing.T) {
 	h := newLocaleHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{}, "en", service)
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "Behavior")
+	h.click(tester, "Behavior & limits")
 	h.assertTexts(tester, "OS sandbox",
 		"On (platform: darwin)",
 		"not configurable")

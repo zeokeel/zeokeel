@@ -46,12 +46,14 @@ func TestInterruptedContinueFocusesComposer(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 
-	// Move the keyboard focus away from the composer first (a toolbar menu, not
-	// the composer input), so the assertion is about the action and not the
-	// screen's opening autofocus.
-	h.click(tester, "会话设置")
-	tester.Key(0, ui.KeyEscape)
+	// Move the keyboard focus away from the composer input first (Tab reaches
+	// the composer toolbar's one stop), so the assertion is about the action and
+	// not the screen's opening autofocus.
+	tester.Key(0, ui.KeyTab)
 	tester.Frame()
+	if tester.Focused("输入消息…") {
+		t.Fatalf("composer input kept the focus after Tab; texts = %v", tester.Texts())
+	}
 	// The action names its outcome instead of a vague 继续: it hands the user
 	// the composer's input and says so in the tooltip too.
 	cont, ok := tester.AccessByRole(ui.RoleButton, "在输入框继续")

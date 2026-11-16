@@ -4,9 +4,7 @@ package session_test
 //   - memory rows bound to a workspace show a human-readable scope label, never
 //     the raw "workspace:<id>" storage value;
 //   - the model chip names the assembly's default model when no model row is
-//     configured (FR-26), with the explanation in the chip menu;
-//   - the session menu marks permission/conversation mode as conversation-wide
-//     settings (PM-14).
+//     configured (FR-26), with the explanation in the chip menu.
 
 import (
 	"testing"
@@ -50,18 +48,4 @@ func TestModelChipNamesAssemblyDefault(t *testing.T) {
 	h.clickExact(tester, chip)
 	h.assertTexts(tester, "默认模型来自装配，添加模型行后可覆盖")
 	tester.Key(0, ui.KeyEscape)
-}
-
-// TestSessionMenuMarksConversationWideSettings covers PM-14: the session menu's
-// permission and conversation-mode groups say they apply to every conversation
-// (persona / remembered tools stay conversation-scoped and unmarked).
-func TestSessionMenuMarksConversationWideSettings(t *testing.T) {
-	chat := newFakeChat()
-	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "作用域"}, true)
-	h := newPermissionHarness(t, chat, newPermissionSettings(nil))
-	tester := h.tester()
-
-	h.openSessionMenu(tester)
-	h.assertTexts(tester, "权限模式（所有会话）", "对话模式（所有会话）")
-	h.assertTexts(tester, "插入预设")
 }

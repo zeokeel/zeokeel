@@ -1,7 +1,7 @@
 package session_test
 
-// TDD tests (RED first) for the assistant usage footer, the per-message copy
-// action and the agent plan-mode badge/menu.
+// TDD tests (RED first) for the assistant usage footer and the per-message
+// copy action.
 
 import (
 	"strings"
@@ -133,70 +133,4 @@ func TestAssistantCopyHiddenForEmptyText(t *testing.T) {
 	if _, ok := tester.Find("消息操作"); ok {
 		t.Fatalf("assistant actions entry rendered for an empty message; texts = %v", tester.Texts())
 	}
-}
-
-// --- plan mode --------------------------------------------------------------
-
-func TestAgentModePlanBadgeAndToggle(t *testing.T) {
-	settings := newPermissionSettings(nil)
-	h := newPermissionHarness(t, permissionChat(), settings)
-	tester := h.tester()
-	// The chip label stays stable; the plan state appears as the mode group's
-	// trailing value and a warning-coloured stable label (R17).
-	h.assertTexts(tester, "会话设置")
-	if got := textsContaining(tester.Texts(), "计划模式"); got != 0 {
-		t.Fatalf("plan state rendered outside the session menu; texts = %v", tester.Texts())
-	}
-
-	h.openSessionMenu(tester)
-	h.assertTexts(tester, "对话模式", "普通模式", "计划模式")
-	h.clickExact(tester, "计划模式")
-	if got := settings.get(contracts.SettingAgentMode); got != contracts.AgentModePlan {
-		t.Fatalf("stored agent mode = %q, want plan", got)
-	}
-	h.assertTexts(tester, "会话设置")
-	h.openSessionMenu(tester)
-	assertMenuTrailingValue(t, tester, "计划模式")
-
-	h.clickExact(tester, "普通模式")
-	if got := settings.get(contracts.SettingAgentMode); got != contracts.AgentModeNormal {
-		t.Fatalf("stored agent mode = %q, want normal", got)
-	}
-	h.assertTexts(tester, "会话设置")
-	if got := textsContaining(tester.Texts(), "计划模式"); got != 0 {
-		t.Fatalf("plan state still rendered after switching back; texts = %v", tester.Texts())
-	}
-}
-
-func TestAgentModeHiddenWithoutSettings(t *testing.T) {
-	h := newPermissionHarness(t, permissionChat(), nil)
-	tester := h.tester()
-	if got := exactTextCount(tester.Texts(), "普通"); got != 0 {
-		t.Fatalf("mode control rendered without a settings store; texts = %v", tester.Texts())
-	}
-	if got := textsContaining(tester.Texts(), "计划模式"); got != 0 {
-		t.Fatalf("plan mode state rendered without a settings store; texts = %v", tester.Texts())
-	}
-	// The session menu still carries the built-in presets, but no mode group.
-	h.openSessionMenu(tester)
-	h.assertNoTexts(tester, "对话模式", "普通模式", "计划模式")
-}
-
-func TestAgentModeEnglishCopy(t *testing.T) {
-	settings := newPermissionSettings(nil)
-	h := newPermissionHarness(t, permissionChat(), settings)
-	tester := h.tester()
-	h.ui.Locale().SetLanguage("en")
-	tester.Frame()
-	h.assertTexts(tester, "Session settings")
-
-	h.openSessionMenu(tester)
-	h.assertTexts(tester, "Conversation mode", "Normal mode", "Plan mode")
-	h.clickExact(tester, "Plan mode")
-	if got := settings.get(contracts.SettingAgentMode); got != contracts.AgentModePlan {
-		t.Fatalf("stored agent mode = %q, want plan", got)
-	}
-	h.assertTexts(tester, "Session settings")
-	h.openSessionMenu(tester)
-	assertMenuTrailingValue(t, tester, "Plan mode")
 }

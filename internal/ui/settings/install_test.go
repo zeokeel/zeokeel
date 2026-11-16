@@ -1,6 +1,6 @@
 package settings_test
 
-// Tests for the update page's install half: the optional UpdateInstaller, its
+// Tests for the update section's install half: the optional UpdateInstaller, its
 // install-on-next-launch button (only after a verified download), the scheduling
 // state, the pending-plan display on open, errors and the English copy.
 
@@ -135,14 +135,14 @@ func openUpdateReadyForInstall(t *testing.T, h *harness, tester *ui.Tester, lang
 	t.Helper()
 	tester.Frame()
 	if language == "en" {
-		h.click(tester, "Update")
+		h.click(tester, "About")
 		h.click(tester, "Check for updates")
 		waitForText(t, tester, "Update available")
 		h.click(tester, "Download update")
 		waitForText(t, tester, "Downloaded")
 		return
 	}
-	h.click(tester, "更新")
+	h.click(tester, "关于")
 	h.click(tester, "检查更新")
 	waitForText(t, tester, "可更新")
 	h.click(tester, "下载更新")
@@ -285,6 +285,6 @@ func TestUpdateInstallEnglish(t *testing.T) {
 	pendingHarness := newLocaleHarnessWithUpdate(t, "en", pending)
 	pendingTester := pendingHarness.tester()
 	pendingTester.Frame()
-	pendingHarness.click(pendingTester, "Update")
+	pendingHarness.click(pendingTester, "About")
 	pendingHarness.assertTexts(pendingTester, "Pending install: v1.3.0")
 }

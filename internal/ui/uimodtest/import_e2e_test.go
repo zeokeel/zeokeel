@@ -116,11 +116,18 @@ func TestDSHImportEndToEnd(t *testing.T) {
 	}
 	uiRoot.Navigator().ToggleSettings()
 	tester.Frame()
-	// 导入 lives in the always-visible 数据与通知 group.
-	if err := tester.Click("导入"); err != nil {
-		t.Fatalf("click import page: %v; texts = %v", err, tester.Texts())
+	// Import is the last section of the merged Data & privacy page.
+	if err := tester.Click("数据与隐私"); err != nil {
+		t.Fatalf("click data page: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
+	for attempt := 0; attempt < 8; attempt++ {
+		if tester.HasText("DSH 数据目录") {
+			break
+		}
+		tester.Scroll(740, 500, 0, 220)
+		tester.Frame()
+	}
 	for _, want := range []string{"导入", "DSH 数据目录", "浏览", "扫描"} {
 		if !tester.HasText(want) {
 			t.Fatalf("import page missing %q; texts = %v", want, tester.Texts())

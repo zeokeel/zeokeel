@@ -19,7 +19,7 @@ import (
 // TestChatFontSizeSelectorMapping covers the Behavior page selector.
 func TestChatFontSizeSelectorMapping(t *testing.T) {
 	harness := startBehaviorUI(t, false)
-	harness.openSettingsPage(t, "行为")
+	harness.openSettingsPage(t, "行为与限额")
 	// 消息字号 lives inside the collapsed 更多对话设置 disclosure. The OS
 	// sandbox section pushed the disclosure below the fold, so scroll it into
 	// view first.

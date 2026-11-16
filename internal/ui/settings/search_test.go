@@ -1,6 +1,7 @@
 package settings_test
 
-// Tests for the settings 搜索 page: the web-search endpoint/API key rows, the
+// Tests for the web-search backend section of the merged 网络与搜索 / Network &
+// search page: the endpoint/API key rows, the
 // configured badge, endpoint validation and the save/error status.
 
 import (
@@ -15,7 +16,7 @@ import (
 
 func openSearchPage(t *testing.T, h *harness, tester *ui.Tester) {
 	t.Helper()
-	h.click(tester, "搜索")
+	h.click(tester, "网络与搜索")
 }
 
 func clearAndType(t *testing.T, h *harness, tester *ui.Tester, label, value string) {
@@ -39,7 +40,7 @@ func TestSearchPageRendersConfiguredState(t *testing.T) {
 	tester.Frame()
 	openSearchPage(t, h, tester)
 
-	h.assertTexts(tester, "搜索", "搜索后端", "已配置", "API Key 已设置",
+	h.assertTexts(tester, "网络与搜索", "搜索后端", "已配置", "API Key 已设置",
 		"搜索端点", "API Key")
 	// The footer primary is disabled while the drafts match the stored rows
 	// (P2-11): an untouched form cannot overwrite them.
@@ -114,8 +115,8 @@ func TestSearchPageEnglishCopy(t *testing.T) {
 	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
 
-	h.click(tester, "Search")
-	h.assertTexts(tester, "Search", "Search backend", "Configured",
+	h.click(tester, "Network & search")
+	h.assertTexts(tester, "Network & search", "Search backend", "Configured",
 		"Search endpoint", "Save")
 	h.assertNoTexts(tester, "搜索后端", "已配置")
 

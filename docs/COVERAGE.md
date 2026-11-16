@@ -56,13 +56,12 @@
 | `globalhotkey` | ✅ | host hotkey.go + mygo `GlobalShortcut` + 外观设置 | 可配置系统级加速键（修饰符+单键，固定顺序规范化），注册后 Show/Restore/Focus 窗口；留空关闭、非法/注册失败仅警告、shutdown 注销；桌面不可用环境安全回退 |
 | `i18n` | ✅ | uiroot locale + uikit + 各 UI 切片 | 全部页面 en/zh + 命令动态重注册 + **后端错误分类本地化（auth/rate_limit/network/timeout/context/cancelled 标题+原因，原文保留）**；少量 host chrome tooltip 为长尾 |
 | `icons` | ✅ | `internal/icons` | Lucide SVG |
-| `importer` | ✅ | `internal/modules/importer` + settings 导入页 | DSH session.v4.jsonl Scan/Import、文本+reasoning、workspace、symlink 跳过/重复 ID 去重；旧 DSH 私有长尾（attachments/credentials/manifest/zstd 压缩）为明确非目标（预览中计数说明） |
+| `importer` | ✅ | `internal/modules/importer` + settings「数据与隐私」页内导入小节 | DSH session.v4.jsonl Scan/Import、文本+reasoning、workspace、symlink 跳过/重复 ID 去重；旧 DSH 私有长尾（attachments/credentials/manifest/zstd 压缩）为明确非目标（预览中计数说明） |
 | `lsp` | ✅ | toolkit lsp.go + 设置 LSP 页 | **多服务器列表 + 活动服务器选择 + workspace `.zeokeel/lsp.json` opt-in**（默认关、显式 allow、settings 优先合并）；启动活动服务器并注册 `lsp_*` 工具，卸载关闭；错误仅警告 |
 | `mcp` | ✅ | 能力页「连接器」Tab + toolkit `mcp.Start`（stdio+HTTP）+ settings/workspace 合并 + server 级启停 | HTTP/stdio 握手/工具注册/失败诊断；assembly>settings>workspace mcp.json（opt-in）；`mcp.servers`/`mcp.disabledServers`/`mcp.workspaceOptIn` 数据键不变；连接器卡展示连接状态、失败摘要/详情/重试；工具目录/工具开关已从能力页删除（工具默认开启）；第三方插件市场为明确非目标 |
 | `memory` | ✅ | `internal/modules/memory` + rig memory tool + session Memory tab + 设置「记忆」页 | JSON MemoryStore/tool/搜索/添加/编辑/整理/清空 + **工作区身份 scope（`workspace:<id>`，List/Search 按当前工作区过滤，`ListAll` 供管理页）+ 统一默认 scope（Config.Scope 生效）** + **损坏 memory.json 隔离备份后空 store 继续（assembly 不失败）** + 确定性 consolidation（上限/保留期，**启动与每次写入自动执行**）+ **模型驱动 extract（opt-in 手动触发，最近 20 条→≤5 条，去重/忙碌守卫/坏 JSON 错误、scope 跟随配置默认、候选长度≤200 rune、密钥硬校验、部分失败返回已写入条目）** |
 | `modelcatalog` | ✅ | `internal/modules/modelcatalog` + composer 模型菜单 + settings「模型」页（模型列表） | **用户配置的模型列表（列表为空时装配默认模型仍生效，UI 标注「默认模型，尚未配置连接」；旧 chat.model/baseURL/apiKey 连接在首次启动时迁移为一行）**、**每模型独立 Base URL/API Key（可同时配置多家服务商）**、per-session 模型切换、**模型 chip 两级菜单（一级「模型／推理等级」，二级模型按服务商分组、推理等级为“跟随模型默认+模式”）**、**每模型默认思考强度（Home composer / 设置编辑弹窗）+ 会话×模型思考覆盖（会话内「推理等级」，默认跟随该模型默认值；切换模型不会串用其他模型的强度）**、自定义模式 JSON 参数、**每模型生成参数（temperature/top_p/max_tokens）**、列表增删改/上下文窗口/默认模型/测试连接、消息元信息行预算显示 |
-| `presets` | ✅ | contracts/presets.go + session presets 菜单/人设选择器 + settings「预设」页 | prompt 片段 CRUD/插入 + **AgentPreset（persona/prompt/tools allowlist/model/order）**：settings 代理预设 CRUD、composer「人设」选择器
-（per-session 设置）、agent 每 run 应用（base→AGENTS→persona→prompt，model 默认、tool allowlist 与模式门禁叠加） |
+| `presets` | ✅（仅后端） | contracts/presets.go + agent 每 run 应用 | **AgentPreset（persona/prompt/tools allowlist/model/order）** 每 run 应用（base→AGENTS→persona→prompt，model 默认、tool allowlist 与模式门禁叠加）；**composer 人设/插入预设与 settings「预设」页已按用户要求删除**，既有数据键保留，不再提供编辑 UI |
 | `prompt` | ✅ | agent SystemPrompt + settings 模型页提示词 + **AGENTS.md 注入** | 系统提示可配置；每次运行读取当前工作区 `AGENTS.md`（文件名可配/32KiB 截断/读取失败告警）追加注入；auto-title 按首条提示生成；review prompt 属 review 工具非目标 |
 | `provider` | ✅ | rig `provider/openai` + agent 模块 + 模型列表每模型连接 | OpenAI Chat Completions 兼容 + **常用服务商预设（DeepSeek/OpenAI/Ollama/通义千问/Kimi/智谱/硅基流动/OpenRouter/Gemini/自定义，添加模型弹窗预填）** + **每模型 Base URL/API Key 解析（列表行优先，chat.*/env 回落）** + **每模型思考/采样参数注入（Request.Extra / AgentSpec Temperature/TopP/MaxTokens）** + **模型页运行参数（最大迭代、上下文预算自动压缩、流完整性开关）** |
 | `runtime` | ✅ | agent + rig agent/gate/compact | 循环/审批/自动压缩/检查点/多模态 parts/subagent runner/team manager/goal 工具与 goal 桥 + **聊天模式（普通/计划/精简/创作）** + **目标暂停/自动续跑**；PTC/workflow/ralph/review 工具为明确非目标 |
@@ -83,7 +82,7 @@
 | old Shell/UI 能力 | 状态 | 当前实现/证据 | 差异说明 |
 |---|---|---|---|
 | Home / 起始页 | ✅ | `internal/ui/home` | hero/greeting/setup card/**真实 composer（多行输入、Enter 发送、单行动作行：附件菜单（选择文件/手动路径）+ 模型 + 模式 + 发送；发送后建会话并进入）/最近会话 |
-| Composer 基础（输入/附件/发送/停止/模型 chip/@//） | ✅ | `internal/ui/session/view.go`、`attachments.go` | 文本、附件/图片/拖放、发送/停止、per-session 模型菜单、工作区 @、/ 菜单；动作行收敛为附件菜单 + 模型 + 会话设置菜单 + 发送 |
+| Composer 基础（输入/附件/发送/停止/模型 chip/@//） | ✅ | `internal/ui/session/view.go`、`attachments.go` | 文本、附件/图片/拖放、发送/停止、per-session 模型菜单、工作区 @、/ 菜单；动作行收敛为附件 + 模型 chip + 权限按钮（按钮文案=当前权限：工作区修改/所有权限/只读）+ 发送 |
 | Composer 深度（/goal /plan /memory/权限/thinking/@session/presets） | ✅ | `sessionCommands` + `command_dialogs.go` + `commands_help.go` + `compact_command.go` | **15 条命令**（/新会话/副本/导出/设置/目标/审阅/记忆/反馈/停止/附加/帮助/**压缩上下文/完成目标/放弃目标**）+ 权限模式、聊天模式、**模型与推理等级（模型 chip 两级菜单：一级「模型／推理等级」，二级选模型/选该模型推理等级；覆盖按（会话×模型）保存、默认跟随模型）**、@session、预设；目标生命周期（完成/放弃/编辑/暂停/恢复/清除）已全量 |
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar + session B3 顶栏 | 280px sidebar、64px rail、Cmd/Ctrl+B、**Cmd/Ctrl+N 新建会话、Cmd/Ctrl+, 设置、Cmd/Ctrl+K 命令面板**、右栏开关、添加工作区、视图选项（排序/分组持久化）、工作区搜索/置顶/归档；**会话 B3 顶栏**：40px 标题/工作区行（TypeM 16px 标题）+ 32px Tabs 行、浅色 band + 单条底边线、无返回/无 Alt+←、⋯ 会话操作（复制/导出/归档）、右上 palette+inspector；无贡献屏无空工具栏；输入框上方 dock（目标条 + 审批内联卡）；通知右上角（header 下方，最多 2 条） |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
@@ -109,12 +108,12 @@
 | Memory 页 | ✅ | session Memory tab + 设置「记忆」页 | 会话工作区记忆管理（Tab 在 store 变更时自动刷新）+ 设置页**全工作区**列表/搜索/添加/编辑/删除/整理/清空/上限保留期策略 + **模型提取开关与手动提取入口（隐私/成本提示、防重复、部分失败显示已写入条数）** + **损坏文件恢复提示** |
 | Workspace→Session 树/分组/计数 | ✅ | sidebar workspace tree | 多 workspace 分组、未分组、计数、搜索、折叠、置顶/归档 |
 | Plan UI（plan_review/exit_plan_mode，rig 官方工具；参数 `content`） | ✅ | interaction plan Modal + /审阅计划 + plan 门禁 + toolcards 计划卡 + **keep-planning 反馈** | Markdown 审阅 + 批准/取消 + 计划模式门禁 + transcript 计划卡 + **「继续规划」反馈（写回当前会话作为下一条用户消息 → 模型修订后重新 plan_review）** |
-| Modes UI（standard/minimal/creator） | ✅ | session 模式 Popover + agent gate 策略 | 四模式：普通（原审批策略）、计划（只读+计划白名单，最高优先）、精简（只读探索白名单）、创作（隐藏编码工具，仅 ask/present/goal/memory/skill）；composer 模式菜单 + header 徽标，坏值归一，中英 |
+| Modes UI（standard/minimal/creator） | ✅（仅后端 gate） | agent gate 策略 | 四模式仍由后端 gate 使用；**输入框权限按钮中原有的模式选择已移除**，用户不再从输入框切换 standard/minimal/creator；坏值归一，中英 |
 | 智能体团队 / 子代理 | ✅ | session `agentsurface.go` + agent `childagents.go` + toolkit `jobs_service.go` | 头部三入口「智能体团队 / 子智能体 N / 后台任务 N」（Popover 浮层）；团队浮层=成员卡+共享任务卡；子代理/成员在主栏以 `父标题 › 子名` 面包屑打开，点父标题返回；一次性只读、可继续有输入框；后台任务可查看状态并停止；不占侧边栏/右栏；**teammate 与子代理共用稳定 child-session ID，记录持久化到 `child-sessions.json`，重启后以「已结束」只读历史恢复；完成回执进入父会话 transcript（live 按时间合入、失败态 danger 语义有红色预算上限），队友完成以 user 消息注入下一轮模型上下文（每队友一次；同步子代理答案已在工具结果中，不重复注入）** |
 | Todo UI（共享任务） | ✅ | toolkit `KeyTaskBoard` + session 团队浮层 | 团队浮层共享任务卡（subject、状态 badge、负责人、依赖/写入范围），数据在浮层打开时快照、关闭重开刷新；与 team_task_* 共用同一 manager；空/错误态；**任务板按会话归属并持久化到 `<数据目录>/team-tasks/<session>.json`（旧全局文件首次会话工具调用时一次性迁移并退役；启动预载、连续 task-N 编号、依赖/owner/写入范围/墓碑保留、删除会话即删文件、128 文件/30 天修剪）**；剩余（后续）：工作台内任务板视图、后台自动刷新、行内 owner/状态操作（当前由工具/服务调用） |
 | Artifacts / Present UI | ✅ | interaction Modal + uiroot ArtifactLister + rightpanel Files「产物」 | present 预览 + 最近 50/产物列表最近 10、内嵌 markdown 再预览 + 下载为 Markdown（原生保存对话框/slug）；跨重启历史为明确非目标（进程内 50 条） |
 | 交互式 ask_user UI | ✅ | `internal/ui/interaction` question Modal + uiroot bridge | 选项/自由文本/取消；hosttools ask_user 已走真实桥，E2E 覆盖 |
-| About 页 | ✅ | `internal/ui/about` | 构建信息/架构/bullet，en/zh 动态导航 |
+| About 页 | ✅ | `internal/ui/settings`（关于 hub） | 构建信息/更新/诊断/架构，en/zh 动态导航 |
 | Welcome/start tab | ✅ | `internal/ui/home`（welcome 为演示模块） | Home 起始页覆盖旧 start tab 主路径 |
 
 ## 4. Top 剩余缺口（按用户影响排序）

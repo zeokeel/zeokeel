@@ -642,15 +642,6 @@ func main() {
 		a.tester.Frame()
 	}
 
-	// Chat modes menu (普通/计划/精简/创作).
-	if modeRect, ok := a.tester.Find("普通"); ok {
-		a.tester.ClickAt(modeRect.X+modeRect.W/2, modeRect.Y+modeRect.H/2)
-		a.tester.Frame()
-		a.render(outDir + "/p2-chat-modes.png")
-		a.tester.Key(0, ui.KeyEscape)
-		a.tester.Frame()
-	}
-
 	// Notification toast overlay.
 	if notifier, notifierErr := a.root.Require(contracts.KeyNotifier); notifierErr == nil {
 		first := notifier.Notify(contracts.NotifySuccess, "对话已导出")
@@ -669,21 +660,19 @@ func main() {
 		a.tester.Frame()
 	}
 
-	// Composer prompt presets menu (inserts prompt/persona templates).
-	if presetRect, ok := a.tester.Find("预设"); ok {
-		a.tester.ClickAt(presetRect.X+presetRect.W/2, presetRect.Y+presetRect.H/2)
-		a.render(outDir + "/p2-presets.png")
-		a.tester.Key(0, ui.KeyEscape)
-		a.tester.Frame()
-	}
-
-	// Permission mode state (read-only → workspace-write → all permissions, the
-	// slash command cycles it).
+	// Permission mode: the composer button itself shows the current permission.
+	// Open it while the all-permissions state is selected to show the warning
+	// state and the radio order (工作区修改 / 所有权限 / 只读).
 	if store, ok := a.root.Get(contracts.KeySettings); ok {
 		_ = store.Set(contracts.SettingAgentPermission, contracts.PermissionFull)
 		a.tester.Frame()
-		a.render(outDir + "/p2-permission.png")
-		_ = store.Set(contracts.SettingAgentPermission, contracts.PermissionReadOnly)
+		if err := a.tester.Click("所有权限"); err == nil {
+			a.tester.Frame()
+			a.render(outDir + "/p2-permission.png")
+			a.tester.Key(0, ui.KeyEscape)
+			a.tester.Frame()
+		}
+		_ = store.Set(contracts.SettingAgentPermission, contracts.PermissionWorkspace)
 		a.tester.Frame()
 	}
 
@@ -1100,46 +1089,14 @@ func main() {
 			Body:        "# 发布前检查\n\n- 跑测试\n- 更新版本号",
 		})
 	}
-	if err := a.clickSettingsItem("快捷键"); err != nil {
-		fmt.Println("click shortcuts:", err)
+	if err := a.clickSettingsItem("行为与限额"); err != nil {
+		fmt.Println("click behavior settings:", err)
 	}
-	a.render(outDir + "/p2-shortcuts.png")
-	if err := a.clickSettingsItem("诊断"); err != nil {
-		fmt.Println("click diagnostics:", err)
-	}
-	a.render(outDir + "/p2-diagnostics.png")
-	if err := a.clickSettingsItem("更新"); err != nil {
-		fmt.Println("click update:", err)
-	}
-	a.render(outDir + "/p2-update.png")
-	if err := a.clickSettingsItem("导入"); err != nil {
-		fmt.Println("click import:", err)
-	}
-	a.render(outDir + "/p2-import.png")
-	// With a directory typed, Scan is the section's accent primary action (H24).
-	if rect, ok := a.tester.Find("DSH 数据目录"); ok {
-		a.tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
-		a.tester.Type("/tmp/dsh-data")
-		a.tester.Frame()
-		a.render(outDir + "/p2-import-selected.png")
-	}
-	if err := a.clickSettingsItem("搜索"); err != nil {
-		fmt.Println("click search settings:", err)
-	}
-	a.render(outDir + "/p2-search-settings.png")
-	if err := a.clickSettingsItem("网络"); err != nil {
+	a.render(outDir + "/p2-behavior.png")
+	if err := a.clickSettingsItem("网络与搜索"); err != nil {
 		fmt.Println("click network settings:", err)
 	}
 	a.render(outDir + "/p2-network-settings.png")
-	if err := a.clickSettingsItem("预设"); err != nil {
-		fmt.Println("click presets settings:", err)
-	}
-	a.render(outDir + "/p2-presets-settings.png")
-	a.tester.Scroll(740, 500, 0, 400)
-	a.tester.Frame()
-	a.render(outDir + "/p2-presets-agent-meta.png")
-	a.tester.Scroll(740, 500, 0, -400)
-	a.tester.Frame()
 	if err := a.clickSettingsItem("LSP"); err != nil {
 		fmt.Println("click LSP settings:", err)
 	}
@@ -1148,18 +1105,30 @@ func main() {
 		fmt.Println("click data settings:", err)
 	}
 	a.render(outDir + "/p2-data-privacy.png")
+	// The DSH import section is the last block of the merged data page.
+	a.tester.Scroll(740, 500, 0, 600)
+	a.tester.Frame()
+	a.render(outDir + "/p2-data-import.png")
+	a.tester.Scroll(740, 500, 0, -600)
+	a.tester.Frame()
 	if err := a.clickSettingsItem("通知"); err != nil {
 		fmt.Println("click notification settings:", err)
 	}
 	a.render(outDir + "/p2-notifications.png")
-	if err := a.clickSettingsItem("行为"); err != nil {
-		fmt.Println("click behavior settings:", err)
-	}
-	a.render(outDir + "/p2-behavior.png")
 	if err := a.clickSettingsItem("归档"); err != nil {
 		fmt.Println("click archived settings:", err)
 	}
 	a.render(outDir + "/p2-archive-settings.png")
+	if err := a.clickSettingsItem("关于"); err != nil {
+		fmt.Println("click about settings:", err)
+	}
+	a.render(outDir + "/p2-about-settings.png")
+	// The update and diagnostics sections sit below the build information.
+	a.tester.Scroll(740, 500, 0, 700)
+	a.tester.Frame()
+	a.render(outDir + "/p2-about-diagnostics.png")
+	a.tester.Scroll(740, 500, 0, -700)
+	a.tester.Frame()
 	a.ui.Locale().SetLanguage("en")
 	a.tester.Frame()
 	a.render(outDir + "/p2-english-archive-settings.png")
@@ -1812,19 +1781,15 @@ func boot(baseURL, dataDir string) *app {
 // identifiers the host deep link (and the navigation row) address.
 var settingsPageIDs = map[string]string{
 	"模型":    "model",
+	"行为与限额": "behavior",
 	"外观":    "appearance",
-	"快捷键":   "shortcuts",
-	"诊断":    "diagnostics",
-	"更新":    "update",
-	"导入":    "import",
-	"搜索":    "search",
-	"网络":    "network",
-	"预设":    "presets",
-	"LSP":   "lsp",
-	"数据与隐私": "data-privacy",
 	"通知":    "notifications",
-	"行为":    "behavior",
+	"网络与搜索": "network",
+	"LSP":   "lsp",
+	"记忆":    "memory",
 	"归档":    "archive",
+	"数据与隐私": "data-privacy",
+	"关于":    "about",
 }
 
 // clickSettingsItem opens one settings page through the host's deep link, the

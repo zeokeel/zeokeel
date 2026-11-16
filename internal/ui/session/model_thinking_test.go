@@ -353,7 +353,7 @@ func TestReasoningFollowClearsAllOverrideRows(t *testing.T) {
 	h.assertTexts(tester, "深度思考")
 }
 
-func TestVeryCompactSessionMenuReasoningFallback(t *testing.T) {
+func TestVeryCompactComposerReachesReasoningWithoutSessionMenu(t *testing.T) {
 	settings := modelCatalogSettings(t, []contracts.ModelInfo{{
 		ID: "qwen3.8", Name: "Qwen 3.8", Family: contracts.ModelFamilyQwen,
 		DefaultThinking: contracts.ThinkingModeQwenDeep,
@@ -366,13 +366,16 @@ func TestVeryCompactSessionMenuReasoningFallback(t *testing.T) {
 		tester.Frame()
 	}
 
-	// The model chip is folded away at this width, so the session menu carries
-	// the same 推理等级 entry.
+	// The session menu now carries only the permission mode; the model and
+	// reasoning entries stay reachable through the toolbar (or its overflow).
 	h.openSessionMenu(tester)
-	h.assertTexts(tester, "模型：qwen3.8", "推理等级", "打开模型设置…")
-	if !menuHasLabel(tester, "推理等级") {
-		t.Fatalf("very narrow session menu lacks the 推理等级 fallback; labels = %v", tester.Menu())
-	}
+	assertSessionMenuOnlyPermissions(t, tester)
+	h.assertNoTexts(tester, "推理等级", "打开模型设置…")
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+
+	openNarrowModelMenu(t, tester, "qwen3.8")
+	assertMenuLabels(t, tester, "模型", "推理等级", "-", "打开模型设置…")
 	h.clickExact(tester, "推理等级")
 	h.assertTexts(tester, "跟随模型默认（深度思考）", "关闭思考")
 	h.clickExact(tester, "关闭思考")

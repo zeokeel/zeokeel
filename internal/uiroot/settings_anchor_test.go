@@ -23,7 +23,7 @@ func anchorTestPages(t *testing.T, r *Root) (model, advanced *searchProbe) {
 		[]contracts.SettingsSearchItem{
 			{ID: "context-budget", Label: "上下文预算", AnchorKey: "model.context-budget"},
 		}, "settings-model-body"))
-	mustPage(t, r, advanced.page("diagnostics", "高级", "诊断", 10, nil,
+	mustPage(t, r, advanced.page("about", "关于", "诊断", 10, nil,
 		[]contracts.SettingsSearchItem{
 			{ID: "log-path", Label: "日志位置", AnchorKey: "diagnostics.log"},
 		}, "settings-diagnostics-body"))
@@ -96,8 +96,8 @@ func TestSettingsOpenPageAtAdvancedPage(t *testing.T) {
 	tt := newTestTester(t, r, 1400, 900)
 	tt.Frame()
 
-	if err := r.nav.OpenSettingsPageAt("diagnostics", "diagnostics.log"); err != nil {
-		t.Fatalf("OpenSettingsPageAt(diagnostics): %v", err)
+	if err := r.nav.OpenSettingsPageAt("about", "diagnostics.log"); err != nil {
+		t.Fatalf("OpenSettingsPageAt(about): %v", err)
 	}
 	tt.Frame()
 	tt.Frame()

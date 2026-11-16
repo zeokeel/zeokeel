@@ -29,35 +29,6 @@ const (
 	BehaviorPageOrder = 20
 )
 
-// behaviorPermission is one default-permission choice.
-type behaviorPermission struct {
-	value     string
-	zh        string
-	en        string
-	meaningZh string
-	meaningEn string
-}
-
-// behaviorPermissions lists the three choices in menu order: 只读 / 工作区可写 /
-// 所有权限 (DSH's read-only / workspace-write / danger-full-access presets).
-var behaviorPermissions = []behaviorPermission{
-	{
-		value: contracts.PermissionReadOnly, zh: "只读", en: "Read-only",
-		meaningZh: "只自动允许只读与信息类工具，其他操作会询问",
-		meaningEn: "Auto-allow read-only and informational tools; ask for the rest",
-	},
-	{
-		value: contracts.PermissionWorkspace, zh: "工作区可写", en: "Workspace-write",
-		meaningZh: "工作区内的文件读写自动允许，其他操作询问",
-		meaningEn: "Auto-allow workspace file reads and writes; ask for the rest",
-	},
-	{
-		value: contracts.PermissionFull, zh: "所有权限", en: "All permissions",
-		meaningZh: "全部自动允许，不再询问（无人值守）",
-		meaningEn: "Allow everything without asking (unattended)",
-	},
-}
-
 // workStepsModeChoice is one work-details presentation level (DSH-aligned).
 type workStepsModeChoice struct {
 	value     string
@@ -180,24 +151,6 @@ type behaviorState struct {
 	agentsFileLoaded bool
 }
 
-// agentPermissionMode normalizes the stored agent.permission row to one of the
-// three presets. Empty/unknown values keep the workspace default; the retired
-// "ask"/"never" rows normalize to read-only (see
-// contracts.NormalizePermissionMode) instead of being offered as choices.
-func agentPermissionMode(raw string) string {
-	return contracts.NormalizePermissionMode(raw)
-}
-
-// behaviorPermissionLabel returns the localized short label of one mode.
-func behaviorPermissionLabel(locale contracts.LocaleService, mode string) string {
-	for _, choice := range behaviorPermissions {
-		if choice.value == mode {
-			return localized(locale, choice.zh, choice.en)
-		}
-	}
-	return localized(locale, "工作区可写", "Workspace-write")
-}
-
 // saveBehaviorSetting persists one immediate-apply settings row and reports the
 // result in the page's shared status line; the behavior page has no save button.
 func saveBehaviorSetting(st *behaviorState, runtime contracts.UIRuntime,
@@ -218,7 +171,7 @@ func saveBehaviorSetting(st *behaviorState, runtime contracts.UIRuntime,
 // ui.workSteps.* and the workspace instruction file saves as it is edited.
 func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 	store contracts.SettingsService, locale contracts.LocaleService, st *behaviorState,
-	sandboxService contracts.SandboxService, search *pageSearch) {
+	sandboxService contracts.SandboxService, capabilities *capabilitiesState, search *pageSearch) {
 	t := design.Of(c)
 	// The message-size and workspace-instruction settings live inside the
 	// collapsed 更多对话设置 disclosure: a search hit on either opens it before
@@ -228,42 +181,13 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 		st.moreOpen = true
 	}
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, "行为", "Behavior"), "")
-		search.region(c, "behavior.permission", func(c *ui.Context) {
-			uikit.Section(c, localized(locale, "默认代理权限", "Default agent permission"), func(*ui.Context) {
-				current := agentPermissionMode(store.Get(contracts.SettingAgentPermission, ""))
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					design.Apply(ui.Text(c, localized(locale, "当前：", "Current: ")+
-						behaviorPermissionLabel(locale, current)), t.Font(design.TypeXS)).
-						TextColor(t.LabelSecondary)
-					ui.Spacer(c).Grow(1)
-					if st.status != "" {
-						statusBadge(c, t, st.status, st.statusErr)
-					}
-				})
-				// A menu is a chip, not a form field: a row keeps it at its natural
-				// width instead of stretching it across the content column.
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-					ui.PopoverMenuButton(c, behaviorPermissionLabel(locale, current), func(m *ui.Menu) {
-						for _, choice := range behaviorPermissions {
-							choice := choice
-							item := m.Item(localized(locale, choice.zh, choice.en))
-							item.Checked(choice.value == current)
-							if item.Chosen() && choice.value != current {
-								if err := store.Set(contracts.SettingAgentPermission, choice.value); err != nil {
-									st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
-									st.statusErr = true
-								} else {
-									st.status = localized(locale, "已保存", "Saved")
-									st.statusErr = false
-								}
-								runtime.Invalidate()
-							}
-						}
-					}).Tooltip(localized(locale, "选择默认权限模式", "Choose the default permission mode"))
-				})
-			})
-		})
+		uikit.PageHeader(c, localized(locale, "行为与限额", "Behavior & limits"), "")
+		// Permission is edited from the composer's permission button now; keep
+		// a quiet pointer here so the setting stays discoverable.
+		design.Apply(ui.Text(c, localized(locale,
+			"权限模式已移到输入框工具栏的权限按钮：工作区修改 / 所有权限 / 只读。",
+			"Permission mode lives on the composer toolbar's permission button: Workspace-write / All permissions / Read-only.")),
+			t.TextMuted(design.TypeXXS)).MaxLines(2)
 		// OS sandbox: the always-on kernel-level file-effect enforcement that
 		// lets the agent gate auto-allow shell tools. It sits next to the
 		// permission mode it mirrors, and its live status says whether this
@@ -343,7 +267,7 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 							st.agentsFile = store.Get(contracts.SettingAgentsFile, "AGENTS.md")
 						}
 						ui.Field(c, localized(locale, "工作区指令文件", "Workspace instructions file"), func() {
-							input := ui.TextInput(c, &st.agentsFile).
+							input := ui.TextInput(c.Key("settings.behavior.agents-file"), &st.agentsFile).
 								Label(localized(locale, "工作区指令文件", "Workspace instructions file")).
 								Placeholder("AGENTS.md").FillWidth()
 							if input.Changed() {
@@ -359,6 +283,18 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 		if !st.moreOpen {
 			design.Apply(ui.Text(c, behaviorMoreSummary(locale, store)), t.TextMuted(design.TypeXXS)).MaxLines(2)
 		}
+		// Keep the transient save line below the editable controls: inserting it
+		// above the workspace-instructions input would shift the focused field
+		// and return focus to the navigation search.
+		if st.status != "" {
+			statusBadgesRow(c, t, st.status, st.statusErr)
+		}
+
+		// Delegation/shell/parallel limits used to be their own settings page;
+		// they are the "limits" half of this page now.
+		uikit.Section(c, localized(locale, "运行限额", "Run limits"), func(body *ui.Context) {
+			buildCapabilitiesPage(body, store, capabilities, locale, false)
+		})
 	})
 }
 

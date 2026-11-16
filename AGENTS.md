@@ -14,7 +14,7 @@
 ```
 cmd/zeokeel             入口（desktop / headless / acp 产品）
 internal/uiroot         窗口壳层：Split/Sidebar/Toolbar/Overlay/palette/设置面
-internal/ui/*           14 个 UI 模块（session/toolcards/approval/interaction/rightpanel/settings/...）
+internal/ui/*           13 个 UI 模块（session/toolcards/approval/interaction/rightpanel/settings/...）
 internal/uikit          共享组合：页头/小节/空态/错误行/对话框动作条/工具行
 internal/design         设计 token（颜色/字号/间距/圆角/阴影/预设）
 internal/brand          品牌层：唯一 hex 来源、主题、字体栈

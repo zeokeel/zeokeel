@@ -27,7 +27,7 @@ func TestSearchPageWithoutSettingsStore(t *testing.T) {
 		ID:    "test.search",
 		Title: "search",
 		Build: func(c *ui.Context) {
-			buildSearchPage(c, bareCtx, state, uiRoot.Locale())
+			buildSearchPage(c, bareCtx, state, uiRoot.Locale(), true)
 		},
 	}); err != nil {
 		t.Fatalf("register test screen: %v", err)

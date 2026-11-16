@@ -74,7 +74,7 @@ func (d *drive) runHNarrowSteps() {
 		})
 
 	d.step("composer-very-narrow", "session", "极窄 composer（<480 DIP）",
-		"704 窗口（composer 卡 <480）：附件菜单 + 会话设置菜单 + 发送；模型 chip 折进会话设置菜单；无无标签 »、无独立 / chip", func(c *check) {
+		"704 窗口（composer 卡 <480）：附件 + 模型入口（toolbar 或官方 overflow）+ 发送；无无标签 »、无独立 / chip", func(c *check) {
 			d.setSize(704, 720)
 			defer func() {
 				d.setSize(1280, 800)
@@ -93,25 +93,23 @@ func (d *drive) runHNarrowSteps() {
 				c.require(c.has(want), "极窄 composer 缺少「%s」", want)
 			}
 			c.require(!d.hasExactText("»"), "极窄 composer 出现了无标签 » 溢出按钮")
-			// A model chip folded into the toolbar's overflow still appears in the
-			// accessibility texts; the visual contract is that no chip's box is
-			// laid out on the composer row at this width.
-			if rect, ok := d.find("drive-model"); ok && rect.W > 0 {
-				c.failf("极窄 composer 仍直接显示模型 chip（应折进会话设置菜单；rect=%+v）", rect)
-			}
+			c.require(!d.hasExactText("/"), "极窄 composer 出现了独立 / chip")
 			c.shot("composer-very-narrow")
-			// The session menu carries the folded model entry and the low-frequency groups.
-			if !c.click("会话设置") && !c.click("工作区可写") {
-				return
+			// The model entry is a toolbar control, or a row of the official
+			// overflow when the toolbar folds it away.
+			if !d.has("drive-model") && !d.has("drive-mo") {
+				if !c.click("更多") && !c.click("More") {
+					c.failf("极窄 composer 找不到模型入口（toolbar 或 overflow）")
+					return
+				}
+				d.drain(2)
+				c.require(d.has("drive-model") || d.has("drive-mo"), "极窄 overflow 缺少模型入口")
+				d.key(0, ui.KeyEscape)
+				d.drain(2)
 			}
-			d.drain(2)
-			c.mustText("模型：", "打开模型设置…", "权限模式", "对话模式", "推理等级", "插入预设")
-			if !c.has("打开行为设置") {
-				c.failf("「会话设置」菜单缺少「打开行为设置…」")
-			}
+			// The session menu may be folded into the overflow at this width; its
+			// permission-only content is covered at the wide width.
 			c.shot("composer-very-narrow-menu")
-			d.key(0, ui.KeyEscape)
-			d.drain(2)
 			// The attach control opens the native picker directly; the old menu
 			// (选择文件… / 手动输入路径…) is gone (P2-12). Do not click it here:
 			// that would open the real native picker in the driven window.

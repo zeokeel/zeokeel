@@ -152,11 +152,11 @@ func TestProductsAndEntries(t *testing.T) {
 			t.Fatalf("desktop root %d = %q, want %q", index, root.Module, wantRoots[index])
 		}
 	}
-	if len(desktop[16].Children) != 13 {
-		t.Fatalf("UI group children = %d, want 13 UI modules", len(desktop[16].Children))
+	if len(desktop[16].Children) != 12 {
+		t.Fatalf("UI group children = %d, want 12 UI modules", len(desktop[16].Children))
 	}
 	wantChildren := []string{
-		"zeokeel-ui/home", "zeokeel-ui/toolcards", "zeokeel-ui/about",
+		"zeokeel-ui/home", "zeokeel-ui/toolcards",
 		"zeokeel-ui/sidebar", "zeokeel-ui/session", "zeokeel-ui/settings", "zeokeel-ui/approval",
 		"zeokeel-ui/rightpanel", "zeokeel-ui/automation", "zeokeel-ui/insights",
 		"zeokeel-ui/plugins", "zeokeel-ui/interaction", "zeokeel-ui/toasts",
@@ -191,7 +191,6 @@ func TestRegistryIsExplicit(t *testing.T) {
 	for _, id := range []string{
 		"zeokeel/appinfo",
 		"zeokeel-ui/home",
-		"zeokeel-ui/about",
 		"zeokeel-ui/welcome",
 		"zeokeel-ui/toolcards",
 		"zeokeel/toolkit",
@@ -225,8 +224,8 @@ func TestRegistryIsExplicit(t *testing.T) {
 			t.Fatalf("Registry() lacks module %q", id)
 		}
 	}
-	if got := len(registry.Modules()); got != 32 {
-		t.Fatalf("Registry() modules = %d, want 32", got)
+	if got := len(registry.Modules()); got != 31 {
+		t.Fatalf("Registry() modules = %d, want 31", got)
 	}
 }
 
@@ -258,13 +257,13 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	// approvals provider, the agent consumer and the UI modules settle in
 	// dependency order.
 	instances := loader.Instances()
-	if len(instances) != 30 {
-		t.Fatalf("desktop instances = %d, want 30", len(instances))
+	if len(instances) != 29 {
+		t.Fatalf("desktop instances = %d, want 29", len(instances))
 	}
 	wantIDs := []string{
 		"appinfo", "store", "goal", "approvals", "workspace", "skills", "memory", "sandbox", "toolkit", "hosttools",
 		"agent", "automation", "update", "importer", "modelcatalog", "insights", "ui",
-		"home", "toolcards", "about", "sidebar", "session", "settings", "approval", "rightpanel",
+		"home", "toolcards", "sidebar", "session", "settings", "approval", "rightpanel",
 		"automation-ui", "insights-ui", "plugins-ui", "interaction", "toasts",
 	}
 	gotIDs := make([]string, len(instances))

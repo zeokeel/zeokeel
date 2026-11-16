@@ -109,11 +109,32 @@ func (n *navigator) OpenSettings() {
 	}
 }
 
+// settingsPageAliases keeps deep links to pages that were merged into another
+// settings page working: the old destination opens the page that now owns the
+// controls ("diagnostics" → the About hub, "shortcuts" → Appearance, ...).
+var settingsPageAliases = map[string]string{
+	"shortcuts":    "appearance",
+	"search":       "network",
+	"capabilities": "behavior",
+	"import":       "data-privacy",
+	"update":       "about",
+	"diagnostics":  "about",
+}
+
+// resolveSettingsPageID maps a retired page id to the page that absorbed it.
+func resolveSettingsPageID(pageID string) string {
+	if target, ok := settingsPageAliases[pageID]; ok {
+		return target
+	}
+	return pageID
+}
+
 // OpenSettingsPage shows the settings surface on one contributed page, for
 // commands and deep links ("open the model settings"). The pages are addressed
 // in the same grouped order the settings navigation renders, so the index is
 // stable across frames.
 func (n *navigator) OpenSettingsPage(pageID string) error {
+	pageID = resolveSettingsPageID(pageID)
 	ordered := flattenSettingsGroups(groupSettingsPages(visiblePages(n.rt.settingsPages())))
 	for index, page := range ordered {
 		if page.ID != pageID {
@@ -141,6 +162,7 @@ func (n *navigator) OpenSettingsPage(pageID string) error {
 // same path a navigation-search hit uses. The pending navigation search state is
 // cleared, so a stale query neither consumes the request nor hides the page.
 func (n *navigator) OpenSettingsPageAt(pageID, anchorKey string) error {
+	pageID = resolveSettingsPageID(pageID)
 	ordered := flattenSettingsGroups(groupSettingsPages(visiblePages(n.rt.settingsPages())))
 	for index, page := range ordered {
 		if page.ID != pageID {

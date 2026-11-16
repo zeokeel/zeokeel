@@ -451,10 +451,9 @@ func openSettingsPage(navigator contracts.Navigator, pageID string) {
 // Settings page identities the conversation links to (the settings module's
 // public PageID/BehaviorPageID/MemoryPageID values).
 const (
-	settingsPageModel    = "model"
-	settingsPageBehavior = "behavior"
-	settingsPageMemory   = "memory"
-	settingsPageSearch   = "search"
+	settingsPageModel  = "model"
+	settingsPageMemory = "memory"
+	settingsPageSearch = "search"
 )
 
 // toast raises one transient host toast (nil-safe). Transient feedback —
@@ -847,7 +846,7 @@ func permissionMode(settings contracts.SettingsService) string {
 	return contracts.NormalizePermissionMode(settings.Get(contracts.SettingAgentPermission, ""))
 }
 
-// nextPermissionMode cycles 只读 → 工作区可写 → 所有权限 → 只读.
+// nextPermissionMode cycles 只读 → 工作区修改 → 所有权限 → 只读.
 func nextPermissionMode(mode string) string {
 	switch mode {
 	case contracts.PermissionReadOnly:
@@ -876,7 +875,7 @@ func (st *state) permissionLabel(mode string) string {
 	case contracts.PermissionFull:
 		return st.tr("所有权限", "All permissions")
 	default:
-		return st.tr("工作区可写", "Workspace-write")
+		return st.tr("工作区修改", "Workspace-write")
 	}
 }
 
@@ -1024,7 +1023,7 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 		{
 			ID:      "zeokeel.session.permission",
 			Title:   st.tr("权限模式", "Permission mode"),
-			Hint:    st.tr("切换权限模式：只读 → 工作区可写 → 所有权限", "Cycle permission: read-only → workspace-write → all permissions"),
+			Hint:    st.tr("切换权限模式：只读 → 工作区修改 → 所有权限", "Cycle permission: read-only → workspace-write → all permissions"),
 			Order:   45,
 			Enabled: func() bool { return st.settings != nil },
 			Run: func() error {

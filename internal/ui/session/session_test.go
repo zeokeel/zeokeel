@@ -597,7 +597,7 @@ func (h *harness) click(tester *ui.Tester, label string) {
 
 // clickExact clicks the first element whose text or label equals label exactly.
 // Tester.Click matches substrings, which is ambiguous now that the composer's
-// 会话设置 button contains the slash command title 设置.
+// permission button text also names a menu option.
 func (h *harness) clickExact(tester *ui.Tester, label string) {
 	h.t.Helper()
 	rect, ok := tester.Find(label)
@@ -618,16 +618,18 @@ func (h *harness) typeSlash(tester *ui.Tester) {
 	tester.Frame()
 }
 
-// sessionMenuLabels are the labels the single 会话设置 button can show: the
-// quiet default plus the contextual permission/mode state that owns it.
-var sessionMenuLabels = []string{
-	"会话设置", "所有权限", "工作区可写", "只读", "计划模式", "精简", "创作",
-	"Session settings", "Settings", "All permissions", "Workspace-write", "Read-only",
-	"Plan mode", "Minimal", "Creator",
+// permissionButtonLabels are the labels the composer's permission button can
+// show: the current permission preset itself (there is no stable 「会话设置」
+// destination name any more). Only the all-permissions warning recolours it.
+var permissionButtonLabels = []string{
+	"工作区修改", "所有权限", "只读",
+	"Workspace-write", "All permissions", "Read-only",
 }
 
-// openSessionMenu clicks the composer's single session menu by whichever label
-// it currently shows (a non-default security/mode state owns the label).
+// openSessionMenu clicks the composer's permission button, which is labeled
+// with the current permission preset. On a very narrow composer the official
+// toolbar folds that last control into its overflow menu, so the opener goes
+// through it when the button itself is not on the row.
 func (h *harness) openSessionMenu(tester *ui.Tester) {
 	h.t.Helper()
 	// A call while the menu is already open would toggle it shut (the native
@@ -635,15 +637,49 @@ func (h *harness) openSessionMenu(tester *ui.Tester) {
 	if tester.HasText("权限模式") || tester.HasText("Permission mode") {
 		return
 	}
-	for _, label := range sessionMenuLabels {
+	clickVisible := func(label string) bool {
 		for _, text := range tester.Texts() {
 			if text == label {
 				h.clickExact(tester, label)
-				return
+				return true
 			}
 		}
+		return false
 	}
-	h.t.Fatalf("session menu button not found; texts = %v", tester.Texts())
+	for _, label := range permissionButtonLabels {
+		if clickVisible(label) {
+			return
+		}
+	}
+	// The overflow button is mygo chrome; its label follows mygo's own language
+	// catalog ("More" in the test harness, 更多 in the Chinese desktop build).
+	for _, more := range []string{"更多", "More"} {
+		if !clickVisible(more) {
+			continue
+		}
+		for _, label := range permissionButtonLabels {
+			folded := false
+			for _, text := range tester.Menu() {
+				if text == label {
+					folded = true
+					break
+				}
+			}
+			if !folded {
+				continue
+			}
+			if err := tester.ChooseMenuItem(label); err != nil {
+				h.t.Fatalf("open the folded permission menu %q: %v", label, err)
+			}
+			tester.Frame()
+			if !tester.HasText("权限模式") && !tester.HasText("Permission mode") {
+				h.t.Fatalf("the folded permission menu entry %q did not open its menu; labels = %v", label, tester.Menu())
+			}
+			return
+		}
+		h.t.Fatalf("toolbar overflow menu has no permission menu entry; labels = %v", tester.Menu())
+	}
+	h.t.Fatalf("permission menu button not found; texts = %v", tester.Texts())
 }
 
 func provide[T any](t *testing.T, ctx cordis.Context, key cordis.ServiceKey[T], value T) {
@@ -1267,9 +1303,12 @@ func TestComposerToolbar(t *testing.T) {
 	// model on purpose.
 	chat.config = contracts.ChatConfig{}
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "工具栏"}, true)
-	h := newHarness(t, chat)
+	// The permission menu needs a settings store (it is the only thing the
+	// session menu offers now).
+	h := newPermissionHarness(t, chat, newPermissionSettings(nil))
 	tester := h.tester()
-	h.assertTexts(tester, "未配置", "附件", "会话设置", "发送")
+	h.assertTexts(tester, "未配置", "附件", "工作区修改", "发送")
+	h.assertNoTexts(tester, "会话设置")
 	h.assertNoTexts(tester, "命令", "更多工具")
 
 	if _, err := h.ui.Runtime().RegisterCommand(contracts.CommandSpec{

@@ -229,10 +229,10 @@ func approvalInlineCard(c *ui.Context, o ApprovalDialogOptions, labels ApprovalL
 			approvalChangeSection(c, t, o, labels, arguments)
 			approvalArgumentsSection(c, t, o, labels, request, arguments, argsOpen)
 			// The middle choice is session-scoped, not run-scoped: say so once
-			// in quiet copy, including where the user can take it back.
+			// in quiet copy, including when it expires.
 			design.Apply(ui.Text(c, T(o.Locale,
-				"「本会话内始终允许」在本会话内不再询问该工具；可在会话设置菜单清除。",
-				"\"Always allow in this session\" stops this tool's prompts for this conversation; clear it from the session settings menu.")),
+				"「本会话内始终允许」在本会话内不再询问该工具，会话结束后失效。",
+				"\"Always allow in this session\" stops this tool's prompts for this conversation; it expires when the conversation ends.")),
 				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).MaxLines(2)
 			// The inline footer keeps the decision order (deny, session-scoped
 			// allow, allow) without the Modal's danger emphasis: the warning
@@ -326,10 +326,10 @@ func approvalRequestBody(c *ui.Context, o ApprovalDialogOptions, labels Approval
 			}},
 		})
 		// The middle choice is session-scoped, not run-scoped: say so once in
-		// quiet copy, including where the user can take it back.
+		// quiet copy, including when it expires.
 		design.Apply(ui.Text(c, T(o.Locale,
-			"「本会话内始终允许」在本会话内不再询问该工具；可在会话设置菜单清除。",
-			"\"Always allow in this session\" stops this tool's prompts for this conversation; clear it from the session settings menu.")),
+			"「本会话内始终允许」在本会话内不再询问该工具，会话结束后失效。",
+			"\"Always allow in this session\" stops this tool's prompts for this conversation; it expires when the conversation ends.")),
 			t.TextMuted(design.TypeXXS)).MaxLines(2)
 		// The key semantics are visible: Esc denies explicitly, and there is no
 		// default action, so a stray Enter decides nothing.

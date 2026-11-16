@@ -312,7 +312,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 	tester.Frame()
 	tester.Frame()
-	for _, want := range []string{"诊断", "工具数", "会话数", "zeokeel.db"} {
+	for _, want := range []string{"构建信息", "运行时信息", "工具数", "会话数", "zeokeel.db"} {
 		if !tester.HasText(want) {
 			t.Fatalf("diagnostics page missing %q; texts = %v", want, tester.Texts())
 		}
@@ -339,7 +339,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 	tester.Frame()
 	tester.Frame()
-	for _, want := range []string{"搜索", "搜索端点", "API Key", "保存"} {
+	for _, want := range []string{"网络与搜索", "搜索端点", "API Key", "保存"} {
 		if !tester.HasText(want) {
 			t.Fatalf("search settings missing %q; texts = %v", want, tester.Texts())
 		}
@@ -523,19 +523,10 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	// link instead of clicking a nav item that may sit below the fold.
 	uiRoot.Navigator().ToggleSettings()
 	tester.Frame()
-	for _, want := range []string{"Settings", "Model", "Appearance", "Shortcuts"} {
+	for _, want := range []string{"Settings", "Model", "Appearance", "Behavior & limits", "Network & search"} {
 		if !tester.HasText(want) {
 			t.Fatalf("english settings missing %q; texts = %v", want, tester.Texts())
 		}
-	}
-	// The low-frequency pages live in different groups now (Diagnostics in
-	// Advanced, Update/Import in Data & notifications); open them by deep link
-	// so the assertion does not depend on the navigation scroll position.
-	for _, page := range []string{"diagnostics", "update", "import"} {
-		if err := uiRoot.OpenSettingsPage(page); err != nil {
-			t.Fatalf("OpenSettingsPage(%s): %v", page, err)
-		}
-		tester.Frame()
 	}
 	if err := uiRoot.OpenSettingsPage("about"); err != nil {
 		t.Fatalf("open english about page: %v", err)

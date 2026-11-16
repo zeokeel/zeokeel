@@ -27,7 +27,7 @@ func findCommandByID(commands []contracts.CommandSpec, id string) (contracts.Com
 func TestOpenUpdateCommandRegistered(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustPage(t, r, contracts.SettingsPageSpec{ID: "update", Section: "高级", Title: "更新页", Order: 40,
+	mustPage(t, r, contracts.SettingsPageSpec{ID: "about", Section: "关于", Title: "关于页", Order: 40,
 		Build: func(c *ui.Context) { ui.Text(c, "update-body") }})
 
 	command, ok := findCommandByID(r.Runtime().Commands(), "uiroot.open-update")

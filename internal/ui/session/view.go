@@ -3095,30 +3095,28 @@ func composerVisibleHint(st *state, running, slashMenuActive, queueAllowed, mode
 }
 
 // buildComposerToolbar is the composer's quiet action row: one attach button,
-// the model chip and the single 会话设置 menu, all inside one official
+// the model chip and the single permission menu, all inside one official
 // ui.Toolbar. In a toolbar mygo gives those controls no face of their own until
 // hovered/pressed/focused (P2-12 replaced the row of small bordered boxes with
 // no hand-written state), and the controls that do not fit fold into the
 // toolbar's trailing overflow menu. The send/queue/stop control is drawn by
 // ComposerShell outside this toolbar, so overflow can never take it.
 //
-// The row keeps at most four controls and folds the low-frequency choices into
-// the session menu. Non-default security or mode states stay visible on the
-// menu button itself (e.g. 所有权限, 计划), so hiding the chips never hides a
-// state the user must notice.
+// The permission menu now holds only the permission mode, so its button shows
+// the current preset itself, and the model chip is always built: at a narrow
+// width the official toolbar (or its overflow menu) keeps that entry reachable
+// instead of the old very-compact session-menu fallback. Only the
+// all-permissions preset warns on the button.
 func buildComposerToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	navigator contracts.Navigator, chat contracts.ChatService, st *state, running, compactControls, veryCompact bool) {
-	activeID := chat.ActiveSession()
 	uikit.ComposerToolbar(c, uikit.ComposerToolbarOptions{
 		Key:    "session.composer.toolbar",
 		Label:  st.tr("输入框工具栏", "Composer toolbar"),
 		Locale: st.locale,
 		Items: func(ic *ui.Context) {
 			buildAttachButton(ic, t, runtime, st, running)
-			if !veryCompact {
-				buildModelChip(ic, t, runtime, navigator, chat, st, compactControls, veryCompact)
-			}
-			buildSessionMenu(ic, t, runtime, navigator, chat, st, activeID, veryCompact)
+			buildModelChip(ic, t, runtime, navigator, chat, st, compactControls, veryCompact)
+			buildSessionMenu(ic, t, runtime, st)
 		},
 	})
 }
@@ -3148,59 +3146,23 @@ func buildAttachButton(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 	})
 }
 
-// buildSessionMenu groups the low-frequency session choices (permission, agent
-// mode, persona and prompt presets) behind one button. Its label keeps a
-// non-default security/mode state visible.
-func buildSessionMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
-	navigator contracts.Navigator, chat contracts.ChatService, st *state, activeID string, veryCompact bool) {
-	label, warn := st.sessionMenuLabel()
+// buildSessionMenu is the composer's single permission menu. After the approved
+// audit it carries only the permission mode; the chat mode, persona, prompt
+// presets, behavior-settings link and clear-remembered-tools row left the
+// composer (their data keys and backend commands stay). The button is labelled
+// with the current permission preset itself (工作区修改 / 所有权限 / 只读) so the
+// composer never shows a separate destination name. Without a settings store
+// there is no permission to show or choose, so the button is not built at all.
+func buildSessionMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+	if st.settings == nil {
+		return
+	}
+	label, warn := st.permissionMenuLabel()
 	button := ui.PopoverMenuButton(c, label, func(m *ui.Menu) {
-		if veryCompact {
-			model := strings.TrimSpace(chat.Config().Model)
-			if model == "" {
-				model = st.tr("未配置", "Not set")
-			}
-			m.Item(st.tr("模型：", "Model: ") + model).Disabled(true)
-			// The model chip is folded away at this width, so its 推理等级
-			// entry moves here; both use the same submenu builder.
-			if thinking, ok := resolveSessionThinking(st, chat, activeID); ok {
-				buildSessionThinkingRow(m, runtime, st, thinking, activeID)
-			}
-			if m.Item(st.tr("打开模型设置…", "Open model settings…")).Chosen() {
-				openSettingsPage(navigator, settingsPageModel)
-			}
-			m.Separator()
-		}
 		buildSessionPermissionMenuItems(m, runtime, st)
-		m.Separator()
-		if buildSessionClearAllowedToolsItem(m, runtime, chat, st, activeID) {
-			m.Separator()
-		}
-		buildSessionModeMenuItems(m, runtime, st)
-		// The thinking strength moved into the model chip's compact 推理等级
-		// submenu (a wide composer); repeating it here stacked the same choice
-		// twice. Persona and prompt presets are lists that can grow with user
-		// data: nested submenus keep the outer menu short enough to fit a
-		// 704x720 window (the tail items stay reachable without scrolling).
-		if setter, ok := chat.(contracts.SessionPresetSetter); ok && activeID != "" {
-			if presets := effectiveAgentPresets(st); len(presets) > 0 {
-				m.Separator()
-				m.Submenu(st.tr("人设", "Persona"), func(sub *ui.Menu) {
-					buildAgentPresetMenuItems(sub, st, runtime, activeID, setter)
-				})
-			}
-		}
-		m.Separator()
-		m.Submenu(st.tr("插入预设", "Insert preset"), func(sub *ui.Menu) {
-			buildSessionPresetSubmenuItems(sub, runtime, st)
-		})
-		m.Separator()
-		if m.Item(st.tr("打开行为设置…", "Open behavior settings…")).Chosen() {
-			openSettingsPage(navigator, settingsPageBehavior)
-		}
 	}).Tooltip(st.tr(
-		"权限、对话模式、人设与提示词预设；模型与推理等级在输入框旁的模型菜单。权限模式：只读只自动允许只读/信息类工具；工作区可写（默认）另自动允许工作区内的文件读写，shell/网络仍会询问；所有权限不再弹窗。弹窗中的「本会话内始终允许」只对本会话生效。",
-		"Permission, mode, persona and prompt presets; the model and reasoning level live in the composer's model menu. Permission: read-only auto-allows read-only/informational tools; workspace-write (default) also auto-allows file reads/writes in the workspace, shell/network still ask; all permissions stops every prompt. The dialog's Always allow in this session only covers this conversation."))
+		"权限模式：只读只自动允许只读/信息类工具；工作区修改（默认）另自动允许工作区内的文件读写，shell/网络仍会询问；所有权限不再弹窗。弹窗中的「本会话内始终允许」只对本会话生效。",
+		"Permission mode: read-only auto-allows read-only/informational tools; workspace-write (default) also auto-allows file reads/writes in the workspace, shell/network still ask; all permissions stops every prompt. The dialog's Always allow in this session only covers this conversation."))
 	if warn {
 		button.TextColor(t.WarningText)
 	} else {
@@ -3208,42 +3170,38 @@ func buildSessionMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRunti
 	}
 }
 
-// sessionMenuLabel names the session menu button. The label is the stable
-// destination name (会话设置), never the current state: a chip whose text drifts
-// between 权限/模式/预设 names cannot tell the user what opening it reveals
-// (R17). A non-default security or mode state still warns on the stable label,
-// and the current permission/mode are the trailing values of the menu's group
-// headers.
-func (st *state) sessionMenuLabel() (label string, warn bool) {
-	label = st.tr("会话设置", "Session settings")
+// permissionMenuLabel names the composer's permission button: the current
+// permission preset itself (工作区修改 / 所有权限 / 只读). Only the all-permissions
+// preset is warning-level; the read-only and workspace presets stay quiet (a
+// stricter permission is not a warning). Without a settings store the button is
+// not built; the label then falls back to the default preset, still quiet.
+func (st *state) permissionMenuLabel() (label string, warn bool) {
 	if st.settings == nil {
-		return label, false
+		return st.permissionLabel(contracts.PermissionWorkspace), false
 	}
-	// Warning-level non-default states: the all-permissions security preset and
-	// the plan/creator chat modes. Read-only and the workspace default stay
-	// quiet (a stricter permission is not a warning).
-	if permissionMode(st.settings) == contracts.PermissionFull {
-		return label, true
-	}
-	return label, currentChatModeOption(st.settings).warn
+	mode := permissionMode(st.settings)
+	return st.permissionLabel(mode), mode == contracts.PermissionFull
 }
 
 // buildSessionPermissionMenuItems adds the permission group header FIRST and
-// then exactly the three selectable presets (只读 / 工作区可写 / 所有权限), one
+// then exactly the three selectable presets (工作区修改 / 所有权限 / 只读), one
 // Radio item each. The disabled header row keeps the group name above its
-// choices (the previous order put the header after the items) and carries the
-// explanation in its tooltip, so the menu does not grow another row (a taller
-// menu would overflow the 704x720 window).
+// choices and carries the explanation in its tooltip, so the menu does not grow
+// another row; the current value is already on the toolbar button.
 func buildSessionPermissionMenuItems(m *ui.Menu, runtime contracts.UIRuntime, st *state) {
 	if st.settings == nil {
 		return
 	}
 	current := permissionMode(st.settings)
-	m.Item(st.tr("权限模式（所有会话）", "Permission mode (all conversations)")).Disabled(true).
-		Trailing(st.permissionLabel(current)).Tooltip(st.tr(
-		"只读：只自动允许只读/信息类工具，其他操作会询问。工作区可写（默认）：工作区内的文件读写自动允许，shell/网络仍会询问。所有权限：全部自动允许，不再弹窗。弹窗中选择「本会话内始终允许」可停止重复询问。",
-		"Read-only: only read-only/informational tools are auto-allowed; other actions ask. Workspace-write (default): workspace file reads/writes are auto-allowed; shell/network still ask. All permissions: everything is auto-allowed without asking. Choose \"Always allow in this session\" in the dialog to stop repeats."))
-	for _, mode := range []string{contracts.PermissionReadOnly, contracts.PermissionWorkspace, contracts.PermissionFull} {
+	// The button itself names the current permission, so the disabled group
+	// header stays a plain group name instead of repeating it as a trailing
+	// value; the explanation lives in its tooltip.
+	m.Item(st.tr("权限模式", "Permission mode")).Disabled(true).
+		Tooltip(st.tr(
+			"只读：只自动允许只读/信息类工具，其他操作会询问。工作区修改（默认）：工作区内的文件读写自动允许，shell/网络仍会询问。所有权限：全部自动允许，不再弹窗。弹窗中选择「本会话内始终允许」可停止重复询问。",
+			"Read-only: only read-only/informational tools are auto-allowed; other actions ask. Workspace-write (default): workspace file reads/writes are auto-allowed; shell/network still ask. All permissions: everything is auto-allowed without asking. Choose \"Always allow in this session\" in the dialog to stop repeats."))
+	m.Separator()
+	for _, mode := range []string{contracts.PermissionWorkspace, contracts.PermissionFull, contracts.PermissionReadOnly} {
 		mode := mode
 		item := m.Item(st.permissionLabel(mode))
 		// Radio marks a single-choice item: assistive technology reads it as a
@@ -3251,61 +3209,6 @@ func buildSessionPermissionMenuItems(m *ui.Menu, runtime contracts.UIRuntime, st
 		item.Radio(mode == current)
 		if item.Chosen() && mode != current {
 			_ = st.settings.Set(contracts.SettingAgentPermission, mode)
-			runtime.Invalidate()
-		}
-	}
-}
-
-// buildSessionClearAllowedToolsItem adds the session-scoped "clear remembered
-// tools" action once the backend has remembered any tool for this conversation,
-// and reports whether the row was added so the caller can close the section with
-// a separator. The approval dialog's 本会话内始终允许 remembers tools for one
-// session; this is the one place to see that it is active and to forget it.
-func buildSessionClearAllowedToolsItem(m *ui.Menu, runtime contracts.UIRuntime,
-	chat contracts.ChatService, st *state, activeID string) bool {
-	permissions, ok := chat.(contracts.SessionToolPermissions)
-	if !ok || activeID == "" {
-		return false
-	}
-	allowed := permissions.AllowedTools(activeID)
-	if len(allowed) == 0 {
-		return false
-	}
-	label := fmt.Sprintf(st.tr("清除自动允许的工具（%d）", "Clear remembered tools (%d)"), len(allowed))
-	if m.Item(label).Chosen() {
-		if err := permissions.ClearAllowedTools(activeID); err != nil {
-			st.commandErr = st.tr("清除失败：", "Clear failed: ") + err.Error()
-		} else {
-			st.clearComposerFailure()
-			st.toast(contracts.NotifySuccess, st.tr("已清除自动允许的工具", "Remembered tools cleared"))
-		}
-		runtime.Invalidate()
-	}
-	return true
-}
-
-// buildSessionModeMenuItems adds the agent/chat mode choices.
-func buildSessionModeMenuItems(m *ui.Menu, runtime contracts.UIRuntime, st *state) {
-	if st.settings == nil {
-		return
-	}
-	current := currentChatModeOption(st.settings)
-	// The group header carries the current mode as a trailing value so the
-	// fixed-label chip still exposes the state one click in (R17).
-	modeValue := st.tr(current.shortZh, current.shortEn)
-	if current.badgeZh != "" {
-		modeValue = st.tr(current.badgeZh, current.badgeEn)
-	}
-	// Permission and chat mode are global settings: say so on their group
-	// headers, since the same menu also holds conversation-scoped entries
-	// (persona, remembered tools) (PM-14).
-	m.Item(st.tr("对话模式（所有会话）", "Conversation mode (all conversations)")).Disabled(true).Trailing(modeValue)
-	for _, option := range chatModeOptions {
-		option := option
-		item := m.Item(st.tr(option.menuZh, option.menuEn))
-		item.Radio(option.key == current.key)
-		if item.Chosen() {
-			applyChatMode(st.settings, option)
 			runtime.Invalidate()
 		}
 	}
@@ -3515,23 +3418,6 @@ func buildSessionModelChoices(m *ui.Menu, runtime contracts.UIRuntime, st *state
 	}
 }
 
-// buildSessionPresetSubmenuItems fills the 插入预设 submenu with the prompt
-// presets (the submenu's own label is the group header).
-func buildSessionPresetSubmenuItems(m *ui.Menu, runtime contracts.UIRuntime, st *state) {
-	presets := effectivePromptPresets(st)
-	if len(presets) == 0 {
-		m.Item(st.tr("还没有预设", "No presets yet")).Disabled(true)
-		return
-	}
-	for _, preset := range presets {
-		preset := preset
-		if m.Item(strings.TrimSpace(preset.Name)).Chosen() {
-			insertPromptPreset(st, preset.Prompt)
-			runtime.Invalidate()
-		}
-	}
-}
-
 // truncateRunes shortens one-line UI labels to at most max runes, marking the
 // cut with an ellipsis; the untruncated value stays in the control's tooltip.
 func truncateRunes(s string, max int) string {
@@ -3629,27 +3515,6 @@ func buildModelChip(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 	}
 }
 
-// buildAgentPresetMenuItems adds the persona picker rows to the 会话设置 menu,
-// for the narrow composer where the standalone persona chip is folded away.
-func buildAgentPresetMenuItems(m *ui.Menu, st *state, runtime contracts.UIRuntime,
-	activeID string, setter contracts.SessionPresetSetter) {
-	presets := effectiveAgentPresets(st)
-	currentID := strings.TrimSpace(setter.SessionPreset(activeID))
-	none := m.Item(st.tr("无", "None"))
-	none.Radio(currentID == "")
-	if none.Chosen() && currentID != "" {
-		applySessionPreset(setter, st, runtime, activeID, "")
-	}
-	for _, preset := range presets {
-		preset := preset
-		item := m.Item(preset.Name)
-		item.Radio(preset.ID == currentID)
-		if item.Chosen() && preset.ID != currentID {
-			applySessionPreset(setter, st, runtime, activeID, preset.ID)
-		}
-	}
-}
-
 // modelMenuLabel is one model menu row's primary label: the display name only.
 // The catalogue note is rendered once, as the item's Subtitle (mygo
 // context-menu.md), never inlined here: appending it to the label rendered the
@@ -3660,20 +3525,6 @@ func modelMenuLabel(info contracts.ModelInfo) string {
 		name = info.ID
 	}
 	return name
-}
-
-// agentMode reads the stored agent mode (normal when unset/unknown or without
-// a settings store).
-func agentMode(settings contracts.SettingsService) string {
-	if settings == nil {
-		return contracts.AgentModeNormal
-	}
-	switch strings.ToLower(strings.TrimSpace(settings.Get(contracts.SettingAgentMode, ""))) {
-	case contracts.AgentModePlan:
-		return contracts.AgentModePlan
-	default:
-		return contracts.AgentModeNormal
-	}
 }
 
 // usageTotalTokens returns the accounting total, falling back to the prompt+

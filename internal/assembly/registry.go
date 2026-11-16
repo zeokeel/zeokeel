@@ -21,7 +21,6 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/toolkit"
 	"github.com/zeokeel/zeokeel/internal/modules/update"
 	"github.com/zeokeel/zeokeel/internal/modules/workspace"
-	"github.com/zeokeel/zeokeel/internal/ui/about"
 	"github.com/zeokeel/zeokeel/internal/ui/approval"
 	automationui "github.com/zeokeel/zeokeel/internal/ui/automation"
 	"github.com/zeokeel/zeokeel/internal/ui/home"
@@ -77,7 +76,6 @@ func Registry() *module.Registry {
 	mustRegister(registry, insights.Module())
 	mustRegister(registry, hosttools.Module())
 	mustRegister(registry, home.Module())
-	mustRegister(registry, about.Module())
 	mustRegister(registry, interaction.Module())
 	mustRegister(registry, toasts.Module())
 	mustRegister(registry, welcome.Module())

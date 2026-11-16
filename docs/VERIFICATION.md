@@ -1,5 +1,43 @@
 # Verification log (final)
 
+## 0.2.44 — 2026-11-16 (设置收敛与输入框权限按钮)
+
+```
+$ gofmt -l internal cmd
+(empty)
+$ go build ./...
+OK
+$ CGO_ENABLED=0 go build ./...
+OK
+$ go vet ./...
+OK
+$ go tool mygo vet .
+OK
+$ go test ./... -count=1
+all packages ok (settings 308 PASS)
+$ go test -race ./internal/ui/settings ./internal/ui/session ./internal/uiroot ./internal/uikit -count=1
+all ok (no data race)
+$ go run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
+designlint: 310 files, 79 violations: 0 error, 0 warn | baseline 156 entries, 10 registered, 0 new, 0 blocking
+$ ./scripts/design-check.sh
+6 passed, 0 failed: PASS
+$ ./scripts/verify.sh --quick
+9 passed, 0 failed (88s)
+$ go run ./internal/devtools/ui-drive -out .cache/drive-permission-final
+84 PASS / 0 FAIL / 0 WARN / 0 BLOCKED
+```
+
+设置 17 页 / 6 组 → 10 页 / 5 组（导航 224 DIP）：预设页删除（数据键保留）；
+快捷键并入外观、搜索并入网络与搜索、限额并入行为与限额、导入并入数据与隐私、
+更新/诊断并入新的「关于」hub；旧页面 ID 由 host alias 深链到新页；About 模块移除，
+设置模块拥有关于页。输入框工具栏权限按钮显示当前权限（工作区修改 / 所有权限 / 只读），点击只打开权限三态菜单（不再出现「会话设置」文字），
+移除对话模式、人设、插入预设、打开行为设置、清除自动允许工具；
+输入框工具栏始终构建模型 chip，窄窗由官方 Toolbar overflow 收纳。
+视觉证据：`.cache/ui-permission/p2-about-settings.png`、`p2-behavior.png`、`p2-network-settings.png`、
+`p2-data-import.png`、`p2-permission.png`、`p2-english-settings.png`；
+交互证据：`.cache/drive-permission-final/drive-report.md`。
+
+
 ## 0.2.43 — 2026-11-16 (能力页：技能与 MCP 连接器)
 
 ```

@@ -4,6 +4,45 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.44] - 2026-11-16
+
+### Changed
+
+- **设置信息架构收敛**：设置侧边栏 17 页 / 6 组 → **10 页 / 5 组**（导航列 200 → 224 DIP）：常用（模型 / 行为与限额）、界面与通知（外观 / 通知）、连接（网络与搜索 / LSP）、数据（记忆 / 归档 / 数据与隐私）、关于（关于）。
+- 合并重复入口：快捷键并入外观、搜索并入网络与搜索、运行限额并入行为与限额、DSH 导入并入数据与隐私、更新与诊断并入新的「关于」页（构建信息 + 更新 + 诊断 + 开发信息）；独立「关于」模块移除，设置模块统一拥有设置页。
+- 旧设置页 ID 保留 host alias 深链（shortcuts→appearance、search→network、capabilities→behavior、import→data-privacy、update/diagnostics→about）。
+- **输入框权限按钮**：工具栏不再显示「会话设置」，按钮直接显示当前权限——默认「工作区修改」，切换后显示「所有权限」/「只读」；「所有权限」保留警示色。菜单只保留权限三态（标题「权限模式」，不再重复 trailing 当前值）。
+- 输入框工具栏始终构建模型 chip；窄窗由官方 `ui.Toolbar` overflow 收纳，模型/推理入口不再依赖权限菜单。
+
+### Removed
+
+- 设置「预设」页（提示词预设 + 代理预设 UI）；`prompt.presets` / `presets.agents` 数据键与后端应用逻辑保留，不删用户数据。
+- 输入框会话菜单中的对话模式、人设、插入预设、打开行为设置、清除自动允许的工具入口；chat mode / preset 后端数据键与 slash 命令保留。
+- `internal/ui/about` 模块及独立更新/诊断/预设页面实现（内容已合并）。
+
+### Fixed
+
+- 行为与限额页的工作区指令输入框加稳定 key，并把即时保存状态行移到控件下方，避免插入行导致焦点跳回设置导航搜索。
+- 网络与搜索共享 footer 时，代理校验失败会短路，不再写入搜索端点（避免半保存）。
+- 移除「清除自动允许工具」入口后，审批说明改为「本会话内始终允许……会话结束后失效」，不再指向不存在的清除入口。
+
+### Verification
+
+```
+$ ./scripts/verify.sh --quick
+9 passed, 0 failed (88s)
+$ go test ./... -count=1
+all packages ok (settings 308 PASS)
+$ go test -race ./internal/ui/settings ./internal/ui/session ./internal/uiroot ./internal/uikit -count=1
+all ok (no data race)
+$ go run ./internal/devtools/ui-drive -out .cache/drive-permission-final
+84 PASS / 0 FAIL / 0 WARN / 0 BLOCKED
+$ go run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
+0 error, 0 warn, 0 new
+```
+
+视觉证据：`.cache/ui-permission/p2-about-settings.png`、`p2-behavior.png`、`p2-network-settings.png`、`p2-permission.png`、`.cache/drive-permission-final/shots/composer-session-settings-menu.png`。
+
 ## [0.2.43] - 2026-11-16
 
 ### Changed

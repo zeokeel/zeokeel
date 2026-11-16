@@ -1,13 +1,14 @@
-// Package settings contributes the model, providers, appearance and shortcuts
-// pages to the settings surface, rebuilt with the ZeoKeel brand design system.
-// Capability surfaces (skills and MCP connectors) live on the Capabilities
-// screen, not here.
+// Package settings contributes the whole settings surface: model, behavior &
+// limits, appearance (with shortcuts), notifications, network & search, LSP,
+// memory, archive, data & privacy (with DSH import) and the About hub (build
+// info, update, diagnostics). Capability surfaces (skills and MCP connectors)
+// live on the Capabilities screen, not here.
 //
-// It is a UI module like ui/about: a kernel Descriptor that requires the host UI
-// runtime, the settings store, the chat read model, the theme and the locale, and
-// registers two contracts.SettingsPageSpec values on activation. The host owns
-// the settings shell (native Sidebar + Modal); this module only composes native
-// mygo controls — ui.TextInput, ui.TextArea, ui.Toggle, ui.Select, ui.Button,
+// It is a UI module: a kernel Descriptor that requires the host UI runtime, the
+// settings store, the chat read model, the theme and the locale, and registers
+// the contracts.SettingsPageSpec values on activation. The host owns the settings
+// shell (native Sidebar + Modal); this module only composes native mygo controls
+// — ui.TextInput, ui.TextArea, ui.Toggle, ui.Select, ui.Button,
 // ui.PrimaryButton, ui.Icon — and styles them with internal/design tokens
 // (Panel cards, the brand type scale, brand spacing/radii and the semantic
 // colors). Nothing is hand-drawn.
@@ -40,57 +41,33 @@ import (
 )
 
 // Settings page constants. ID and Section are stable contracts the host renders
-// in its grouped settings sidebar; the host sorts the nav by Section rank first
-// (常用 → 外观 → 集成 → 模块声明的组 → 高级 → 关于) and by Order inside a
-// section. Order only needs to be unique inside one section.
+// in its grouped settings sidebar; the host sorts the nav by Section rank
+// (常用 → 界面 → 连接 → 数据 → 关于) and by Order inside a section. Order only
+// needs to be unique inside one section.
 const (
 	PageID      = "model"
 	PageSection = "常用"
 	PageOrder   = 10
 
-	// AppearancePageID is the appearance page identity (theme + language).
+	// AppearancePageID is the appearance page identity (theme, language,
+	// shortcuts).
 	AppearancePageID = "appearance"
-	// AppearancePageSection is the "appearance & skills" nav group.
-	AppearancePageSection = "外观"
-	// AppearancePageOrder places the page after the model group.
+	// AppearancePageOrder places the page first in the 界面 group.
 	AppearancePageOrder = 10
-
-	// ShortcutsPageID is the keyboard-shortcut reference page.
-	ShortcutsPageID = "shortcuts"
-	// ShortcutsPageOrder places the page after appearance.
-	ShortcutsPageOrder = 30
-
-	// DiagnosticsPageID is the read-only diagnostics page (advanced section).
-	DiagnosticsPageID = "diagnostics"
-	// DiagnosticsPageSection places it in the advanced group.
-	DiagnosticsPageSection = "高级"
-	// DiagnosticsPageOrder places it first in the advanced group.
-	DiagnosticsPageOrder = 50
 )
 
-// The P2-11 regrouping. The page modules declare the section/order a page had
-// historically; the page registry below is what the host groups by, so the
-// frequent data and notification pages move here instead of behind the collapsed
-// advanced group. The orders are local to their section.
+// Page orders inside a group. The page registry below is what the host groups
+// by; the orders are local to their section.
 const (
-	// dataNotificationsSection is the always-visible group of the pages a user
-	// changes day to day: notifications, memory, archived sessions, data &
-	// privacy, import and update. The value is a stable section key; the syncer
-	// localizes it at registration because the host only carries copy for its
-	// built-in groups.
-	dataNotificationsSection = "数据与通知"
-
 	// Order inside 集成: LSP joins Search/Network (integration surfaces) after
 	// those entries.
 	lspOrderInIntegrations = 50
 
-	// Order inside 数据与通知.
+	// Order inside 数据.
 	notificationsOrderInData = 10
 	memoryOrderInData        = 20
 	archiveOrderInData       = 30
 	dataPrivacyOrderInData   = 40
-	importOrderInData        = 50
-	updateOrderInData        = 60
 )
 
 // shortcutRow is one line of the shortcut reference.
@@ -200,9 +177,11 @@ type shortcutsState struct {
 // two editable desktop shortcuts (persisted through the host settings). Every
 // control on the page applies immediately, so there is no save button.
 func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store contracts.SettingsService,
-	runtime contracts.UIRuntime, locale contracts.LocaleService, st *shortcutsState) {
+	runtime contracts.UIRuntime, locale contracts.LocaleService, st *shortcutsState, showHeader bool) {
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, title, "")
+		if showHeader {
+			uikit.PageHeader(c, title, "")
+		}
 		uikit.Section(c, localized(locale, "桌面快捷键", "Desktop shortcuts"), func(*ui.Context) {
 			// H23: restoring the defaults is a page action, not a form row: it
 			// sits at the section's top right, away from the editable fields.
@@ -523,18 +502,11 @@ func (s *pageSyncer) register(def pageDefinition) error {
 	return nil
 }
 
-// sectionKey resolves the section value a page registers under. The host groups
-// the navigation by Section and localizes the groups it knows; a module-declared
-// group therefore registers its display text (in the current language) instead
-// of a key the host would print raw. The syncer re-registers the pages on a
-// language switch, so the section value is resolved again with the new locale.
+// sectionKey resolves the section value a page registers under. The groups are
+// stable keys the host localizes (常用 / 界面 / 连接 / 数据 / 关于); a module with
+// its own group registers the display text and the host prints it verbatim.
 func (s *pageSyncer) sectionKey(section string) string {
-	switch section {
-	case dataNotificationsSection:
-		return localized(s.locale, "数据与通知", "Data & notifications")
-	default:
-		return section
-	}
+	return section
 }
 
 // start registers every page once (activation).
@@ -596,9 +568,11 @@ type diagnosticsState struct {
 // buildDiagnosticsPage renders the read-only runtime/storage summary (the old
 // shell's diagnostics view) with a native copy action.
 func buildDiagnosticsPage(c *ui.Context, t *design.Tokens, state *diagnosticsState,
-	rows, keys []diagnosticRow, modules []contracts.ModuleInfo, locale contracts.LocaleService) {
+	rows, keys []diagnosticRow, modules []contracts.ModuleInfo, locale contracts.LocaleService, showHeader bool) {
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, "诊断", "Diagnostics"), "")
+		if showHeader {
+			uikit.PageHeader(c, localized(locale, "诊断", "Diagnostics"), "")
+		}
 		uikit.Section(c, localized(locale, "运行时信息", "Runtime information"), func(body *ui.Context) {
 			// The property sheet is one shape everywhere (DESIGN.md §5.2
 			// PropertySheet): a 160 DIP label column, the value left-aligned on
@@ -707,7 +681,7 @@ func Module() *module.Descriptor[Config] {
 		update := newUpdateState()
 		importState := newImportState()
 		search := newSearchState()
-		presets := newPresetsState()
+		about := &aboutState{}
 		catalog := &catalogState{sel: -1}
 		lsp := &lspState{sel: -1}
 		notifications := &notificationsState{}
@@ -718,10 +692,8 @@ func Module() *module.Descriptor[Config] {
 		dataPrivacy := newDataPrivacyState()
 		diagnostics := &diagnosticsState{}
 
-		// Optional host services for the read-only diagnostics page.
+		// Optional host app identity for the About hub.
 		info, _ := ctx.Get(contracts.KeyAppInfo)
-		dataDir, _ := ctx.Get(contracts.KeyDataDir)
-		toolkit, _ := ctx.Get(contracts.KeyToolkit)
 		// Optional OS sandbox service: the Behavior page shows its switch and
 		// live status; a stripped assembly without the module still renders.
 		sandboxService, _ := ctx.Get(contracts.KeySandbox)
@@ -767,9 +739,6 @@ func Module() *module.Descriptor[Config] {
 				Footer: func(c *ui.Context) {
 					uikit.DialogFooter(c, []uikit.DialogAction{{
 						Label: modelLabels().saveLabel, Primary: true,
-						// The footer saves only the prompt/runtime drafts, so the
-						// primary is dead while they match the persisted config; a
-						// model-list edit applies immediately and never lights it.
 						Disabled: !state.dirty(),
 						OnClick: func() {
 							saveModelPage(c, state, store, locale)
@@ -783,50 +752,58 @@ func Module() *module.Descriptor[Config] {
 				},
 			},
 			{
-				ID: DiagnosticsPageID, Section: DiagnosticsPageSection, Order: DiagnosticsPageOrder,
-				zhTitle: "诊断", enTitle: "Diagnostics",
-				keywords: diagnosticsPageKeywords,
+				ID: BehaviorPageID, Section: "常用", Order: BehaviorPageOrder,
+				zhTitle: "行为与限额", enTitle: "Behavior & limits",
+				keywords: func() []string {
+					return append(append([]string{}, behaviorPageKeywords()...), capabilitiesPageKeywords()...)
+				},
+				searchItems: func() []contracts.SettingsSearchItem { return behaviorPageSearchItems(locale) },
+				reveal:      behaviorSearch.reveal,
 				Build: func(c *ui.Context) {
 					syncer.sync()
-					if diagnostics.transient.reentered(runtime) {
-						// The "已复制" badge confirms one action; coming back to the
-						// page starts a new visit and must not claim a fresh copy.
-						diagnostics.copied = false
-					}
-					rows, keys := diagnosticsRows(info, dataDir, toolkit, chat, store, locale)
-					modules := loadedModulesFromContext(ctx)
-					buildDiagnosticsPage(c, design.Of(c), diagnostics, rows, keys, modules, locale)
+					buildBehaviorPage(c, runtime, store, locale, behavior, sandboxService, capabilities, behaviorSearch)
+				},
+				Footer: func(c *ui.Context) {
+					uikit.DialogFooter(c, []uikit.DialogAction{
+						{Label: localized(locale, "恢复限额默认", "Restore limit defaults"), OnClick: func() {
+							capabilities.restoreDefaults(locale)
+							c.Invalidate()
+						}},
+						{Label: localized(locale, "保存", "Save"), Primary: true,
+							Disabled: !capabilities.dirty(store),
+							OnClick: func() {
+								capabilities.save(store, locale)
+								c.Invalidate()
+							}},
+					})
+				},
+				Dirty: func() bool {
+					return behaviorDraftDirty(behavior, store) || capabilities.dirty(store)
+				},
+				Discard: func() {
+					discardBehaviorDraft(behavior, store)
+					capabilities.discardDrafts(store)
 				},
 			},
 			{
-				ID: ShortcutsPageID, Section: "外观", Order: ShortcutsPageOrder,
-				zhTitle: "快捷键", enTitle: "Shortcuts",
-				keywords: shortcutsPageKeywords,
-				Build: func(c *ui.Context) {
-					syncer.sync()
-					buildShortcutsPage(c, design.Of(c), localized(locale, "快捷键", "Shortcuts"), store, runtime, locale, shortcuts)
-				},
-			},
-			{
-				ID: AppearancePageID, Section: AppearancePageSection, Order: AppearancePageOrder,
+				ID: AppearancePageID, Section: "界面", Order: AppearancePageOrder,
 				zhTitle: "外观", enTitle: "Appearance", titleOverride: cfg.AppearanceTitle,
-				keywords:    appearancePageKeywords,
+				keywords: func() []string {
+					return append(append([]string{}, appearancePageKeywords()...), shortcutsPageKeywords()...)
+				},
 				searchItems: func() []contracts.SettingsSearchItem { return appearancePageSearchItems(locale) },
 				reveal:      appearanceSearch.reveal,
 				Build: func(c *ui.Context) {
 					syncer.sync()
 					if appearance.transient.reentered(runtime) {
-						// Re-read the store-backed values and clear the transient status
-						// line, so a value applied elsewhere is visible on the next visit.
 						appearance.reenter(store, locale)
 					}
-					buildAppearancePage(c, appearance, store, theme, locale, appearanceLabels(), appearanceSearch)
+					buildAppearancePage(c, appearance, store, theme, runtime, locale,
+						appearanceLabels(), shortcuts, appearanceSearch)
 				},
 				Footer: func(c *ui.Context) {
 					uikit.DialogFooter(c, []uikit.DialogAction{{
 						Label: appearanceLabels().saveLabel, Primary: true,
-						// Theme, language and the desktop switches apply at once;
-						// only the hotkey draft is pending here.
 						Disabled: !appearance.dirty(),
 						OnClick: func() {
 							applyAppearancePage(c, appearance, store, locale)
@@ -839,62 +816,7 @@ func Module() *module.Descriptor[Config] {
 				},
 			},
 			{
-				ID: UpdatePageID, Section: dataNotificationsSection, Order: updateOrderInData,
-				zhTitle: "更新", enTitle: "Update",
-				keywords: updatePageKeywords,
-				Build: func(c *ui.Context) {
-					syncer.sync()
-					if update.transient.reentered(runtime) {
-						update.copied = false
-					}
-					buildUpdatePage(c, design.Of(c), ctx, runtime, update, locale)
-				},
-			},
-			{
-				ID: ImportPageID, Section: dataNotificationsSection, Order: importOrderInData,
-				zhTitle: "导入", enTitle: "Import",
-				keywords: importPageKeywords,
-				Build: func(c *ui.Context) {
-					syncer.sync()
-					buildImportPage(c, design.Of(c), ctx, runtime, importState, locale)
-				},
-			},
-			{
-				ID: SearchPageID, Section: SearchPageSection, Order: SearchPageOrder,
-				zhTitle: "搜索", enTitle: "Search",
-				keywords: searchPageKeywords,
-				Build: func(c *ui.Context) {
-					syncer.sync()
-					buildSearchPage(c, ctx, search, locale)
-				},
-				Footer: func(c *ui.Context) {
-					uikit.DialogFooter(c, []uikit.DialogAction{{
-						Label: localized(locale, "保存", "Save"), Primary: true,
-						Disabled: !search.dirty(store),
-						OnClick: func() {
-							if store, ok := ctx.Get(contracts.KeySettings); ok && store != nil {
-								saveSearchSettings(search, store, locale)
-							}
-							c.Invalidate()
-						},
-					}})
-				},
-				Dirty: func() bool { return search.dirty(store) },
-				Discard: func() {
-					search.discardDrafts(store)
-				},
-			},
-			{
-				ID: ArchivePageID, Section: dataNotificationsSection, Order: archiveOrderInData,
-				zhTitle: "归档", enTitle: "Archived",
-				keywords: archivePageKeywords,
-				Build: func(c *ui.Context) {
-					syncer.sync()
-					buildArchivePage(c, design.Of(c), ctx, archive, locale)
-				},
-			},
-			{
-				ID: NotificationsPageID, Section: dataNotificationsSection, Order: notificationsOrderInData,
+				ID: NotificationsPageID, Section: "界面", Order: notificationsOrderInData,
 				zhTitle: "通知", enTitle: "Notifications",
 				keywords:    notificationsPageKeywords,
 				searchItems: func() []contracts.SettingsSearchItem { return notificationsPageSearchItems(locale) },
@@ -906,35 +828,38 @@ func Module() *module.Descriptor[Config] {
 				},
 			},
 			{
-				ID: BehaviorPageID, Section: BehaviorPageSection, Order: BehaviorPageOrder,
-				zhTitle: "行为", enTitle: "Behavior",
-				keywords:    behaviorPageKeywords,
-				searchItems: func() []contracts.SettingsSearchItem { return behaviorPageSearchItems(locale) },
-				reveal:      behaviorSearch.reveal,
+				ID: NetworkPageID, Section: "连接", Order: NetworkPageOrder,
+				zhTitle: "网络与搜索", enTitle: "Network & search",
+				keywords: func() []string {
+					return append(append([]string{}, networkPageKeywords()...), searchPageKeywords()...)
+				},
 				Build: func(c *ui.Context) {
 					syncer.sync()
-					buildBehaviorPage(c, runtime, store, locale, behavior, sandboxService, behaviorSearch)
+					buildNetworkPage(c, ctx, store, runtime, network, search, locale)
 				},
-				Dirty: func() bool { return behaviorDraftDirty(behavior, store) },
+				Footer: func(c *ui.Context) {
+					uikit.DialogFooter(c, []uikit.DialogAction{{
+						Label: localized(locale, "保存", "Save"), Primary: true,
+						Disabled: !network.dirty(store) && !search.dirty(store),
+						OnClick: func() {
+							saveNetworkSettings(network, store, locale)
+							// The two halves share one footer: a rejected proxy
+							// must not let the search half write a partial save.
+							if !network.statusErr {
+								saveSearchSettings(search, store, locale)
+							}
+							c.Invalidate()
+						},
+					}})
+				},
+				Dirty: func() bool { return network.dirty(store) || search.dirty(store) },
 				Discard: func() {
-					discardBehaviorDraft(behavior, store)
+					network.discardDrafts(store)
+					search.discardDrafts(store)
 				},
 			},
 			{
-				ID: MemoryPageID, Section: dataNotificationsSection, Order: memoryOrderInData,
-				zhTitle: "记忆", enTitle: "Memory",
-				keywords: memoryPageKeywords,
-				Build: func(c *ui.Context) {
-					syncer.sync()
-					buildMemoryPage(c, design.Of(c), ctx, memoryPage, store, locale)
-				},
-				Dirty: func() bool { return memoryDraftDirty(memoryPage) },
-				Discard: func() {
-					discardMemoryDraft(memoryPage)
-				},
-			},
-			{
-				ID: LSPPageID, Section: "集成", Order: lspOrderInIntegrations,
+				ID: LSPPageID, Section: "连接", Order: lspOrderInIntegrations,
 				zhTitle: "LSP", enTitle: "LSP",
 				keywords: lspPageKeywords,
 				Build: func(c *ui.Context) {
@@ -947,76 +872,56 @@ func Module() *module.Descriptor[Config] {
 				},
 			},
 			{
-				ID: PresetsPageID, Section: PresetsPageSection, Order: PresetsPageOrder,
-				zhTitle: "预设", enTitle: "Presets",
-				keywords: presetsPageKeywords,
+				ID: MemoryPageID, Section: "数据", Order: memoryOrderInData,
+				zhTitle: "记忆", enTitle: "Memory",
+				keywords: memoryPageKeywords,
 				Build: func(c *ui.Context) {
 					syncer.sync()
-					buildPresetsPage(c, store, presets, locale)
+					buildMemoryPage(c, design.Of(c), ctx, memoryPage, store, locale)
 				},
-				Dirty: func() bool { return presetsDraftDirty(presets) },
+				Dirty: func() bool { return memoryDraftDirty(memoryPage) },
 				Discard: func() {
-					discardPresetsDraft(presets)
+					discardMemoryDraft(memoryPage)
 				},
 			},
 			{
-				ID: NetworkPageID, Section: NetworkPageSection, Order: NetworkPageOrder,
-				zhTitle: "网络", enTitle: "Network",
-				keywords: networkPageKeywords,
+				ID: ArchivePageID, Section: "数据", Order: archiveOrderInData,
+				zhTitle: "归档", enTitle: "Archived",
+				keywords: archivePageKeywords,
 				Build: func(c *ui.Context) {
 					syncer.sync()
-					buildNetworkPage(c, store, network, locale)
-				},
-				Footer: func(c *ui.Context) {
-					uikit.DialogFooter(c, []uikit.DialogAction{{
-						Label: localized(locale, "保存", "Save"), Primary: true,
-						Disabled: !network.dirty(store),
-						OnClick: func() {
-							saveNetworkSettings(network, store, locale)
-							c.Invalidate()
-						},
-					}})
-				},
-				Dirty: func() bool { return network.dirty(store) },
-				Discard: func() {
-					network.discardDrafts(store)
+					buildArchivePage(c, design.Of(c), ctx, archive, locale)
 				},
 			},
 			{
-				ID: CapabilitiesPageID, Section: CapabilitiesPageSection, Order: CapabilitiesPageOrder,
-				zhTitle: "能力", enTitle: "Capabilities",
-				keywords: capabilitiesPageKeywords,
-				Build: func(c *ui.Context) {
-					syncer.sync()
-					buildCapabilitiesPage(c, store, capabilities, locale)
-				},
-				Footer: func(c *ui.Context) {
-					uikit.DialogFooter(c, []uikit.DialogAction{
-						{Label: localized(locale, "恢复默认", "Restore defaults"), OnClick: func() {
-							capabilities.restoreDefaults(locale)
-							c.Invalidate()
-						}},
-						{Label: localized(locale, "保存", "Save"), Primary: true,
-							Disabled: !capabilities.dirty(store),
-							OnClick: func() {
-								capabilities.save(store, locale)
-								c.Invalidate()
-							}},
-					})
-				},
-				Dirty: func() bool { return capabilities.dirty(store) },
-				Discard: func() {
-					capabilities.discardDrafts(store)
-				},
-			},
-			{
-				ID: DataPrivacyPageID, Section: dataNotificationsSection,
-				Order:   dataPrivacyOrderInData,
+				ID: DataPrivacyPageID, Section: "数据", Order: dataPrivacyOrderInData,
 				zhTitle: "数据与隐私", enTitle: "Data & privacy",
-				keywords: dataPrivacyPageKeywords,
+				keywords: func() []string {
+					return append(append([]string{}, dataPrivacyPageKeywords()...), importPageKeywords()...)
+				},
 				Build: func(c *ui.Context) {
 					syncer.sync()
-					buildDataPrivacyPage(c, design.Of(c), ctx, chat, store, dataPrivacy, locale)
+					buildDataPrivacyPage(c, design.Of(c), ctx, runtime, chat, store, dataPrivacy, importState, locale)
+				},
+			},
+			{
+				ID: "about", Section: "关于", Order: 10,
+				zhTitle: "关于", enTitle: "About",
+				keywords: func() []string {
+					all := append([]string{}, updatePageKeywords()...)
+					all = append(all, diagnosticsPageKeywords()...)
+					all = append(all, "关于", "about", "版本", "version", "许可", "license", "架构", "architecture")
+					return all
+				},
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					if update.transient.reentered(runtime) {
+						update.copied = false
+					}
+					if diagnostics.transient.reentered(runtime) {
+						diagnostics.copied = false
+					}
+					buildAboutHubPage(c, ctx, info, update, diagnostics, about, locale)
 				},
 			},
 		}
@@ -1546,8 +1451,8 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 // for a setting that takes effect immediately); the global hotkey is the page's
 // only explicit-save field and says so next to its input.
 func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.SettingsService,
-	theme contracts.ThemeService, locale contracts.LocaleService, labels buildAppearanceLabels,
-	search *pageSearch) {
+	theme contracts.ThemeService, runtime contracts.UIRuntime, locale contracts.LocaleService,
+	labels buildAppearanceLabels, shortcuts *shortcutsState, search *pageSearch) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		uikit.PageHeader(c, labels.title, "")
@@ -1611,6 +1516,10 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 			clearAppearanceStatus(state)
 		}
 		statusBadgesRow(c, t, state.status, state.statusErr)
+
+		// Keyboard configuration and the reference used to be a separate
+		// settings page; it is one section of the appearance page now.
+		buildShortcutsPage(c, t, localized(locale, "快捷键", "Shortcuts"), store, runtime, locale, shortcuts, false)
 	})
 }
 

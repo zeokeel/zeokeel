@@ -12,14 +12,9 @@ import (
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
-// Search page constants. Section "general" matches About (90) and sits between
-// 更新 (92) and 导入 (94); the default page stays About.
-const (
-	SearchPageID      = "search"
-	SearchPageSection = "集成"
-	SearchPageOrder   = 20
-	SearchPageTitle   = "搜索"
-)
+// SearchPageTitle is the section title used when the search half renders
+// standalone; the merged Network & search page hides the extra page header.
+const SearchPageTitle = "搜索"
 
 // searchState is the Search page's draft/status state. The endpoint echoes the
 // stored value; the API key is write-only (blank keeps the stored key), like
@@ -43,12 +38,14 @@ func newSearchState() *searchState { return &searchState{} }
 // The copy states the actual behavior: the web_search tool stays registered
 // even without an endpoint (a call then reports the missing backend), so the
 // page must not promise that an empty endpoint disables the tool (PM-15).
-func buildSearchPage(c *ui.Context, kctx cordis.Context, st *searchState, locale contracts.LocaleService) {
+func buildSearchPage(c *ui.Context, kctx cordis.Context, st *searchState, locale contracts.LocaleService, showHeader bool) {
 	t := design.Of(c)
 	store, hasStore := kctx.Get(contracts.KeySettings)
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, SearchPageTitle, "Search"), "")
+		if showHeader {
+			uikit.PageHeader(c, localized(locale, SearchPageTitle, "Search"), "")
+		}
 		if !hasStore || store == nil {
 			uikit.Section(c, localized(locale, "设置存储未启用", "Settings store not enabled"), func(*ui.Context) {
 				uikit.EmptyState(c, localized(locale,

@@ -1480,9 +1480,13 @@ var settingsSectionRank = map[string]int{
 	"general": 10, // host tests and legacy contributors
 	"常用":      12,
 	"模型":      20, // legacy contributors
-	"外观":      30,
+	"界面":      30,
+	"外观":      30, // legacy contributors
 	"键盘":      40, // legacy contributors
-	"集成":      50,
+	"连接":      50,
+	"集成":      50, // legacy contributors
+	"数据":      70,
+	"数据与通知":   70, // legacy contributors
 	"高级":      80,
 	"关于":      90,
 }
@@ -1578,12 +1582,18 @@ func (r *Root) settingsSectionTitle(section string) string {
 		return r.tr("常用", "Common")
 	case "模型":
 		return r.tr("模型与对话", "Models & chat")
+	case "界面":
+		return r.tr("界面与通知", "Interface & notifications")
 	case "外观":
 		return r.tr("外观与语言", "Appearance & language")
 	case "键盘":
 		return r.tr("键盘", "Keyboard")
+	case "连接":
+		return r.tr("连接", "Connections")
 	case "集成":
 		return r.tr("集成", "Integrations")
+	case "数据":
+		return r.tr("数据", "Data")
 	case "高级":
 		return r.tr("高级", "Advanced")
 	case "关于":
@@ -1677,10 +1687,16 @@ func (r *Root) settingsDiscardBar(c *ui.Context, t *design.Tokens) {
 	})
 }
 
+// settingsNavWidth is the fixed settings navigation column. It grew from 200
+// to 224 for the merged five-group navigation: the longer page names
+// (网络与搜索, 行为与限额) must not truncate while the page body keeps a useful
+// measure.
+const settingsNavWidth = 224
+
 // settingsNavColumn renders the grouped settings navigation with its filter
 // field. The host owns the navigation; pages only contribute their specs.
 func (r *Root) settingsNavColumn(c *ui.Context, t *design.Tokens, selected *string, groups []settingsGroup) {
-	ui.Column(c).Width(200).FillHeight().Children(func() {
+	ui.Column(c).Width(settingsNavWidth).FillHeight().Children(func() {
 		ui.Row(c).FillWidth().Shrink(0).
 			Padding(design.Space3, design.Space3, design.Space2, design.Space3).Children(func() {
 			ui.SearchField(c, &r.settingsQuery).

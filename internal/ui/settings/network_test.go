@@ -18,9 +18,9 @@ func TestNetworkPageDefaults(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "网络")
+	h.click(tester, "网络与搜索")
 
-	h.assertTexts(tester, "网络", "当前生效", "代理地址", "NO_PROXY", "直连",
+	h.assertTexts(tester, "网络与搜索", "当前生效", "代理地址", "NO_PROXY", "直连",
 		"修改后需要重启应用生效", "保存")
 }
 
@@ -31,7 +31,7 @@ func TestNetworkPageSaveWritesSettings(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "网络")
+	h.click(tester, "网络与搜索")
 
 	h.focusInput(tester, "代理地址 输入")
 	tester.Type("http://127.0.0.1:7890")
@@ -50,14 +50,16 @@ func TestNetworkPageSaveWritesSettings(t *testing.T) {
 	h.assertTexts(tester, "已保存", "http://127.0.0.1:7890", "localhost,127.0.0.1")
 }
 
-// TestNetworkPageInvalidURLIsNotWritten covers validation: a non-http(s) URL is
-// rejected with the page's danger text and nothing is written.
+// TestNetworkPageInvalidURLIsNotWritten covers validation on the merged network &
+// search page: a non-http(s) proxy URL is rejected with the page's danger text
+// and the shared footer writes neither half (a rejected proxy must not let the
+// search half commit a partial save).
 func TestNetworkPageInvalidURLIsNotWritten(t *testing.T) {
 	store := newFakeSettings(nil)
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "网络")
+	h.click(tester, "网络与搜索")
 
 	h.focusInput(tester, "代理地址 输入")
 	tester.Type("not-a-url")
@@ -80,7 +82,7 @@ func TestNetworkPageSaveError(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "网络")
+	h.click(tester, "网络与搜索")
 
 	h.focusInput(tester, "代理地址 输入")
 	tester.Type("http://127.0.0.1:7890")
@@ -99,7 +101,7 @@ func TestNetworkPageReadsStoredValues(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "网络")
+	h.click(tester, "网络与搜索")
 
 	h.assertTexts(tester, "http://old.proxy:8080", "localhost,.internal")
 	h.click(tester, "保存")
@@ -116,9 +118,9 @@ func TestNetworkPageEnglish(t *testing.T) {
 	h := newLocaleHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{}, "en")
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "Network")
+	h.click(tester, "Network & search")
 
-	h.assertTexts(tester, "Network", "Currently applied", "Proxy URL", "NO_PROXY",
+	h.assertTexts(tester, "Network & search", "Currently applied", "Proxy URL", "NO_PROXY",
 		"Direct", "Restart the app to apply changes", "Save")
 	// The footer primary is disabled while nothing is pending (P2-11); a typed
 	// proxy enables it and the save reports its result.

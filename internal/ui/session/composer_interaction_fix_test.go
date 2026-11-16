@@ -42,7 +42,7 @@ func menuItemInside(rect ui.Rect, width, height float32) bool {
 	return rect.X >= 0 && rect.Y >= 0 && rect.X+rect.W <= width && rect.Y+rect.H <= height
 }
 
-func TestSessionMenuTailReachableInNarrowWindow(t *testing.T) {
+func TestSessionMenuPermissionRowsReachableInNarrowWindow(t *testing.T) {
 	for _, size := range []struct {
 		name string
 		w, h int
@@ -53,7 +53,8 @@ func TestSessionMenuTailReachableInNarrowWindow(t *testing.T) {
 				{ID: "m1", Role: contracts.ChatRoleUser, Text: "你好"},
 				{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "你好呀"},
 			}}, true)
-			h := newPermissionHarness(t, chat, newPermissionSettings(nil))
+			settings := newPermissionSettings(nil)
+			h := newPermissionHarness(t, chat, settings)
 			tester := h.tester()
 			tester.SetSize(size.w, size.h)
 			// The composer width comes from the last laid-out frame.
@@ -62,58 +63,22 @@ func TestSessionMenuTailReachableInNarrowWindow(t *testing.T) {
 			}
 
 			h.openSessionMenu(tester)
-			// The menu's last row must be inside the window (no reachable-by-
-			// scrolling-only tail) and clickable.
-			last, ok := tester.Find("打开行为设置…")
-			if !ok {
-				t.Fatalf("%s: last menu item missing; texts = %v", size.name, tester.Texts())
+			// Every permission row must be inside the window (no reachable-by-
+			// scrolling-only tail) and the last one must be clickable.
+			for _, label := range []string{"权限模式", "工作区修改", "所有权限", "只读"} {
+				row, ok := tester.Find(label)
+				if !ok {
+					t.Fatalf("%s: menu row %q missing; texts = %v", size.name, label, tester.Texts())
+				}
+				if !menuItemInside(row, float32(size.w), float32(size.h)) {
+					t.Fatalf("%s: menu row %q rect %+v escapes the window", size.name, label, row)
+				}
 			}
-			if !menuItemInside(last, float32(size.w), float32(size.h)) {
-				t.Fatalf("%s: last menu item rect %+v escapes the window", size.name, last)
-			}
-			h.clickExact(tester, "打开行为设置…")
-			if !h.ui.Navigator().SettingsOpen() {
-				t.Fatalf("%s: last menu item is not clickable", size.name)
+			h.clickExact(tester, "只读")
+			if got := settings.get(contracts.SettingAgentPermission); got != contracts.PermissionReadOnly {
+				t.Fatalf("%s: last menu row is not clickable (%q)", size.name, got)
 			}
 		})
-	}
-}
-
-func TestSessionMenuSubmenusReachableAndShort(t *testing.T) {
-	chat := presetSessionChat(newPresetChat())
-	// This test pins the menu shape for an unconfigured model; with a model the
-	// very-compact composer intentionally folds the model chip (and its
-	// reasoning row) into this menu instead.
-	chat.config = contracts.ChatConfig{}
-	h := newPresetsHarness(t, chat, presetStore(t))
-	tester := h.tester()
-	tester.SetSize(704, 720)
-	for i := 0; i < 3; i++ {
-		tester.Frame()
-	}
-
-	h.openSessionMenu(tester)
-	// Persona and presets are submenu rows: the outer menu stays short.
-	h.assertTexts(tester, "权限模式", "对话模式", "人设", "插入预设", "打开行为设置…")
-	// Reasoning is not repeated in the session menu: the model chip owns it.
-	h.assertNoTexts(tester, "推理等级")
-	h.clickExact(tester, "人设")
-	h.assertTexts(tester, "Reviewer", "Writer", "无")
-	h.clickExact(tester, "Reviewer")
-	tester.Frame()
-	if calls := chat.selectedCalls(); len(calls) != 1 || calls[0] != "sess-1:p1" {
-		t.Fatalf("SetSessionPreset calls = %v", calls)
-	}
-
-	// The preset submenu is reachable too.
-	h.openSessionMenu(tester)
-	h.clickExact(tester, "插入预设")
-	h.assertTexts(tester, "简洁回答", "代码审查", "逐步推理")
-	h.clickExact(tester, "代码审查")
-	tester.Frame()
-	// Choosing a preset closes the whole menu and keeps the content as a draft.
-	if tester.HasText("插入预设") {
-		t.Fatalf("menu still open after choosing a preset; texts = %v", tester.Texts())
 	}
 }
 

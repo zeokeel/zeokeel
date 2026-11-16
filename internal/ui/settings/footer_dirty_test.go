@@ -100,13 +100,14 @@ func TestH1AppearanceFooterDirty(t *testing.T) {
 	}
 }
 
-// TestH1NetworkAndSearchDirty covers the explicit-save network and search pages:
-// their footers save, and a draft difference marks the page unsaved.
+// TestH1NetworkAndSearchDirty covers the merged explicit-save network & search
+// page: its one footer saves, and either half's draft difference marks the page
+// unsaved and guards closing.
 func TestH1NetworkAndSearchDirty(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "网络")
+	h.click(tester, "网络与搜索")
 	h.focusInput(tester, "代理地址 输入")
 	tester.Type("http://127.0.0.1:7890")
 	tester.Frame()
@@ -123,7 +124,7 @@ func TestH1NetworkAndSearchDirty(t *testing.T) {
 	h2 := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
 	tester2 := h2.tester()
 	tester2.Frame()
-	h2.click(tester2, "搜索")
+	h2.click(tester2, "网络与搜索")
 	h2.focusInput(tester2, "搜索端点 输入")
 	tester2.Type("https://search.example.com/search")
 	tester2.Frame()
@@ -181,17 +182,19 @@ func TestN1DiscardResetsModelPage(t *testing.T) {
 	}
 }
 
-// TestN1DiscardResetsOtherDirtyPages covers the appearance, network and search
-// Discard hooks at behavior level: discard closes, reopen is clean and closes
-// without the unsaved guard.
+// TestN1DiscardResetsOtherDirtyPages covers the appearance and merged network &
+// search Discard hooks at behavior level: discard closes, reopen is clean and
+// closes without the unsaved guard.
 func TestN1DiscardResetsOtherDirtyPages(t *testing.T) {
 	cases := []struct {
 		page   string
+		nav    string
 		edit   func(t *testing.T, h *harness, tester *ui.Tester)
 		reopen func(t *testing.T, h *harness, tester *ui.Tester)
 	}{
 		{
 			page: "外观",
+			nav:  "外观",
 			edit: func(t *testing.T, h *harness, tester *ui.Tester) {
 				h.focusInput(tester, "组合键 输入")
 				tester.Type("CmdOrCtrl+Alt+J")
@@ -200,22 +203,24 @@ func TestN1DiscardResetsOtherDirtyPages(t *testing.T) {
 			reopen: func(t *testing.T, h *harness, tester *ui.Tester) { h.click(tester, "外观") },
 		},
 		{
-			page: "网络",
+			page: "网络代理",
+			nav:  "网络与搜索",
 			edit: func(t *testing.T, h *harness, tester *ui.Tester) {
 				h.focusInput(tester, "代理地址 输入")
 				tester.Type("http://127.0.0.1:7890")
 				tester.Frame()
 			},
-			reopen: func(t *testing.T, h *harness, tester *ui.Tester) { h.click(tester, "网络") },
+			reopen: func(t *testing.T, h *harness, tester *ui.Tester) { h.click(tester, "网络与搜索") },
 		},
 		{
-			page: "搜索",
+			page: "搜索端点",
+			nav:  "网络与搜索",
 			edit: func(t *testing.T, h *harness, tester *ui.Tester) {
 				h.focusInput(tester, "搜索端点 输入")
 				tester.Type("https://search.example.com/search")
 				tester.Frame()
 			},
-			reopen: func(t *testing.T, h *harness, tester *ui.Tester) { h.click(tester, "搜索") },
+			reopen: func(t *testing.T, h *harness, tester *ui.Tester) { h.click(tester, "网络与搜索") },
 		},
 	}
 	for _, test := range cases {
@@ -225,7 +230,7 @@ func TestN1DiscardResetsOtherDirtyPages(t *testing.T) {
 			h := newHarness(t, &fakeChat{}, store, settings.Config{})
 			tester := h.tester()
 			tester.Frame()
-			h.click(tester, test.page)
+			h.click(tester, test.nav)
 			test.edit(t, h, tester)
 			h.assertTexts(tester, "未保存")
 
@@ -264,7 +269,7 @@ func TestN3AnyDirtyPageGuardsClosing(t *testing.T) {
 
 	// Switch to a page with no Dirty: the host's header still reports the
 	// unsaved edit made on the model page (N3), and the close guard fires.
-	h.click(tester, "行为")
+	h.click(tester, "行为与限额")
 	h.assertTexts(tester, "未保存")
 	closeSettings(h, tester)
 	if !h.uiRoot.Navigator().SettingsOpen() {

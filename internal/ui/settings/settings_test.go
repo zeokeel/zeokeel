@@ -314,25 +314,6 @@ func (h *harness) tester() *ui.Tester {
 
 func (h *harness) click(tester *ui.Tester, label string) {
 	h.t.Helper()
-	// The settings navigation keeps the 高级 group collapsed by default (the
-	// settings-complexity simplification). A test that asks for a low-frequency
-	// page opens the group first, exactly like a user would. The visible groups
-	// now fill the navigation on their own, so the 高级 header can sit below the
-	// fold: scroll it into view before opening it.
-	if _, ok := tester.Find(label); !ok {
-		for _, advanced := range []string{"高级", "Advanced"} {
-			if !hasExactLabel(tester, advanced) {
-				continue
-			}
-			if _, expandable := tester.Find(advanced); expandable {
-				h.ensureVisible(tester, advanced)
-				if err := tester.Click(advanced); err == nil {
-					tester.Frame()
-				}
-			}
-			break
-		}
-	}
 	h.ensureVisible(tester, label)
 	if err := tester.Click(label); err != nil {
 		h.t.Fatalf("click %q: %v; texts = %v", label, err, tester.Texts())
@@ -735,21 +716,27 @@ func TestSettingsFooterSaveVerbAndDisabledState(t *testing.T) {
 	h.assertTexts(tester, "已保存")
 	requireFooterDisabled(t, tester, "保存", true, "appearance applied")
 
-	// Search page (already 保存): now disabled until the endpoint draft differs.
-	h.click(tester, "搜索")
-	requireFooterDisabled(t, tester, "保存", true, "search clean")
-	h.focusInput(tester, "搜索端点 输入")
-	tester.Type("https://search.example.com/search")
-	tester.Frame()
-	requireFooterDisabled(t, tester, "保存", false, "search dirty")
-
-	// Network page (already 保存): same semantics.
-	h.click(tester, "网络")
-	requireFooterDisabled(t, tester, "保存", true, "network clean")
+	// Network & search (already 保存): the merged page has one footer save for
+	// both halves; either draft lights the primary, and saving persists both.
+	h.click(tester, "网络与搜索")
+	requireFooterDisabled(t, tester, "保存", true, "network & search clean")
 	h.focusInput(tester, "代理地址 输入")
 	tester.Type("http://127.0.0.1:7890")
 	tester.Frame()
-	requireFooterDisabled(t, tester, "保存", false, "network dirty")
+	requireFooterDisabled(t, tester, "保存", false, "network draft dirty")
+	h.focusInput(tester, "搜索端点 输入")
+	tester.Type("https://search.example.com/search")
+	tester.Frame()
+	requireFooterDisabled(t, tester, "保存", false, "search draft dirty")
+	h.click(tester, "保存")
+	h.assertTexts(tester, "已保存")
+	requireFooterDisabled(t, tester, "保存", true, "network & search saved")
+	if got := h.settings.get(contracts.SettingNetProxy); got != "http://127.0.0.1:7890" {
+		t.Fatalf("%s = %q, want the typed proxy", contracts.SettingNetProxy, got)
+	}
+	if got := h.settings.get(contracts.SettingWebSearchEndpoint); got != "https://search.example.com/search" {
+		t.Fatalf("%s = %q, want the typed endpoint", contracts.SettingWebSearchEndpoint, got)
+	}
 }
 
 // TestSettingsFooterSaveIgnoresInstantItems pins the model page's split: the
@@ -780,47 +767,83 @@ func TestSettingsFooterSaveIgnoresInstantItems(t *testing.T) {
 	requireFooterDisabled(t, tester, "保存", true, "appearance after an immediate switch")
 }
 
-// TestSettingsGroupingLiftsFrequentPagesOutOfAdvanced pins the regrouping: the
-// frequent notifications/memory/archive pages sit in an always-visible group
-// instead of behind the collapsed advanced group, while diagnostics stays the
-// low-frequency page there; deep links still land.
-func TestSettingsGroupingLiftsFrequentPagesOutOfAdvanced(t *testing.T) {
+// TestSettingsGroupingMergedPagesAndAliases pins the merged 10-page / 5-group
+// settings IA: all five groups are visible at once (the collapsed 高级 group is
+// gone), the standalone pages were merged into the pages that now own their
+// content, and the retired page IDs still deep-link to the merged page.
+func TestSettingsGroupingMergedPagesAndAliases(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
 	tester := h.tester()
 	tester.Frame()
 
-	h.assertTexts(tester, "数据与通知", "通知", "记忆", "归档")
-	if rect, ok := tester.Find("数据与通知"); !ok || rect.W <= 0 || rect.H <= 0 {
-		t.Fatalf("the new group header has no visible geometry: %+v, ok=%v", rect, ok)
+	// The five always-visible groups.
+	for _, group := range []string{"常用", "界面与通知", "连接", "数据", "关于"} {
+		if !hasExactLabel(tester, group) {
+			t.Fatalf("settings nav group %q missing; texts = %v", group, tester.Texts())
+		}
 	}
-	if _, ok := tester.Find("诊断"); ok {
-		t.Fatalf("诊断 is visible before the advanced group opens; texts = %v", tester.Texts())
+	// The merged/removed destinations are not separate sidebar items anymore.
+	for _, retired := range []string{"数据与通知", "高级", "预设", "快捷键", "搜索", "能力", "导入", "更新", "诊断"} {
+		if hasExactLabel(tester, retired) {
+			t.Fatalf("retired settings nav item %q is still in the sidebar; texts = %v", retired, tester.Texts())
+		}
 	}
-	h.click(tester, "高级")
-	h.assertTexts(tester, "诊断")
+	// Ten pages: everything is reachable without opening a collapsed group.
+	for _, page := range []string{"模型", "行为与限额", "外观", "通知", "网络与搜索", "LSP", "记忆", "归档", "数据与隐私", "关于"} {
+		if _, ok := tester.Find(page); !ok {
+			t.Fatalf("settings page %q is missing from the navigation; texts = %v", page, tester.Texts())
+		}
+	}
 
-	// The deep link keeps working for a moved page.
+	// The normal deep link keeps working for a page that stayed.
 	if err := h.uiRoot.OpenSettingsPage("notifications"); err != nil {
 		t.Fatalf("OpenSettingsPage(notifications): %v", err)
 	}
 	tester.Frame()
 	tester.Frame()
 	h.assertTexts(tester, "系统通知")
+
+	// Retired page IDs alias to the merged page that absorbed their content.
+	aliases := []struct{ id, want string }{
+		{"shortcuts", "桌面快捷键"},
+		{"search", "搜索后端"},
+		{"capabilities", "委派并发"},
+		{"import", "导入服务未启用"},
+		{"update", "当前版本"},
+		{"diagnostics", "运行时信息"},
+	}
+	for _, alias := range aliases {
+		if err := h.uiRoot.OpenSettingsPage(alias.id); err != nil {
+			t.Fatalf("OpenSettingsPage(%s): %v", alias.id, err)
+		}
+		tester.Frame()
+		tester.Frame()
+		h.assertTexts(tester, alias.want)
+	}
 }
 
-// TestSettingsGroupingAndSaveEnglish covers the English copy of the new group
-// and the unified verb.
+// TestSettingsGroupingAndSaveEnglish covers the English copy of the merged
+// groups and the unified footer verb.
 func TestSettingsGroupingAndSaveEnglish(t *testing.T) {
 	h := newLocaleHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{}, "en")
 	tester := h.tester()
 	tester.Frame()
 
-	h.assertTexts(tester, "Data & notifications", "Notifications", "Memory", "Archived")
-	if _, ok := tester.Find("Diagnostics"); ok {
-		t.Fatalf("Diagnostics is visible before the advanced group opens; texts = %v", tester.Texts())
+	for _, group := range []string{"Common", "Interface & notifications", "Connections", "Data", "About"} {
+		if !hasExactLabel(tester, group) {
+			t.Fatalf("English settings nav group %q missing; texts = %v", group, tester.Texts())
+		}
 	}
-	h.click(tester, "Advanced")
-	h.assertTexts(tester, "Diagnostics")
+	for _, retired := range []string{"Appearance & language", "Data & notifications", "Advanced", "Presets", "Shortcuts", "Search", "Capabilities", "Import", "Update", "Diagnostics"} {
+		if hasExactLabel(tester, retired) {
+			t.Fatalf("retired English settings nav item %q is still in the sidebar; texts = %v", retired, tester.Texts())
+		}
+	}
+	for _, page := range []string{"Model", "Behavior & limits", "Appearance", "Notifications", "Network & search", "LSP", "Memory", "Archived", "Data & privacy", "About"} {
+		if _, ok := tester.Find(page); !ok {
+			t.Fatalf("English settings page %q is missing from the navigation; texts = %v", page, tester.Texts())
+		}
+	}
 
 	h.click(tester, "Model")
 	if _, ok := tester.Find("Save prompt & runtime"); ok {

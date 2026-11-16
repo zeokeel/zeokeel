@@ -63,6 +63,15 @@ func TestDiagnosticsBuiltInModules(t *testing.T) {
 	tester := openDiagnostics(t, moduleListerFake{modules: modulesCatalog(42)})
 	requireHasText(t, tester, "已加载模块 42 个")
 	requireNoText(t, tester, "entry-00") // collapsed
+	// The merged About page is long; the diagnostics section sits below the
+	// fold, so scroll like the user would before expanding its module list.
+	for attempt := 0; attempt < 8; attempt++ {
+		if rect, ok := tester.Find("展开模块列表"); ok && rect.Y+rect.H < 800 {
+			break
+		}
+		tester.Scroll(740, 500, 0, 220)
+		tester.Frame()
+	}
 	if err := tester.Click("展开模块列表"); err != nil {
 		t.Fatalf("expand modules: %v; texts = %v", err, tester.Texts())
 	}

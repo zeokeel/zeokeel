@@ -19,7 +19,7 @@ import (
 
 // composerToolbarChat is a fake chat with an active conversation whose model is
 // configured, so the composer renders all three toolbar controls (attach, model
-// chip, 会话设置 menu).
+// chip, permission menu).
 func composerToolbarChat() *fakeChat {
 	chat := newFakeChat()
 	chat.config = contracts.ChatConfig{Model: "toolbar-model"}
@@ -55,7 +55,7 @@ func TestComposerToolbarKeyboardFocus(t *testing.T) {
 	}
 	// The three switchers sit inside the toolbar's bounds (one row), not beside
 	// it as free-standing controls.
-	for _, name := range []string{"附件", "toolbar-model", "会话设置"} {
+	for _, name := range []string{"附件", "toolbar-model", "工作区修改"} {
 		info, found := tester.Access(name)
 		if !found {
 			t.Fatalf("toolbar control %q missing; texts = %v", name, tester.Texts())
@@ -74,20 +74,20 @@ func TestComposerToolbarKeyboardFocus(t *testing.T) {
 	h.openSessionMenu(tester)
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
-	if !tester.Focused("会话设置") {
-		t.Fatalf("the session menu did not keep the focus; texts = %v", tester.Texts())
+	if !tester.Focused("工作区修改") {
+		t.Fatalf("the permission menu did not keep the focus; texts = %v", tester.Texts())
 	}
 	tester.Key(0, ui.KeyLeft)
 	if !tester.Focused("toolbar-model") {
-		t.Fatalf("Left from 会话设置 did not reach the model chip")
+		t.Fatalf("Left from the permission button did not reach the model chip")
 	}
 	tester.Key(0, ui.KeyRight)
-	if !tester.Focused("会话设置") {
-		t.Fatalf("Right from the model chip did not return to 会话设置")
+	if !tester.Focused("工作区修改") {
+		t.Fatalf("Right from the model chip did not return to the permission button")
 	}
 	tester.Key(0, ui.KeyRight)
 	if !tester.Focused("附件") {
-		t.Fatalf("Right past 会话设置 did not wrap to the attach control")
+		t.Fatalf("Right past the permission button did not wrap to the attach control")
 	}
 	// Enter on the focused attach control opens the picker like a click.
 	tester.Key(0, ui.KeyEnter)

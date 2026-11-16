@@ -1,6 +1,6 @@
 package settings_test
 
-// Tests for the diagnostics page's loaded-module list (host KeyModuleLister):
+// Tests for the diagnostics section's loaded-module list (host KeyModuleLister):
 // the count row, the expandable mono rows, the 40-row cap, absence without the
 // service and the English copy.
 
@@ -31,7 +31,7 @@ func TestDiagnosticsLoadedModules(t *testing.T) {
 	provide[contracts.ModuleLister](t, h.ctx, contracts.KeyModuleLister, lister)
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "诊断")
+	h.click(tester, "关于")
 
 	h.assertTexts(tester, "已加载模块 3 个")
 	// Nothing of the collection shows until the disclosure opens.
@@ -71,7 +71,7 @@ func TestDiagnosticsLoadedModulesCappedAt40(t *testing.T) {
 	provide[contracts.ModuleLister](t, h.ctx, contracts.KeyModuleLister, modulesLister{modules: modules})
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "诊断")
+	h.click(tester, "关于")
 	h.assertTexts(tester, "已加载模块 42 个")
 	h.click(tester, "展开模块列表")
 	h.assertTexts(tester, "entry-39", "…")
@@ -88,7 +88,7 @@ func TestDiagnosticsLoadedModulesHiddenWithoutService(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "诊断")
+	h.click(tester, "关于")
 	h.assertNoTexts(tester, "已加载模块", "展开模块列表")
 }
 
@@ -100,7 +100,7 @@ func TestDiagnosticsLoadedModulesEnglish(t *testing.T) {
 	provide[contracts.ModuleLister](t, h.ctx, contracts.KeyModuleLister, lister)
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "Diagnostics")
+	h.click(tester, "About")
 	h.assertTexts(tester, "Loaded modules: 1")
 	h.click(tester, "Show modules")
 	h.assertTexts(tester, "appinfo", "zeokeel/appinfo", "active")

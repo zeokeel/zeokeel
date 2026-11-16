@@ -53,17 +53,13 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 
-	// Shell title and host-rendered page navigation. The frequent data and
-	// notification pages sit in their own always-visible group (P2-11); only
-	// the low-frequency advanced group is collapsed (its header is the
-	// discoverable entry point).
-	h.assertTexts(tester, "Common", "Model", "Behavior",
-		"Presets", "Appearance & language", "Appearance", "Shortcuts",
-		"Integrations", "Search", "Network",
-		"Data & notifications", "Notifications", "Memory", "Archived", "Advanced")
-	h.assertNoTexts(tester, "模型", "外观", "技能", "快捷键", "诊断", "更新", "导入")
-	h.click(tester, "Advanced")
-	h.assertTexts(tester, "Diagnostics", "Update", "Import", "Notifications", "Archived")
+	// Shell title and the merged 10-page / 5-group navigation.
+	h.assertTexts(tester, "Common", "Model", "Behavior & limits",
+		"Interface & notifications", "Appearance", "Notifications",
+		"Connections", "Network & search", "LSP",
+		"Data", "Memory", "Archived", "Data & privacy", "About")
+	h.assertNoTexts(tester, "模型", "外观", "技能", "快捷键", "诊断", "更新", "导入",
+		"高级", "Data & notifications")
 
 	// Model page: the model list is the only model surface; the footer Save
 	// owns only the prompt/runtime drafts.
@@ -72,37 +68,42 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 		"Prompt & runtime (saved by the footer)", "System prompt",
 		"Save", "Default model", "Not configured", "No models yet")
 
-	// Appearance page.
+	// Appearance page: the keyboard shortcuts moved into its desktop-shortcut
+	// section instead of remaining a separate page.
 	h.click(tester, "Appearance")
 	h.assertTexts(tester, "Appearance", "Theme", "Appearance mode", "Light", "Dark", "System",
-		"Language", "Interface language", "Save")
+		"Language", "Interface language", "Desktop shortcuts", "All shortcuts",
+		"Collapse / expand sidebar", uikit.FormatShortcut("cmd+b"),
+		"Open command palette", "Save")
+	h.assertNoTexts(tester, "Shortcuts", "Appearance & language")
 
-	// Shortcuts page.
-	h.click(tester, "Shortcuts")
-	h.assertTexts(tester, "Shortcuts", "Collapse / expand sidebar", uikit.FormatShortcut("cmd+b"),
-		"Open command palette", "Send message", "New line", "Close dialog / menu",
-		"Restore defaults", "Sidebar shortcut")
+	// Network & search: the search backend is the second half of the page.
+	h.click(tester, "Network & search")
+	h.assertTexts(tester, "Network & search", "Currently applied", "Search backend",
+		"Search endpoint", "API Key")
 
-	// Diagnostics page.
-	h.click(tester, "Diagnostics")
-	h.assertTexts(tester, "Diagnostics", "Data directory", "Session database",
-		"Tools", "Sessions", "Setting keys", "Copy diagnostics")
+	// Data & privacy: the DSH import lives at the page's end (backend absent).
+	h.click(tester, "Data & privacy")
+	h.assertTexts(tester, "Data & privacy", "Data directory", "Session data",
+		"Import service is not enabled")
 
-	// Update and import pages (backends absent, their disabled states localize).
-	h.click(tester, "Update")
-	h.assertTexts(tester, "Update", "Current version", "Update service is not enabled")
-	h.click(tester, "Import")
-	h.assertTexts(tester, "Import", "Import service is not enabled")
+	// About: the merged build information + update + diagnostics hub.
+	h.click(tester, "About")
+	h.assertTexts(tester, "About", "Build information", "Current version",
+		"Update service is not enabled", "Runtime information", "Data directory",
+		"Session database", "Copy diagnostics")
+
 	// Switch back to Chinese: navigation and content follow on the next frame.
 	h.uiRoot.Locale().SetLanguage("zh")
 	tester.Frame()
-	h.assertTexts(tester, "设置", "常用", "模型", "行为", "预设", "外观",
-		"外观", "快捷键", "集成", "搜索", "网络",
-		"数据与通知", "通知", "记忆", "归档", "高级")
+	h.assertTexts(tester, "设置", "常用", "模型", "行为与限额", "界面与通知",
+		"外观", "通知", "连接", "网络与搜索", "LSP",
+		"数据", "记忆", "归档", "数据与隐私", "关于")
 	// The module-declared group's title follows the language switch with the
 	// page titles; the English value must not linger.
-	h.assertNoTexts(tester, "Settings", "Providers", "Appearance", "Shortcuts",
-		"Diagnostics", "Data & notifications")
+	h.assertNoTexts(tester, "Settings", "Common", "Behavior & limits",
+		"Interface & notifications", "Appearance", "Network & search",
+		"Data & privacy", "About")
 	h.click(tester, "模型")
 	h.assertTexts(tester, "模型列表（即时生效）", "添加模型",
 		"提示词与运行参数（页脚保存）", "保存", "还没有模型")
@@ -134,7 +135,7 @@ func TestSettingsEnglishUpdatePage(t *testing.T) {
 	h := newLocaleHarnessWithUpdate(t, "en", update)
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "Update")
+	h.click(tester, "About")
 	h.assertTexts(tester, "Update", "Current version", "1.0.0", "Check for updates")
 	h.click(tester, "Check for updates")
 	waitForText(t, tester, "Latest version")

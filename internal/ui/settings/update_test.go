@@ -1,6 +1,7 @@
 package settings_test
 
-// Tests for the settings 更新 page: the optional update backend, the async
+// Tests for the update section of the merged 关于 / About settings page: the
+// optional update backend, the async
 // check with its checking state, the version/status result, the release-notes
 // Markdown, the resource line, the copy-link action and the error states.
 
@@ -113,7 +114,7 @@ func openUpdatePage(t *testing.T, h *harness) *ui.Tester {
 	t.Helper()
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "更新")
+	h.click(tester, "关于")
 	return tester
 }
 
@@ -134,7 +135,7 @@ func TestUpdatePageWithoutBackend(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "更新")
+	h.click(tester, "关于")
 	h.assertTexts(tester, "更新", "当前版本", "dev", "更新服务未启用")
 	// The description mentions 检查更新; the action button itself must be absent.
 	if got := exactTextCount(tester.Texts(), "检查更新"); got != 0 {
@@ -163,6 +164,7 @@ func TestUpdateCheckShowsNewVersion(t *testing.T) {
 		"修复登录问题", "提升启动速度", "复制下载链接",
 		"资源："+runtime.GOOS+"/"+runtime.GOARCH, "2.0 MB", "SHA256 abcdef01")
 
+	h.ensureVisible(tester, "复制下载链接")
 	if err := tester.Click("复制下载链接"); err != nil {
 		t.Fatalf("click copy link: %v; texts = %v", err, tester.Texts())
 	}
@@ -192,6 +194,7 @@ func TestUpdateCheckAlreadyLatest(t *testing.T) {
 	h.assertNoTexts(tester, "可更新")
 	h.assertTexts(tester, "没有匹配当前平台的下载资源")
 	// The copy button exists but is disabled with no URL: it writes nothing.
+	h.ensureVisible(tester, "复制下载链接")
 	if err := tester.Click("复制下载链接"); err != nil {
 		t.Fatalf("click disabled copy: %v", err)
 	}
@@ -809,7 +812,7 @@ func TestUpdateInstallEnglishCopy(t *testing.T) {
 	calls := registerInstallCommand(t, h, nil)
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "Update")
+	h.click(tester, "About")
 	tester.Frame()
 	h.click(tester, "Check for updates")
 	waitForText(t, tester, "Update available")

@@ -14,14 +14,8 @@ import (
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
-// Import page constants. Section "general" matches About (90) and 更新 (92);
-// Order 94 keeps this page after both, so the default page stays About.
-const (
-	ImportPageID      = "import"
-	ImportPageSection = "高级"
-	ImportPageOrder   = 30
-	ImportPageTitle   = "导入"
-)
+// ImportPageTitle is the section title the merged Data & privacy page uses.
+const ImportPageTitle = "导入"
 
 // ImportDirectoryPicker is the DSH data-directory seam: the default opens the
 // native mygo directory dialog with a localized title; tests replace it with a
@@ -59,11 +53,13 @@ func newImportState() *importState { return &importState{} }
 // browse seam + scan), the read-only scan preview and the import action with
 // its result. No progress percentages: the service reports counts only.
 func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runtime contracts.UIRuntime,
-	st *importState, locale contracts.LocaleService) {
+	st *importState, locale contracts.LocaleService, showHeader bool) {
 	importer, hasImporter := kctx.Get(contracts.KeyImporter)
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, "导入", "Import"), "")
+		if showHeader {
+			uikit.PageHeader(c, localized(locale, "导入", "Import"), "")
+		}
 		if !hasImporter {
 			uikit.EmptyState(c, localized(locale,
 				"导入服务未启用", "Import service is not enabled"))

@@ -19,7 +19,7 @@ func openBehaviorPage(t *testing.T, h *harness) *ui.Tester {
 	t.Helper()
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "行为")
+	h.click(tester, "行为与限额")
 	tester.Frame()
 	return tester
 }
@@ -51,7 +51,7 @@ func requireSegmentUnchecked(t *testing.T, tester *ui.Tester, label string) {
 // TestBehaviorPageWorkStepsDefaults covers the visible section and its defaults:
 // the four display levels and two collapse timings are listed, the defaults
 // (标准 / 回答结束后) are selected, rendering writes nothing, and the section
-// sits between the permission section and the collapsed conversation options.
+// sits between the OS sandbox status and the collapsed conversation options.
 func TestBehaviorPageWorkStepsDefaults(t *testing.T) {
 	store := newFakeSettings(nil)
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
@@ -69,11 +69,11 @@ func TestBehaviorPageWorkStepsDefaults(t *testing.T) {
 	requireSegmentUnchecked(t, tester, "完全展开")
 	requireSegmentUnchecked(t, tester, "下次有新消息时")
 
-	// The section sits between the daily permission choice and the collapsed
+	// The section sits between the OS sandbox status and the collapsed
 	// low-frequency settings.
-	permission, ok := tester.Find("默认代理权限")
+	sandbox, ok := tester.Find("OS 沙箱")
 	if !ok {
-		t.Fatalf("permission section missing; texts = %v", tester.Texts())
+		t.Fatalf("sandbox section missing; texts = %v", tester.Texts())
 	}
 	workSteps, ok := tester.Find("工作步骤")
 	if !ok {
@@ -83,9 +83,9 @@ func TestBehaviorPageWorkStepsDefaults(t *testing.T) {
 	if !ok {
 		t.Fatalf("more-settings disclosure missing; texts = %v", tester.Texts())
 	}
-	if !(permission.Y < workSteps.Y && workSteps.Y < more.Y) {
-		t.Fatalf("section order y = permission %.1f, work steps %.1f, more %.1f; want permission < work steps < more",
-			permission.Y, workSteps.Y, more.Y)
+	if !(sandbox.Y < workSteps.Y && workSteps.Y < more.Y) {
+		t.Fatalf("section order y = sandbox %.1f, work steps %.1f, more %.1f; want sandbox < work steps < more",
+			sandbox.Y, workSteps.Y, more.Y)
 	}
 
 	// Rendering never writes the defaults: the rows stay absent.
@@ -192,7 +192,7 @@ func TestBehaviorPageWorkStepsEnglish(t *testing.T) {
 	h := newLocaleHarness(t, &fakeChat{}, store, settings.Config{}, "en")
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "Behavior")
+	h.click(tester, "Behavior & limits")
 	tester.Frame()
 
 	h.assertTexts(tester,

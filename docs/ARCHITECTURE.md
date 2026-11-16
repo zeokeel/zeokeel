@@ -168,7 +168,7 @@ sidebar 消费，无服务时仅打开会话）。
   {"id":"appinfo","module":"zeokeel/appinfo","config":{"name":"ZeoKeel"}},
   {"id":"ui","module":"zeokeel/host/group","children":[
     {"id":"home","module":"zeokeel-ui/home"},
-    {"id":"about","module":"zeokeel-ui/about"}
+    {"id":"settings","module":"zeokeel-ui/settings"}
   ]}
 ]}
 ```
@@ -248,9 +248,9 @@ sidebar 消费，无服务时仅打开会话）。
   `ui/rightpanel` 提供窗口级 docked 右侧栏（默认收起；多标签：开始/文件/打开的文件；侧边栏终端已于 0.2.41 删除），宿主右上角开关；composer slash 命令；
   composer 工具栏（模型 chip / 命令入口 / 附件占位）与 Home 初始设置卡对照 old 实现；
   （日志面已随多标签右栏收敛删除；持久化事件仍由 KeyStore/SessionLog 提供）
-- ✅ 示范模块：`appinfo`（服务）、`ui/home`（screen+command+槽位组合）、`ui/about`
-  （settings page + settings.header）、`ui/welcome`（home.hero + command）、
-  `ui/toolcards`（ToolRenderer）、`uikit`（共享控件封装）
+- ✅ 示范模块：`appinfo`（服务）、`ui/home`（screen+command+槽位组合）、
+  `ui/settings`（settings pages：模型/行为与限额/外观/网络/关于等）、`ui/welcome`
+  （home.hero + command）、`ui/toolcards`（ToolRenderer）、`uikit`（共享控件封装）
 - ✅ 测试：uiroot 29 个 headless 测试（覆盖率 99.3%，含注入点区域/Post/生命周期/多窗串行）、
   assembly/host 装配与宿主测试、ui 模块集成测试（真实 assembly.Load + Root.View）；`-race` 绿
 - ✅ 验证：`make ci` 全绿；headless 产品可运行并优雅退出；Xvfb 下 desktop 真窗口冒烟通过

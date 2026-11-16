@@ -64,26 +64,6 @@ func TestLSPDraftGuardOnClose(t *testing.T) {
 	}
 }
 
-// TestPresetsDraftGuardOnClose covers ST-02 for the 新增预设 form.
-func TestPresetsDraftGuardOnClose(t *testing.T) {
-	store := newFakeSettings(nil)
-	h := newHarness(t, &fakeChat{}, store, settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "预设")
-	h.focusInput(tester, "预设名称 输入")
-	tester.Type("我的预设")
-	tester.Frame()
-	assertCloseGuard(t, h, tester)
-	h.click(tester, "放弃修改")
-	tester.Frame()
-	reopenSettings(h, tester)
-	h.click(tester, "预设")
-	if got := inputValue(t, tester, "预设名称 输入"); got != "" {
-		t.Fatalf("the discarded preset draft survived: %q", got)
-	}
-}
-
 // TestMemoryDraftGuardOnClose covers ST-02 for the 添加记忆 input.
 func TestMemoryDraftGuardOnClose(t *testing.T) {
 	h := memoryPageHarness(t, newFakeMemoryStore())
@@ -129,7 +109,7 @@ func TestBehaviorDraftGuardOnlyWithDraft(t *testing.T) {
 	// Opening the disclosure loads the stored value; a later write from
 	// elsewhere makes the loaded draft stale, so closing asks first.
 	reopenSettings(h, tester)
-	h.click(tester, "行为")
+	h.click(tester, "行为与限额")
 	h.click(tester, "更多对话设置")
 	tester.Frame()
 	if err := store.Set(contracts.SettingAgentsFile, "OTHER.md"); err != nil {
@@ -140,7 +120,7 @@ func TestBehaviorDraftGuardOnlyWithDraft(t *testing.T) {
 	h.click(tester, "放弃修改")
 	tester.Frame()
 	reopenSettings(h, tester)
-	h.click(tester, "行为")
+	h.click(tester, "行为与限额")
 	tester.Frame()
 	if got := store.get(contracts.SettingAgentsFile); got != "OTHER.md" {
 		t.Fatalf("stored instruction file = %q, want OTHER.md", got)
@@ -154,12 +134,12 @@ func TestDiagnosticsCopiedBadgeClearsOnReentry(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "诊断")
+	h.click(tester, "关于")
 	h.click(tester, "复制诊断信息")
 	h.assertTexts(tester, "已复制")
 	h.click(tester, "模型")
 	tester.Frame()
-	h.click(tester, "诊断")
+	h.click(tester, "关于")
 	tester.Frame()
 	h.assertNoTexts(tester, "已复制")
 }
@@ -203,24 +183,6 @@ func TestAppearanceReReadsThemeOnReentry(t *testing.T) {
 	}
 	if !info.Checked {
 		t.Fatalf("the appearance page did not re-read the theme mode on re-entry: checked=%v", info.Checked)
-	}
-}
-
-// TestBehaviorPermissionChipIsCompact covers ST-04: the default-permission
-// popover menu is a chip at its natural width, not a full-row field.
-func TestBehaviorPermissionChipIsCompact(t *testing.T) {
-	store := newFakeSettings(nil)
-	h := newHarness(t, &fakeChat{}, store, settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "行为")
-	tester.Frame()
-	info, ok := tester.Access("工作区可写")
-	if !ok {
-		t.Fatalf("permission menu button not found; texts = %v", tester.Texts())
-	}
-	if info.Bounds.W >= 200 {
-		t.Fatalf("permission chip is %v DIP wide, want a natural chip width < 200", info.Bounds.W)
 	}
 }
 

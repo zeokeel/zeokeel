@@ -351,7 +351,7 @@ func AskDialog(c *ui.Context, o AskDialogOptions)
 
 **职责**：用户与 Agent 交互的主入口。统一两个 composer（会话页 / 首页）的解剖，避免同一动作两种外观；保持"流式期间可继续输入 + 停止/排队"的安全语义。
 
-**数据模型**：`draft string`、`attachments []Attachment`、`running bool`、`queue []string`、模型/权限/模式/人设选择、模型与推理等级（`modelcatalog.models` 的模型列表与 `DefaultThinking`）、会话×模型推理等级覆盖（`session.<id>.thinking.<modelID>`，默认跟随该模型默认值；旧 `session.<id>.thinking`/`session.<id>.effort` 仅作旧会话兼容回落，任何一次显式选择都会清掉旧行）、`focusComposer`。
+**数据模型**：`draft string`、`attachments []Attachment`、`running bool`、`queue []string`、权限选择、模型与推理等级（`modelcatalog.models` 的模型列表与 `DefaultThinking`）、会话×模型推理等级覆盖（`session.<id>.thinking.<modelID>`，默认跟随该模型默认值；旧 `session.<id>.thinking`/`session.<id>.effort` 仅作旧会话兼容回落，任何一次显式选择都会清掉旧行）、`focusComposer`。
 
 **状态矩阵**：
 
@@ -373,7 +373,7 @@ type ComposerOptions struct {
     Running     bool
     Queue       []string
     Attachments func(c *ui.Context)
-    Toolbar     func(c *ui.Context) // 附件/模型/权限/模式/推理/人设
+    Toolbar     func(c *ui.Context) // 附件/模型/权限/推理
     Send        func()
     Stop        func()
     OnKey       func(ui.TextKey) bool
@@ -384,7 +384,7 @@ type ComposerOptions struct {
 func ComposerShell(c *ui.Context, o ComposerOptions)
 ```
 
-**布局**：composer 上方 dock（阅读列宽度居中、`session.banner` 槽）：目标条（有目标时）→ 审批内联卡（有 pending 时）→ 卡片 `t.Composer()`；输入 `ui.TextArea`（MinHeight Space9、MaxHeight Space8*6、边框透明、聚焦 accent 边）；工具条一行：`uikit.ComposerToolbar`（官方 `ui.Toolbar`，默认无边框、hover 才显底色，单 Tab stop、左右键）包住附件按钮 + 模型菜单 + 会话设置菜单；附件按钮 `uikit.ComposerAttachButton` 直连原生文件选择器（无「手动输入路径…」菜单/对话框，拖入/粘贴保留）；窄宽度折叠低频 chip 进菜单，veryCompact 时模型 chip 折进会话设置菜单并保留「模型：…／推理等级」回退入口；右侧发送/停止固定，**不进溢出菜单**；键位提示在宽 composer 显示、窄 composer 放 tooltip。模型 chip 打开**两级紧凑菜单**：一级只有「模型」「推理等级」两行（Trailing 当前值）+「打开模型设置…」；catalog 已注册但列表为空、而 `Config().Model` 非空时（装配默认模型，FR-26），chip 文案为「<model>（默认模型，尚未配置连接）」并在菜单顶部加一行「默认模型来自装配，添加模型行后可覆盖」；「模型」二级按服务商分组（`MatchProviderPreset`，未匹配“自定义服务”）列出模型；「推理等级」二级为「跟随模型默认（…）」+ 该模型模式；模型级 `DefaultThinking` 在 Home composer 的「推理等级」与设置页编辑弹窗配置。
+**布局**：composer 上方 dock（阅读列宽度居中、`session.banner` 槽）：目标条（有目标时）→ 审批内联卡（有 pending 时）→ 卡片 `t.Composer()`；输入 `ui.TextArea`（MinHeight Space9、MaxHeight Space8*6、边框透明、聚焦 accent 边）；工具条一行：`uikit.ComposerToolbar`（官方 `ui.Toolbar`，默认无边框、hover 才显底色，单 Tab stop、左右键）包住附件按钮 + 模型菜单 + 权限按钮；附件按钮 `uikit.ComposerAttachButton` 直连原生文件选择器（无「手动输入路径…」菜单/对话框，拖入/粘贴保留）；窄宽度由官方 Toolbar 折叠低频控件进 overflow；模型 chip 始终构建（不再折进权限菜单），权限按钮本身显示当前权限（工作区修改 / 所有权限 / 只读），点击只打开权限三态菜单；右侧发送/停止固定，**不进溢出菜单**；键位提示在宽 composer 显示、窄 composer 放 tooltip。模型 chip 打开**两级紧凑菜单**：一级只有「模型」「推理等级」两行（Trailing 当前值）+「打开模型设置…」；catalog 已注册但列表为空、而 `Config().Model` 非空时（装配默认模型，FR-26），chip 文案为「<model>（默认模型，尚未配置连接）」并在菜单顶部加一行「默认模型来自装配，添加模型行后可覆盖」；「模型」二级按服务商分组（`MatchProviderPreset`，未匹配“自定义服务”）列出模型；「推理等级」二级为「跟随模型默认（…）」+ 该模型模式；模型级 `DefaultThinking` 在 Home composer 的「推理等级」与设置页编辑弹窗配置。
 
 **交互/键盘**：Enter 发送、Shift+Enter 换行、Cmd+Enter 发送；运行中 Esc 中断；slash/@ 菜单优先级最高；Tab 顺序：输入 → 菜单项 → 发送 → 停止。
 
@@ -549,7 +549,7 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 
 - **顶栏只有一块**：屏幕通过 `screen.header` / `screen.actions` / `screen.tabs` 槽位把标题/动作/Tabs 交给宿主 B3 顶栏（浅色 header 面 + 仅底边 hairline、行间无线），屏幕 body 不再叠第二行 header；无贡献的屏幕没有空工具栏；不提供返回按钮或 `Alt+←` 历史回退（侧栏即导航）。
 - **输入框上方的 dock**：目标条与审批内联卡固定在 composer 上方（阅读列宽度居中），是会话页唯一的阻断/目标区；不把目标放回顶栏、不把审批做成居中 Modal。目标条只展示当前会话的 durable goal（phase/轮次/activation/blocked reason），UI 不缓存其他会话目标、不发送续跑；清除目标走 `ClearGoal` + `uikit.ConfirmDanger`。
-- **会话级 vs 全局设置**：会话设置菜单里「权限模式（所有会话）」「对话模式（所有会话）」的组标题带后缀，明确这两项作用于所有会话；人设与「本会话内始终允许」保持会话级（PM-14）。
+- **会话级 vs 全局设置**：权限按钮只保留「权限模式」一项（按钮文案即当前权限），作用于所有会话；「本会话内始终允许」保持会话级（PM-14）。
 - **记忆 scope**：`workspace:<id>` 绑定作用域的条目在会话「记忆」页签显示「工作区（本会话项目）」，不展示存储原值；设置→记忆是跨工作区管理页，保持「工作区」标签。
 - **模型价格与成本**：价格在「设置 → 模型」的编辑表单里配置（输入 / 缓存输入 / 输出，每 1M token 的美元价；留空或 0 = 未配置），只写 `modelcatalog.models`，不复制进默认模型 mirror；非法值（非数字/负数/NaN/超大）就地报错且不保存。价格只用于成本估算，按当前价格重算（重启回放也用当前价格），无价格时 Context 页签不显示累计成本/成本列、行级未知成本显示「—」，绝不渲染 0/假成本。
 - **通知位置**：toast/通知固定右上角、B3 顶栏下方 8 DIP，右对齐自上而下堆叠（最多 2 条）；不放在右下角、不遮挡标题/Tabs/顶栏动作或输入区。
@@ -632,7 +632,7 @@ Agent 客户端的界面不是一次性输出：用户对界面的操作要作�
 | S4 | ApprovalDialog | approval | DialogFooter（已有） | 无 Default/Esc deny/队列 | `approval.png` |
 | S5 | PlanReviewDialog | interaction planPanel | DialogFooter | Esc 不取消/空反馈不批准 | `plan.png` |
 | S6 | AskDialog | interaction questionPanel | DialogFooter | Enter 误选防护/Other | `ask.png` |
-| S7 | ComposerShell | session + home composer | Composer 预设（已有） | Enter/Shift+Enter/Esc/排队 | `composer.png` |
+| S7 | ComposerShell | session + home composer | Composer 权限模式（已有） | Enter/Shift+Enter/Esc/排队 | `composer.png` |
 | S8 | RunStatus | session 状态/队列/用量 + toasts | — | 不伪造进度/重试/用量 | `run-status.png` |
 | S9 | TeamSurface | rightpanel agents/tasks | 团队语义（已有测试） | RunState 真实/指派/确认 | `team.png` |
 

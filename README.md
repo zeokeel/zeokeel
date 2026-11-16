@@ -4,18 +4,14 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.43 — 能力页：技能与 MCP 连接器** (2026-11-16). Native, compile-time modular
+> **v0.2.44 — 设置收敛与输入框权限按钮** (2026-11-16). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
-> webview. 本版把侧栏「插件」升级为 **「能力」/Capabilities**：页级 Tabs 骨架下
-> **技能** 与 **连接器** 是平行的两个 Tab（未来工作流加一行 `capabilityTabSpecs`
-> 即成为第三 Tab，不新增 screen），每个 Tab 用 3 列官方 `ui.GridView` 卡片
-> （技能卡 128 高、连接器卡 176 高；失败连接器卡含红色错误摘要 +「查看报错详情」
-> +「重试」）。技能与 MCP 连接器管理（新建/编辑/删除、Markdown 内容预览、
-> 添加/编辑/测试连接/移除、`mcp.servers`/`mcp.disabledServers` 启停、工作区
-> `mcp.json` opt-in）从设置迁入该页；设置删除「技能」「MCP」两页（17 页），设置
-> 搜索不再命中技能/MCP。能力页不再有工具目录/工具开关（工具默认开启，不属于
-> 能力面）。数据键 `skills.dirs` / `mcp.servers` / `mcp.disabledServers` /
-> `mcp.workspaceOptIn` 不变，无数据迁移。See [CHANGELOG.md](CHANGELOG.md).
+> webview. 本版把设置侧边栏从 17 页 / 6 组收敛为 **10 页 / 5 组**：预设页删除
+> （数据键保留），快捷键/搜索/限额/导入/更新/诊断分别并入外观、网络与搜索、
+> 行为与限额、数据与隐私、关于；旧深链由 host alias 兼容。输入框工具栏不再出现
+> 「会话设置」：按钮直接显示当前权限（默认「工作区修改」，可切「所有权限」/
+> 「只读」，所有权限带警示色），弹层只保留权限三态。`internal/ui/about` 模块移除，
+> 设置模块统一提供「关于」hub。See [CHANGELOG.md](CHANGELOG.md).
 
 > **v0.2.24 主要变化**：按 `docs/PRODUCT-BUG-REVIEW-2026-11-11.md` 做 TDD 修复——
 > ① 安全/权限：MCP 多 server 重名 panic、`settings_get` 明文凭据、自动化只读越权、只读预设 destructive memory、LSP 初始化与沙箱路径、损坏数据文件隔离、后端工具开关生效；
@@ -73,9 +69,9 @@ publishes the GitHub release with `SHA256SUMS.txt` and a download table.
 > team manager 编排与右侧「团队」面板（spawn/steer/interrupt）、@session 引用与推理强度（low/medium/high）、
 > composer /goal /plan /memory 对话框、更新下载+SHA256 暂存、MCP stdio 服务器、右侧「任务」面板、
 > 工件历史（Files「产物」）、单实例 + XDG autostart、install-on-restart、toast 通知、workspace mcp.json opt-in、
-> 网络代理设置、MCP 工具级开关、提示词预设（设置 CRUD + composer 插入）、可编辑模型列表（每模型独立服务商/Base URL/API Key + 思考强度/生成参数 + 默认模型；旧单连接自动迁移）、
+> 网络代理设置、可编辑模型列表（每模型独立服务商/Base URL/API Key + 思考强度/生成参数 + 默认模型；旧单连接自动迁移）、
 > 消息用量 footer/逐条复制、计划模式 + keep-planning、自动化运行历史、
-> Memory 整理/清空、技能新建/删除、工件下载、系统托盘/关闭到托盘、全局热键、LSP 工具、聊天模式（普通/计划/精简/创作）、
+> Memory 整理/清空、技能新建/删除、工件下载、系统托盘/关闭到托盘、全局热键、LSP 工具、聊天模式后端（普通/计划/精简/创作；composer 选择已移除）、
 > Home 真实 composer、/停止 /附加文件 /帮助、数据与隐私页、通知开关、侧栏添加工作区、能力页 MCP 连接器详情；
 > 反证审计共 283 PASS / 0 SKIP（含最新审计补充），4×P2+4×P3 全部修复。详情：[docs/ADVERSARIAL-AUDIT.md](docs/ADVERSARIAL-AUDIT.md)。
 >
@@ -147,7 +143,7 @@ go test ./...
   memory/schedule/worktree/skill/team_task/settings 等）、
   `hosttools`（产品侧 host 工具：ask_user/present/plan_review/exit_plan_mode + DSH goal 三件套
   get_goal/create_goal/update_goal，注册进共享工具注册表）、
-  `ui/home`、`ui/about`、`ui/welcome`、`ui/toolcards`、`uikit`
+  `ui/home`、`ui/welcome`、`ui/toolcards`、`uikit`
 - ✅ SDK 依赖：`github.com/zeokeel/zeokeel-rig v0.13.2`（纯工具集：agent loop / subagent / provider /
   sandbox / 81 个静态工具 + MCP/LSP / gate / session+compact / checkpoint；零第三方依赖；
   旧 agent 61 个工具名 + 现代工具面 55 个名称 100% 覆盖，`TestToolCatalogCoverage` 与

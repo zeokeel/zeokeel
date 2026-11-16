@@ -103,11 +103,10 @@ func TestCompactHeaderKeepsTitleAndGoalDock(t *testing.T) {
 	}
 }
 
-// TestVeryNarrowComposerToolsMenu covers N2: at a very narrow composer the
-// toolbar keeps one attach menu, the single 会话设置 menu and send; the model
-// chip folds into that menu (its 模型/打开模型设置 entries), no unlabeled »
-// overflow and no standalone "/" chip appears, and typing "/" still opens the
-// command menu.
+// TestVeryNarrowComposerToolsMenu covers the narrow composer after the menu
+// simplification: attach/send stay on the row, the model entry is on the
+// toolbar (or behind the official overflow), no standalone "/" chip appears,
+// and the session menu no longer carries the model/reasoning fallback.
 func TestVeryNarrowComposerToolsMenu(t *testing.T) {
 	product := newInteractionProduct(t)
 	tester := product.tester
@@ -118,35 +117,32 @@ func TestVeryNarrowComposerToolsMenu(t *testing.T) {
 	tester.Frame()
 	tester.Frame()
 	tester.Frame()
-	for _, want := range []string{"附件", "会话设置", "发送"} {
+	for _, want := range []string{"附件", "发送"} {
 		if !tester.HasText(want) {
 			t.Fatalf("very narrow composer lacks %q; texts = %v", want, tester.Texts())
 		}
 	}
-	if exactLabels(tester, "»") > 0 {
-		t.Fatalf("very narrow composer still shows the unlabeled » overflow; texts = %v", tester.Texts())
-	}
 	if exactLabels(tester, "/") > 0 {
 		t.Fatalf("very narrow composer still shows the standalone / chip; texts = %v", tester.Texts())
 	}
-	// The model chip folds into the session menu at this width. The check is by
-	// exact label (not substring): the first-run checklist copy also contains
-	// the word 未配置, and only a chip label itself would be a regression.
-	if exactLabels(tester, "test-model") > 0 || exactLabels(tester, "未配置") > 0 {
-		t.Fatalf("very narrow composer still shows a model chip; texts = %v", tester.Texts())
-	}
-	if err := tester.Click("会话设置"); err != nil {
-		t.Fatalf("open session menu: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	tester.Frame()
-	for _, want := range []string{"模型：", "打开模型设置…", "权限模式", "对话模式", "推理等级", "插入预设", "打开行为设置…"} {
-		if !tester.HasText(want) {
-			t.Fatalf("会话设置 menu missing %q; texts = %v", want, tester.Texts())
+	// The model chip is no longer hidden at this width: the simplified session
+	// menu made room for it, and the official toolbar may still fold it into
+	// its overflow when needed.
+	if !tester.HasText("test-model") {
+		overflow := "更多"
+		if !tester.HasText(overflow) && tester.HasText("More") {
+			overflow = "More"
 		}
+		if err := tester.Click(overflow); err != nil {
+			t.Fatalf("model entry is neither on the toolbar nor behind its overflow: %v; texts = %v", err, tester.Texts())
+		}
+		tester.Frame()
+		if !tester.HasText("test-mod") {
+			t.Fatalf("toolbar overflow lacks the model entry; texts = %v", tester.Texts())
+		}
+		tester.Key(0, ui.KeyEscape)
+		tester.Frame()
 	}
-	tester.Key(0, ui.KeyEscape)
-	tester.Frame()
 
 	// The attach control opens the native picker directly; the old menu with
 	// its manual path entry is gone (P2-12).
@@ -179,11 +175,11 @@ func TestVeryNarrowComposerToolsMenu(t *testing.T) {
 
 	// The wide composer restores the full row (attach + model + session menu + send).
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && !tester.HasText("会话设置") {
+	for time.Now().Before(deadline) && !tester.HasText("工作区修改") {
 		tester.Frame()
 		time.Sleep(5 * time.Millisecond)
 	}
-	if !tester.HasText("会话设置") {
+	if !tester.HasText("工作区修改") {
 		t.Fatalf("wide composer did not restore its full toolbar; texts = %v", tester.Texts())
 	}
 }

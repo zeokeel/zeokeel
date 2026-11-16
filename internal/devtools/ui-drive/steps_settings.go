@@ -1,6 +1,6 @@
 package main
 
-// Settings-surface steps: open, walk all 17 pages with key-control checks and
+// Settings-surface steps: open, walk all 10 pages with key-control checks and
 // screenshots, flip a few switches, scroll long pages to their bottom action,
 // and close via the X and Escape.
 
@@ -22,26 +22,19 @@ type settingsPageSpec struct {
 	controls []string
 }
 
-// settingsPages is the product's settings navigation (17 pages, after the host
-// groups them by Section; the advanced pages live behind a collapsed group).
+// settingsPages is the product's settings navigation (10 pages after the
+// capability/behavior/about consolidation; the host groups them by Section).
 var settingsPages = []settingsPageSpec{
 	{"settings-page-model", "model", "模型", []string{"模型列表", "添加模型", "系统提示词"}},
-	{"settings-page-appearance", "appearance", "外观", []string{"外观模式", "界面语言", "保存"}},
-	{"settings-page-shortcuts", "shortcuts", "快捷键", []string{"快捷键", "Ctrl + B"}},
-	{"settings-page-diagnostics", "diagnostics", "诊断", []string{"工具数", "会话数"}},
-	{"settings-page-update", "update", "更新", []string{"当前版本", "检查更新"}},
-	{"settings-page-import", "import", "导入", []string{"DSH 数据目录", "扫描"}},
-	{"settings-page-search", "search", "搜索", []string{"搜索端点", "保存"}},
-	{"settings-page-archive", "archive", "归档", []string{"归档的会话"}},
+	{"settings-page-behavior", "behavior", "行为与限额", []string{"工作步骤", "工作步骤展示", "运行限额", "Subagent 并发"}},
+	{"settings-page-appearance", "appearance", "外观", []string{"外观模式", "界面语言", "桌面快捷键"}},
 	{"settings-page-notifications", "notifications", "通知", []string{"显示通知气泡"}},
-	{"settings-page-behavior", "behavior", "行为", []string{"默认代理权限", "工作步骤", "工作步骤展示"}},
-	{"settings-page-memory", "memory", "记忆", []string{"整理策略", "添加记忆"}},
+	{"settings-page-network", "network", "网络与搜索", []string{"代理配置", "搜索端点", "保存"}},
 	{"settings-page-lsp", "lsp", "LSP", []string{"语言服务器", "新增服务器"}},
-	{"settings-page-presets", "presets", "预设", []string{"预设列表", "新增预设", "代理预设"}},
-	{"settings-page-network", "network", "网络", []string{"代理配置", "保存"}},
-	{"settings-page-capabilities", "capabilities", "能力", []string{"委派并发", "Subagent 并发", "Shell 命令"}},
-	{"settings-page-data", "data-privacy", "数据与隐私", []string{"数据目录", "清除全部会话"}},
-	{"settings-page-about", "about", "关于", []string{"关于 ZeoKeel", "构建信息", "架构"}},
+	{"settings-page-memory", "memory", "记忆", []string{"整理策略", "添加记忆"}},
+	{"settings-page-archive", "archive", "归档", []string{"归档的会话"}},
+	{"settings-page-data", "data-privacy", "数据与隐私", []string{"数据目录", "DSH 数据目录", "清除全部会话"}},
+	{"settings-page-about", "about", "关于", []string{"构建信息", "当前版本", "检查更新", "运行时信息"}},
 }
 
 func (d *drive) runSettingsSteps() {
@@ -57,43 +50,29 @@ func (d *drive) runSettingsSteps() {
 			c.shot("settings-open")
 		})
 
-	d.step("settings-advanced-group", "settings", "设置：高级分组默认折叠",
-		"设置导航默认显示日常页与「数据与通知」组；「高级」分组默认折叠，点击后只展开诊断（通知/归档/导入/更新已在数据与通知中），再次点击收起", func(c *check) {
+	d.step("settings-groups", "settings", "设置：合并后的 10 页 / 5 组",
+		"设置导航只保留合并后的 10 页：常用（模型/行为与限额）、界面与通知（外观/通知）、连接（网络与搜索/LSP）、数据（记忆/归档/数据与隐私）、关于（关于）；不再有数据与通知/高级/预设/独立快捷键页", func(c *check) {
 			if !d.openSettingsFromNeutralScreen() {
 				c.failf("打开设置失败")
 				return
 			}
 			c.require(c.has("常用"), "设置导航缺少「常用」分组")
-			c.require(c.has("行为"), "设置导航缺少「行为」")
-			c.require(c.has("数据与通知"), "设置导航缺少「数据与通知」分组")
-			c.require(c.has("通知") && c.has("归档"), "日常「数据与通知」组未显示通知/归档")
-			c.require(c.has("高级"), "设置导航缺少「高级」分组标题")
-			c.require(!c.has("诊断"), "「高级」分组默认展开（应折叠）")
-			// The navigation is longer now (数据与通知 before 高级), so the
-			// collapsed group can sit below the dialog fold. A deep link opens
-			// the page and auto-expands its group; close/reopen then verifies
-			// the default collapsed state again.
-			if err := d.openSettingsPageID("diagnostics"); err != nil {
-				c.failf("打开诊断深链失败：%v", err)
+			c.require(c.has("行为与限额"), "设置导航缺少「行为与限额」")
+			c.require(c.has("界面与通知"), "设置导航缺少「界面与通知」分组")
+			c.require(c.has("连接"), "设置导航缺少「连接」分组")
+			c.require(c.has("网络与搜索"), "设置导航缺少「网络与搜索」")
+			c.require(c.has("数据"), "设置导航缺少「数据」分组")
+			c.require(c.has("关于") && c.has("模型"), "设置导航缺少「关于」或「模型」")
+			c.require(!d.hasExactText("预设") && !d.hasExactText("高级") && !c.has("数据与通知"),
+				"设置导航仍显示已合并的分组/页面")
+			if err := d.openSettingsPageID("about"); err != nil {
+				c.failf("打开关于页失败：%v", err)
 				return
 			}
 			d.drain(2)
-			c.require(c.has("诊断") && c.has("工具数"), "展开「高级」后诊断页仍不可见")
-			c.shot("settings-advanced-expanded")
-			// Return to a daily page before closing: reopening the settings
-			// surface remembers the selected page, and the advanced group is
-			// expanded only while its page is selected.
-			if err := d.openSettingsPageID("model"); err != nil {
-				c.failf("回到模型页失败：%v", err)
-				return
-			}
-			d.uiRoot.Navigator().CloseSettings()
-			d.drain(2)
-			if !d.openSettingsFromNeutralScreen() {
-				c.failf("重开设置失败")
-				return
-			}
-			c.require(!c.has("诊断"), "默认「高级」分组未折叠/诊断页仍显示")
+			c.require(c.has("构建信息") && c.has("当前版本") && c.has("运行时信息"),
+				"关于页缺少构建/更新/诊断区块")
+			c.shot("settings-groups")
 		})
 
 	for _, page := range settingsPages {
@@ -139,7 +118,7 @@ func (d *drive) runSettingsSteps() {
 		})
 
 	d.step("settings-footer", "settings", "设置：固定 footer 主操作",
-		"外观/模型/行为/搜索/网络/LSP/记忆等页的主操作固定在底部 footer：不滚动即可见、在弹窗内、可点击", func(c *check) {
+		"外观/模型/行为/网络等页的主操作固定在底部 footer：不滚动即可见、在弹窗内、可点击", func(c *check) {
 			panel := d.settingsPanelRect()
 			checked := 0
 			for _, page := range settingsPages {
@@ -147,7 +126,7 @@ func (d *drive) runSettingsSteps() {
 				// host's fixed footer; immediate-save pages (behavior, data &
 				// privacy, …) have no footer action by design.
 				switch page.id {
-				case "appearance", "model", "search", "network":
+				case "appearance", "model", "network", "behavior":
 				default:
 					continue
 				}
@@ -210,7 +189,7 @@ func (d *drive) runSettingsSteps() {
 			d.typeText("归档")
 			d.drain(2)
 			c.require(c.has("归档"), "导航搜索「归档」后没有结果")
-			c.require(!c.has("行为"), "导航搜索「归档」后仍显示无关页「行为」")
+			c.require(!c.has("行为与限额"), "导航搜索「归档」后仍显示无关页「行为与限额」")
 			c.shot("settings-nav-filtered")
 			d.clearDraft()
 			d.drain(2)

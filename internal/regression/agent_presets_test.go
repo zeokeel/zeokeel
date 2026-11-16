@@ -4,8 +4,9 @@ package regression
 // (SessionPresetSetter) validates session/preset IDs, "" clears it, and every
 // run resolves the preset fresh: persona+prompt appended after the base prompt,
 // tool allowlist filters the model-visible tools, the preset model is the
-// default and an explicit per-session model override wins. The composer picker
-// exposes the same selection.
+// default and an explicit per-session model override wins. The composer
+// picker was removed with the preset UI; the backend selection still applies to
+// sessions that carry a preset row.
 
 import (
 	"encoding/json"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/modules/agent"
-	sessionui "github.com/zeokeel/zeokeel/internal/ui/session"
 )
 
 // presetRequest decodes the model/tools/system fields of one provider request.
@@ -156,58 +156,6 @@ func TestAgentPresetSelectionAndRunApplication(t *testing.T) {
 	}
 	if indexOf(third.System, "PERSONA-ALPHA") >= 0 || indexOf(third.System, "PROMPT-ALPHA") >= 0 {
 		t.Fatalf("preset instructions leaked after clearing: %q", third.System)
-	}
-}
-
-// TestAgentPresetPickerUI covers the composer picker: the persona rows live in
-// the single 会话设置 menu, choosing a preset updates the session, and "None"
-// clears it.
-func TestAgentPresetPickerUI(t *testing.T) {
-	harness := startAgentWith(t, agent.Config{},
-		newFakeModel(t, func([]byte) (int, string) { return 0, sseAnswer("ok") }))
-	presetSettings(t, harness)
-	sessionID := harness.newChatSession(t, "Picker session")
-	activate(t, harness.h.ctx, sessionui.Module(), sessionui.Config{})
-	harness.h.push(sessionui.ScreenID)
-	tester := harness.h.tester(1280, 800)
-	tester.Frame()
-	// The persona picker lives in the single session menu; the chip label is the
-	// stable destination name (会话设置), never the drifting permission state.
-	requireHasText(t, tester, "会话设置")
-
-	if err := tester.Click("会话设置"); err != nil {
-		t.Fatalf("open session menu: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	requireHasText(t, tester, "人设")
-	if err := tester.Click("人设"); err != nil {
-		t.Fatalf("open persona submenu: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	requireHasTexts(t, tester, "无", "Alpha", "Beta")
-	if err := tester.Click("Alpha"); err != nil {
-		t.Fatalf("choose Alpha: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	setter := harness.chat.(contracts.SessionPresetSetter)
-	if got := setter.SessionPreset(sessionID); got != "alpha" {
-		t.Fatalf("selected preset = %q, want alpha", got)
-	}
-
-	if err := tester.Click("会话设置"); err != nil {
-		t.Fatalf("reopen session menu: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	if err := tester.Click("人设"); err != nil {
-		t.Fatalf("reopen persona submenu: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	if err := tester.Click("无"); err != nil {
-		t.Fatalf("choose None: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	if got := setter.SessionPreset(sessionID); got != "" {
-		t.Fatalf("preset after None = %q, want empty", got)
 	}
 }
 

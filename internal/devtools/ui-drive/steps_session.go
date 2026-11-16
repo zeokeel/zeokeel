@@ -216,85 +216,87 @@ func (d *drive) runSessionSteps() {
 			c.require(!c.has("打开模型设置"), "Esc 后模型菜单未关闭")
 		})
 
-	d.step("composer-session-settings-menu", "session", "输入区：会话设置分组菜单",
-		"点击「会话设置」→ 一个菜单同时提供权限模式、对话模式与提示词预设（低频项收进一组；模型/推理等级在模型 chip 的二级菜单里）→ Esc 关闭", func(c *check) {
+	d.step("composer-permission-menu", "session", "输入区：权限按钮只显示权限模式",
+		"工具栏按钮默认显示「工作区修改」（不再是「会话设置」）→ 点击只显示权限三态（工作区修改 / 所有权限 / 只读）→ Esc 关闭", func(c *check) {
 			d.resetToSession()
-			if !c.click("会话设置") && !c.click("工作区可写") {
+			c.require(c.has("工作区修改"), "权限按钮没有显示默认「工作区修改」")
+			c.require(!c.has("会话设置"), "工具栏仍出现「会话设置」")
+			if !c.click("工作区修改") {
+				c.failf("composer 缺少权限按钮")
 				return
 			}
 			d.drain(2)
-			c.require(c.has("权限模式"), "「会话设置」菜单缺少权限模式分组")
-			c.require(c.has("对话模式"), "「会话设置」菜单缺少对话模式分组")
-			c.require(!c.has("思考强度") && !c.has("推理等级"),
-				"宽布局「会话设置」菜单仍含思考强度（应只在模型 chip 的「推理等级」二级菜单）")
-			c.require(c.has("插入预设") || c.has("还没有预设"), "「会话设置」菜单缺少提示词预设分组")
-			c.require(c.has("打开行为设置") || c.has("打开行为设置…"),
-				"「会话设置」菜单缺少「打开行为设置…」入口")
+			c.require(c.has("权限模式"), "权限菜单缺少权限模式分组")
+			for _, want := range []string{"工作区修改", "所有权限", "只读"} {
+				c.require(c.has(want), "权限菜单缺少权限「%s」", want)
+			}
+			for _, gone := range []string{"会话设置", "对话模式", "人设", "插入预设", "打开行为设置", "清除自动允许的工具"} {
+				c.require(!c.has(gone), "权限菜单仍显示已移除项「%s」", gone)
+			}
+			c.require(!c.has("推理等级"), "权限菜单仍含推理等级（应只在模型 chip 菜单）")
 			c.shot("composer-session-settings-menu")
 			d.key(0, ui.KeyEscape)
 			d.drain(2)
 			if c.has("权限模式") {
-				// Observed P3 quirk (reported to the fixers): right after a
-				// previous menu was Esc-closed, the first Esc on the next
-				// composer menu is swallowed; a second Esc closes it.
 				d.key(0, ui.KeyEscape)
 				d.drain(2)
-				c.require(!c.has("权限模式"), "两次 Esc 后「会话设置」菜单仍未关闭；texts=%v", paletteTailTexts(d))
-				c.note("P3 观察：前置菜单 Esc 关闭后，新开「会话设置」菜单第一次 Esc 被吞，第二次关闭成功")
 			}
+			c.require(!c.has("权限模式"), "Esc 后权限菜单仍未关闭")
+			c.require(c.has("工作区修改"), "Esc 后权限按钮没有恢复当前权限文案")
 		})
 
 	d.step("composer-toolbar-groups", "session", "输入区：工具栏分组",
-		"composer 动作行只有一个附件菜单、模型 chip、一个会话设置菜单和固定右侧的发送；权限/模式等低频项在会话设置菜单里，模型/推理等级在模型 chip 的二级菜单里", func(c *check) {
+		"composer 动作行只有附件、模型 chip、一个权限按钮和右侧发送；权限按钮显示当前权限，模型/推理等级在模型 chip 的二级菜单里", func(c *check) {
 			d.resetToSession()
-			// Always-visible primary controls.
 			c.require(c.has("附件"), "composer 缺少附件菜单")
 			c.require(c.has("drive-model"), "composer 缺少模型 chip")
-			c.require(c.has("工作区可写") || c.has("会话设置"), "composer 缺少会话设置菜单")
-			// The fixed right group is the send control (never in overflow).
+			c.require(c.has("工作区修改"), "composer 权限按钮没有显示当前权限")
+			c.require(!c.has("会话设置"), "composer 仍出现「会话设置」")
 			rect, ok := d.find("发送")
 			if !ok {
 				c.failf("composer 缺少发送按钮")
 				return
 			}
 			c.note("发送 rect=(%.0f,%.0f,%.0f,%.0f)", rect.X, rect.Y, rect.W, rect.H)
-			if !c.click("会话设置") && !c.click("工作区可写") {
+			if !c.click("工作区修改") {
 				return
 			}
 			d.drain(2)
-			for _, want := range []string{"权限模式", "对话模式", "插入预设"} {
-				c.require(c.has(want), "「会话设置」菜单缺少「%s」分组", want)
+			for _, want := range []string{"权限模式", "工作区修改", "所有权限", "只读"} {
+				c.require(c.has(want), "权限菜单缺少「%s」", want)
 			}
-			c.require(!c.has("推理等级"), "「会话设置」菜单仍含推理等级（应只在模型 chip 菜单）")
-			// The permission group header comes first, directly above exactly
-			// three selectable presets; the retired ask/never modes are gone.
-			for _, want := range []string{"只读", "工作区可写", "所有权限"} {
-				c.require(c.has(want), "「会话设置」菜单缺少权限模式「%s」", want)
+			for _, gone := range []string{"会话设置", "对话模式", "插入预设", "人设", "打开行为设置", "清除自动允许的工具"} {
+				c.require(!c.has(gone), "权限菜单仍显示已移除项「%s」", gone)
 			}
-			c.require(!c.has("询问") && !c.has("从不允许"),
-				"「会话设置」菜单仍提供已移除的权限模式（询问/从不允许）")
 			if header, ok := d.find("权限模式"); ok {
-				if item, okItem := d.find("只读"); okItem && item.Y <= header.Y {
+				if item, okItem := d.find("工作区修改"); okItem && item.Y <= header.Y {
 					c.failf("权限模式分组标题不在模式项上方：header Y=%.1f item Y=%.1f", header.Y, item.Y)
 				}
 			}
 			d.key(0, ui.KeyEscape)
 			d.drain(2)
-			// Narrow composer: no separate permission/mode chips; the same
-			// session menu owns them.
+			// Narrow composer: the model entry stays on the row or behind the
+			// official toolbar overflow; the session menu is still permission-only.
 			d.setSize(900, 600)
 			d.resetToSession()
 			d.drain(3)
 			c.require(d.has("附件"), "窄窗 composer 工具栏缺少附件菜单")
-			c.require(d.has("工作区可写") || d.has("会话设置"), "窄窗 composer 工具栏缺少会话设置分组")
+			c.require(d.has("工作区修改"), "窄窗 composer 权限按钮没有显示当前权限")
 			c.require(d.has("发送"), "窄窗 composer 工具栏缺少发送按钮")
-			if d.has("»") {
-				c.warnf("窄窗 composer 出现了无标签 » 溢出按钮")
+			if rect, ok := d.find("drive-model"); !ok || rect.W <= 0 {
+				if !c.click("更多") && !c.click("More") {
+					c.failf("窄窗 composer 找不到模型入口（toolbar 或 overflow）")
+				} else {
+					d.drain(2)
+					c.require(d.has("drive-model") || d.has("test-mod"), "窄窗 overflow 缺少模型入口")
+					d.key(0, ui.KeyEscape)
+					d.drain(2)
+				}
 			}
-			if c.click("会话设置") || c.click("工作区可写") {
+			if c.click("工作区修改") {
 				d.drain(2)
-				c.require(d.has("权限模式") && d.has("对话模式"),
-					"窄窗「会话设置」菜单没有权限/对话模式分组")
+				c.require(d.has("权限模式"), "窄窗权限菜单缺少权限模式")
+				c.require(!d.has("对话模式"), "窄窗权限菜单仍显示对话模式")
 				d.key(0, ui.KeyEscape)
 				d.drain(2)
 			}

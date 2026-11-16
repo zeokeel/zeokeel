@@ -101,8 +101,8 @@ func newDataPrivacyState() *dataPrivacyState { return &dataPrivacyState{} }
 // directory); the exports are secondary and the bulk clear is a danger action
 // behind the native confirmation dialog.
 func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
-	chat contracts.ChatService, store contracts.SettingsService, st *dataPrivacyState,
-	locale contracts.LocaleService) {
+	runtime contracts.UIRuntime, chat contracts.ChatService, store contracts.SettingsService,
+	st *dataPrivacyState, importState *importState, locale contracts.LocaleService) {
 	dataDir, _ := kctx.Get(contracts.KeyDataDir)
 	dataDir = strings.TrimSpace(dataDir)
 	sessions, hasSessionList := dataSessionList(chat)
@@ -236,6 +236,11 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			})
 		}
 	})
+
+	// DSH import used to be its own settings page; it is a one-time data
+	// migration and belongs with the data controls.
+	buildImportPage(c, t, kctx, runtime, importState, locale, false)
+
 }
 
 // dataSessionList returns the scripted session list; ok=false when the chat

@@ -12,7 +12,6 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
-	"github.com/zeokeel/zeokeel/internal/ui/about"
 	"github.com/zeokeel/zeokeel/internal/ui/home"
 	"github.com/zeokeel/zeokeel/internal/ui/toolcards"
 	"github.com/zeokeel/zeokeel/internal/ui/welcome"
@@ -113,37 +112,12 @@ func TestToolcardsRenderDemoCall(t *testing.T) {
 	h.assertTexts(tester, "还没有 demo 工具卡渲染器（由 ui/toolcards 模块提供）。")
 }
 
-// TestAboutExtendsSettingsSurface proves a module can contribute a settings page
-// without changing the host; the page itself carries the build identity (the
-// old settings.header build-metadata item was removed by the design review).
-func TestAboutExtendsSettingsSurface(t *testing.T) {
-	h := newHarness(t)
-	aboutFiber := activate(t, h.ctx, about.Module(), about.Config{})
-	h.ui.Navigator().ToggleSettings()
-	tester := h.tester()
-	h.assertTexts(tester,
-		"关于",                   // sidebar page + page title
-		"关于 ZeoKeel",           // page header (title + app name)
-		"构建信息",                 // page body section
-		"2026-01-01T00:00:00Z", // build time from appinfo config
-	)
-
-	if err := aboutFiber.Dispose(); err != nil {
-		t.Fatalf("dispose about: %v", err)
-	}
-	tester.Frame()
-	h.assertNoTexts(tester, "构建信息", "关于 ZeoKeel")
-	h.assertTexts(tester, "还没有注册任何设置页。") // host empty state
-}
-
 // TestModuleManifests pins each module's contract: stable ID, required host
 // services (so the assembly pre-flight can resolve them) and no provided
 // service a UI module does not need.
 func TestModuleManifests(t *testing.T) {
 	assertManifest(t, home.Module(), "zeokeel-ui/home",
 		contracts.KeyUIRuntime.Name(), contracts.KeyNavigator.Name(), contracts.KeyAppInfo.Name())
-	assertManifest(t, about.Module(), "zeokeel-ui/about",
-		contracts.KeyUIRuntime.Name(), contracts.KeyAppInfo.Name())
 	assertManifest(t, welcome.Module(), "zeokeel-ui/welcome",
 		contracts.KeyUIRuntime.Name(), contracts.KeyAppInfo.Name())
 	assertManifest(t, toolcards.Module(), "zeokeel-ui/toolcards",

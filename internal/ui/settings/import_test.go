@@ -1,6 +1,7 @@
 package settings_test
 
-// Tests for the settings 导入 page: the optional importer, the DSH directory
+// Tests for the DSH import section of the merged 数据与隐私 / Data & privacy
+// page: the optional importer, the DSH directory
 // seam, the read-only scan preview (counts + skip notes), the import run and
 // its result, the busy states and the error paths.
 
@@ -146,7 +147,7 @@ func openImportPage(t *testing.T, h *harness) *ui.Tester {
 	t.Helper()
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "导入")
+	h.click(tester, "数据与隐私")
 	return tester
 }
 
@@ -173,8 +174,8 @@ func TestImportPageWithoutBackend(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "导入")
-	h.assertTexts(tester, "导入", "导入服务未启用")
+	h.click(tester, "数据与隐私")
+	h.assertTexts(tester, "数据与隐私", "导入服务未启用")
 }
 
 func TestImportBrowseSeamFillsDirectory(t *testing.T) {

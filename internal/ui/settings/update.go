@@ -15,14 +15,8 @@ import (
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
-// Update page constants. Section "general" matches the About page's, and Order
-// 92 keeps this page after About (90) instead of becoming the default page.
-const (
-	UpdatePageID      = "update"
-	UpdatePageSection = "高级"
-	UpdatePageOrder   = 40
-	UpdatePageTitle   = "更新"
-)
+// UpdatePageTitle is the section title the merged About page uses.
+const UpdatePageTitle = "更新"
 
 // updateState is the update page's UI state: the last check result, whether a
 // check or the asset download is in flight, the verified download (when the
@@ -146,41 +140,29 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 	current := firstNonEmpty(appInfo.Version, st.info.CurrentVersion, "dev")
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		if st.unavailable {
-			// A build without a release feed cannot check, download or install:
-			// say so instead of offering an action that always fails.
-			uikit.PageHeader(c, localized(locale, "更新", "Update"), "")
-		} else {
-			// The page's only primary action (check now) sits at the header's
-			// right edge; the page writes nothing, so there is no footer save.
-			uikit.PageHeaderAction(c,
-				localized(locale, "更新", "Update"),
-				"",
-				func(c *ui.Context) {
-					if !hasUpdate {
-						return
+		// The update controls are a section of the About page now: the check
+		// action sits on the section heading instead of a second page header.
+		checkAction := func(c *ui.Context) {
+			if !hasUpdate || st.unavailable {
+				return
+			}
+			checkLabel := localized(locale, "检查更新", "Check for updates")
+			busyLabel := localized(locale, "检查中…", "Checking…")
+			if st.checking {
+				checkLabel = busyLabel
+			}
+			ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				buildBusySpinner(c, st.checking, busyLabel)
+				if design.Apply(ui.Button(c, checkLabel), t.SecondaryButton()).
+					Disabled(st.checking || st.downloading).Clicked() {
+					if !st.checking && !st.downloading {
+						startUpdateCheck(updateService, runtime, st)
+						c.Invalidate()
 					}
-					checkLabel := localized(locale, "检查更新", "Check for updates")
-					busyLabel := localized(locale, "检查中…", "Checking…")
-					if st.checking {
-						checkLabel = busyLabel
-					}
-					// The busy state is the official spinner with an accessible
-					// progress name beside the disabled action; no fake percentage.
-					ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-						buildBusySpinner(c, st.checking, busyLabel)
-						// Checking is a utility action; the contextual download/install
-						// action is the page's one primary.
-						if design.Apply(ui.Button(c, checkLabel), t.SecondaryButton()).
-							Disabled(st.checking || st.downloading).Clicked() {
-							if !st.checking && !st.downloading {
-								startUpdateCheck(updateService, runtime, st)
-								c.Invalidate()
-							}
-						}
-					})
-				})
+				}
+			})
 		}
+		uikit.SectionAction(c, localized(locale, "更新", "Update"), checkAction, nil)
 
 		uikit.Section(c, localized(locale, "当前版本", "Current version"), func(body *ui.Context) {
 			// The running build is a one-row property sheet, the same shape the

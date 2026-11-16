@@ -117,11 +117,6 @@
           }
         },
         {
-          "id": "about",
-          "module": "zeokeel-ui/about",
-          "config": {}
-        },
-        {
           "id": "sidebar",
           "module": "zeokeel-ui/sidebar",
           "config": {}

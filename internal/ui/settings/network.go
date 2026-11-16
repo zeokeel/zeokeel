@@ -11,6 +11,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	cordis "github.com/zeokeel/zeokeel-kernel"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -39,10 +41,10 @@ func newNetworkState() *networkState { return &networkState{} }
 // buildNetworkPage renders the current effective proxy values and the two
 // native inputs with the save action. Changes are stored now and applied by the
 // host at the next start.
-func buildNetworkPage(c *ui.Context, store contracts.SettingsService, st *networkState, locale contracts.LocaleService) {
+func buildNetworkPage(c *ui.Context, kctx cordis.Context, store contracts.SettingsService, runtime contracts.UIRuntime, st *networkState, search *searchState, locale contracts.LocaleService) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, NetworkPageTitle, "Network"), "")
+		uikit.PageHeader(c, localized(locale, "网络与搜索", "Network & search"), "")
 
 		if !st.loaded {
 			st.loaded = true
@@ -87,6 +89,10 @@ func buildNetworkPage(c *ui.Context, store contracts.SettingsService, st *networ
 		// H1: the save action lives in the host's fixed footer; the body keeps
 		// the status line.
 		statusBadgesRow(c, t, st.status, st.statusErr)
+
+		// The web-search backend is the other half of network configuration;
+		// it used to be its own settings page.
+		buildSearchPage(c, kctx, search, locale, false)
 	})
 }
 

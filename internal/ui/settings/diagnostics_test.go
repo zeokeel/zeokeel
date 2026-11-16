@@ -1,6 +1,7 @@
 package settings_test
 
-// Diagnostics page: read-only runtime/storage values and the copy action.
+// Diagnostics section of the merged 关于 / About settings page: read-only
+// runtime/storage values and the copy action.
 
 import (
 	"context"
@@ -59,10 +60,10 @@ func TestDiagnosticsPage(t *testing.T) {
 	uiRoot.Navigator().ToggleSettings()
 	tester := ui.NewTester(uiRoot.View, 1200, 800)
 	tester.Frame()
-	// The grouped navigation scrolls; open the page through the stable deep
-	// link rather than relying on the item being on the first screen.
-	if err := uiRoot.OpenSettingsPage("diagnostics"); err != nil {
-		t.Fatalf("open diagnostics page: %v", err)
+	// The About hub is long; open it and scroll the diagnostics section into
+	// view like a user would (rather than clicking a retired nav item).
+	if err := uiRoot.OpenSettingsPage("about"); err != nil {
+		t.Fatalf("open about page: %v", err)
 	}
 	tester.Frame()
 	for _, want := range []string{"诊断", "ZeoKeel v1.2.3", "abc124", "go1.27.3",
@@ -73,6 +74,7 @@ func TestDiagnosticsPage(t *testing.T) {
 	}
 	// The setting keys are a per-key disclosure now (a joined line used to be
 	// truncated and could not be copied per value).
+	ensureVisibleInFrame(t, tester, "设置项 · 5 项")
 	if err := tester.Click("设置项 · 5 项"); err != nil {
 		t.Fatalf("expand setting keys: %v; texts = %v", err, tester.Texts())
 	}
@@ -85,6 +87,7 @@ func TestDiagnosticsPage(t *testing.T) {
 			t.Fatalf("diagnostics page leaked %q; texts = %v", secret, tester.Texts())
 		}
 	}
+	ensureVisibleInFrame(t, tester, "复制诊断信息")
 	if err := tester.Click("复制诊断信息"); err != nil {
 		t.Fatalf("copy diagnostics: %v; texts = %v", err, tester.Texts())
 	}

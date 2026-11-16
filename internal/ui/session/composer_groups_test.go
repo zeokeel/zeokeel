@@ -26,29 +26,27 @@ func groupsChat() *fakeChat {
 	return chat
 }
 
-// TestComposerToolbarGroupsLowFrequencyControls covers H7: the prompt presets
-// (and the other low-frequency choices) live in the 会话设置 group instead of
-// separate chips, while the reasoning strength lives one level down in the model
-// chip's 推理等级 entry.
-func TestComposerToolbarGroupsLowFrequencyControls(t *testing.T) {
+// TestComposerToolbarSessionMenuOnlyPermissions covers the approved
+// simplification: the one permission menu is the picker — no chat mode, persona,
+// prompt-preset or behavior-settings rows — while the model chip keeps the model
+// and reasoning choices. The toolbar button itself names the current permission.
+func TestComposerToolbarSessionMenuOnlyPermissions(t *testing.T) {
 	settings := newPermissionSettings(nil)
 	h := newPermissionHarness(t, groupsChat(), settings)
 	tester := h.tester()
 
-	h.assertTexts(tester, "会话设置")
+	h.assertTexts(tester, "工作区修改")
 	h.assertNoTexts(tester, "推理：默认", "预设")
+	assertNoSessionSettingsLabel(t, tester)
 	h.openSessionMenu(tester)
-	h.assertTexts(tester, "权限模式", "对话模式", "插入预设", "打开行为设置…")
+	assertSessionMenuOnlyPermissions(t, tester)
+	h.assertNoTexts(tester, "对话模式", "插入预设", "打开行为设置…", "人设")
 	// Reasoning is not repeated in this menu: the model chip owns it.
 	h.assertNoTexts(tester, "推理等级")
-	// The preset list grows with user data: it is one submenu deeper so the
-	// outer menu fits a narrow window.
-	h.click(tester, "插入预设")
-	h.assertTexts(tester, "简洁回答", "代码审查", "逐步推理")
 }
 
 // TestComposerToolbarCompactsAtNarrowWidths covers the calm composer row at
-// 900/1024: one attach menu, the model chip, one 会话设置 menu and the fixed
+// 900/1024: one attach menu, the model chip, one permission menu and the fixed
 // send control; the standalone slash entry and the old adaptive chips are gone,
 // so no unlabeled » overflow is needed.
 func TestComposerToolbarCompactsAtNarrowWidths(t *testing.T) {
@@ -61,7 +59,8 @@ func TestComposerToolbarCompactsAtNarrowWidths(t *testing.T) {
 		tester.Frame()
 		tester.Frame()
 
-		h.assertTexts(tester, "会话设置", "附件", "发送")
+		h.assertTexts(tester, "工作区修改", "附件", "发送")
+		assertNoSessionSettingsLabel(t, tester)
 		h.assertNoTexts(tester, "命令", "更多工具", "路径", "询问", "»")
 		attach, ok := tester.Find("附件")
 		if !ok {
@@ -70,9 +69,9 @@ func TestComposerToolbarCompactsAtNarrowWidths(t *testing.T) {
 		if attach.X < 0 || attach.X+attach.W > float32(width) {
 			t.Fatalf("%d: attach control at %.1f..%.1f escaped the window", width, attach.X, attach.X+attach.W)
 		}
-		// The single session menu carries every low-frequency choice.
+		// The single session menu is the permission picker at these widths too.
 		h.openSessionMenu(tester)
-		h.assertTexts(tester, "权限模式", "只读", "工作区可写", "所有权限", "对话模式", "插入预设", "打开行为设置…")
+		assertSessionMenuOnlyPermissions(t, tester)
 		h.assertNoTexts(tester, "询问", "从不允许", "推理等级")
 	}
 }
@@ -193,11 +192,12 @@ func TestNarrowHeaderAndToolbarWithInspectorDrawer(t *testing.T) {
 		tester.Frame()
 	}
 
-	// N2: at a very narrow composer the model chip is hidden (the session menu
-	// repeats it), the attach menu and the single session menu stay, and the
-	// removed toolbar's slash entry/overflow no longer exist.
-	h.assertTexts(tester, "附件", "会话设置", "发送")
-	h.assertNoTexts(tester, "更多工具", "命令", "snapshot…", "»")
+	// N2: at a very narrow composer the model chip is still built, the attach
+	// control stays on the row, and the single permission menu stays reachable
+	// through the official toolbar's overflow (the old slash chip is gone; the
+	// overflow button itself is labeled More/更多, not a bespoke unlabeled »).
+	h.assertTexts(tester, "附件", "发送")
+	h.assertNoTexts(tester, "更多工具", "命令")
 	if got := exactTextCount(tester.Texts(), "/"); got != 0 {
 		t.Fatalf("slash entry still rendered on a very narrow composer; texts = %v", tester.Texts())
 	}
@@ -208,9 +208,14 @@ func TestNarrowHeaderAndToolbarWithInspectorDrawer(t *testing.T) {
 	if attach.X < 0 || attach.X+attach.W > 704 {
 		t.Fatalf("attach control at %.1f..%.1f escaped the 704 window", attach.X, attach.X+attach.W)
 	}
+	// The model entry must stay reachable at this width without the session menu:
+	// either the toolbar kept the chip or the toolbar overflow carries it.
+	assertModelEntryReachable(t, tester, "snapshot…")
+	// The permission menu may itself be folded into the toolbar's overflow at
+	// this width; the harness opener goes through it.
 	h.openSessionMenu(tester)
-	h.assertTexts(tester, "模型：snapshot-model", "推理等级", "打开模型设置…", "权限模式", "对话模式",
-		"插入预设", "打开行为设置…")
+	assertSessionMenuOnlyPermissions(t, tester)
+	h.assertNoTexts(tester, "模型：", "推理等级", "打开模型设置…")
 }
 
 // TestEscapeClosesAnchoredMenusAndKeepsDraft covers H8's Escape/draft contract

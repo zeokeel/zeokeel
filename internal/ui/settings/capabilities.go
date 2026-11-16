@@ -29,14 +29,9 @@ import (
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
-// Capabilities page identity. Section 集成 groups it with MCP/Search/Network,
-// before the skills/LSP pages.
-const (
-	CapabilitiesPageID      = "capabilities"
-	CapabilitiesPageSection = "集成"
-	CapabilitiesPageOrder   = 35
-	CapabilitiesPageTitle   = "能力"
-)
+// CapabilitiesPageTitle is the section title used when the limits half renders
+// standalone; the merged Behavior & limits page hides the extra page header.
+const CapabilitiesPageTitle = "能力"
 
 // Product defaults the page shows for an unset (clean) row. They match the
 // modules' own constants, so a clean save never changes the effective limits.
@@ -220,15 +215,17 @@ func (st *capabilitiesState) discardDrafts(store contracts.SettingsService) {
 
 // buildCapabilitiesPage renders the page body.
 func buildCapabilitiesPage(c *ui.Context, store contracts.SettingsService,
-	st *capabilitiesState, locale contracts.LocaleService) {
+	st *capabilitiesState, locale contracts.LocaleService, showHeader bool) {
 	t := design.Of(c)
 	if !st.loaded {
 		st.load(store)
 	}
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, CapabilitiesPageTitle, "Capabilities"),
-			localized(locale, "委派并发与 Shell 命令的运行上限。",
-				"Run limits for delegation concurrency and shell commands."))
+		if showHeader {
+			uikit.PageHeader(c, localized(locale, CapabilitiesPageTitle, "Capabilities"),
+				localized(locale, "委派并发与 Shell 命令的运行上限。",
+					"Run limits for delegation concurrency and shell commands."))
+		}
 
 		uikit.Section(c, localized(locale, "委派并发", "Delegation concurrency"), func(body *ui.Context) {
 			ui.Field(body, localized(locale, "Subagent 并发", "Subagent concurrency"), func() {
