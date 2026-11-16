@@ -4,14 +4,14 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.44 — 设置收敛与输入框权限按钮** (2026-11-16). Native, compile-time modular
+> **v0.2.45 — MCP OAuth 2.1 授权与技能卡管理入口** (2026-11-16). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
-> webview. 本版把设置侧边栏从 17 页 / 6 组收敛为 **10 页 / 5 组**：预设页删除
-> （数据键保留），快捷键/搜索/限额/导入/更新/诊断分别并入外观、网络与搜索、
-> 行为与限额、数据与隐私、关于；旧深链由 host alias 兼容。输入框工具栏不再出现
-> 「会话设置」：按钮直接显示当前权限（默认「工作区修改」，可切「所有权限」/
-> 「只读」，所有权限带警示色），弹层只保留权限三态。`internal/ui/about` 模块移除，
-> 设置模块统一提供「关于」hub。See [CHANGELOG.md](CHANGELOG.md).
+> webview. 本版接入 **zeokeel-rig v0.18.0** 的 MCP OAuth 2.1：连接器表单支持
+> 无认证 / Bearer / OAuth 2.1，未授权卡显示「需要授权」并完成浏览器授权，
+> 令牌保存在本机 settings、支持重新授权/撤销，启动失败的连接器授权后自动重连。
+> 能力页每张技能卡都有 `⋯` 管理入口（默认应用打开 / 文件管理器显示 / 复制路径；
+> dataDir 目录形态技能可编辑/删除），只读技能有明确说明。
+> See [CHANGELOG.md](CHANGELOG.md).
 
 > **v0.2.24 主要变化**：按 `docs/PRODUCT-BUG-REVIEW-2026-11-11.md` 做 TDD 修复——
 > ① 安全/权限：MCP 多 server 重名 panic、`settings_get` 明文凭据、自动化只读越权、只读预设 destructive memory、LSP 初始化与沙箱路径、损坏数据文件隔离、后端工具开关生效；
