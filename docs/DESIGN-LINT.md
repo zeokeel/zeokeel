@@ -128,7 +128,7 @@ internal/ui/home/composer.go:634:7: DS-03 [AP-03] 裸数值度量：MinHeight(88
 |---|---|---|---|---|---|
 | DS-01 | 颜色字面量禁止 | error | AST：`ui.RGBA/ui.RGB/ui.Hex` 调用 + hex 字符串字面量；白名单 `internal/brand`、`internal/design`（阴影实现） | AP-01 | 1 |
 | DS-02 | 主题/状态色覆写与语义 | error（颜色）/warn（语义） | 链式 `.Background/.TextColor/.Border/.Shadow` 的实参不是主题/token 取得的颜色；状态色当正文（`TextColor(t.Success)`、`t.Danger` 或 `t.Warning` 而非 `*Text`） | AP-02/AP-18 | 2 |
-| DS-03 | 裸数值度量 | error | 数值字面量实参出现在固定方法集合（见 §3.3） | AP-03/AP-13 | 1 |
+| DS-03 | 裸数值度量 | error | 数值字面量实参出现在固定方法集合（见 §3.3）；**FontWeight 字面量与间接实参（无法追溯到 design.Weight* 的变量/常量/选择器）为 warn（UD-10）** | AP-03/AP-13 | 1 |
 | DS-04 | Agent surface 绕过入口 | error（按 registry） | type info：`contracts.ToolCall/ApprovalRequest/PlanReview/UserQuestion/ChatMessage` 的渲染不在入口包/入口函数内 | AP-05/AP-06 | 3 |
 | DS-05 | 默认组件多余样式覆写 | warn→error | 官方/入口组件的调用链上出现 `.Background/.Border/.Radius(非 token)/.Shadow/.FontSize` 覆写 | AP-07 | 2 |
 | DS-06 | 未登记自绘 | error | `ui.ButtonBase(` 等自绘调用点不在 `design-allowlist`/registry；`*Base` 使用未登记 | AP-04/AP-11 | 2 |
@@ -214,6 +214,8 @@ MinHeight, MaxHeight, MinWidth, MaxWidth, Size, Shadow
 
 **白名单**：`internal/design`（token 实现）、`internal/brand`、测试；`FontWeight(400/500/600/700)` 在有 `t.Font(...)` 同链时降为 warn（heading weight 尚未 role 化，见 DESIGN.md D6）。
 
+**间接字重（2026-11 审计 UD-10，warn）**：`FontWeight` 实参为非字面量（ident/const/selector）时，必须能追溯到 `design.Weight*` token——直接 `design.WeightSemibold` selector，或本地别名/变量的**每次赋值**都来自 token（如 `weight := design.WeightRegular; if active { weight = design.WeightSemibold }`、`const agentHeadingWeight = design.WeightSemibold`）。本地 const/var 持裸数值（`const headingWeight = 600`）、外部 selector、调用表达式、无法解析的形参 → warn「间接字重」。解析是文件级语法级（不解析跨作用域遮蔽，只会漏报不会误报）；uikit 包另有 `weights_test.go` AST 守卫钉住包内零裸字重（含 markdown theme 字段赋值）。
+
 **反例 / 正例**：
 
 ```go
@@ -269,7 +271,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{ /* tool fields */ })
 **目标**：自绘只能出现在 [DESIGN-LINT 白名单]（`internal/design/registry.json` 的 `allowlist`）与 [DESIGN.md](DESIGN.md) §7.1；并保留官方交互语义。
 
 **检测**：
-1. `ui.ButtonBase(` / `ui.DialogBase(` / `ui.CollapsibleBase(` 等 base 调用点，按 文件+符号 匹配 allowlist；
+1. `ui.ButtonBase(` / `ui.DialogBase(` / `ui.CollapsibleBase(` 等 base 调用点，按 **文件 + 符号/文本锚点** 匹配 allowlist（2026-11 审计 UD-11 落地站点级）：条目可选 `symbol`（ enclosing 函数/方法名，方法不带 receiver）与 `text`（归一化源码片段子串）；两者都设时须同时满足；**纯 paths 条目保持历史文件级行为**（向后兼容）。富行条目按符号锚定（`command-palette.rows`→`palette`、`uiroot.rail-session-rows`→`railSessionRow`），不再以文件前缀误豁免同文件其他站点；`chrome.file-picker-seam` 已收窄到实际 seam 文件列表（不再整目录豁免 uiroot）；
 2. allowlist 条目必须含 `owner`、`reason`、`until`；缺一即报（DS-06b）；
 3. 自绘按钮必须同时有 `Label`/`Tooltip`（AST 链式检查）且处理 `Hovered/Pressed/Focused`（字符串级检查 `Hovered()`/`Pressed()`；无法判定时 warn + 建议帧测试）。
 
@@ -501,27 +503,27 @@ Run again after fixing: go run ./internal/devtools/designlint --diff ./...
 
 ---
 
-## 附录 A：本仓库实测基线（2026-11-09，Phase 1a/1b 后）
+## 附录 A：本仓库实测基线（2026-11 审计修复后）
 
-> 来源：`.cache/design-research/zeokeel-inventory.md` + designlint/baseline 实测；复算命令见附录 B。
+> 来源：designlint/baseline 实测（2026-11-17 复核）；复算命令见附录 B。
 
 | 规则 | 当前存量 | 说明 |
 |---|---|---|
 | DS-01 颜色字面量 | **0** | Phase 1b 已把 3 处 UI 层 `ui.RGBA` 换成 `t.ShadowOverlay()`；design/brand 内部实现不计 |
 | DS-02 状态色/覆写 | 未纳入 lint | 颜色覆写已基本清零；DS-02 规则 Phase 2 实现 |
-| DS-03 裸数值度量 | **51**（grep 行口径；designlint 按字面量计 146 条） | 全部入 `.design-baseline.json`；新代码零容忍 |
+| DS-03 裸数值度量 | **21**（grep 行口径；designlint 按字面量计 61 条） | 全部入 `.design-baseline.json`；新代码零容忍 |
 | DS-03 裸 FontSize | **0** | Phase 1b 已迁移到 `t.MonoText(role)` |
-| DS-03 裸 FontWeight | 90（warn；designlint 口径） | 待 heading type role（DESIGN.md D6）后收敛 |
-| DS-06 手绘 ButtonBase | **10** | Phase 2a 的 `uikit.IconButton` 已收编图标按钮；余下 8 处富行/success 态 + 内核 2 处，registry allowlist 已登记 |
+| DS-03 裸 FontWeight | 32（warn；designlint 口径）+ 间接字重 warn 规则（UD-10，当前 0 命中） | 待 heading type role（DESIGN.md D6）后收敛 |
+| DS-06 手绘 ButtonBase | **11** | 富行 8 处（palette/rail/slash@/侧栏）+ RunStatus 队列徽章 + IconButton 内核 2 处，registry allowlist 全登记（站点级锚点） |
 | DS-06b 无效豁免 | 0 | 行内 `//design:allow` 必须有 owner/until/reason |
 | DS-07 图标来源 | 0 | emoji/手写 SVG 已清零 |
 | DS-10 Danger+Default | 0（结构级） | 语义行为由帧测试覆盖 |
 | DS-09 重复状态函数 | **0** | Phase 2b 已收敛到 `uikit.Status*`；design-check 阈值收紧为 0 |
 | DS-08 文档同步 | 部分 | conformance 覆盖 registry/allowlist/虚构 API；文档表格逐行镜像待 Phase 3 |
 | 对话框宽度绕 token | **0** | Phase 1b 已全部换 `DialogWidth*`/`OverlayWidthS` |
-| 工具渲染路径 | **4** | 待 Phase 2/3 收编为 ToolRow/ToolCallCard |
+| 工具渲染路径 | **2** | Phase 2c 收编为 ToolRow/ToolCallCard；AR-01 后预览/详情段统一 uikit.ToolCallPreview/ToolPanelSections |
 
-**baseline 现状（2026-11-09 刷新后）**：`.design-baseline.json` 共 **156 条**（DS-03 146、DS-06 10），全部带 owner + expires（2027-06-30）；designlint 实测 156 条 violations（全部被 baseline/allowlist 收口），`--strict --baseline` 为 0 new / 0 blocking。design-check 阈值已收紧：metric 51、ButtonBase 10、FontSize 0、status-func 0、Danger+Default 0。
+**baseline 现状（2026-11 审计清理后）**：`.design-baseline.json` 共 **72 条**（DS-03 61、DS-06 11），全部带 owner + expires（2027-06-30）；designlint 实测 72 条 violations（全部被 baseline/allowlist 收口），`--strict --baseline` 为 0 new / 0 blocking。2026-11 清理：156→72（删除 86 条 stale：14 条指向已删文件 + 72 条违规已修复；2 处已登记站点并入 ledger）。design-check 阈值已收紧：metric **21**、ButtonBase **11**、FontSize 0、status-func 0、Danger+Default 0。
 **基线策略**：新代码零容忍；不得为过 lint 向 baseline 加新条目；`make design-baseline` 只在 Lead/owner 批准时用于清理 stale 条目。
 
 ## 附录 B：Phase 0 检查（grep 版，已由 `scripts/design-check.sh` 自动化）
@@ -533,9 +535,9 @@ Run again after fixing: go run ./internal/devtools/designlint --diff ./...
 grep -rnE 'ui\.(Hex|RGBA)\(' internal/ui internal/uiroot --include='*.go' | grep -v _test.go | wc -l
 # DS-03 裸 FontSize（期望 0）
 grep -rn '\.FontSize(' internal/ui internal/uiroot --include='*.go' | grep -v _test.go | wc -l
-# DS-03 裸数值度量（期望 51）
+# DS-03 裸数值度量（期望 21）
 grep -rnE '\.(Height|Width|Size|Gap|Padding|PaddingX|PaddingY|PaddingStart|PaddingEnd|MaxHeight|MinHeight|MinWidth|MaxWidth|Radius|FontSize|Shadow)\(-?[0-9]' internal/ui internal/uiroot --include='*.go' | grep -v _test.go | wc -l
-# DS-06 未登记自绘（期望 10，全部 allowlist 登记）
+# DS-06 未登记自绘（期望 11，全部 allowlist 登记）
 grep -rn 'ui\.ButtonBase(' internal --include='*.go' | grep -v _test.go | wc -l
 # DS-10 危险 + 默认组合（期望 0）
 grep -rn 'Danger: *true' internal --include='*.go' | grep -v _test.go | wc -l
@@ -576,5 +578,5 @@ grep -rnE '^func (statusLabel|normalizeStatus|statusColor|toolStatusColors|statu
 | Phase 3c | `uikit.ComposerShell/RunStatus`；两处 composer 统一；13 个帧测试 | composer-after：会话面仅时钟/用量文字；Home 有意统一（高度/内边距/发送图标） |
 | Phase 3d | `uikit.TeamSurface` + F-1 主代理徽标统一；rightpanel 只留数据 | team-after：任务板 0px；主代理徽标 tinted 统一；14 个帧测试 |
 
-**已知偏差**：① registry 载体 YAML→JSON（离线依赖限制，schema 不变）；② `--strict` 只升级 warn，不使 baseline 失败；③ DS-06 v1 仅 ButtonBase/DialogBase；④ design-check 阈值取实测并随迁移收紧（FontSize 0、metric 68、ButtonBase 10、status-func 0）。
+**已知偏差**：① registry 载体 YAML→JSON（离线依赖限制，schema 不变）；② `--strict` 只升级 warn，不使 baseline 失败；③ DS-06 v1 仅 ButtonBase/DialogBase；④ design-check 阈值取实测并随迁移收紧（FontSize 0、metric 21、ButtonBase 11、status-func 0）。
 

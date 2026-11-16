@@ -1,7 +1,7 @@
 # Agent 客户端入口组件规格（AGENT-SURFACES.md）
 
 > 本文是 [DESIGN.md](DESIGN.md) §2「场景 → 组件硬映射」的展开规格：**Agent 客户端 9 个 surface 的入口组件契约**。
-> **当前状态（2026-11-10）：S1–S9 全部已有入口实现；S9 从右侧栏 TeamSurface 改为会话内的 agent surface（PopoverBase 团队浮层 + 主栏子会话视图）。** 每节保留目标 API 草案（作为契约）、最终实现位置、迁移步骤与验收（迁移步骤仅作历史记录）。
+> **当前状态（2026-11 审计修复后）：S1–S9 全部已有入口实现；S9 从右侧栏 TeamSurface 改为会话内的 agent surface（PopoverBase 团队浮层 + 主栏子会话视图）。** 2026-11 多角色审计修复补充了 US-01 分段交错、US-03/04 呈现保真、UX-02 dock 预算、UX-06 stopping、UX-18 草稿持久化、UX-19 播报、RG-09 旧权限提示、US-11 todo 披露等规格（各节「2026-11 审计」段）。每节保留目标 API 草案（作为契约）、最终实现位置、迁移步骤与验收（迁移步骤仅作历史记录）。
 > 落地顺序与 lint 规则见 [DESIGN-LINT.md](DESIGN-LINT.md)；token/预设见 [DESIGN.md](DESIGN.md) §5/§6。
 
 ---
@@ -108,6 +108,18 @@ func SessionThread(c *ui.Context, o SessionThreadOptions)
 
 **查找与轨迹定位（2026-11-15）**：Cmd/Ctrl+F 打开官方 `ui.FindBar`（自动切到「对话」；子会话忽略），匹配每条消息的正文+推理（大小写不敏感，每条消息计 1 次），显示计数并用 `uikit.BuildSessionRowMap` 把消息映射到 transcript 分组行后 `ScrollIntoView`；Enter/Shift+Enter/上一/下一/Done/Esc 走官方控件；Esc 分层——字段自己消费，运行中 `interruptEsc` 先关 FindBar 且不停止 run，空闲时仅 findOpen 注册 screen Esc 并让位 slash 菜单；关闭保留 query/current，重开回到当前匹配，键盘交还 composer。轨迹页：`trajList.FollowEnd` 跟随流式新调用；计数行在 `uikit.ReadingColumn` 与卡片同轴；每卡「在对话中查看」（可及名「在对话中定位 <工具>」），方向键只移动选中、Enter/双击才切回对话并滚动到该消息行。
 
+**分段交错时间线（2026-11 审计 US-01/US-02，A/C/F 波）**：live 读模型不再把多轮思考拼成单 string——`contracts.ChatMessage.ReasoningSegments []ReasoningSegment{Text, Iteration, TextOffset}` 按模型迭代保留思考分段（`Reasoning` 平铺字段保留兼容），复用 `ToolCall.TextOffset` 机制：`TextOffset` 是该迭代思考到达时助手累计正文的字节长度。`session.mergeTimelineEvents` 把思考分段与工具调用按偏移合并为一条时间线，**思考↔工具↔正文交错渲染**（同偏移交替约定；已知限制：同迭代多并行工具全偏移相等时排序近似，完全精确需 `ToolCall.Iteration`，记入审计最终报告限制）。**live/restored 同构**：重启后从 rig 历史逐轮恢复的分段与 live 呈现一致（US-02 关闭）。standard/compact 摘要行在分段 >1 时显示「N 段思考」（`processSummaryParts`）；detailed/verbose 展开完整交错时间线。帧测试：`internal/ui/session` 的 US-01 live/restored 集成测试与 `trajectory_content_test.go`。
+
+**工作步骤思考态与时态（2026-11 审计 US-03）**：standard/compact 单行按真实阶段取词（`liveWorkStepPhase`）——有运行中工具＝该工具族的进行时词（正在读取文件/正在运行命令…）+ 该调用摘要；最后一个工具完成后正文未到＝「正在思考」（standard 档附当前迭代思考的一行预览，≤96 rune）；正文已到＝「正在回复」；无任何事件＝「正在分析请求」。**工具完成后不再滞留进行时词**：工具行状态词走 `uikit.StatusText` 完成时态（已完成/Done），回合结束后收进过程摘要。
+
+**轨迹含思考与正文（2026-11 审计 US-04）**：轨迹 tab 不再是「只有工具调用」——每回合按时间线渲染思考折叠行（「思考」disclosure，分段计数）+ 工具卡 + 正文片段（「正文」），与对话页共用 `mergeTimelineEvents`。决定性断言：`TestTrajectoryIncludesReasoningAndBody`（两轮思考行 + 正文 + 工具卡）。
+
+**运行态播报（2026-11 审计 UX-19）**：流式 settle 后 `c.Announce`「回答已完成/Reply finished」；审批到达 `c.Announce`「需要审批：工具调用等待你的决定」（去重：同一最旧请求只播一次）。standard/compact 的活动行是 `Role(ui.RoleStatus)`  live region（detailed/verbose 由 `uikit.RunStatus` 的 RoleStatus 行承担），读屏随阶段朗读当前状态词。
+
+**dock 高度预算（2026-11 审计 UX-02/US-12）**：composer 上方 dock（目标条 + 审批内联卡 + 子会话 banner）有总高度预算 `composerDockMaxHeight = design.Space8 * 10`（320 DIP），超出部分 dock 内滚动（`TrackScroll`），**决策按钮在 900×600 窗口可达**；几何帧测试钉住 input.bottom ≤ 预算（修复前 1036/974 → 修复后 507/允许 395，transcript ≈40 DIP 与 demo 同量级）。
+
+**右栏文件树 Outline（2026-11 审计 UD-14）**：右栏文件页工作区树用官方 `ui.Outline`（懒加载缓存，`filesOutline`），不再 `ui.Tree` + 400 cap——第 401 项可达；侧栏工作区树同构。
+
 **迁移步骤**：① 把 `buildChatPane` 的 List 配置/空态/回到最新抽成 `uikit.SessionThread`；② 消息体渲染保留为可插拔 `func(*ui.Context)`（业务 slot）；③ 用现有 transcript/scroll 测试作回归；④ 新增快照 `uikit-session-thread.png`。
 
 **验收**：`TestSessionThreadVirtualizesLongConversation`、`TestSessionThreadFollowAndBackToLatest`、`TestSessionThreadDefaultRows`（uikit）；流式隐藏动作由业务 Row 实现，由 session `TestStreamingMessageHidesActions` 覆盖；+ 快照。
@@ -118,7 +130,7 @@ func SessionThread(c *ui.Context, o SessionThreadOptions)
 
 **职责**：把模型推理作为**次级折叠内容**展示：默认不抢主视觉；streaming 时展开；结束后收起为一行摘要。
 
-**数据模型**：`reasoning string`、`streaming bool`、`open bool`（按 message ID 持久化）。
+**数据模型**：`reasoning string`（兼容平铺）、**`segments []contracts.ReasoningSegment{Text, Iteration, TextOffset}`（2026-11 审计 US-01 修订：单 string 规格编码了 live 折叠缺陷，已废弃为唯一来源）**、`streaming bool`、`open bool`（按 message ID 持久化）。渲染优先用分段：多段思考按迭代折叠/展开，与工具调用按 TextOffset 交错（S1 时间线）；旧消息无分段时回退平铺 `Reasoning` 单块。
 
 **状态矩阵**：
 
@@ -152,7 +164,7 @@ type ReasoningTraceOptions struct {
 
 **禁止**：大 Card 把 CoT 渲染成正文；默认展开（除 streaming）；把推理拼进消息正文；每帧重建 trigger。
 
-**当前实现**：`internal/ui/session/view.go` `buildReasoningDisclosure`（`ui.CollapsibleBase` + muted markdown + Spinner + 行数 + `thinkOpen`）。
+**当前实现**：`internal/ui/session/view.go` `buildReasoningDisclosure`（`ui.CollapsibleBase` + muted markdown + Spinner + 行数 + `thinkOpen`）；分段来源 `reasoningSegmentsOrFallback`（live 读模型 `ReasoningSegments`，restored 从 rig 历史逐轮恢复，二者同构）。
 
 **迁移步骤**：抽函数 → `uikit.ReasoningTrace`；保留 muted Markdown options；新增帧测试覆盖 streaming 展开/结束后收起/`HoldPlace`。
 
@@ -394,6 +406,12 @@ func ComposerShell(c *ui.Context, o ComposerOptions)
 
 **当前实现**：会话 `internal/ui/session/view.go` `buildComposer`（含 queue/stop/slash/@/Enter 语义）；首页 `internal/ui/home/composer.go`。共用 `design.Tokens.Composer()`。差异清单见 [DESIGN.md](DESIGN.md) §1.3 与 ui-inventory 报告 §C6。
 
+**草稿持久化（2026-11 审计 UX-18）**：per-session 草稿**文本**落 settings 存储（`sessionDraftSettingKey(sessionID)` 行），重启后恢复；只持久化文本（附件/引用不持久化）。切换会话保存/恢复草稿的既有语义不变；编辑消息/hero 示例对非空草稿的保护见 UX-05。
+
+**权限双层披露（2026-11 审计 US-05/(a)）**：composer 权限按钮是**全局**开关（菜单标注「（全局）」），同时决定审批 gate 与 OS 沙箱：只读＝仅只读/信息类工具免审批；工作区修改（默认）＝再加工作区内文件读写免审批，OS 沙箱可用时 shell 类工具在沙箱内自动放行、不可用时命令失败；所有权限＝全部免审批且 OS 沙箱不包装命令（以宿主权限运行，警示态徽章 RG-02）。**会话/自动化级「所有权限」仅放宽审批，OS 沙箱跟随全局**——权限说明与系统提示词明示该两层语义及反向泄漏（会话 read-only + 全局 full 时工作区外读不受限）；「本会话内始终允许」保持会话级。沙箱拒绝经 rig DenialSignatures 归因到工具结果/错误行（RG-03，ErrorKind sandbox-denied）。
+
+**全局热键冲突二次确认（2026-11 审计 UX-11）**：设置外观页的全局热键**直接输入路径**保存前做冲突检测（与命令面板/侧栏等已声明快捷键比对），冲突时显示警告行且保存需再次确认（`conflictArmed` 两段式）；录制路径仍被面板 shortcut-first 截获。
+
 **迁移步骤**：① 抽 `uikit.ComposerShell`（卡片+输入+工具条槽+发送/停止槽+错误行）；② 会话/首页各自提供 toolbar slot 与发送逻辑；③ 统一宽度（`design.TranscriptWidth`/容器宽）与发送控件外观；④ 帧测试覆盖 Enter/Shift+Enter/运行中 Esc/排队/附件直连 picker。
 
 **验收**：`TestComposerEnterSends`、`TestComposerShiftEnterNewline`、`TestComposerEscapeInterrupts`、`TestComposerQueueDuringRun` + 快照 `chat-composer.png`。
@@ -414,7 +432,7 @@ func ComposerShell(c *ui.Context, o ComposerOptions)
 | restored-interrupted | 恢复后 `ChatSession.Interrupted`（上次 run 未完成、未重放）：transcript 顶部一条中性提示——`uikit.StatusBadge`「上次运行被中断」+「未重放；请检查工作区状态后继续。」+「继续」+ 忽略图标。继续只聚焦 composer（不自动重放），忽略仅本次隐藏；后端下一次 run 清零后提示自然消失；sidebar 不加徽章（非持久提示不进入导航） |
 | streaming | 最后消息尾部 Spinner + 状态文本；输入区停止按钮；`RoleStatus`/Busy；composer 键位提示为「Enter 排队 · Esc 停止」；**有待审批时改为「Esc 拒绝审批（再按停止）」**，与审批卡的「Esc 拒绝」一致（PM-12） |
 | queued | 队列 Badge（可展开）：排队项来自后端 `contracts.PromptQueue`（按发送顺序 + 本地时间显示），可移除单条/清空；排队只发文字提示。UI 不持有队列、不发送、不 drain |
-| stopping | 停止按钮 pressed/disabled；不可重复触发 |
+| stopping | 停止按钮 pressed/disabled，文案「停止中…/Stopping…」；不可重复触发；**settle 后才 toast「已停止」**（UX-06：取消是异步的，running=true 期间不宣布完成） |
 | failed | 错误行 + 重试（带标签按钮，不是图标） |
 | queue-send-failed | 投递失败由后端把该条放回队首（并保留），UI 只渲染 `QueuedPrompts` 供用户移除；无「暂停/恢复/重试」内存语义，不得逐帧自动重发或每帧请求重绘 |
 | completed | 完成 toast/Announce；用量折叠显示 |
@@ -443,6 +461,10 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 **Job 输出（0.2.40）**：后台任务浮层每行可展开 256 DIP mono 输出面板（复制命令/输出、截断/中断提示、500ms live 刷新、结束补读）；停止为两段式（第一次 arm「确认停止」，3 秒内第二次 `KillJob`，超时/关闭复位），键盘 Enter 可确认。
 
 **当前实现**：session 生成中 Spinner/文本、queue Badge/popover、stop 按钮、消息元信息行（时间 + `FormatCompactCount` 紧凑用量 + ⋯ 用量明细）、`buildRetryAction`；后台完成通知静默由可选 `contracts.ForegroundSession`（uiroot 提供、host 接线）判定：只有当前屏幕=会话且该会话在前台才静默，其他屏幕的后台完成照常通知；无该服务（headless）回退 agent active 会话判定。toasts 模块（`c.AddToast` + `ToastViewportBase`，2 条上限 + 合并 ×N）。测试：`queue_send_test.go`、`usage_test.go`、`toasts_test.go`。
+
+**停止态与 settle toast（2026-11 审计 UX-06）**：主停止点击后进入 stopping 态（`uikit.ComposerShell` 停止位读「停止中…」、disabled 防重复），后端 run 真正 settle 后才发「已停止」toast；与 team/job 停止的既有「停止中…」语义对齐。regression 钉住：`TestStopCommandEnabledAndCancel`（stopping/settle 后 toast）。
+
+**旧权限运行中 job 提示（2026-11 审计 RG-09）**：权限降级不追溯——后台任务浮层经可选 `contracts.JobPermissionReporter` 读模型显示「N 个运行中任务仍按旧权限运行」+ 说明（OS 沙箱约束在启动时施加、不追溯变更）+ 两段式批量「停止仍按旧权限运行的任务」入口（第一次 arm 确认，3 秒内第二次执行）；job 路由修复（RG-01 pwsh/promoted 前缀）后 kill 真实可达。
 
 **迁移步骤**：抽 `uikit.RunStatus`（状态行/队列/停止/重试/用量）；保留通知通道不变；帧测试覆盖排队/停止/重试/用量折叠。
 
@@ -486,6 +508,8 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 - 团队浮层的数据只读，但 running 成员可停止/关闭（控制动作）；成员/任务数据来自 `TeamService`/`TaskBoard`；任务完成/指派由工具或服务调用完成，浮层在打开时读取一次任务快照（关闭重开刷新）。
 - 头部窄带（阅读列 < 2/3）退化为图标+计数，可及名保留全称。
 - a11y：入口按钮 Label 为全称；状态文案可读（不只靠颜色）；浮层为 native popover/dialog 语义。
+
+**Todo dock 全局披露与保序（2026-11 审计 US-11）**：composer 上方 Todo dock 的 store 是**进程级全局**（跨会话共享）——dock 内一行 TypeXXS 静默文案明示「待办为全应用共享，不区分当前会话」，避免把别的会话写的清单读成本会话计划；列表**按 agent 写入的编号步骤序渲染**（不按状态分组重排），`TestTodoDockKeepsAgentOrder` 以行 Y 坐标钉住顺序契约。
 
 **禁止**：把团队/子代理塞进侧边栏或右栏常驻页签；`active` 当 running；伪造子代理活动时间线；一次性子代理显示可发送输入框。
 

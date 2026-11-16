@@ -57,7 +57,10 @@ design-baseline:
 	$(GO) run ./internal/devtools/designlint --write-baseline ./...
 	@echo "updated .design-baseline.json (only remove stale entries in normal PRs)"
 
-# What CI runs.
+# The fast local subset of CI (build+vet+test). The hosted CI additionally runs
+# gofmt, the design contract (designlint/design-check/mygo vet), the import
+# boundary assertion, a targeted -race pass, product smokes, cross-compile and
+# installer packaging (.github/workflows/ci.yml); full local parity: make verify.
 ci: build vet test
 
 # One-command reproducible verification: gofmt/build/vet/test/-race/regression/

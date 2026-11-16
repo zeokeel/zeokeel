@@ -11,7 +11,8 @@
     覆盖）+ rig team manager 全量工具（team_*、legacy、DSH spawn_teammate/list_agents/wait_agent/
     send_message/interrupt_agent）+ **会话头部智能体团队浮层**（成员/状态/最新回答、打开成员会话）
     + **共享任务**（team_task_* 工具，团队浮层只读展示）+ goal 工具/会话 goal chip。
-  - **Composer 高级控制**：/goal /plan /memory 原生对话框、**权限模式**（命令 + composer badge，默认工作区：工作区文件读写自动允许，shell/网络仍询问；
+  - **Composer 高级控制**：/goal /plan /memory 原生对话框、**权限模式**（命令 + composer badge（标注「全局」），默认工作区修改：工作区文件读写免审批，
+    OS 沙箱可用时 shell 类工具在沙箱内自动放行、不可用时命令失败；审批与 OS 沙箱是两层，会话级「所有权限」仅放宽审批、OS 沙箱跟随全局；
     只读/工作区可写/所有权限（DSH 同款预设），settings `agent.permission`）、**思考强度**（per-session、按模型系列/自定义模式 +
     toolbar 菜单 + provider `reasoning_effort`）、**@session 引用**（@ 菜单会话分组、token 持久化、
     agent 注入尾部 20 条/≤8000 rune、`session_refs` 事件）。
@@ -30,8 +31,8 @@
 - **presets 已落地**：prompt 片段契约 + composer「预设/Presets」插入菜单 + 设置「预设」页 CRUD（名称/提示词/排序/
   恢复默认）+ 设置「模型」页的模型列表（modelcatalog.settings 动态读取）；旧 agent presets 的 tool allowlist 语义仍未迁移，
   故 presets 记 🟡。
-- 复核统计（Round 65 终值）：62 项中 **✅61 / 🟡0 / ❌1**（❌ 仅 winproc，Windows 平台非目标）。✅ 为有等价实现或剩余差异属明确非目标；🟡 为已实现但存在
-  深度/长尾差异（§5.1）；❌ 仅 winproc（Windows 平台非目标）。核心对话/持久化/工作区/审批/设置/右栏/搜索/导入/更新/
+- 复核统计（2026-11 审计修复后终值）：62 项中 **✅60 / 🟡0 / ❌2**（❌ 为 winproc（Windows 平台非目标）与 Terminal 运行器（侧边栏终端 0.2.41 / 模型侧 terminal_* 0.2.42 移除，明确非目标））。✅ 为有等价实现或剩余差异属明确非目标；🟡 为已实现但存在
+  深度/长尾差异（§5.1）；❌ 见 §2/§3 矩阵。核心对话/持久化/工作区/审批/设置/右栏/搜索/导入/更新/
   编排/composer 控制/MCP 管理/宿主桌面能力均已可用。
 - **功能面覆盖已完成**：旧应用的用户可见功能均有等价实现；剩余工作为 §5.1 的交互深度精修与 §5.2 的明确非目标。
 
@@ -39,9 +40,9 @@
 
 | 状态 | 数量 | 占比 | 含义 |
 |---|---:|---:|---|
-| ✅ 已迁移/等价 | 61 | 98.4% | 当前代码有对应实现，进入 desktop/headless 装配或剩余差异属明确非目标 |
+| ✅ 已迁移/等价 | 60 | 96.8% | 当前代码有对应实现，进入 desktop/headless 装配或剩余差异属明确非目标 |
 | 🟡 已实现（深度限制） | 0 | 0% | （全部关闭） |
-| ❌ 未迁移 | 1 | 1.6% | 仅 winproc（Windows 平台非目标） |
+| ❌ 未迁移 | 2 | 3.2% | winproc（Windows 平台非目标）+ Terminal 运行器（0.2.41/0.2.42 移除，明确非目标） |
 | 合计 | 62 | 100% | 28 后端能力 + 34 Shell/UI 能力 |
 
 ## 2. 后端能力矩阵（28 项）
@@ -86,7 +87,7 @@
 | Composer 深度（/goal /plan /memory/权限/thinking/@session/presets） | ✅ | `sessionCommands` + `command_dialogs.go` + `commands_help.go` + `compact_command.go` | **15 条命令**（/新会话/副本/导出/设置/目标/审阅/记忆/反馈/停止/附加/帮助/**压缩上下文/完成目标/放弃目标**）+ 权限模式、聊天模式、**模型与推理等级（模型 chip 两级菜单：一级「模型／推理等级」，二级选模型/选该模型推理等级；覆盖按（会话×模型）保存、默认跟随模型）**、@session、预设；目标生命周期（完成/放弃/编辑/暂停/恢复/清除）已全量 |
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar + session B3 顶栏 | 280px sidebar、64px rail、Cmd/Ctrl+B、**Cmd/Ctrl+N 新建会话、Cmd/Ctrl+, 设置、Cmd/Ctrl+K 命令面板**、右栏开关、添加工作区、视图选项（排序/分组持久化）、工作区搜索/置顶/归档；**会话 B3 顶栏**：40px 标题/工作区行（TypeM 16px 标题）+ 32px Tabs 行、浅色 band + 单条底边线、无返回/无 Alt+←、⋯ 会话操作（复制/导出/归档）、右上 palette+inspector；无贡献屏无空工具栏；输入框上方 dock（目标条 + 审批内联卡）；通知右上角（header 下方，最多 2 条） |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
-| Settings 外壳与页面 | ✅ | `internal/ui/settings`、about | **17 页**（原 19；高级分组默认折叠）：常用（模型/行为/预设）、外观（外观/快捷键）、集成（搜索/网络/LSP/能力（限额））、数据与通知（通知/记忆/归档/数据与隐私/导入/更新）、高级（诊断）、关于；**技能/MCP 两页已删除并迁入能力页，设置搜索不再命中技能/MCP**；**模型页 = 模型列表（每模型服务商/Base URL/API Key/系列/思考模式/生成参数编辑；添加模型弹窗含常用服务商预填、密钥继承与测试连接，可设默认模型）+ 提示词 + 运行参数（最大迭代默认不限制/上下文预算/流完整性）**；扩展设置在能力页底部「诊断与设置」区（已接线键）；第三方插件市场为明确非目标 |
+| Settings 外壳与页面 | ✅ | `internal/ui/settings`、about | **10 页 5 组**：常用（模型/行为与限额）、界面（外观（含快捷键）/通知）、连接（网络与搜索/LSP）、数据（记忆/归档/数据与隐私（含导入/文件隐藏））、关于（关于 hub：构建信息/更新/诊断/架构）；**技能/MCP 两页已删除并迁入能力页，预设页已删除（后端 presets 保留），设置搜索不再命中技能/MCP**；**模型页 = 模型列表（每模型服务商/Base URL/API Key/系列/思考模式/生成参数编辑；添加模型弹窗含常用服务商预填、密钥继承与测试连接，可设默认模型）+ 提示词 + 运行参数（最大迭代默认不限制/上下文预算/流完整性）**；扩展设置在能力页底部「诊断与设置」区（已接线键）；第三方插件市场为明确非目标 |
 | Approval 审批内联卡（V3 强调） | ✅ | `uikit.ApprovalDialog`（Inline）+ `internal/ui/approval` + approvals 模块 | 输入框上方内联卡（警示横幅+警示描边，不遮挡 transcript）；allow/allow-always/deny、无默认焦点、Esc=deny 最早一条且不中断本轮（session 判断审批优先）、多请求计数、非会话屏自动切回会话；旧 Modal 路径保留给 embedder；只读/工作区可写/所有权限三档预设（settings 覆盖；旧 ask/never 存值归一为只读；headless assembly 可配 ask/never 策略） |
 | 右侧栏 | ✅ | rightpanel | 默认收起；多标签：开始引导 / 文件 / 每个打开文件一个可关闭标签；文件页含工作区树、交付区、预览/改动；无概览/工具/日志/变更/团队/任务常驻 pane、无侧边栏终端；en/zh |
 | 文件页 / 文件标签 | ✅ | rightpanel files + workspace | 工作区树/面包屑/文本/Markdown/图片预览/错误态/交付区；打开文件新标签，内容可滚动 |
@@ -118,11 +119,12 @@
 
 ## 4. Top 剩余缺口（按用户影响排序）
 
-1. **Composer 收尾（高，每日可见）**：/compact、/goal pause/resume/complete、plan-mode 切换、
-   预设/persona 的管理页已落地（预设片段），仍缺 /compact 与 plan-mode 切换。
-2. **Plan 深度（中高）**：keep-planning + 反馈修订循环、plan mode 工具策略切换、transcript plan 卡；
-   当前只有批准/取消两键。
-3. **消息级操作/用量**：已实现元信息行单一 ⋯（复制/重生成/反馈/用量明细）与过程折叠，无缺口。
+1. **Composer 收尾（已关闭）**：/compact（`compact_command.go` + Context 页头「压缩上下文」）、
+   /goal pause/resume/complete、/plan 计划模式切换、预设片段均已落地；无剩余缺口。
+2. **Plan 深度（已关闭）**：keep-planning + 反馈修订循环、plan mode 工具策略切换、transcript plan 卡均已落地
+   （`uikit.PlanReviewDialog`：批准/继续规划/取消计划三键）。
+3. **消息级操作/用量**：已实现元信息行单一 ⋯（复制/重生成/用量明细）与过程折叠，无缺口
+   （消息反馈/评分功能已按用户要求移除，导出不再含反馈字段）。
 4. **管理深度（中）**：第三方插件市场/内置插件开关（明确非目标）；memory 后台自动提取（当前为手动触发）；
    artifact 下载动作。
 5. **编排执行深度（中）**：goal 自动驱动（多轮自动继续）、review/PTC/workflow/ralph 工具接线；
@@ -137,7 +139,7 @@
 
 ## 5. 结论与收口分类（Round 59 终版）
 
-**功能面覆盖结论：旧应用的用户可见功能均已落地等价实现（✅61/62）**；唯一 ❌ 为 winproc（Windows 平台相关，明确非目标）。
+**功能面覆盖结论：旧应用的用户可见功能均已落地等价实现（✅60/62）**；❌ 为 winproc（Windows 平台相关，明确非目标）与 Terminal 运行器（0.2.41/0.2.42 移除，明确非目标）。
 此前 §5.1 列出的 13 项深度限制已全部关闭：automation 字段、LSP 多服务器+workspace opt-in、memory consolidation+extract、agent presets、
 session tool spill、sessionreference URI/预算、i18n 错误分类、/compact 与 /goal 生命周期、能力页扩展设置、ACP tool_call、能力页技能 CRUD。
 非目标见 §5.2。
@@ -155,9 +157,10 @@ ACP 客户端职责（auth/fs/terminal）、系统级全局热键以外的 OS �
 
 ## 6. 对外表述建议
 
-- 可说："已支持完整对话、工作区/文件/变更检查、17 页设置（模型/行为/预设/外观/快捷键/搜索/网络/LSP/
-  能力（限额）/通知/记忆/归档/数据与隐私/导入/更新/诊断 + 关于）、审批与权限模式、聊天模式（普通/计划/精简/创作）、
-  右栏（团队/任务）、搜索/fork/导出（Markdown+JSONL，含反馈）、置顶归档、web search、ask_user/present/plan 审阅、
+- 可说："已支持完整对话、工作区/文件/变更检查、10 页 5 组设置（模型/行为与限额/外观（含快捷键）/通知/网络与搜索/LSP/
+  记忆/归档/数据与隐私（含导入/文件隐藏）/关于 hub（更新/诊断/架构））、审批与权限模式（全局权限决定审批与 OS 沙箱两层；
+  会话级「所有权限」仅放宽审批）、聊天模式（普通/计划/精简/创作）、
+  右栏（开始引导/文件/打开的文件/变更/产物；团队/任务在会话头部浮层，不在右栏）、搜索/fork/导出（Markdown+JSONL，不含反馈——反馈功能已移除）、置顶归档、web search、ask_user/present/plan 审阅、
   keep-planning、真实 subagent/team 编排、per-session 模型与思考强度/自定义模式与上下文预算与最大迭代、@session 引用、
   能力页（技能/连接器页级 Tabs，3 列卡片；MCP HTTP/stdio/server 级开关/连接配置）、桌面单实例/autostart/install-on-restart/toast/代理/托盘/全局热键/主题三态、
   Home composer、能力页技能编辑、记忆管理、工件下载、ACP list/load、导入/更新下载安装调度。"

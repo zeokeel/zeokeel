@@ -46,9 +46,13 @@ cmd (30 行) → host (进程) → assembly (装配) → kernel root
 - **locale 分工**：产品文案归 `contracts.LocaleService`（uiroot）；mygo 框架自己的控件/菜单/无障碍文案归 `mygo.App.SetLocale`。host 在启动时与 `uiroot.Config.OnLanguageChange` 回调里把产品语言镜像给框架（`internal/host/framework_locale.go`）；uiroot/模块不得直接调用 `App.SetLocale`。
 - **生命周期**：模块在装配期（主线程）激活并注册贡献；注销函数交给 `ctx.Effect`，kernel
   dispose 逆序撤销。配置变更 = 重启进程。
-- **依赖方向**：模块只能 import `internal/contracts`、`internal/uikit`、`internal/design`、
-  `internal/lib/*`、第三方；禁止 import 其他模块实现、`internal/uiroot`、`internal/host`。
-  CI 用 `go list -deps` 断言。
+- **依赖方向**：UI 模块只能 import `internal/contracts`、`internal/uikit`、`internal/design`、
+  `internal/icons`、`internal/brand`（资产层 logo）、`internal/lib/*`、第三方；后端模块可 import
+  `internal/contracts`、`internal/uikit`、`internal/design`、`internal/lib/*`、共享库
+  `internal/{hosttools,memorytools,websearch}`、第三方；禁止 import 其他模块实现、`internal/uiroot`、
+  `internal/host`；`host` 不得直连 `internal/modules/*`（共享代码移 `internal/lib`，如
+  `lib/version.CompareVersions`）。CI 用 `go list` import 边界断言机器执行
+  （`internal/assembly/boundary_test.go` `TestImportBoundaries`，2026-11 审计 AR-07/AR-08 落地）。
 
 ## 4. 注入点模型（灵活扩展的核心）
 
@@ -185,7 +189,7 @@ sidebar 消费，无服务时仅打开会话）。
   `slot` 模型含保留槽位与模块自定义槽位 `RenderSlot`；`RenderTool` 工具卡注入）
 - ✅ assembly（编译期 registry + 内嵌 desktop/headless 装配 + 预检 + 级联卸载）
 - ✅ host（窗口/设置存储/日志/信号/退出顺序）+ 薄 `cmd/zeokeel`（17 行）+ Makefile
-- ✅ 工具集：`internal/modules/toolkit` 把 **ZeoKeel Rig v0.13.2**（sandbox 策略 + 内置
+- ✅ 工具集：`internal/modules/toolkit` 把 **ZeoKeel Rig v0.18.1**（sandbox 策略 + 内置
   fs/shell/pwsh/editor/image、真实 PTY terminal、后台 jobs、memory/schedule/worktree、
   settings（宿主注入）、skill、team 任务板、working_directory/todo、可选 web_fetch 与
   远程 MCP over Streamable HTTP）组装成 `zeokeel/toolkit` 服务；Rig 侧
@@ -197,7 +201,8 @@ sidebar 消费，无服务时仅打开会话）。
   `internal/ui/settings`（模型设置页）
 - ✅ P1 持久化/审批：`internal/modules/sessionstore`（SQLite History/SessionLog/CheckpointStore）、
   `internal/modules/approvals` + `internal/ui/approval`（审批队列与 native Modal）、
-  `internal/ui/toolcards` 真实工具卡、`ui/session` 轨迹时间线；desktop 15 实例 / headless 6 实例
+  `internal/ui/toolcards` 真实工具卡、`ui/session` 轨迹时间线；desktop 29 实例 / headless 15 实例
+  （`internal/assembly/assemblies/*.json` 实测计数，含组容器与 UI 子组）
 - ✅ P2 第一批：`ui/home` 真实最近会话 + 新对话；`ui/settings` 外观页（主题/语言，native Toggle/Select，
   持久化 host 键）与模型列表（每模型独立服务商连接、思考强度与生成参数）
 - ✅ 品牌设计体系：`internal/brand`（palette/theme/mark）、`internal/design`（tokens/字阶/间距/组件样式、
@@ -220,9 +225,9 @@ sidebar 消费，无服务时仅打开会话）。
 - ✅ 覆盖矩阵：docs/COVERAGE.md（旧功能面 vs 产品）
 - ✅ i18n：uikit.T；sidebar/session/home/settings/about/rightpanel/automation/plugins/toolcards/approval
   en/zh 动态切换（host chrome/dialog 标题/后端数据仍中文）
-- ✅ 设置：17 页（原 19）——常用（模型/行为/预设）、外观（外观/快捷键）、集成（搜索/网络/LSP/能力（限额））、
-  数据与通知（通知/记忆/归档/数据与隐私/导入/更新）、高级（诊断）、关于；技能/MCP 两页已删除并迁入能力页，
-  设置搜索不再命中技能/MCP。
+- ✅ 设置：10 页 5 组——常用（模型/行为与限额）、界面（外观（含快捷键）/通知）、连接（网络与搜索/LSP）、
+  数据（记忆/归档/数据与隐私（含导入/文件隐藏））、关于（关于 hub：构建信息/更新/诊断/架构）；
+  技能/MCP 两页已删除并迁入能力页，预设页已按用户要求删除（后端 presets 保留），设置搜索不再命中技能/MCP。
 - ✅ ACP 模式：`internal/modules/acp` + host `--acp`（stdio JSON-RPC，编辑器接入）
 - ✅ DSH 导入：`internal/modules/importer`（session.v4.jsonl → store）+ 设置导入页
 - ✅ 拖放附件：window.OnFileDrop → KeyFileDrop → composer 附件
@@ -249,21 +254,22 @@ sidebar 消费，无服务时仅打开会话）。
   composer 工具栏（模型 chip / 命令入口 / 附件占位）与 Home 初始设置卡对照 old 实现；
   （日志面已随多标签右栏收敛删除；持久化事件仍由 KeyStore/SessionLog 提供）
 - ✅ 示范模块：`appinfo`（服务）、`ui/home`（screen+command+槽位组合）、
-  `ui/settings`（settings pages：模型/行为与限额/外观/网络/关于等）、`ui/welcome`
-  （home.hero + command）、`ui/toolcards`（ToolRenderer）、`uikit`（共享控件封装）
-- ✅ 测试：uiroot 29 个 headless 测试（覆盖率 99.3%，含注入点区域/Post/生命周期/多窗串行）、
-  assembly/host 装配与宿主测试、ui 模块集成测试（真实 assembly.Load + Root.View）；`-race` 绿
+  `ui/settings`（settings pages：模型/行为与限额/外观/通知/网络与搜索/LSP/记忆/归档/数据与隐私/关于）、
+  `ui/welcome`（home.hero + command；**编译期 registry 已注册，desktop/headless 装配均未启用**——纯示范模块）、
+  `ui/toolcards`（ToolRenderer）、`uikit`（共享控件封装）
+- ✅ 测试：uiroot 180 个 headless 测试函数（含注入点区域/Post/生命周期/多窗串行）、
+  assembly/host 装配与宿主测试（含 `TestImportBoundaries` import 边界断言）、ui 模块集成测试（真实 assembly.Load + Root.View）；`-race` 绿
 - ✅ 验证：`make ci` 全绿；headless 产品可运行并优雅退出；Xvfb 下 desktop 真窗口冒烟通过
-- ⬜ 逐模块迁移：后端 20 个 + UI 16 个（见 05 报告），先低耦合叶子（importer/tools-web/diff/plugins）
-- ⬜ session 读模型 + ui/session 模块（接管 `session.*` 槽位，含轨迹与轨迹旁横条）
+- ✅ 逐模块迁移完成：后端 17 个 + UI 13 个（另有 test-only `ui/uimodtest`），全部在编译期 registry 注册
+- ✅ session 读模型 + ui/session 模块（接管 `session.*` 槽位，含轨迹与轨迹旁横条；2026-11 审计 US-01 后轨迹含思考分段与正文）
 
 ## 9. 硬规则（review checklist）
 
-1. **优先 mygo 原生控件**（`ui.Sidebar/List/Tabs/Modal/Markdown/VirtualList/Button/...`），
-   不手搓控件或用 Row/Column 拼控件。
+1. **优先 mygo 原生控件**（`ui.Sidebar/List/Tabs/Modal/GridView/Button/...`；Markdown 在
+   `ui/markdown` 子包：`markdown.View/Stream`），不手搓控件或用 Row/Column 拼控件。
 2. UI 只在帧内构建；帧内无副作用；跨线程走 `UIRuntime.Post`。
 3. 状态归模块实例；禁止包级可变状态。
 4. 注册/注销必须走 `ctx.Effect`（裸注册无法回滚）。
-5. 模块不 import 其他模块实现 / uiroot / host；依赖只走 contracts 服务。
+5. 模块不 import 其他模块实现 / uiroot / host；跨模块行为依赖只走 contracts 服务（import 白名单见 §3，CI 边界断言执行）。
 6. 配置变更 = 重启；无运行时模块安装/热更新。
 7. 每个 UI 模块带 headless 测试（`ui.NewTester` 或假 frame），覆盖「注册→渲染→卸载」。

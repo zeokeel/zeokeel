@@ -14,7 +14,7 @@
 |---|---|
 | 窗口骨架/分栏 | `ui.Split` + `SplitReset`；`ui.Sidebar`（导航与设置导航） |
 | 右侧检查器 | 官方 overlay recipe（`Row + Absolute + Modal + RoleDialog + Esc`） |
-| 列表/日志/表格行 | 右栏 Files/Log/Tools/Tasks/Agents、侧栏会话、Home 最近会话、palette、设置搜索命中均为 `ui.List` |
+| 列表/日志/表格行 | 右栏 Files/打开的文件/Changes/产物、侧栏会话、Home 最近会话、palette、设置搜索命中均为 `ui.List`（右栏 Log/Tools/Tasks/Agents 常驻 pane 已删除，团队/任务在会话头部浮层） |
 | 卡片网格 | 能力页技能/连接器卡片：官方 `ui.GridView` + `t.Panel()`（3 列，技能卡 128 高、连接器卡 176 高；独立对象卡，非设置式管理列表） |
 | 大纲/树 | 侧栏工作区树 `ui.Outline` |
 | 菜单 | `PopoverMenuButton` / `MenuItem.Danger/Radio/ID/Shortcut/Subtitle`；Files/Tasks 行 `Element.ContextMenu` |
@@ -58,10 +58,11 @@
 
 | 位置 | 保留理由 |
 |---|---|
-| `internal/uiroot/frame.go` rail/折叠/展开/设置/关闭设置图标按钮 | 无官方 IconButton；`custom-widgets.md` 允许 `ButtonBase` 自绘无边框图标按钮的 hover/focus/pressed，已注释 |
-| `internal/uiroot/frame.go` 命令面板行按钮 | 单次点击即执行命令，且需要 `RoleButton` a11y 名称（`uiroot/conformance_test.go` 钉住）；List 行角色是 listitem，官方 List 不提供按钮行语义 |
-| `internal/ui/sidebar` 新对话以外的图标/行按钮（添加工作区、工作区组标题、会话 ⋯、设置行） | 官方 Sidebar/Outline 只提供源列表与大纲语义，行内自定义内容与 ⋯ 菜单仍用 `ButtonBase`（custom-widgets）；品牌「新对话」已改官方 `PrimaryButton` |
-| `internal/ui/rightpanel` 检查器关闭、artifact 标题切换、任务 ⋯ | 无原生外观的独立图标按钮；`rowTint` 自绘状态属官方允许的 base 用法 |
+| `internal/uiroot/frame.go` rail 会话富行（`railSessionRow`） | 整行点击打开会话 + 运行/未读点自绘状态前景；官方 List 行是 listitem 语义；`uiroot.rail-session-rows` 登记（symbol 锚点，2026-11 审计 UD-11 补登记）。**rail/折叠/展开/设置/关闭等图标按钮已迁 `uikit.IconButton`（含 Native 变体），不再 ButtonBase** |
+| `internal/uiroot/frame.go` 命令面板行按钮 | 单次点击即执行命令，且需要 `RoleButton` a11y 名称（`uiroot/conformance_test.go` 钉住）；List 行角色是 listitem，官方 List 不提供按钮行语义；`command-palette.rows` 登记（symbol=palette 锚点） |
+| `internal/uikit/runstatus.go` 队列计数徽章 | 官方 `ui.Badge` 无点击/键盘语义；ButtonBase 全状态自绘（rest/hover/pressed/focused/selected，H28）；`uikit.run-status-queue-badge` 登记（2026-11 审计 UD-06） |
+| `internal/ui/sidebar` 新对话以外的图标/行按钮（添加工作区、工作区组标题、会话 ⋯、设置行） | 官方 Sidebar/Outline 只提供源列表与大纲语义，行内自定义内容与 ⋯ 菜单仍用 `ButtonBase`（custom-widgets）；品牌「新对话」已改官方 `PrimaryButton`；行内 ⋯ 已迁 IconButton Native（UD-09） |
+| `internal/ui/rightpanel` | **ButtonBase 已清零**（2026-11 审计 UD-09/AR-01）：检查器关闭、artifact 标题切换等迁 `uikit.IconButton`（Native 变体）；`rowTint` 自绘状态属官方允许的 base 用法 |
 | composer 动作行（Shell 的 Row：左半 `uikit.ComposerToolbar` + hint + 右侧发送/排队/停止） | `ui.Toolbar` 溢出菜单会吞掉发送按钮，故主操作留在 Toolbar 外；左半控件本身已是官方 `ui.Toolbar`（`uikit.ComposerToolbar`），不再手搓按钮状态 |
 | slash/@ 富行建议面板 | 行内含图标/标题/说明多段富文本，官方 Autocomplete 仅纯文本；已按官方 accessibility suggestions 模式实现 RoleListBox/RoleOption/PositionInSet/ActiveDescendant 与完整键盘 |
 | transcript 消息内 hover 动作行 | 消息级悬停交互，官方列表行不提供 |
@@ -84,7 +85,7 @@
 | composer 排队弹层 | `for` 循环行 → 官方 `ui.List`（有界 MaxHeight，行内取消保留） |
 | Files 面包屑 | 手拼 Button/Text → 官方 `ui.Breadcrumbs`（navigation landmark、Link、CurrentPage、点击/Enter 导航；深路径保留 first→…→last two） |
 | 会话重命名对话框 | 手写 footer → `uikit.DialogFooter`+`AutoFocus`+`EnterTo`（全仓对话框一致） |
-| 消息评分 / /feedback | 手绘 selected Button → 官方 `ui.Toggle`；/feedback 用 `ui.ToggleGroup`（`ui.Segmented` 无法表达“未评价”，已记录偏差） |
+| 消息评分 / /feedback | **功能已按用户要求移除**（0 调用）：手绘 selected Button 与官方 `ui.Toggle`/`ToggleGroup` 一并删除；导出不再含反馈字段（2026-11 审计 UD-17 核实） |
 | 8 处忙碌态（更新/导入/模型检查/记忆提取/附件选择/压缩） | 文字或静态 Reload 图标 → 官方 `ui.Spinner`（不伪造 Progress） |
 | 记忆 pane 编辑图标 / 设置“未保存” | Unicode `✎` → `internal/icons` 新增 Lucide pencil；裸 Text → 官方 `ui.Badge` |
 | 上下文占用条 / 内联重命名 / 导航历史 | 仍为 KEEP/后续：`ui.Meter` 可选增强；`ui.EditableText` 就地改名（M）；`ui.Router`+`BackButton/ForwardButton`（L，需 screenID→路径映射） |

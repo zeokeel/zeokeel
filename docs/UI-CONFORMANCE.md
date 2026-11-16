@@ -25,7 +25,7 @@
 | 命令面板 | `SearchField + List + ActiveDescendant` | accessibility.md / list.md | 列表要有 `Label`，搜索框指向选中行 |
 | 建议菜单（slash/@） | `RoleListBox` + `RoleOption.Checked` + `PositionInSet` + 输入框 `ActiveDescendant` | accessibility.md「Suggestions」 | 不再用无 role 的按钮行 |
 | 表单 | `Form/Field/Fieldset`；`Description/Error`；`LabelledBy`；`NumberInput`/`DecimalInput` | form.md / number-input.md | 数字用官方输入（记忆策略、运行上限、上下文窗口、生成参数已全部迁移，配“使用默认”开关）；错误用 `Error`；分组用 Fieldset（能力页连接器 STDIO 编辑弹窗已采用）；**多字段对话框（如「新建队友」）用 `Form/Field` 给出可见标签，不能只靠 placeholder** |
-| 对话框 | `Modal`/`AlertDialog`；`DialogFooter` + `Default` 焦点 + `Submitted()` 提交 | dialog.md / alert-dialog.md / text-input.md | Enter 提交必须覆盖每个输入对话框；**危险确认（删除任务/关闭队友）用 `ui.Modal` + 自建 footer：取消在前、无 `Default` 动作，避免 `AlertDialog` 末位按钮作为平台默认被 Enter 误触**；安全文案按钮（如取消）可放首位承接焦点 |
+| 对话框 | `Modal`/`AlertDialog`；`DialogFooter` + `Default` 焦点 + `Submitted()` 提交 | dialog.md / alert-dialog.md / text-input.md | Enter 提交必须覆盖每个输入对话框；**危险确认（删除任务/关闭队友/清空）用 `uikit.ConfirmDanger`（`ui.Modal` + DialogFooter）：取消为 Default 承接 Enter、危险动作非 Default 且为 danger 按钮**，避免 `AlertDialog` 末位按钮作为平台默认被 Enter 误触；审批/计划审阅完全无 Default |
 | 请求/提交动作 | `uikit.PageHeaderAction` / `uikit.SectionAction`（基于官方 Row/Button 的共享布局） | layout.md / form.md | 页面级即时动作（新建/刷新/检查更新）在页头同行右侧；小节工具动作（恢复默认/导出报告）在节标题同行右侧；显式保存页只保留宿主 footer 的一个主操作，不在内容底部再放动作行 |
 | 查找 | `FindBar`（文内查找）；`SearchField`（过滤列表） | find-bar.md / search-field.md | 查找≠过滤，按场景选 |
 | 差异 | `editor.DiffState` + `editor.DiffView`（`ParsePatch`/`SetPatch`，词级/折叠/审查） | diff-viewer.md / code-editor.md | 不手写逐行 diff 文本 |
@@ -106,10 +106,12 @@
 
 ```bash
 export PATH=/usr/local/go/bin:$PATH
-# /tmp is read-only in this environment; the temp dir must stay OUTSIDE the git
-# worktree, or tests that create throwaway workspaces see them as untracked
-# files of this repository (e.g. workspace Changes tests).
-export GOCACHE=/data/mygo/.cache/go-build GOTMPDIR=/data/zeokeel-tmp TMPDIR=/data/zeokeel-tmp
+# The temp dir must stay OUTSIDE the git worktree, or tests that create
+# throwaway workspaces see them as untracked files of this repository (e.g.
+# workspace Changes tests). /data/zeokeel-tmp is read-only in this sandbox;
+# use /tmp/zeokeel-tmp (same as AGENTS.md §4).
+export GOCACHE=/data/mygo/.cache/go-build GOTMPDIR=/tmp/zeokeel-tmp TMPDIR=/tmp/zeokeel-tmp
+mkdir -p /tmp/zeokeel-tmp
 export GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off
 
 go build ./...

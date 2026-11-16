@@ -18,12 +18,12 @@ internal/ui/*           13 个 UI 模块（session/toolcards/approval/interactio
 internal/uikit          共享组合：页头/小节/空态/错误行/对话框动作条/工具行
 internal/design         设计 token（颜色/字号/间距/圆角/阴影/预设）
 internal/brand          品牌层：唯一 hex 来源、主题、字体栈
-internal/icons          33 个 SVG 图标（16/24 网格不变量测试）
+internal/icons          34 个 SVG 图标（16/24 网格不变量测试）
 internal/contracts      服务契约（chat/approval/plan/team/task/...）
 internal/modules/*      后端能力模块
 ```
 
-- 模块边界：UI 模块只能 import `internal/contracts`、`internal/uikit`、`internal/design`、`internal/icons`、`internal/lib/*`；禁止 import 其他 UI 模块实现、`internal/uiroot`、`internal/host`（按 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3 执行；当前无自动断言，评审人工检查）。
+- 模块边界：UI 模块只能 import `internal/contracts`、`internal/uikit`、`internal/design`、`internal/icons`、`internal/brand`（资产层 logo）、`internal/lib/*` 与第三方模块；禁止 import 其他 UI 模块实现、`internal/uiroot`、`internal/host`。后端模块可 import `contracts/uikit/design/lib/*` 与共享库 `internal/{hosttools,memorytools,websearch}`，禁止其他模块实现与 UI 壳层；`host` 不得直连 `internal/modules/*`（按 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3 执行；**CI 机器断言**：`internal/assembly/boundary_test.go` `TestImportBoundaries`，`go list` 解析全产品 import 图）。
 - 依赖方向：`contracts ← modules/ui ← uiroot`；帧循环/窗口/`*ui.Context` 只归 `uiroot`，模块只贡献 builder（`func(c *ui.Context)`）。
 
 ---
@@ -54,7 +54,7 @@ internal/modules/*      后端能力模块
 8. **图标只从 `internal/icons` + `ui.Icon` 取**：禁 emoji/Unicode/手写 SVG；图标按钮必须 `Label`（Tooltip 按需，与 Esc 冲突时可不加并注释）；纯图标按钮统一用 `uikit.IconButton`，禁止新增 `ButtonBase` 图标按钮。
 9. **危险确认安全默认**：删除/清空/恢复类确认必须用 `uikit.ConfirmDanger`（`ui.Modal` + `DialogFooter`，取消为 Default、危险动作非 Default 且为 danger 按钮）；`ui.AlertDialog` 只用于**非危险、非不可逆**的简单确认。审批无 Default、Esc=拒绝，且 Esc 必须在窗口级生效（不依赖焦点位置）。
 10. **强调色预算**：一屏 ≤2 个 Accent 填充块、≤1 个 primary 按钮；状态只能用 `uikit.StatusBadge`（语义 tint + AA 文字 + 必填标签），禁止中性底 + 状态字拼徽章；一屏红色元素 ≤2。
-11. **选择态两级**：持久导航/树/列表当前项 = `BgSelected`(12%) + 2px `Accent` 左条 + `LabelPrimary`；只有浮层内的瞬态选择（命令面板/菜单/下拉）用 Accent 填充 + `OnPrimary`。禁止满蓝导航选中行。
+11. **选择态两级**：持久导航/树/列表当前项 = `BgSelected`（亮 12% / 暗 18%） + 2px `Accent` 左条 + `LabelPrimary`（2px 左条要求仅针对**自绘富行**；官方 `Sidebar`/`Tabs` 的原生 tint 选中视为合规，不强加左条）；浮层内的瞬态选择（命令面板/菜单/下拉/slash/@ 建议）可用 Accent 填充 + `OnPrimary`，也可用 `BgSelected` tint（两者均为瞬态许可词汇）。禁止满蓝导航选中行。
 12. **字号纪律**：`TypeXXXS`(11) 只用于微标签/kbd/终端 gutter，**禁止成句文本**；成句元数据最低 `TypeXXS`(12)，正文 `TypeBody`(14)；顶级屏标题 `TypeM/600`（顶带），设置页/对话框 `TypeL/600`。
 13. **度量档位**：控件高度只用 32/36/40/44（`design.RowCompactHeight/ControlHeight/PageActionHeight/RowDoubleHeight`），禁止 38；圆角只用 `RadiusXS/SM/MD/LG/XL/Max`（XL 仅 composer）；表面遵循 S0–S4 ramp（暗色导航必须比页面深）。
 14. **页面主操作两落点**：页面级即时动作放页头右，需要提交的表单放固定页脚右下的唯一 primary；分节动作放 `SectionAction`；禁止页中悬浮 primary。
@@ -128,7 +128,7 @@ make ci                                   # build+vet+test；全量用 make veri
 
 - **UI 生命周期**：不把 `ui.Element`/parts 存进 struct/全局/goroutine；不跨 build pass 用旧元素；`c.Key` 给循环内 stateful 控件稳定身份；容器 key 在 children 之前。
 - **线程**：UI 构建/绘制/输入/回调都在主线程；`*ui.Context` 不出 build；后台结果回 UI 用 `UIRuntime.Post`；`Invalidate` 只请求重绘。
-- **模块边界**：不 import 其他模块实现/uiroot/host；跨模块用 contracts 服务或稳定命令 ID（如 `rightpanel.team.open`）。
+- **模块边界**：不 import 其他模块实现/uiroot/host；跨模块用 contracts 服务或稳定命令 ID（如 `rightpanel.files.open`）。
 - **不自造标准件**：官方有 `List/Modal/AlertDialog/Overlay/Popover/Menu/SearchField/Form/Field/Switch/Checkbox/Radio/Select/Tabs/Collapsible/Toast/Scroll/Split/Sidebar/Table/Outline/GridView/editor/markdown` 等，必须用。
 - **不虚构 API**：v0.9.0 没有 `ui.DialogFooter`、`Button.Default`、`ui.Markdown`、`ui.DatePicker`、`ui.CommandPalette`（见 DESIGN.md §7.4）。
 - **不加依赖**：新增第三方 UI/图标/样式库前必须说明理由并获得确认；不引入第二套设计系统。

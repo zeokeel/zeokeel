@@ -3,13 +3,20 @@
 > 注入点模型与保留槽位全表见 [ARCHITECTURE.md §4/§5](ARCHITECTURE.md)。本文件是「当前已接线」
 > 的落地清单（模块 → 注入点 → assembly 注册），随模块迁入持续更新。
 >
-> 当前状态（2026-11-06）：`welcome` / `toolcards` 已接入 `internal/assembly/registry.go`
-> 与 `assemblies/desktop.json`；产品级装配由 `internal/ui/uimodtest/assembly_integration_test.go`
-> 覆盖（desktop Load 6 实例 Active、真实 Root.View 可见全部示范模块、Close 后贡献消失）。
-> 目录约定见 `docs/ARCHITECTURE.md` §4/§5；模块只 import `internal/contracts`、
-> `internal/uikit`、kernel 与 mygo，不 import 其他模块实现 / uiroot / host。
+> 当前状态（2026-11 审计修复后）：`welcome` / `toolcards` 已接入 `internal/assembly/registry.go`；
+> `toolcards` 在 `assemblies/desktop.json` 启用，`welcome` 仅注册未装配（纯示范模块）。
+> 产品级装配由 `internal/ui/uimodtest/assembly_integration_test.go`
+> 覆盖（desktop Load 29 实例、示范模块 Active、真实 Root.View 可见、Close 后贡献消失）。
+> 目录约定见 `docs/ARCHITECTURE.md` §4/§5；UI 模块只 import `internal/contracts`、
+> `internal/uikit`、`internal/design`、`internal/icons`、`internal/brand`、`internal/lib/*`、
+> kernel 与 mygo，不 import 其他模块实现 / uiroot / host（CI 边界断言：
+> `internal/assembly/boundary_test.go`）。
 
 ## 1. 待注册的 Module() 列表
+
+> 下表是注入点机制的**示范模块子集**（历史接线清单）。完整编译期 registry 现有
+> 17 个后端模块 + 13 个 UI 模块（`internal/assembly/registry.go`），desktop 装配
+> 29 实例 / headless 15 实例；`welcome` 已注册但两个产品装配均未启用。
 
 顺序无要求：kernel 的 provider-first 调度会先把 provider 排到 consumer 前，UI 模块在
 assembly 内同时要求 `zeokeel/ui` 与 `zeokeel/appinfo` 两个服务，因此 appinfo 必须与 UI
@@ -55,12 +62,22 @@ assembly 内同时要求 `zeokeel/ui` 与 `zeokeel/appinfo` 两个服务，因�
   "module": "zeokeel/host/group",
   "children": [
     {"id": "home", "module": "zeokeel-ui/home", "config": {}},
-    {"id": "welcome", "module": "zeokeel-ui/welcome", "config": {}},
-    {"id": "toolcards", "module": "zeokeel-ui/toolcards", "config": {}}
+    {"id": "toolcards", "module": "zeokeel-ui/toolcards", "config": {}},
+    {"id": "sidebar", "module": "zeokeel-ui/sidebar"},
+    {"id": "session", "module": "zeokeel-ui/session"},
+    {"id": "settings", "module": "zeokeel-ui/settings"},
+    {"id": "approval", "module": "zeokeel-ui/approval"},
+    {"id": "rightpanel", "module": "zeokeel-ui/rightpanel"},
+    {"id": "automation-ui", "module": "zeokeel-ui/automation"},
+    {"id": "insights-ui", "module": "zeokeel-ui/insights"},
+    {"id": "plugins-ui", "module": "zeokeel-ui/plugins"},
+    {"id": "interaction", "module": "zeokeel-ui/interaction"},
+    {"id": "toasts", "module": "zeokeel-ui/toasts"}
   ]
 }
 ```
 
+（`welcome` 不在 desktop 装配中——它只在模块级测试里验证注入语义。）
 headless 产品不挂 UI 子组即可（当前无 UI 模块时 `Root.Validate()` 不通过，headless 不建窗口）。
 
 ## 4. typed Config（assembly.json 的 config 字段，缺省即默认值）
@@ -94,7 +111,7 @@ go test -race ./internal/ui/... ./internal/uikit/... -count=1
 | --- | --- |
 | `internal/uikit/uikit_test.go` | 四个 uikit 组件的 headless 渲染、空 subtitle / nil body |
 | `internal/ui/uimodtest/integration_test.go` | home 槽位化组合与第三方注入、welcome 扩展、toolcards 工具卡、各模块 manifest |
-| `internal/ui/uimodtest/assembly_integration_test.go` | 真实 `internal/assembly.Load(desktop)` 产品装配：6 个实例全 Active、真实 Root.View 出帧看到 welcome/toolcards、loader.Close 后贡献消失 |
+| `internal/ui/uimodtest/assembly_integration_test.go` | 真实 `internal/assembly.Load(desktop)` 产品装配：29 个实例、示范模块全 Active、真实 Root.View 出帧看到 toolcards、loader.Close 后贡献消失 |
 
 `internal/ui/uimodtest` 是 test-only 包（只有 `_test.go`，不会编进产品）。它有两层测试：
 模块级（kernel plugin 逐个激活，隔离验证注入/卸载）与产品级（真实 `assembly.Load(assembly.ProductDesktop)`）。

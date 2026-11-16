@@ -53,6 +53,14 @@ jobs:
           bash scripts/design-check.sh
           go tool mygo vet .
 
+      - name: Import boundaries
+        # The module-boundary allowlist (AGENTS.md §1 / docs/ARCHITECTURE.md §3,
+        # 2026-11 audit AR-07/AR-08) is machine-asserted: UI modules only reach
+        # contracts/uikit/design/icons/brand/lib/*, backend modules never reach
+        # another module implementation or the UI shell, host never reaches
+        # modules directly (AR-22).
+        run: go test ./internal/assembly -run TestImportBoundaries -count=1
+
       - name: Test
         # The hosted 2-vCPU runner was repeatedly shut down while several UI
         # test binaries rendered frames in parallel (exit 143 / "runner received
@@ -64,6 +72,18 @@ jobs:
           GOFLAGS: -mod=mod -p=1
           GOMEMLIMIT: 4GiB
         run: go test ./... -count=1 -timeout 20m
+
+      - name: Race detector (targeted)
+        # 2026-11 audit AR-11: CI never ran -race. The concurrency-heavy
+        # surfaces (UI frame loops, agent/toolkit lifecycles, host teardown)
+        # get a dedicated race pass, serialized with the same -p=1 discipline
+        # as the Test step. -race needs cgo, overriding the job-wide
+        # CGO_ENABLED=0 (the ubuntu-24.04 image ships gcc).
+        env:
+          CGO_ENABLED: "1"
+          GOFLAGS: -mod=mod -p=1
+          GOMEMLIMIT: 4GiB
+        run: go test -race ./internal/ui/... ./internal/uiroot ./internal/modules/agent ./internal/modules/toolkit ./internal/host -count=1 -timeout 20m
 
       - name: Product binary smoke
         run: |
