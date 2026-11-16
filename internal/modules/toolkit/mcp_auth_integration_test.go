@@ -23,11 +23,12 @@ import (
 )
 
 type oauthFakeAS struct {
-	t         *testing.T
-	base      string
-	server    *httptest.Server
-	mu        sync.Mutex
-	challenge string
+	t            *testing.T
+	base         string
+	server       *httptest.Server
+	mu           sync.Mutex
+	challenge    string
+	refreshCalls int
 }
 
 func newOAuthFakeAS(t *testing.T) *oauthFakeAS {
@@ -69,6 +70,21 @@ func newOAuthFakeAS(t *testing.T) *oauthFakeAS {
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "bad form", http.StatusBadRequest)
+			return
+		}
+		if r.PostForm.Get("grant_type") == "refresh_token" {
+			as.mu.Lock()
+			as.refreshCalls++
+			as.mu.Unlock()
+			if r.PostForm.Get("refresh_token") != "refresh-1" {
+				w.WriteHeader(http.StatusBadRequest)
+				writeToolkitJSON(t, w, map[string]any{"error": "invalid_grant"})
+				return
+			}
+			writeToolkitJSON(t, w, map[string]any{
+				"access_token": "access-2", "token_type": "Bearer",
+				"expires_in": 3600, "refresh_token": "refresh-2", "scope": "files:read",
+			})
 			return
 		}
 		if r.PostForm.Get("grant_type") != "authorization_code" {
@@ -128,7 +144,7 @@ func newOAuthFakeMCP(t *testing.T, asURL string) *oauthFakeMCP {
 		mcpServer.mu.Lock()
 		mcpServer.seenAuth = append(mcpServer.seenAuth, authHeader)
 		mcpServer.mu.Unlock()
-		if authHeader != "Bearer access-1" {
+		if authHeader != "Bearer access-1" && authHeader != "Bearer access-2" {
 			w.Header().Set("WWW-Authenticate",
 				fmt.Sprintf(`Bearer resource_metadata="%s/.well-known/oauth-protected-resource", scope="files:read"`, mcpServer.base))
 			w.WriteHeader(http.StatusUnauthorized)
@@ -242,5 +258,68 @@ func TestMCPAuthRuntimeAuthorizesPersistsAndConnects(t *testing.T) {
 	_ = client.Close()
 	if got := resource.authorizations(); len(got) == 0 || got[len(got)-1] != "Bearer access-1" {
 		t.Fatalf("MCP authorizations = %v, want Bearer access-1", got)
+	}
+}
+
+func TestMCPAuthRefreshPersistsRotatedTokens(t *testing.T) {
+	as := newOAuthFakeAS(t)
+	resource := newOAuthFakeMCP(t, as.server.URL)
+	settings := newAuthTestSettings()
+	runtime := newMCPAuthRuntime(settings, t.Logf)
+	defer runtime.close()
+
+	cfg := contracts.MCPServerConfig{
+		Name: "files",
+		URL:  resource.server.URL,
+		Auth: &contracts.MCPAuthConfig{Mode: contracts.MCPAuthOAuth2},
+	}
+	flow, err := runtime.Prepare(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	response, err := http.Get(flow.AuthURL)
+	if err != nil {
+		t.Fatalf("browser GET: %v", err)
+	}
+	_ = response.Body.Close()
+	if _, err := runtime.Wait(context.Background(), cfg, flow); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+
+	// Force a refresh (the transport also does this automatically on near-expiry
+	// and on a 401); the rotated refresh token must be persisted.
+	status, err := runtime.Refresh(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if status.State != contracts.MCPAuthStateAuthorized {
+		t.Fatalf("status after refresh = %+v, want authorized", status)
+	}
+	if status.ExpiresAt.IsZero() {
+		t.Fatal("refresh did not report a new expiry")
+	}
+	record := settings.Get(contracts.MCPAuthSettingKey(cfg.Name), "")
+	if !strings.Contains(record, `"accessToken":"access-2"`) {
+		t.Fatalf("token record has no rotated access token: %s", record)
+	}
+	if !strings.Contains(record, `"refreshToken":"refresh-2"`) {
+		t.Fatalf("token record has no rotated refresh token: %s", record)
+	}
+	as.mu.Lock()
+	refreshCalls := as.refreshCalls
+	as.mu.Unlock()
+	if refreshCalls != 1 {
+		t.Fatalf("refresh calls = %d, want 1", refreshCalls)
+	}
+
+	client, err := startHTTPMCP(context.Background(), MCPServer{
+		Name: cfg.Name, URL: cfg.URL, Auth: cfg.Auth,
+	}, runtime)
+	if err != nil {
+		t.Fatalf("startHTTPMCP after refresh: %v", err)
+	}
+	_ = client.Close()
+	if got := resource.authorizations(); len(got) == 0 || got[len(got)-1] != "Bearer access-2" {
+		t.Fatalf("MCP authorizations = %v, want the rotated access token", got)
 	}
 }
