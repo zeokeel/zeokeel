@@ -1,5 +1,38 @@
 # Verification log (final)
 
+## 0.2.45 — 2026-11-16 (MCP OAuth 2.1 与技能卡管理入口)
+
+```
+$ gofmt -l internal cmd
+(empty)
+$ CGO_ENABLED=0 go build ./...
+OK
+$ go vet ./...
+OK
+$ go tool mygo vet .
+OK
+$ go test ./... -count=1
+all packages ok
+$ go test -race ./internal/ui/plugins ./internal/modules/toolkit -count=1
+all ok (no data race)
+$ go run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
+designlint: 313 files, 79 violations: 0 error, 0 warn | baseline 156 entries, 10 registered, 0 new, 0 blocking
+$ ./scripts/design-check.sh
+6 passed, 0 failed: PASS
+```
+
+MCP 连接器接入 OAuth 2.1（协议由 zeokeel-rig v0.18.0 提供）：认证方式（无 / Bearer /
+OAuth 2.1）、卡片「需要授权 / 授权已失效」、两阶段浏览器授权 modal、重新授权/撤销、
+settings 令牌存储与脱敏、workspace mcp.json 禁止 OAuth、授权后自动重连；toolkit 用
+settings TokenStore 适配，UI 只在主线程打开浏览器。技能页每张卡都有 `⋯` 管理入口，
+dataDir 目录形态技能保留编辑/删除，顶层 `.md` 与工作区/额外目录技能只读并有说明行，
+空态不再重复「新建技能」。
+视觉证据：`.cache/skills-p0-shots/p2-capabilities-skills.png`（workspace 与 dataDir 卡均有 `⋯`）、
+`.cache/wiring-shots/p2-capabilities-connector-form.png`（连接器认证方式）。
+合并前 CI：PR #1（OAuth 接线）与 PR #2（技能 P0）的 `Build, vet, test` 均通过；
+rig v0.18.0 release workflow（签名 tag + clean-room smoke）通过。
+
+
 ## 0.2.44 — 2026-11-16 (设置收敛与输入框权限按钮)
 
 ```
