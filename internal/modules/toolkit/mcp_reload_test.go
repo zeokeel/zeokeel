@@ -121,3 +121,49 @@ func TestMCPHotReloadAddsRemovesAndDisablesServers(t *testing.T) {
 		t.Fatal("disabled server's tool is still registered")
 	}
 }
+
+func TestMCPToolCatalogListsAndTogglesTools(t *testing.T) {
+	server := testMCPToolListServer(t, []map[string]any{oneTool("alpha_tool"), oneTool("beta_tool")})
+	defer server.Close()
+	settings := newMutableSettings(map[string]string{
+		contracts.SettingMCPServers: `[{"name":"srv","url":"` + server.URL + `"}]`,
+	})
+	root, registry, plugins, _ := activateMCPToolkitWithRoot(t, map[string]any{"root": "."}, settings)
+	catalog, err := root.Require(contracts.KeyMCPToolCatalog)
+	if err != nil {
+		t.Fatalf("require tool catalog: %v", err)
+	}
+	tools := catalog.Tools("srv")
+	if len(tools) < 2 {
+		t.Fatalf("tools = %+v, want at least the two regular tools", tools)
+	}
+	for _, tool := range tools {
+		if !tool.Enabled {
+			t.Fatalf("tool %q starts disabled", tool.Name)
+		}
+	}
+	target := ""
+	for _, tool := range tools {
+		if strings.Contains(tool.Name, "alpha") {
+			target = tool.Name
+		}
+	}
+	if target == "" {
+		t.Fatalf("alpha tool not found in %+v", tools)
+	}
+	if err := catalog.SetToolEnabled(context.Background(), "srv", target, false); err != nil {
+		t.Fatalf("disable tool: %v", err)
+	}
+	if registryHasTool(registry, target) {
+		t.Fatalf("disabled tool %q is still registered", target)
+	}
+	if got := len(plugins.MCP()); got != 1 || plugins.MCP()[0].Tools != 1 {
+		t.Fatalf("plugins after disable = %+v, want one tool", plugins.MCP())
+	}
+	if err := catalog.SetToolEnabled(context.Background(), "srv", target, true); err != nil {
+		t.Fatalf("enable tool: %v", err)
+	}
+	if !registryHasTool(registry, target) {
+		t.Fatalf("re-enabled tool %q is not registered", target)
+	}
+}

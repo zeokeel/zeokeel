@@ -261,7 +261,7 @@ func TestMCPAuthRuntimeAuthorizesPersistsAndConnects(t *testing.T) {
 	}
 }
 
-func TestMCPAuthRefreshPersistsRotatedTokens(t *testing.T) {
+func TestMCPAuthRefreshDueRefreshesExpiringTokens(t *testing.T) {
 	as := newOAuthFakeAS(t)
 	resource := newOAuthFakeMCP(t, as.server.URL)
 	settings := newAuthTestSettings()
@@ -286,24 +286,26 @@ func TestMCPAuthRefreshPersistsRotatedTokens(t *testing.T) {
 		t.Fatalf("Wait: %v", err)
 	}
 
-	// Force a refresh (the transport also does this automatically on near-expiry
-	// and on a 401); the rotated refresh token must be persisted.
-	status, err := runtime.Refresh(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("Refresh: %v", err)
+	// The fresh token is valid for an hour: a one-minute background window must
+	// not refresh it.
+	if refreshed := runtime.refreshDue(context.Background(), time.Minute); refreshed != 0 {
+		t.Fatalf("refreshDue(1m) refreshed %d token(s), want 0", refreshed)
 	}
+	// A wide window makes it due; the rotated tokens must be persisted.
+	if refreshed := runtime.refreshDue(context.Background(), 24*time.Hour); refreshed != 1 {
+		t.Fatalf("refreshDue(24h) refreshed %d token(s), want 1", refreshed)
+	}
+	status := runtime.Status(cfg)
 	if status.State != contracts.MCPAuthStateAuthorized {
-		t.Fatalf("status after refresh = %+v, want authorized", status)
+		t.Fatalf("status after background refresh = %+v, want authorized", status)
 	}
 	if status.ExpiresAt.IsZero() {
-		t.Fatal("refresh did not report a new expiry")
+		t.Fatal("background refresh did not report a new expiry")
 	}
 	record := settings.Get(contracts.MCPAuthSettingKey(cfg.Name), "")
-	if !strings.Contains(record, `"accessToken":"access-2"`) {
-		t.Fatalf("token record has no rotated access token: %s", record)
-	}
-	if !strings.Contains(record, `"refreshToken":"refresh-2"`) {
-		t.Fatalf("token record has no rotated refresh token: %s", record)
+	if !strings.Contains(record, `"accessToken":"access-2"`) ||
+		!strings.Contains(record, `"refreshToken":"refresh-2"`) {
+		t.Fatalf("token record after background refresh = %s", record)
 	}
 	as.mu.Lock()
 	refreshCalls := as.refreshCalls

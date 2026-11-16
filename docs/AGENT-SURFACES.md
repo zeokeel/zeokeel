@@ -620,6 +620,7 @@ Agent 客户端的界面不是一次性输出：用户对界面的操作要作�
 - **技能根**：优先级为工作区（`skills`、`.agents/skills`、`.zeokeel/skills`）→ `skills.dirs` → assembly 目录 → `dataDir/skills` → `$ZEOKEEL_SKILLS` → `~/.zeokeel/skills`；同名遮蔽与扫描上限经 `SkillWarnings.Warnings()` 在能力页「技能」Tab 可见。
 - **技能内容边界**：`List` 只读每个 `SKILL.md` 的前缀（名称/描述/可搜索摘要），`Read`/`load` 才读全文（≤1MiB）；编辑只重写名称/描述/正文，保留未知 frontmatter 键；写路径仍仅 `<dataDir>/skills`。
 - **技能管理入口（2026-11-16）**：能力页每张技能卡都有 `⋯`（默认应用打开/文件管理器显示/复制路径）；只有 `<dataDir>/skills/<name>/SKILL.md` 目录形态技能额外出现编辑/删除（`skillsEditActionsAllowed` 同时校验 dataDir 与 `SKILL.md` 基名）；顶层 `<dataDir>/skills/foo.md` 与工作区/额外目录技能保持只读；没有任何可编辑技能时显示只读说明行；空列表只有集合行一个「新建技能」。
+- **技能启停/复制/自动刷新（2026-11-16）**：`skills.disabled` 保存被禁用技能名，仅 toolkit 的 agent-facing skill store 过滤（UI 仍列出并可恢复）；只读技能可用「复制到我的技能」预填新建表单；外部 `SKILL.md` 修改在技能页打开时每 5s 自动重扫；创建/编辑弹窗提供 Markdown 预览。
 
 ### 2.7.1 连接器 OAuth 2.1（非 surface，事实约定）
 
@@ -629,7 +630,8 @@ Agent 客户端的界面不是一次性输出：用户对界面的操作要作�
 - **令牌存储**：每个连接器一条 `mcp.oauth.<slug>.<sha8>` settings 记录（版本化 JSON，由 rig 序列化）；诊断导出与模型 `settings_get` 对该前缀整值隐藏，`headers` 对象/数组的所有值按凭证掩码。
 - **浏览器与线程**：`Prepare` 在后台 goroutine 发现/注册/监听；浏览器只在 UI 主线程打开（`internal/lib/openurl`）；`Wait` 后台等待回调并换 token；授权成功后 toolkit 自动重连该连接器（无需重启）。headless 无浏览器时不提供交互式授权。
 - **安全边界**：workspace `mcp.json` 的 OAuth 配置被忽略并告警；PKCE 必须 S256；MCP 请求只跟随同源重定向；`invalid_grant` 需重新授权。
-- **令牌刷新**：每个 MCP 请求前检查到期时间，**提前 60 秒**单飞刷新；401 时刷新并重试一次（请求体可重放时）；refresh token 轮换后写回 settings，持久化失败会清空并要求重新授权。UI 详情显示当前 access token 到期时间，刷新后随 `Status` 更新。
+- **令牌刷新**：每个 MCP 请求前检查到期时间，**提前 60 秒**单飞刷新；**toolkit 后台每 30s 检查、到期前 5 分钟主动刷新**；401 时刷新并重试一次（请求体可重放时）；refresh token 轮换后写回 settings，持久化失败会清空并要求重新授权。已授权连接器不再显示「重新授权」，只有 Required/Expired 才提供授权入口。UI 详情显示当前 access token 到期时间，刷新后随 `Status` 更新。
+- **Headers 与工具开关**：连接器表单可配置任意 HTTP 请求头（`Name: value` 多行，诊断/模型读取脱敏），用于非标准认证/网关；详情列出该 server 的模型可见工具并支持逐工具 `tools.disabled` 开关，切换后热重载。
 - **热重载（2026-11-16）**：连接器设置写入后，toolkit 经 `contracts.KeyMCPReloader` 重建受管连接、注销旧工具并注册新工具，`contracts.KeyToolkit` / `KeyPlugins` / `KeyMCPAuth` 指针保持稳定；新增/编辑/移除/启停/授权不再要求重启。OAuth 行 URL 在保存与启动前去掉路径尾斜杠（`contracts.NormalizeMCPURL`），避免 PRM resource 尾斜杠误报 `resource_mismatch`。
 - **GitHub 远程 MCP**：`api.githubcopilot.com/mcp` 不提供动态客户端注册，且 GitHub 令牌交换需要 client secret（当前公开客户端不支持）；UI 明确引导选择 **Bearer 令牌 + GitHub PAT**。
 

@@ -94,10 +94,6 @@ func (f *fakeMCPAuth) Cancel(contracts.MCPServerConfig, contracts.MCPAuthFlow) {
 	f.cancelCalls++
 }
 
-func (f *fakeMCPAuth) Refresh(context.Context, contracts.MCPServerConfig) (contracts.MCPAuthStatus, error) {
-	return f.Status(contracts.MCPServerConfig{}), nil
-}
-
 func (f *fakeMCPAuth) Revoke(context.Context, contracts.MCPServerConfig) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -382,6 +378,74 @@ func TestConnectorGitHubRegistrationFailureSuggestsPAT(t *testing.T) {
 	h.click(tester, "授权")
 	waitForConnectorText(t, tester, "GitHub 远程 MCP 不支持动态客户端注册")
 	h.assertTexts(tester, "Bearer 令牌", "GitHub PAT")
+}
+
+func TestConnectorAuthorizedOAuthHasNoReauthorizeAction(t *testing.T) {
+	auth := &fakeMCPAuth{status: contracts.MCPAuthStatus{State: contracts.MCPAuthStateAuthorized}}
+	h, _ := newAuthConnectorHarness(t, &connectorPlugins{}, map[string]string{
+		contracts.SettingMCPServers: oauthConnectorJSON,
+	}, auth)
+	tester := h.tester()
+	h.click(tester, "连接器")
+	h.click(tester, "连接器操作 notion")
+	h.assertTexts(tester, "撤销授权")
+	h.assertNoTexts(tester, "重新授权")
+}
+
+func TestConnectorBearerRowHasNoOAuthAuthorizeAction(t *testing.T) {
+	h, _ := newAuthConnectorHarness(t, &connectorPlugins{}, map[string]string{
+		contracts.SettingMCPServers: `[{"name":"legacy","url":"https://mcp.example.com/mcp","auth":{"mode":"bearer","token":"t"}}]`,
+	}, &fakeMCPAuth{status: contracts.MCPAuthStatus{State: contracts.MCPAuthStateRequired}})
+	tester := h.tester()
+	h.click(tester, "连接器")
+	h.click(tester, "连接器操作 legacy")
+	h.assertTexts(tester, "编辑", "移除")
+	h.assertNoTexts(tester, "授权", "重新授权")
+}
+
+func TestConnectorHeadersRoundTrip(t *testing.T) {
+	h, store := newConnectorHarness(t, &connectorPlugins{}, nil)
+	tester := h.tester()
+	h.click(tester, "连接器")
+	h.click(tester, "添加连接器")
+	fillConnectorInput(t, h, tester, "名称 输入", "gateway")
+	fillConnectorInput(t, h, tester, "URL 输入", "https://mcp.example.com/mcp")
+	h.click(tester, "HTTP 请求头（可选）")
+	fillConnectorInput(t, h, tester, "请求头 输入", "X-API-Key: secret-value")
+	scrollConnectorTo(t, tester, "添加")
+	h.click(tester, "添加")
+
+	rows := storedConnectorRows(t, store)
+	if len(rows) != 1 || rows[0].Headers["X-Api-Key"] != "secret-value" {
+		t.Fatalf("stored headers = %+v", rows)
+	}
+	h.click(tester, "连接器操作 gateway")
+	if err := tester.Click("编辑"); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	tester.Frame()
+	// The text area's value is not part of tester.Texts(); saving the opened
+	// edit form unchanged must still round-trip the headers.
+	scrollConnectorTo(t, tester, "保存")
+	h.click(tester, "保存")
+	rows = storedConnectorRows(t, store)
+	if len(rows) != 1 || rows[0].Headers["X-Api-Key"] != "secret-value" {
+		t.Fatalf("headers after unchanged edit = %+v", rows)
+	}
+}
+
+func TestConnectorHeadersRejectMalformedLine(t *testing.T) {
+	h, _ := newConnectorHarness(t, &connectorPlugins{}, nil)
+	tester := h.tester()
+	h.click(tester, "连接器")
+	h.click(tester, "添加连接器")
+	fillConnectorInput(t, h, tester, "名称 输入", "bad")
+	fillConnectorInput(t, h, tester, "URL 输入", "https://mcp.example.com/mcp")
+	h.click(tester, "HTTP 请求头（可选）")
+	fillConnectorInput(t, h, tester, "请求头 输入", "not-a-header")
+	scrollConnectorTo(t, tester, "添加")
+	h.click(tester, "添加")
+	h.assertTexts(tester, "请求头第 1 行")
 }
 
 var _ = ui.KeyEscape

@@ -59,6 +59,25 @@ type MCPReloader interface {
 // KeyMCPReloader is provided by the toolkit and consumed by the connectors tab.
 var KeyMCPReloader = cordis.NewServiceKey[MCPReloader]("zeokeel/mcp-reloader")
 
+// MCPTool is one model-visible tool of a connected MCP server, with its current
+// enablement. The list is read-only data; toggling persists into tools.disabled
+// and applies through a reload.
+type MCPTool struct {
+	Name        string
+	Description string
+	Enabled     bool
+}
+
+// MCPToolCatalog exposes per-server tool lists and their switches. It is
+// optional: a composition without it simply omits the tool list from details.
+type MCPToolCatalog interface {
+	Tools(server string) []MCPTool
+	SetToolEnabled(ctx context.Context, server, tool string, enabled bool) error
+}
+
+// KeyMCPToolCatalog is provided by the toolkit and consumed by connector details.
+var KeyMCPToolCatalog = cordis.NewServiceKey[MCPToolCatalog]("zeokeel/mcp/tools")
+
 // MCPServerConfig is one user-configured MCP server row stored in settings.
 // Rows with a Command (or Transport "stdio") start a stdio child process; rows
 // with a URL use Streamable HTTP. Existing {name,url} JSON rows stay valid.
@@ -166,8 +185,6 @@ type MCPAuthService interface {
 	// Cancel drops a pending flow (safe on the UI thread; it only closes local
 	// resources).
 	Cancel(cfg MCPServerConfig, flow MCPAuthFlow)
-	// Refresh refreshes the access token (off the UI thread).
-	Refresh(ctx context.Context, cfg MCPServerConfig) (MCPAuthStatus, error)
 	// Revoke calls the revocation endpoint when available and deletes the local
 	// token (off the UI thread; confirm in the UI first).
 	Revoke(ctx context.Context, cfg MCPServerConfig) error

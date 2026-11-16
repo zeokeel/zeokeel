@@ -13,10 +13,13 @@ package plugins
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
@@ -70,7 +73,87 @@ func startCreateSkill(c *ui.Context, p *skillsState) {
 	p.draftName = ""
 	p.draftDescription = ""
 	p.draftBody = ""
+	p.bodyPreviewOpen = false
 	c.Invalidate()
+}
+
+// startCopySkill prefills the create modal from any discovered skill (including
+// workspace/read-only ones), so a repo skill can be forked into the editable
+// data directory.
+func startCopySkill(c *ui.Context, p *skillsState, st *state, skills contracts.SkillsService,
+	skill contracts.Skill, editor contracts.SkillsEditor) {
+	if editor == nil {
+		return
+	}
+	body, bodyErr := skillBody(skills, p, skill)
+	if bodyErr != "" {
+		p.editErr = st.tr("读取技能内容失败：", "Failed to read skill content: ") + bodyErr
+		c.Invalidate()
+		return
+	}
+	p.creating = true
+	p.editErr = ""
+	p.draftName = uniqueSkillCopyName(p.skills, skill.Name)
+	p.draftDescription = skill.Description
+	p.draftBody = body
+	c.Invalidate()
+}
+
+// uniqueSkillCopyName picks a non-colliding "<name>-copy" draft name; the user
+// can still edit it in the create dialog.
+func uniqueSkillCopyName(existing []contracts.Skill, base string) string {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = "skill"
+	}
+	taken := make(map[string]bool, len(existing))
+	for _, skill := range existing {
+		taken[strings.ToLower(strings.TrimSpace(skill.Name))] = true
+	}
+	candidate := base + "-copy"
+	for index := 2; taken[strings.ToLower(candidate)]; index++ {
+		candidate = fmt.Sprintf("%s-copy-%d", base, index)
+	}
+	return candidate
+}
+
+// setSkillDisabled adds/removes one name from skills.disabled, persists it and
+// updates the in-memory set. The agent-facing skill tool reads the setting on
+// every call, so no restart/reload is needed.
+func (p *skillsState) setSkillDisabled(st *state, settings contracts.SettingsService,
+	name string, disabled bool) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("skill name is required")
+	}
+	names := make([]string, 0, len(p.disabledNames)+1)
+	for _, existing := range p.disabledNames {
+		if strings.EqualFold(strings.TrimSpace(existing), name) {
+			continue
+		}
+		names = append(names, existing)
+	}
+	if disabled {
+		names = append(names, name)
+	}
+	encoded, err := contracts.EncodeStringListJSON(names)
+	if err != nil {
+		return err
+	}
+	if err := settings.Set(contracts.SettingSkillsDisabled, encoded); err != nil {
+		return err
+	}
+	p.disabled = make(map[string]bool, len(names))
+	p.disabledNames = names
+	for _, entry := range names {
+		p.disabled[strings.ToLower(entry)] = true
+	}
+	if disabled {
+		p.editStatus = st.tr("已禁用技能", "Skill disabled")
+	} else {
+		p.editStatus = st.tr("已启用技能", "Skill enabled")
+	}
+	return nil
 }
 
 // startEditSkill opens the edit modal prefilled with one existing data-dir
@@ -81,6 +164,7 @@ func startEditSkill(c *ui.Context, p *skillsState, skill contracts.Skill, body s
 	p.editDescription = skill.Description
 	p.editBody = body
 	p.editErr = ""
+	p.bodyPreviewOpen = false
 	c.Invalidate()
 }
 
@@ -141,6 +225,7 @@ func buildSkillCreateDialog(c *ui.Context, t *design.Tokens, p *skillsState, st 
 					Label(skillInputLabel(st, st.tr("内容", "Body"))).
 					FillWidth().MinHeight(design.Space6 * 5)
 			})
+			buildSkillBodyPreview(c, t, p, st, &p.draftBody)
 			if p.editErr != "" {
 				uikit.ErrorLine(c, p.editErr)
 			}
@@ -191,6 +276,7 @@ func buildSkillEditDialog(c *ui.Context, t *design.Tokens, p *skillsState, st *s
 					Label(skillInputLabel(st, st.tr("内容", "Body"))).
 					FillWidth().MinHeight(design.Space6 * 5)
 			})
+			buildSkillBodyPreview(c, t, p, st, &p.editBody)
 			if p.editErr != "" {
 				uikit.ErrorLine(c, p.editErr)
 			}
@@ -202,6 +288,22 @@ func buildSkillEditDialog(c *ui.Context, t *design.Tokens, p *skillsState, st *s
 				}},
 				{Label: st.tr("保存", "Save"), Primary: true, OnClick: submit},
 			})
+		})
+	})
+}
+
+// buildSkillBodyPreview renders a collapsible Markdown preview of the current
+// body draft, so authors see formatting without saving first.
+func buildSkillBodyPreview(c *ui.Context, t *design.Tokens, p *skillsState, st *state, body *string) {
+	ui.Collapsible(c, st.tr("Markdown 预览", "Markdown preview"), &p.bodyPreviewOpen, func() {
+		text := strings.TrimSpace(*body)
+		if text == "" {
+			design.Apply(ui.Text(c, st.tr("内容为空，暂无可预览内容。", "The body is empty; nothing to preview.")),
+				t.TextMuted(design.TypeXS))
+			return
+		}
+		ui.Scroll(c).FillWidth().MaxHeight(design.DialogBodyMax).Children(func() {
+			markdown.View(c, text, nil)
 		})
 	})
 }
@@ -266,6 +368,21 @@ func buildSkillCardMenu(c *ui.Context, t *design.Tokens, p *skillsState, st *sta
 		}
 		if m.Item(st.tr("复制路径", "Copy path")).Chosen() {
 			c.WriteClipboard(path)
+		}
+		if editor != nil && m.Item(st.tr("复制到我的技能", "Copy to my skills")).Chosen() {
+			startCopySkill(c, p, st, skills, skill, editor)
+		}
+		if settingsStore, ok := st.ctx.Get(contracts.KeySettings); ok && settingsStore != nil {
+			toggleLabel := st.tr("禁用技能", "Disable skill")
+			if p.skillDisabled(name) {
+				toggleLabel = st.tr("启用技能", "Enable skill")
+			}
+			if m.Item(toggleLabel).Chosen() {
+				if err := p.setSkillDisabled(st, settingsStore, name, !p.skillDisabled(name)); err != nil {
+					p.editErr = st.tr("更新技能启停失败：", "Failed to update the skill state: ") + err.Error()
+				}
+				c.Invalidate()
+			}
 		}
 		if editor == nil || !skillsEditActionsAllowed(path, dataDir) {
 			return
