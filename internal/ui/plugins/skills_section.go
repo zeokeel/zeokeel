@@ -163,6 +163,15 @@ func buildSkillsTab(c *ui.Context, t *design.Tokens, st *state) {
 					strings.Join(warnings, "；"))
 			}
 		}
+		if len(p.skills) > 0 && !skillsHaveEditable(p.skills, editor, dataDir) {
+			// The management entry exists on every card now; explain why most
+			// of them only offer read-only actions instead of leaving the user
+			// guessing why Edit/Delete are missing.
+			design.Apply(ui.Text(c, st.tr(
+				"工作区/自定义目录中的技能只读；用卡片 ⋯ 打开文件或所在目录，或在上方操作行新建一个可编辑的技能。",
+				"Skills from the workspace or custom directories are read-only; use a card's ⋯ to open the file or its folder, or create an editable skill from the row above."),
+			), t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
+		}
 		if len(p.skills) > skillsSearchThreshold {
 			label := st.tr("搜索技能", "Search skills")
 			ui.SearchField(c, &p.query).Label(label).
@@ -176,7 +185,7 @@ func buildSkillsTab(c *ui.Context, t *design.Tokens, st *state) {
 				st.tr("还没有发现技能", "No skills discovered yet"),
 				st.tr("在技能目录放置 <name>/SKILL.md 后点击刷新。",
 					"Place <name>/SKILL.md in a skill directory, then refresh."),
-				func() { buildSkillsEmptyAction(c, t, p, st, editor) })
+				func() { buildSkillsEmptyAction(c, t, p, st) })
 			return
 		case len(filtered) == 0:
 			uikit.EmptyStateBlock(c,
@@ -246,16 +255,10 @@ func buildSkillsCollectionRow(c *ui.Context, t *design.Tokens, p *skillsState, s
 	})
 }
 
-// buildSkillsEmptyAction is the empty state's next step: create a skill when the
-// editor is available, else rescan the directories.
-func buildSkillsEmptyAction(c *ui.Context, t *design.Tokens, p *skillsState, st *state,
-	editor contracts.SkillsEditor) {
-	if editor != nil {
-		if design.Apply(ui.Button(c, st.tr("新建技能", "New skill")), t.SecondaryButton()).Clicked() {
-			startCreateSkill(c, p)
-		}
-		return
-	}
+// buildSkillsEmptyAction is the empty state's next step: rescan the
+// directories. "New skill" stays in the collection row above, so the empty
+// state does not render a second, duplicate create action.
+func buildSkillsEmptyAction(c *ui.Context, t *design.Tokens, p *skillsState, st *state) {
 	label := st.tr("刷新技能", "Refresh skills")
 	uikit.IconButton(c, uikit.IconButtonOptions{
 		Key: "skills.empty.refresh", Label: label, Tooltip: label,
@@ -265,6 +268,20 @@ func buildSkillsEmptyAction(c *ui.Context, t *design.Tokens, p *skillsState, st 
 			c.Invalidate()
 		},
 	})
+}
+
+// skillsHaveEditable reports whether at least one skill can be edited/deleted
+// from this page (a directory-form SKILL.md below the data directory).
+func skillsHaveEditable(skills []contracts.Skill, editor contracts.SkillsEditor, dataDir string) bool {
+	if editor == nil {
+		return false
+	}
+	for _, skill := range skills {
+		if skillsEditActionsAllowed(skill.Path, dataDir) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildSkillCard is one skill as a card: sparkles + name + trailing actions,
@@ -299,7 +316,14 @@ func buildSkillCard(c *ui.Context, t *design.Tokens, p *skillsState, st *state,
 		}
 		ui.Spacer(c).Grow(1)
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Badge(c, skillSourceLabel(st, source)), t.Badge())
+			sourceBadge := design.Apply(ui.Badge(c, skillSourceLabel(st, source)), t.Badge())
+			if source == "workspace" {
+				sourceBadge.Tooltip(st.tr("仓库内容，模型按不可信数据处理；只读",
+					"Repository content treated as untrusted data; read-only"))
+			} else {
+				sourceBadge.Tooltip(st.tr("全局技能目录；只有 dataDir 下的目录形态技能可编辑",
+					"Global skill directory; only directory-form skills below dataDir are editable"))
+			}
 			if path := strings.TrimSpace(skill.Path); path != "" {
 				design.Apply(ui.Text(c, relative), t.MonoText(design.TypeXXS)).
 					TextColor(t.LabelTertiary).Grow(1).Shrink(1).MinWidth(design.Space0).

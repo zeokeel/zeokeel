@@ -347,8 +347,11 @@ func TestSkillsCardsRender(t *testing.T) {
 	h.assertGridItem(tester, "alpha")
 	h.assertGridItem(tester, "beta")
 
-	// The editor half is optional: without it no create action or card menu.
-	h.assertNoTexts(tester, "新建技能", "技能操作", "编辑技能", "删除技能")
+	// The editor half is optional: no create/Edit/Delete, but every card still
+	// exposes its read-only management menu.
+	h.assertTexts(tester, "技能操作 alpha", "技能操作 beta",
+		"工作区/自定义目录中的技能只读；用卡片 ⋯ 打开文件或所在目录，或在上方操作行新建一个可编辑的技能。")
+	h.assertNoTexts(tester, "新建技能", "编辑技能", "删除技能")
 }
 
 // TestSkillsSearchAppearsForLongLists covers H20's search: it is hidden while
@@ -597,7 +600,7 @@ func TestSkillsEditModal(t *testing.T) {
 	skills.setList(dataDirSkill(dataDir, "alpha", "old desc", "old body"))
 	tester := h.tester()
 
-	h.click(tester, "技能操作")
+	h.click(tester, "技能操作 alpha")
 	h.click(tester, "编辑技能")
 	h.assertTexts(tester, "编辑技能", "alpha", "名称不可修改", "描述", "内容", "保存", "取消")
 	focusSkillField(t, tester, "描述 输入")
@@ -631,7 +634,7 @@ func TestSkillsDeleteConfirmEscapeCancel(t *testing.T) {
 	skills.setList(dataDirSkill(dataDir, "alpha", "Alpha", "# Alpha"))
 	tester := h.tester()
 
-	h.click(tester, "技能操作")
+	h.click(tester, "技能操作 alpha")
 	h.click(tester, "删除技能")
 	h.assertTexts(tester, "删除技能", "确认删除")
 	if !tester.HasText("alpha") {
@@ -656,7 +659,7 @@ func TestSkillsDeleteConfirms(t *testing.T) {
 	skills.setList(dataDirSkill(dataDir, "alpha", "Alpha", "# Alpha"))
 	tester := h.tester()
 
-	h.click(tester, "技能操作")
+	h.click(tester, "技能操作 alpha")
 	h.click(tester, "删除技能")
 	h.click(tester, "确认删除")
 
@@ -669,15 +672,118 @@ func TestSkillsDeleteConfirms(t *testing.T) {
 }
 
 // TestSkillsEditorActionsHiddenWithoutEditor covers the optional editor: only
-// the read-only skills service means no create action and no card menu.
+// the read-only skills service means no create/Edit/Delete, while the card's
+// read-only management menu stays available.
 func TestSkillsEditorActionsHiddenWithoutEditor(t *testing.T) {
 	skills := newFakeSkills()
 	h, _, dataDir := newSkillsHarness(t, skills, nil)
 	skills.setList(dataDirSkill(dataDir, "alpha", "Alpha", "# Alpha"))
 	tester := h.tester()
 
-	h.assertTexts(tester, "alpha", "查看内容")
-	h.assertNoTexts(tester, "新建技能", "技能操作")
+	h.assertTexts(tester, "alpha", "查看内容", "技能操作 alpha")
+	h.assertNoTexts(tester, "新建技能", "编辑技能", "删除技能")
+}
+
+// TestSkillsReadOnlyCardMenuActions covers the read-only management entry on a
+// workspace skill: open / reveal / copy are always available, Edit/Delete are
+// not.
+func TestSkillsReadOnlyCardMenuActions(t *testing.T) {
+	previousOpen, previousShow := openpath.Open, openpath.ShowInFolder
+	var opened, revealed []string
+	openpath.Open = func(path string) error {
+		opened = append(opened, path)
+		return nil
+	}
+	openpath.ShowInFolder = func(path string) error {
+		revealed = append(revealed, path)
+		return nil
+	}
+	t.Cleanup(func() {
+		openpath.Open = previousOpen
+		openpath.ShowInFolder = previousShow
+	})
+	skills := newFakeSkills()
+	h, _, _ := newSkillsHarness(t, skills, newFakeSkillsEditor(skills))
+	workspaceRoot := t.TempDir()
+	withWorkspace(t, h, workspaceRoot)
+	path := filepath.Join(workspaceRoot, "skills", "alpha", "SKILL.md")
+	skills.setList(contracts.Skill{Name: "alpha", Description: "Alpha", Path: path})
+	tester := h.tester()
+
+	h.click(tester, "技能操作 alpha")
+	h.assertTexts(tester, "用默认应用打开", "在文件管理器中显示", "复制路径")
+	h.assertNoTexts(tester, "编辑技能", "删除技能")
+	if err := tester.Click("用默认应用打开"); err != nil {
+		t.Fatalf("open action: %v", err)
+	}
+	tester.Frame()
+	if len(opened) != 1 || opened[0] != path {
+		t.Fatalf("open with default app = %v, want [%s]", opened, path)
+	}
+
+	h.click(tester, "技能操作 alpha")
+	if err := tester.Click("在文件管理器中显示"); err != nil {
+		t.Fatalf("reveal action: %v", err)
+	}
+	tester.Frame()
+	if len(revealed) != 1 || revealed[0] != path {
+		t.Fatalf("show in file manager = %v, want [%s]", revealed, path)
+	}
+}
+
+// TestSkillsTopLevelMarkdownSkillStaysReadOnly covers the discovered top-level
+// <dataDir>/skills/foo.md form: it gets the read-only menu but never the
+// editor actions that would fail after the click.
+func TestSkillsTopLevelMarkdownSkillStaysReadOnly(t *testing.T) {
+	skills := newFakeSkills()
+	editor := newFakeSkillsEditor(skills)
+	h, _, dataDir := newSkillsHarness(t, skills, editor)
+	skills.setList(contracts.Skill{
+		Name: "top", Description: "Top-level markdown",
+		Path: filepath.Join(dataDir, "skills", "top.md"),
+	})
+	tester := h.tester()
+	h.click(tester, "技能操作 top")
+	h.assertTexts(tester, "用默认应用打开", "在文件管理器中显示", "复制路径")
+	h.assertNoTexts(tester, "编辑技能", "删除技能")
+}
+
+// TestSkillsEmptyStateSingleCreateAction covers the duplicated create button:
+// the collection row owns "New skill", the empty state only offers refresh.
+func TestSkillsEmptyStateSingleCreateAction(t *testing.T) {
+	skills := newFakeSkills()
+	h, _, _ := newSkillsHarness(t, skills, newFakeSkillsEditor(skills))
+	tester := h.tester()
+	tester.Frame()
+	count := 0
+	for _, text := range tester.Texts() {
+		if text == "新建技能" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("New skill rendered %d times, want exactly once; texts = %v", count, tester.Texts())
+	}
+	h.assertTexts(tester, "刷新技能")
+}
+
+// TestSkillsReadOnlyHintOnlyWithoutEditableSkill covers the hint's condition.
+func TestSkillsReadOnlyHintOnlyWithoutEditableSkill(t *testing.T) {
+	hint := "工作区/自定义目录中的技能只读"
+	skills := newFakeSkills()
+	h, _, dataDir := newSkillsHarness(t, skills, newFakeSkillsEditor(skills))
+	skills.setList(dataDirSkill(dataDir, "editable", "Editable", "# Editable"))
+	tester := h.tester()
+	h.assertNoTexts(tester, hint)
+
+	// A workspace-only list has no editable skill, so the hint appears.
+	h2Skills := newFakeSkills()
+	h2, _, _ := newSkillsHarness(t, h2Skills, newFakeSkillsEditor(h2Skills))
+	workspaceRoot := t.TempDir()
+	withWorkspace(t, h2, workspaceRoot)
+	h2Skills.setList(contracts.Skill{Name: "readonly", Path: filepath.Join(workspaceRoot, "skills", "readonly", "SKILL.md")})
+	tester2 := h2.tester()
+	h2.assertTexts(tester2, hint)
 }
 
 // TestSkillsEnglishCopy covers the localized English surface.
@@ -690,7 +796,7 @@ func TestSkillsEnglishCopy(t *testing.T) {
 
 	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Skills", "Connectors", "New skill", "View content", "Skill actions")
+	h.assertTexts(tester, "Skills", "Connectors", "New skill", "View content", "Skill actions alpha")
 
 	h.click(tester, "New skill")
 	h.assertTexts(tester, "Name", "Description", "Body", "Create", "Cancel")
@@ -703,7 +809,7 @@ func TestSkillsEnglishCopy(t *testing.T) {
 	h.click(tester, "Create")
 	h.assertTexts(tester, "Skill created", "english-skill")
 
-	h.click(tester, "Skill actions")
+	h.click(tester, "Skill actions alpha")
 	h.click(tester, "Edit skill")
 	h.assertTexts(tester, "Edit skill", "The name cannot be changed", "Save", "Cancel")
 }

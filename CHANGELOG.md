@@ -11,6 +11,15 @@ All notable changes to ZeoKeel are documented here. The format follows
 - **MCP 连接器 OAuth 2.1 授权**：连接器表单新增认证方式（无 / Bearer 令牌 / OAuth 2.1）；未授权卡显示「需要授权」并以 secondary 按钮启动浏览器授权，授权过程为两阶段 modal（准备 / 等待浏览器 / 错误重试），已授权卡支持重新授权与撤销授权；令牌保存在 `mcp.oauth.<server>` settings 记录，诊断/模型读取整值隐藏。协议实现来自升级后的 `zeokeel-rig v0.18.0`（发现、注册、PKCE、回环回调、刷新/撤销），ZeoKeel 只做契约、toolkit 适配与 UI。
 - 启动失败的 MCP 连接器现在也会注册为受管连接：授权成功后自动重连，无需重启应用。
 
+### Added
+
+- **技能卡管理入口**：能力页每张技能卡都有 `⋯` 管理菜单（用默认应用打开 / 在文件管理器中显示 / 复制路径）；`<dataDir>/skills/<name>/SKILL.md` 目录形态技能额外提供编辑与删除（危险确认），工作区/额外目录技能保持只读并显示只读说明行；`⋯` 的无障碍 Label 带技能名。
+
+### Fixed
+
+- 顶层 `<dataDir>/skills/foo.md` 技能不再出现会失败的编辑/删除菜单（编辑器只接受目录形态 `SKILL.md`）。
+- 技能列表为空时「新建技能」不再重复出现两次。
+
 ### Changed
 
 - 连接器认证状态新增 `uikit.StatusNeedsAction`（warning 语义，非失败）；「需要授权」不再显示为笼统的连接失败。
