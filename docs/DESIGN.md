@@ -664,7 +664,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 入口 | 状态 | 说明 |
 |---|---|---|
 | `plugins.capabilityTabs` | **已有**（2026-11-16） | 页级并行 Tab 骨架（`capability_shell.go`）：`capabilityTabSpecs` 注册 技能/连接器，Tab 行不随内容滚动；每个 Tab 拥有自己的整页正文与动作行；页底「诊断与设置」区（内置模块清单/扩展设置（已接线设置））不占 Tab |
-| `插件页技能卡` | **已有**（2026-11-16） | 技能 Tab 的独立对象卡：`t.Panel()` 卡片、固定 128 高、3 列 `ui.GridView`（官方网格虚拟化）；卡片底部「查看内容」图标按钮 + 行内 ⋯；创建走分节动作位（`SectionAction` 等价行）的 secondary（页面无 primary）。来源：设置「技能」页迁入（数据键 `skills.dirs` 不变） |
+| `插件页技能卡` | **已有**（2026-11-16，管理入口 2026-11-16） | 技能 Tab 的独立对象卡：`t.Panel()` 卡片、固定 128 高、3 列 `ui.GridView`（官方网格虚拟化）；卡片底部「查看内容」图标按钮 + **每张卡都有的行内 ⋯**（用默认应用打开 / 在文件管理器中显示 / 复制路径；仅 dataDir 的目录形态 `<name>/SKILL.md` 追加编辑/删除，删除走 `uikit.ConfirmDanger`）；只有只读技能时集合行下显示一行 `TypeXXS` 只读说明；⋯ 的 a11y Label 带技能名；空态不重复渲染「新建技能」；创建走分节动作位（`SectionAction` 等价行）的 secondary（页面无 primary）。来源：设置「技能」页迁入（数据键 `skills.dirs` 不变） |
 | `插件页连接器卡` | **已有**（2026-11-16，OAuth 2026-11-16） | 连接器 Tab 的独立对象卡：固定 176 高、3 列 `ui.GridView`；失败卡含红色错误摘要 +「查看报错详情」+「重试」；**OAuth 2.1 认证**：表单「认证方式」= 无/Bearer/OAuth 2.1，未授权卡显示 warning 徽章「需要授权」+ secondary「授权」（复用失败摘要行，不增卡高），失效显示「授权已失效」+「重新授权」，已授权卡 `⋯` 提供重新授权/撤销授权；授权过程用 `ui.Modal` 两阶段（准备/等待浏览器）+ `uikit.DialogFooter`；添加/编辑/测试连接/移除与 `mcp.servers`、`mcp.disabledServers` 启停、工作区 `mcp.json` opt-in 都在此 Tab；**工作区 mcp.json 不允许 OAuth 配置**。来源：设置「MCP」页迁入（数据键不变） |
 
 > **AP-25 边界**：卡片布局是用户 2026-11-16 的明确要求。技能与连接器是**独立对象**（一张卡 = 一个技能/一台服务器），

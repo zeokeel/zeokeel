@@ -17,3 +17,10 @@ import (
 var Open = func(path string) error {
 	return mygo.Shell.OpenPath(strings.TrimSpace(path))
 }
+
+// ShowInFolder reveals one path in the platform's file manager (selecting the
+// item when supported). It is a seam for the same reason as Open.
+var ShowInFolder = func(path string) error {
+	mygo.Shell.ShowItemInFolder(strings.TrimSpace(path))
+	return nil
+}

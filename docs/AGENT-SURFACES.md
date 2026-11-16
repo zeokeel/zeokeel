@@ -619,6 +619,7 @@ Agent 客户端的界面不是一次性输出：用户对界面的操作要作�
 - **记忆恢复**：`memory.json` 损坏时隔离为 `.corrupt-<ts>` 并以空 store 继续；`MemoryRecoveryReporter.RecoveryNotice()` 必须显示在记忆页（不能只写日志）。
 - **技能根**：优先级为工作区（`skills`、`.agents/skills`、`.zeokeel/skills`）→ `skills.dirs` → assembly 目录 → `dataDir/skills` → `$ZEOKEEL_SKILLS` → `~/.zeokeel/skills`；同名遮蔽与扫描上限经 `SkillWarnings.Warnings()` 在能力页「技能」Tab 可见。
 - **技能内容边界**：`List` 只读每个 `SKILL.md` 的前缀（名称/描述/可搜索摘要），`Read`/`load` 才读全文（≤1MiB）；编辑只重写名称/描述/正文，保留未知 frontmatter 键；写路径仍仅 `<dataDir>/skills`。
+- **技能管理入口（2026-11-16）**：能力页每张技能卡都有 `⋯`（默认应用打开/文件管理器显示/复制路径）；只有 `<dataDir>/skills/<name>/SKILL.md` 目录形态技能额外出现编辑/删除（`skillsEditActionsAllowed` 同时校验 dataDir 与 `SKILL.md` 基名）；顶层 `<dataDir>/skills/foo.md` 与工作区/额外目录技能保持只读；没有任何可编辑技能时显示只读说明行；空列表只有集合行一个「新建技能」。
 
 ### 2.7.1 连接器 OAuth 2.1（非 surface，事实约定）
 

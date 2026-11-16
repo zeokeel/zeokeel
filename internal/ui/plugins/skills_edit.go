@@ -21,6 +21,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/lib/openpath"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -45,6 +46,13 @@ func skillsEditActionsAllowed(path, dataDir string) bool {
 	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
+		return false
+	}
+	// Only the directory-form skill (<dataDir>/skills/<name>/SKILL.md) is
+	// writable. A top-level <dataDir>/skills/foo.md is discovered by List but
+	// the editor cannot rewrite it; showing edit/delete there would fail after
+	// the click.
+	if !strings.EqualFold(filepath.Base(filepath.Clean(absPath)), "SKILL.md") {
 		return false
 	}
 	relative, err := filepath.Rel(absDataDir, absPath)
@@ -225,21 +233,44 @@ func buildSkillDeleteDialog(c *ui.Context, p *skillsState, st *state,
 	}
 }
 
-// buildSkillCardMenu is one skill card's trailing ⋯ menu: Edit (only for the
-// product data directory's skills) and the destructive Delete as the danger
-// item. Read-only skills show no menu at all.
+// buildSkillCardMenu is one skill card's trailing ⋯ menu. Every skill gets the
+// read-only actions (open / reveal / copy path); only a directory-form skill
+// below the product data directory additionally gets Edit and the destructive
+// Delete. The label names the skill so several cards do not expose identical
+// accessible buttons.
 func buildSkillCardMenu(c *ui.Context, t *design.Tokens, p *skillsState, st *state,
 	skills contracts.SkillsService, skill contracts.Skill, editor contracts.SkillsEditor,
 	dataDir string) {
-	if editor == nil || !skillsEditActionsAllowed(skill.Path, dataDir) {
+	path := strings.TrimSpace(skill.Path)
+	if path == "" {
 		return
 	}
-	label := st.tr("技能操作", "Skill actions")
+	name := firstNonEmpty(skill.Name, st.tr("(未命名技能)", "(Unnamed skill)"))
+	label := st.tr("技能操作", "Skill actions") + " " + name
 	menu := uikit.IconButton(c, uikit.IconButtonOptions{
-		Key: "skills.menu/" + skillKey(skill), Label: label, Tooltip: label,
+		Key: "skills.menu/" + skillKey(skill), Label: label, Tooltip: st.tr("技能操作", "Skill actions"),
 		Icon: icons.More(), Size: design.IconSizeS,
 	})
 	menu.PopoverMenuButton(func(m *ui.Menu) {
+		if m.Item(st.tr("用默认应用打开", "Open with default app")).Chosen() {
+			if err := openpath.Open(path); err != nil {
+				p.editErr = st.tr("打开技能失败：", "Failed to open the skill: ") + err.Error()
+			}
+			c.Invalidate()
+		}
+		if m.Item(st.tr("在文件管理器中显示", "Show in file manager")).Chosen() {
+			if err := openpath.ShowInFolder(path); err != nil {
+				p.editErr = st.tr("在文件管理器中显示失败：", "Failed to reveal the skill: ") + err.Error()
+			}
+			c.Invalidate()
+		}
+		if m.Item(st.tr("复制路径", "Copy path")).Chosen() {
+			c.WriteClipboard(path)
+		}
+		if editor == nil || !skillsEditActionsAllowed(path, dataDir) {
+			return
+		}
+		m.Separator()
 		if m.Item(st.tr("编辑技能", "Edit skill")).Chosen() {
 			body, bodyErr := skillBody(skills, p, skill)
 			if bodyErr != "" {
