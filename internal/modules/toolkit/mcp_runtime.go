@@ -95,6 +95,8 @@ type mcpRuntime struct {
 	disabled map[string]bool
 	// maxOutput is the product's per-result output budget (0 = default).
 	maxOutput int
+	// auth adapts rig OAuth clients for connectors with auth.mode=oauth2.
+	auth *mcpAuthRuntime
 
 	mu       sync.Mutex
 	registry *rigtool.Registry
@@ -104,14 +106,15 @@ type mcpRuntime struct {
 }
 
 // newMCPRuntime creates the runtime for one activation.
-func newMCPRuntime(logf func(string, ...any), disabled map[string]bool, maxOutput int) *mcpRuntime {
+func newMCPRuntime(logf func(string, ...any), disabled map[string]bool, maxOutput int,
+	auth *mcpAuthRuntime) *mcpRuntime {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
 	if maxOutput <= 0 {
 		maxOutput = defaultMCPMaxOutputBytes
 	}
-	return &mcpRuntime{logf: logf, disabled: disabled, maxOutput: maxOutput}
+	return &mcpRuntime{logf: logf, disabled: disabled, maxOutput: maxOutput, auth: auth}
 }
 
 // prepareMCPServerPlans validates every merged server row and freezes the
@@ -193,7 +196,7 @@ func (r *mcpRuntime) startMCPServers(ctx context.Context, plans []mcpStartPlan) 
 // startOne connects one server, lists its tools and builds the registry tools
 // (already filtered by the disabled-tool switches).
 func (r *mcpRuntime) startOne(ctx context.Context, plan mcpStartPlan) mcpStartOutcome {
-	client, err := startMCPClient(ctx, plan.server)
+	client, err := startMCPClient(ctx, plan.server, r.auth)
 	if err != nil {
 		return mcpStartOutcome{err: err}
 	}
@@ -245,18 +248,32 @@ func (r *mcpRuntime) boundOutput(tools []rig.Tool) []rig.Tool {
 	return bounded
 }
 
-// attachServer registers one started connection's tools (wrapped in reconnect
-// proxies) and records the managed server. It returns the registry tools and
-// how many tools/list tools actually reached the registry (duplicates skipped).
-func (r *mcpRuntime) attachServer(pluginIndex int, plan mcpStartPlan, outcome mcpStartOutcome,
-	seen map[string]bool) (wrapped []rig.Tool, regularCount int) {
+// registerServer records one valid plan as a managed connection before it is
+// started, so a failed startup (including "OAuth authorization required") can
+// be reconnected after the user authorizes without restarting the product.
+func (r *mcpRuntime) registerServer(plan mcpStartPlan, pluginIndex int) *managedMCPServer {
 	server := &managedMCPServer{
 		plan:        plan,
 		pluginIndex: pluginIndex,
-		client:      outcome.client,
-		inner:       make(map[string]rig.Tool, len(outcome.tools)),
-		registered:  make(map[string]rig.Tool, len(outcome.tools)),
+		inner:       make(map[string]rig.Tool),
+		registered:  make(map[string]rig.Tool),
 	}
+	r.mu.Lock()
+	r.servers = append(r.servers, server)
+	r.mu.Unlock()
+	return server
+}
+
+// attachOutcome registers one started connection's tools (wrapped in reconnect
+// proxies). It returns the registry tools and how many tools/list tools
+// actually reached the registry (duplicates skipped).
+func (r *mcpRuntime) attachOutcome(server *managedMCPServer, outcome mcpStartOutcome,
+	seen map[string]bool) (wrapped []rig.Tool, regularCount int) {
+	if server == nil {
+		return nil, 0
+	}
+	plan := server.plan
+	server.client = outcome.client
 	for _, tool := range outcome.tools {
 		name := tool.Name()
 		if seen[name] {
@@ -275,9 +292,6 @@ func (r *mcpRuntime) attachServer(pluginIndex int, plan mcpStartPlan, outcome mc
 	server.mu.Lock()
 	server.regularRegistered = regularCount
 	server.mu.Unlock()
-	r.mu.Lock()
-	r.servers = append(r.servers, server)
-	r.mu.Unlock()
 	return wrapped, regularCount
 }
 
@@ -332,6 +346,28 @@ func (r *mcpRuntime) reconnectPlugin(index int) bool {
 	return r.reconnect(target, target.currentClient())
 }
 
+// reconnectByName rebuilds the connection whose configured name matches (the
+// OAuth adapter calls it after a completed authorization).
+func (r *mcpRuntime) reconnectByName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	r.mu.Lock()
+	var target *managedMCPServer
+	for _, server := range r.servers {
+		if strings.EqualFold(strings.TrimSpace(server.plan.server.Name), name) {
+			target = server
+			break
+		}
+	}
+	r.mu.Unlock()
+	if target == nil {
+		return false
+	}
+	return r.reconnect(target, target.currentClient())
+}
+
 // updatePlugin refreshes the Plugins read model of one server from its live
 // client.
 func (r *mcpRuntime) updatePlugin(server *managedMCPServer, status string, toolCount int) {
@@ -370,10 +406,14 @@ func (r *mcpRuntime) reconnect(target *managedMCPServer, observed *mcp.Client) b
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	client, err := startMCPClient(ctx, plan.server)
+	client, err := startMCPClient(ctx, plan.server, r.auth)
 	if err != nil {
 		if plugins != nil {
-			plugins.setStatus(target.pluginIndex, statusConnectFailed+err.Error())
+			status := statusConnectFailed + err.Error()
+			if authStatus := r.auth.failureStatus(plan.server); authStatus != "" {
+				status = authStatus
+			}
+			plugins.setStatus(target.pluginIndex, status)
 		}
 		r.logf("[toolkit] mcp %q: reconnect failed: %v", plan.entry.plugin.Name, err)
 		return false
@@ -382,7 +422,11 @@ func (r *mcpRuntime) reconnect(target *managedMCPServer, observed *mcp.Client) b
 	if err != nil {
 		_ = client.Close()
 		if plugins != nil {
-			plugins.setStatus(target.pluginIndex, statusConnectFailed+err.Error())
+			status := statusConnectFailed + err.Error()
+			if authStatus := r.auth.failureStatus(plan.server); authStatus != "" {
+				status = authStatus
+			}
+			plugins.setStatus(target.pluginIndex, status)
 		}
 		r.logf("[toolkit] mcp %q: reconnect list tools failed: %v", plan.entry.plugin.Name, err)
 		return false
@@ -474,6 +518,9 @@ func (r *mcpRuntime) close() {
 		if client := server.currentClient(); client != nil {
 			_ = client.Close()
 		}
+	}
+	if r.auth != nil {
+		r.auth.close()
 	}
 }
 

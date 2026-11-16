@@ -6,6 +6,7 @@ package toolkit
 // shows those servers; the user setting only adds endpoints.
 
 import (
+	"net/url"
 	"strings"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -68,6 +69,13 @@ func mergeMCPServerRows(base []MCPServer, rows []contracts.MCPServerConfig, sour
 			logf("[toolkit] skip %s[%d]: command/URL must not contain NUL", source, index)
 			continue
 		}
+		auth := cloneMCPAuthConfig(row.Auth)
+		if source == "workspace mcp.json" && auth != nil {
+			// A repository-provided mcp.json must not be able to start an
+			// interactive authorization against a user's account.
+			logf("[toolkit] ignore OAuth auth from %s[%d]: authentication is only configurable in settings", source, index)
+			auth = nil
+		}
 		server := MCPServer{
 			Name:      name,
 			URL:       url,
@@ -75,7 +83,17 @@ func mergeMCPServerRows(base []MCPServer, rows []contracts.MCPServerConfig, sour
 			Command:   command,
 			Args:      cleanMCPArgs(row.Args),
 			Env:       cleanMCPArgs(row.Env),
+			Headers:   cloneMCPHeaders(row.Headers),
 			TimeoutMs: row.TimeoutMs,
+			Auth:      auth,
+		}
+		if server.Auth != nil {
+			normalized, authErr := normalizeMCPAuth(server.Auth, server.URL)
+			if authErr != "" {
+				logf("[toolkit] skip %s[%d]: %s", source, index, authErr)
+				continue
+			}
+			server.Auth = normalized
 		}
 		switch {
 		case command != "" || transport == "stdio":
@@ -139,4 +157,87 @@ func cleanMCPArgs(values []string) []string {
 		return nil
 	}
 	return out
+}
+
+// cloneMCPHeaders copies one header map so merge results never alias settings.
+func cloneMCPHeaders(headers map[string]string) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(headers))
+	for key, value := range headers {
+		key = strings.TrimSpace(key)
+		if key == "" || strings.ContainsRune(key, 0) || strings.ContainsRune(value, 0) {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// cloneMCPAuthConfig copies one auth config and its slice fields.
+func cloneMCPAuthConfig(auth *contracts.MCPAuthConfig) *contracts.MCPAuthConfig {
+	if auth == nil {
+		return nil
+	}
+	out := *auth
+	out.Scopes = append([]string(nil), auth.Scopes...)
+	return &out
+}
+
+// normalizeMCPAuth validates one connector's auth mode. An empty bearer token
+// degrades to no authentication (the historical row semantics); OAuth requires
+// an HTTP URL.
+func normalizeMCPAuth(auth *contracts.MCPAuthConfig, url string) (*contracts.MCPAuthConfig, string) {
+	if auth == nil {
+		return nil, ""
+	}
+	auth.Mode = contracts.MCPAuthMode(strings.ToLower(strings.TrimSpace(string(auth.Mode))))
+	switch auth.Mode {
+	case contracts.MCPAuthNone:
+		return nil, ""
+	case contracts.MCPAuthBearer:
+		auth.Token = strings.TrimSpace(auth.Token)
+		if auth.Token == "" {
+			return nil, ""
+		}
+		if strings.TrimSpace(url) == "" {
+			return nil, "bearer auth requires an HTTP URL"
+		}
+		return auth, ""
+	case contracts.MCPAuthOAuth2:
+		if strings.TrimSpace(url) == "" {
+			return nil, "OAuth requires an HTTP URL"
+		}
+		if !validOAuthEndpointURL(url) {
+			return nil, "OAuth requires an https URL (loopback http is allowed for local servers)"
+		}
+		auth.Scopes = cleanMCPArgs(auth.Scopes)
+		// The connector URL is the canonical resource (rig enforces URL ==
+		// resource); the legacy override field is ignored.
+		auth.Resource = ""
+		return auth, ""
+	default:
+		return nil, "unsupported auth mode " + string(auth.Mode)
+	}
+}
+
+// validOAuthEndpointURL accepts https, or plain http only for loopback hosts.
+func validOAuthEndpointURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "https":
+		return true
+	case "http":
+		host := strings.ToLower(strings.Trim(parsed.Hostname(), "[]"))
+		return host == "127.0.0.1" || host == "::1" || host == "localhost"
+	default:
+		return false
+	}
 }

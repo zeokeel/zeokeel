@@ -11,6 +11,8 @@ import (
 
 	rig "github.com/zeokeel/zeokeel-rig"
 	"github.com/zeokeel/zeokeel-rig/tools/mcp"
+
+	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
 // mcpServerTransport infers the transport from an MCPServer row. A non-empty
@@ -59,7 +61,7 @@ func mcpStartConfig(server MCPServer) mcp.Config {
 
 // startMCPClient connects one server over its configured transport. ctx bounds
 // the handshake (the MCP startup phase passes one overall deadline).
-func startMCPClient(ctx context.Context, server MCPServer) (*mcp.Client, error) {
+func startMCPClient(ctx context.Context, server MCPServer, auth *mcpAuthRuntime) (*mcp.Client, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -67,7 +69,7 @@ func startMCPClient(ctx context.Context, server MCPServer) (*mcp.Client, error) 
 	case mcp.TransportStdio:
 		return mcp.Start(ctx, mcpStartConfig(server))
 	case mcp.TransportHTTP:
-		return startHTTPMCP(ctx, server)
+		return startHTTPMCP(ctx, server, auth)
 	default:
 		return nil, fmt.Errorf("mcp: unsupported transport %q", mcpServerTransport(server))
 	}
@@ -75,14 +77,37 @@ func startMCPClient(ctx context.Context, server MCPServer) (*mcp.Client, error) 
 
 // startHTTPMCP is the HTTP half of the startup loop, kept separate so the loop
 // reads as transport dispatch.
-func startHTTPMCP(ctx context.Context, server MCPServer) (*mcp.Client, error) {
+func startHTTPMCP(ctx context.Context, server MCPServer, auth *mcpAuthRuntime) (*mcp.Client, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	headers := cloneMCPHeaders(server.Headers)
+	var oauthClient *mcp.OAuthClient
+	if server.Auth != nil {
+		switch server.Auth.Mode {
+		case contracts.MCPAuthBearer:
+			if headers == nil {
+				headers = make(map[string]string, 1)
+			}
+			// OAuth never coexists with this branch; a static token overrides
+			// any assembly-provided Authorization header.
+			headers["Authorization"] = "Bearer " + strings.TrimSpace(server.Auth.Token)
+		case contracts.MCPAuthOAuth2:
+			if auth == nil {
+				return nil, fmt.Errorf("mcp: OAuth is not available in this composition")
+			}
+			client, err := auth.clientForServer(server)
+			if err != nil {
+				return nil, err
+			}
+			oauthClient = client
+		}
+	}
 	cfg := mcp.HTTPConfig{
 		URL:        server.URL,
-		Headers:    server.Headers,
+		Headers:    headers,
 		ServerName: server.Name,
+		OAuth:      oauthClient,
 	}
 	if server.TimeoutMs > 0 {
 		cfg.Timeout = time.Duration(server.TimeoutMs) * time.Millisecond

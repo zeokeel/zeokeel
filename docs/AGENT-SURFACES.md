@@ -620,6 +620,15 @@ Agent 客户端的界面不是一次性输出：用户对界面的操作要作�
 - **技能根**：优先级为工作区（`skills`、`.agents/skills`、`.zeokeel/skills`）→ `skills.dirs` → assembly 目录 → `dataDir/skills` → `$ZEOKEEL_SKILLS` → `~/.zeokeel/skills`；同名遮蔽与扫描上限经 `SkillWarnings.Warnings()` 在能力页「技能」Tab 可见。
 - **技能内容边界**：`List` 只读每个 `SKILL.md` 的前缀（名称/描述/可搜索摘要），`Read`/`load` 才读全文（≤1MiB）；编辑只重写名称/描述/正文，保留未知 frontmatter 键；写路径仍仅 `<dataDir>/skills`。
 
+### 2.7.1 连接器 OAuth 2.1（非 surface，事实约定）
+
+能力页「连接器」Tab 的 OAuth 认证也不是 Agent surface，但会话工具依赖同一批连接：
+
+- **协议边界**：OAuth 发现/注册/PKCE/回环/令牌/刷新/撤销全部由 `zeokeel-rig v0.18.0` 的 `tools/mcp` 实现；产品只经 `contracts.KeyMCPAuth` 提供状态与两阶段流程，并在 `internal/modules/toolkit/mcp_auth.go` 注入 `TokenStore`（settings）与状态映射。
+- **令牌存储**：每个连接器一条 `mcp.oauth.<slug>.<sha8>` settings 记录（版本化 JSON，由 rig 序列化）；诊断导出与模型 `settings_get` 对该前缀整值隐藏，`headers` 对象/数组的所有值按凭证掩码。
+- **浏览器与线程**：`Prepare` 在后台 goroutine 发现/注册/监听；浏览器只在 UI 主线程打开（`internal/lib/openurl`）；`Wait` 后台等待回调并换 token；授权成功后 toolkit 自动重连该连接器（无需重启）。headless 无浏览器时不提供交互式授权。
+- **安全边界**：workspace `mcp.json` 的 OAuth 配置被忽略并告警；PKCE 必须 S256；MCP 请求只跟随同源重定向；401 单飞刷新重试一次，`invalid_grant` 需重新授权。
+
 ---
 
 ## 3. 迁移与验收总表

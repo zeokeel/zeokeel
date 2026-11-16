@@ -40,6 +40,10 @@ const (
 	// StatusInProgress is a task being worked on; same warning color as
 	// running, different copy ("进行中").
 	StatusInProgress
+	// StatusNeedsAction is a capability that needs the user to act (for
+	// example an OAuth connector waiting for authorization): warning color,
+	// distinct copy, never a failure.
+	StatusNeedsAction
 	// StatusSuccess finished well.
 	StatusSuccess
 	// StatusError failed.
@@ -274,7 +278,7 @@ func TaskStatusLabel(locale contracts.LocaleService, status string) string {
 // §5.2). Unnamed and non-failure states stay neutral.
 func StatusColor(t *design.Tokens, kind StatusKind) ui.Color {
 	switch kind {
-	case StatusRunning, StatusInProgress:
+	case StatusRunning, StatusInProgress, StatusNeedsAction:
 		return t.WarningText
 	case StatusSuccess:
 		return t.SuccessText
@@ -290,7 +294,7 @@ func StatusColor(t *design.Tokens, kind StatusKind) ui.Color {
 // not write text).
 func statusFill(t *design.Tokens, kind StatusKind) ui.Color {
 	switch kind {
-	case StatusRunning, StatusInProgress:
+	case StatusRunning, StatusInProgress, StatusNeedsAction:
 		return t.Warning
 	case StatusSuccess:
 		return t.Success

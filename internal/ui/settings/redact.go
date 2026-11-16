@@ -18,12 +18,17 @@ import (
 // credentialMarkers are the lower-case substrings that mark a setting key or a
 // JSON object key as holding a credential.
 var credentialMarkers = []string{
-	"apikey", "api_key", "token", "secret", "password", "authorization",
+	"apikey", "api_key", "api-key", "access_key", "private_key",
+	"token", "secret", "password", "authorization",
 }
 
 // hasCredentialMarker reports whether text looks credential-named.
 func hasCredentialMarker(text string) bool {
 	lower := strings.ToLower(text)
+	// The OAuth token record is opaque rig JSON; hide the whole row.
+	if strings.HasPrefix(lower, contracts.MCPAuthSettingPrefix) {
+		return true
+	}
 	for _, marker := range credentialMarkers {
 		if strings.Contains(lower, marker) {
 			return true
@@ -86,6 +91,10 @@ func redactJSONSecrets(value any) any {
 				redacted[key] = "***"
 				continue
 			}
+			if strings.EqualFold(key, "headers") || strings.EqualFold(key, "header") {
+				redacted[key] = maskHeaderValues(item)
+				continue
+			}
 			redacted[key] = redactJSONSecrets(item)
 		}
 		return redacted
@@ -105,5 +114,43 @@ func redactJSONSecrets(value any) any {
 		return typed
 	default:
 		return value
+	}
+}
+
+// maskHeaderValues hides every value of an HTTP header object (header names are
+// user-chosen, so credential markers cannot catch e.g. X-Api-Key).
+func maskHeaderValues(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		masked := make(map[string]any, len(typed))
+		for key, item := range typed {
+			if text, ok := item.(string); ok && strings.Contains(text, "Bearer ") {
+				masked[key] = "Bearer ***"
+				continue
+			}
+			masked[key] = "***"
+		}
+		return masked
+	case []any:
+		masked := make([]any, len(typed))
+		for index, item := range typed {
+			text, ok := item.(string)
+			if !ok {
+				masked[index] = "***"
+				continue
+			}
+			switch {
+			case strings.Contains(text, "Bearer "):
+				masked[index] = "Bearer ***"
+			case strings.Contains(text, ":"):
+				key, _, _ := strings.Cut(text, ":")
+				masked[index] = strings.TrimSpace(key) + ": ***"
+			default:
+				masked[index] = "***"
+			}
+		}
+		return masked
+	default:
+		return "***"
 	}
 }
