@@ -4,6 +4,31 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.42] - 2026-11-16
+
+### Removed
+
+- **模型侧 terminal_* 工具（6 个）**：删除 `terminal_open/send/read/signal/close/list` 注册；侧边栏终端和 terminal 模块此前已删除，模型侧不再保留无 UI 的隐藏交互终端。`bash`/`pwsh`（含 `run_in_background`）与 `job_output/job_kill/job_list` 覆盖一次性/后台命令。
+- **Team 旧别名（13 个）**：删除 `team_spawn/team_list/team_send/team_wait/team_last/team_close/team_interrupt`、`spawn_team/list_teams/team_status/close_team/wait_team/list_subagent_models`；模型面收敛为 DSH 规范团队工具：`spawn_teammate/list_agents/wait_agent/send_message/interrupt_agent/team_task_*`，保留 `subagent/subagent_fork`。
+- **job_start / job_wait（2 个）**：后台命令改用 DSH 的 `bash {run_in_background:true}`；等待改用 `job_output {wait:true}`。保留 `job_output/job_kill/job_list`。toolkit 的 execution routing 会识别 bash 后台结果并继续按 job_id 跨 build 路由。
+
+### Added
+
+- **硬 loop 熔断**：每次 run 独立执行 wall-clock、token、连续相同工具调用、连续无文件变更预算；超限时取消 run，错误类型为 `loop`，UI 显示「循环保护已触发」，不再把内部 `context canceled` 当作唯一解释。设置键：`agent.loopWallClockSeconds`、`agent.loopTokenBudget`、`agent.loopRepeatLimit`、`agent.loopNoDiffCalls`；默认 30 分钟 / 4,000,000 tokens / 5 次相同调用 / 40 次无变更。
+
+### Changed
+
+- 默认工具面从 71 个降到 **50 个**，工具定义从 **13,470 tokens** 降到 **10,267 tokens**（-3,203）。
+- team 成员排除列表、系统提示、assembly/regression 测试同步收敛。
+
+### Verification
+
+- `gofmt`、`go build ./...`、`CGO_ENABLED=0 go build ./...`、`go vet ./...`、`go tool mygo vet .` 通过
+- `go test ./... -count=1` 全绿
+- 工具面实测：**50 tools / 10,267 tool tokens**（清理前 71 / 13,470）
+- `ui-drive --only jobs` PASS（`jobs-chip`：bash run_in_background → chip → 浮层 → 停止）
+- 硬 loop breaker：wall-clock / token / 相同调用 / 无文件变更；新增 `loop_breaker_test.go`
+
 ## [0.2.41] - 2026-11-15
 
 按用户要求删除侧边栏终端/命令页（模型侧 `terminal_*` 工具保留）。

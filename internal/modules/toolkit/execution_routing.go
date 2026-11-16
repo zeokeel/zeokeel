@@ -39,9 +39,8 @@ import (
 // Execution tool categories.
 var (
 	jobExecutionTools = map[string]bool{
-		jobs.ToolJobStart:  true,
+		"bash":             true, // run_in_background starts a job through the same manager
 		jobs.ToolJobOutput: true,
-		jobs.ToolJobWait:   true,
 		jobs.ToolJobKill:   true,
 		jobs.ToolJobList:   true,
 	}
@@ -65,11 +64,13 @@ func (g *rebindGroup) isExecutionTool(name string) bool {
 func (g *rebindGroup) invokeExecutionTool(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
 	name := strings.TrimSpace(call.Name)
 	switch {
-	case name == jobs.ToolJobStart:
+	case name == "bash":
 		scoped := g.currentForContext(ctx)
 		result, err := invokeRootScoped(ctx, scoped, call)
 		if err == nil && !result.IsError {
-			g.recordJobStarted(ctx, scoped, call, result)
+			if strings.HasPrefix(strings.TrimSpace(result.Content), "started background job ") {
+				g.recordJobStarted(ctx, scoped, call, result)
+			}
 		}
 		return result, err
 	case name == terminal.ToolTerminalOpen:
@@ -83,7 +84,7 @@ func (g *rebindGroup) invokeExecutionTool(ctx context.Context, call rig.ToolCall
 		return g.mergeJobLists(ctx)
 	case name == terminal.ToolTerminalList:
 		return g.mergeTerminalLists(ctx)
-	case name == jobs.ToolJobOutput || name == jobs.ToolJobWait || name == jobs.ToolJobKill:
+	case name == jobs.ToolJobOutput || name == jobs.ToolJobKill:
 		id := executionArgument(call.Arguments, "job_id")
 		return invokeRootScoped(ctx, g.executionOwner(id, false), call)
 	case name == terminal.ToolTerminalSend || name == terminal.ToolTerminalRead ||
@@ -261,6 +262,13 @@ func executionArgument(arguments string, keys ...string) string {
 // executionResultID extracts the value of one "key: value" line from a tool
 // result (job_start -> "job_id: ...", terminal_open -> "session_id: ...").
 func executionResultID(content, key string) string {
+	if key == "started background job" {
+		trimmed := strings.TrimSpace(content)
+		if strings.HasPrefix(trimmed, key+" ") {
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, key+" "))
+		}
+		return ""
+	}
 	prefix := key + ":"
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
@@ -313,6 +321,9 @@ func sessionOf(ctx context.Context) string {
 // recordJobStarted remembers the job's owner build and records the audit event.
 func (g *rebindGroup) recordJobStarted(ctx context.Context, scoped *rootScoped, call rig.ToolCall, result rig.ToolResult) {
 	id := executionResultID(result.Content, "job_id")
+	if id == "" {
+		id = executionResultID(result.Content, "started background job")
+	}
 	if id == "" || scoped == nil {
 		return
 	}

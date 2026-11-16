@@ -44,7 +44,7 @@ func (d *drive) waitJobDone(jobID string, timeout time.Duration) bool {
 
 func (d *drive) runJobsSteps() {
 	d.step("jobs-chip", "session", "后台任务：页头 chip → 浮层 → 停止",
-		"没有后台任务时页头不显示后台任务 chip（R15 零值隐藏）；job_start 启动一个后台命令后页头出现「1 个后台任务」；点开原生浮层显示 运行中/命令/用时/退出码 与「停止」；点停止后任务不再运行（JobService.KillJob）", func(c *check) {
+		"没有后台任务时页头不显示后台任务 chip（R15 零值隐藏）；bash run_in_background 启动一个后台命令后页头出现「1 个后台任务」；点开原生浮层显示 运行中/命令/用时/退出码 与「停止」；点停止后任务不再运行（JobService.KillJob）", func(c *check) {
 			d.resetToSession()
 			d.uiRoot.SetRightPanelOpen(false)
 			d.frame()
@@ -53,13 +53,13 @@ func (d *drive) runJobsSteps() {
 			if d.has("个后台任务") {
 				c.failf("没有后台任务时页头仍显示后台任务 chip；texts=%v", paletteTailTexts(d))
 			}
-			if ok, detail := d.invokeToolResult("job_start", `{"command":"bash -c 'sleep 30'","timeout_ms":20000}`); !ok {
-				c.failf("job_start 工具调用失败，无法验证后台任务 chip：%s", shortText(detail))
+			if ok, detail := d.invokeToolResult("bash", `{"command":"bash -c 'sleep 30'","run_in_background":true}`); !ok {
+				c.failf("bash run_in_background 工具调用失败，无法验证后台任务 chip：%s", shortText(detail))
 				return
 			}
 			jobs := d.jobService().Jobs()
 			if len(jobs) != 1 {
-				c.failf("job_start 后 JobService.Jobs()=%d 条，期望 1", len(jobs))
+				c.failf("bash run_in_background 后 JobService.Jobs()=%d 条，期望 1", len(jobs))
 				return
 			}
 			related := jobs[0].ID

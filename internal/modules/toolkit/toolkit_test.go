@@ -59,7 +59,7 @@ func TestModuleProvidesRigToolset(t *testing.T) {
 	}
 	for _, want := range []string{
 		wantShell, "read_file", "str_replace_editor", "read_image",
-		"terminal_open", "terminal_list", "job_start", "working_directory", "todo_write",
+		"working_directory", "todo_write",
 		"memory", "schedule_create", "enter_worktree", "settings_get",
 		"skill", "team_task_create",
 	} {

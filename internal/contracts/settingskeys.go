@@ -27,6 +27,18 @@ const (
 	// seconds (5–600; unset keeps the toolkit Config's timeout, 30s by
 	// default). The toolkit resolves it at activation, so a change applies
 	// after a restart.
+	// SettingAgentLoopWallClockSeconds bounds one agent run's wall-clock time
+	// in seconds (0 disables; unset keeps the agent default, 30 minutes).
+	SettingAgentLoopWallClockSeconds = "agent.loopWallClockSeconds"
+	// SettingAgentLoopTokenBudget bounds one agent run's total model tokens
+	// (0 disables; unset keeps the agent default, 4,000,000).
+	SettingAgentLoopTokenBudget = "agent.loopTokenBudget"
+	// SettingAgentLoopRepeatLimit cancels a run after this many consecutive
+	// identical tool calls (0 disables; unset keeps 5).
+	SettingAgentLoopRepeatLimit = "agent.loopRepeatLimit"
+	// SettingAgentLoopNoDiffCalls cancels a run after this many consecutive
+	// non-mutating tool calls (0 disables; unset keeps 40).
+	SettingAgentLoopNoDiffCalls       = "agent.loopNoDiffCalls"
 	SettingToolkitShellTimeoutSeconds = "toolkit.shellTimeoutSeconds"
 	// SettingToolkitShellMaxOutputKiB caps one shell tool result in KiB
 	// (0 = the tool default, 1–4096 otherwise; unset keeps the toolkit

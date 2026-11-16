@@ -287,25 +287,19 @@ func TestBuildRootScopedNilRunnerKeepsOldBehavior(t *testing.T) {
 	}
 }
 
-// TestBuildRootScopedInjectsRunnerIntoJobTerminalAndWorktree proves the runner
+// TestBuildRootScopedInjectsRunnerIntoJobAndWorktree proves the runner
 // reaches every command-executing tool: a fail-closed runner makes jobs,
 // terminals and worktree git calls fail before anything is spawned.
-func TestBuildRootScopedInjectsRunnerIntoJobTerminalAndWorktree(t *testing.T) {
+func TestBuildRootScopedInjectsRunnerIntoJobAndWorktree(t *testing.T) {
 	requireUnixShell(t)
 	root := t.TempDir()
 	runner := &fakeSandboxRunner{err: rigsandbox.ErrSandboxUnavailable}
 	scoped := newSandboxBuild(t, Config{}, root, rigsandbox.ModeWorkspaceWrite, runner)
 
 	// Background jobs get the runner through jobs.WithRunner.
-	started := invokeScopedTool(t, scoped, "job_start", `{"command":"echo never-spawned"}`)
+	started := invokeScopedTool(t, scoped, "bash", `{"command":"echo never-spawned","run_in_background":true}`)
 	if !started.IsError {
-		t.Fatalf("job_start succeeded with a fail-closed runner: %q", started.Content)
-	}
-
-	// Terminal sessions get it through terminal.WithRunner.
-	opened := invokeScopedTool(t, scoped, "terminal_open", `{}`)
-	if !opened.IsError {
-		t.Fatalf("terminal_open succeeded with a fail-closed runner: %q", opened.Content)
+		t.Fatalf("bash run_in_background succeeded with a fail-closed runner: %q", started.Content)
 	}
 
 	// Worktree git calls get it through worktree.WithRunner: a fake git binary
@@ -330,8 +324,8 @@ func TestBuildRootScopedInjectsRunnerIntoJobTerminalAndWorktree(t *testing.T) {
 		t.Fatalf("enter_worktree used fake git output: %q", entered.Content)
 	}
 
-	if calls := runner.recordedCalls(); len(calls) < 3 {
-		t.Fatalf("runner Confine calls = %d, want at least 3 (job, terminal, worktree)", len(calls))
+	if calls := runner.recordedCalls(); len(calls) < 2 {
+		t.Fatalf("runner Confine calls = %d, want at least 2 (job, worktree)", len(calls))
 	}
 }
 

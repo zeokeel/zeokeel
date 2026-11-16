@@ -1410,8 +1410,8 @@ func buildJobsPanel(c *ui.Context, t *design.Tokens, st *state, jobs contracts.J
 	agentPanelHeader(c, t, icons.Clock(), st.tr("后台任务", "Background jobs"),
 		fmt.Sprintf(st.tr("%d 个任务 · %d 个运行中", "%d jobs · %d running"), len(list), running))
 	if len(list) == 0 && len(history) == 0 {
-		design.Apply(ui.Text(c, st.tr("暂无后台任务。job_start 启动的后台任务会出现在这里。",
-			"No background jobs yet. Jobs started with job_start appear here.")),
+		design.Apply(ui.Text(c, st.tr("暂无后台任务。bash run_in_background 启动的后台任务会出现在这里。",
+			"No background jobs yet. Background jobs start with bash run_in_background.")),
 			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(3)
 		return
 	}

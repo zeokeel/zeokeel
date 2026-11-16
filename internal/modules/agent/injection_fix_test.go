@@ -250,7 +250,7 @@ func guidanceMarker(name string) (string, bool) {
 		return "ask_user", true
 	case "present":
 		return "present", true
-	case "goal":
+	case "goal", "create_goal", "get_goal", "update_goal":
 		return "goal", true
 	case "plan_review":
 		return "plan_review", true
@@ -298,19 +298,16 @@ func guidanceMarker(name string) (string, bool) {
 // catalog was captured from the desktop assembly in the injection review.
 func TestToolGuidanceCoversRegisteredFamilies(t *testing.T) {
 	catalog := []string{
-		"ask_user", "bash", "close_team", "edit_file", "enter_worktree", "exit_plan_mode",
-		"exit_worktree", "glob", "goal", "grep", "interrupt_agent", "job_kill", "job_list",
-		"job_output", "job_start", "job_wait", "list_agents", "list_dir", "list_subagent_models",
-		"list_teams", "list_worktrees", "memory", "plan_review", "present", "read_file",
-		"ralph", "read_image", "schedule_create", "schedule_delete", "schedule_list", "schedule_update",
+		"ask_user", "bash", "create_goal", "edit_file", "enter_worktree", "exit_worktree",
+		"get_goal", "glob", "grep", "interrupt_agent", "job_kill", "job_list", "job_output",
+		"list_agents", "list_dir", "list_worktrees", "memory", "present", "ralph", "read_file",
+		"read_image", "schedule_create", "schedule_delete", "schedule_list", "schedule_update",
 		"send_message", "session_event_read", "session_event_search", "session_event_trace",
 		"session_search", "session_trace", "settings_get", "settings_set", "skill",
-		"spawn_team", "spawn_teammate", "str_replace_editor", "subagent", "subagent_fork",
-		"team_close", "team_interrupt", "team_last", "team_list", "team_send", "team_spawn",
-		"team_status", "team_task_create", "team_task_get", "team_task_list", "team_task_update",
-		"team_wait", "terminal_close", "terminal_list", "terminal_open", "terminal_read",
-		"terminal_send", "terminal_signal", "todo_write", "wait_agent", "wait_team", "web_fetch",
-		"web_search", "workflow", "working_directory", "write_file",
+		"spawn_teammate", "str_replace_editor", "subagent", "subagent_fork",
+		"team_task_create", "team_task_get", "team_task_list", "team_task_update",
+		"todo_write", "update_goal", "wait_agent", "web_fetch", "web_search", "workflow",
+		"working_directory", "write_file",
 	}
 	names := make(map[string]bool, len(catalog))
 	for _, name := range catalog {

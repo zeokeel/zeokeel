@@ -2454,10 +2454,15 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	maxIterations := effectiveMaxIterations(cfg.MaxIterations)
 	// Loop hygiene: one per-run repeat guard appends a DSH-style advisory
 	// reminder after the Nth consecutive identical tool call without blocking
-	// the call (see loop_guard.go). A new run starts a fresh repeat chain.
-	// The workspace-root wrapper is outermost so every tool call sees the
-	// session's root even when another workspace is current.
-	runTools := withWorkspaceRoot(withAgentScope(withRepeatGuard(tools, newRepeatToolGuard()), sessionID, origin), workspaceRoot)
+	// the call (see loop_guard.go), and the hard loop breaker (loop_breaker.go)
+	// cancels the run on wall-clock/token/repeat/no-diff budgets. The
+	// workspace-root wrapper is outermost so every tool call sees the session's
+	// root even when another workspace is current.
+	loopCtx, loopCancel := context.WithCancel(ctx)
+	defer loopCancel()
+	loopGuard := newRunLoopGuard(loopCancel, s.loopGuardConfig())
+	loopGuard.start()
+	runTools := withLoopGuard(withWorkspaceRoot(withAgentScope(withRepeatGuard(tools, newRepeatToolGuard()), sessionID, origin), workspaceRoot), loopGuard)
 	spec := rig.AgentSpec{
 		Provider:      provider,
 		Model:         cfg.Model,
@@ -2499,8 +2504,13 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// model call, while only the last call's prompt tokens describe the context
 	// the model actually saw (MessageUsage.ContextTokens).
 	usage := &turnUsage{model: cfg.Model}
-	emit := func(event rig.Event) { s.handleEvent(ctx, sessionID, workspaceRoot, event, usage) }
-	result, runErr := runner.Run(ctx, rig.RunRequest{
+	emit := func(event rig.Event) {
+		if event.Type == rig.EventUsage && event.Usage != nil {
+			loopGuard.observeUsage(event.Usage.TotalTokens)
+		}
+		s.handleEvent(ctx, sessionID, workspaceRoot, event, usage)
+	}
+	result, runErr := runner.Run(loopCtx, rig.RunRequest{
 		SessionID: sessionID,
 		Input:     input,
 		Emit:      emit,
@@ -2508,7 +2518,13 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// Context overflow recovery (DSH): compact once and retry the same turn
 	// once. The user message is already durable, so no new input is appended
 	// and executed tools are not replayed.
-	if runErr != nil && ctx.Err() == nil && isContextOverflowError(runErr) {
+	loopGuard.stop()
+	if loopGuard.tripped() && ctx.Err() == nil {
+		// The guard's child context was canceled, not the user's context: report
+		// the concrete budget instead of a generic "context canceled".
+		runErr = loopGuard.err()
+	}
+	if runErr != nil && ctx.Err() == nil && !loopGuard.tripped() && isContextOverflowError(runErr) {
 		if retryResult, retryErr, retried := s.retryContextOverflow(ctx, sessionID, cfg, spec, provider, emit, usage, result); retried {
 			result, runErr = retryResult, retryErr
 		}

@@ -1,5 +1,26 @@
 # Verification log (final)
 
+## 0.2.42 — 2026-11-16 (工具面收敛与 loop 熔断)
+
+```
+$ gofmt -l internal cmd
+(empty)
+$ go build ./...
+OK
+$ CGO_ENABLED=0 go build ./...
+OK
+$ go vet ./...
+OK
+$ go tool mygo vet .
+OK
+$ go test ./... -count=1
+all packages ok
+$ go run ./internal/devtools/ui-drive --only jobs
+jobs-chip PASS
+```
+
+模型可见工具 71 → 50（工具 tokens 13,470 → 10,267）：删除 `terminal_*` 6 个、team 原生/legacy 别名 13 个、`job_start/job_wait` 2 个。保留 DSH 对齐的 job observer（`job_output/job_kill/job_list`）；后台命令改为 `bash run_in_background`，execution routing 识别 `started background job <id>` 并继续按 job id 跨 build 路由。新增 `loop_breaker.go`：wall-clock、token、相同调用、无文件变更四个 run 级预算，错误类型 `loop`。
+
 ## 0.2.41 — 2026-11-15 (移除侧边栏终端)
 
 ```

@@ -18,7 +18,6 @@ import (
 	"github.com/zeokeel/zeokeel-rig/tools/image"
 	"github.com/zeokeel/zeokeel-rig/tools/jobs"
 	"github.com/zeokeel/zeokeel-rig/tools/misc"
-	"github.com/zeokeel/zeokeel-rig/tools/terminal"
 	"github.com/zeokeel/zeokeel-rig/tools/worktree"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -85,7 +84,7 @@ func workspaceRootSource(ctx cordis.Context, configured string) func() string {
 // managers. Builds are RETAINED for the lifetime of the module (see
 // rebindGroup): switching the workspace root or the permission/sandbox policy
 // creates a new build with the new policy, but the previous build keeps its
-// managers alive so its running jobs and terminals stay controllable by ID.
+// managers alive so its running jobs stay controllable by ID.
 // closeNow releases the managers; it runs on module unload only.
 //
 // A build also records the linked OS sandbox mode and whether a runner was
@@ -178,15 +177,12 @@ func buildRootScoped(cfg Config, root string, timeout time.Duration, mode sandbo
 func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode sandbox.Mode, runner sandbox.Runner, goos string, lookPath func(string) (string, error)) *rootScoped {
 	policy := newPolicy(cfg, root, timeout, mode)
 	// The runner is injected into every command-executing surface: the built-in
-	// bash/pwsh tools, the background job manager, the terminal manager and the
-	// worktree git calls. A nil runner adds no option at all, so the old
-	// behavior is preserved exactly.
+	// bash/pwsh tools, the background job manager and the worktree git calls. A
+	// nil runner adds no option at all, so the old behavior is preserved exactly.
 	jobsOpts := []jobs.Option{jobs.WithPolicy(policy)}
-	terminalOpts := []terminal.Option{terminal.WithPolicy(policy)}
 	var worktreeOpts []worktree.Option
 	if runner != nil {
 		jobsOpts = append(jobsOpts, jobs.WithRunner(runner))
-		terminalOpts = append(terminalOpts, terminal.WithRunner(runner))
 		worktreeOpts = append(worktreeOpts, worktree.WithRunner(runner))
 	}
 	background := jobs.NewManager(jobsOpts...)
@@ -200,14 +196,6 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode san
 	if runner != nil {
 		builtinOpts = append(builtinOpts, builtin.WithRunner(runner))
 	}
-	switch strings.ToLower(strings.TrimSpace(cfg.TerminalTransport)) {
-	case "pty":
-		terminalOpts = append(terminalOpts, terminal.WithTransport(terminal.TransportPTY))
-	case "pipe":
-		terminalOpts = append(terminalOpts, terminal.WithTransport(terminal.TransportPipe))
-	}
-	terminals := terminal.NewManager(terminalOpts...)
-
 	bash, pwsh := shellTools(goos, lookPath)
 	tools := make([]rig.Tool, 0, 32)
 	// The built-in policy set is the six file tools plus the bash tool: keep the
@@ -225,8 +213,16 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode san
 	tools = append(tools,
 		editor.New(policy, editor.WithWorkingDirectory(workingDirectory.Current)),
 		image.New(policy, image.WithWorkingDirectory(workingDirectory.Current)))
-	tools = append(tools, terminals.ToolsWithList()...)
-	tools = append(tools, background.Tools()...)
+	// DSH's bash tool owns background execution (run_in_background); the
+	// product keeps only the job observer half (output/kill/list). job_start and
+	// job_wait are deliberately not model-facing.
+	for _, tool := range background.Tools() {
+		switch tool.Name() {
+		case "job_start", "job_wait":
+			continue
+		}
+		tools = append(tools, tool)
+	}
 	tools = append(tools, worktree.Tools(policy, worktreeOpts...)...)
 	tools = append(tools, workingDirectory)
 
@@ -242,7 +238,6 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode san
 		byName:    byName,
 		done:      make(chan struct{}),
 		close: func() {
-			_ = terminals.CloseAll()
 			_ = background.CloseAll()
 		},
 		drainJobNotices: func() []jobs.Notice {

@@ -198,9 +198,7 @@ func TestTeamToolsRegisteredAndDeduplicated(t *testing.T) {
 		seen[spec.Name]++
 	}
 	for _, name := range []string{
-		"team_spawn", "team_list", "team_send", "team_wait", "team_last", "team_close", "team_interrupt",
-		"spawn_team", "list_teams", "team_status", "close_team", "send_message", "interrupt_agent",
-		"spawn_teammate", "list_agents", "wait_agent",
+		"spawn_teammate", "list_agents", "wait_agent", "send_message", "interrupt_agent",
 	} {
 		if seen[name] != 1 {
 			t.Fatalf("team tool %q count = %d (have %v)", name, seen[name], seen)
@@ -210,6 +208,12 @@ func TestTeamToolsRegisteredAndDeduplicated(t *testing.T) {
 	// already registered by RUN-1 must win and never be duplicated.
 	if seen["subagent"] != 1 || seen["subagent_fork"] != 1 {
 		t.Fatalf("subagent tools = %d/%d, want exactly one each", seen["subagent"], seen["subagent_fork"])
+	}
+	// Legacy team aliases must not be model-visible.
+	for _, name := range []string{"team_spawn", "team_list", "team_send", "team_wait", "team_last", "team_close", "team_interrupt", "spawn_team", "list_teams", "team_status", "close_team", "wait_team", "list_subagent_models"} {
+		if seen[name] != 0 {
+			t.Fatalf("legacy team alias %q still registered", name)
+		}
 	}
 }
 
@@ -228,7 +232,7 @@ func TestTeamToolsUnregisterAndCloseAllOnDispose(t *testing.T) {
 		t.Fatalf("DisposeAll: %v", err)
 	}
 	for _, spec := range svc.registry.Specs() {
-		if spec.Name == "team_spawn" || spec.Name == "spawn_teammate" || spec.Name == "spawn_team" {
+		if spec.Name == "spawn_teammate" {
 			t.Fatalf("team tool %q survived disposal", spec.Name)
 		}
 	}
@@ -242,8 +246,8 @@ func TestTeamToolsUnregisterAndCloseAllOnDispose(t *testing.T) {
 
 func TestTeamExcludedTools(t *testing.T) {
 	names := teamExcludedTools()
-	want := []string{"team_spawn", "team_list", "team_send", "team_wait", "team_last", "team_close",
-		"team_interrupt", "spawn_teammate", "list_agents", "wait_agent", "subagent", "subagent_fork"}
+	want := []string{"spawn_teammate", "send_message", "list_agents", "wait_agent", "interrupt_agent",
+		"subagent", "subagent_fork", "team_task_create", "team_task_list", "team_task_get", "team_task_update"}
 	for _, name := range want {
 		found := false
 		for _, excluded := range names {

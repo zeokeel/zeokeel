@@ -169,16 +169,16 @@ func TestJobCompletionNoticesReachAgentLoop(t *testing.T) {
 		}
 	}
 
-	start := findProxy(t, proxyTools, "job_start")
+	start := findProxy(t, proxyTools, "bash")
 	started, err := start.Invoke(context.Background(), rig.ToolCall{
-		Name:      "job_start",
-		Arguments: `{"command":"echo notice-me"}`,
+		Name:      "bash",
+		Arguments: `{"command":"echo notice-me","run_in_background":true}`,
 	})
 	if err != nil {
-		t.Fatalf("job_start: %v", err)
+		t.Fatalf("bash run_in_background: %v", err)
 	}
-	if !strings.Contains(started.Content, "job_id:") {
-		t.Fatalf("job_start result = %q, want a job id", started.Content)
+	if !strings.Contains(started.Content, "started background job") {
+		t.Fatalf("bash run_in_background result = %q, want a job id", started.Content)
 	}
 
 	var notices []string
@@ -205,7 +205,7 @@ func TestJobCompletionNoticesReachAgentLoop(t *testing.T) {
 }
 
 // jobIDPattern extracts the id from a job_start/job_output result.
-var jobIDPattern = regexp.MustCompile(`job_id:\s*(\S+)`)
+var jobIDPattern = regexp.MustCompile(`(?:job_id:|started background job)\s*(\S+)`)
 
 // TestWorkspaceSwitchKeepsOldRootJobs covers the execution-domain persistence:
 // a job started under root A stays controllable by id after switching to root B
@@ -221,17 +221,17 @@ func TestWorkspaceSwitchKeepsOldRootJobs(t *testing.T) {
 	defer group.close()
 	proxyTools := group.proxies(group.forRoot())
 
-	start := findProxy(t, proxyTools, "job_start")
+	start := findProxy(t, proxyTools, "bash")
 	started, err := start.Invoke(context.Background(), rig.ToolCall{
-		Name:      "job_start",
-		Arguments: `{"command":"tail -f /dev/null"}`,
+		Name:      "bash",
+		Arguments: `{"command":"tail -f /dev/null","run_in_background":true}`,
 	})
 	if err != nil || started.IsError {
-		t.Fatalf("job_start = %q (err %v)", started.Content, err)
+		t.Fatalf("bash run_in_background = %q (err %v)", started.Content, err)
 	}
 	match := jobIDPattern.FindStringSubmatch(started.Content)
 	if match == nil {
-		t.Fatalf("job_start result = %q, want a job id", started.Content)
+		t.Fatalf("bash run_in_background result = %q, want a job id", started.Content)
 	}
 	jobID := match[1]
 	if listed, listErr := findProxy(t, proxyTools, "job_list").Invoke(context.Background(), rig.ToolCall{Name: "job_list"}); listErr != nil ||

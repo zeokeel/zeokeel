@@ -10,17 +10,10 @@ package agent
 import "strings"
 
 // sandboxShellTools is the shell family covered by the auto-allow: command
-// execution (bash/pwsh/job_start) plus the interactive terminal session tools.
-// terminal_list/terminal_read are already in the shared read-only allowlist and
-// are intentionally not duplicated here.
+// execution (bash/pwsh); background commands use bash run_in_background.
 var sandboxShellTools = map[string]bool{
-	"bash":            true,
-	"pwsh":            true,
-	"job_start":       true,
-	"terminal_open":   true,
-	"terminal_send":   true,
-	"terminal_signal": true,
-	"terminal_close":  true,
+	"bash": true,
+	"pwsh": true,
 }
 
 // sandboxShellAutoAllowed 报告 shell 家族工具能否因 OS 沙箱可用而跳过审批。

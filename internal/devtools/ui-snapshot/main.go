@@ -842,8 +842,8 @@ func main() {
 	liveJob := ""
 	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
 		if result, invokeErr := toolkit.Invoke(a.toolContext(context.Background()), rig.ToolCall{
-			ID: "job-snapshot", Name: "job_start",
-			Arguments: `{"command":"bash -c 'sleep 60'","timeout_ms":30000}`,
+			ID: "job-snapshot", Name: "bash",
+			Arguments: `{"command":"bash -c 'sleep 60'","run_in_background":true}`,
 		}); invokeErr == nil && !result.IsError {
 			if jobsService, jobsErr := a.root.Require(contracts.KeyJobs); jobsErr == nil {
 				if jobs := jobsService.Jobs(); len(jobs) > 0 {

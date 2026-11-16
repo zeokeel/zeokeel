@@ -447,7 +447,7 @@ func TestDesktopAssemblyHasNoStubTeamTool(t *testing.T) {
 	}
 	// The real team surface (agent module + rig team manager) is still there.
 	for _, name := range []string{
-		"spawn_teammate", "list_agents", "wait_agent", "send_message", "team_spawn", "team_list",
+		"spawn_teammate", "list_agents", "wait_agent", "send_message", "interrupt_agent", "team_task_create",
 	} {
 		if !names[name] {
 			t.Fatalf("real team tool %q missing after removing the stub (have %v)", name, names)

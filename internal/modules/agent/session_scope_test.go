@@ -61,7 +61,7 @@ func TestWithAgentSessionStampsToolContext(t *testing.T) {
 
 func TestWithAgentSessionKeepsNoticeSource(t *testing.T) {
 	source := &sessionNoticeTool{
-		sessionCaptureTool: sessionCaptureTool{name: "job_start", seen: make(chan string, 1)},
+		sessionCaptureTool: sessionCaptureTool{name: "bash", seen: make(chan string, 1)},
 		notices:            []string{"job finished"},
 	}
 	wrapped := withAgentSession([]rig.Tool{source}, "sess-7")

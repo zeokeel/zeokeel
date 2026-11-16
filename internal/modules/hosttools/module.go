@@ -11,7 +11,7 @@
 // internal/hosttools seam. The legacy Goal v1 `goal` tool is no longer
 // registered: goals are per-session and durable behind contracts.GoalService. The legacy in-memory
 // "team" stub was removed: the agent module registers the real rig team tools
-// (team_*, spawn_team, spawn_teammate, ...) against contracts.KeyTeam, so
+// (spawn_teammate, list_agents, team_task_*, ...) against contracts.KeyTeam, so
 // keeping the stub only misled the model into spawning members that never ran.
 //
 // Interactive products (the desktop app) register every tool. Non-interactive

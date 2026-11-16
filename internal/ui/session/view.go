@@ -2061,6 +2061,8 @@ func buildMessageError(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 		heading = st.tr("请求超时", "Request timed out")
 	case contracts.MessageErrorKindContext:
 		heading, reason = st.tr("上下文超限", "Context limit reached"), st.tr("请压缩或新建会话", "compact or start a new conversation")
+	case contracts.MessageErrorKindLoop:
+		heading, reason = st.tr("循环保护已触发", "Loop guard triggered"), st.tr("已停止重复或无进展的工具循环", "stopped a repeated or no-progress tool loop")
 	case contracts.MessageErrorKindCancelled:
 		heading = st.tr("已取消", "Cancelled")
 	}

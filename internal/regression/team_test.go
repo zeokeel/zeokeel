@@ -321,7 +321,7 @@ func TestTeamDisposeClosesAllAndUnregistersTools(t *testing.T) {
 func TestAgentToolRegistrationDeduplicatesTeamNames(t *testing.T) {
 	seeded := []fakeRigTool{
 		{name: "spawn_teammate"},
-		{name: "team_spawn"},
+		{name: "send_message"},
 	}
 	harness := startAgentWith(t, agent.Config{}, newFakeModel(t, nil), seeded[0], seeded[1])
 
@@ -329,7 +329,7 @@ func TestAgentToolRegistrationDeduplicatesTeamNames(t *testing.T) {
 	for _, spec := range harness.registry.Specs() {
 		seen[spec.Name]++
 	}
-	for _, name := range []string{"spawn_teammate", "team_spawn"} {
+	for _, name := range []string{"spawn_teammate", "send_message"} {
 		if seen[name] != 1 {
 			t.Fatalf("tool %q count = %d, want exactly one (the seeded marker)", name, seen[name])
 		}
@@ -345,9 +345,15 @@ func TestAgentToolRegistrationDeduplicatesTeamNames(t *testing.T) {
 		}
 	}
 	// A team tool that had no conflict is registered by the agent.
-	for _, name := range []string{"team_list", "spawn_team", "list_agents"} {
+	for _, name := range []string{"list_agents", "wait_agent"} {
 		if seen[name] != 1 {
 			t.Fatalf("team tool %q count = %d, want one", name, seen[name])
+		}
+	}
+	// Removed aliases must not be registered.
+	for _, name := range []string{"team_spawn", "team_list", "spawn_team", "close_team", "wait_team"} {
+		if seen[name] != 0 {
+			t.Fatalf("removed team alias %q is still registered", name)
 		}
 	}
 	if !harness.h.logger.contains("[agent] skip team tool spawn_teammate") {

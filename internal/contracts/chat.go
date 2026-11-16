@@ -239,8 +239,11 @@ const (
 	// the localized copy should point at the limit instead of dumping rig's
 	// internal English diagnostic.
 	MessageErrorKindIterations = "iterations"
-	MessageErrorKindCancelled  = "cancelled"
-	MessageErrorKindOther      = "other"
+	// MessageErrorKindLoop marks the product loop breaker (wall-clock, token,
+	// identical-call or no-diff budget) instead of a provider failure.
+	MessageErrorKindLoop      = "loop"
+	MessageErrorKindCancelled = "cancelled"
+	MessageErrorKindOther     = "other"
 )
 
 // ClassifyError maps one backend error (or its message) to a MessageErrorKind
@@ -281,6 +284,8 @@ func ClassifyError(err error, msg string) string {
 	case has("max iterations", "iteration limit", "without a final answer",
 		"rounds without"):
 		return MessageErrorKindIterations
+	case has("loop guard:", "loop guard", "no file diff", "identical tool call repeated"):
+		return MessageErrorKindLoop
 	default:
 		return MessageErrorKindOther
 	}

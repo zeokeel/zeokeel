@@ -30,25 +30,27 @@ const (
 )
 
 // teamToolNames returns every model-facing orchestration tool name this module
-// registers (native team_*, legacy aliases, DSH spawn/list/wait, shared task
-// board). Both the team and synchronous-subagent runners exclude them.
+// registers (DSH canonical team/delegation plus the shared task board). Both the
+// team and synchronous-subagent runners exclude them.
 func teamToolNames() []string {
-	names := append([]string(nil), rigteam.ToolNames()...)
-	names = append(names, rigteam.LegacyToolNames()...)
-	names = append(names,
+	names := []string{
 		rigteam.ToolSpawnTeammate,
 		rigteam.ToolListAgents,
 		rigteam.ToolWaitAgent,
+		rigteam.ToolSendMessage,
+		rigteam.ToolInterruptAgent,
 		rigteam.ToolSubagent,
 		rigteam.ToolSubagentFork,
 		"team_task_create",
+		"team_task_list",
+		"team_task_get",
 		"team_task_update",
-	)
+	}
 	return names
 }
 
 // teamExcludedTools is the orchestration-tool set a team member must never
-// receive: the synchronous subagent names plus every team/legacy/DSH tool this
+// receive: the synchronous subagent names plus every canonical team tool this
 // module registers, so a member cannot recursively start teammates.
 func teamExcludedTools() []string {
 	names := append([]string(nil), subagentExcludedTools()...)
@@ -619,17 +621,27 @@ func teamDisplayName(values ...string) string {
 	return ""
 }
 
-// newTeamTools builds every model-facing team tool group for the manager:
-// native team_* tools, legacy aliases and the DSH-compatible spawn/list/wait
-// set. Each tool is wrapped so its invocation lands in the bounded team
+// newTeamTools builds the model-facing team tool surface: the DSH canonical
+// spawn/list/wait/subagent tools plus the canonical send_message and
+// interrupt_agent controls. Legacy and native aliases are intentionally not
+// registered. Each tool is wrapped so its invocation lands in the bounded team
 // activity read model (the run lifecycle itself is tracked in team_state.go).
 func newTeamTools(svc *service, manager *rigteam.Manager) []rig.Tool {
 	if manager == nil {
 		return nil
 	}
-	tools := manager.Tools()
-	tools = append(tools, manager.LegacyTools(nil)...)
-	tools = append(tools, rigteam.DSHTools(manager)...)
+	tools := rigteam.DSHTools(manager)
+	// DSH's canonical team surface reuses send_message and interrupt_agent from
+	// the legacy set. The other legacy aliases (spawn_team/list_teams/
+	// team_status/close_team/wait_team/list_subagent_models) duplicate
+	// spawn_teammate/list_agents/team_last/close/wait and must not reach the
+	// model.
+	for _, tool := range manager.LegacyTools(nil) {
+		switch tool.Name() {
+		case rigteam.ToolSendMessage, rigteam.ToolInterruptAgent:
+			tools = append(tools, tool)
+		}
+	}
 	tracker := teamTrackerFor(manager, nil)
 	if tracker == nil {
 		return tools

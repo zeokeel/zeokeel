@@ -2,7 +2,7 @@ package agent
 
 // Tests for the OS-sandbox shell auto-allow in the tool approval gate: when the
 // optional contracts.SandboxService reports a usable platform runner, the shell
-// family (bash/pwsh/job_start/terminal_*) runs without an approval prompt,
+// family (bash/pwsh) runs without an approval prompt,
 // because the OS profile now enforces the file effects. When the service is
 // missing or unavailable, the gate must keep the pre-sandbox behavior exactly.
 //
@@ -22,13 +22,8 @@ import (
 )
 
 // sandboxShellFamily is the shell-family surface the sandbox auto-allow covers:
-// command execution (bash/pwsh/job_start) plus the interactive terminal session
-// tools. terminal_list/terminal_read are already in the shared read-only
-// allowlist and are intentionally not part of this family.
-var sandboxShellFamily = []string{
-	"bash", "pwsh", "job_start",
-	"terminal_open", "terminal_send", "terminal_signal", "terminal_close",
-}
+// command execution (bash/pwsh); background jobs use bash run_in_background.
+var sandboxShellFamily = []string{"bash", "pwsh"}
 
 // fakeSandbox is a contracts.SandboxService test double. Runner is nil: the gate
 // only reads Available, never the runner itself.
@@ -73,15 +68,8 @@ func TestSandboxShellAutoAllowedHelper(t *testing.T) {
 		{name: "unavailable bash", sandbox: fakeSandbox{available: false}, tool: "bash", want: false},
 		{name: "available bash", sandbox: fakeSandbox{available: true}, tool: "bash", want: true},
 		{name: "available pwsh", sandbox: fakeSandbox{available: true}, tool: "pwsh", want: true},
-		{name: "available job_start", sandbox: fakeSandbox{available: true}, tool: "job_start", want: true},
-		{name: "available terminal_open", sandbox: fakeSandbox{available: true}, tool: "terminal_open", want: true},
-		{name: "available terminal_send", sandbox: fakeSandbox{available: true}, tool: "terminal_send", want: true},
-		{name: "available terminal_signal", sandbox: fakeSandbox{available: true}, tool: "terminal_signal", want: true},
-		{name: "available terminal_close", sandbox: fakeSandbox{available: true}, tool: "terminal_close", want: true},
 		{name: "available trims name", sandbox: fakeSandbox{available: true}, tool: " bash ", want: true},
 		{name: "available non-shell", sandbox: fakeSandbox{available: true}, tool: "web_fetch", want: false},
-		{name: "available terminal_list untouched", sandbox: fakeSandbox{available: true}, tool: "terminal_list", want: false},
-		{name: "unavailable terminal_list untouched", sandbox: fakeSandbox{available: false}, tool: "terminal_list", want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

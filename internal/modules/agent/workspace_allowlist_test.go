@@ -20,8 +20,8 @@ import (
 var workspaceAutoAllowedSample = []string{
 	"read_file", "write_file", "edit_file", "str_replace_editor", "list_dir", "glob", "grep",
 	"read_image", "working_directory", "memory", "skill", "skills",
-	"todo_write", "team_task_list", "team_task_get", "terminal_list",
-	"job_list", "job_output", "job_wait", "session_search", "session_event_trace",
+	"todo_write", "team_task_list", "team_task_get",
+	"job_list", "job_output", "session_search", "session_event_trace",
 	"lsp_diagnostics",
 }
 

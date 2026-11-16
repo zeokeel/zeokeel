@@ -85,7 +85,7 @@ func waitJobOutput(t *testing.T, proxy rig.Tool, jobID, want string) {
 	t.Fatalf("job_output(%s) never contained %q", jobID, want)
 }
 
-// TestJobRoutesAcrossWorkspaceSwitch covers the core rule: a job started before
+// TestJobRoutesAcrossWorkspaceSwitch covers the core rule: a background job started before
 // a workspace switch stays readable and killable by id afterwards.
 func TestJobRoutesAcrossWorkspaceSwitch(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -97,8 +97,8 @@ func TestJobRoutesAcrossWorkspaceSwitch(t *testing.T) {
 	defer group.close()
 	proxies := group.proxies(group.forRoot())
 
-	started := executionCall(t, findProxy(t, proxies, "job_start"), "sess-job", `{"command":"tail -f /dev/null"}`)
-	jobID := executionArgumentID(t, started, "job_id")
+	started := executionCall(t, findProxy(t, proxies, "bash"), "sess-job", `{"command":"tail -f /dev/null","run_in_background":true}`)
+	jobID := executionArgumentID(t, started, "started background job")
 
 	current = rootB
 	scopedB := group.forRoot()
@@ -122,53 +122,6 @@ func TestJobRoutesAcrossWorkspaceSwitch(t *testing.T) {
 	}
 }
 
-// TestTerminalRoutesAcrossWorkspaceSwitch covers the terminal half: open before
-// the switch, then send/read/close from the new build.
-func TestTerminalRoutesAcrossWorkspaceSwitch(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("terminal pipe transport needs /bin/sh")
-	}
-	rootA, rootB := t.TempDir(), t.TempDir()
-	current := rootA
-	group := newRebindGroup(Config{}, 5*time.Second, func() string { return current }, nil, nil)
-	defer group.close()
-	proxies := group.proxies(group.forRoot())
-
-	opened := executionCall(t, findProxy(t, proxies, "terminal_open"), "sess-term", `{"type":"pipe","name":"main"}`)
-	sessionID := executionArgumentID(t, opened, "session_id")
-
-	current = rootB
-	group.forRoot()
-	group.mu.Lock()
-	owner := group.terminalOwners[sessionID]
-	group.mu.Unlock()
-	if owner == nil || owner.root != rootA {
-		t.Fatalf("terminal owner = %+v, want the root-A build", owner)
-	}
-
-	sent := executionCall(t, findProxy(t, proxies, "terminal_send"), "sess-term",
-		`{"sessionId":"`+sessionID+`","text":"echo routed-ok\n"}`)
-	if sent.IsError {
-		t.Fatalf("terminal_send after switch = %q", sent.Content)
-	}
-	read := executionCall(t, findProxy(t, proxies, "terminal_read"), "sess-term",
-		`{"sessionId":"`+sessionID+`","offset":0,"count":50}`)
-	if read.IsError || !strings.Contains(read.Content, "routed-ok") {
-		t.Fatalf("terminal_read after switch = %q, want routed-ok", read.Content)
-	}
-	closed := executionCall(t, findProxy(t, proxies, "terminal_close"), "sess-term", `{"sessionId":"`+sessionID+`"}`)
-	if closed.IsError {
-		t.Fatalf("terminal_close after switch = %q", closed.Content)
-	}
-	// The routing entry is dropped once closed: a later send falls back to the
-	// current build and reports Rig's unknown-session error.
-	again := executionCall(t, findProxy(t, proxies, "terminal_send"), "sess-term",
-		`{"sessionId":"`+sessionID+`","text":"echo late\n"}`)
-	if !again.IsError {
-		t.Fatalf("terminal_send after close = %q, want an unknown-session error", again.Content)
-	}
-}
-
 // TestExecutionListsMergeOnlyCallerRootBuilds covers the list semantics: jobs
 // from every retained build of the caller's root are merged (permission switch)
 // with an accurate count, while another root's jobs are never mixed in.
@@ -185,15 +138,15 @@ func TestExecutionListsMergeOnlyCallerRootBuilds(t *testing.T) {
 	defer group.close()
 	proxies := group.proxies(group.forRoot())
 
-	jobA1 := executionArgumentID(t, executionCall(t, findProxy(t, proxies, "job_start"), "sess-list",
-		`{"command":"tail -f /dev/null"}`), "job_id")
+	jobA1 := executionArgumentID(t, executionCall(t, findProxy(t, proxies, "bash"), "sess-list",
+		`{"command":"tail -f /dev/null","run_in_background":true}`), "started background job")
 
 	// A permission-preset change builds a new identity for the SAME root; the
 	// old build is retained and its job must stay listed for this workspace.
 	mode = sandbox.ModeDangerFullAccess
 	group.forRoot()
-	jobA2 := executionArgumentID(t, executionCall(t, findProxy(t, proxies, "job_start"), "sess-list",
-		`{"command":"tail -f /dev/null"}`), "job_id")
+	jobA2 := executionArgumentID(t, executionCall(t, findProxy(t, proxies, "bash"), "sess-list",
+		`{"command":"tail -f /dev/null","run_in_background":true}`), "started background job")
 	group.mu.Lock()
 	secondOwner := group.jobOwners[jobA2]
 	firstOwner := group.jobOwners[jobA1]
@@ -217,33 +170,6 @@ func TestExecutionListsMergeOnlyCallerRootBuilds(t *testing.T) {
 	}
 }
 
-// TestTerminalListMergesRetainedBuilds covers terminal_list across two builds of
-// the same root (permission rebuild): both sessions are listed.
-func TestTerminalListMergesRetainedBuilds(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("terminal pipe transport needs /bin/sh")
-	}
-	root := t.TempDir()
-	mode := sandbox.ModeWorkspaceWrite
-	group := newRebindGroup(Config{}, 5*time.Second,
-		func() string { return root },
-		func() (sandbox.Mode, sandbox.Runner) { return mode, nil }, nil)
-	defer group.close()
-	proxies := group.proxies(group.forRoot())
-
-	first := executionArgumentID(t, executionCall(t, findProxy(t, proxies, "terminal_open"), "sess-term-list",
-		`{"type":"pipe","name":"one"}`), "session_id")
-	mode = sandbox.ModeDangerFullAccess
-	group.forRoot()
-	second := executionArgumentID(t, executionCall(t, findProxy(t, proxies, "terminal_open"), "sess-term-list",
-		`{"type":"pipe","name":"two"}`), "session_id")
-
-	listed := executionCall(t, findProxy(t, proxies, "terminal_list"), "sess-term-list", `{}`)
-	if listed.IsError || !strings.Contains(listed.Content, first) || !strings.Contains(listed.Content, second) {
-		t.Fatalf("merged terminal_list = %q, want both sessions %s/%s", listed.Content, first, second)
-	}
-}
-
 // TestNewJobsUseTheNewPolicy covers the policy half: after a permission rebuild
 // the retained job is still controllable, while a NEW job is built under the new
 // (read-only) policy and is refused by it.
@@ -258,14 +184,14 @@ func TestNewJobsUseTheNewPolicy(t *testing.T) {
 		func() (sandbox.Mode, sandbox.Runner) { return mode, nil }, nil)
 	defer group.close()
 	proxies := group.proxies(group.forRoot())
-	start := findProxy(t, proxies, "job_start")
-	jobID := executionArgumentID(t, executionCall(t, start, "", `{"command":"tail -f /dev/null"}`), "job_id")
+	start := findProxy(t, proxies, "bash")
+	jobID := executionArgumentID(t, executionCall(t, start, "", `{"command":"tail -f /dev/null","run_in_background":true}`), "started background job")
 
 	mode = sandbox.ModeReadOnly
 	group.forRoot()
-	refused := executionCall(t, start, "", `{"command":"true"}`)
+	refused := executionCall(t, start, "", `{"command":"true","run_in_background":true}`)
 	if !refused.IsError {
-		t.Fatalf("job_start under the read-only rebuild = %q, want the policy refusal", refused.Content)
+		t.Fatalf("bash run_in_background under the read-only rebuild = %q, want the policy refusal", refused.Content)
 	}
 	// The retained pre-rebuild job is still controllable by id.
 	output := executionCall(t, findProxy(t, proxies, "job_output"), "", `{"job_id":"`+jobID+`"}`)
@@ -306,22 +232,22 @@ func TestExecutionListUsesContextWorkspaceRoot(t *testing.T) {
 	proxies := group.proxies(group.forRoot())
 
 	startCtx := contracts.WithWorkspaceRoot(context.Background(), rootA)
-	started, err := findProxy(t, proxies, "job_start").Invoke(startCtx, rig.ToolCall{
-		Name: "job_start", Arguments: `{"command":"tail -f /dev/null"}`,
+	started, err := findProxy(t, proxies, "bash").Invoke(startCtx, rig.ToolCall{
+		Name: "bash", Arguments: `{"command":"tail -f /dev/null","run_in_background":true}`,
 	})
 	if err != nil {
 		t.Fatalf("job_start: %v", err)
 	}
-	jobID := executionArgumentID(t, started, "job_id")
+	jobID := executionArgumentID(t, started, "started background job")
 	// A concurrent run in another root gets its own build and job.
 	bCtx := contracts.WithWorkspaceRoot(context.Background(), rootB)
-	startedB, err := findProxy(t, proxies, "job_start").Invoke(bCtx, rig.ToolCall{
-		Name: "job_start", Arguments: `{"command":"tail -f /dev/null"}`,
+	startedB, err := findProxy(t, proxies, "bash").Invoke(bCtx, rig.ToolCall{
+		Name: "bash", Arguments: `{"command":"tail -f /dev/null","run_in_background":true}`,
 	})
 	if err != nil {
 		t.Fatalf("job_start(rootB): %v", err)
 	}
-	jobB := executionArgumentID(t, startedB, "job_id")
+	jobB := executionArgumentID(t, startedB, "started background job")
 	group.mu.Lock()
 	ownerA, ownerB := group.jobOwners[jobID], group.jobOwners[jobB]
 	group.mu.Unlock()
@@ -364,8 +290,8 @@ func TestDrainNoticesCoversRetainedBuilds(t *testing.T) {
 	defer group.close()
 	proxies := group.proxies(group.forRoot())
 
-	started := executionCall(t, findProxy(t, proxies, "job_start"), "", `{"command":"true"}`)
-	jobID := executionArgumentID(t, started, "job_id")
+	started := executionCall(t, findProxy(t, proxies, "bash"), "", `{"command":"true","run_in_background":true}`)
+	jobID := executionArgumentID(t, started, "started background job")
 	// Wait for the job to settle before switching, then switch to a new root.
 	waitJobOutput(t, findProxy(t, proxies, "job_output"), jobID, "state: exited")
 	current = rootB
@@ -410,11 +336,8 @@ func TestExecutionLifecycleEventsDurable(t *testing.T) {
 	defer group.close()
 	proxies := group.proxies(group.forRoot())
 
-	started := executionCall(t, findProxy(t, proxies, "job_start"), "sess-durable", `{"command":"true","cwd":"."}`)
-	jobID := executionArgumentID(t, started, "job_id")
-	opened := executionCall(t, findProxy(t, proxies, "terminal_open"), "sess-durable", `{"type":"pipe","name":"audit"}`)
-	sessionID := executionArgumentID(t, opened, "session_id")
-	executionCall(t, findProxy(t, proxies, "terminal_close"), "sess-durable", `{"sessionId":"`+sessionID+`"}`)
+	started := executionCall(t, findProxy(t, proxies, "bash"), "sess-durable", `{"command":"true","cwd":".","run_in_background":true}`)
+	jobID := executionArgumentID(t, started, "started background job")
 
 	// Wait for the job notice drain to record job_finished.
 	deadline := time.Now().Add(5 * time.Second)
@@ -433,21 +356,6 @@ func TestExecutionLifecycleEventsDurable(t *testing.T) {
 	}
 	if startPayload["id"] != jobID || startPayload["command"] != "true" || startPayload["root"] == "" {
 		t.Fatalf("job_started payload = %+v", startPayload)
-	}
-	openedEvents := store.byType(contracts.ExecutionTerminalOpened)
-	if len(openedEvents) != 1 || openedEvents[0].SessionID != "sess-durable" {
-		t.Fatalf("terminal_opened events = %+v", openedEvents)
-	}
-	var openPayload map[string]any
-	if err := json.Unmarshal(openedEvents[0].Payload, &openPayload); err != nil {
-		t.Fatalf("decode terminal_opened: %v", err)
-	}
-	if openPayload["id"] != sessionID || openPayload["transport"] != "pipe" {
-		t.Fatalf("terminal_opened payload = %+v", openPayload)
-	}
-	closedEvents := store.byType(contracts.ExecutionTerminalClosed)
-	if len(closedEvents) != 1 || closedEvents[0].SessionID != "sess-durable" {
-		t.Fatalf("terminal_closed events = %+v", closedEvents)
 	}
 	finished := store.byType(contracts.ExecutionJobFinished)
 	if len(finished) != 1 || finished[0].SessionID != "sess-durable" {
@@ -491,7 +399,7 @@ func TestGroupCloseReleasesRetainedBuildsExecutions(t *testing.T) {
 	group := newRebindGroup(Config{}, 5*time.Second, func() string { return rootA }, nil, nil)
 	scoped := group.forRoot()
 	proxies := group.proxies(scoped)
-	executionCall(t, findProxy(t, proxies, "job_start"), "", `{"command":"tail -f /dev/null"}`)
+	executionCall(t, findProxy(t, proxies, "bash"), "", `{"command":"tail -f /dev/null","run_in_background":true}`)
 	group.forRootValue(t.TempDir())
 	group.close()
 	group.close()

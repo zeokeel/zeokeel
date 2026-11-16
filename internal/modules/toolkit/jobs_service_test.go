@@ -398,16 +398,16 @@ func TestJobServiceAgainstRealRigManager(t *testing.T) {
 	group := &rebindGroup{rootOf: func() string { return root }, current: scoped}
 	defer group.close()
 
-	started, err := scoped.byName["job_start"].Invoke(context.Background(), rig.ToolCall{
-		Name:      "job_start",
-		Arguments: `{"command":"tail -f /dev/null"}`,
+	started, err := scoped.byName["bash"].Invoke(context.Background(), rig.ToolCall{
+		Name:      "bash",
+		Arguments: `{"command":"tail -f /dev/null","run_in_background":true}`,
 	})
 	if err != nil || started.IsError {
-		t.Fatalf("job_start = %q (err %v)", started.Content, err)
+		t.Fatalf("bash run_in_background = %q (err %v)", started.Content, err)
 	}
 	match := jobIDPattern.FindStringSubmatch(started.Content)
 	if match == nil {
-		t.Fatalf("job_start output %q has no job id", started.Content)
+		t.Fatalf("bash run_in_background output %q has no job id", started.Content)
 	}
 	jobID := match[1]
 
