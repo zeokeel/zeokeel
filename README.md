@@ -4,12 +4,11 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.46 — 连接器热重载与 GitHub MCP 修复** (2026-11-16). Native, compile-time modular
+> **v0.2.47 — MCP 稳定刷新、Headers 与技能管理** (2026-11-16). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
-> webview. 本版让 MCP 连接器**新增/编辑/移除/启停立即生效**（连接与工具热重载，
-> 无需重启）；修复 OAuth 连接器 URL 尾斜杠导致的 `resource_mismatch`（GitHub MCP
-> 常见）；GitHub 远程 MCP 明确引导使用 **Bearer 令牌 + GitHub PAT**（GitHub 不支持
-> 动态客户端注册且令牌交换需要 client secret）。
+> webview. 本版让 MCP OAuth **后台自动刷新**（不再反复要求授权），连接器可配置
+> 自定义 **HTTP Headers**，详情内可逐个开关工具；技能支持**禁用/启用**、
+> **复制到我的技能**、外部修改自动刷新与 Markdown 预览。
 > See [CHANGELOG.md](CHANGELOG.md).
 
 > **v0.2.24 主要变化**：按 `docs/PRODUCT-BUG-REVIEW-2026-11-11.md` 做 TDD 修复——

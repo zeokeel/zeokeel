@@ -1,5 +1,36 @@
 # Verification log (final)
 
+## 0.2.47 — 2026-11-16 (MCP 稳定刷新、Headers 与技能管理)
+
+```
+$ gofmt -l internal cmd
+(empty)
+$ CGO_ENABLED=0 go build ./...
+OK
+$ go vet ./...
+OK
+$ go tool mygo vet .
+OK
+$ go test ./... -count=1
+all packages ok
+$ go test -race ./internal/modules/toolkit ./internal/ui/plugins -count=1
+all ok (no data race)
+$ go run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
+designlint: 316 files, 79 violations: 0 error, 0 warn | baseline 156 entries, 10 registered, 0 new, 0 blocking
+$ ./scripts/design-check.sh
+6 passed, 0 failed: PASS
+```
+
+MCP：OAuth 后台每 30s 检查、到期前 5 分钟主动刷新（保留请求前 60s 与 401 刷新），
+已授权连接器不再显示重新授权；表单支持自定义 HTTP Headers；详情支持逐工具开关
+（写入 `tools.disabled` 并热重载）；移除未使用的 MCPAuthService.Refresh 和失效资源字段。
+技能：`skills.disabled` 过滤模型侧技能、只读技能可复制到 dataDir、外部修改 5s 自动重扫、
+创建/编辑 Markdown 预览；移除空态重复刷新按钮。
+测试：后台刷新/轮换、工具目录开关与注册表断言、Headers 往返/校验、授权菜单状态、
+技能禁用过滤/复制/自动刷新。视觉证据：`.cache/next-shots/p2-capabilities-connector-form.png`。
+合并前 CI：PR #7 `Build, vet, test` 通过。
+
+
 ## 0.2.46 — 2026-11-16 (连接器热重载与 GitHub MCP 修复)
 
 ```
