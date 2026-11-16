@@ -4,6 +4,34 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.48] - 2026-11-17
+
+### Changed
+
+- **上游 SDK 升级 zeokeel-rig v0.18.1**：shell/jobs 失败结果在匹配 OS 沙箱拒绝方言（四平台，含中文「拒绝访问」）时追加结构化归因行，区分「沙箱拒绝」与「命令自身失败」；bash/pwsh 工具描述随 runner 注入动态化，挂接 OS 沙箱后准确声明边界。
+- **权限语义披露（个人使用尺度）**：会话/自动化级「所有权限」明示仅放宽审批、OS 文件沙箱恒随全局；composer 权限按钮标「（全局）」；权限菜单与行为页双层模型白话披露并修正「沙箱可用时 shell 仍会询问」的事实矛盾；沙箱状态面 full 档改琥珀警示「完全访问：OS 沙箱不包装命令」；系统提示词文件政策按实际 mode 三态动态（full+无工作区明示进程 cwd 例外）。
+- **执行过程呈现保真**：live 读模型新增 per-iteration 思考分段（`ReasoningSegments`/`TextOffset`），时间线按偏移与工具卡统一交错，live 与重启恢复同构；standard 单行补「正在思考/正在回复」态与正确时态；轨迹页补思考与正文；折叠摘要含分段计数。
+- **最小窗口几何**：composer dock 与审批卡中段有界滚动、待审批置顶；900×600 与默认窗全堆叠下 composer 与审批决策按钮全部入窗。
+- **运行态**：停止按钮 stopping 态、settle 后才提示「已停止」、防重复触发；流式结束/审批到达读屏播报 + 默认模式 RoleStatus；权限降级后仍按旧权限运行的任务一行警示 + 两段式批量停止。
+- **输入与草稿**：草稿跨重启持久化（仅文本）；编辑消息/hero 示例覆盖非空草稿前确认；跨屏拖入 toast + 导航；空闲跨会话审批时 composer 提示 Esc 拒绝。
+- **安全默认补齐**：排队「清空全部」走 ConfirmDanger（取消 Default、显式确认才删）；全局热键冲突警告 + 二次确认；侧栏 fork/置顶/归档/删除失败可见反馈（删除失败保留对话框）。
+- **可访问性与设计纪律**：亮色焦点环 4.59:1、选中 tint 次级文字 ≥4.5:1；首启唯一 primary；rail 运行点改 Warning；11px 成句/按钮文字簇升 12px；浮层动作按钮 32 档；右栏文件树迁 Outline（突破 400 条上限）；空态/错误行收敛共享入口；纯图标按钮收口 IconButton（新增 Native 变体）；TextScale 覆盖主阅读面与标题夹取。
+- **性能**：会话快照版本化共享只读缓存（消除每帧 7–8 次全量深拷贝）；会话列表缓存 + 单条 LEFT JOIN；侧栏搜索与分栏拖拽持久化移出 build（debounce）；附件读文件/解码移后台线程。
+- **后端正确性**：toolkit 卸载组合关闭（后台任务/MCP/刷新循环不再孤儿）；MCP 热重载世代守卫（读模型覆盖、禁用工具复活、连接泄漏修复）；pwsh 与超时提升后台任务路由修复（重建后可查可杀）；logger Close/Printf 竞态；导入不再静默切换当前工作区；SQLite 写移出锁临界区；ACP 发射序；automation WaitGroup 生命周期；会话 ID 单调去忙等；注册表读错误隔离备份；goal 轮次 send 失败回滚；spill 用会话绑定根。
+- **治理**：CI 新增 import 边界机器断言与定向 -race 门禁；allowlist 站点级符号/文本锚点；designlint 间接字重规则；baseline 156→72（清理 86 条 stale，零新增豁免）；design-check 阈值收紧 21/11；11 份契约/覆盖/验证文档同步；firstNonEmpty/上下文窗口格式/记忆编辑对话框收敛共享入口；删除零调用别名与死代码。
+- **可配置（默认关/空，个人尺度不加摩擦）**：`agent.approvalTimeoutSeconds`（仅自动化来源超时自动拒绝 + 记录 + 通知，默认 0=关）；`toolkit.deniedGlobs`（工作区文件隐藏 opt-in，设置→数据与隐私页入口，shell 旁路明示）。
+
+### Fixed
+
+- 2026-11 多角色审计确认的 108 条发现中产品侧全部修复（另 1 条原 P1 经独立反证判定误报，不修）；rig 侧 RG-03/RG-05 随 v0.18.1 发布。审计探针 61/61 翻绿作为验收信号。
+
+### Known limitations
+
+- 同迭代多并行工具且文本偏移全相等时，思考/工具排序为近似（偏移不同即精确）。
+- 900×600 全堆叠时 transcript 最小份额约 40 DIP（决策按钮与 composer 优先入窗）。
+- 草稿持久化仅文本，附件字节不跨重启。
+- Windows/macOS 运行时行为本环境未复现（沙箱/提权链路经静态核实 + Linux 探针验证）。
+
 ## [0.2.47] - 2026-11-16
 
 ### Added
