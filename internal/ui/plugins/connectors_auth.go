@@ -61,7 +61,7 @@ func (p *connectorsState) startConnectorAuth(st *state, auth contracts.MCPAuthSe
 			}
 			p.authPreparing = false
 			if err != nil {
-				p.authError = authErrorText(st, err)
+				p.authError = authErrorText(st, err, row)
 				st.runtime.Invalidate()
 				return
 			}
@@ -91,7 +91,7 @@ func (p *connectorsState) waitConnectorAuth(st *state, auth contracts.MCPAuthSer
 		p.authWaiting = false
 		p.authStatus = status
 		if err != nil {
-			p.authError = authErrorText(st, err)
+			p.authError = authErrorText(st, err, row)
 			st.runtime.Invalidate()
 			return
 		}
@@ -110,7 +110,7 @@ func (p *connectorsState) waitConnectorAuth(st *state, auth contracts.MCPAuthSer
 
 // authErrorText localizes the well-known failure causes and keeps the raw
 // diagnostic bounded for the details line.
-func authErrorText(st *state, err error) string {
+func authErrorText(st *state, err error, cfg contracts.MCPServerConfig) string {
 	message := strings.TrimSpace(err.Error())
 	lower := strings.ToLower(message)
 	switch {
@@ -129,8 +129,12 @@ func authErrorText(st *state, err error) string {
 	case strings.Contains(lower, "state_mismatch"), strings.Contains(lower, "iss_mismatch"):
 		return st.tr("授权回调校验失败，请重新授权。", "The authorization callback failed validation; re-authorize.")
 	case strings.Contains(lower, "registration"):
-		return st.tr("客户端注册失败；可填写预注册的客户端 ID 后重试。",
-			"Client registration failed; configure a pre-registered client ID and retry.")
+		if isGitHubCopilotMCPURL(cfg.URL) {
+			return st.tr("GitHub 远程 MCP 不支持动态客户端注册；请改用「Bearer 令牌」填写 GitHub PAT（OAuth 令牌交换需要 client secret，当前版本不发送）。",
+				"GitHub's remote MCP does not support dynamic client registration; use Bearer token with a GitHub PAT (OAuth token exchange needs a client secret, which this build does not send).")
+		}
+		return st.tr("客户端注册失败；该服务可能不支持动态注册。可填写预注册客户端 ID，或改用 Bearer 令牌。",
+			"Client registration failed; the service may not support dynamic registration. Fill in a pre-registered client ID, or use a Bearer token.")
 	case strings.Contains(lower, "revoked"):
 		return st.tr("授权已被撤销。", "The authorization was revoked.")
 	}

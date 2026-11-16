@@ -259,6 +259,12 @@ func (p *connectorsState) buildFormModal(c *ui.Context, t *design.Tokens, st *st
 						}).Description(st.tr(
 							"Bearer 令牌作为 Authorization 头发送；OAuth 2.1 在保存后于卡片上完成浏览器授权。",
 							"Bearer tokens are sent as the Authorization header; OAuth 2.1 authorizes in the browser from the saved card."))
+						if isGitHubCopilotMCPURL(p.url) {
+							design.Apply(ui.Text(c, st.tr(
+								"GitHub 远程 MCP 不提供动态客户端注册，且令牌交换需要 client secret；请选择「Bearer 令牌」填入 GitHub PAT。",
+								"GitHub's remote MCP does not offer dynamic client registration and its token exchange needs a client secret; choose Bearer token and paste a GitHub PAT.",
+							)), t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(3)
+						}
 						switch contracts.MCPAuthMode(p.authMode) {
 						case contracts.MCPAuthBearer:
 							ui.Field(c, st.tr("Bearer 令牌", "Bearer token"), func() {
@@ -282,17 +288,13 @@ func (p *connectorsState) buildFormModal(c *ui.Context, t *design.Tokens, st *st
 										Label(inputLabel(st, st.tr("客户端 ID（可选）", "Client ID (optional)"))).
 										Placeholder(st.tr("留空使用动态注册", "Blank uses dynamic registration")).
 										FillWidth()
-								})
+								}).Description(st.tr(
+									"仅适用于支持公开客户端的授权服务器；GitHub 的令牌交换还需要 client secret，请改用 Bearer PAT。",
+									"Only for authorization servers that accept public clients; GitHub also needs a client secret at token exchange, so use a Bearer PAT."))
 								ui.Field(c, st.tr("授权服务器（可选）", "Authorization server (optional)"), func() {
 									ui.TextInput(c, &p.authServer).
 										Label(inputLabel(st, st.tr("授权服务器（可选）", "Authorization server (optional)"))).
 										Placeholder(st.tr("留空从服务器元数据发现", "Blank discovers from server metadata")).
-										FillWidth()
-								})
-								ui.Field(c, st.tr("资源标识（可选）", "Resource (optional)"), func() {
-									ui.TextInput(c, &p.authResource).
-										Label(inputLabel(st, st.tr("资源标识（可选）", "Resource (optional)"))).
-										Placeholder(st.tr("留空使用连接器 URL", "Blank uses the connector URL")).
 										FillWidth()
 								})
 							})
@@ -383,8 +385,7 @@ func (p *connectorsState) saveConnector(st *state, settings contracts.SettingsSe
 	p.servers = rows
 	p.formOpen = false
 	p.resetFormDraft()
-	st.status = st.tr("已保存，重启生效", "Saved; restart applies")
-	st.statusErr = false
+	st.requestMCPReload(st.tr("已应用连接器变更", "Connector changes applied"))
 }
 
 // oauthRecordMustBeDropped reports whether editing a connector invalidates its
@@ -501,7 +502,7 @@ func (p *connectorsState) connectorDraft(st *state, checkDuplicates bool) (contr
 	} else if auth != nil {
 		row.Auth = auth
 	}
-	return row, true
+	return contracts.NormalizeMCPAuthURL(row), true
 }
 
 // authDraft validates the authentication section of one HTTP draft. A blank
@@ -548,6 +549,18 @@ func (p *connectorsState) duplicateName(name string) bool {
 		}
 	}
 	return false
+}
+
+// isGitHubCopilotMCPURL reports the GitHub-hosted remote MCP endpoint, whose
+// OAuth service has no dynamic client registration and requires a client secret
+// at token exchange (a PAT is the supported path in this build).
+func isGitHubCopilotMCPURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "api.githubcopilot.com" || strings.HasSuffix(host, ".githubcopilot.com")
 }
 
 // validOAuthEndpoint accepts https, or http only for loopback hosts.
@@ -941,6 +954,5 @@ func (p *connectorsState) removeConnector(st *state, settings contracts.Settings
 	} else if p.editIndex > index {
 		p.editIndex--
 	}
-	st.status = st.tr("已保存，重启生效", "Saved; restart applies")
-	st.statusErr = false
+	st.requestMCPReload(st.tr("已移除连接器", "Connector removed"))
 }

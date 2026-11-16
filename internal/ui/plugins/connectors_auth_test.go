@@ -368,4 +368,20 @@ func TestConnectorRemoveDropsOAuthToken(t *testing.T) {
 	}
 }
 
+func TestConnectorGitHubRegistrationFailureSuggestsPAT(t *testing.T) {
+	auth := &fakeMCPAuth{
+		status:     contracts.MCPAuthStatus{State: contracts.MCPAuthStateRequired},
+		prepareErr: errors.New("mcp oauth: client_registration_failed: registration_endpoint missing"),
+	}
+	useOpenURL(t, nil)
+	h, _ := newAuthConnectorHarness(t, &connectorPlugins{}, map[string]string{
+		contracts.SettingMCPServers: `[{"name":"github","url":"https://api.githubcopilot.com/mcp/","auth":{"mode":"oauth2"}}]`,
+	}, auth)
+	tester := h.tester()
+	h.click(tester, "连接器")
+	h.click(tester, "授权")
+	waitForConnectorText(t, tester, "GitHub 远程 MCP 不支持动态客户端注册")
+	h.assertTexts(tester, "Bearer 令牌", "GitHub PAT")
+}
+
 var _ = ui.KeyEscape

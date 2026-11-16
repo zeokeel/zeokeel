@@ -99,9 +99,14 @@ func (st *state) setServerEnabled(name string, enabled bool, settings contracts.
 		st.statusErr = true
 		return
 	}
-	// A server switch only takes effect on the next launch: the card keeps a
-	// positive "enabled, connects after restart" state (see
-	// enabledPendingServerRows) and the status line says what happened.
+	if st.mcpHotReload() {
+		// The reloader rebuilds the connections immediately; no restart-pending
+		// state is needed.
+		st.clearPendingEnabledServer(name)
+		st.requestMCPReload(st.tr("已应用连接器启停变更", "Connector enablement applied"))
+		return
+	}
+	// Older compositions without a reloader keep the restart-pending copy.
 	if enabled {
 		st.pendingRestartServers[name] = true
 	} else {

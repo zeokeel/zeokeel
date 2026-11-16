@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net/url"
 	"strings"
 	"time"
 
@@ -41,12 +42,22 @@ type PluginsService interface {
 
 // SettingMCPServers stores user-configured MCP servers as a JSON array of
 // {"name":"...","url":"..."} rows. The toolkit merges them with the assembly's
-// servers on startup (a restart applies changes).
+// servers and hot-reloads add/edit/remove/enable changes (no restart).
 const SettingMCPServers = "mcp.servers"
 
 // KeyPlugins is provided by the toolkit module (which owns the MCP clients)
 // and consumed by the Plugins screen.
 var KeyPlugins = cordis.NewServiceKey[PluginsService]("zeokeel/plugins")
+
+// MCPReloader rebuilds the MCP connections from the current settings (add,
+// edit, remove, enable/disable and workspace opt-in) without restarting the
+// app. It returns the fresh read model.
+type MCPReloader interface {
+	Reload(ctx context.Context) ([]MCPPlugin, error)
+}
+
+// KeyMCPReloader is provided by the toolkit and consumed by the connectors tab.
+var KeyMCPReloader = cordis.NewServiceKey[MCPReloader]("zeokeel/mcp-reloader")
 
 // MCPServerConfig is one user-configured MCP server row stored in settings.
 // Rows with a Command (or Transport "stdio") start a stdio child process; rows
@@ -226,11 +237,11 @@ func EncodeMCPServersJSON(rows []MCPServerConfig) (string, error) {
 const SettingMCPWorkspaceOptIn = "mcp.workspaceOptIn"
 
 // SettingMCPDisabledTools stores a JSON array of MCP tool names that should
-// not be registered (per-tool switches in the plugins page; restart applies).
+// not be registered (per-tool switches in the plugins page; the next reload applies).
 const SettingMCPDisabledTools = "mcp.disabledTools"
 
 // SettingMCPDisabledServers stores a JSON array of MCP server names that are
-// not started (their tools are not registered; restart applies).
+// not started (their tools are not registered; the next reload applies).
 const SettingMCPDisabledServers = "mcp.disabledServers"
 
 // SettingToolsDisabled stores a JSON array of any tool names (built-in or MCP)
@@ -261,4 +272,31 @@ func EncodeStringListJSON(values []string) (string, error) {
 		return "", err
 	}
 	return string(encoded), nil
+}
+
+// NormalizeMCPURL trims a trailing slash from a connector URL path (the root
+// "/" is preserved). OAuth protected-resource metadata commonly advertises
+// "https://host/mcp" while users paste "https://host/mcp/"; canonicalizing the
+// connector URL avoids a spurious resource_mismatch. Other connectors keep the
+// URL exactly as entered.
+func NormalizeMCPURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" ||
+		parsed.Path == "" || parsed.Path == "/" {
+		return trimmed
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	return parsed.String()
+}
+
+// NormalizeMCPAuthURL applies NormalizeMCPURL only to OAuth rows.
+func NormalizeMCPAuthURL(row MCPServerConfig) MCPServerConfig {
+	if row.Auth != nil && row.Auth.Mode == MCPAuthOAuth2 {
+		row.URL = NormalizeMCPURL(row.URL)
+	}
+	return row
 }

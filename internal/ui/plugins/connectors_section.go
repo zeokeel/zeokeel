@@ -138,6 +138,8 @@ type connectorsState struct {
 	detailOpen bool
 	detailKey  string
 
+	// reloading is true while the toolkit rebuilds MCP after a settings write.
+	reloading bool
 	// removeOpen/removeIndex are the destructive remove confirmation's state.
 	removeOpen  bool
 	removeIndex int
@@ -285,8 +287,12 @@ func (p *connectorsState) buildCollectionRow(c *ui.Context, t *design.Tokens, st
 		} else {
 			ui.Spacer(c).Grow(1)
 		}
-		if st.refreshing {
-			ui.Spinner(c).Label(st.tr("正在重连…", "Reconnecting…")).
+		if st.refreshing || p.reloading {
+			label := st.tr("正在重连…", "Reconnecting…")
+			if p.reloading {
+				label = st.tr("正在应用连接器…", "Applying connectors…")
+			}
+			ui.Spinner(c).Label(label).
 				Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
 		}
 		refreshLabel := st.tr("刷新连接", "Reconnect")
@@ -299,7 +305,7 @@ func (p *connectorsState) buildCollectionRow(c *ui.Context, t *design.Tokens, st
 			Key:   "connectors.refresh",
 			Label: refreshLabel, Tooltip: refreshTooltip,
 			Icon: icons.Reload(), Size: design.IconSizeS,
-			Disabled: st.refreshing || !hasPlugins,
+			Disabled: st.refreshing || p.reloading || !hasPlugins,
 			OnClick: func() {
 				if hasPlugins && !st.refreshing {
 					st.startMCPRefresh(service)
@@ -338,6 +344,9 @@ func (p *connectorsState) loadStorage(st *state, settings contracts.SettingsServ
 		p.parseErr = st.tr("配置解析失败：", "Configuration parse failed: ") + err.Error()
 		p.servers = nil
 	} else {
+		for index := range rows {
+			rows[index] = contracts.NormalizeMCPAuthURL(rows[index])
+		}
 		p.servers = rows
 	}
 	p.workspaceOptIn = strings.EqualFold(
@@ -434,15 +443,34 @@ func buildStoredConnectorCard(st *state, row contracts.MCPServerConfig, index in
 		card.Version = plugin.Version
 		card.Protocol = plugin.Protocol
 	}
+	hotReload := st.mcpHotReload()
 	switch {
 	case !card.Enabled:
 		card.StatusKind = uikit.StatusIdle
 		card.StatusLabel = st.tr("已停用", "Disabled")
-		card.StatusTooltip = st.tr("已停用（重启生效）", "Disabled (restart applies)")
+		if hotReload {
+			card.StatusTooltip = st.tr("已停用（已断开，启用后自动重连）",
+				"Disabled (disconnected; enabling reconnects automatically)")
+		} else {
+			if st.mcpHotReload() {
+				card.StatusTooltip = st.tr("已停用（已断开，启用后自动重连）",
+					"Disabled (disconnected; enabling reconnects automatically)")
+			} else {
+				card.StatusTooltip = st.tr("已停用（重启生效）", "Disabled (restart applies)")
+			}
+		}
 	case liveMatched:
 		card.StatusKind, card.StatusLabel = connectorStatus(st, plugin.Status)
 		card.StatusTooltip = strings.TrimSpace(plugin.Status)
 		card.Failure = pluginStatusFailed(plugin.Status)
+	case hotReload && st.connectors != nil && st.connectors.reloading:
+		card.StatusKind = uikit.StatusIdle
+		card.StatusLabel = st.tr("正在应用…", "Applying…")
+		card.StatusTooltip = st.tr("正在重建 MCP 连接", "Rebuilding the MCP connection")
+	case hotReload:
+		card.StatusKind = uikit.StatusIdle
+		card.StatusLabel = st.tr("正在连接…", "Connecting…")
+		card.StatusTooltip = st.tr("保存后自动连接，无需重启", "Connects automatically after saving")
 	case st.pendingEnabled(name):
 		card.StatusKind = uikit.StatusIdle
 		card.StatusLabel = st.tr("待重启", "Restart needed")
@@ -693,8 +721,7 @@ func (p *connectorsState) saveWorkspaceOptIn(st *state, settings contracts.Setti
 		st.statusErr = true
 		return
 	}
-	st.status = st.tr("已保存，重启生效", "Saved; restart applies")
-	st.statusErr = false
+	st.requestMCPReload(st.tr("已应用工作区 mcp.json 变更", "Workspace mcp.json changes applied"))
 }
 
 // mcpWorkspaceHint names the workspace file the opt-in reads and when it
@@ -702,6 +729,10 @@ func (p *connectorsState) saveWorkspaceOptIn(st *state, settings contracts.Setti
 func mcpWorkspaceHint(st *state, p *connectorsState) string {
 	if root := strings.TrimSpace(p.workspaceRoot); root != "" {
 		path := filepath.Join(root, "mcp.json")
+		if st.mcpHotReload() {
+			return st.tr("从 "+path+" 读取；开启/关闭会立即应用。",
+				"Reads "+path+"; toggling applies immediately.")
+		}
 		return st.tr("启动时读取 "+path+"；修改后重启生效。",
 			"Extra servers are read from "+path+" on launch; restart to apply changes.")
 	}
@@ -797,4 +828,17 @@ func connectorToolCountLabel(st *state, count int) string {
 		return fmt.Sprintf("%d tools", count)
 	}
 	return fmt.Sprintf("%d 个工具", count)
+}
+
+// connectorPageHint describes when connector changes apply: hot reload keeps
+// the copy honest, while older compositions still need a restart.
+func connectorPageHint(st *state) string {
+	if st != nil && st.mcpHotReload() {
+		return st.tr(
+			"连接器把外部 MCP 服务接入会话；新增、编辑、启停与授权立即生效。",
+			"Connectors expose external MCP servers to sessions; add, edit, enablement and authorization apply immediately.")
+	}
+	return st.tr(
+		"连接器把外部 MCP 服务接入会话；启用变更在重启后生效。",
+		"Connectors expose external MCP servers to sessions; enablement changes apply after a restart.")
 }

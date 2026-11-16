@@ -503,8 +503,10 @@ func (r *mcpRuntime) swapTools(target *managedMCPServer, registry *rigtool.Regis
 	return registered
 }
 
-// close releases every MCP connection (module unload).
-func (r *mcpRuntime) close() {
+// stop closes every connection, unregisters this runtime's tools and marks the
+// runtime dead. It does NOT close the shared OAuth adapter: a hot reload reuses
+// that adapter (and its settings TokenStore) for the next runtime.
+func (r *mcpRuntime) stop(registry *rigtool.Registry) {
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
@@ -515,10 +517,27 @@ func (r *mcpRuntime) close() {
 	r.servers = nil
 	r.mu.Unlock()
 	for _, server := range servers {
-		if client := server.currentClient(); client != nil {
+		server.mu.Lock()
+		names := make([]string, 0, len(server.registered))
+		for name := range server.registered {
+			names = append(names, name)
+		}
+		client := server.client
+		server.mu.Unlock()
+		for _, name := range names {
+			if registry != nil {
+				registry.Unregister(name)
+			}
+		}
+		if client != nil {
 			_ = client.Close()
 		}
 	}
+}
+
+// close releases every MCP connection and the OAuth adapter (module unload).
+func (r *mcpRuntime) close() {
+	r.stop(nil)
 	if r.auth != nil {
 		r.auth.close()
 	}

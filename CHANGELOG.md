@@ -4,6 +4,18 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **MCP 连接器热重载**：新增/编辑/移除/启停连接器、切换工作区 `mcp.json` opt-in 后立即重建 MCP 连接与工具注册，无需重启应用；OAuth 授权后仍自动重连。删除连接器后其卡片和工具立即消失（此前因无热重载看起来像删除失败）。
+- 连接器表单对 GitHub 远程 MCP（`api.githubcopilot.com/mcp`）给出明确提示：GitHub 不提供动态客户端注册且令牌交换需要 client secret，请选择 **Bearer 令牌** 填入 GitHub PAT。
+
+### Fixed
+
+- OAuth 连接器 URL 的尾部斜杠在保存/启动前归一化，修复 GitHub MCP 因 PRM `resource` 为 `.../mcp` 而配置为 `.../mcp/` 导致的 `resource_mismatch` 授权失败。
+- 连接器删除/编辑不再只写 settings 而保留旧 live 连接：热重载会注销旧工具并移除卡片。
+
 ## [0.2.45] - 2026-11-16
 
 ### Added
