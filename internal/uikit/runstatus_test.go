@@ -89,7 +89,10 @@ func TestRunStatusRetryAndDismiss(t *testing.T) {
 
 // TestRunStatusQueuePopover covers the queue: the count badge is a button, the
 // popover lists the queued prompts and offers cancel, clear and (after a paused
-// stop) resume actions.
+// stop) resume actions. Clearing is irreversible, so it goes through
+// uikit.ConfirmDanger first (2026-11 audit UX-04, DESIGN.md rule 9): the click
+// opens the confirmation with the queue intact, Enter takes the safe cancel,
+// and only the explicit danger button clears.
 func TestRunStatusQueuePopover(t *testing.T) {
 	queueOpen := false
 	var queued = []string{"第一条排队消息", "第二条排队消息"}
@@ -140,15 +143,230 @@ func TestRunStatusQueuePopover(t *testing.T) {
 		t.Fatalf("clear queue: %v", err)
 	}
 	tt.Frame()
+	if clears != 0 {
+		t.Fatalf("clear ran without confirmation (%d calls)", clears)
+	}
+	if !tt.HasText("清空全部排队消息？") {
+		t.Fatalf("clear did not open the danger confirmation; texts = %v", tt.Texts())
+	}
+	// The queue is preserved (the count badge still reports both prompts) and
+	// the popover yields to the modal, which owns the whole screen.
+	if !tt.HasText("已排队 2 条") {
+		t.Fatalf("the confirmation lost the queued prompts; texts = %v", tt.Texts())
+	}
+	if queueOpen {
+		t.Fatal("the queue popover stayed open under the confirmation modal")
+	}
+	// Enter takes the safe default (cancel), never the destructive action.
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if clears != 0 {
+		t.Fatalf("Enter confirmed the destructive clear (%d calls)", clears)
+	}
+	if tt.HasText("清空全部排队消息？") {
+		t.Fatalf("Enter did not close the confirmation; texts = %v", tt.Texts())
+	}
+	if !tt.HasText("已排队 2 条") {
+		t.Fatalf("cancel lost the queued prompts; texts = %v", tt.Texts())
+	}
+	// The explicit danger button is the only way to clear.
+	if err := tt.Click("已排队 2 条"); err != nil {
+		t.Fatalf("reopen queue popover: %v", err)
+	}
+	tt.Frame()
+	if err := tt.Click("清空全部"); err != nil {
+		t.Fatalf("reopen clear confirmation: %v", err)
+	}
+	tt.Frame()
+	if err := tt.Click("确认清空"); err != nil {
+		t.Fatalf("confirm clear: %v", err)
+	}
+	tt.Frame()
 	if clears != 1 {
 		t.Fatalf("clear calls = %d, want 1", clears)
 	}
+	if err := tt.Click("已排队 2 条"); err != nil {
+		t.Fatalf("reopen queue popover for resume: %v", err)
+	}
+	tt.Frame()
 	if err := tt.Click("发送排队消息"); err != nil {
 		t.Fatalf("resume queue: %v", err)
 	}
 	tt.Frame()
 	if resumes != 1 {
 		t.Fatalf("resume calls = %d, want 1", resumes)
+	}
+}
+
+// TestRunStatusQueueClearConfirmSafety pins the confirmation's safe defaults
+// (DESIGN.md AP-12/AP-24): Cancel carries the focus and Enter, Escape cancels,
+// the queue survives both, and only the explicit danger click clears.
+func TestRunStatusQueueClearConfirmSafety(t *testing.T) {
+	queueOpen := true
+	clears := 0
+	tt := ui.NewTester(runStatusView(uikit.RunStatusOptions{
+		Queued:       []string{"第一条排队消息", "第二条排队消息"},
+		QueueOpen:    &queueOpen,
+		QueueList:    &ui.ListState{},
+		OnQueueClear: func() { clears++ },
+	}), 480, 400)
+	tt.Frame()
+	if err := tt.Click("清空全部"); err != nil {
+		t.Fatalf("open clear confirmation: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("清空全部排队消息？") || !tt.HasText("此操作无法撤销。") {
+		t.Fatalf("confirmation missing its title/message; texts = %v", tt.Texts())
+	}
+	if !tt.Focused("取消") {
+		t.Fatalf("the safe cancel does not carry the focus; texts = %v", tt.Texts())
+	}
+	if !tt.HasText("已排队 2 条") {
+		t.Fatalf("queue lost while confirming; texts = %v", tt.Texts())
+	}
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if clears != 0 || tt.HasText("清空全部排队消息？") {
+		t.Fatalf("Enter did not safely cancel (clears=%d); texts = %v", clears, tt.Texts())
+	}
+	if !tt.HasText("已排队 2 条") {
+		t.Fatalf("cancel lost the queued prompts; texts = %v", tt.Texts())
+	}
+
+	// Escape is the safe outcome too.
+	if err := tt.Click("已排队 2 条"); err != nil {
+		t.Fatalf("reopen queue popover: %v", err)
+	}
+	tt.Frame()
+	if err := tt.Click("清空全部"); err != nil {
+		t.Fatalf("reopen confirmation: %v", err)
+	}
+	tt.Frame()
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if clears != 0 || tt.HasText("清空全部排队消息？") {
+		t.Fatalf("Escape did not cancel (clears=%d); texts = %v", clears, tt.Texts())
+	}
+
+	// The explicit danger click clears once.
+	if err := tt.Click("已排队 2 条"); err != nil {
+		t.Fatalf("reopen queue popover: %v", err)
+	}
+	tt.Frame()
+	if err := tt.Click("清空全部"); err != nil {
+		t.Fatalf("reopen confirmation: %v", err)
+	}
+	tt.Frame()
+	if err := tt.Click("确认清空"); err != nil {
+		t.Fatalf("confirm clear: %v", err)
+	}
+	tt.Frame()
+	if clears != 1 {
+		t.Fatalf("explicit confirm clears = %d, want 1", clears)
+	}
+}
+
+// TestRunStatusQueueTargetSizes pins the hit targets (2026-11 audit UX-08,
+// AP-17/DESIGN.md §5.4): the count badge sits on the compact chip step (28) and
+// the per-row remove action is an icon button with the ≥24 DIP target.
+func TestRunStatusQueueTargetSizes(t *testing.T) {
+	queueOpen := true
+	tt := ui.NewTester(runStatusView(uikit.RunStatusOptions{
+		Queued:        []string{"第一条排队消息", "第二条排队消息"},
+		QueueOpen:     &queueOpen,
+		QueueList:     &ui.ListState{},
+		OnQueueCancel: func(int) {},
+	}), 480, 400)
+	tt.Frame()
+	badge := requireButton(t, tt, ui.RoleButton, "已排队 2 条")
+	if badge.Bounds.H < design.ControlCompactHeight {
+		t.Fatalf("queue badge height = %v, want ≥%v (compact chip step)",
+			badge.Bounds.H, design.ControlCompactHeight)
+	}
+	remove := requireButton(t, tt, ui.RoleButton, "取消排队")
+	if remove.Bounds.W < design.IconSizeL || remove.Bounds.H < design.IconSizeL {
+		t.Fatalf("remove target = %vx%v, want ≥%vx%v",
+			remove.Bounds.W, remove.Bounds.H, design.IconSizeL, design.IconSizeL)
+	}
+}
+
+// TestRunStatusQueueBadgeStates pins the badge's full state vocabulary
+// (2026-11 audit UD-06, AP-02/AP-11): the count badge is a registered
+// ButtonBase that paints rest/hover/pressed/focused/selected itself, so the
+// clickable count never looks dead. The fills are sampled from the rendered
+// frame; the press changes the count ink to the accent's pressed step.
+func TestRunStatusQueueBadgeStates(t *testing.T) {
+	tokens := design.Light()
+	queueOpen := false
+	tt := ui.NewTester(runStatusView(uikit.RunStatusOptions{
+		Queued:       []string{"第一条排队消息"},
+		QueueOpen:    &queueOpen,
+		QueueList:    &ui.ListState{},
+		OnQueueClear: func() {},
+	}), 480, 320)
+	tt.Frame()
+
+	fill := func() (int, int) {
+		info := requireButton(t, tt, ui.RoleButton, "已排队 1 条")
+		return int(info.Bounds.X) + 2, int(info.Bounds.Y + info.Bounds.H/2)
+	}
+	// Rest: the quiet hover tint (the badge keeps a visible fill).
+	x, y := fill()
+	requirePixel(t, tt, x, y, over(tokens.BgHover, tokens.BgBase))
+
+	// Hover deepens the tint.
+	info := requireButton(t, tt, ui.RoleButton, "已排队 1 条")
+	cx, cy := info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2
+	tt.Move(cx, cy)
+	tt.Frame()
+	requirePixel(t, tt, x, y, over(tokens.BgSelected, tokens.BgBase))
+
+	// Press keeps the deeper tint and darkens the count ink to AccentPressed:
+	// the frame must contain the pressed ink inside the badge.
+	tt.Press(cx, cy)
+	tt.Frame()
+	pressedInk := 0
+	hoverImage := tt.Image()
+	for py := int(info.Bounds.Y); py < int(info.Bounds.Y+info.Bounds.H); py++ {
+		for px := int(info.Bounds.X); px < int(info.Bounds.X+info.Bounds.W); px++ {
+			got := hoverImage.RGBAAt(px, py)
+			if got.R == tokens.AccentPressed.R && got.G == tokens.AccentPressed.G &&
+				got.B == tokens.AccentPressed.B && got.A == 255 {
+				pressedInk++
+			}
+		}
+	}
+	if pressedInk == 0 {
+		t.Fatal("the pressed badge paints no AccentPressed count ink (press looks dead)")
+	}
+	tt.Release(cx, cy)
+	tt.Move(0, 0)
+	tt.Frame()
+
+	// The open popover is the selected state: the deeper tint without hover.
+	queueOpen = true
+	tt.Frame()
+	requirePixel(t, tt, x, y, over(tokens.BgSelected, tokens.BgBase))
+	queueOpen = false
+	tt.Frame()
+
+	// Keyboard focus rings the badge (the base's native ring) and tints it.
+	tt.Key(0, ui.KeyTab)
+	tt.Frame()
+	if !tt.Focused("已排队 1 条") {
+		t.Fatalf("Tab did not focus the queue badge; texts = %v", tt.Texts())
+	}
+	requirePixel(t, tt, x, y, over(tokens.BgSelected, tokens.BgBase))
+	ringFound := false
+	bg := tt.Image().RGBAAt(int(info.Bounds.X)-12, int(info.Bounds.Y+info.Bounds.H/2))
+	for dx := 1; dx <= 5; dx++ {
+		px := tt.Image().RGBAAt(int(info.Bounds.X)-dx, int(info.Bounds.Y+info.Bounds.H/2))
+		if px != bg {
+			ringFound = true
+		}
+	}
+	if !ringFound {
+		t.Fatal("the focused queue badge draws no focus ring")
 	}
 }
 

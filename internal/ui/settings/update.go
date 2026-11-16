@@ -12,6 +12,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -137,7 +138,7 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 	updateService, hasUpdate := kctx.Get(contracts.KeyUpdate)
 	appInfo, _ := kctx.Get(contracts.KeyAppInfo)
 
-	current := firstNonEmpty(appInfo.Version, st.info.CurrentVersion, "dev")
+	current := textutil.FirstNonEmpty(appInfo.Version, st.info.CurrentVersion, "dev")
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		// The update controls are a section of the About page now: the check
@@ -218,7 +219,7 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 			return
 		}
 
-		latest := firstNonEmpty(st.info.LatestVersion, current)
+		latest := textutil.FirstNonEmpty(st.info.LatestVersion, current)
 		uikit.Section(c, localized(locale, "更新状态", "Update status"), func(*ui.Context) {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space3).Children(func() {
 				design.Apply(ui.Text(c, localized(locale, "最新版本", "Latest version")),
@@ -332,7 +333,7 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			copyLink := design.Apply(ui.Button(c,
 				localized(locale, "复制下载链接", "Copy download link")), t.SecondaryButton()).
-				Tooltip(firstNonEmpty(st.info.URL,
+				Tooltip(textutil.FirstNonEmpty(st.info.URL,
 					localized(locale, "没有可下载的链接", "No download link")))
 			copyLink.Disabled(!hasURL)
 			if copyLink.Clicked() && hasURL {

@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -175,6 +176,12 @@ type Root struct {
 	sidebarWidth   float32
 	inspectorWidth float32
 	widthsLoaded   bool
+	// widthsPending/widthsSaveDue debounce the width persist: a drag updates the
+	// in-memory widths every move frame but schedules one coalesced save after
+	// the value settles, instead of fsyncing settings.json inside each move's
+	// build pass (2026-11 audit AR-03). UI thread only.
+	widthsPending bool
+	widthsSaveDue time.Time
 
 	// lastAnnouncedScreen/lastRightOpen drive the assistive-technology
 	// announcements of navigation and inspector changes (c.Announce), which a
@@ -315,6 +322,33 @@ func (r *Root) saveInspectorOpen() {
 		return
 	}
 	_ = r.settingsService.Set(settingsKeyInspectorOpen, strconv.FormatBool(r.rightOpen))
+}
+
+// chromeWidthsSaveDebounce is how long the shell waits after the last divider
+// move before persisting the pane widths: a whole drag costs one coalesced
+// write, not one settings.json fsync per move frame (2026-11 audit AR-03).
+const chromeWidthsSaveDebounce = 300 * time.Millisecond
+
+// scheduleChromeWidthsSave marks the dragged widths dirty and (re)arms the
+// debounce. It runs in the Split's Changed branch while dragging — it only
+// updates in-memory state and requests a wake-up frame; the actual persist is
+// deferred to flushChromeWidthsSave so no I/O happens on the drag hot path.
+func (r *Root) scheduleChromeWidthsSave(c *ui.Context) {
+	r.widthsPending = true
+	r.widthsSaveDue = c.Now().Add(chromeWidthsSaveDebounce)
+	c.After(chromeWidthsSaveDebounce)
+}
+
+// flushChromeWidthsSave persists the widths once the debounce has elapsed, at
+// frame start and out of the per-move build branch: the write is posted to the
+// frame-start drain (UI thread, outside the view build) so a settled drag costs
+// a single coalesced save. A still-pending drag (now before due) writes nothing.
+func (r *Root) flushChromeWidthsSave(c *ui.Context) {
+	if !r.widthsPending || c.Now().Before(r.widthsSaveDue) {
+		return
+	}
+	r.widthsPending = false
+	r.rt.Post(func() { r.saveChromeWidths() })
 }
 
 // saveChromeWidths persists the dragged pane widths, so the layout opens the
@@ -476,9 +510,6 @@ func (r *Root) SetChatService(chat contracts.ChatService) {
 	r.mu.Unlock()
 }
 
-// BindChat is an alias for SetChatService.
-func (r *Root) BindChat(chat contracts.ChatService) { r.SetChatService(chat) }
-
 // SetKernelContext installs the optional kernel root used by window shortcuts
 // (Cmd/Ctrl+N resolves contracts.KeyChat from it). The desktop host may leave it
 // unset; the shortcut then falls back to the registered new-session command.
@@ -487,15 +518,6 @@ func (r *Root) SetKernelContext(ctx cordis.Context) {
 	r.kernelContext = ctx
 	r.mu.Unlock()
 }
-
-// BindKernel is an alias for SetKernelContext.
-func (r *Root) BindKernel(ctx cordis.Context) { r.SetKernelContext(ctx) }
-
-// SetKernel is an alias for SetKernelContext.
-func (r *Root) SetKernel(ctx cordis.Context) { r.SetKernelContext(ctx) }
-
-// SetChat is an alias for SetChatService.
-func (r *Root) SetChat(chat contracts.ChatService) { r.SetChatService(chat) }
 
 // AppName returns the product name shown in the title bar and UI.
 func (r *Root) AppName() string { return r.appName }

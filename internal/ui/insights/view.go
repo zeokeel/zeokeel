@@ -16,6 +16,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -183,7 +184,7 @@ func buildErrorState(c *ui.Context, t *design.Tokens, st *state) {
 func buildKPI(c *ui.Context, t *design.Tokens, st *state, data contracts.Insights) {
 	totals := data.Totals
 	ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(design.Space5).Children(func() {
-		kpiCell(c, t, "tokens", uikit.FormatCompactCount(totals.TotalTokens),
+		kpiCell(c, t, st.tr("词元 tokens", "Tokens"), uikit.FormatCompactCount(totals.TotalTokens),
 			fmt.Sprintf(st.tr("输入 %s · 输出 %s", "%s in · %s out"),
 				uikit.FormatCompactCount(totals.PromptTokens),
 				uikit.FormatCompactCount(totals.CompletionTokens)))
@@ -195,7 +196,7 @@ func buildKPI(c *ui.Context, t *design.Tokens, st *state, data contracts.Insight
 			kpiCell(c, t, st.tr("成本", "Cost"), formatCostUSD(totals.CostUSD), hint)
 		}
 		kpiCell(c, t, st.tr("会话", "Sessions"), fmt.Sprintf("%d", totals.Sessions),
-			fmt.Sprintf(st.tr("%d 轮 · %d 步", "%d turns · %d steps"), totals.Turns, totals.Steps))
+			fmt.Sprintf(st.tr("%d 轮对话 · %d 步工具调用", "%d turns · %d tool steps"), totals.Turns, totals.Steps))
 		toolHint := ""
 		if totals.Compactions > 0 || totals.Spills > 0 {
 			toolHint = fmt.Sprintf(st.tr("压缩 %d · 溢出 %d", "%d compactions · %d spills"),
@@ -241,7 +242,7 @@ func buildDailySection(c *ui.Context, t *design.Tokens, st *state, data contract
 		}
 		columns := []ui.TableColumn{
 			{Title: st.tr("日期", "Day"), MinWidth: design.Space8 * 4, MaxWidth: design.Space8 * 6},
-			{Title: "tokens", Width: design.Space8 * 3, Align: ui.End},
+			{Title: st.tr("词元 tokens", "Tokens"), Width: design.Space8 * 3, Align: ui.End},
 		}
 		if daysCostVisible(days) {
 			columns = append(columns, ui.TableColumn{
@@ -310,7 +311,7 @@ func buildModelSection(c *ui.Context, t *design.Tokens, st *state, data contract
 		columns := []ui.TableColumn{
 			{Title: st.tr("模型", "Model"), MinWidth: design.Space8 * 5, MaxWidth: design.Space8 * 10},
 			{Title: st.tr("调用", "Calls"), Width: design.Space8 * 2, Align: ui.End},
-			{Title: "tokens", Width: design.Space8 * 3, Align: ui.End},
+			{Title: st.tr("词元 tokens", "Tokens"), Width: design.Space8 * 3, Align: ui.End},
 			{Title: st.tr("缓存", "Cached"), Width: design.Space8 * 3, Align: ui.End},
 		}
 		if modelsCostVisible(rows) {
@@ -329,7 +330,7 @@ func buildModelSection(c *ui.Context, t *design.Tokens, st *state, data contract
 				return ""
 			}
 			row := rows[index]
-			return firstNonEmpty(row.Model, st.tr("未知模型", "Unknown model")) + " · " +
+			return textutil.FirstNonEmptyTrimmed(row.Model, st.tr("未知模型", "Unknown model")) + " · " +
 				uikit.FormatCompactCount(row.TotalTokens) + " tokens"
 		}
 		ui.Table(body, &st.modelTable, columns, count, func(row, col int) {
@@ -338,7 +339,7 @@ func buildModelSection(c *ui.Context, t *design.Tokens, st *state, data contract
 			color := t.LabelSecondary
 			switch col {
 			case 0:
-				value = firstNonEmpty(model.Model, st.tr("未知模型", "Unknown model"))
+				value = textutil.FirstNonEmptyTrimmed(model.Model, st.tr("未知模型", "Unknown model"))
 				color = t.LabelPrimary
 			case 1:
 				value = fmt.Sprintf("%d", model.Calls)
@@ -370,7 +371,7 @@ func buildWorkspaceSection(c *ui.Context, t *design.Tokens, st *state, data cont
 		columns := []ui.TableColumn{
 			{Title: st.tr("工作区", "Workspace"), MinWidth: design.Space8 * 5, MaxWidth: design.Space8 * 10},
 			{Title: st.tr("会话", "Sessions"), Width: design.Space8 * 2, Align: ui.End},
-			{Title: "tokens", Width: design.Space8 * 3, Align: ui.End},
+			{Title: st.tr("词元 tokens", "Tokens"), Width: design.Space8 * 3, Align: ui.End},
 		}
 		if workspacesCostVisible(rows) {
 			columns = append(columns, ui.TableColumn{
@@ -529,7 +530,7 @@ func buildSessionRow(row ui.ListRow, t *design.Tokens, st *state,
 	})
 	content.Children(func() {
 		ui.Column(row.Context).Grow(1).Shrink(1).MinWidth(design.Space0).Gap(design.Space1).Children(func() {
-			title := firstNonEmpty(session.Title, st.tr("未命名会话", "Untitled conversation"))
+			title := textutil.FirstNonEmptyTrimmed(session.Title, st.tr("未命名会话", "Untitled conversation"))
 			design.Apply(ui.Text(row.Context, title), t.Font(design.TypeS)).
 				FontWeight(design.WeightMedium).TextColor(titleColor).
 				MaxLines(1).Ellipsis("…").Tooltip(title)
@@ -538,7 +539,7 @@ func buildSessionRow(row ui.ListRow, t *design.Tokens, st *state,
 				meta = append(meta, model)
 			}
 			if workspace := session.WorkspaceID; workspace != "" {
-				meta = append(meta, firstNonEmpty(workspaceNames[workspace], workspace))
+				meta = append(meta, textutil.FirstNonEmptyTrimmed(workspaceNames[workspace], workspace))
 			}
 			if !session.UpdatedAt.IsZero() {
 				meta = append(meta, uikit.FormatDateTime(st.locale, session.UpdatedAt))
@@ -584,7 +585,7 @@ func (st *state) workspaceNames(workspaces []contracts.InsightsWorkspace) map[st
 
 // sessionLabel is the accessible name of one leaderboard row.
 func (st *state) sessionLabel(session contracts.InsightsSession) string {
-	title := firstNonEmpty(session.Title, st.tr("未命名会话", "Untitled conversation"))
+	title := textutil.FirstNonEmptyTrimmed(session.Title, st.tr("未命名会话", "Untitled conversation"))
 	label := title
 	if model := strings.TrimSpace(session.Model); model != "" {
 		label += " · " + model

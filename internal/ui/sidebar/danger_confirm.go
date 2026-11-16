@@ -28,9 +28,12 @@ const dangerConfirmWidth = design.DialogWidthS
 // buildDangerConfirm shows the confirmation while *open is true. onConfirm runs
 // only for the danger action; onClose runs for every close (confirm, cancel,
 // Escape, click outside) after the dialog closed, so the caller can drop the
-// pending target. Both callbacks run on the UI thread during a frame.
+// pending target. Both callbacks run on the UI thread during a frame. errText,
+// when non-empty, renders an inline error line above the actions: a failed
+// confirm can reopen the dialog with the failure named instead of closing on a
+// false success (2026-11 audit UX-10).
 func buildDangerConfirm(c *ui.Context, t *design.Tokens, open *bool,
-	title, message, confirmLabel, cancelLabel string,
+	title, message, errText, confirmLabel, cancelLabel string,
 	onConfirm, onClose func()) {
 	if !*open {
 		return
@@ -48,6 +51,9 @@ func buildDangerConfirm(c *ui.Context, t *design.Tokens, open *bool,
 				TextColor(t.LabelPrimary)
 			design.Apply(ui.Text(c, message), t.Text(design.TypeS)).
 				TextColor(t.LabelSecondary).MaxLines(4)
+			if errText != "" {
+				uikit.ErrorLine(c, errText)
+			}
 			uikit.DialogFooter(c, []uikit.DialogAction{
 				// Danger first (left), the safe action last and focused, as
 				// design.DialogFooter orders them. No action is Primary: the

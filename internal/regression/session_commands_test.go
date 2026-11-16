@@ -73,8 +73,10 @@ func overrideSessionPicker(t *testing.T, fn func() ([]string, error)) {
 }
 
 // TestStopCommandEnabledAndCancel covers /stop: disabled when no turn runs,
-// enabled while running, calls Cancel and reports the outcome; a Cancel failure
-// is a readable danger line.
+// enabled while running, calls Cancel and enters the stopping state (2026-11
+// audit UX-06): the 已停止 toast fires only when the run settles, a second
+// request while stopping is ignored, and a Cancel failure is a readable danger
+// line.
 func TestStopCommandEnabledAndCancel(t *testing.T) {
 	chat := newFakeChat()
 	chat.addSession(contracts.ChatSession{ID: "sess-idle", Title: "空闲",
@@ -87,8 +89,8 @@ func TestStopCommandEnabledAndCancel(t *testing.T) {
 	// The palette skips disabled commands, so the disabled state is the guard;
 	// (Run is only reachable through the palette.)
 
-	// A running turn enables the command; Cancel is called and the success
-	// badge is rendered in the composer area.
+	// A running turn enables the command; Cancel is called and the composer
+	// enters the stopping state — the reply may still stream, so no toast yet.
 	chat.addSession(contracts.ChatSession{ID: "sess-run", Title: "运行中", Running: true,
 		Messages: []contracts.ChatMessage{{ID: "m1", Role: contracts.ChatRoleUser, Text: "q"}}}, true)
 	harness.tester.Frame()
@@ -103,10 +105,39 @@ func TestStopCommandEnabledAndCancel(t *testing.T) {
 	if got := chat.cancelCalls(); len(got) != 1 || got[0] != "sess-run" {
 		t.Fatalf("Cancel calls = %v, want [sess-run]", got)
 	}
-	requireToast(t, harness.notifier, "已停止")
+	requireHasText(t, harness.tester, "停止中…")
+	if toastMatches(harness.notifier, "已停止") {
+		t.Fatal("the 已停止 toast fired before the run settled")
+	}
 
-	// Cancel failure is readable and leaves the stack usable.
+	// A second request while stopping is ignored (no extra Cancel).
+	if err := stop.Run(); err != nil {
+		t.Fatalf("Run /stop while stopping: %v", err)
+	}
+	harness.tester.Frame()
+	if got := chat.cancelCalls(); len(got) != 1 {
+		t.Fatalf("a second stop re-triggered Cancel: %v", got)
+	}
+
+	// The run settles: the stopping state clears and the toast fires once.
+	session, ok := chat.Session("sess-run")
+	if !ok {
+		t.Fatal("sess-run missing")
+	}
+	session.Running = false
+	chat.updateSession(session)
+	settleFrames(t, harness.tester, "stop settle toast", func() bool {
+		return toastMatches(harness.notifier, "已停止")
+	})
+	requireNoText(t, harness.tester, "停止中…")
+
+	// Cancel failure is readable and leaves the stack usable. Restart the run,
+	// inject the failure and stop again.
+	session.Running = true
+	chat.updateSession(session)
+	harness.tester.Frame()
 	chat.setCancelError(errors.New("cancel timeout"))
+	stop = harness.command(t, "zeokeel.session.stop")
 	if err := stop.Run(); err != nil {
 		t.Fatalf("Run /stop with a Cancel error: %v", err)
 	}

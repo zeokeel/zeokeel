@@ -127,12 +127,21 @@ func TestThinkingMenuQwenFamilyModes(t *testing.T) {
 	assertMenuLabels(t, tester, "模型", "推理等级", "-", "打开模型设置…")
 	h.assertTexts(tester, "Qwen 3.8")
 	openReasoningLevelMenu(t, h, tester)
-	h.assertTexts(tester, "跟随模型默认（系列默认）", "默认", "关闭思考", "思考开启", "深度思考")
+	// With no configured model default the follow row and the built-in 「默认」
+	// mode merge into one 「默认（跟随模型）」 row (2026-11 audit US-07).
+	h.assertTexts(tester, "默认（跟随模型）", "关闭思考", "思考开启", "深度思考")
+	if _, ok := tester.AccessByRole(ui.RoleMenuItemRadio, "默认"); ok {
+		t.Fatal("the built-in 默认 mode must merge into the follow row when the model has no configured default")
+	}
 	// With no explicit override for this (conversation, model) the follow row
 	// is checked; the model itself has no configured default, so it names the
 	// family default.
-	if info, ok := tester.AccessByRole(ui.RoleMenuItemRadio, "跟随模型默认（系列默认）"); !ok || !info.Checked {
+	if info, ok := tester.AccessByRole(ui.RoleMenuItemRadio, "默认（跟随模型）"); !ok || !info.Checked {
 		t.Fatalf("follow-model radio = %+v/%v, want the checked radio", info, ok)
+	}
+	// The strength档 carries its trade-off hint (deeper = slower/costlier).
+	if info, ok := tester.AccessByRole(ui.RoleMenuItemRadio, "深度思考"); !ok || !strings.Contains(info.Description, "更慢") {
+		t.Fatalf("deep-thinking hint = %+v/%v, want the slower/costlier trade-off tooltip", info, ok)
 	}
 
 	// Picking a mode stores the (conversation, model) row (the agent reads it
@@ -236,7 +245,7 @@ func TestThinkingMenuLegacyEffortMigration(t *testing.T) {
 	// The effective legacy level is the row's trailing value.
 	h.assertTexts(tester, "高强度")
 	openReasoningLevelMenu(t, h, tester)
-	h.assertTexts(tester, "跟随模型默认（系列默认）", "低强度", "中强度")
+	h.assertTexts(tester, "默认（跟随模型）", "低强度", "中强度")
 	h.clickExact(tester, "中强度")
 	key := contracts.SessionModelThinkingSettingKey("sess-1", "mystery-model")
 	if got := settings.get(key); got != contracts.ThinkingModeReasoningMedium {
@@ -261,7 +270,7 @@ func TestThinkingMenuUnknownModelInfersOtherFamily(t *testing.T) {
 
 	openChipMenu(t, h, tester, "totally-unknown-model")
 	openReasoningLevelMenu(t, h, tester)
-	h.assertTexts(tester, "跟随模型默认（系列默认）", "默认", "低强度", "中强度", "高强度")
+	h.assertTexts(tester, "默认（跟随模型）", "低强度", "中强度", "高强度")
 }
 
 func TestThinkingMenuSessionModelOverrideWins(t *testing.T) {
@@ -278,7 +287,7 @@ func TestThinkingMenuSessionModelOverrideWins(t *testing.T) {
 	openChipMenu(t, h, tester, "qwen3.8-flash-next")
 	h.assertTexts(tester, "Qwen")
 	openReasoningLevelMenu(t, h, tester)
-	h.assertTexts(tester, "跟随模型默认（系列默认）", "关闭思考", "思考开启", "深度思考")
+	h.assertTexts(tester, "默认（跟随模型）", "关闭思考", "思考开启", "深度思考")
 }
 
 func TestThinkingMenuCustomFamilyWithoutModesHidden(t *testing.T) {
@@ -305,7 +314,7 @@ func TestThinkingMenuEnglishCopy(t *testing.T) {
 	openChipMenu(t, h, tester, "qwen3.8-flash-next")
 	assertMenuLabels(t, tester, "Model", "Reasoning level", "-", "Open model settings…")
 	h.clickExact(tester, "Reasoning level")
-	h.assertTexts(tester, "Follow the model default (Family default)", "Default", "Thinking off", "Thinking on", "Deep thinking")
+	h.assertTexts(tester, "Default (follow model)", "Thinking off", "Thinking on", "Deep thinking")
 	h.clickExact(tester, "Deep thinking")
 	key := contracts.SessionModelThinkingSettingKey("sess-1", "qwen3.8-flash-next")
 	if got := settings.get(key); got != contracts.ThinkingModeQwenDeep {

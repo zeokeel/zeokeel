@@ -43,6 +43,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -71,16 +72,16 @@ type Config struct {
 // copy resolves the configured strings with their defaults.
 func (c Config) resolved() Config {
 	return Config{
-		Title:               firstNonEmpty(c.Title, "对话"),
-		EmptyText:           firstNonEmpty(c.EmptyText, "还没有消息，开始一段新对话吧。"),
-		ComposerPlaceholder: firstNonEmpty(c.ComposerPlaceholder, "输入消息…"),
-		SendLabel:           firstNonEmpty(c.SendLabel, "发送"),
-		StopLabel:           firstNonEmpty(c.StopLabel, "停止"),
-		TabChat:             firstNonEmpty(c.TabChat, "对话"),
-		TabTrajectory:       firstNonEmpty(c.TabTrajectory, "轨迹"),
-		TabMemory:           firstNonEmpty(c.TabMemory, "记忆"),
-		TabContext:          firstNonEmpty(c.TabContext, "上下文"),
-		ComposerHint:        firstNonEmpty(c.ComposerHint, "Enter 发送 · Shift+Enter 换行"),
+		Title:               textutil.FirstNonEmptyTrimmed(c.Title, "对话"),
+		EmptyText:           textutil.FirstNonEmptyTrimmed(c.EmptyText, "还没有消息，开始一段新对话吧。"),
+		ComposerPlaceholder: textutil.FirstNonEmptyTrimmed(c.ComposerPlaceholder, "输入消息…"),
+		SendLabel:           textutil.FirstNonEmptyTrimmed(c.SendLabel, "发送"),
+		StopLabel:           textutil.FirstNonEmptyTrimmed(c.StopLabel, "停止"),
+		TabChat:             textutil.FirstNonEmptyTrimmed(c.TabChat, "对话"),
+		TabTrajectory:       textutil.FirstNonEmptyTrimmed(c.TabTrajectory, "轨迹"),
+		TabMemory:           textutil.FirstNonEmptyTrimmed(c.TabMemory, "记忆"),
+		TabContext:          textutil.FirstNonEmptyTrimmed(c.TabContext, "上下文"),
+		ComposerHint:        textutil.FirstNonEmptyTrimmed(c.ComposerHint, "Enter 发送 · Shift+Enter 换行"),
 	}
 }
 
@@ -169,6 +170,12 @@ type state struct {
 	// fold opened in a message (list.md HoldPlace): the clicked line stays under
 	// the pointer instead of being pushed by the growing row.
 	chatHoldPlace bool
+	// dockScroll keeps the composer dock's scroll offset (UX-02): the dock is
+	// height-budgeted, so a long todo list + goal + approval card scroll inside
+	// it instead of pushing the composer out of the window. childBannerScroll
+	// is the same budget for the child conversation's banner dock.
+	dockScroll        ui.ScrollState
+	childBannerScroll ui.ScrollState
 	// messageFocusPending is the one-shot "open the conversation at this
 	// message" handoff from a search surface (contracts.SessionFocus, provided
 	// as KeySessionFocus). The screen build consumes it before the transcript
@@ -371,6 +378,23 @@ type state struct {
 	// only.
 	runSawRunning      bool
 	runObservedSession string
+	// runSettledAnnounce is the one-shot settle edge for the screen-reader
+	// announcement (UX-19): the transition is observed in the subscription
+	// Post or the frame build, and the next session build announces it.
+	runSettledAnnounce bool
+	// stopRequested is the session whose stop was requested and whose cancel
+	// the backend has not settled yet (UX-06): the composer shows 停止中… and
+	// refuses re-triggers; the settle toasts 已停止 once and clears it.
+	stopRequested string
+	// draftOverwritePending is the text waiting for the overwrite confirmation
+	// (UX-05): editing a message or clicking a hero example over a non-empty
+	// draft asks through ConfirmDanger first; Cancel keeps the draft.
+	draftOverwritePending string
+	draftOverwriteOpen    bool
+	// lastAnnouncedApproval is the oldest pending approval ID the screen last
+	// announced (UX-19): a new oldest request announces its arrival; an empty
+	// queue resets it so the next arrival announces again.
+	lastAnnouncedApproval string
 
 	// Composer command feedback: the last error line and the /compact loading
 	// state (a success is a transient toast, never a resident badge).
@@ -451,10 +475,23 @@ func openSettingsPage(navigator contracts.Navigator, pageID string) {
 // Settings page identities the conversation links to (the settings module's
 // public PageID/BehaviorPageID/MemoryPageID values).
 const (
-	settingsPageModel  = "model"
-	settingsPageMemory = "memory"
-	settingsPageSearch = "search"
+	settingsPageModel    = "model"
+	settingsPageMemory   = "memory"
+	settingsPageSearch   = "search"
+	settingsPageBehavior = "behavior"
 )
+
+// finishStop completes a requested stop once the backend settled the run
+// (UX-06): the 已停止 toast fires here — never at request time, when the reply
+// may still stream — and the stopping state clears so the composer returns to
+// its idle anatomy.
+func (st *state) finishStop() {
+	if st == nil || st.stopRequested == "" {
+		return
+	}
+	st.stopRequested = ""
+	st.toast(contracts.NotifyInfo, st.tr("已停止", "Stopped"))
+}
 
 // toast raises one transient host toast (nil-safe). Transient feedback —
 // export/stop/compaction/goal outcomes, copy confirmations — goes here instead
@@ -553,6 +590,14 @@ func Module() *module.Descriptor[Config] {
 				// change (a model call, a settle) can move the folded view, so a
 				// visible Context tab re-reads it on the next frame.
 				moduleState.contextDirty = true
+				// A requested stop settles here (UX-06): the 已停止 toast fires
+				// when the run actually ends — even if the user switched
+				// conversations while the cancel was in flight.
+				if moduleState.stopRequested == sessionID {
+					if settled, ok := chat.Session(sessionID); ok && !settled.Running {
+						moduleState.finishStop()
+					}
+				}
 				if observeRunSettledForFocus(chat, moduleState) {
 					// The settle is observed here first (before the next screen
 					// build), so request the composer keyboard handoff now: the
@@ -561,6 +606,9 @@ func Module() *module.Descriptor[Config] {
 					if moduleState.tab == tabChat && strings.TrimSpace(chat.ActiveSession()) == sessionID {
 						moduleState.focusComposer = true
 					}
+					// The next session build announces the finished reply
+					// (UX-19); the Post has no ui.Context to announce from.
+					moduleState.runSettledAnnounce = true
 				}
 				runtime.Invalidate()
 			})
@@ -573,12 +621,16 @@ func Module() *module.Descriptor[Config] {
 		}
 
 		// Dropped files (the native window's drop) stage as composer
-		// attachments, exactly like the native picker's selection.
+		// attachments, exactly like the native picker's selection. The reads
+		// run off the UI thread (AR-10); a drop outside the conversation screen
+		// says where the files went and offers the way there (UX-15).
 		if drop, ok := ctx.Get(contracts.KeyFileDrop); ok {
 			drop.SetHandler(func(paths []string) {
 				runtime.Post(func() {
-					stageAttachmentFiles(moduleState, paths)
-					runtime.Invalidate()
+					stageAttachmentFilesAsync(runtime, moduleState, moduleState.draftSession, paths,
+						func(staged int) {
+							notifyDropOutsideSession(moduleState, navigator, staged)
+						})
 				})
 			})
 			if err := own(ctx, func() (func(), error) {
@@ -1061,14 +1113,26 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 				// A stop must stop: the agent backend disarms the goal when the
 				// human stops (the dock then offers 继续目标) and owns the prompt
 				// inbox, so a stop never clears the queued prompts; their drain
-				// is the backend's decision.
-				if err := chat.Cancel(session.ID); err != nil {
-					st.commandErr = st.tr("停止失败：", "Stop failed: ") + err.Error()
-				} else {
-					st.commandErr = ""
-					st.toast(contracts.NotifySuccess, st.tr("已停止", "Stopped"))
-				}
-				runtime.Invalidate()
+				// is the backend's decision. The shared path carries the stopping
+				// state and the settle-time toast (UX-06).
+				cancelRunningTurn(chat, st, runtime, session.ID)
+				return nil
+			},
+		},
+		{
+			// The stable Esc arbitration (UX-03): the window-level fallback
+			// calls this command instead of duplicating the screen's Esc order
+			// (find bar → child view → deny approval → dialogs → menu → stop).
+			ID:    "session.escape",
+			Title: st.tr("Esc：关闭 / 拒绝 / 停止", "Esc: close / deny / stop"),
+			Hint: st.tr("按当前上下文关闭查找、返回父会话、拒绝审批、关闭菜单或停止回复",
+				"Close find, return to the parent, deny an approval, dismiss a menu or stop the reply, by context"),
+			Order: 43,
+			Enabled: func() bool {
+				return strings.TrimSpace(chat.ActiveSession()) != ""
+			},
+			Run: func() error {
+				sessionEscape(chat, st, runtime, chat.ActiveSession())
 				return nil
 			},
 		},
@@ -1118,15 +1182,6 @@ func own(ctx cordis.Context, register func() (func(), error)) error {
 	return nil
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
-
 // sendWhileRunningEnabled reports whether Enter queues the prompt while the
 // active turn still runs. Queueing is a fixed behavior (A4): the old
 // ui.sendWhileRunning Settings control was removed, so the stored row is no
@@ -1145,6 +1200,23 @@ type composerDraft struct {
 	attachErr   string
 }
 
+// sessionDraftSettingKey is the settings row that carries one conversation's
+// unsent draft text across app restarts (UX-18). Only the text persists: the
+// staged attachment bytes stay in memory (a settings row is not a file store).
+func sessionDraftSettingKey(sessionID string) string {
+	return "session." + sessionID + ".draft"
+}
+
+// persistDraftText writes one conversation's draft text to the settings store
+// (empty clears the row). Writes happen on user-paced edges — a conversation
+// switch, a send, a queue — never per keystroke or per frame.
+func (st *state) persistDraftText(sessionID, text string) {
+	if st == nil || st.settings == nil || sessionID == "" {
+		return
+	}
+	_ = st.settings.Set(sessionDraftSettingKey(sessionID), text)
+}
+
 // saveComposerDraft stores the live composer state under sessionID and clears
 // it, so the caller can load another conversation's state without copying the
 // previous one over it. An empty draft is dropped instead of cached.
@@ -1156,6 +1228,7 @@ func (st *state) saveComposerDraft(sessionID string) {
 		if st.composerDrafts != nil {
 			delete(st.composerDrafts, sessionID)
 		}
+		st.persistDraftText(sessionID, "")
 		return
 	}
 	if st.composerDrafts == nil {
@@ -1166,6 +1239,8 @@ func (st *state) saveComposerDraft(sessionID string) {
 		attachments: st.pendingAttachments,
 		attachErr:   st.attachErr,
 	}
+	// The text survives the restart too (UX-18); the attachments stay in memory.
+	st.persistDraftText(sessionID, st.draft)
 	st.draft = ""
 	st.pendingAttachments = nil
 	st.attachErr = ""
@@ -1177,17 +1252,20 @@ func (st *state) loadComposerDraft(sessionID string) {
 	st.draft = ""
 	st.pendingAttachments = nil
 	st.attachErr = ""
-	if st.composerDrafts == nil {
-		return
+	if st.composerDrafts != nil {
+		if saved, ok := st.composerDrafts[sessionID]; ok {
+			st.draft = saved.text
+			st.pendingAttachments = saved.attachments
+			st.attachErr = saved.attachErr
+			delete(st.composerDrafts, sessionID)
+			return
+		}
 	}
-	saved, ok := st.composerDrafts[sessionID]
-	if !ok {
-		return
+	// No in-memory draft: the settings row carries the text across restarts
+	// (UX-18). It stays stored until the next save/send updates it.
+	if st.settings != nil && sessionID != "" {
+		st.draft = st.settings.Get(sessionDraftSettingKey(sessionID), "")
 	}
-	st.draft = saved.text
-	st.pendingAttachments = saved.attachments
-	st.attachErr = saved.attachErr
-	delete(st.composerDrafts, sessionID)
 }
 
 // withComposerSession applies fn to the composer state that belongs to
@@ -1284,6 +1362,8 @@ func enqueueDraft(st *state, sessionID string) bool {
 	st.queueActionErr = ""
 	st.draft = ""
 	st.composerCaret = 0
+	// The queued draft must not resurrect after a restart (UX-18).
+	st.persistDraftText(sessionID, "")
 	st.toast(contracts.NotifySuccess, st.tr("已加入排队", "Added to the queue"))
 	return true
 }

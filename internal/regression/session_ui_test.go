@@ -300,8 +300,9 @@ func TestSessionAttachmentSizeBoundary(t *testing.T) {
 		t.Fatalf("close at-limit file: %v", err)
 	}
 	harness.h.ui.FileDrop().Dispatch([]string{atLimit})
-	harness.tester.Frame()
-	requireHasText(t, harness.tester, "at-limit.txt")
+	// AR-10: staging reads the file off the UI thread, so settle until the chip
+	// lands rather than asserting on the first frame after the dispatch.
+	settleFrames(t, harness.tester, "at-limit chip", func() bool { return harness.tester.HasText("at-limit.txt") })
 	requireHasText(t, harness.tester, "10.0 MB")
 	requireNoText(t, harness.tester, "超过 10 MB 附件上限")
 
@@ -318,8 +319,7 @@ func TestSessionAttachmentSizeBoundary(t *testing.T) {
 		t.Fatalf("close over-limit file: %v", err)
 	}
 	harness.h.ui.FileDrop().Dispatch([]string{overLimit})
-	harness.tester.Frame()
-	requireHasText(t, harness.tester, "超过 10 MB 附件上限")
+	settleFrames(t, harness.tester, "over-limit error", func() bool { return harness.tester.HasText("超过 10 MB 附件上限") })
 	requireHasText(t, harness.tester, "over-limit.txt")
 	// The rejected file is not staged; the accepted chip is still there.
 	requireHasText(t, harness.tester, "at-limit.txt")
@@ -334,20 +334,17 @@ func TestSessionAttachmentInvalidPaths(t *testing.T) {
 	})
 	dir := t.TempDir()
 	harness.h.ui.FileDrop().Dispatch([]string{dir})
-	harness.tester.Frame()
-	requireHasText(t, harness.tester, "不是可读的普通文件")
+	settleFrames(t, harness.tester, "directory rejection", func() bool { return harness.tester.HasText("不是可读的普通文件") })
 
 	harness.h.ui.FileDrop().Dispatch([]string{filepath.Join(dir, "missing.txt")})
-	harness.tester.Frame()
-	requireHasText(t, harness.tester, "不是可读的普通文件")
+	settleFrames(t, harness.tester, "missing-path rejection", func() bool { return harness.tester.HasText("不是可读的普通文件") })
 
 	valid := filepath.Join(dir, "valid.txt")
 	if err := os.WriteFile(valid, []byte("hello"), 0o644); err != nil {
 		t.Fatalf("write valid file: %v", err)
 	}
 	harness.h.ui.FileDrop().Dispatch([]string{valid})
-	harness.tester.Frame()
-	requireHasText(t, harness.tester, "valid.txt")
+	settleFrames(t, harness.tester, "valid chip", func() bool { return harness.tester.HasText("valid.txt") })
 	requireNoText(t, harness.tester, "不是可读的普通文件")
 }
 

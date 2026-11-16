@@ -209,6 +209,14 @@ func (r *Root) closePalette() {
 	r.requestFrame()
 }
 
+// sessionEscapeCommandID is the stable command the session module registers to
+// adjudicate the conversation's Escape semantics (child view returns to the
+// parent, an open FindBar closes, menus dismiss). The window-level fallback
+// delegates to it when present so the same key keeps one meaning regardless of
+// where the focus sits (2026-11 audit UX-03); the fallback's own deny/stop
+// promise applies only when the module has not registered the command.
+const sessionEscapeCommandID = "session.escape"
+
 // escapeFallback is the window-level Escape. Screen-level handlers (the
 // composer's stop key, the approval card's deny key, menus, dialogs and the
 // inspector drawer) take Escape first when their scope holds the focus. When
@@ -217,11 +225,21 @@ func (r *Root) closePalette() {
 // approval card promises ("Esc 拒绝") would silently do nothing. This fallback
 // keeps the promise: deny the oldest pending approval, else stop the running
 // turn, but only on the conversation screen with no modal surface open (R4).
+//
+// The session module owns the conversation's full Escape semantics through the
+// stable session.escape command (it knows the child view, the FindBar and the
+// menu state the window fallback cannot see). When that command is registered
+// and enabled the fallback defers to it instead of blind-denying the parent
+// approval or stopping a hidden run (UX-03); only when the command is absent or
+// disabled does the fallback keep the deny/stop promise itself.
 func (r *Root) escapeFallback() {
 	if r.nav == nil || r.nav.Current() != sessionScreenID {
 		return
 	}
 	if r.paletteOpen || r.inspectorDrawerShown || r.nav.SettingsOpen() {
+		return
+	}
+	if r.runCommandByID(sessionEscapeCommandID) {
 		return
 	}
 	r.mu.Lock()
@@ -315,20 +333,24 @@ func (r *Root) bindChromeShortcuts(c *ui.Context) {
 }
 
 // runCommandByID runs one registered command by id, if it exists and is
-// enabled. The host uses it for chrome shortcuts whose action belongs to a
-// module (the inspector's pane cycling).
-func (r *Root) runCommandByID(id string) {
+// enabled, reporting whether it ran. The host uses it for chrome shortcuts
+// whose action belongs to a module (the inspector's pane cycling) and for the
+// Escape fallback's delegation to the session module's session.escape command
+// (a false return means the command is absent or disabled, so the caller keeps
+// its own fallback behavior).
+func (r *Root) runCommandByID(id string) bool {
 	for _, cmd := range r.rt.commandSpecs() {
 		if cmd.ID != id {
 			continue
 		}
 		if cmd.Enabled != nil && !cmd.Enabled() {
-			return
+			return false
 		}
 		if err := runSafelyErr(cmd.Run); err != nil {
 			log.Printf("uiroot: command %q: %v", id, err)
 		}
 		r.requestFrame()
-		return
+		return true
 	}
+	return false
 }

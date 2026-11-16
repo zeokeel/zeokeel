@@ -12,6 +12,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -71,7 +72,7 @@ func buildMCPConnectionConfig(c *ui.Context, t *design.Tokens, st *state,
 		uikit.ErrorLine(c, st.tr("配置无法解析", "Configuration could not be parsed"))
 		return
 	}
-	row, ok := findMCPServerConfig(rows, firstNonEmpty(server.Name, server.ServerName))
+	row, ok := findMCPServerConfig(rows, textutil.FirstNonEmptyTrimmed(server.Name, server.ServerName))
 	if !ok {
 		return
 	}

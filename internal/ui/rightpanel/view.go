@@ -2,7 +2,6 @@ package rightpanel
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/lib/openpath"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -171,9 +171,9 @@ func buildUnderlineTab(c *ui.Context, t *design.Tokens, tabs ui.TabsParts, index
 		tab = tab.BorderColor(t.Accent)
 	}
 	tab.Children(func() {
-		ink, weight := t.LabelSecondary, 400
+		ink, weight := t.LabelSecondary, design.WeightRegular
 		if active {
-			ink, weight = t.LabelPrimary, 600
+			ink, weight = t.LabelPrimary, design.WeightSemibold
 		}
 		design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).
 			FontWeight(weight).TextColor(ink).MaxLines(1).Ellipsis("…").NoWrap()
@@ -203,9 +203,9 @@ func buildDocumentTab(c *ui.Context, t *design.Tokens, st *state, tabs ui.TabsPa
 		}
 	}
 	tab.Children(func() {
-		ink, weight := t.LabelSecondary, 400
+		ink, weight := t.LabelSecondary, design.WeightRegular
 		if active {
-			ink, weight = t.LabelPrimary, 600
+			ink, weight = t.LabelPrimary, design.WeightSemibold
 		}
 		design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).
 			FontWeight(weight).TextColor(ink).MaxLines(1).Ellipsis("…").NoWrap().
@@ -381,8 +381,10 @@ func buildFilePreviewBody(c *ui.Context, t *design.Tokens, st *state, path strin
 		buildExternalPreview(c, t, st, path, preview)
 	}
 	if preview.truncated {
+		// A truncation notice is a sentence, so it takes the metadata step, not
+		// TypeXXXS's 11 DIP (DESIGN.md §5.3, audit UD-05).
 		design.Apply(ui.Text(c, st.tr("仅显示前 256 KiB", "Showing the first 256 KiB only")),
-			t.TextMuted(design.TypeXXXS))
+			t.TextMuted(design.TypeXXS))
 	}
 }
 
@@ -517,28 +519,30 @@ func buildFilesPage(c *ui.Context, t *design.Tokens, workspace contracts.Workspa
 	entries, loading, listErr := st.syncFilesRoot(workspace, st.runtime)
 	ui.Column(c).FillWidth().Grow(1).Gap(design.Space2).Children(func() {
 		buildWorkspaceHeader(c, t, st, current, loading)
-		ui.Scroll(c).FillWidth().Grow(1).Children(func() {
-			ui.Column(c).FillWidth().Padding(design.Space2, design.Space3).Gap(design.Space3).Children(func() {
-				if artifacts != nil {
-					buildArtifactsSection(c, t, artifacts, st.runtime, st)
-				}
-				switch {
-				case listErr != nil:
-					uikit.ErrorLine(c, st.tr("列目录失败：", "Failed to list the directory: ")+listErr.Error())
-				case loading && entries == nil:
-					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-						ui.Spinner(c).Label(st.tr("正在读取目录…", "Reading the directory…")).
-							Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
-						design.Apply(ui.Text(c, st.tr("正在读取目录…", "Reading the directory…")),
-							t.TextMuted(design.TypeXS))
-					})
-				case len(entries) == 0:
-					design.Apply(ui.Text(c, st.tr("目录为空", "The directory is empty")),
+		// The tree is the virtualized native Outline (UD-14): it must own a
+		// bounded height to build only the rows in view, so the page body is a
+		// bounded column (not an unbounded scroll) and the outline grows into
+		// the remaining space. The deliverables history sits above it in flow.
+		ui.Column(c).FillWidth().Grow(1).Shrink(1).
+			Padding(design.Space2, design.Space3).Gap(design.Space3).Children(func() {
+			if artifacts != nil {
+				buildArtifactsSection(c, t, artifacts, st.runtime, st)
+			}
+			switch {
+			case listErr != nil:
+				uikit.ErrorLine(c, st.tr("列目录失败：", "Failed to list the directory: ")+listErr.Error())
+			case loading && entries == nil:
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+					ui.Spinner(c).Label(st.tr("正在读取目录…", "Reading the directory…")).
+						Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+					design.Apply(ui.Text(c, st.tr("正在读取目录…", "Reading the directory…")),
 						t.TextMuted(design.TypeXS))
-				default:
-					buildWorkspaceTree(c, t, workspace, entries, st)
-				}
-			})
+				})
+			case len(entries) == 0:
+				uikit.EmptyState(c, st.tr("目录为空", "The directory is empty"))
+			default:
+				buildWorkspaceTree(c, t, workspace, entries, st)
+			}
 		})
 	})
 }
@@ -550,7 +554,7 @@ func buildWorkspaceHeader(c *ui.Context, t *design.Tokens, st *state,
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
 		Padding(design.Space2, design.Space3).Children(func() {
 		design.Apply(ui.Text(c, st.tr("工作区", "Workspace")), t.TextMuted(design.TypeXXXS)).NoWrap()
-		design.Apply(ui.Text(c, firstNonEmpty(current.Name, filepath.Base(current.Root))),
+		design.Apply(ui.Text(c, textutil.FirstNonEmptyTrimmed(current.Name, filepath.Base(current.Root))),
 			t.Font(design.TypeXS)).TextColor(t.LabelPrimary).
 			Grow(1).MaxLines(1).Ellipsis("…").Tooltip(current.Root).Bold()
 		if loading {
@@ -572,51 +576,148 @@ func buildWorkspaceHeader(c *ui.Context, t *design.Tokens, st *state,
 	})
 }
 
-// buildWorkspaceTree renders the workspace's root entries with the native
-// ui.Tree: directories show their children only while open, and a directory's
-// listing is read the first time the user opens it. A file row's click opens
-// its tab; a directory row's click opens or closes it.
+// treeStateSuffix marks a pseudo-child row that reports an open directory's
+// loading/empty/error state (a real path never contains a NUL). The outline's
+// item graph stays pure paths; these render as indented state rows.
+const (
+	treeStateLoading = "\x00loading"
+	treeStateEmpty   = "\x00empty"
+	treeStateError   = "\x00error"
+)
+
+// treeEntryPath is one tree item's stable path key.
+func treeEntryPath(entry contracts.FileEntry) string {
+	return textutil.FirstNonEmptyTrimmed(entry.Path, entry.Name)
+}
+
+// buildWorkspaceTree renders the workspace tree with the virtualized native
+// ui.Outline (2026-11 audit UD-14): only the rows in view are built, so a
+// directory of any size is fully reachable (the old ui.Tree capped at 400).
+// Directories lazy-load their listing through the existing syncDir cache the
+// first time they open; a file row's click opens its tab, a directory row's
+// click opens or closes it, and the outline owns the keyboard (arrows move,
+// Right/Left open and close, Enter activates).
 func buildWorkspaceTree(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
 	entries []contracts.FileEntry, st *state) {
-	shown, hidden := capTreeEntries(entries)
-	ui.Tree(c, func() {
-		for _, entry := range shown {
-			st.buildTreeNode(c, t, workspace, entry)
+	// Index every known entry by path (the root listing plus every loaded
+	// directory), so the row builders stay pure lookups.
+	index := make(map[string]contracts.FileEntry, len(entries))
+	addEntries := func(list []contracts.FileEntry) {
+		for _, entry := range list {
+			index[treeEntryPath(entry)] = entry
 		}
-		if hidden > 0 {
-			design.Apply(ui.Text(c, fmt.Sprintf(st.tr("还有 %d 项未显示", "%d more entries not shown"), hidden)),
-				t.TextMuted(design.TypeXXXS)).Padding(design.Space1, design.Space2)
-		}
-	})
-}
-
-// capTreeEntries bounds one directory's rendered rows (the native tree builds
-// every row it shows). It returns the rows and how many were left out, so the
-// tree can say so honestly instead of silently dropping entries.
-func capTreeEntries(entries []contracts.FileEntry) ([]contracts.FileEntry, int) {
-	if len(entries) <= maxTreeEntries {
-		return entries, 0
 	}
-	return entries[:maxTreeEntries], len(entries) - maxTreeEntries
+	addEntries(entries)
+	for _, listing := range st.filesDirs {
+		if listing.loaded {
+			addEntries(listing.entries)
+		}
+	}
+	roots := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		roots = append(roots, treeEntryPath(entry))
+	}
+
+	// children gives an item's children: nil for a file (a leaf), a non-nil
+	// empty slice for a closed directory (a branch with an arrow, but its
+	// listing is NOT read yet — lazy load only on open), and the loaded child
+	// paths (or one state pseudo-row) for an open directory.
+	children := func(path string) []string {
+		if strings.Contains(path, "\x00") {
+			return nil
+		}
+		entry, ok := index[path]
+		if !ok || !entry.Dir {
+			return nil
+		}
+		if !st.filesOutline.Open.Has(path) {
+			return []string{}
+		}
+		listing := st.syncDir(path, workspace)
+		if listing == nil || (listing.loading && !listing.loaded) {
+			return []string{path + treeStateLoading}
+		}
+		if listing.err != nil {
+			return []string{path + treeStateError}
+		}
+		if len(listing.entries) == 0 {
+			return []string{path + treeStateEmpty}
+		}
+		kids := make([]string, 0, len(listing.entries))
+		for _, child := range listing.entries {
+			kids = append(kids, treeEntryPath(child))
+		}
+		return kids
+	}
+
+	if st.filesRow >= st.filesOutline.Rows() {
+		st.filesRow = -1
+	}
+	st.filesOutline.List.Selected = &st.filesRow
+	st.filesOutline.List.Label = func(row int) string {
+		if row < 0 || row >= st.filesOutline.Rows() {
+			return ""
+		}
+		item := st.filesOutline.Item(row)
+		if entry, ok := index[item]; ok {
+			return textutil.FirstNonEmptyTrimmed(entry.Name, filepath.Base(item))
+		}
+		return ""
+	}
+	outline := ui.Outline(c, &st.filesOutline, roots, children, func(path string) {
+		st.buildTreeRow(c, t, index, path)
+	}).Label(st.tr("工作区文件", "Workspace files")).Grow(1).FillWidth()
+	if outline.Submitted() && st.filesRow >= 0 && st.filesRow < st.filesOutline.Rows() {
+		st.activateTreeItem(index, st.filesOutline.Item(st.filesRow))
+	}
 }
 
-// buildTreeNode is one row of the workspace tree.
-func (st *state) buildTreeNode(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
-	entry contracts.FileEntry) {
-	path := firstNonEmpty(entry.Path, entry.Name)
-	if entry.Dir {
-		open := st.directoryOpen(path)
-		item := ui.TreeItem(c, firstNonEmpty(entry.Name, filepath.Base(path)), open, func() {
-			st.buildDirectoryChildren(c, t, workspace, path)
-		})
-		if item.Clicked() {
-			*open = !*open
-			st.invalidate()
+// buildTreeRow is one outline row's content (after the outline's arrow): a
+// directory or file name, or an open directory's loading/empty/error state row.
+func (st *state) buildTreeRow(c *ui.Context, t *design.Tokens, index map[string]contracts.FileEntry, path string) {
+	switch {
+	case strings.HasSuffix(path, treeStateLoading):
+		design.Apply(ui.Text(c, st.tr("正在读取…", "Loading…")), t.TextMuted(design.TypeXS)).
+			Padding(design.Space1, design.Space2)
+		return
+	case strings.HasSuffix(path, treeStateEmpty):
+		uikit.EmptyState(c, st.tr("目录为空", "The directory is empty"))
+		return
+	case strings.HasSuffix(path, treeStateError):
+		parent := strings.TrimSuffix(path, treeStateError)
+		listing := st.directoryListing(parent)
+		if listing.err != nil {
+			uikit.ErrorLine(c, st.tr("列目录失败：", "Failed to list the directory: ")+listing.err.Error())
 		}
 		return
 	}
-	item := ui.TreeItem(c, firstNonEmpty(entry.Name, filepath.Base(path)), nil, nil)
-	item.ContextMenu(func(menu *ui.Menu) {
+	entry := index[path]
+	name := textutil.FirstNonEmptyTrimmed(entry.Name, filepath.Base(path))
+	row := ui.Row(c).FillWidth().Height(design.RowCompactHeight).AlignItems(ui.Center).
+		Gap(design.Space2).PaddingX(design.Space1).Radius(design.RadiusSM)
+	if entry.Dir {
+		// A click on the name toggles the disclosure (the outline's arrow does
+		// the same); the listing loads lazily on open via the children callback.
+		row.ObserveInput(func(ev ui.InputEvent) {
+			if ev.Kind != ui.InputPointerUp || ev.Button != 0 {
+				return
+			}
+			st.toggleTreeDir(path)
+		})
+		row.Children(func() {
+			design.Apply(ui.Text(c, name), t.Font(design.TypeXS)).TextColor(t.LabelPrimary).
+				Grow(1).MaxLines(1).Ellipsis("…")
+		})
+		return
+	}
+	row.ObserveInput(func(ev ui.InputEvent) {
+		if ev.Kind != ui.InputPointerUp || ev.Button != 0 {
+			return
+		}
+		st.openFile(path)
+		st.invalidate()
+	})
+	row.ContextMenu(func(menu *ui.Menu) {
 		if menu.Item(st.tr("打开", "Open")).Chosen() {
 			st.openFile(path)
 		}
@@ -624,53 +725,34 @@ func (st *state) buildTreeNode(c *ui.Context, t *design.Tokens, workspace contra
 			c.WriteClipboard(path)
 		}
 	})
-	if item.Clicked() {
-		st.openFile(path)
-		st.invalidate()
-	}
+	row.Children(func() {
+		design.Apply(ui.Text(c, name), t.Font(design.TypeXS)).TextColor(t.LabelPrimary).
+			Grow(1).MaxLines(1).Ellipsis("…")
+	})
 }
 
-// buildDirectoryChildren renders (and lazily loads) one open directory's
-// entries. It runs while the tree builds the open item's group.
-func (st *state) buildDirectoryChildren(c *ui.Context, t *design.Tokens,
-	workspace contracts.WorkspaceService, path string) {
-	listing := st.syncDir(path, workspace)
-	if listing == nil || (listing.loading && !listing.loaded) {
-		design.Apply(ui.Text(c, st.tr("正在读取…", "Loading…")), t.TextMuted(design.TypeXXXS)).
-			Padding(design.Space1, design.Space2)
-		return
+// toggleTreeDir opens or closes one directory item and requests a frame.
+func (st *state) toggleTreeDir(path string) {
+	if st.filesOutline.Open.Has(path) {
+		st.filesOutline.Open.Remove(path)
+	} else {
+		st.filesOutline.Open.Add(path)
 	}
-	if listing.err != nil {
-		uikit.ErrorLine(c, st.tr("列目录失败：", "Failed to list the directory: ")+listing.err.Error())
-		return
-	}
-	if len(listing.entries) == 0 {
-		design.Apply(ui.Text(c, st.tr("目录为空", "The directory is empty")),
-			t.TextMuted(design.TypeXXXS)).Padding(design.Space1, design.Space2)
-		return
-	}
-	shown, hidden := capTreeEntries(listing.entries)
-	for _, child := range shown {
-		st.buildTreeNode(c, t, workspace, child)
-	}
-	if hidden > 0 {
-		design.Apply(ui.Text(c, fmt.Sprintf(st.tr("还有 %d 项未显示", "%d more entries not shown"), hidden)),
-			t.TextMuted(design.TypeXXXS)).Padding(design.Space1, design.Space2)
-	}
+	st.invalidate()
 }
 
-// directoryOpen returns the stable fold state pointer of one directory (the
-// native TreeItem owns the *bool).
-func (st *state) directoryOpen(path string) *bool {
-	if st.filesOpen == nil {
-		st.filesOpen = make(map[string]*bool)
+// activateTreeItem is the outline's Enter/double-click action: a directory
+// toggles, a file opens its tab; state pseudo-rows do nothing.
+func (st *state) activateTreeItem(index map[string]contracts.FileEntry, path string) {
+	if strings.Contains(path, "\x00") {
+		return
 	}
-	open, ok := st.filesOpen[path]
-	if !ok {
-		open = new(bool)
-		st.filesOpen[path] = open
+	if entry, ok := index[path]; ok && entry.Dir {
+		st.toggleTreeDir(path)
+		return
 	}
-	return open
+	st.openFile(path)
+	st.invalidate()
 }
 
 // buildEmptyPane is the centered empty state of one page: a title in flow,

@@ -121,19 +121,27 @@ func violationKey(rule, file, text string) string {
 // AllowEntry registers a legal self-drawn area (docs/DESIGN.md §7.1). It
 // mirrors internal/design/registry.json's allowlist without importing the
 // design package, so the library stays independent of the app code it scans.
+//
+// Paths are prefixes; Symbol and Text optionally narrow the entry to one call
+// site (2026-11 audit UD-11): Symbol must equal the enclosing function/method
+// name and Text must appear in the normalized violation snippet. An entry
+// without anchors keeps the historical file-level behavior.
 type AllowEntry struct {
 	ID     string
 	Paths  []string
 	Rules  []string
+	Symbol string
+	Text   string
 	Owner  string
 	Reason string
 	Until  string
 }
 
 // matches reports whether the entry covers file under one of the enabled
-// rules. Paths are prefixes: "internal/ui/session" covers the directory *and*
-// a file of that exact name.
-func (a AllowEntry) matches(rule, file string) bool {
+// rules, at the call site named symbol with the normalized snippet text.
+// Paths are prefixes: "internal/ui/session" covers the directory *and* a file
+// of that exact name.
+func (a AllowEntry) matches(rule, file, symbol, text string) bool {
 	ruleOK := false
 	for _, r := range a.Rules {
 		if r == rule {
@@ -142,6 +150,12 @@ func (a AllowEntry) matches(rule, file string) bool {
 		}
 	}
 	if !ruleOK {
+		return false
+	}
+	if a.Symbol != "" && symbol != a.Symbol {
+		return false
+	}
+	if a.Text != "" && !strings.Contains(text, a.Text) {
 		return false
 	}
 	for _, p := range a.Paths {

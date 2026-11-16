@@ -63,7 +63,9 @@ type RunStatusOptions struct {
 	QueueError string
 	// OnQueueCancel removes one queued prompt; nil hides the per-row action.
 	OnQueueCancel func(index int)
-	// OnQueueClear clears the whole queue; nil hides the action.
+	// OnQueueClear clears the whole queue; nil hides the action. It runs only
+	// after the entry's ConfirmDanger is explicitly confirmed (Cancel is the
+	// Enter default), never on the popover button's own click.
 	OnQueueClear func()
 	// OnQueueResume sends the first queued prompt after a pause; nil hides it.
 	OnQueueResume func()
@@ -160,14 +162,22 @@ func RunStatus(c *ui.Context, o RunStatusOptions) {
 // runStatusQueue draws the queue badge and its popover: the count is a button
 // (the queue must be inspectable), each row can be cancelled, and after a stop
 // paused the queue the popover explains it and offers the explicit resume and
-// clear actions.
+// clear actions. Clearing the whole queue is irreversible, so it asks through
+// uikit.ConfirmDanger first (DESIGN.md rule 9, AP-24).
 func runStatusQueue(c *ui.Context, t *design.Tokens, o RunStatusOptions) {
 	queued := o.Queued
 	if len(queued) == 0 && o.QueueError == "" {
 		return
 	}
+	// The queue area keeps a stable identity: the clear confirmation's open
+	// flag is element-local state on this row, so it survives the frames the
+	// popover rebuilds and never leaks between run-status areas.
+	rowKey := "runstatus.queue"
+	if prefix := strings.TrimSpace(o.KeyPrefix); prefix != "" {
+		rowKey += "/" + prefix
+	}
 	var anchor ui.Element
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+	row := ui.Row(c.Key(rowKey)).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 		if len(queued) > 0 && o.QueueOpen != nil {
 			count := len(queued)
 			label := fmt.Sprintf(T(o.Locale, "已排队 %d 条", "%d queued"), count)
@@ -176,13 +186,7 @@ func runStatusQueue(c *ui.Context, t *design.Tokens, o RunStatusOptions) {
 				tip = T(o.Locale, "已停止：排队消息不会自动发送，展开后可手动发送或取消",
 					"Stopped: queued messages are not sent automatically; open to send or cancel them")
 			}
-			button := ui.Button(c, label).Label(label).
-				Height(t.Theme().Space(5)).PaddingX(design.Space2).Radius(design.RadiusMax).
-				Background(t.BgHover).TextColor(t.Accent).
-				Tooltip(tip)
-			if *o.QueueOpen {
-				button.Background(t.BgSelected)
-			}
+			button := runStatusQueueBadge(c, t, rowKey, label, tip, *o.QueueOpen)
 			if button.Clicked() {
 				*o.QueueOpen = !*o.QueueOpen
 				c.Invalidate()
@@ -202,9 +206,39 @@ func runStatusQueue(c *ui.Context, t *design.Tokens, o RunStatusOptions) {
 	if o.QueueError != "" {
 		ErrorLine(c, o.QueueError)
 	}
-	if !anchor.Valid() || o.QueueOpen == nil || !*o.QueueOpen || len(queued) == 0 {
-		return
+	// The clear confirmation's open flag is element-local state on the queue
+	// row, so it survives the frames the popover rebuilds and never leaks
+	// between run-status areas.
+	var confirmOpen *bool
+	if o.OnQueueClear != nil {
+		confirmOpen = ui.Local(row, "clearConfirm", func() bool { return false })
 	}
+	if anchor.Valid() && o.QueueOpen != nil && *o.QueueOpen && len(queued) > 0 {
+		runStatusQueuePopover(c, t, o, rowKey, anchor, confirmOpen)
+	}
+	// The confirmation is built after the popover so it sits on top: overlays
+	// stack in build order, and Escape and the pointer go to the one built
+	// last (docs/ui/overlays.md). While it is open the modal owns the focus
+	// (safe cancel, never a clear).
+	if confirmOpen != nil {
+		ConfirmDanger(c, confirmOpen, ConfirmDangerOptions{
+			Key:     rowKey + ".clear",
+			Title:   T(o.Locale, "清空全部排队消息？", "Clear all queued messages?"),
+			Message: T(o.Locale, "此操作无法撤销。", "This cannot be undone."),
+			Confirm: T(o.Locale, "确认清空", "Clear all"),
+			Cancel:  T(o.Locale, "取消", "Cancel"),
+			OnConfirm: func() {
+				o.OnQueueClear()
+			},
+		})
+	}
+}
+
+// runStatusQueuePopover draws the open queue's panel beside the badge: the
+// prompt rows with their remove actions, and the resume/clear footer.
+func runStatusQueuePopover(c *ui.Context, t *design.Tokens, o RunStatusOptions,
+	rowKey string, anchor ui.Element, confirmOpen *bool) {
+	queued := o.Queued
 	panelWidth := anchor.Bounds().W
 	if panelWidth < design.DialogWidthXS {
 		// The anchor is the small count badge: give the prompt rows room to be
@@ -251,19 +285,20 @@ func runStatusQueue(c *ui.Context, t *design.Tokens, o RunStatusOptions) {
 							TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…").
 							Tooltip(full)
 						if o.OnQueueCancel != nil {
-							remove := ui.Button(rowC, "").
-								Label(T(o.Locale, "取消排队", "Cancel queued")).
-								Tooltip(fmt.Sprintf(T(o.Locale, "取消第 %d 条排队消息：", "Cancel queued message %d: "),
-									index+1)+runStatusQueuedSummary(queued[index])).
-								Size(t.Theme().Space(5), t.Theme().Space(5)).
-								Radius(design.RadiusSM)
-							remove.Children(func() {
-								ui.Icon(rowC, icons.Close()).Size(design.Space3, design.Space3).
-									TextColor(t.LabelTertiary)
+							// The row's remove action is the product's one icon
+							// button (DESIGN.md rule 8): the entry guarantees the
+							// ≥24 DIP hit target, the Label and the hover/pressed/
+							// focus states the hand-written 20×20 button bypassed
+							// (2026-11 audit UX-08).
+							IconButton(rowC, IconButtonOptions{
+								Key:   fmt.Sprintf("%s.remove.%d", rowKey, index),
+								Label: T(o.Locale, "取消排队", "Cancel queued"),
+								Tooltip: fmt.Sprintf(T(o.Locale, "取消第 %d 条排队消息：", "Cancel queued message %d: "),
+									index+1) + runStatusQueuedSummary(queued[index]),
+								Icon:    icons.Close(),
+								Size:    design.IconSizeS,
+								OnClick: func() { o.OnQueueCancel(index) },
 							})
-							if remove.Clicked() {
-								o.OnQueueCancel(index)
-							}
 						}
 					})
 			})
@@ -277,10 +312,19 @@ func runStatusQueue(c *ui.Context, t *design.Tokens, o RunStatusOptions) {
 						o.OnQueueResume()
 					}
 				}
-				if o.OnQueueClear != nil {
+				if o.OnQueueClear != nil && confirmOpen != nil {
 					if clear := design.Apply(ui.Button(c, T(o.Locale, "清空全部", "Clear all")),
 						t.SecondaryButton()); clear.Clicked() {
-						o.OnQueueClear()
+						// Irreversible: ask first. ConfirmDanger keeps Cancel the
+						// Enter default; the queue survives until the explicit
+						// danger click (DESIGN.md rule 9 / AP-24, 2026-11 audit UX-04).
+						// The popover yields to the modal: an anchored popover
+						// closes on any press outside itself, which would swallow
+						// the confirmation's own click mid-gesture. The count
+						// badge keeps the queue visible behind the scrim.
+						*confirmOpen = true
+						*o.QueueOpen = false
+						c.Invalidate()
 					}
 				}
 			})
@@ -292,6 +336,45 @@ func runStatusQueue(c *ui.Context, t *design.Tokens, o RunStatusOptions) {
 	if len(queued) == 0 && o.QueueOpen != nil {
 		*o.QueueOpen = false
 	}
+}
+
+// runStatusQueueBadge draws the clickable queue-count badge on the compact
+// chip step (28 DIP, DESIGN.md §5.4).
+//
+// design:allowed AP-04 owner=uikit until=2027-06-30
+// Why not the official widget: ui.Badge is informational and carries no click
+// or keyboard semantics; a ui.Button with a background override loses the
+// native hover/pressed/disabled state machine (mygo styleButton only tints a
+// button whose background is the theme's base — design/components.go,
+// DESIGN.md §1.3.1 / AP-02). ButtonBase keeps the official interaction while
+// the badge look is drawn here with every state (2026-11 audit UD-06).
+// What official semantics are preserved: ButtonBase owns the pointer, Enter
+// and Space, the Tab focus, the theme's focus ring and Disabled; Label and
+// Tooltip name and describe the count for assistive technology. The fill and
+// ink below cover rest, hover, pressed, focused and selected (the open
+// popover), so the clickable count never looks dead (AP-11).
+func runStatusQueueBadge(c *ui.Context, t *design.Tokens, rowKey, label, tip string, open bool) ui.Element {
+	button := ui.ButtonBase(c.Key(rowKey + ".badge")).Label(label).
+		Height(design.ControlCompactHeight).PaddingX(design.Space2).Radius(design.RadiusMax).
+		AlignItems(ui.Center).Tooltip(tip)
+	// The badge keeps a quiet fill at rest (the count must read without being
+	// hovered); hover, keyboard focus and the open popover deepen it to the
+	// selection tint, and a press darkens the count ink to the accent's pressed
+	// step — every state is visible.
+	ink := t.Accent
+	switch {
+	case button.Pressed():
+		button = button.Background(t.BgSelected)
+		ink = t.AccentPressed
+	case open || button.Hovered() || button.Focused():
+		button = button.Background(t.BgSelected)
+	default:
+		button = button.Background(t.BgHover)
+	}
+	button.Children(func() {
+		design.Apply(ui.Text(c, label), t.Font(design.TypeS)).TextColor(ink).NoWrap()
+	})
+	return button
 }
 
 // runStatusQueuedSummary truncates one queued prompt for the queue row.

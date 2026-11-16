@@ -56,9 +56,10 @@ func TestSessionI18nSwitchToEnglishAndBack(t *testing.T) {
 		t.Fatalf("export dialog title = %q, want Export conversation", exportTitle)
 	}
 
-	// The trajectory and memory panes' empty states are translated.
+	// The trajectory's trace rows (US-04: thinking + body summary) and the
+	// memory pane's empty state are translated.
 	h.click(tester, "Trajectory")
-	h.assertTexts(tester, "No tool calls in this conversation yet.")
+	h.assertTexts(tester, "Conversation trajectory", "Reasoning", "Reply text")
 	h.click(tester, "Memory")
 	h.assertTexts(tester, "Memory backend not enabled")
 	// The tab strip keeps the focus: Home returns to the first tab (clicking

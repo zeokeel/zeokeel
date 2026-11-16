@@ -9,6 +9,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -178,7 +179,7 @@ func collapsedMCPStatus(status string) string {
 // pluginStatusLabel is the connection badge label (the service's own status
 // text, or a generic fallback).
 func pluginStatusLabel(st *state, status string) string {
-	return firstNonEmpty(status, st.tr("未知状态", "Unknown status"))
+	return textutil.FirstNonEmptyTrimmed(status, st.tr("未知状态", "Unknown status"))
 }
 
 // pluginStatusKind maps an MCP connection state onto the shared status

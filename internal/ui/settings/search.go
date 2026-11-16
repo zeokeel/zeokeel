@@ -9,6 +9,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -59,7 +60,7 @@ func buildSearchPage(c *ui.Context, kctx cordis.Context, st *searchState, locale
 			st.endpoint = store.Get(contracts.SettingWebSearchEndpoint, "")
 			st.loaded = true
 		}
-		apiKeySet := firstNonEmpty(store.Get(contracts.SettingWebSearchAPIKey, ""), st.apiKey) != ""
+		apiKeySet := textutil.FirstNonEmpty(store.Get(contracts.SettingWebSearchAPIKey, ""), st.apiKey) != ""
 		configured := strings.TrimSpace(st.endpoint) != ""
 
 		uikit.Section(c, localized(locale, "搜索后端", "Search backend"), func(*ui.Context) {

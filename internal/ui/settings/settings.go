@@ -29,14 +29,13 @@ import (
 	"strconv"
 	"strings"
 
-	rigtools "github.com/zeokeel/zeokeel-rig/tools"
-
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -297,6 +296,10 @@ type appearanceState struct {
 	// savedHotkey is the persisted accelerator the draft was seeded from, so the
 	// page can show an "unapplied" hint and its action a dirty state.
 	savedHotkey string
+	// conflictArmed gates the two-step save of a conflicting global hotkey
+	// (UX-11): the first Save arms the confirmation, the second Save writes.
+	// Editing the draft disarms it, so a new conflict needs a fresh confirmation.
+	conflictArmed bool
 
 	// transient detects the page being shown again after another page (or the
 	// closed surface), so status copy and store-backed values can refresh.
@@ -700,18 +703,18 @@ func Module() *module.Descriptor[Config] {
 
 		modelLabels := func() buildLabels {
 			return buildLabels{
-				title:             firstNonEmpty(cfg.Title, localized(locale, "模型", "Model")),
-				systemPromptLabel: firstNonEmpty(cfg.SystemPromptLabel, localized(locale, "系统提示词", "System prompt")),
-				saveLabel: firstNonEmpty(cfg.SaveLabel, localized(locale,
+				title:             textutil.FirstNonEmpty(cfg.Title, localized(locale, "模型", "Model")),
+				systemPromptLabel: textutil.FirstNonEmpty(cfg.SystemPromptLabel, localized(locale, "系统提示词", "System prompt")),
+				saveLabel: textutil.FirstNonEmpty(cfg.SaveLabel, localized(locale,
 					"保存", "Save")),
 			}
 		}
 		appearanceLabels := func() buildAppearanceLabels {
 			return buildAppearanceLabels{
-				title:         firstNonEmpty(cfg.AppearanceTitle, localized(locale, "外观", "Appearance")),
-				themeLabel:    firstNonEmpty(cfg.ThemeLabel, localized(locale, "外观模式", "Appearance mode")),
-				languageLabel: firstNonEmpty(cfg.LanguageLabel, localized(locale, "界面语言", "Interface language")),
-				saveLabel:     firstNonEmpty(cfg.SaveAppearanceLabel, localized(locale, "保存", "Save")),
+				title:         textutil.FirstNonEmpty(cfg.AppearanceTitle, localized(locale, "外观", "Appearance")),
+				themeLabel:    textutil.FirstNonEmpty(cfg.ThemeLabel, localized(locale, "外观模式", "Appearance mode")),
+				languageLabel: textutil.FirstNonEmpty(cfg.LanguageLabel, localized(locale, "界面语言", "Interface language")),
+				saveLabel:     textutil.FirstNonEmpty(cfg.SaveAppearanceLabel, localized(locale, "保存", "Save")),
 			}
 		}
 
@@ -761,7 +764,7 @@ func Module() *module.Descriptor[Config] {
 				reveal:      behaviorSearch.reveal,
 				Build: func(c *ui.Context) {
 					syncer.sync()
-					buildBehaviorPage(c, runtime, store, locale, behavior, sandboxService, capabilities, behaviorSearch)
+					buildBehaviorPage(c, runtime, store, locale, behavior, sandboxService, chat, capabilities, behaviorSearch)
 				},
 				Footer: func(c *ui.Context) {
 					uikit.DialogFooter(c, []uikit.DialogAction{
@@ -897,11 +900,28 @@ func Module() *module.Descriptor[Config] {
 				ID: DataPrivacyPageID, Section: "数据", Order: dataPrivacyOrderInData,
 				zhTitle: "数据与隐私", enTitle: "Data & privacy",
 				keywords: func() []string {
-					return append(append([]string{}, dataPrivacyPageKeywords()...), importPageKeywords()...)
+					all := append([]string{}, dataPrivacyPageKeywords()...)
+					all = append(all, importPageKeywords()...)
+					// The opt-in file-hiding field (2026-11 audit RG-10).
+					return append(all, "文件隐藏", "隐藏文件", "deniedGlobs", "glob", "隐私", "privacy", ".env")
 				},
 				Build: func(c *ui.Context) {
 					syncer.sync()
 					buildDataPrivacyPage(c, design.Of(c), ctx, runtime, chat, store, dataPrivacy, importState, locale)
+				},
+				Footer: func(c *ui.Context) {
+					uikit.DialogFooter(c, []uikit.DialogAction{{
+						Label: localized(locale, "保存", "Save"), Primary: true,
+						Disabled: !deniedGlobsDirty(dataPrivacy, store),
+						OnClick: func() {
+							saveDeniedGlobs(dataPrivacy, store, locale)
+							c.Invalidate()
+						},
+					}})
+				},
+				Dirty: func() bool { return deniedGlobsDirty(dataPrivacy, store) },
+				Discard: func() {
+					discardDeniedGlobs(dataPrivacy, store)
 				},
 			},
 			{
@@ -961,8 +981,10 @@ func Module() *module.Descriptor[Config] {
 }
 
 // diagnosticsRows collects the read-only diagnostics values. Optional services
-// degrade to explicit "未启用" values instead of hiding the row.
-func diagnosticsRows(info contracts.AppInfo, dataDir string, toolkit *rigtools.Registry,
+// degrade to explicit "未启用" values instead of hiding the row. The tool surface
+// is the narrow contracts.ToolCatalog (names + count), never the concrete rig
+// registry, so this UI module imports no backend tool framework (AR-06).
+func diagnosticsRows(info contracts.AppInfo, dataDir string, catalog contracts.ToolCatalog,
 	chat contracts.ChatService, store contracts.SettingsService, locale contracts.LocaleService) ([]diagnosticRow, []diagnosticRow) {
 	name := info.Name
 	if name == "" {
@@ -976,20 +998,25 @@ func diagnosticsRows(info contracts.AppInfo, dataDir string, toolkit *rigtools.R
 		{localized(locale, "应用", "Application"), name + " v" + version},
 		{"Commit", diagnosticValue(locale, info.Commit)},
 		{localized(locale, "构建时间", "Build time"), diagnosticValue(locale, info.BuildTime)},
-		{localized(locale, "Go 版本", "Go version"), firstNonEmpty(info.GoVersion, runtime.Version())},
+		{localized(locale, "Go 版本", "Go version"), textutil.FirstNonEmpty(info.GoVersion, runtime.Version())},
 		{localized(locale, "平台", "Platform"), runtime.GOOS + "/" + runtime.GOARCH},
-		{localized(locale, "数据目录", "Data directory"), firstNonEmpty(dataDir, localized(locale, "未设置", "not set"))},
+		{localized(locale, "数据目录", "Data directory"), textutil.FirstNonEmpty(dataDir, localized(locale, "未设置", "not set"))},
 		{localized(locale, "会话数据库", "Session database"), localized(locale, "zeokeel.db（数据目录）", "zeokeel.db (data directory)")},
 	}
 	if dataDir != "" {
 		rows[6].Value = filepath.Join(dataDir, "zeokeel.db")
 	}
 	toolCount := 0
-	if toolkit != nil {
-		toolCount = len(toolkit.Specs())
+	toolNames := localized(locale, "未启用", "not enabled")
+	if catalog != nil {
+		toolCount = catalog.Len()
+		if names := catalog.Names(); len(names) > 0 {
+			toolNames = strings.Join(names, ", ")
+		}
 	}
 	rows = append(rows,
 		diagnosticRow{localized(locale, "工具数", "Tools"), fmt.Sprintf("%d", toolCount)},
+		diagnosticRow{localized(locale, "工具清单", "Tool names"), toolNames},
 		diagnosticRow{localized(locale, "会话数", "Sessions"), fmt.Sprintf("%d", len(chat.Sessions()))},
 	)
 	// Every setting value goes through the shared credential mask, so the page,
@@ -1065,9 +1092,24 @@ func saveModelPage(c *ui.Context, state *moduleState, store contracts.SettingsSe
 }
 
 // applyAppearancePage is the appearance page's pinned footer action: it applies
-// the explicit-save values and reports the result in the page status line.
+// the explicit-save values and reports the result in the page status line. A
+// global hotkey that conflicts with a chrome shortcut needs a second
+// confirmation: the first Save arms it and writes nothing, the second Save
+// overwrites (UX-11, personal-scale ruling — warning + 二次确认, not a block).
 func applyAppearancePage(c *ui.Context, state *appearanceState, store contracts.SettingsService,
 	locale contracts.LocaleService) {
+	if action := globalHotkeyConflict(locale, state.globalHotkey, store); action != "" {
+		if !state.conflictArmed {
+			state.conflictArmed = true
+			state.status = localized(locale,
+				"与「"+action+"」快捷键冲突：再次点「保存」确认覆盖。",
+				"Conflicts with the "+action+" shortcut: press Save again to confirm overwriting it.")
+			state.statusErr = true
+			c.Invalidate()
+			return
+		}
+	}
+	state.conflictArmed = false
 	if err := applyAppearance(state, store, locale); err != nil {
 		state.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
 		state.statusErr = true
@@ -1435,7 +1477,7 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 				Rows: []uikit.PropertyRow{
 					{Label: localized(locale, "当前会话", "Current session"), Value: active},
 					{Label: localized(locale, "默认模型", "Default model"),
-						Value: firstNonEmpty(defaultModel,
+						Value: textutil.FirstNonEmpty(defaultModel,
 							localized(locale, "未配置", "Not configured"))},
 				},
 				Key: "runtime.current", Locale: locale,
@@ -1534,6 +1576,7 @@ func (st *appearanceState) discardHotkey(store contracts.SettingsService) {
 	st.savedHotkey = saved
 	st.hotkeyText = formatHotkeyDisplay(saved)
 	st.hotkeyError = ""
+	st.conflictArmed = false
 	st.capturing = false
 	st.captureText = ""
 	st.captureFocus = false
@@ -1642,14 +1685,4 @@ func own(ctx cordis.Context, register func() (func(), error)) error {
 		return err
 	}
 	return nil
-}
-
-// firstNonEmpty returns the first non-empty string.
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }

@@ -2,6 +2,8 @@ package uiroot
 
 import (
 	"fmt"
+	"log"
+	"runtime/debug"
 	"sort"
 	"sync"
 
@@ -387,8 +389,13 @@ func onceUnregister(remove func()) func() {
 func runSafely(fn func()) {
 	defer func() {
 		// A lost Post must not take down the UI thread. Module panics inside
-		// builders are contained by the caller's own recover.
-		_ = recover()
+		// builders are contained by the caller's own recover. The recovery is
+		// logged with its stack, matching safeBuild/runHandlerSafely, so a
+		// half-applied state update leaves a trace a developer can find
+		// (2026-11 audit AR-18: the silent recover hid the failure).
+		if rec := recover(); rec != nil {
+			log.Printf("uiroot: post: panic: %v\n%s", rec, debug.Stack())
+		}
 	}()
 	fn()
 }

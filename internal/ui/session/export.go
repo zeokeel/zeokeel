@@ -11,6 +11,7 @@ import (
 	"github.com/egoist/mygo"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 )
 
 // ExportJSONLSaver is the JSONL export seam (same contract as ExportSaver):
@@ -104,7 +105,7 @@ func exportSessionLog(st *state, exporter contracts.SessionLogExporter, chatSess
 		notifyExport(st, contracts.NotifyError, st.tr("导出失败：", "Export failed: ")+err.Error())
 		return
 	}
-	title := firstNonEmpty(chatSession.Title, cfg.Title, st.tr("会话", "Conversation"))
+	title := textutil.FirstNonEmptyTrimmed(chatSession.Title, cfg.Title, st.tr("会话", "Conversation"))
 	path, err := ExportLogSaver(st.tr("导出会话原始日志", "Export raw session log"),
 		sanitizeExportFilename(title)+".zip", archive)
 	switch {
@@ -191,7 +192,7 @@ func exportTranscript(chatSession contracts.ChatSession, title string, english b
 	if english {
 		fallback = "Conversation"
 	}
-	fmt.Fprintf(&builder, "# %s\n\n", firstNonEmpty(title, fallback))
+	fmt.Fprintf(&builder, "# %s\n\n", textutil.FirstNonEmptyTrimmed(title, fallback))
 	if createdAt := formatTimestamp(locale, chatSession.CreatedAt); createdAt != "" && createdAt != "—" {
 		if english {
 			fmt.Fprintf(&builder, "Created: %s\n\n", createdAt)

@@ -418,14 +418,15 @@ func buildGoalResumeButton(c *ui.Context, t *design.Tokens, runtime contracts.UI
 // buildGoalDockMenuButton is the goal strip's ⋯ entry (24 DIP More icon).
 func buildGoalDockMenuButton(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
 	label := st.tr("目标操作", "Goal actions")
-	button := ui.Button(c.Key("session.goal.menu"), "").Label(label).Tooltip(label).
-		Size(t.Scale(design.Space6), t.Scale(design.Space6)).
-		PaddingX(design.Space0).Radius(design.RadiusSM)
-	button.Children(func() {
-		ui.Icon(c, icons.More()).Size(t.Scale(design.Space4), t.Scale(design.Space4)).
-			TextColor(t.LabelTertiary)
-	})
-	button.PopoverMenuButton(func(m *ui.Menu) { buildGoalMenu(m, t, runtime, st) })
+	uikit.IconButton(c, uikit.IconButtonOptions{
+		Key:      "session.goal.menu",
+		Label:    label,
+		Tooltip:  label,
+		Icon:     icons.More(),
+		Size:     t.Scale(design.IconSizeS),
+		Variant:  uikit.IconButtonNative,
+		InkColor: t.LabelTertiary,
+	}).PopoverMenuButton(func(m *ui.Menu) { buildGoalMenu(m, t, runtime, st) })
 }
 
 // buildGoalMenu fills the goal strip's menu: pause/resume and complete first,

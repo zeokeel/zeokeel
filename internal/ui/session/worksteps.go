@@ -27,17 +27,61 @@ type workStepActivity struct {
 	en   string
 }
 
-// liveWorkStepActivity resolves the activity of the turn's current step: the
-// latest finished tool call names the work (its category glyph and status word),
-// and a turn that has not called a tool yet is analyzing the request.
+// liveWorkStepActivity resolves the activity of the turn's current phase
+// (US-03): a running tool names the work in progress; once the last tool
+// finished, the turn is thinking (the next iteration's reasoning) or writing
+// the reply — never still "reading files". A turn with no recorded event yet is
+// analyzing the request.
 func liveWorkStepActivity(message contracts.ChatMessage) workStepActivity {
-	if len(message.Tools) == 0 {
-		return workStepActivity{icon: icons.Sparkles(), zh: "正在分析请求", en: "Analyzing the request"}
-	}
-	tool := message.Tools[len(message.Tools)-1]
-	activity := workStepStatus(tool.Name)
-	activity.icon = uikit.ToolIcon(tool.Name)
+	activity, _ := liveWorkStepPhase(message)
 	return activity
+}
+
+// latestRunningTool returns the most recent tool call still in flight, if any.
+func latestRunningTool(message contracts.ChatMessage) (contracts.ToolCall, bool) {
+	for index := len(message.Tools) - 1; index >= 0; index-- {
+		tool := message.Tools[index]
+		if uikit.ParseToolStatus(tool.Status).Kind() == uikit.StatusRunning {
+			return tool, true
+		}
+	}
+	return contracts.ToolCall{}, false
+}
+
+// liveWorkStepPhase resolves the running turn's activity words and its one-line
+// detail together, so the glyph, the word and the detail always describe the
+// same phase:
+//
+//   - a running tool: its progressive word + the call's own summary;
+//   - prose arrived after the last recorded event: writing the reply (the
+//     streaming body below already shows it, so no detail);
+//   - otherwise the model is thinking: the thinking word + a one-line preview
+//     of the current iteration's reasoning (standard mode shows no other
+//     thinking content, so the row carries a glimpse of it);
+//   - no event at all: analyzing the request.
+func liveWorkStepPhase(message contracts.ChatMessage) (workStepActivity, string) {
+	if tool, ok := latestRunningTool(message); ok {
+		activity := workStepStatus(tool.Name)
+		activity.icon = uikit.ToolIcon(tool.Name)
+		return activity, uikit.ToolPreview(tool.Summary, 96)
+	}
+	segments := reasoningSegmentsOrFallback(message)
+	events := mergeTimelineEvents(segments, message.Tools, len(message.Text))
+	lastOffset := 0
+	if len(events) > 0 {
+		lastOffset = events[len(events)-1].offset
+	}
+	if len(message.Text) > lastOffset {
+		return workStepActivity{icon: icons.Pencil(), zh: "正在回复", en: "Writing the reply"}, ""
+	}
+	if len(events) == 0 {
+		return workStepActivity{icon: icons.Sparkles(), zh: "正在分析请求", en: "Analyzing the request"}, ""
+	}
+	detail := ""
+	if len(segments) > 0 {
+		detail = uikit.ToolPreview(segments[len(segments)-1].Text, 96)
+	}
+	return workStepActivity{icon: icons.Sparkles(), zh: "正在思考", en: "Thinking"}, detail
 }
 
 // workStepStatus maps one tool id to its live activity words. The table mirrors
@@ -79,13 +123,12 @@ func workStepStatus(name string) workStepActivity {
 	}
 }
 
-// liveWorkStepDetail is the step's live detail: the latest tool call's summary,
-// already normalized to one line (empty when the call reported none).
+// liveWorkStepDetail is the phase's live detail, already normalized to one
+// line: the running tool's summary, or the current thinking preview (empty
+// when the phase has nothing to show).
 func liveWorkStepDetail(message contracts.ChatMessage) string {
-	if len(message.Tools) == 0 {
-		return ""
-	}
-	return uikit.ToolPreview(message.Tools[len(message.Tools)-1].Summary, 96)
+	_, detail := liveWorkStepPhase(message)
+	return detail
 }
 
 // buildLiveWorkSteps draws the running turn's single activity line:
@@ -97,8 +140,12 @@ func liveWorkStepDetail(message contracts.ChatMessage) string {
 func buildLiveWorkSteps(c *ui.Context, t *design.Tokens, st *state, message contracts.ChatMessage, showDetail bool) {
 	activity := liveWorkStepActivity(message)
 	label := st.tr(activity.zh, activity.en)
+	// The activity row is the standard/compact mode's live region (UX-19, S7
+	// a11y): assistive technology reads the current phase as a status, the way
+	// detailed/verbose get uikit.RunStatus's RoleStatus row.
 	ui.Row(c.Key("session.live." + message.ID)).FillWidth().AlignItems(ui.Center).
-		Gap(design.Space2).PaddingY(design.Space1).Children(func() {
+		Gap(design.Space2).PaddingY(design.Space1).
+		Role(ui.RoleStatus).Label(label).Children(func() {
 		ui.Icon(c, activity.icon).Size(design.Space4, design.Space4).
 			TextColor(t.LabelTertiary)
 		design.Apply(ui.Text(c, label), t.Font(design.TypeXXS)).

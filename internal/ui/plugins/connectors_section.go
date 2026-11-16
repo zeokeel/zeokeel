@@ -25,6 +25,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -231,8 +232,8 @@ func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 		return
 	}
 	design.Apply(ui.Text(c, st.tr(
-		"连接器把外部 MCP 服务接入会话；启用变更在重启后生效。",
-		"Connectors bring external MCP servers into the session; enable changes apply after a restart.")),
+		"连接器把外部 MCP 服务（第三方工具服务，如浏览器、数据库、搜索）接入会话；启用变更在重启后生效。",
+		"Connectors bring external MCP servers (third-party tool services such as browsers, databases and search) into the session; enable changes apply after a restart.")),
 		t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
 
 	if len(cards) == 0 {
@@ -410,7 +411,7 @@ func (p *connectorsState) connectorCards(st *state, service contracts.PluginsSer
 		if used[index] {
 			continue
 		}
-		identity := strings.ToLower(firstNonEmpty(plugin.Name, plugin.ServerName, plugin.URL))
+		identity := strings.ToLower(textutil.FirstNonEmptyTrimmed(plugin.Name, plugin.ServerName, plugin.URL))
 		if identity != "" && seen[identity] {
 			continue
 		}
@@ -436,7 +437,7 @@ func buildStoredConnectorCard(st *state, row contracts.MCPServerConfig, index in
 	name := strings.TrimSpace(row.Name)
 	card := connectorCard{
 		Key:         connectorStoredKey(name, address, nameCounts),
-		Name:        firstNonEmpty(name, st.tr("未命名连接器", "Untitled connector")),
+		Name:        textutil.FirstNonEmptyTrimmed(name, st.tr("未命名连接器", "Untitled connector")),
 		Transport:   transport,
 		Address:     address,
 		ConfigIndex: index,
@@ -528,14 +529,14 @@ func applyConnectorAuthStatus(st *state, card *connectorCard, row contracts.MCPS
 	case contracts.MCPAuthStateRequired:
 		card.StatusKind = uikit.StatusNeedsAction
 		card.StatusLabel = st.tr("需要授权", "Authorization needed")
-		card.StatusTooltip = firstNonEmpty(status.Message, st.tr("OAuth 2.1 授权尚未完成", "OAuth 2.1 authorization is not complete"))
+		card.StatusTooltip = textutil.FirstNonEmptyTrimmed(status.Message, st.tr("OAuth 2.1 授权尚未完成", "OAuth 2.1 authorization is not complete"))
 		card.Failure = false
 		card.AuthAction = true
 		card.FailureSummary = st.tr("需要授权（OAuth 2.1）", "Authorization needed (OAuth 2.1)")
 	case contracts.MCPAuthStateExpired:
 		card.StatusKind = uikit.StatusNeedsAction
 		card.StatusLabel = st.tr("授权已失效", "Authorization expired")
-		card.StatusTooltip = firstNonEmpty(status.Message, st.tr("需要重新授权", "Re-authorization required"))
+		card.StatusTooltip = textutil.FirstNonEmptyTrimmed(status.Message, st.tr("需要重新授权", "Re-authorization required"))
 		card.Failure = false
 		card.AuthAction = true
 		card.FailureSummary = st.tr("授权已失效，请重新授权", "Authorization expired; re-authorize to reconnect")
@@ -552,7 +553,7 @@ func applyConnectorAuthStatus(st *state, card *connectorCard, row contracts.MCPS
 // buildLiveConnectorCard builds a read-only card for a live-only assembly or
 // workspace server: it has no settings row, so edit/remove stay unavailable.
 func buildLiveConnectorCard(st *state, plugin contracts.MCPPlugin, index int) connectorCard {
-	name := firstNonEmpty(plugin.Name, plugin.ServerName, plugin.URL,
+	name := textutil.FirstNonEmptyTrimmed(plugin.Name, plugin.ServerName, plugin.URL,
 		st.tr("未命名连接器", "Untitled connector"))
 	transport := connectorTransportHTTP
 	if strings.TrimSpace(plugin.URL) == "" {
@@ -661,7 +662,7 @@ func (p *connectorsState) buildCard(c *ui.Context, t *design.Tokens, st *state,
 			})
 		})
 
-		address := firstNonEmpty(card.Address, mcpDetailValue(""))
+		address := textutil.FirstNonEmptyTrimmed(card.Address, mcpDetailValue(""))
 		design.Apply(ui.Text(c, address), t.MonoText(design.TypeXXS)).
 			TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…").Tooltip(card.Address)
 		switch {

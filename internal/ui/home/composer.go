@@ -21,6 +21,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -409,7 +410,7 @@ func homeProviderGroup(english bool, info contracts.ModelInfo, tr func(zh, en st
 
 // homeModelLabel names one catalog row: its display name, or its id.
 func homeModelLabel(info contracts.ModelInfo) string {
-	return firstNonEmpty(strings.TrimSpace(info.Name), strings.TrimSpace(info.ID))
+	return textutil.FirstNonEmpty(strings.TrimSpace(info.Name), strings.TrimSpace(info.ID))
 }
 
 // homeDefaultModelLabel names the default model for the compact menu: the
@@ -538,7 +539,17 @@ func buildHomeThinkingRow(m *ui.Menu, runtime contracts.UIRuntime, st *homeCompo
 		}
 		for _, mode := range modes {
 			mode := mode
+			// The "default" mode sends no thinking fields, exactly what 系列默认
+			// (no override) already does — offering both is a near-synonymous
+			// duplicate the user cannot tell apart (audit US-07). 系列默认 is the
+			// single default expression.
+			if mode.ID == contracts.ThinkingModeDefault {
+				continue
+			}
 			item := sub.Item(mode.DisplayName(english))
+			if hint := homeThinkingTradeoff(mode.ID, tr); hint != "" {
+				item.Subtitle(hint)
+			}
 			item.Radio(strings.EqualFold(configured, mode.ID))
 			if item.Chosen() {
 				save(mode.ID)
@@ -547,6 +558,28 @@ func buildHomeThinkingRow(m *ui.Menu, runtime contracts.UIRuntime, st *homeCompo
 	})
 	row.Trailing(homeModelThinkingLabel(info, english, tr))
 	return true
+}
+
+// homeThinkingTradeoff is one reasoning level's plain-language trade-off hint
+// (audit US-07): deeper thinking costs more time and tokens, lighter thinking is
+// faster and cheaper. The strength levels otherwise offered no explanation.
+func homeThinkingTradeoff(modeID string, tr func(zh, en string) string) string {
+	switch modeID {
+	case contracts.ThinkingModeReasoningLow:
+		return tr("思考较浅，更快更省", "Lighter thinking, faster and cheaper")
+	case contracts.ThinkingModeReasoningMedium:
+		return tr("思考深度适中", "Balanced thinking depth")
+	case contracts.ThinkingModeReasoningHigh:
+		return tr("思考更深，更慢更贵", "Deeper thinking, slower and costlier")
+	case contracts.ThinkingModeQwenOff:
+		return tr("不思考，最快", "No thinking, fastest")
+	case contracts.ThinkingModeQwenOn:
+		return tr("开启思考", "Thinking on")
+	case contracts.ThinkingModeQwenDeep:
+		return tr("深度思考，更慢更贵", "Deep thinking, slower and costlier")
+	default:
+		return ""
+	}
 }
 
 // homeModeChoice is one Home context-mode entry; it writes the same agent/chat
@@ -622,6 +655,11 @@ func submitHomeComposer(chat contracts.ChatService, nav contracts.Navigator, run
 	if chat == nil || st.sending || strings.TrimSpace(st.draft) == "" {
 		return false
 	}
+	// The model gate also holds here, so no path creates an empty session that
+	// can only fail (audit UX-09): the composer disables Send and explains why.
+	if strings.TrimSpace(chat.Config().Model) == "" {
+		return false
+	}
 	prompt := strings.TrimSpace(st.draft)
 	attachments := append([]contracts.Attachment(nil), st.attachments...)
 	st.sending = true
@@ -685,6 +723,11 @@ func buildHomeComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 	if st.attachBusy {
 		attachLabel = tr("选择中…", "Choosing…")
 	}
+	// The model gate matches the conversation composer (S7, audit UX-09):
+	// without a configured model sending is disabled, the composer says why and
+	// offers the deep link that fixes it, and the keyboard path creates nothing.
+	missingModel, missingKey := homeConfigGaps(chat)
+	modelReady := chat != nil && !missingModel
 	errors := make([]string, 0, 4)
 	for _, text := range []string{st.attachErr, st.workspaceErr, st.modelErr, st.sendErr} {
 		if strings.TrimSpace(text) != "" {
@@ -744,9 +787,25 @@ func buildHomeComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 			})
 		},
 		Notices: func(ic *ui.Context) {
+			// No model: sending is disabled, so the composer says why and offers
+			// the one action that fixes it — the same notice the conversation
+			// composer shows (FR-31, audit UX-09), instead of letting the first
+			// send create an empty session and fail with a raw backend error.
+			if !modelReady {
+				ui.Row(ic).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+					ui.Icon(ic, icons.AlertTriangle()).Size(design.Space3, design.Space3).TextColor(t.WarningText)
+					design.Apply(ui.Text(ic, tr("尚未配置模型：发送已禁用", "No model configured: sending is disabled")),
+						t.Font(design.TypeXXS)).TextColor(t.WarningText).Grow(1).MaxLines(2)
+					fix := design.Apply(ui.Button(ic, tr("打开模型设置", "Open model settings")),
+						t.SecondaryButton()).Height(design.RowCompactHeight).Shrink(0)
+					if fix.Clicked() {
+						openHomeSettingsPage(navigator, "model")
+					}
+				})
+			}
 			// A missing API key is a pre-send warning, not a hard block: local
 			// model servers need no key, so the send path stays available.
-			if _, missingKey := homeConfigGaps(chat); missingKey {
+			if missingKey {
 				design.Apply(ui.Text(ic, tr(
 					"尚未配置 API Key：发送可能失败；本地模型服务可忽略。",
 					"No API key configured: sending may fail; ignore this for local model servers.")),
@@ -777,10 +836,13 @@ func buildHomeComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 				},
 			})
 		},
-		SendEnabled: chat != nil && !st.sending && strings.TrimSpace(st.draft) != "",
+		SendEnabled: chat != nil && !st.sending && strings.TrimSpace(st.draft) != "" && modelReady,
 		SendLabel:   sendLabel,
 		SendTooltip: tr("发送 (Enter)", "Send (Enter)"),
 		Send: func() bool {
+			if !modelReady {
+				return false
+			}
 			return submitHomeComposer(chat, navigator, runtime, st, tr)
 		},
 		Errors: errors,

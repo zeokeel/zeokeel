@@ -19,6 +19,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -92,6 +93,12 @@ type dataPrivacyState struct {
 	noticeDetail string
 	noticeErr    bool
 	confirmClear bool
+	// Opt-in denied-globs form (2026-11 audit RG-10): the comma-separated draft,
+	// its once-only load flag and the save status line.
+	globsDraft     string
+	globsLoaded    bool
+	globsStatus    string
+	globsStatusErr bool
 }
 
 func newDataPrivacyState() *dataPrivacyState { return &dataPrivacyState{} }
@@ -124,7 +131,7 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 
 		uikit.Section(c, localized(locale, "数据目录", "Data directory"), func(*ui.Context) {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				value := firstNonEmpty(dataDir, localized(locale, "未设置", "Not set"))
+				value := textutil.FirstNonEmpty(dataDir, localized(locale, "未设置", "Not set"))
 				design.Apply(ui.Text(c, value), t.Font(design.TypeXXS), t.MonoFamily()).
 					TextColor(t.LabelPrimary).Grow(1).MaxLines(2)
 				copyButton := design.Apply(ui.Button(c, localized(locale, "复制", "Copy")),
@@ -219,6 +226,8 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
 
+		buildDeniedGlobsSection(c, t, store, st, locale)
+
 		if st.confirmClear && hasSessionList && len(sessions) > 0 {
 			message := fmt.Sprintf(localized(locale,
 				"将删除全部 %d 个会话，此操作无法撤销。",
@@ -290,10 +299,10 @@ func sessionsMarkdown(chat contracts.ChatService, sessions []contracts.ChatSessi
 			continue
 		}
 		count++
-		title := firstNonEmpty(session.Title, info.Title, localized(locale, "未命名会话", "Untitled session"))
+		title := textutil.FirstNonEmpty(session.Title, info.Title, localized(locale, "未命名会话", "Untitled session"))
 		fmt.Fprintf(&builder, "# %s\n\n", title)
 		for _, message := range session.Messages {
-			role := firstNonEmpty(strings.TrimSpace(message.Role), "unknown")
+			role := textutil.FirstNonEmpty(strings.TrimSpace(message.Role), "unknown")
 			fmt.Fprintf(&builder, "**%s**: %s\n\n", role, message.Text)
 		}
 	}
@@ -363,13 +372,13 @@ func diagnosticReportText(kctx cordis.Context, store contracts.SettingsService, 
 	fmt.Fprintf(&builder, "%s\n\n", localized(locale, "ZeoKeel 诊断报告", "ZeoKeel diagnostic report"))
 	fmt.Fprintf(&builder, "%s: %s\n", localized(locale, "生成时间", "Generated at"), time.Now().Format(time.RFC3339))
 	fmt.Fprintf(&builder, "%s: %s v%s\n", localized(locale, "应用", "Application"),
-		firstNonEmpty(info.Name, "ZeoKeel"), firstNonEmpty(info.Version, "dev"))
-	fmt.Fprintf(&builder, "Commit: %s\n", firstNonEmpty(info.Commit, "unknown"))
-	fmt.Fprintf(&builder, "%s: %s\n", localized(locale, "构建时间", "Build time"), firstNonEmpty(info.BuildTime, "unknown"))
-	fmt.Fprintf(&builder, "Go: %s\n", firstNonEmpty(info.GoVersion, runtime.Version()))
+		textutil.FirstNonEmpty(info.Name, "ZeoKeel"), textutil.FirstNonEmpty(info.Version, "dev"))
+	fmt.Fprintf(&builder, "Commit: %s\n", textutil.FirstNonEmpty(info.Commit, "unknown"))
+	fmt.Fprintf(&builder, "%s: %s\n", localized(locale, "构建时间", "Build time"), textutil.FirstNonEmpty(info.BuildTime, "unknown"))
+	fmt.Fprintf(&builder, "Go: %s\n", textutil.FirstNonEmpty(info.GoVersion, runtime.Version()))
 	fmt.Fprintf(&builder, "%s: %s/%s\n", localized(locale, "平台", "Platform"), runtime.GOOS, runtime.GOARCH)
 	fmt.Fprintf(&builder, "%s: %s\n", localized(locale, "数据目录", "Data directory"),
-		firstNonEmpty(strings.TrimSpace(dataDir), localized(locale, "未设置", "not set")))
+		textutil.FirstNonEmpty(strings.TrimSpace(dataDir), localized(locale, "未设置", "not set")))
 	fmt.Fprintf(&builder, "%s: %d\n", localized(locale, "会话数", "Sessions"), sessionCount)
 	fmt.Fprintf(&builder, "\n%s:\n", localized(locale, "设置项", "Settings"))
 	values := store.All()

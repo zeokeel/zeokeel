@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // hexColorRe is the color-literal shape of DESIGN-LINT §3.1: a string that is
@@ -113,9 +114,16 @@ func metricFix(method string) string {
 // checkDS03 reports raw numeric metric literals (DESIGN-LINT §3.3). Bare
 // FontWeight literals are a warn: heading weights have no type role yet
 // (DESIGN.md D6), so they are grandfathered instead of blocking.
+//
+// Non-literal FontWeight arguments are checked too (2026-11 audit UD-10): the
+// weight must still come from design.WeightRegular/Medium/Semibold — directly
+// as a selector, or through a local alias/variable whose every assignment
+// resolves to a token. A local const/var holding a raw number bypassed the
+// literal-only rule; it warns with the same DS-03 family severity.
 func checkDS03(fc *fileCtx) []Violation {
 	rule := ruleByID("DS-03")
 	var out []Violation
+	var origins map[string][]ast.Expr // lazy: only built for indirect weights
 	ast.Inspect(fc.file, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
@@ -137,6 +145,17 @@ func checkDS03(fc *fileCtx) []Violation {
 			}
 		}
 		if literal == nil {
+			if method == "FontWeight" && len(call.Args) > 0 {
+				if origins == nil {
+					origins = fc.weightOrigins()
+				}
+				if !fc.resolvesToWeightToken(call.Args[0], origins, map[string]bool{}) {
+					text := fc.snippet(sel.Sel.Pos(), call.End())
+					out = append(out, fc.violation(rule, SeverityWarn, call.Args[0].Pos(), text,
+						"间接字重："+text+"（实参无法确认来自 design.Weight* token，绕过字重纪律）",
+						"字重只用 design.WeightRegular/Medium/Semibold（400/500/600）：直接写 token，或让本地别名/变量的每次赋值都来自 design.Weight*（DESIGN.md §5.3 / UD-10）"))
+				}
+			}
 			return true
 		}
 		text := fc.snippet(sel.Sel.Pos(), call.End())
@@ -150,6 +169,72 @@ func checkDS03(fc *fileCtx) []Violation {
 		return true
 	})
 	return out
+}
+
+// weightOrigins collects every right-hand side assigned to each local name in
+// the file (const/var specs and assignments, including :=). A nil entry marks
+// an assignment whose value cannot be paired with the name (iota continuation,
+// multi-value call). The map is file-wide and syntactic: shadowing across
+// scopes is not resolved, which can only hide a violation, never invent one.
+func (fc *fileCtx) weightOrigins() map[string][]ast.Expr {
+	origins := map[string][]ast.Expr{}
+	add := func(name string, value ast.Expr) {
+		origins[name] = append(origins[name], value)
+	}
+	ast.Inspect(fc.file, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.ValueSpec:
+			for i, name := range x.Names {
+				if i < len(x.Values) {
+					add(name.Name, x.Values[i])
+				} else {
+					add(name.Name, nil)
+				}
+			}
+		case *ast.AssignStmt:
+			for i, lhs := range x.Lhs {
+				id, ok := lhs.(*ast.Ident)
+				if !ok {
+					continue
+				}
+				if len(x.Rhs) == len(x.Lhs) {
+					add(id.Name, x.Rhs[i])
+				} else {
+					add(id.Name, nil)
+				}
+			}
+		}
+		return true
+	})
+	return origins
+}
+
+// resolvesToWeightToken reports whether expr is a design.Weight* selector or a
+// local name whose every recorded assignment resolves to one (recursively,
+// with a cycle guard). Anything else — raw numbers, foreign selectors, calls,
+// parameters — is not provably token-derived.
+func (fc *fileCtx) resolvesToWeightToken(expr ast.Expr, origins map[string][]ast.Expr, seen map[string]bool) bool {
+	switch e := expr.(type) {
+	case *ast.SelectorExpr:
+		id, ok := e.X.(*ast.Ident)
+		return ok && fc.packageOf(id) == designPath && strings.HasPrefix(e.Sel.Name, "Weight")
+	case *ast.Ident:
+		values, ok := origins[e.Name]
+		if !ok || len(values) == 0 || seen[e.Name] {
+			return false
+		}
+		seen[e.Name] = true
+		defer delete(seen, e.Name)
+		for _, value := range values {
+			if value == nil || !fc.resolvesToWeightToken(value, origins, seen) {
+				return false
+			}
+		}
+		return true
+	case *ast.ParenExpr:
+		return fc.resolvesToWeightToken(e.X, origins, seen)
+	}
+	return false
 }
 
 // numericLiteral unwraps parentheses and unary signs to find a numeric
@@ -178,8 +263,9 @@ var selfDrawnBases = map[string]bool{
 	"DialogBase": true,
 }
 
-// findAllow returns the first allowlist entry covering file for a rule.
-func findAllow(allow []AllowEntry, rule, file string) (AllowEntry, bool) {
+// findAllow returns the first allowlist entry covering the call site (file,
+// enclosing function symbol, normalized snippet) for a rule.
+func findAllow(allow []AllowEntry, rule, file, symbol, text string) (AllowEntry, bool) {
 	for _, a := range allow {
 		rules := a.Rules
 		if len(rules) == 0 {
@@ -187,7 +273,7 @@ func findAllow(allow []AllowEntry, rule, file string) (AllowEntry, bool) {
 		}
 		entry := a
 		entry.Rules = rules
-		if entry.matches(rule, file) {
+		if entry.matches(rule, file, symbol, text) {
 			return entry, true
 		}
 	}
@@ -213,7 +299,7 @@ func checkDS06(fc *fileCtx, allow []AllowEntry) []Violation {
 		v := fc.violation(rule, rule.Severity, call.Pos(), text,
 			"未登记自绘："+name+"（mygo *Base 重建了官方交互，必须登记 allowlist 并保留 hover/focus/pressed 语义）",
 			"优先用官方件或 uikit 入口（待建 uikit.IconButton）；确需自绘则同步 DESIGN.md §7.1 + internal/design/registry.json allowlist（owner/reason/until）")
-		if entry, ok := findAllow(allow, rule.ID, fc.rel); ok {
+		if entry, ok := findAllow(allow, rule.ID, fc.rel, fc.enclosingFunc(call.Pos()), v.Text); ok {
 			v.Allowed = true
 			v.AllowID = entry.ID
 			v.Owner = entry.Owner

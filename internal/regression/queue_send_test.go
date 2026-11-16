@@ -201,8 +201,9 @@ func TestQueueStopKeepsInbox(t *testing.T) {
 }
 
 // TestQueueRemoveAndClearGoToBackend covers the popover mutations: a row
-// removal calls RemoveQueuedPrompt (the backend entry is really gone) and
-// clear-all empties the rest.
+// removal calls RemoveQueuedPrompt (the backend entry is really gone), and
+// clear-all goes through uikit.ConfirmDanger (2026-11 audit UX-04, DESIGN rule
+// 9): cancelling keeps the queue, only the explicit danger click empties it.
 func TestQueueRemoveAndClearGoToBackend(t *testing.T) {
 	harness := startQueueUI(t, "true")
 	harness.typeQueuePrompt(t, "排队", "甲条")
@@ -223,6 +224,8 @@ func TestQueueRemoveAndClearGoToBackend(t *testing.T) {
 	}
 	requireHasText(t, harness.tester, "已排队 1 条")
 
+	// Clear-all asks first: the popover yields to the ConfirmDanger modal and
+	// the queue survives behind the scrim until the explicit danger click.
 	if !harness.tester.HasText("排队消息") {
 		if err := harness.tester.Click("已排队 1 条"); err != nil {
 			t.Fatalf("reopen queue popover: %v", err)
@@ -230,12 +233,42 @@ func TestQueueRemoveAndClearGoToBackend(t *testing.T) {
 		harness.tester.Frame()
 	}
 	if err := harness.tester.Click("清空全部"); err != nil {
-		t.Fatalf("clear queue: %v; texts = %v", err, harness.tester.Texts())
+		t.Fatalf("open clear confirmation: %v; texts = %v", err, harness.tester.Texts())
+	}
+	harness.tester.Frame()
+	requireHasText(t, harness.tester, "清空全部排队消息？")
+	requireHasText(t, harness.tester, "已排队 1 条")
+	if queued := harness.chat.queueFor("sess-run"); len(queued) != 1 {
+		t.Fatalf("opening the confirmation cleared the inbox early: %+v", queued)
+	}
+
+	// Cancel (the Default) keeps the queue and closes the modal.
+	if err := harness.tester.Click("取消"); err != nil {
+		t.Fatalf("cancel clear: %v; texts = %v", err, harness.tester.Texts())
+	}
+	harness.tester.Frame()
+	requireNoText(t, harness.tester, "清空全部排队消息？")
+	requireHasText(t, harness.tester, "已排队 1 条")
+	if queued := harness.chat.queueFor("sess-run"); len(queued) != 1 || queued[0].Text != "乙条" {
+		t.Fatalf("cancelling the confirmation dropped the inbox: %+v", queued)
+	}
+
+	// The explicit danger click empties the backend inbox.
+	if err := harness.tester.Click("已排队 1 条"); err != nil {
+		t.Fatalf("reopen queue popover after cancel: %v", err)
+	}
+	harness.tester.Frame()
+	if err := harness.tester.Click("清空全部"); err != nil {
+		t.Fatalf("reopen clear confirmation: %v", err)
+	}
+	harness.tester.Frame()
+	if err := harness.tester.Click("确认清空"); err != nil {
+		t.Fatalf("confirm clear: %v; texts = %v", err, harness.tester.Texts())
 	}
 	harness.tester.Frame()
 	requireNoText(t, harness.tester, "已排队")
 	if queued := harness.chat.queueFor("sess-run"); len(queued) != 0 {
-		t.Fatalf("clear-all left backend entries: %+v", queued)
+		t.Fatalf("confirmed clear left backend entries: %+v", queued)
 	}
 	// A cleared inbox is not sent when the run later settles.
 	harness.flipRunning(t, false)

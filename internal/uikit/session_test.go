@@ -9,6 +9,7 @@ package uikit_test
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 
@@ -179,6 +180,100 @@ func TestSessionThreadFollowAndBackToLatest(t *testing.T) {
 	}
 	if !follow {
 		t.Fatal("the back-to-latest action did not resume the follow")
+	}
+}
+
+// TestSessionThreadBackToLatestKeepsPrimaryBudget pins the emphasis budget
+// (2026-11 audit UD-13, AP-20): while the reader is scrolled up with a draft in
+// the composer, the enabled Send is the screen's one accent primary — the
+// floating back-to-latest affordance is a secondary action, not a second
+// primary. The fills are sampled from the rendered frame.
+func TestSessionThreadBackToLatestKeepsPrimaryBudget(t *testing.T) {
+	messages := make([]contracts.ChatMessage, 60)
+	for index := range messages {
+		messages[index] = threadMessage(index)
+	}
+	state := &ui.ListState{}
+	follow, laidOut := true, false
+	tt := ui.NewTester(func(c *ui.Context) {
+		t := design.Of(c)
+		c.SetTheme(t.Theme())
+		ui.Column(c).FillWidth().FillHeight().Background(t.BgBase).Children(func() {
+			uikit.SessionThread(c, uikit.SessionThreadOptions{
+				Messages:  messages,
+				State:     state,
+				FollowEnd: &follow,
+				LaidOut:   &laidOut,
+				Row: func(c *ui.Context, message contracts.ChatMessage) {
+					ui.Text(c, "row:"+message.ID)
+				},
+			})
+			// The composer dock's send position with a non-empty draft: the
+			// enabled accent primary the budget counts.
+			ui.Row(c).FillWidth().Justify(ui.End).Padding(design.Space4).Children(func() {
+				design.Apply(ui.PrimaryButton(c, "发送"), t.PrimaryButton())
+			})
+		})
+	}, 800, 400)
+	tt.Frame()
+	tt.Scroll(400, 200, 0, -300)
+	tt.Frame()
+	if !tt.HasText("回到最新") {
+		t.Fatalf("scrolled up the back-to-latest action is missing; texts = %v", tt.Texts())
+	}
+	back, okBack := tt.AccessByRole(ui.RoleButton, "回到最新")
+	send, okSend := tt.AccessByRole(ui.RoleButton, "发送")
+	if !okBack || !okSend {
+		t.Fatalf("buttons missing (back=%v send=%v); texts = %v", okBack, okSend, tt.Texts())
+	}
+	accent := design.Light().Accent
+	sample := func(b ui.Rect) (uint8, uint8, uint8) {
+		px := tt.Image().RGBAAt(int(b.X)+6, int(b.Y+b.H/2))
+		return px.R, px.G, px.B
+	}
+	isAccent := func(b ui.Rect) bool {
+		r, g, bb := sample(b)
+		return r == accent.R && g == accent.G && bb == accent.B
+	}
+	backAccent, sendAccent := isAccent(back.Bounds), isAccent(send.Bounds)
+	t.Logf("back fill accent=%v, send fill accent=%v", backAccent, sendAccent)
+	if !sendAccent {
+		t.Fatal("control invalid: the enabled Send is not the accent primary in this harness")
+	}
+	if backAccent {
+		t.Error("back-to-latest is a second accent primary beside Send (UD-13, AP-20 ≤1 primary)")
+	}
+	// The affordance's chevron reads in the secondary ink, not OnPrimary. The
+	// 12 DIP glyph is anti-aliased, so its pixels sit on the secondary-over-
+	// white blend line rather than at the exact color; count the clearly inked
+	// ones (alpha ≥ 0.3) that are not the primary text ink's blends.
+	secondary := design.Light().LabelSecondary
+	primary := design.Light().LabelPrimary
+	blendOf := func(px [3]uint8, src ui.Color) bool {
+		if px[0] == 255 {
+			return false
+		}
+		a := float64(255-px[0]) / float64(255-src.R)
+		if a < 0.3 || a > 1 {
+			return false
+		}
+		g := float64(src.G)*a + 255*(1-a)
+		b := float64(src.B)*a + 255*(1-a)
+		return math.Abs(float64(px[1])-g) <= 2 && math.Abs(float64(px[2])-b) <= 2
+	}
+	img := tt.Image()
+	inkPixels := 0
+	for y := int(back.Bounds.Y); y < int(back.Bounds.Y+back.Bounds.H); y++ {
+		for x := int(back.Bounds.X); x < int(back.Bounds.X+back.Bounds.W); x++ {
+			px := img.RGBAAt(x, y)
+			c := [3]uint8{px.R, px.G, px.B}
+			if blendOf(c, secondary) && !blendOf(c, primary) {
+				inkPixels++
+			}
+		}
+	}
+	if inkPixels == 0 {
+		t.Error("back-to-latest paints no LabelSecondary ink (the icon should read as a secondary action)")
 	}
 }
 

@@ -208,6 +208,212 @@ func TestDS06UnregisteredSelfDrawn(t *testing.T) {
 	})
 }
 
+// TestDS06SiteAnchors covers the site-level allowlist granularity (2026-11
+// audit UD-11): an entry may anchor to the enclosing function symbol and/or a
+// normalized source-text snippet, so one registered rich-row function cannot
+// silently exempt every other ButtonBase in the same file (the rail row used
+// to ride the command-palette entry's file prefix). Paths-only entries keep
+// the historical file-level behavior.
+func TestDS06SiteAnchors(t *testing.T) {
+	src := "package probe\n" + uiImport + "\n" +
+		"func palette(c *ui.Context) { ui.ButtonBase(c) }\n" +
+		"func railSessionRow(c *ui.Context) { ui.ButtonBase(c) }\n"
+
+	byFunc := func(violations []conform.Violation, line int) conform.Violation {
+		t.Helper()
+		for _, v := range violations {
+			if v.Rule == "DS-06" && v.Line == line {
+				return v
+			}
+		}
+		t.Fatalf("no DS-06 violation on line %d: %+v", line, violations)
+		return conform.Violation{}
+	}
+
+	t.Run("symbol anchor covers only its function", func(t *testing.T) {
+		violations := scan(t, "internal/uiroot/probe.go", src, conform.ScanOptions{
+			Allowlist: []conform.AllowEntry{{
+				ID: "command-palette.rows", Paths: []string{"internal/uiroot/probe.go"}, Rules: []string{"DS-06"},
+				Symbol: "palette",
+				Owner:  "uiroot", Reason: "r", Until: "2027-06-30",
+			}},
+		})
+		if got := countRule(violations, "DS-06"); got != 2 {
+			t.Fatalf("DS-06 count = %d, want 2", got)
+		}
+		paletteRow := byFunc(violations, 3)
+		if !paletteRow.Allowed || paletteRow.AllowID != "command-palette.rows" {
+			t.Fatalf("palette row = %+v, want allowed by command-palette.rows", paletteRow)
+		}
+		railRow := byFunc(violations, 4)
+		if railRow.Allowed || railRow.Severity != conform.SeverityError {
+			t.Fatalf("rail row = %+v, want an unregistered error (symbol anchor must not leak)", railRow)
+		}
+	})
+
+	t.Run("text anchor covers only the matching snippet", func(t *testing.T) {
+		textSrc := "package probe\n" + uiImport + "\n" +
+			"func f(c *ui.Context) { ui.ButtonBase(c.Key(\"palette.row\")) }\n" +
+			"func g(c *ui.Context) { ui.ButtonBase(c.Key(\"other\")) }\n"
+		violations := scan(t, "internal/uiroot/probe.go", textSrc, conform.ScanOptions{
+			Allowlist: []conform.AllowEntry{{
+				ID: "palette.rows", Paths: []string{"internal/uiroot/probe.go"}, Rules: []string{"DS-06"},
+				Text:  "ButtonBase(c.Key(\"palette.row\"))",
+				Owner: "uiroot", Reason: "r", Until: "2027-06-30",
+			}},
+		})
+		if got := countRule(violations, "DS-06"); got != 2 {
+			t.Fatalf("DS-06 count = %d, want 2", got)
+		}
+		if v := byFunc(violations, 3); !v.Allowed || v.AllowID != "palette.rows" {
+			t.Fatalf("anchored snippet = %+v, want allowed", v)
+		}
+		if v := byFunc(violations, 4); v.Allowed {
+			t.Fatalf("non-matching snippet = %+v, want unregistered", v)
+		}
+	})
+
+	t.Run("symbol and text anchors combine", func(t *testing.T) {
+		violations := scan(t, "internal/uiroot/probe.go", src, conform.ScanOptions{
+			Allowlist: []conform.AllowEntry{{
+				ID: "palette.rows", Paths: []string{"internal/uiroot/probe.go"}, Rules: []string{"DS-06"},
+				Symbol: "railSessionRow", Text: "ButtonBase(c)",
+				Owner: "uiroot", Reason: "r", Until: "2027-06-30",
+			}},
+		})
+		if v := byFunc(violations, 3); v.Allowed {
+			t.Fatalf("palette row = %+v, want unregistered (symbol mismatch)", v)
+		}
+		if v := byFunc(violations, 4); !v.Allowed || v.AllowID != "palette.rows" {
+			t.Fatalf("rail row = %+v, want allowed by both anchors", v)
+		}
+	})
+
+	t.Run("paths-only entry keeps file-level behavior", func(t *testing.T) {
+		violations := scan(t, "internal/uiroot/probe.go", src, conform.ScanOptions{
+			Allowlist: []conform.AllowEntry{{
+				ID: "legacy.file-level", Paths: []string{"internal/uiroot/probe.go"}, Rules: []string{"DS-06"},
+				Owner: "uiroot", Reason: "r", Until: "2027-06-30",
+			}},
+		})
+		for _, line := range []int{3, 4} {
+			if v := byFunc(violations, line); !v.Allowed || v.AllowID != "legacy.file-level" {
+				t.Fatalf("line %d = %+v, want allowed by the paths-only entry", line, v)
+			}
+		}
+	})
+}
+
+// TestDS03IndirectFontWeight covers the UD-10 indirect-weight rule (2026-11
+// audit): a FontWeight argument that is not a numeric literal must still name
+// a design.Weight* token — directly, or through a local alias/variable whose
+// every assignment comes from the tokens. A local const/var holding a raw
+// number is the bypass the literal-only rule missed, and warns (DS-03 family).
+func TestDS03IndirectFontWeight(t *testing.T) {
+	designImport := `import "github.com/zeokeel/zeokeel/internal/design"`
+	tests := []struct {
+		name     string
+		src      string
+		want     int
+		severity string
+		prefix   string
+	}{
+		{
+			name: "local variable holding a raw weight warns",
+			src: "package probe\n" + uiImport + "\n" +
+				"func f(c *ui.Context) { weight := 600; ui.Text(c, \"x\").FontWeight(weight) }\n",
+			want: 1, severity: conform.SeverityWarn, prefix: "间接字重",
+		},
+		{
+			name: "local const holding a raw weight warns",
+			src: "package probe\n" + uiImport + "\n" +
+				"const headingWeight = 600\nfunc f(c *ui.Context) { ui.Text(c, \"x\").FontWeight(headingWeight) }\n",
+			want: 1, severity: conform.SeverityWarn, prefix: "间接字重",
+		},
+		{
+			name: "design token selector is clean",
+			src: "package probe\n" + uiImport + "\n" + designImport + "\n" +
+				"func f(c *ui.Context) { ui.Text(c, \"x\").FontWeight(design.WeightSemibold) }\n",
+			want: 0,
+		},
+		{
+			name: "conditional token variable is clean",
+			src: "package probe\n" + uiImport + "\n" + designImport + "\n" +
+				"func f(c *ui.Context, active bool) {\n" +
+				"	weight := design.WeightRegular\n" +
+				"	if active { weight = design.WeightSemibold }\n" +
+				"	ui.Text(c, \"x\").FontWeight(weight)\n" +
+				"}\n",
+			want: 0,
+		},
+		{
+			name: "const alias of a token is clean",
+			src: "package probe\n" + uiImport + "\n" + designImport + "\n" +
+				"const agentHeadingWeight = design.WeightSemibold\n" +
+				"func f(c *ui.Context) { ui.Text(c, \"x\").FontWeight(agentHeadingWeight) }\n",
+			want: 0,
+		},
+		{
+			name: "mixed token and raw assignments warn",
+			src: "package probe\n" + uiImport + "\n" + designImport + "\n" +
+				"func f(c *ui.Context, active bool) {\n" +
+				"	weight := design.WeightRegular\n" +
+				"	if active { weight = 600 }\n" +
+				"	ui.Text(c, \"x\").FontWeight(weight)\n" +
+				"}\n",
+			want: 1, severity: conform.SeverityWarn, prefix: "间接字重",
+		},
+		{
+			name: "foreign selector warns",
+			src: "package probe\n" + uiImport + "\n" +
+				"func f(c *ui.Context) { ui.Text(c, \"x\").FontWeight(other.Weight) }\n",
+			want: 1, severity: conform.SeverityWarn, prefix: "间接字重",
+		},
+		{
+			name: "call expression warns",
+			src: "package probe\n" + uiImport + "\n" +
+				"func f(c *ui.Context) { ui.Text(c, \"x\").FontWeight(weightOf(c)) }\n",
+			want: 1, severity: conform.SeverityWarn, prefix: "间接字重",
+		},
+		{
+			name: "unresolved parameter warns",
+			src: "package probe\n" + uiImport + "\n" +
+				"func f(c *ui.Context, weight int) { ui.Text(c, \"x\").FontWeight(weight) }\n",
+			want: 1, severity: conform.SeverityWarn, prefix: "间接字重",
+		},
+		{
+			name: "bare literal keeps the existing warn",
+			src: "package probe\n" + uiImport + "\n" +
+				"func f(c *ui.Context) { ui.Text(c, \"x\").FontWeight(600) }\n",
+			want: 1, severity: conform.SeverityWarn, prefix: "裸字重",
+		},
+		{
+			name: "indirect metrics other than weight stay out of scope",
+			src: "package probe\n" + uiImport + "\n" +
+				"func f(c *ui.Context) { h := 36; ui.Column(c).Height(h) }\n",
+			want: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			violations := scan(t, "internal/ui/probe.go", tt.src, conform.ScanOptions{})
+			got := countRule(violations, "DS-03")
+			if got != tt.want {
+				t.Fatalf("DS-03 count = %d, want %d (%+v)", got, tt.want, violations)
+			}
+			if tt.want == 1 {
+				v := violations[0]
+				if v.Severity != tt.severity {
+					t.Fatalf("severity = %q, want %q", v.Severity, tt.severity)
+				}
+				if !strings.HasPrefix(v.Message, tt.prefix) {
+					t.Fatalf("message = %q, want prefix %q", v.Message, tt.prefix)
+				}
+			}
+		})
+	}
+}
+
 func TestDS07Icons(t *testing.T) {
 	tests := []struct {
 		name string

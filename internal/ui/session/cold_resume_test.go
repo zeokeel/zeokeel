@@ -49,7 +49,7 @@ func TestTeamOverlayResumableHistoryOffersContinue(t *testing.T) {
 	h.click(tester, "继续此队友 上次的研究员")
 	// The action opens the child conversation with its cold-resume composer.
 	h.assertTexts(tester, "上次的研究员", "已结束记录 · 可继续",
-		"历史记录（应用重启后仍保留）：可继续；发送后会基于已保存的会话冷恢复。",
+		"历史记录（应用重启后仍保留）：可继续；发送后会接着已保存的会话继续。",
 		"发送给 上次的研究员")
 }
 
@@ -96,7 +96,7 @@ func TestHistoricalChildResumeSendCallsChildAgentService(t *testing.T) {
 	h.assertTexts(tester, "队友 · 已结束记录 · 可继续")
 	h.click(tester, "继续此队友 上次的研究员")
 	h.assertTexts(tester, "发送给 上次的研究员",
-		"发送后冷恢复这条历史记录，并等待它的回答。")
+		"发送后会恢复这条历史记录的会话，并等待它的回答。")
 
 	input, ok := tester.Find("发送给 上次的研究员")
 	if !ok {
@@ -171,7 +171,27 @@ func TestHistoricalSubagentSwitcherOffersContinue(t *testing.T) {
 	}
 	h.click(tester, "继续此子代理 上次的子代理")
 	h.assertTexts(tester, "发送给 上次的子代理",
-		"发送后冷恢复这条历史记录，并等待它的回答。")
+		"发送后会恢复这条历史记录的会话，并等待它的回答。")
+}
+
+// TestColdResumeCopyIsPlainLanguage covers US-10: the user-facing copy says
+// what happens in plain words (恢复/继续 the saved conversation) — the internal
+// term 冷恢复 never reaches the frame.
+func TestColdResumeCopyIsPlainLanguage(t *testing.T) {
+	children := &fakeChildAgents{agents: []contracts.ChildAgent{resumableHistoricalChild()}}
+	h := newAgentSurfaceHarness(t, headerChat("白话文案"), agentServices{children: children})
+	tester := h.tester()
+	tester.Frame()
+
+	h.click(tester, "子智能体 1")
+	h.click(tester, "继续此队友 上次的研究员")
+	tester.Frame()
+	h.assertTexts(tester, "发送后会恢复这条历史记录的会话，并等待它的回答。")
+	for _, text := range tester.Texts() {
+		if strings.Contains(text, "冷恢复") {
+			t.Fatalf("US-10: internal term 冷恢复 leaked into user copy: %q", text)
+		}
+	}
 }
 
 func TestColdResumeEnglishCopy(t *testing.T) {
@@ -188,7 +208,7 @@ func TestColdResumeEnglishCopy(t *testing.T) {
 	}
 	h.click(tester, "Continue teammate 上次的研究员")
 	h.assertTexts(tester,
-		"Finished record (kept after a restart): continuable; sending cold-resumes the saved session.",
+		"Finished record (kept after a restart): continuable; sending picks the saved conversation back up.",
 		"Send to 上次的研究员")
 	// Sending uses the same localized pipeline.
 	input, ok := tester.Find("Send to 上次的研究员")

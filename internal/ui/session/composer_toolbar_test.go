@@ -55,7 +55,7 @@ func TestComposerToolbarKeyboardFocus(t *testing.T) {
 	}
 	// The three switchers sit inside the toolbar's bounds (one row), not beside
 	// it as free-standing controls.
-	for _, name := range []string{"附件", "toolbar-model", "工作区修改"} {
+	for _, name := range []string{"附件", "toolbar-model", "工作区修改（全局）"} {
 		info, found := tester.Access(name)
 		if !found {
 			t.Fatalf("toolbar control %q missing; texts = %v", name, tester.Texts())
@@ -74,7 +74,7 @@ func TestComposerToolbarKeyboardFocus(t *testing.T) {
 	h.openSessionMenu(tester)
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
-	if !tester.Focused("工作区修改") {
+	if !tester.Focused("工作区修改（全局）") {
 		t.Fatalf("the permission menu did not keep the focus; texts = %v", tester.Texts())
 	}
 	tester.Key(0, ui.KeyLeft)
@@ -82,7 +82,7 @@ func TestComposerToolbarKeyboardFocus(t *testing.T) {
 		t.Fatalf("Left from the permission button did not reach the model chip")
 	}
 	tester.Key(0, ui.KeyRight)
-	if !tester.Focused("工作区修改") {
+	if !tester.Focused("工作区修改（全局）") {
 		t.Fatalf("Right from the model chip did not return to the permission button")
 	}
 	tester.Key(0, ui.KeyRight)

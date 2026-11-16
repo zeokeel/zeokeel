@@ -88,6 +88,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -196,6 +197,14 @@ type paneState struct {
 	deleteOpen   bool
 	deleteTarget string
 	deleteTitle  string
+	// deleteErr is the last failed delete confirmation: the dialog stays open
+	// and shows it instead of closing on a failure that deleted nothing (a
+	// false success; 2026-11 audit UX-10).
+	deleteErr string
+	// sessionOpErr is the last failed fork/pin/archive row-menu action, shown
+	// as an error line under the session list so the failure is not silent
+	// (2026-11 audit UX-10).
+	sessionOpErr string
 }
 
 // T returns the localized copy for the current frame.
@@ -203,17 +212,17 @@ func (state *paneState) T(zh, en string) string { return uikit.T(state.locale, z
 
 // newChatLabel is the primary action label for the current frame.
 func (state *paneState) newChatLabel() string {
-	return firstNonEmpty(state.cfgNewChatLabel, state.T("新对话", "New chat"))
+	return textutil.FirstNonEmpty(state.cfgNewChatLabel, state.T("新对话", "New chat"))
 }
 
 // settingsLabel is the footer settings label for the current frame.
 func (state *paneState) settingsLabel() string {
-	return firstNonEmpty(state.cfgSettingsLabel, state.T("设置", "Settings"))
+	return textutil.FirstNonEmpty(state.cfgSettingsLabel, state.T("设置", "Settings"))
 }
 
 // sessionsTitle is the flat session-list section label for the current frame.
 func (state *paneState) sessionsTitle() string {
-	return firstNonEmpty(state.cfgSessionsTitle, state.T("会话", "Chats"))
+	return textutil.FirstNonEmpty(state.cfgSessionsTitle, state.T("会话", "Chats"))
 }
 
 // sessionTitle is the displayed title of one session in the current language.
@@ -503,8 +512,7 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 			case overallEmpty:
 				// One empty state for the whole search, not a session one
 				// followed by a message one (R11).
-				design.Apply(ui.Text(c, state.T("没有匹配", "No matches")), t.TextMuted(design.TypeXXS)).
-					Padding(design.Space1, design.Space2, design.Space0, design.Space2)
+				sidebarEmptyLine(c, state.T("没有匹配", "No matches"), design.Space1)
 			case hasWorkspace:
 				// Grouping is the product's only mode: the workspace tree (and
 				// its per-workspace row actions) renders even with no sessions,
@@ -518,16 +526,18 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 				// plain no-query empty state and the unsearched title miss stay
 				// here.
 				if query == "" {
-					design.Apply(ui.Text(c, state.T("还没有会话", "No sessions yet")),
-						t.TextMuted(design.TypeXXS)).
-						Padding(design.Space1, design.Space2, design.Space0, design.Space2)
+					sidebarEmptyLine(c, state.T("还没有会话", "No sessions yet"), design.Space1)
 				} else if !degradedTitle {
-					design.Apply(ui.Text(c, state.T("没有匹配的会话", "No matching sessions")),
-						t.TextMuted(design.TypeXXS)).
-						Padding(design.Space1, design.Space2, design.Space0, design.Space2)
+					sidebarEmptyLine(c, state.T("没有匹配的会话", "No matching sessions"), design.Space1)
 				}
 			default:
 				buildFlatSessionList(c, t, chat, nav, runtime, state, sessions)
+			}
+			// A failed fork/pin/archive row action reports itself here, close to
+			// the list it acted on, instead of failing silently (audit UX-10).
+			if state.sessionOpErr != "" {
+				ui.Column(c).FillWidth().Padding(design.Space1, design.Space2, design.Space0, design.Space2).
+					Children(func() { buildSidebarError(c, t, state.sessionOpErr) })
 			}
 			// Full-text message search below the title-filtered list: a query
 			// can match messages of sessions whose title does not match, so this
@@ -538,9 +548,7 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 			// The title miss under message hits: a quiet last line instead of a
 			// "no matching sessions" headline before the results (R11).
 			if degradedTitle {
-				design.Apply(ui.Text(c, state.T("标题无匹配", "No matching titles")),
-					t.TextMuted(design.TypeXXS)).
-					Padding(design.Space2, design.Space2, design.Space0, design.Space2)
+				sidebarEmptyLine(c, state.T("标题无匹配", "No matching titles"), design.Space2)
 			}
 		})
 }
@@ -605,8 +613,7 @@ func buildMessageSearch(c *ui.Context, t *design.Tokens, chat contracts.ChatServ
 				return
 			}
 			if len(visibleHits) == 0 {
-				design.Apply(ui.Text(c, state.T("没有匹配的消息", "No matching messages")), t.TextMuted(design.TypeXXS)).
-					Padding(design.Space1, design.Space2, design.Space0, design.Space2)
+				sidebarEmptyLine(c, state.T("没有匹配的消息", "No matching messages"), design.Space1)
 				return
 			}
 			design.Apply(ui.Text(c, state.T(
@@ -634,7 +641,7 @@ func buildMessageSearch(c *ui.Context, t *design.Tokens, chat contracts.ChatServ
 				if row.group != nil {
 					return row.group.title
 				}
-				return row.groupTitle + " " + firstNonEmpty(row.hit.Snippet, row.hit.Role)
+				return row.groupTitle + " " + textutil.FirstNonEmpty(row.hit.Snippet, row.hit.Role)
 			}
 			list := ui.List(c, &state.searchList, len(rows)).
 				Label(state.T("消息搜索", "Message search")).
@@ -721,7 +728,7 @@ func groupMessageHits(hits []contracts.MessageSearchHit, state *paneState) []mes
 			at = len(groups)
 			index[key] = at
 			groups = append(groups, messageHitGroup{
-				title: firstNonEmpty(hit.SessionTitle, state.T("未命名会话", "Untitled session")),
+				title: textutil.FirstNonEmpty(hit.SessionTitle, state.T("未命名会话", "Untitled session")),
 			})
 		}
 		groups[at].hits = append(groups[at].hits, hit)
@@ -759,7 +766,7 @@ func messageSearchRows(groups []messageHitGroup) []messageSearchRow {
 // query cut off at the row edge.
 func buildMessageHitRowContent(c *ui.Context, t *design.Tokens, state *paneState,
 	hit contracts.MessageSearchHit, showTitle bool, query string) {
-	title := firstNonEmpty(hit.SessionTitle, state.T("未命名会话", "Untitled session"))
+	title := textutil.FirstNonEmpty(hit.SessionTitle, state.T("未命名会话", "Untitled session"))
 	ui.Column(c).FillWidth().Gap(design.Space1).
 		Padding(design.Space1, design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -935,13 +942,23 @@ func formatHitTime(locale contracts.LocaleService, value time.Time) string {
 	return uikit.FormatDateTime(locale, value)
 }
 
-// buildSidebarError is the sidebar's danger row.
+// buildSidebarError is the sidebar's danger row: the shared uikit.ErrorLine
+// anatomy (a role-alert live region a screen reader announces, a selectable
+// message, the TypeXS metadata step), not a hand-built Row+Icon+11px Text that
+// never reads as an alert (2026-11 audit UD-16). The 280 DIP sidebar holds the
+// TypeXS line.
 func buildSidebarError(c *ui.Context, t *design.Tokens, text string) {
-	th := t.Theme()
-	ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
-		ui.Icon(c, icons.AlertTriangle()).Size(th.Space(3), th.Space(3)).TextColor(t.Danger)
-		design.Apply(ui.Text(c, text), t.Font(design.TypeXXXS)).
-			TextColor(t.DangerText).MaxLines(2)
+	uikit.ErrorLine(c, text)
+}
+
+// sidebarEmptyLine renders one converged empty-state line (uikit.EmptyState,
+// the TypeXS metadata step) with the sidebar's standard inset padding, so the
+// list's several "nothing here" states share one anatomy instead of ad-hoc
+// muted Text at drifting sizes (2026-11 audit UD-15).
+func sidebarEmptyLine(c *ui.Context, text string, padTop float32) {
+	ui.Column(c).FillWidth().
+		Padding(padTop, design.Space2, design.Space0, design.Space2).Children(func() {
+		uikit.EmptyState(c, text)
 	})
 }
 
@@ -1041,17 +1058,19 @@ func buildWorkspaceTree(
 			return
 		}
 		if query != "" {
-			design.Apply(ui.Text(c, state.T("没有匹配的会话", "No matching sessions")),
-				t.TextMuted(design.TypeXXS)).
-				Padding(design.Space1, design.Space2, design.Space0, design.Space2)
+			ui.Column(c).FillWidth().
+				Padding(design.Space1, design.Space2, design.Space0, design.Space2).Children(func() {
+				uikit.EmptyState(c, state.T("没有匹配的会话", "No matching sessions"))
+			})
 			return
 		}
+		// The shared empty-state anatomy (uikit.EmptyState, the TypeXS metadata
+		// step), not ad-hoc muted Text with an 11 DIP hint sentence (audit
+		// UD-15/UD-05): both lines read at the same step.
 		ui.Column(c).FillWidth().Gap(design.Space1).
 			Padding(design.Space2, design.Space2, design.Space0, design.Space2).Children(func() {
-			design.Apply(ui.Text(c, state.T("还没有工作区", "No workspaces yet")),
-				t.TextMuted(design.TypeXXS))
-			design.Apply(ui.Text(c, state.T("点击 + 添加工作区", "Click + to add a workspace")),
-				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).MaxLines(2)
+			uikit.EmptyState(c, state.T("还没有工作区", "No workspaces yet"))
+			uikit.EmptyState(c, state.T("点击 + 添加工作区", "Click + to add a workspace"))
 		})
 		return
 	}
@@ -1239,7 +1258,7 @@ func prepareWorkspaceTree(state *paneState, workspace contracts.WorkspaceService
 			continue
 		}
 		addGroup(workspaceTreeKey(ws.ID), &ws,
-			firstNonEmpty(ws.Name, ws.Root, state.T("未命名工作区", "Untitled workspace")),
+			textutil.FirstNonEmpty(ws.Name, ws.Root, state.T("未命名工作区", "Untitled workspace")),
 			totals[ws.ID], sessions)
 	}
 	if sessions := byGroup[""]; len(sessions) > 0 || (query == "" && totals[""] > 0) {
@@ -1458,7 +1477,7 @@ func workspaceGroupMenu(state *paneState, runtime contracts.UIRuntime,
 			if m.Item(state.T("重命名工作区", "Rename workspace")).ID("rename").Chosen() {
 				state.workspaceRenameOpen = true
 				state.workspaceRenameID = ws.ID
-				state.workspaceRenameDraft = firstNonEmpty(strings.TrimSpace(ws.Name), name)
+				state.workspaceRenameDraft = textutil.FirstNonEmpty(strings.TrimSpace(ws.Name), name)
 				state.workspaceRenameErr = ""
 				runtime.Invalidate()
 			}
@@ -1485,16 +1504,18 @@ func buildWorkspaceRowActions(c *ui.Context, t *design.Tokens, workspace contrac
 	runtime contracts.UIRuntime, state *paneState, tree *workspaceTreeGroups, key, name string,
 	revealed bool) {
 	menuLabel := state.T("工作区操作：", "Workspace actions: ") + name
-	more := ui.ButtonBase(c).Size(20, 20).Center().Radius(design.RadiusSM).
+	// ≥24 DIP hit target (AP-17, audit UD-08), matching the session ⋯ and the
+	// IconButton guarantee; the glyph stays on the design icon step.
+	more := ui.ButtonBase(c).Size(design.IconSizeL, design.IconSizeL).Center().Radius(design.RadiusSM).
 		Label(menuLabel).Tooltip(menuLabel)
-	if more.Hovered() {
-		more = more.Background(t.BgHover)
-	}
+	// The registered rich row paints pressed as well as hovered (audit UD-18):
+	// rowTint is the product's one ButtonBase state vocabulary.
+	more = rowTint(t, more, false)
 	if !revealed {
 		more = more.Opacity(0).IgnoreInput(true)
 	}
 	more.Children(func() {
-		ui.Icon(c, icons.More()).Size(14, 14).TextColor(t.LabelTertiary)
+		ui.Icon(c, icons.More()).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelTertiary)
 	})
 	more.PopoverMenuButton(workspaceGroupMenu(state, runtime, workspace, tree, key, name),
 		ui.PopoverMenuButtonOptions{At: ui.AnchorBottomEnd, Self: ui.AnchorTopEnd})
@@ -1966,7 +1987,13 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 			state.renameDraft = sessionTitleByID(chat, session.ID, state)
 		}
 		if forker != nil && m.Item(state.T("创建副本", "Duplicate")).Chosen() {
-			if newID, err := forker.ForkSession(session.ID); err == nil && strings.TrimSpace(newID) != "" {
+			newID, err := forker.ForkSession(session.ID)
+			if err != nil {
+				// A failed fork is reported, not silent (audit UX-10).
+				state.sessionOpErr = state.T("创建副本失败：", "Could not duplicate the session: ") + err.Error()
+				runtime.Invalidate()
+			} else if strings.TrimSpace(newID) != "" {
+				state.sessionOpErr = ""
 				_ = chat.SetActiveSession(newID)
 				runtime.Post(func() { _ = nav.Push("session") })
 				runtime.Invalidate()
@@ -1978,7 +2005,11 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 				pinLabel = state.T("取消置顶", "Unpin session")
 			}
 			if m.Item(pinLabel).Chosen() {
-				if err := pinner.SetSessionPinned(session.ID, !session.Pinned); err == nil {
+				if err := pinner.SetSessionPinned(session.ID, !session.Pinned); err != nil {
+					state.sessionOpErr = state.T("更新置顶失败：", "Could not update the pin: ") + err.Error()
+					runtime.Invalidate()
+				} else {
+					state.sessionOpErr = ""
 					runtime.Invalidate()
 				}
 			}
@@ -1988,7 +2019,11 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 			// archive page is where they can be restored. Archiving reports
 			// success through a toast (with Undo when the host supports it).
 			if m.Item(state.T("归档会话", "Archive session")).Chosen() {
-				if err := archiver.SetSessionArchived(session.ID, true); err == nil {
+				if err := archiver.SetSessionArchived(session.ID, true); err != nil {
+					state.sessionOpErr = state.T("归档失败：", "Could not archive the session: ") + err.Error()
+					runtime.Invalidate()
+				} else {
+					state.sessionOpErr = ""
 					raiseSessionArchivedToast(state, chat, runtime, session.ID, label)
 					runtime.Invalidate()
 				}
@@ -1998,6 +2033,7 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 		// danger color and the row dialog still confirms it.
 		if m.Item(state.T("删除", "Delete")).Danger().Chosen() {
 			state.deleteOpen = true
+			state.deleteErr = ""
 			state.deleteTarget = session.ID
 			state.deleteTitle = state.sessionTitle(session)
 		}
@@ -2086,12 +2122,12 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 		})
 		menuLabel := state.T("会话操作：", "Session actions: ") + label
 		c.Key("session/" + session.ID + "/menu")
-		more := ui.ButtonBase(c).Size(24, 24).Center().Radius(design.RadiusSM).
+		more := ui.ButtonBase(c).Size(design.IconSizeL, design.IconSizeL).Center().Radius(design.RadiusSM).
 			Label(menuLabel).Tooltip(menuLabel)
 		moreColor := t.LabelSecondary
-		if more.Hovered() {
-			more = more.Background(t.BgHover)
-		}
+		// Pressed as well as hovered, through the product's one ButtonBase
+		// state vocabulary (audit UD-18).
+		more = rowTint(t, more, false)
 		if !revealed {
 			more = more.Opacity(0).IgnoreInput(true)
 		}
@@ -2214,22 +2250,36 @@ func buildFooter(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime,
 	state *paneState, label string) {
 	if state.deleteOpen {
-		deleteTitle := firstNonEmpty(state.deleteTitle, state.T("未命名会话", "Untitled session"))
+		deleteTitle := textutil.FirstNonEmpty(state.deleteTitle, state.T("未命名会话", "Untitled session"))
 		target := state.deleteTarget
 		messageTemplate := state.T("“%s”及其全部消息将被删除，此操作无法撤销。",
 			"“%s” and all its messages will be deleted. This cannot be undone.")
 		message := fmt.Sprintf(messageTemplate, deleteTitle)
 		buildDangerConfirm(c, t, &state.deleteOpen,
-			state.T("删除会话", "Delete session"), message,
+			state.T("删除会话", "Delete session"), message, state.deleteErr,
 			state.T("删除", "Delete"), state.T("取消", "Cancel"),
 			func() {
-				if err := chat.DeleteSession(target); err == nil {
+				if err := chat.DeleteSession(target); err != nil {
+					// A failed delete keeps the dialog open and names the
+					// failure: closing it would leave the session in place and
+					// read as a success (audit UX-10).
+					state.deleteErr = state.T("删除会话失败：", "Could not delete the session: ") + err.Error()
+					state.deleteOpen = true
 					runtime.Invalidate()
+					return
 				}
+				state.deleteErr = ""
+				runtime.Invalidate()
 			},
 			func() {
+				// The confirm callback may have reopened the dialog after a
+				// failure; only a real close drops the pending target.
+				if state.deleteOpen {
+					return
+				}
 				state.deleteTarget = ""
 				state.deleteTitle = ""
+				state.deleteErr = ""
 				runtime.Invalidate()
 			})
 		return
@@ -2424,14 +2474,4 @@ func own(ctx cordis.Context, register func() (func(), error)) error {
 		return err
 	}
 	return nil
-}
-
-// firstNonEmpty returns the first non-empty string.
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }

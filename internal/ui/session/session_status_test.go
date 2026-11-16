@@ -65,7 +65,7 @@ func TestSessionStatusStripRendersUsage(t *testing.T) {
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
 
-	const line = "2 轮 · 3 步 · 82 tok/s · 120K/128K tok · 缓存命中 95% · 剩余 6%"
+	const line = "2 轮对话 · 3 步工具调用 · 82 tok/s · 120K/128K tok · 缓存命中 95% · 上下文剩余 6%"
 	h.assertTexts(tester, line)
 	// Cumulative billing prompt tokens never reach the context ratio.
 	h.assertNoTexts(tester, "220K/128K", "100K/128K")
@@ -92,7 +92,7 @@ func TestSessionStatusStripEnglishCopy(t *testing.T) {
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
 
-	h.assertTexts(tester, "2 rounds · 3 steps · 82 tok/s · 120K/128K tok · Cache hit 95% · 6% left")
+	h.assertTexts(tester, "2 turns · 3 tool steps · 82 tok/s · 120K/128K tok · Cache hit 95% · context 6% left")
 }
 
 // TestSessionStatusStripHiddenWithoutUsage covers the empty/failed conversations
@@ -105,7 +105,7 @@ func TestSessionStatusStripHiddenWithoutUsage(t *testing.T) {
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
 	h.assertTexts(tester, "回答", "发送")
-	h.assertNoTexts(tester, "tok/s", "缓存命中", " 轮 · ")
+	h.assertNoTexts(tester, "tok/s", "缓存命中", " 轮对话 · ")
 
 	// A conversation with no messages at all hides it too.
 	empty := newModelChat()
@@ -128,7 +128,7 @@ func TestSessionStatusStripWithoutCatalog(t *testing.T) {
 	})
 	h := newModelHarness(t, chat, nil)
 	tester := h.tester()
-	h.assertTexts(tester, "1 轮 · 0 步 · 333 tok/s · 缓存命中 50%")
+	h.assertTexts(tester, "1 轮对话 · 0 步工具调用 · 333 tok/s · 缓存命中 50%")
 	h.assertNoTexts(tester, "剩余", "/128K tok", "900/")
 }
 
@@ -146,7 +146,7 @@ func TestSessionStatusStripOmitsContextWithUnknownModel(t *testing.T) {
 	chat.config = contracts.ChatConfig{Model: "custom-model", ContextBudget: 64000}
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
-	h.assertTexts(tester, "1 轮 · 0 步 · 333 tok/s · 缓存命中 50%")
+	h.assertTexts(tester, "1 轮对话 · 0 步工具调用 · 333 tok/s · 缓存命中 50%")
 	h.assertNoTexts(tester, "剩余", "/64K tok", "/128K tok")
 }
 
@@ -163,7 +163,7 @@ func TestSessionStatusStripOmitsContextWithoutContextTokens(t *testing.T) {
 	})
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
-	h.assertTexts(tester, "1 轮 · 0 步 · 333 tok/s · 缓存命中 50%")
+	h.assertTexts(tester, "1 轮对话 · 0 步工具调用 · 333 tok/s · 缓存命中 50%")
 	h.assertNoTexts(tester, "剩余", "/128K tok", "0/128K")
 }
 
@@ -179,7 +179,7 @@ func TestSessionStatusStripHidesUnknownSpeed(t *testing.T) {
 	})
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
-	const line = "1 轮 · 0 步 · 120K/128K tok · 缓存命中 50% · 剩余 6%"
+	const line = "1 轮对话 · 0 步工具调用 · 120K/128K tok · 缓存命中 50% · 上下文剩余 6%"
 	h.assertTexts(tester, line)
 	h.assertNoTexts(tester, "tok/s")
 }

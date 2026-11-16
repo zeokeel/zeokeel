@@ -20,6 +20,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -325,7 +326,7 @@ func buildContextOverview(c *ui.Context, t *design.Tokens, st *state, data contr
 			history := snapshot.History
 			snapshotRows := []uikit.PropertyRow{
 				{Label: st.tr("时间", "Time"), Value: formatTimestamp(st.locale, snapshot.At)},
-				{Label: st.tr("模型", "Model"), Value: firstNonEmpty(snapshot.Model, st.tr("未知", "Unknown"))},
+				{Label: st.tr("模型", "Model"), Value: textutil.FirstNonEmptyTrimmed(snapshot.Model, st.tr("未知", "Unknown"))},
 			}
 			if snapshot.Window > 0 {
 				snapshotRows = append(snapshotRows, uikit.PropertyRow{
@@ -466,7 +467,7 @@ func buildContextSections(c *ui.Context, t *design.Tokens, st *state, snapshot c
 				value = label
 				color = t.LabelPrimary
 			case 1:
-				value = firstNonEmpty(source, "—")
+				value = textutil.FirstNonEmptyTrimmed(source, "—")
 				color = t.LabelTertiary
 			case 2:
 				value = formatContextBytes(section.Bytes)
@@ -476,7 +477,7 @@ func buildContextSections(c *ui.Context, t *design.Tokens, st *state, snapshot c
 			cell := design.Apply(ui.Text(c, value), t.Font(design.TypeXS)).TextColor(color).NoWrap()
 			if col == 0 {
 				tip := st.tr("分段 ID：", "Section ID: ") +
-					firstNonEmpty(strings.TrimSpace(section.ID), "—")
+					textutil.FirstNonEmptyTrimmed(strings.TrimSpace(section.ID), "—")
 				if hash := strings.TrimSpace(section.Hash); hash != "" {
 					tip += st.tr("\n内容哈希：", "\nContent hash: ") + hash
 				}
@@ -608,7 +609,7 @@ func buildContextRequests(c *ui.Context, t *design.Tokens, st *state, data contr
 				value = fmt.Sprintf("%d", request.Iteration)
 				color = t.LabelTertiary
 			case 1:
-				value = firstNonEmpty(request.Model, "—")
+				value = textutil.FirstNonEmptyTrimmed(request.Model, "—")
 				color = t.LabelPrimary
 			case 2:
 				value = uikit.FormatCompactCount(request.Prompt)

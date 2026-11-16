@@ -13,6 +13,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -266,7 +267,11 @@ func lspWorkspaceOptIn(raw string) bool {
 func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, locale contracts.LocaleService) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, "LSP", "")
+		// A plain-language subtitle teaches what LSP is for (US-08): the bare
+		// acronym faced a non-developer with no explanation.
+		uikit.PageHeader(c, "LSP", localized(locale,
+			"语言服务：为智能体提供代码诊断与补全。",
+			"Language servers: code diagnostics and completion for the agent."))
 		if store == nil {
 			uikit.Section(c, localized(locale, "设置存储未启用", "Settings store not enabled"), func(*ui.Context) {
 				uikit.EmptyState(c, localized(locale, "设置存储未启用，无法保存语言服务器。",
@@ -297,7 +302,7 @@ func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, 
 				if index < 0 || index >= len(st.servers) {
 					return ""
 				}
-				return firstNonEmpty(strings.TrimSpace(st.servers[index].Name),
+				return textutil.FirstNonEmpty(strings.TrimSpace(st.servers[index].Name),
 					localized(locale, "(未命名服务器)", "(Untitled server)"))
 			})
 			ui.List(c, &st.list, len(st.servers)).

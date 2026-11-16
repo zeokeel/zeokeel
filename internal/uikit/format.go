@@ -51,6 +51,20 @@ func FormatCompactCount(count int) string {
 	return text + units[unit]
 }
 
+// FormatContextWindow renders a model's context-window token count for the
+// catalog list and the usage footer (AR-17: one formatter instead of the two
+// private formatContextWindow copies): exact thousands as "128k", other
+// positive values with one decimal ("32.8k"); zero/negative hides the value.
+func FormatContextWindow(tokens int) string {
+	if tokens <= 0 {
+		return ""
+	}
+	if tokens%1000 == 0 {
+		return strconv.Itoa(tokens/1000) + "k"
+	}
+	return strconv.FormatFloat(float64(tokens)/1000, 'f', 1, 64) + "k"
+}
+
 // FormatShortcut normalizes one of the product's shortcut notations into the
 // single display form the UI shows: modifiers joined with " + ", the command
 // modifier spelled for the platform ("Cmd" on macOS, "Ctrl" elsewhere), and

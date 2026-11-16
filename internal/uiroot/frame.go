@@ -4,6 +4,7 @@ import (
 	"log"
 	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -67,6 +68,9 @@ func (r *Root) view(c *ui.Context) {
 	}
 	tokens := design.Of(c)
 	r.loadChromeWidths()
+	// Persist a settled divider drag once, at frame start and out of the
+	// per-move build branch (AR-03): the drag itself only scheduled the save.
+	r.flushChromeWidthsSave(c)
 	// The expanded sidebar resolves the first-run destination while rendering its
 	// selection, but a persisted collapsed sidebar (the icon rail) does not draw
 	// the screen list: without an explicit default here nav.Current() stays "",
@@ -106,7 +110,10 @@ func (r *Root) view(c *ui.Context) {
 				r.sidebarWidth = clamped
 				c.Invalidate()
 			}
-			r.saveChromeWidths()
+			// Debounce the persist: the drag updates the in-memory width every
+			// move frame, but the settings write is coalesced to one save after
+			// the value settles (AR-03), not an fsync per move inside the build.
+			r.scheduleChromeWidthsSave(c)
 		}
 	})
 
@@ -387,7 +394,7 @@ func (r *Root) railSessionsEntry(c *ui.Context, t *design.Tokens) {
 }
 
 // railSessionRow is one conversation row of the rail popover: its title, a
-// running (success) or unread (accent) dot, and the same state in the row's
+// running (warning) or unread (accent) dot, and the same state in the row's
 // accessible name so assistive technology hears it too. A click opens the
 // conversation and closes the popover.
 func (r *Root) railSessionRow(c *ui.Context, t *design.Tokens, session contracts.ChatSessionInfo) {
@@ -402,9 +409,21 @@ func (r *Root) railSessionRow(c *ui.Context, t *design.Tokens, session contracts
 	case session.Unread:
 		rowLabel += " · " + r.tr("未读", "Unread")
 	}
-	row := ui.ButtonBase(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+	// The row's identity is the session, not its position: the list reorders
+	// while the popover is open (a run starts, a new message bumps UpdatedAt),
+	// and a positional key would leave the keyboard focus on the slot while
+	// another session moved into it — Enter would open the wrong conversation
+	// (2026-11 audit AR-04).
+	row := ui.ButtonBase(c.Key("chrome.rail.session."+session.ID)).
+		FillWidth().AlignItems(ui.Center).Gap(design.Space2).
 		Padding(design.Space2, design.Space3).Radius(design.RadiusSM).Label(rowLabel)
-	if row.Hovered() {
+	// The registered rich row paints its own states (ButtonBase has no look):
+	// pressed uses the product's one pressed vocabulary (the selection tint,
+	// as rowTint and IconButton do), hover the lighter tint (audit UD-18).
+	switch {
+	case row.Pressed():
+		row = row.Background(t.BgSelected)
+	case row.Hovered():
 		row = row.Background(t.BgHover)
 	}
 	row.Children(func() {
@@ -412,7 +431,9 @@ func (r *Root) railSessionRow(c *ui.Context, t *design.Tokens, session contracts
 			Grow(1).MaxLines(1).Ellipsis("…")
 		switch {
 		case session.Running:
-			ui.Box(c).Size(design.Space2, design.Space2).Radius(design.Space1).Background(t.Success)
+			// running→Warning (DESIGN.md §5.2): a Success-green dot reads as
+			// "finished" while the run is still streaming (audit UD-03).
+			ui.Box(c).Size(design.Space2, design.Space2).Radius(design.Space1).Background(t.Warning)
 		case session.Unread:
 			ui.Box(c).Size(design.Space2, design.Space2).Radius(design.Space1).Background(t.Accent)
 		}
@@ -609,7 +630,9 @@ func (r *Root) contentArea(c *ui.Context) {
 			r.inspectorWidth = width
 			c.Invalidate()
 		}
-		r.saveChromeWidths()
+		// One coalesced save after the drag settles, as the sidebar split does
+		// (AR-03): no settings fsync on the move hot path.
+		r.scheduleChromeWidthsSave(c)
 	}
 }
 
@@ -822,27 +845,29 @@ func (r *Root) screenHeaderRow(c *ui.Context, t *design.Tokens) {
 			r.renderScreenSlot(c, contracts.SlotScreenHeader)
 		})
 		r.renderScreenSlot(c, contracts.SlotScreenActions)
-		r.paletteButton(c, t)
-		r.inspectorButton(c, t)
+		r.paletteButton(c)
+		r.inspectorButton(c)
 	})
 }
 
-// paletteButton is the host command-palette entry of the top band.
-func (r *Root) paletteButton(c *ui.Context, t *design.Tokens) {
+// paletteButton is the host command-palette entry of the top band. The Native
+// icon button keeps the official outlined look and the Cmd/Ctrl+K chord while
+// converging on the one icon-button entry (2026-11 audit UD-09).
+func (r *Root) paletteButton(c *ui.Context) {
 	paletteLabel := r.tr("快捷操作", "Quick actions")
-	palette := ui.Button(c, "").Label(paletteLabel).Tooltip(paletteLabel).
-		KeyShortcuts(ui.Cmd, ui.KeyK)
-	palette.Children(func() {
-		ui.Icon(c, icons.Search()).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
-	})
-	if palette.Clicked() {
-		r.togglePalette()
-	}
+	uikit.IconButton(c, uikit.IconButtonOptions{
+		Label:   paletteLabel,
+		Tooltip: paletteLabel,
+		Icon:    icons.Search(),
+		Size:    design.IconSizeS,
+		Variant: uikit.IconButtonNative,
+		OnClick: r.togglePalette,
+	}).KeyShortcuts(ui.Cmd, ui.KeyK)
 }
 
 // inspectorButton is the host inspector toggle of the top band, shown only on
 // the screen that contributes the inspector's pane.
-func (r *Root) inspectorButton(c *ui.Context, t *design.Tokens) {
+func (r *Root) inspectorButton(c *ui.Context) {
 	if !r.inspectorAvailable() {
 		return
 	}
@@ -850,21 +875,20 @@ func (r *Root) inspectorButton(c *ui.Context, t *design.Tokens) {
 	if r.rightOpen {
 		label = r.tr("收起右侧栏", "Close inspector")
 	}
-	inspector := ui.Button(c, "").Label(label).Tooltip(label).
-		KeyShortcuts(ui.Cmd|ui.Alt, ui.KeyI).
-		Bind(&r.inspectorToggle)
+	uikit.IconButton(c, uikit.IconButtonOptions{
+		Label:   label,
+		Tooltip: label,
+		Icon:    icons.PanelRight(),
+		Size:    design.IconSizeS,
+		Variant: uikit.IconButtonNative,
+		OnClick: func() { r.setRightPanelOpen(!r.rightOpen, false) },
+	}).KeyShortcuts(ui.Cmd|ui.Alt, ui.KeyI).Bind(&r.inspectorToggle)
 	if r.inspectorFocusPending {
 		// The close that removed the focused control (drawer, or the narrow
 		// docked header's X) asks for the keyboard back on the toggle that opens
 		// the inspector, as a dialog returns it.
 		r.inspectorFocusPending = false
 		r.inspectorToggle.Focus(c)
-	}
-	inspector.Children(func() {
-		ui.Icon(c, icons.PanelRight()).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
-	})
-	if inspector.Clicked() {
-		r.setRightPanelOpen(!r.rightOpen, false)
 	}
 }
 
@@ -959,13 +983,13 @@ func (r *Root) inspectorDrawer(c *ui.Context) {
 							// first Escape before this drawer's OverlayShortcut could close
 							// it. Label keeps the button named for assistive technology.
 							closeLabel := r.tr("关闭右侧栏", "Close inspector")
-							close := ui.Button(c, "").Label(closeLabel)
-							close.Children(func() {
-								ui.Icon(c, icons.Close()).Size(16, 16).TextColor(t.LabelSecondary)
+							uikit.IconButton(c, uikit.IconButtonOptions{
+								Label:   closeLabel,
+								Icon:    icons.Close(),
+								Size:    design.IconSizeS,
+								Variant: uikit.IconButtonNative,
+								OnClick: func() { r.setRightPanelOpen(false, true) },
 							})
-							if close.Clicked() {
-								r.setRightPanelOpen(false, true)
-							}
 						})
 						r.slot(c, contracts.SlotSessionPanelRight)
 					})
@@ -1195,9 +1219,12 @@ func (r *Root) palette(c *ui.Context) {
 					r.runPaletteCommand(matches[r.paletteSelected])
 				}
 			}
+			// Instruction copy, not a kbd-only micro-label: the metadata step
+			// keeps the legend out of TypeXXXS's 11 DIP size (DESIGN.md §5.3,
+			// audit UX-14 — the no-match hint above already follows the rule).
 			design.Apply(ui.Text(c, r.tr("↑↓ 选择 · Enter 运行 · Esc 关闭",
 				"Up/Down to choose · Enter to run · Esc to close")),
-				t.TextMuted(design.TypeXXXS))
+				t.TextMuted(design.TypeXXS))
 		})
 	})
 }
@@ -1252,6 +1279,14 @@ func (r *Root) paletteCommandList() []contracts.CommandSpec {
 	all = append(all, registered...)
 	for _, spec := range visibleScreens(r.rt.screenSpecs()) {
 		spec := spec
+		// Home is not a palette destination, as it is not a sidebar one
+		// (TestSidebarHasNoHomeDestination): the conversation is the product's
+		// one landing surface, reached through the new-chat action. A second
+		// "前往 首页" entry would keep the low-weight Home alive beside it
+		// (2026-11 audit UX-20, lead ruling: consistency with the sidebar).
+		if spec.ID == "home" {
+			continue
+		}
 		title := r.screenLabel(spec)
 		all = append(all, contracts.CommandSpec{
 			ID:       "uiroot.goto." + spec.ID,
@@ -1696,12 +1731,24 @@ const settingsNavWidth = 224
 // settingsNavColumn renders the grouped settings navigation with its filter
 // field. The host owns the navigation; pages only contribute their specs.
 func (r *Root) settingsNavColumn(c *ui.Context, t *design.Tokens, selected *string, groups []settingsGroup) {
+	searching := strings.TrimSpace(r.settingsQuery) != ""
+	matchCount := 0
+	for _, group := range groups {
+		matchCount += len(group.pages)
+	}
 	ui.Column(c).Width(settingsNavWidth).FillHeight().Children(func() {
-		ui.Row(c).FillWidth().Shrink(0).
+		ui.Column(c).FillWidth().Shrink(0).Gap(design.Space1).
 			Padding(design.Space3, design.Space3, design.Space2, design.Space3).Children(func() {
 			ui.SearchField(c, &r.settingsQuery).
 				Label(r.tr("搜索设置", "Search settings")).
 				Placeholder(r.tr("搜索设置…", "Search settings…")).FillWidth()
+			// The search reports how many pages match instead of filtering
+			// silently (settings IA review P1-6, audit UX-16): a count under
+			// the field says whether the query landed, including zero.
+			if searching {
+				design.Apply(ui.Text(c, strconv.Itoa(matchCount)+r.tr(" 个匹配", " matches")),
+					t.TextMuted(design.TypeXXS)).MaxLines(1)
+			}
 		})
 		// The navigation scrolls under this hairline: without it a partially
 		// scrolled section title (常用) sat clipped against the search field
@@ -1714,12 +1761,23 @@ func (r *Root) settingsNavColumn(c *ui.Context, t *design.Tokens, selected *stri
 			addPages := func(pages []contracts.SettingsPageSpec) {
 				for _, page := range pages {
 					item := ui.SidebarItem(c, page.ID, nil, page.Title)
+					// A page holding an unsaved draft carries a small warning
+					// dot on its nav row, named "未保存" for assistive
+					// technology, so the user sees WHICH page has the draft
+					// (the title row's global badge alone did not say; settings
+					// IA review P0-5, audit UX-16).
+					if page.Dirty != nil && page.Dirty() {
+						item.Children(func() {
+							ui.Box(c).Size(design.Space2, design.Space2).Shrink(0).
+								Radius(design.RadiusMax).Background(t.Warning).
+								Label(r.tr("未保存", "Unsaved"))
+						})
+					}
 					if page.ID == *selected {
 						scrollTarget = item
 					}
 				}
 			}
-			searching := strings.TrimSpace(r.settingsQuery) != ""
 			for _, group := range groups {
 				group := group
 				title := r.settingsSectionTitle(group.section)

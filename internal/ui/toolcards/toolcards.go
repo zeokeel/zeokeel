@@ -23,9 +23,7 @@
 package toolcards
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -37,6 +35,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -201,7 +200,7 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return err
 		}
-		title := firstNonEmpty(cfg.Title, "工具调用")
+		title := textutil.FirstNonEmptyTrimmed(cfg.Title, "工具调用")
 		locale, _ := ctx.Get(contracts.KeyLocale)
 		state := newRendererState()
 		state.runtime = runtime
@@ -289,7 +288,7 @@ func realBuild(state *rendererState, runtime contracts.UIRuntime) func(c *ui.Con
 			open = uikit.SummaryDefaultOpen(call.Status, summary)
 		}
 		toggled := false
-		sections := PanelSections(state.locale, call)
+		sections := uikit.ToolPanelSections(state.locale, call)
 		statusKind := uikit.ParseToolStatus(call.Status).Kind()
 		row := uikit.ToolRowOptions{
 			Key:         "toolcards." + key,
@@ -303,7 +302,7 @@ func realBuild(state *rendererState, runtime contracts.UIRuntime) func(c *ui.Con
 			// finished call draws none and stays quiet.
 			State:   statusKind,
 			Running: statusKind == uikit.StatusRunning,
-			Preview: Preview(state.locale, call),
+			Preview: uikit.ToolCallPreview(state.locale, call),
 			Open:    open,
 			Toggle: func(next bool) {
 				toggled = true
@@ -319,415 +318,10 @@ func realBuild(state *rendererState, runtime contracts.UIRuntime) func(c *ui.Con
 	}
 }
 
-// maxToolInputRunes bounds one rendered input section (JSON, command, content
-// preview). It mirrors the agent's read-model argument bound so the UI never
-// shows less than the read model kept, and keeps a huge write_file content from
-// bloating the panel.
-const maxToolInputRunes = 4000
-
-// maxToolContentPreviewRunes bounds the write_file content preview.
-const maxToolContentPreviewRunes = 2000
-
-// assumedToolSummaryRunes mirrors agent.maxToolSummaryRunes: a read-model
-// summary at this length that ends with the truncation ellipsis was cut by the
-// backend. Keep the two in sync (both have tests asserting the bound).
-const assumedToolSummaryRunes = 4000
-
-// maxPreviewRunes bounds the collapsed row's one-line preview, in runes. It is
-// the same measure the rows used before the localized templates, so a template
-// never makes a row wider than the raw summary it replaces.
-const maxPreviewRunes = 96
-
-// previewTemplate renders one tool call's localized one-line preview from its
-// arguments. It returns "" when the arguments do not carry the fields the line
-// needs, and Preview falls back to the backend result summary.
-type previewTemplate func(locale contracts.LocaleService, call contracts.ToolCall) string
-
-// previewTemplates is the collapsed tool row's preview registry (P3-5). The
-// backend result summary is raw English narration ("created shared team task
-// id: task-1 subject: ...") that read as protocol noise in a one-line row; a
-// tool that ships a card gets the product's localized action line instead,
-// built from the arguments it already received. Only registered tools with the
-// template's fields use it: an unknown tool, or a known tool whose arguments
-// lack the field, keeps the backend summary unchanged.
-var previewTemplates = map[string]previewTemplate{
-	// shell / files
-	"bash":               previewLine("运行命令：%s", "Run command: %s", "command"),
-	"pwsh":               previewLine("运行命令：%s", "Run command: %s", "command"),
-	"read_file":          previewLine("读取文件：%s", "Read file: %s", "path"),
-	"write_file":         previewLine("写入文件：%s", "Write file: %s", "path"),
-	"edit_file":          previewLine("编辑文件：%s", "Edit file: %s", "path"),
-	"str_replace_editor": previewLine("编辑文件：%s", "Edit file: %s", "path"),
-	"list_dir":           previewLine("列出目录：%s", "List directory: %s", "path"),
-	"glob":               previewLine("查找文件：%s", "Find files: %s", "pattern"),
-	"grep":               previewLine("搜索代码：%s", "Search code: %s", "pattern"),
-	"read_image":         previewLine("查看图片：%s", "View image: %s", "path"),
-	// web
-	"web_fetch":  previewLine("抓取网页：%s", "Fetch page: %s", "url"),
-	"web_search": previewLine("搜索网页：%s", "Search the web: %s", "query", "queries"),
-	// jobs / terminals
-	"job_start":       previewLine("启动后台任务：%s", "Start background job: %s", "command"),
-	"job_output":      previewLine("读取后台任务输出：%s", "Read job output: %s", "job_id"),
-	"terminal_open":   previewLine("打开终端：%s", "Open terminal: %s", "cwd", "name", "shell"),
-	"terminal_send":   terminalSendPreview,
-	"terminal_read":   previewLine("读取终端输出：%s", "Read terminal output: %s", "session_id", "sessionId"),
-	"terminal_signal": terminalSignalPreview,
-	"terminal_close":  previewLine("关闭终端：%s", "Close terminal: %s", "session_id", "sessionId"),
-	// orchestration / team tasks
-	"subagent":         previewLine("启动子代理：%s", "Start subagent: %s", "description", "prompt"),
-	"team_task_create": previewLine("创建团队任务：%s", "Create team task: %s", "subject"),
-	"team_task_update": teamTaskUpdatePreview,
-	"team_task_get":    previewLine("查看任务：%s", "View task: %s", "id"),
-	"team_task_list":   teamTaskListPreview,
-}
-
-// Preview renders the collapsed tool row's one-line copy for one call: the
-// localized action line from the preview registry when the tool and its
-// arguments provide one, else the backend result summary unchanged (the row's
-// earlier behavior). The line is normalized to one line and bounded to
-// maxPreviewRunes.
-func Preview(locale contracts.LocaleService, call contracts.ToolCall) string {
-	text := ""
-	if template, ok := previewTemplates[strings.ToLower(strings.TrimSpace(call.Name))]; ok {
-		text = template(locale, call)
-	}
-	if strings.TrimSpace(text) == "" {
-		text = call.Summary
-	}
-	return uikit.ToolPreview(text, maxPreviewRunes)
-}
-
-// previewLine builds the registry's common shape: one localized line filled
-// with the first present argument among keys. It reports "" (so Preview keeps
-// the backend summary) when none of the fields carries a value.
-func previewLine(zhFormat, enFormat string, keys ...string) previewTemplate {
-	return func(locale contracts.LocaleService, call contracts.ToolCall) string {
-		value := previewArgValue(call.Arguments, keys...)
-		if value == "" {
-			return ""
-		}
-		return fmt.Sprintf(uikit.T(locale, zhFormat, enFormat), value)
-	}
-}
-
-// terminalSendPreview names the terminal and the text one terminal_send writes.
-// The session argument accepts both the DSH camelCase and the snake_case
-// spelling the backend records.
-func terminalSendPreview(locale contracts.LocaleService, call contracts.ToolCall) string {
-	session := previewArgValue(call.Arguments, "session_id", "sessionId")
-	text := previewArgValue(call.Arguments, "text", "input")
-	if session == "" || text == "" {
-		return ""
-	}
-	return fmt.Sprintf(uikit.T(locale, "向终端 %s 发送：%s", "Send to terminal %s: %s"), session, text)
-}
-
-// terminalSignalPreview names the terminal and the signal sent to it.
-func terminalSignalPreview(locale contracts.LocaleService, call contracts.ToolCall) string {
-	session := previewArgValue(call.Arguments, "session_id", "sessionId")
-	signal := previewArgValue(call.Arguments, "signal")
-	if session == "" || signal == "" {
-		return ""
-	}
-	return fmt.Sprintf(uikit.T(locale, "向终端 %s 发送信号：%s", "Signal terminal %s: %s"), session, signal)
-}
-
-// teamTaskUpdatePreview names the task and the localized board action.
-func teamTaskUpdatePreview(locale contracts.LocaleService, call contracts.ToolCall) string {
-	id := previewArgValue(call.Arguments, "id")
-	if id == "" {
-		return ""
-	}
-	action := previewArgValue(call.Arguments, "action")
-	if action == "" {
-		return fmt.Sprintf(uikit.T(locale, "更新任务 %s", "Update task %s"), id)
-	}
-	return fmt.Sprintf(uikit.T(locale, "更新任务 %s（%s）", "Update task %s (%s)"),
-		id, teamTaskActionLabel(locale, action))
-}
-
-// teamTaskActionLabel localizes the task board's action names; an unknown
-// action keeps its raw value.
-func teamTaskActionLabel(locale contracts.LocaleService, action string) string {
-	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "claim":
-		return uikit.T(locale, "认领", "claim")
-	case "complete":
-		return uikit.T(locale, "完成", "complete")
-	case "reopen":
-		return uikit.T(locale, "重新打开", "reopen")
-	case "release":
-		return uikit.T(locale, "释放", "release")
-	case "edit":
-		return uikit.T(locale, "编辑", "edit")
-	case "set_dependencies":
-		return uikit.T(locale, "调整依赖", "set dependencies")
-	case "reassign":
-		return uikit.T(locale, "改派", "reassign")
-	default:
-		return strings.TrimSpace(action)
-	}
-}
-
-// teamTaskListPreview describes the list query: the status and owner filters
-// when present, and a plain list line otherwise.
-func teamTaskListPreview(locale contracts.LocaleService, call contracts.ToolCall) string {
-	var filters []string
-	if status := strings.ToLower(strings.TrimSpace(previewArgValue(call.Arguments, "status"))); status != "" {
-		filters = append(filters, teamTaskStatusLabel(locale, status))
-	}
-	if owner := previewArgValue(call.Arguments, "owner"); owner != "" {
-		filters = append(filters, fmt.Sprintf(uikit.T(locale, "负责人：%s", "owner: %s"), owner))
-	}
-	if len(filters) == 0 {
-		return uikit.T(locale, "列出团队任务", "List team tasks")
-	}
-	return fmt.Sprintf(uikit.T(locale, "列出团队任务（%s）", "List team tasks (%s)"),
-		strings.Join(filters, uikit.T(locale, " · ", " · ")))
-}
-
-// teamTaskStatusLabel localizes a task board status; an unknown status keeps
-// its raw value.
-func teamTaskStatusLabel(locale contracts.LocaleService, status string) string {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "pending":
-		return uikit.T(locale, "待处理", "pending")
-	case "in_progress":
-		return uikit.T(locale, "进行中", "in progress")
-	case "completed":
-		return uikit.T(locale, "已完成", "completed")
-	default:
-		return strings.TrimSpace(status)
-	}
-}
-
-// previewArgValue reads the first present argument among keys as preview copy.
-// It accepts a string value or the first string of an array (DSH's web_search
-// queries), and reports "" for anything else so the caller falls back to the
-// backend summary.
-func previewArgValue(arguments string, keys ...string) string {
-	trimmed := strings.TrimSpace(arguments)
-	if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
-		return ""
-	}
-	var values map[string]any
-	if err := json.Unmarshal([]byte(trimmed), &values); err != nil {
-		return ""
-	}
-	for _, key := range keys {
-		switch value := values[key].(type) {
-		case string:
-			if text := strings.TrimSpace(value); text != "" {
-				return text
-			}
-		case []any:
-			for _, entry := range value {
-				if text, ok := entry.(string); ok && strings.TrimSpace(text) != "" {
-					return strings.TrimSpace(text)
-				}
-			}
-		}
-	}
-	return ""
-}
-
-// PanelSections builds the expanded panel of one tool call: the tool's input
-// (bash command, write path+content, edit path+before/after, or pretty JSON),
-// then its bounded output. Labels are localized through locale; colors are
-// applied by the shared uikit section renderer from the design tokens.
-func PanelSections(locale contracts.LocaleService, call contracts.ToolCall) []uikit.ToolPanelSection {
-	tr := func(zh, en string) string { return uikit.T(locale, zh, en) }
-	name := strings.ToLower(strings.TrimSpace(call.Name))
-	arguments := strings.TrimSpace(call.Arguments)
-	sections := make([]uikit.ToolPanelSection, 0, 4)
-
-	switch {
-	case name == "bash", name == "pwsh":
-		if command := toolStringArg(arguments, "command"); command != "" {
-			sections = append(sections, uikit.ToolPanelSection{
-				Label:     tr("命令", "Command"),
-				Text:      command,
-				Mono:      true,
-				Bounded:   true,
-				CopyLabel: tr("复制命令", "Copy command"),
-			})
-		} else if generic, ok := genericInputSection(tr, arguments); ok {
-			sections = append(sections, generic)
-		}
-	case name == "write_file":
-		if path := toolStringArg(arguments, "path"); path != "" {
-			sections = append(sections, uikit.ToolPanelSection{
-				Label:     tr("路径", "Path"),
-				Text:      path,
-				Mono:      true,
-				CopyLabel: tr("复制路径", "Copy path"),
-			})
-		}
-		if content := toolStringArg(arguments, "content"); content != "" {
-			text, truncated := boundRunes(content, maxToolContentPreviewRunes)
-			section := uikit.ToolPanelSection{
-				Label:     tr("内容", "Content"),
-				Text:      text,
-				Mono:      true,
-				Bounded:   true,
-				CopyLabel: tr("复制内容", "Copy content"),
-			}
-			if truncated {
-				section.Hint = tr("内容已截断，仅显示前部分", "Content truncated; only the beginning is shown")
-			}
-			sections = append(sections, section)
-		}
-	case name == "edit_file", name == "str_replace_editor":
-		if path := toolStringArg(arguments, "path"); path != "" {
-			sections = append(sections, uikit.ToolPanelSection{
-				Label:     tr("路径", "Path"),
-				Text:      path,
-				Mono:      true,
-				CopyLabel: tr("复制路径", "Copy path"),
-			})
-		}
-		oldText := firstToolStringArg(arguments, "old_string", "old_str")
-		newText := firstToolStringArg(arguments, "new_string", "new_str")
-		if oldText != "" {
-			sections = append(sections, uikit.ToolPanelSection{
-				Label:     tr("替换前", "Before"),
-				Text:      oldText,
-				Mono:      true,
-				Bounded:   true,
-				Tone:      uikit.ToolSectionRemoved,
-				CopyLabel: tr("复制替换前", "Copy before"),
-			})
-		}
-		if newText != "" {
-			sections = append(sections, uikit.ToolPanelSection{
-				Label:     tr("替换后", "After"),
-				Text:      newText,
-				Mono:      true,
-				Bounded:   true,
-				Tone:      uikit.ToolSectionAdded,
-				CopyLabel: tr("复制替换后", "Copy after"),
-			})
-		}
-		// str_replace_editor's create command carries the new file body instead
-		// of an old/new pair.
-		if oldText == "" && newText == "" {
-			if content := firstToolStringArg(arguments, "file_text", "content"); content != "" {
-				text, truncated := boundRunes(content, maxToolContentPreviewRunes)
-				section := uikit.ToolPanelSection{
-					Label:     tr("内容", "Content"),
-					Text:      text,
-					Mono:      true,
-					Bounded:   true,
-					CopyLabel: tr("复制内容", "Copy content"),
-				}
-				if truncated {
-					section.Hint = tr("内容已截断，仅显示前部分", "Content truncated; only the beginning is shown")
-				}
-				sections = append(sections, section)
-			}
-		}
-	default:
-		if generic, ok := genericInputSection(tr, arguments); ok {
-			sections = append(sections, generic)
-		}
-	}
-
-	if summary := strings.TrimSpace(call.Summary); summary != "" {
-		section := uikit.ToolPanelSection{
-			Label:     tr("输出", "Output"),
-			Text:      summary,
-			Mono:      true,
-			Bounded:   true,
-			CopyLabel: tr("复制输出", "Copy output"),
-		}
-		if toolOutputTruncated(summary) {
-			section.Hint = tr("输出已截断，仅显示前部分", "Output truncated; only the beginning is shown")
-		}
-		sections = append(sections, section)
-	}
-	return sections
-}
-
-// genericInputSection renders the tool arguments as indented JSON, bounded and
-// copyable. It reports false when there is nothing readable to show.
-func genericInputSection(tr func(zh, en string) string, arguments string) (uikit.ToolPanelSection, bool) {
-	trimmed := strings.TrimSpace(arguments)
-	if trimmed == "" || trimmed == "{}" || trimmed == "null" {
-		return uikit.ToolPanelSection{}, false
-	}
-	text := trimmed
-	if pretty, ok := prettyJSON(trimmed); ok {
-		text = pretty
-	}
-	bounded, truncated := boundRunes(text, maxToolInputRunes)
-	section := uikit.ToolPanelSection{
-		Label:     tr("输入", "Input"),
-		Text:      bounded,
-		Mono:      true,
-		Bounded:   true,
-		CopyLabel: tr("复制输入", "Copy input"),
-	}
-	if truncated {
-		section.Hint = tr("输入已截断，仅显示前部分", "Input truncated; only the beginning is shown")
-	}
-	return section, true
-}
-
-// toolStringArg reads one string field of the tool's JSON arguments ("" when
-// the arguments are not JSON or the field is absent/non-string).
-func toolStringArg(arguments, key string) string {
-	trimmed := strings.TrimSpace(arguments)
-	if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
-		return ""
-	}
-	var values map[string]any
-	if err := json.Unmarshal([]byte(trimmed), &values); err != nil {
-		return ""
-	}
-	value, _ := values[key].(string)
-	return value
-}
-
-// firstToolStringArg returns the first present string field among keys.
-func firstToolStringArg(arguments string, keys ...string) string {
-	for _, key := range keys {
-		if value := toolStringArg(arguments, key); value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-// prettyJSON indents one JSON document for the input section.
-func prettyJSON(raw string) (string, bool) {
-	if !strings.HasPrefix(strings.TrimSpace(raw), "{") && !strings.HasPrefix(strings.TrimSpace(raw), "[") {
-		return "", false
-	}
-	var buffer bytes.Buffer
-	if err := json.Indent(&buffer, []byte(raw), "", "  "); err != nil {
-		return "", false
-	}
-	return buffer.String(), true
-}
-
-// boundRunes cuts text to max runes (UTF-8 safe) and reports whether it cut.
-func boundRunes(text string, max int) (string, bool) {
-	runes := []rune(text)
-	if max <= 0 || len(runes) <= max {
-		return text, false
-	}
-	return string(runes[:max]) + "…", true
-}
-
-// toolOutputTruncated reports whether the backend cut the read-model summary:
-// the agent appends the truncation ellipsis when the output exceeds its bound.
-func toolOutputTruncated(summary string) bool {
-	return strings.HasSuffix(strings.TrimSpace(summary), "…") &&
-		len([]rune(strings.TrimSpace(summary))) >= assumedToolSummaryRunes
-}
-
-// toolIcon maps a tool name to its brand glyph: shell/process tools use the
-// terminal, file and web reads the globe, searches the magnifier, task tools// truncateSummary bounds the expanded excerpt (UTF-8 safe) and marks the cut.
+// truncateSummary bounds the expanded excerpt (UTF-8 safe) and marks the cut.
+// The preview copy and expanded-panel sections live in internal/uikit
+// (ToolCallPreview/ToolPanelSections) so any screen renders a call without
+// importing this module (2026-11 audit AR-01).
 func truncateSummary(summary string) string {
 	if len(summary) <= maxSummaryChars {
 		return summary
@@ -862,13 +456,4 @@ func own(ctx cordis.Context, register func() (func(), error)) error {
 		return err
 	}
 	return nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }

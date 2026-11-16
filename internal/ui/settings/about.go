@@ -72,9 +72,12 @@ func buildAboutHubPage(c *ui.Context, kctx cordis.Context, info contracts.AppInf
 		buildUpdatePage(c, t, kctx, uiRuntimeFrom(kctx), update, locale)
 		store, _ := kctx.Get(contracts.KeySettings)
 		dataDir, _ := kctx.Get(contracts.KeyDataDir)
-		toolkit, _ := kctx.Get(contracts.KeyToolkit)
+		// The narrow rig-free tool catalog (AR-06): diagnostics only need the tool
+		// names and count, not the concrete *rigtool.Registry the legacy KeyToolkit
+		// exposes.
+		catalog, _ := kctx.Get(contracts.KeyToolCatalog)
 		chat, _ := kctx.Get(contracts.KeyChat)
-		rows, keys := diagnosticsRows(info, dataDir, toolkit, chat, store, locale)
+		rows, keys := diagnosticsRows(info, dataDir, catalog, chat, store, locale)
 		modules := loadedModulesFromContext(kctx)
 		buildDiagnosticsPage(c, t, diagnostics, rows, keys, modules, locale, false)
 	})

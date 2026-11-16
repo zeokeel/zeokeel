@@ -4,28 +4,23 @@ package settings_test
 // runtime/storage values and the copy action.
 
 import (
-	"context"
 	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
-	rig "github.com/zeokeel/zeokeel-rig"
-	rigtools "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
-type diagnosisTool struct{ name string }
+// fakeToolCatalog is a rig-free contracts.ToolCatalog (AR-06): the diagnostics
+// page consumes the narrow names/count surface, never the concrete rig registry.
+type fakeToolCatalog struct{ names []string }
 
-func (t diagnosisTool) Name() string           { return t.name }
-func (t diagnosisTool) Description() string    { return t.name + " tool" }
-func (t diagnosisTool) Schema() map[string]any { return map[string]any{"type": "object"} }
-func (t diagnosisTool) Invoke(context.Context, rig.ToolCall) (rig.ToolResult, error) {
-	return rig.ToolResult{Content: "ok"}, nil
-}
+func (f fakeToolCatalog) Names() []string { return append([]string(nil), f.names...) }
+func (f fakeToolCatalog) Len() int        { return len(f.names) }
 
 func TestDiagnosticsPage(t *testing.T) {
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
@@ -53,9 +48,9 @@ func TestDiagnosticsPage(t *testing.T) {
 		BuildTime: "2026-01-02T03:04:05Z", GoVersion: "go1.27.3",
 	})
 	provide(t, ctx, contracts.KeyDataDir, "/tmp/zeokeel-diag")
-	provide(t, ctx, contracts.KeyToolkit, rigtools.NewRegistry(
-		diagnosisTool{"bash"}, diagnosisTool{"read_file"},
-	))
+	provide(t, ctx, contracts.KeyToolCatalog, contracts.ToolCatalog(fakeToolCatalog{
+		names: []string{"bash", "read_file"},
+	}))
 	activate(t, ctx, settings.Module(), settings.Config{})
 	uiRoot.Navigator().ToggleSettings()
 	tester := ui.NewTester(uiRoot.View, 1200, 800)
@@ -67,7 +62,9 @@ func TestDiagnosticsPage(t *testing.T) {
 	}
 	tester.Frame()
 	for _, want := range []string{"诊断", "ZeoKeel v1.2.3", "abc124", "go1.27.3",
-		"/tmp/zeokeel-diag", "zeokeel.db", "工具数", "会话数"} {
+		"/tmp/zeokeel-diag", "zeokeel.db", "工具数", "会话数",
+		// AR-06: the narrow ToolCatalog's Names render in the diagnostics.
+		"工具清单", "bash, read_file"} {
 		if !tester.HasText(want) {
 			t.Fatalf("diagnostics frame missing %q; texts = %v", want, tester.Texts())
 		}

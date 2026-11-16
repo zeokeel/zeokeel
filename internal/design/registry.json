@@ -21,7 +21,9 @@
       "allowed": [
         "uikit.ToolRow",
         "uikit.ToolPanelSectionView",
-        "uikit.ToolPreview"
+        "uikit.ToolPreview",
+        "uikit.ToolCallPreview",
+        "uikit.ToolPanelSections"
       ],
       "forbidden": [
         "raw_text_body",
@@ -109,7 +111,8 @@
         "label-required",
         "hit-target-24",
         "token-colors",
-        "ink-color-option"
+        "ink-color-option",
+        "native-variant-official-look"
       ],
       "doc": "docs/DESIGN.md §6.3 / §7.1"
     },
@@ -844,9 +847,24 @@
       "rules": [
         "DS-06"
       ],
+      "symbol": "palette",
       "what": "命令面板行按钮（富行，单次点击执行，RoleButton）",
       "owner": "uiroot",
       "reason": "官方 List 行语义是 listitem，不提供按钮行（DESIGN.md §7.1）",
+      "until": "2027-06-30"
+    },
+    {
+      "id": "uiroot.rail-session-rows",
+      "paths": [
+        "internal/uiroot/frame.go"
+      ],
+      "rules": [
+        "DS-06"
+      ],
+      "symbol": "railSessionRow",
+      "what": "rail 会话富行（标题 + 运行/未读点，整行点击打开会话并关闭浮层，RoleButton）",
+      "owner": "uiroot",
+      "reason": "官方 List 行语义是 listitem，不提供按钮行；rail 浮层行需整行点击与自绘状态前景（DESIGN.md §7.1，2026-11 审计 UD-11 补登记）",
       "until": "2027-06-30"
     },
     {
@@ -915,6 +933,19 @@
       "until": "2027-06-30"
     },
     {
+      "id": "uikit.run-status-queue-badge",
+      "paths": [
+        "internal/uikit/runstatus.go"
+      ],
+      "rules": [
+        "DS-06"
+      ],
+      "what": "RunStatus 队列计数徽章：ButtonBase 全状态自绘（rest/hover/pressed/focused/selected）",
+      "owner": "uikit",
+      "reason": "官方 ui.Badge 无点击/键盘语义；ui.Button 覆写背景会丢原生 hover/pressed（AP-02）；ButtonBase 保留键盘/焦点/焦点环，自绘补齐全部状态（DESIGN.md §7.1，2026-11 审计 UD-06）",
+      "until": "2027-06-30"
+    },
+    {
       "id": "toast.brand-chrome",
       "paths": [
         "internal/ui/toasts"
@@ -930,14 +961,22 @@
     {
       "id": "chrome.file-picker-seam",
       "paths": [
-        "internal/uiroot"
+        "internal/ui/home/composer.go",
+        "internal/ui/rightpanel/artifacts_download.go",
+        "internal/ui/rightpanel/files.go",
+        "internal/ui/session/attachments.go",
+        "internal/ui/session/export.go",
+        "internal/ui/session/view.go",
+        "internal/ui/settings/data.go",
+        "internal/ui/settings/import.go",
+        "internal/ui/sidebar/workspace_add.go"
       ],
       "rules": [
         "DS-06"
       ],
-      "what": "文件/目录选择器 seam：纯测试注入点",
+      "what": "文件/目录选择器与导出保存 seam：纯测试注入点（var 函数，无自绘控件）",
       "owner": "uiroot",
-      "reason": "无应用状态，非 UI 自绘（DESIGN.md §7.1）",
+      "reason": "无应用状态，非 UI 自绘（DESIGN.md §7.1）；2026-11 审计 UD-11 由整目录收窄到实际 seam 文件",
       "until": "2027-06-30"
     }
   ]

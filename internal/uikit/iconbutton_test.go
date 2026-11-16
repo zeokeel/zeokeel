@@ -344,6 +344,166 @@ func TestIconButtonContentBuildsTheInside(t *testing.T) {
 	requireButton(t, tt, ui.RoleButton, "展开侧边栏")
 }
 
+// TestIconButtonNativeVariantIsTheOfficialLook covers the Native variant
+// (2026-11 audit UD-09): the chrome's bordered icon actions migrate to the one
+// IconButton entry without changing their look — Native paints exactly the
+// official ui.Button outline (surface fill + hairline border + native
+// hover/pressed), while keeping the entry's Label, ≥24 hit target and keyboard
+// guarantees. The reference frame builds the official button the way the 12
+// legacy sites did; the two frames must agree pixel for pixel.
+func TestIconButtonNativeVariantIsTheOfficialLook(t *testing.T) {
+	const label = "快捷操作"
+	native := ui.NewTester(iconButtonView(uikit.IconButtonOptions{
+		Label:   label,
+		Tooltip: label,
+		Icon:    icons.Search(),
+		Size:    design.IconSizeS,
+		Variant: uikit.IconButtonNative,
+	}), 240, 160)
+	native.Frame()
+	official := ui.NewTester(func(c *ui.Context) {
+		t := design.Of(c)
+		ui.Column(c).FillWidth().FillHeight().Background(t.BgBase).
+			Padding(design.Space4).Children(func() {
+			button := ui.Button(c, "").Label(label).Tooltip(label).
+				Size(design.IconSizeS+design.Space2, design.IconSizeS+design.Space2).
+				PaddingX(design.Space0).Radius(design.RadiusSM)
+			button.Children(func() {
+				ui.Icon(c, icons.Search()).Size(design.IconSizeS, design.IconSizeS).
+					TextColor(t.LabelSecondary)
+			})
+		})
+	}, 240, 160)
+	official.Frame()
+
+	info := requireButton(t, native, ui.RoleButton, label)
+	if info.Bounds.W < design.IconSizeL || info.Bounds.H < design.IconSizeL {
+		t.Fatalf("native hit target = %vx%v, want ≥%v", info.Bounds.W, info.Bounds.H, design.IconSizeL)
+	}
+	if info.Description != label {
+		t.Fatalf("native tooltip is not the description: %+v", info)
+	}
+	ref := requireButton(t, official, ui.RoleButton, label)
+	if info.Bounds != ref.Bounds {
+		t.Fatalf("native bounds %+v differ from the official button's %+v", info.Bounds, ref.Bounds)
+	}
+	nativeImage, officialImage := native.Image(), official.Image()
+	for y := int(info.Bounds.Y) - 4; y < int(info.Bounds.Y+info.Bounds.H)+4; y++ {
+		for x := int(info.Bounds.X) - 4; x < int(info.Bounds.X+info.Bounds.W)+4; x++ {
+			if nativeImage.RGBAAt(x, y) != officialImage.RGBAAt(x, y) {
+				t.Fatalf("native variant diverges from the official ui.Button look at (%d,%d): %v != %v",
+					x, y, nativeImage.RGBAAt(x, y), officialImage.RGBAAt(x, y))
+			}
+		}
+	}
+
+	// The ghost variant keeps its own (borderless) look: the two variants are
+	// visibly different at rest.
+	ghost := ui.NewTester(iconButtonView(uikit.IconButtonOptions{
+		Label: label,
+		Icon:  icons.Search(),
+		Size:  design.IconSizeS,
+	}), 240, 160)
+	ghost.Frame()
+	ghostInfo := requireButton(t, ghost, ui.RoleButton, label)
+	same := 0
+	ghostImage := ghost.Image()
+	for y := int(ghostInfo.Bounds.Y); y < int(ghostInfo.Bounds.Y+ghostInfo.Bounds.H); y++ {
+		for x := int(ghostInfo.Bounds.X); x < int(ghostInfo.Bounds.X+ghostInfo.Bounds.W); x++ {
+			if ghostImage.RGBAAt(x, y) == nativeImage.RGBAAt(x, y) {
+				same++
+			}
+		}
+	}
+	if same == int(ghostInfo.Bounds.W*ghostInfo.Bounds.H) {
+		t.Fatal("the native variant paints the ghost look (the two variants must differ)")
+	}
+}
+
+// TestIconButtonNativeStatesAndKeyboard covers the Native variant's interaction
+// guarantees: the official hover/pressed fills, the keyboard activation and the
+// disabled state — the reasons the legacy sites' hand-written buttons migrate.
+func TestIconButtonNativeStatesAndKeyboard(t *testing.T) {
+	tokens := design.Light()
+	clicks := 0
+	// The Native variant is the official button: its state fills come from the
+	// window theme, which the product installs at the shell root (uiroot).
+	view := func(c *ui.Context) {
+		c.SetTheme(tokens.Theme())
+		iconButtonView(uikit.IconButtonOptions{
+			Label:   "打开右侧栏",
+			Icon:    icons.PanelRight(),
+			Size:    design.IconSizeS,
+			Variant: uikit.IconButtonNative,
+			OnClick: func() { clicks++ },
+		})(c)
+	}
+	tt := ui.NewTester(view, 240, 160)
+	tt.Frame()
+	info := requireButton(t, tt, ui.RoleButton, "打开右侧栏")
+	x, y := int(info.Bounds.X)+2, int(info.Bounds.Y+info.Bounds.H/2)
+	rest := tt.Image().RGBAAt(x, y)
+
+	tt.Move(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+	tt.Frame()
+	hover := tt.Image().RGBAAt(x, y)
+	if hover == rest {
+		t.Fatal("the native button shows no hover change")
+	}
+	if hover != (color.RGBA{R: over(tokens.BgHover, tokens.BgBase).R, G: over(tokens.BgHover, tokens.BgBase).G, B: over(tokens.BgHover, tokens.BgBase).B, A: 255}) {
+		t.Fatalf("native hover fill = %v, want the theme hover tint %v", hover, over(tokens.BgHover, tokens.BgBase))
+	}
+	tt.Press(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+	tt.Frame()
+	pressed := tt.Image().RGBAAt(x, y)
+	if pressed == hover || pressed == rest {
+		t.Fatalf("the native button shows no distinct pressed fill (rest=%v hover=%v pressed=%v)", rest, hover, pressed)
+	}
+	tt.Release(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+	tt.Frame()
+	if clicks != 1 {
+		t.Fatalf("native pointer click calls = %d, want 1", clicks)
+	}
+
+	tt.Move(0, 0)
+	tt.Key(0, ui.KeyTab)
+	tt.Frame()
+	if !tt.Focused("打开右侧栏") {
+		t.Fatalf("Tab did not focus the native icon button; texts = %v", tt.Texts())
+	}
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	tt.Key(0, ui.KeySpace)
+	tt.Frame()
+	if clicks != 3 {
+		t.Fatalf("native keyboard calls = %d, want 3 (Enter + Space)", clicks)
+	}
+
+	disabled := ui.NewTester(iconButtonView(uikit.IconButtonOptions{
+		Label:    "打开右侧栏",
+		Icon:     icons.PanelRight(),
+		Variant:  uikit.IconButtonNative,
+		Disabled: true,
+		OnClick:  func() { clicks++ },
+	}), 240, 160)
+	disabled.Frame()
+	if got := requireButton(t, disabled, ui.RoleButton, "打开右侧栏"); !got.Disabled {
+		t.Fatalf("disabled native button does not read as disabled: %+v", got)
+	}
+	if err := disabled.Click("打开右侧栏"); err != nil {
+		t.Fatalf("click disabled: %v", err)
+	}
+	disabled.Frame()
+	disabled.Key(0, ui.KeyTab)
+	disabled.Frame()
+	if disabled.Focused("打开右侧栏") {
+		t.Fatal("a disabled native icon button took the keyboard focus")
+	}
+	if clicks != 3 {
+		t.Fatalf("disabled native button ran its action (calls=%d)", clicks)
+	}
+}
+
 // TestIconButtonInkColorOverridesTheGlyph covers the additive InkColor option
 // (audit PN-01): a selected List row paints the accent fill, so an icon action
 // on it passes Tokens.AccentText as its ink. The zero value must keep the

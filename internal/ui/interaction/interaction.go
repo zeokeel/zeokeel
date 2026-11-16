@@ -28,6 +28,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -350,7 +351,7 @@ func buildAskDialog(c *ui.Context, runtime contracts.UIRuntime, st *state, quest
 // overlay uses.
 func artifactPanel(c *ui.Context, runtime contracts.UIRuntime, st *state, artifact contracts.Artifact) {
 	t := design.Of(c)
-	title := firstNonEmpty(artifact.Title, st.tr("工件预览", "Artifact preview"))
+	title := textutil.FirstNonEmptyTrimmed(artifact.Title, st.tr("工件预览", "Artifact preview"))
 	close := func() { popOverlay(runtime, st) }
 	dialogEnter(c, close)
 	design.Apply(ui.Column(c).Width(design.DialogWidthL).Gap(design.Space4), func(el ui.Element) ui.Element {
@@ -522,14 +523,4 @@ func own(ctx cordis.Context, register func() (func(), error)) error {
 		return err
 	}
 	return nil
-}
-
-// firstNonEmpty returns the first non-empty trimmed string.
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }

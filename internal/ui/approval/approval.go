@@ -33,6 +33,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -70,12 +71,12 @@ type Config struct {
 // resolved fills every empty field with its default.
 func (c Config) resolved() Config {
 	return Config{
-		Title:            firstNonEmpty(c.Title, "需要审批"),
-		ToolLabel:        firstNonEmpty(c.ToolLabel, "工具"),
-		ArgumentsLabel:   firstNonEmpty(c.ArgumentsLabel, "原始参数"),
-		AllowLabel:       firstNonEmpty(c.AllowLabel, "允许"),
-		AllowAlwaysLabel: firstNonEmpty(c.AllowAlwaysLabel, "本会话内始终允许"),
-		DenyLabel:        firstNonEmpty(c.DenyLabel, "拒绝"),
+		Title:            textutil.FirstNonEmpty(c.Title, "需要审批"),
+		ToolLabel:        textutil.FirstNonEmpty(c.ToolLabel, "工具"),
+		ArgumentsLabel:   textutil.FirstNonEmpty(c.ArgumentsLabel, "原始参数"),
+		AllowLabel:       textutil.FirstNonEmpty(c.AllowLabel, "允许"),
+		AllowAlwaysLabel: textutil.FirstNonEmpty(c.AllowAlwaysLabel, "本会话内始终允许"),
+		DenyLabel:        textutil.FirstNonEmpty(c.DenyLabel, "拒绝"),
 	}
 }
 
@@ -306,14 +307,4 @@ func resolve(runtime contracts.UIRuntime, approvals contracts.Approvals, st *sta
 	st.resolvedID = id
 	_ = approvals.Resolve(id, decision)
 	runtime.Invalidate()
-}
-
-// firstNonEmpty returns the first non-empty string.
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }

@@ -63,7 +63,8 @@ func repoScan(t *testing.T) (*conform.Result, *conform.Baseline, *design.Registr
 		allow := make([]conform.AllowEntry, 0, len(scanRegistry.Allowlist))
 		for _, a := range scanRegistry.AllowEntries() {
 			allow = append(allow, conform.AllowEntry{
-				ID: a.ID, Paths: a.Paths, Rules: a.Rules, Owner: a.Owner, Reason: a.Reason, Until: a.Until,
+				ID: a.ID, Paths: a.Paths, Rules: a.Rules, Symbol: a.Symbol, Text: a.Text,
+				Owner: a.Owner, Reason: a.Reason, Until: a.Until,
 			})
 		}
 		scanResult, scanErr = conform.Scan(conform.ScanOptions{

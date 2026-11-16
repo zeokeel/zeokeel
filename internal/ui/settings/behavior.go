@@ -1,12 +1,15 @@
 package settings
 
 // Behavior page: the default agent permission mode (daily), the transcript's
-// work-details presentation (DSH-aligned), and the page's lower-frequency
-// conversation options behind one collapsed disclosure. Every control applies
-// immediately (the page has no save button): the permission menu writes the
-// shared agent.permission row the approvals gate reads dynamically, the work
-// details segmented controls write ui.workSteps.* and the workspace instruction
-// file saves as it is edited.
+// work-details presentation (DSH-aligned), the page's lower-frequency
+// conversation options behind one collapsed disclosure, and the run-limits
+// form. The page has TWO submit models, partitioned explicitly (audit US-13):
+// the display preferences apply immediately — the permission pointer reflects
+// the shared agent.permission row the approvals gate reads dynamically, the
+// work-details segmented controls write ui.workSteps.*, and the workspace
+// instruction file saves as it is edited — while the run-limits form is an
+// explicit-save draft persisted by the page footer's Save button (VE-01: the
+// old "the page has no save button" comment drifted from that footer).
 
 import (
 	"strings"
@@ -127,6 +130,80 @@ func workStepsModeLabels(locale contracts.LocaleService) []string {
 	return labels
 }
 
+// workStepsModeMeaning renders one display level's plain-language meaning for
+// the current locale (the meaningZh/En fields, previously defined but never
+// shown — 2026-11 audit US-06). It is the selected level's description, so the
+// four abstract levels teach what they do instead of leaving the user to guess.
+func workStepsModeMeaning(locale contracts.LocaleService, mode string) string {
+	for _, choice := range workStepsModeChoices {
+		if choice.value == mode {
+			return localized(locale, choice.meaningZh, choice.meaningEn)
+		}
+	}
+	return localized(locale, workStepsModeChoices[1].meaningZh, workStepsModeChoices[1].meaningEn)
+}
+
+// permissionModeLabel names one permission preset in plain language.
+func permissionModeLabel(locale contracts.LocaleService, mode string) string {
+	switch contracts.NormalizePermissionMode(mode) {
+	case contracts.PermissionReadOnly:
+		return localized(locale, "只读", "Read-only")
+	case contracts.PermissionFull:
+		return localized(locale, "所有权限", "All permissions")
+	default:
+		return localized(locale, "工作区修改", "Workspace-write")
+	}
+}
+
+// buildPermissionExplanation is the visible permission teaching block (audit
+// US-05): the three states explained accurately, the two-layer model (approval
+// gate × OS sandbox) disclosed, the shell auto-allow fact stated correctly (no
+// "仍会询问" contradiction), and — when an active session carries the wave-A read
+// model — its effective approval mode, OS sandbox mode and permission scope, so
+// a session-level "all permissions" override is visibly approval-only while the
+// OS sandbox follows the global mode.
+func buildPermissionExplanation(c *ui.Context, t *design.Tokens, locale contracts.LocaleService, chat contracts.ChatService) {
+	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+		design.Apply(ui.Text(c, localized(locale,
+			"权限三态只决定「哪些工具调用免审批」：只读＝仅只读/信息类工具；工作区修改（默认）＝再加工作区内文件读写；所有权限＝全部免审批。",
+			"The three permission states only decide which tool calls skip approval: Read-only = read-only/informational tools; Workspace-write (default) = plus file reads/writes inside the workspace; All permissions = everything skips approval.")),
+			t.TextMuted(design.TypeXXS)).MaxLines(3)
+		design.Apply(ui.Text(c, localized(locale,
+			"审批与 OS 沙箱是两层：OS 沙箱始终跟随全局权限，会话/自动化级「所有权限」只放宽审批、不解除沙箱；沙箱可用时 shell 类工具自动放行，不可用时命令失败。",
+			"Approval and the OS sandbox are two layers: the OS sandbox always follows the global permission; a session/automation-level All permissions only relaxes approval, never lifts the sandbox. Shell tools are auto-allowed when the sandbox is available and fail closed when not.")),
+			t.TextMuted(design.TypeXXS)).MaxLines(3)
+		// The active session's effective modes make the distinction concrete.
+		if chat == nil {
+			return
+		}
+		active := chat.ActiveSession()
+		if active == "" {
+			return
+		}
+		var info contracts.ChatSessionInfo
+		found := false
+		for _, session := range chat.Sessions() {
+			if session.ID == active {
+				info, found = session, true
+				break
+			}
+		}
+		if !found || info.EffectiveApprovalMode == "" {
+			return
+		}
+		scope := localized(locale, "全局跟随", "follows global")
+		if info.PermissionScope == contracts.PermissionScopeSession {
+			scope = localized(locale, "会话级覆盖", "session override")
+		}
+		design.Apply(ui.Text(c, localized(locale, "当前会话：审批＝", "Current session: approval = ")+
+			permissionModeLabel(locale, info.EffectiveApprovalMode)+"（"+scope+"）"+
+			localized(locale, " · OS 沙箱＝", " · OS sandbox = ")+
+			permissionModeLabel(locale, info.EffectiveSandboxMode)+
+			localized(locale, "（跟随全局）", " (follows global)")),
+			t.TextMuted(design.TypeXXS)).MaxLines(2)
+	})
+}
+
 // workStepsCollapseLabels renders the two collapse-timing labels.
 func workStepsCollapseLabels(locale contracts.LocaleService) []string {
 	labels := make([]string, 0, len(workStepsCollapseChoices))
@@ -152,7 +229,8 @@ type behaviorState struct {
 }
 
 // saveBehaviorSetting persists one immediate-apply settings row and reports the
-// result in the page's shared status line; the behavior page has no save button.
+// result in the page's shared status line. These display preferences apply at
+// once; only the run-limits form below uses the page footer's Save button.
 func saveBehaviorSetting(st *behaviorState, runtime contracts.UIRuntime,
 	store contracts.SettingsService, locale contracts.LocaleService, key, value string) {
 	if err := store.Set(key, value); err != nil {
@@ -165,13 +243,14 @@ func saveBehaviorSetting(st *behaviorState, runtime contracts.UIRuntime,
 	runtime.Invalidate()
 }
 
-// buildBehaviorPage renders the default-permission settings. Every control on
-// the page applies at once (the page has no save button): the permission menu
-// writes the shared agent row, the work-details segmented controls write
-// ui.workSteps.* and the workspace instruction file saves as it is edited.
+// buildBehaviorPage renders the behavior & limits page. The display preferences
+// apply at once (the permission pointer reflects the shared agent row, the
+// work-details segmented controls write ui.workSteps.*, the workspace
+// instruction file saves as it is edited); the run-limits form is the page's
+// explicit-save half, persisted by the footer Save button (US-13/VE-01).
 func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 	store contracts.SettingsService, locale contracts.LocaleService, st *behaviorState,
-	sandboxService contracts.SandboxService, capabilities *capabilitiesState, search *pageSearch) {
+	sandboxService contracts.SandboxService, chat contracts.ChatService, capabilities *capabilitiesState, search *pageSearch) {
 	t := design.Of(c)
 	// The message-size and workspace-instruction settings live inside the
 	// collapsed 更多对话设置 disclosure: a search hit on either opens it before
@@ -188,11 +267,19 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 			"权限模式已移到输入框工具栏的权限按钮：工作区修改 / 所有权限 / 只读。",
 			"Permission mode lives on the composer toolbar's permission button: Workspace-write / All permissions / Read-only.")),
 			t.TextMuted(design.TypeXXS)).MaxLines(2)
+		// The three states get a visible plain-language explanation here, not a
+		// tooltip buried on a disabled menu header (audit US-05): what each state
+		// auto-allows, the two-layer model (approval gate × OS sandbox), and the
+		// corrected fact that shell tools are auto-allowed when the sandbox is
+		// available. The active session's effective modes + scope make the
+		// session-vs-global distinction concrete.
+		buildPermissionExplanation(c, t, locale, chat)
 		// OS sandbox: the always-on kernel-level file-effect enforcement that
 		// lets the agent gate auto-allow shell tools. It sits next to the
 		// permission mode it mirrors, and its live status says whether this
-		// host can enforce it.
-		buildSandboxSection(c, locale, sandboxService)
+		// host can enforce it — mode-aware, since full access passes commands
+		// through unconfined (RG-02).
+		buildSandboxSection(c, locale, sandboxService, store)
 		// Work details: how much of a turn's tool-call steps the transcript shows
 		// and when finished steps fold (DSH-aligned). This stays visible next to
 		// the daily permission choice; it is a display preference, not a
@@ -211,7 +298,7 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 						saveBehaviorSetting(st, runtime, store, locale,
 							contracts.SettingWorkStepsMode, workStepsModeValue(modeIndex))
 					}
-				})
+				}).Description(workStepsModeMeaning(locale, workStepsModeValue(modeIndex)))
 				collapseIndex := workStepsCollapseIndex(contracts.NormalizeWorkStepsCollapse(
 					store.Get(contracts.SettingWorkStepsCollapse, "")))
 				ui.Field(c, localized(locale, "工作步骤收起时机", "When to collapse work details"),
@@ -291,8 +378,15 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 		}
 
 		// Delegation/shell/parallel limits used to be their own settings page;
-		// they are the "limits" half of this page now.
+		// they are the "limits" half of this page now. Unlike the display
+		// preferences above (which apply immediately), this form is saved by the
+		// page footer's Save button — the section says so, so the two submit
+		// models are not confused (2026-11 audit US-13).
 		uikit.Section(c, localized(locale, "运行限额", "Run limits"), func(body *ui.Context) {
+			design.Apply(ui.Text(body, localized(locale,
+				"以下限额需点页脚「保存」后生效；上方的显示偏好即时生效。",
+				"These limits apply after the footer Save; the display preferences above apply immediately.")),
+				t.TextMuted(design.TypeXXS)).MaxLines(2)
 			buildCapabilitiesPage(body, store, capabilities, locale, false)
 		})
 	})

@@ -369,9 +369,21 @@ func TestWorkStepsActivityWords(t *testing.T) {
 			h.assertTexts(tester, testCase.want, "细节")
 		})
 	}
-	// A turn without a tool call is analyzing the request.
+	// US-03 phase words: a turn whose prose is already streaming is writing the
+	// reply (the old pinned word 正在分析请求 claimed analysis while the answer
+	// visibly streamed); only a turn with no recorded event yet is analyzing.
 	h, _ := newWorkStepsHarness(t, liveStepChat(), nil)
-	h.assertTexts(h.tester(), "正在分析请求")
+	h.assertTexts(h.tester(), "正在回复")
+	initial := newFakeChat()
+	initial.addSession(contracts.ChatSession{
+		ID: "sess-1", Title: "工作步骤", Running: true,
+		Messages: []contracts.ChatMessage{
+			{ID: "u1", Role: contracts.ChatRoleUser, Text: "开始"},
+			{ID: "a1", Role: contracts.ChatRoleAssistant, Streaming: true},
+		},
+	}, true)
+	h2, _ := newWorkStepsHarness(t, initial, nil)
+	h2.assertTexts(h2.tester(), "正在分析请求")
 }
 
 // TestWorkStepsEnglishCopy covers the localized live line and the elapsed clock.

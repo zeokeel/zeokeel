@@ -93,7 +93,7 @@ func TestTrajectoryRowJumpsToTheMessage(t *testing.T) {
 
 	// Back on the conversation tab, scrolled to the calling message.
 	h.assertTexts(tester, "早期回复正文")
-	h.assertNoTexts(tester, "工具调用轨迹")
+	h.assertNoTexts(tester, "会话轨迹")
 }
 
 // TestTrajectoryFollowsNewStreamingCalls covers the streaming follow: a tool
@@ -153,24 +153,25 @@ func TestTrajectoryEnterJumpsFromTheKeyboard(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "轨迹")
-	h.assertNoTexts(tester, "早期回复正文")
+	// US-04: the trace now carries the reply-body summary, so "still on the
+	// trajectory tab" is the not-jumped-yet assertion.
+	h.assertTexts(tester, "会话轨迹")
 
 	// Tab from the tab strip moves the keyboard into the timeline's List.
 	tester.Key(0, ui.KeyTab)
 	tester.Frame()
-	if !tester.Focused("工具调用轨迹") {
+	if !tester.Focused("会话轨迹") {
 		t.Fatalf("Tab did not reach the trajectory list; texts = %v", tester.Texts())
 	}
 	// Down only moves the choice: the tab stays.
 	tester.Key(0, ui.KeyDown)
 	tester.Frame()
-	h.assertTexts(tester, "工具调用轨迹")
-	h.assertNoTexts(tester, "早期回复正文")
+	h.assertTexts(tester, "会话轨迹")
 	// Enter submits the chosen row and jumps to its message.
 	tester.Key(0, ui.KeyEnter)
 	tester.Frame()
 	h.assertTexts(tester, "早期回复正文")
-	h.assertNoTexts(tester, "工具调用轨迹")
+	h.assertNoTexts(tester, "会话轨迹")
 }
 
 // --- trajectory timing ------------------------------------------------------

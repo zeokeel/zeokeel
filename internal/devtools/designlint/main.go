@@ -396,6 +396,8 @@ func toAllowEntries(in []design.AllowEntry) []conform.AllowEntry {
 			ID:     a.ID,
 			Paths:  a.Paths,
 			Rules:  a.Rules,
+			Symbol: a.Symbol,
+			Text:   a.Text,
 			Owner:  a.Owner,
 			Reason: a.Reason,
 			Until:  a.Until,

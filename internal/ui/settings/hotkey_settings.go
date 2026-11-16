@@ -16,6 +16,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -173,6 +174,7 @@ func (st *appearanceState) captureHotkey(k ui.TextKey, locale contracts.LocaleSe
 	st.globalHotkey = accelerator
 	st.hotkeyText = formatHotkeyDisplay(accelerator)
 	st.hotkeyError = ""
+	st.conflictArmed = false
 	st.capturing = false
 	st.captureText = ""
 	return true
@@ -181,6 +183,7 @@ func (st *appearanceState) captureHotkey(k ui.TextKey, locale contracts.LocaleSe
 // syncHotkeyDraft parses the visible hotkey text into the canonical accelerator
 // the page persists, recording the inline error when it is not a valid chord.
 func (st *appearanceState) syncHotkeyDraft(locale contracts.LocaleService) {
+	st.conflictArmed = false
 	accelerator, ok := parseHotkeyDisplay(st.hotkeyText)
 	if !ok {
 		st.hotkeyError = globalHotkeyInvalidMessage(locale)
@@ -273,12 +276,61 @@ func buildGlobalHotkeySection(c *ui.Context, t *design.Tokens, state *appearance
 					state.globalHotkey = preset
 					state.hotkeyText = uikit.FormatShortcut(preset)
 					state.hotkeyError = ""
+					state.conflictArmed = false
 					state.capturing = false
 					c.Invalidate()
 				}
 			}
 		})
+		// A draft that collides with a chrome shortcut warns visibly here (not
+		// only at save time), naming the action it would shadow; the footer Save
+		// then needs a second confirmation (UX-11, personal-scale ruling).
+		if conflict := globalHotkeyConflict(locale, state.globalHotkey, store); conflict != "" {
+			ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(design.Space2).Children(func() {
+				ui.Icon(c, icons.AlertTriangle()).Size(design.Space3, design.Space3).TextColor(t.WarningText)
+				design.Apply(ui.Text(c, localized(locale,
+					"与「"+conflict+"」快捷键冲突（"+uikit.FormatShortcut(state.globalHotkey)+"）；保存需再次确认。",
+					"Conflicts with the "+conflict+" shortcut ("+uikit.FormatShortcut(state.globalHotkey)+"); saving needs a second confirmation.")),
+					t.Font(design.TypeXXS)).TextColor(t.WarningText).Grow(1).MaxLines(2)
+			})
+		}
 	})
+}
+
+// globalHotkeyConflict reports the chrome action a candidate global hotkey
+// collides with ("" when none), comparing the platform-displayed chord so
+// "Cmd+K", "CmdOrCtrl+K" and the palette's stored "cmd+k" all read as the same
+// physical key (2026-11 audit UX-11). The global accelerator is registered at
+// startup and would shadow the in-app chord, so the page warns and asks for a
+// second confirmation before saving over it.
+func globalHotkeyConflict(locale contracts.LocaleService, draft string, store contracts.SettingsService) string {
+	if strings.TrimSpace(draft) == "" {
+		return ""
+	}
+	display := uikit.FormatShortcut(draft)
+	if display == "" {
+		return ""
+	}
+	paletteChord := contracts.DefaultShortcutCommandPalette
+	sidebarChord := contracts.DefaultShortcutToggleSidebar
+	if store != nil {
+		paletteChord = store.Get(contracts.SettingsUIShortcutCommandPalette, contracts.DefaultShortcutCommandPalette)
+		sidebarChord = store.Get(contracts.SettingsUIShortcutToggleSidebar, contracts.DefaultShortcutToggleSidebar)
+	}
+	candidates := []struct{ chord, action string }{
+		{paletteChord, localized(locale, "命令面板", "Command palette")},
+		{sidebarChord, localized(locale, "折叠 / 展开侧边栏", "Collapse / expand sidebar")},
+		{"CmdOrCtrl+N", localized(locale, "新会话", "New session")},
+		{"CmdOrCtrl+,", localized(locale, "设置", "Settings")},
+		{"CmdOrCtrl+Alt+I", localized(locale, "切换右侧栏", "Toggle right panel")},
+		{"CmdOrCtrl+Alt+P", localized(locale, "文件页", "Files page")},
+	}
+	for _, candidate := range candidates {
+		if uikit.FormatShortcut(candidate.chord) == display {
+			return candidate.action
+		}
+	}
+	return ""
 }
 
 // --- accelerator validation (mirrors the host's normalizeHotkey) -------------

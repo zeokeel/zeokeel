@@ -26,23 +26,17 @@ func TestWorkspaceFileRowMenuKeyOpensRowMenu(t *testing.T) {
 	h.openPage(tester, "文件")
 	h.assertTexts(tester, "README.md", "notes.txt")
 
-	focusedName := func() string {
-		for _, info := range tester.AccessAll() {
-			if info.Focused {
-				return info.Name
-			}
-		}
-		return ""
-	}
 	focusFileRow := func() {
 		t.Helper()
-		for i := 0; i < 6 && focusedName() != "README.md"; i++ {
-			tester.Key(0, ui.KeyTab)
-			tester.Frame()
+		// The tree is the virtualized native Outline (UD-14): one focus stop
+		// named 工作区文件, whose chosen row the menu key acts on. Focus it,
+		// then Down chooses the first row (README.md).
+		if err := tester.Click("工作区文件"); err != nil {
+			t.Fatalf("focus the workspace files outline: %v; texts = %v", err, tester.Texts())
 		}
-		if got := focusedName(); got != "README.md" {
-			t.Fatalf("Tab did not reach the README.md tree row (focused %q); texts = %v", got, tester.Texts())
-		}
+		tester.Frame()
+		tester.Key(0, ui.KeyDown)
+		tester.Frame()
 	}
 
 	assertRowMenu := func(key ui.Key, mods ui.Modifiers) {

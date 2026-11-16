@@ -33,7 +33,7 @@ func ChatMarkdown(t *design.Tokens, size float32) *markdown.Options {
 	theme.Text = t.LabelPrimary
 	theme.Muted = t.LabelTertiary
 	theme.Link = t.Accent
-	theme.LinkWeight = 500
+	theme.LinkWeight = design.WeightMedium
 	theme.Strong = t.LabelPrimary
 	theme.Code = t.LabelPrimary
 	theme.CodeBackground = t.BgStrong
@@ -65,21 +65,24 @@ func ChatMarkdown(t *design.Tokens, size float32) *markdown.Options {
 		}
 		return target / size
 	}
-	h1 := size + 3.5
-	if h1 < 17 {
-		h1 = 17
+	// UD-02: the absolute clamp bounds and offsets are DIP measures of text, so
+	// they follow the Tokens' TextScale like the body; at scale 1 the historical
+	// bounds hold byte-for-byte.
+	h1 := size + t.Scale(3.5)
+	if h1 < t.Scale(17) {
+		h1 = t.Scale(17)
 	}
-	if h1 > 18 {
-		h1 = 18
+	if h1 > t.Scale(18) {
+		h1 = t.Scale(18)
 	}
 	theme.Headings[0].Size = heading(h1)
-	theme.Headings[1].Size = heading(min(size+2, 16))
-	theme.Headings[2].Size = heading(min(size+1, 15))
+	theme.Headings[1].Size = heading(min(size+t.Scale(2), t.Scale(16)))
+	theme.Headings[2].Size = heading(min(size+t.Scale(1), t.Scale(15)))
 	theme.Headings[3].Size = 1
 	theme.Headings[4].Size = 0.95
 	theme.Headings[5].Size = 0.9
 	for index := range theme.Headings {
-		theme.Headings[index].Weight = 600
+		theme.Headings[index].Weight = design.WeightSemibold
 	}
 	theme.Headings[0].Top, theme.Headings[0].Bottom = 1.1, 0.4
 	theme.Headings[1].Top, theme.Headings[1].Bottom = 1.0, 0.4

@@ -22,6 +22,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -44,9 +45,9 @@ type Config struct {
 // resolved fills the configured strings with their defaults.
 func (c Config) resolved() Config {
 	return Config{
-		Title:     firstNonEmpty(c.Title, "自动化"),
-		NewLabel:  firstNonEmpty(c.NewLabel, "新建任务"),
-		EmptyText: firstNonEmpty(c.EmptyText, "还没有自动化任务"),
+		Title:     textutil.FirstNonEmptyTrimmed(c.Title, "自动化"),
+		NewLabel:  textutil.FirstNonEmptyTrimmed(c.NewLabel, "新建任务"),
+		EmptyText: textutil.FirstNonEmptyTrimmed(c.EmptyText, "还没有自动化任务"),
 	}
 }
 
@@ -244,13 +245,4 @@ func own(ctx cordis.Context, register func() (func(), error)) error {
 		return err
 	}
 	return nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }

@@ -53,9 +53,9 @@ func TestPermissionMenuLabelFollowsPreset(t *testing.T) {
 		label string
 		warn  bool
 	}{
-		{contracts.PermissionWorkspace, "工作区修改", false},
-		{contracts.PermissionReadOnly, "只读", false},
-		{contracts.PermissionFull, "所有权限", true},
+		{contracts.PermissionWorkspace, "工作区修改（全局）", false},
+		{contracts.PermissionReadOnly, "只读（全局）", false},
+		{contracts.PermissionFull, "所有权限（全局）", true},
 	} {
 		store.values[contracts.SettingAgentPermission] = want.mode
 		label, warn := st.permissionMenuLabel()
@@ -71,14 +71,14 @@ func TestPermissionMenuLabelFollowsPreset(t *testing.T) {
 	store.values[contracts.SettingAgentPermission] = contracts.PermissionWorkspace
 	store.values[contracts.SettingAgentMode] = contracts.AgentModePlan
 	store.values[contracts.SettingChatMode] = contracts.ChatModeCreator
-	if label, warn := st.permissionMenuLabel(); label != "工作区修改" || warn {
+	if label, warn := st.permissionMenuLabel(); label != "工作区修改（全局）" || warn {
 		t.Fatalf("chat mode still drives the permission button: label = %q warn = %v", label, warn)
 	}
 
 	// Without a settings store the label falls back to the default preset and
 	// stays quiet (the button itself is not built).
 	st = &state{}
-	if label, warn := st.permissionMenuLabel(); label != "工作区修改" || warn {
+	if label, warn := st.permissionMenuLabel(); label != "工作区修改（全局）" || warn {
 		t.Fatalf("missing settings: label = %q warn = %v", label, warn)
 	}
 }

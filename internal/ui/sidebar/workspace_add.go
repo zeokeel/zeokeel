@@ -23,6 +23,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 )
 
 // DirectoryPicker is the sidebar's workspace directory-picker seam: the default
@@ -154,12 +155,12 @@ func buildWorkspaceDeleteDialog(c *ui.Context, workspace contracts.WorkspaceServ
 	if workspace == nil {
 		return
 	}
-	name := firstNonEmpty(state.workspaceDeleteName, state.T("未命名工作区", "Untitled workspace"))
+	name := textutil.FirstNonEmpty(state.workspaceDeleteName, state.T("未命名工作区", "Untitled workspace"))
 	target := state.workspaceDeleteID
 	message := fmt.Sprintf(state.T("从列表中移除工作区“%s”？文件夹不会被删除。",
 		"Remove the workspace “%s” from the list? Its folder is not deleted."), name)
 	buildDangerConfirm(c, design.Of(c), &state.workspaceDeleteOpen,
-		state.T("删除工作区", "Delete workspace"), message,
+		state.T("删除工作区", "Delete workspace"), message, "",
 		state.T("删除", "Delete"), state.T("取消", "Cancel"),
 		func() {
 			if err := workspace.Delete(context.Background(), target); err != nil {

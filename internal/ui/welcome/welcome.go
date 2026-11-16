@@ -14,6 +14,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -39,8 +40,8 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		locale, _ := ctx.Get(contracts.KeyLocale)
-		title := firstNonEmpty(cfg.Title, "欢迎使用 ZeoKeel")
-		message := firstNonEmpty(cfg.Message, "这是一个独立编译的 UI 模块，通过注入点出现在宿主中。")
+		title := textutil.FirstNonEmpty(cfg.Title, "欢迎使用 ZeoKeel")
+		message := textutil.FirstNonEmpty(cfg.Message, "这是一个独立编译的 UI 模块，通过注入点出现在宿主中。")
 		// services is this window's frame services, captured while the module's
 		// hero builds: a command may run from the palette after a frame, and the
 		// clipboard must not be reached through a stored ui.Context.
@@ -105,13 +106,4 @@ func own(ctx cordis.Context, register func() (func(), error)) error {
 		return err
 	}
 	return nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }

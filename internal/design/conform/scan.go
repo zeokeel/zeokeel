@@ -216,6 +216,23 @@ func (fc *fileCtx) position(pos token.Pos) (int, int) {
 	return p.Line, p.Column
 }
 
+// enclosingFunc returns the name of the function or method whose body
+// contains pos ("" for top-level declarations). It is the symbol anchor of
+// the site-level allowlist (DESIGN-LINT §3.6, 2026-11 audit UD-11): methods
+// anchor by their bare name, without the receiver.
+func (fc *fileCtx) enclosingFunc(pos token.Pos) string {
+	for _, decl := range fc.file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		if fn.Body.Pos() <= pos && pos < fn.Body.End() {
+			return fn.Name.Name
+		}
+	}
+	return ""
+}
+
 // violation builds a Violation for a rule at a position.
 func (fc *fileCtx) violation(rule Rule, severity string, pos token.Pos, text, message, fix string) Violation {
 	line, column := fc.position(pos)

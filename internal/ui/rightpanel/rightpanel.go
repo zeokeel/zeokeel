@@ -41,6 +41,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/lib/openpath"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -98,15 +99,15 @@ func (c Config) resolved() Config {
 }
 
 func (c Config) titleLabel(locale contracts.LocaleService) string {
-	return firstNonEmpty(c.Title, uikit.T(locale, "右侧栏", "Right sidebar"))
+	return textutil.FirstNonEmptyTrimmed(c.Title, uikit.T(locale, "右侧栏", "Right sidebar"))
 }
 
 func (c Config) guideLabel(locale contracts.LocaleService) string {
-	return firstNonEmpty(c.GuideTab, uikit.T(locale, "开始", "Start"))
+	return textutil.FirstNonEmptyTrimmed(c.GuideTab, uikit.T(locale, "开始", "Start"))
 }
 
 func (c Config) filesLabel(locale contracts.LocaleService) string {
-	return firstNonEmpty(c.FilesTab, uikit.T(locale, "文件", "Files"))
+	return textutil.FirstNonEmptyTrimmed(c.FilesTab, uikit.T(locale, "文件", "Files"))
 }
 
 // fileTab is one opened file tab: the workspace-relative path (slash
@@ -150,11 +151,13 @@ type state struct {
 	docTab  int
 
 	// filesDirs caches the workspace tree's directory listings by relative
-	// path ("" is the root); filesOpen keeps the native tree's fold state per
-	// directory (the *bool ui.TreeItem owns). filesWorkspace is the key of the
-	// workspace the cache belongs to; a workspace switch drops it.
+	// path ("" is the root). filesOutline is the virtualized native outline's
+	// state: its Open set keeps the fold state per directory (replacing the old
+	// ui.Tree *bool map), and filesRow is the chosen row. filesWorkspace is the
+	// key of the workspace the cache belongs to; a workspace switch drops it.
 	filesDirs      map[string]*dirListing
-	filesOpen      map[string]*bool
+	filesOutline   ui.OutlineState[string]
+	filesRow       int
 	filesWorkspace string
 	// filesGeneration drops posted directory results an explicit refresh (or
 	// a workspace switch) invalidated while they were in flight.
@@ -372,7 +375,7 @@ func Module() *module.Descriptor[Config] {
 			cfg:           config,
 			runtime:       runtime,
 			filesDirs:     make(map[string]*dirListing),
-			filesOpen:     make(map[string]*bool),
+			filesRow:      -1,
 			previews:      make(map[string]*filePreview),
 			editors:       make(map[editorKey]*editor.State),
 			changesOpen:   make(map[string]bool),
@@ -650,14 +653,4 @@ func own(ctx cordis.Context, register func() (func(), error)) error {
 		return err
 	}
 	return nil
-}
-
-// firstNonEmpty returns the first non-empty trimmed string.
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }

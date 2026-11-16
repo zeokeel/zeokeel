@@ -52,6 +52,15 @@ const approvalMaxArgumentsRunes = 4000
 // token grid).
 const approvalArgumentsMaxHeight float32 = design.Space8*4 + design.Space3
 
+// approvalInlineBodyMaxHeight bounds the inline card's middle section (origin,
+// impact, summary, diff, raw arguments, scope hint): the banner and the decision
+// footer stay fixed while a long payload scrolls inside, so the card can never
+// push the composer out of the window (2026-11 audit UX-02). The budget fits a
+// standard shell card's middle (impact + summary + collapsed arguments + the
+// scope sentence) without clipping the decision-relevant hint, and keeps the
+// whole card inside the session dock's minimum-window budget.
+const approvalInlineBodyMaxHeight float32 = design.Space8*5 + design.Space3
+
 // ApprovalLabels is the configurable copy of one approval card. Empty fields
 // fall back to the localized product defaults, so a host that only overrides
 // one label keeps the rest. The caller localizes the fields it passes (the
@@ -185,6 +194,9 @@ func approvalInlineCard(c *ui.Context, o ApprovalDialogOptions, labels ApprovalL
 	// The raw-arguments disclosure is the card's own visual state: it keeps its
 	// open flag across frames and starts collapsed for each new request.
 	argsOpen := ui.Local(root, "argsOpen", func() bool { return false })
+	// The middle section's scroll offset is element-local too (keyed by the
+	// request through root): each new request starts at its top (UX-02).
+	bodyScroll := ui.Local(root, "bodyScroll", func() ui.ScrollState { return ui.ScrollState{} })
 	root.Children(func() {
 		// The warning banner: the card's one strong emphasis, so it reads as a
 		// decision to make, not as another tool result.
@@ -221,23 +233,36 @@ func approvalInlineCard(c *ui.Context, o ApprovalDialogOptions, labels ApprovalL
 				return el.Background(t.BgRaised).Padding(design.Space3).
 					Radius(design.RadiusXS, design.RadiusXS, design.RadiusLG, design.RadiusLG)
 			}).Children(func() {
-			approvalOriginRow(c, t, o)
-			approvalImpactLine(c, t, o.Locale)
-			approvalSummarySection(c, t, o, summary, arguments)
-			// The change itself, before the raw payload: a file write/edit is
-			// judged by what it will do to the file, not by its JSON.
-			approvalChangeSection(c, t, o, labels, arguments)
-			approvalArgumentsSection(c, t, o, labels, request, arguments, argsOpen)
-			// The middle choice is session-scoped, not run-scoped: say so once
-			// in quiet copy, including when it expires.
-			design.Apply(ui.Text(c, T(o.Locale,
-				"「本会话内始终允许」在本会话内不再询问该工具，会话结束后失效。",
-				"\"Always allow in this session\" stops this tool's prompts for this conversation; it expires when the conversation ends.")),
-				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).MaxLines(2)
+			// The middle section scrolls inside a fixed budget (UX-02): a long
+			// summary/diff/argument payload can grow the card only up to the
+			// budget, so the banner above and the decision footer below stay
+			// reachable at the supported minimum window.
+			ui.Scroll(c.Key("uikit.approval/inline.body." + request.ID)).FillWidth().
+				MaxHeight(approvalInlineBodyMaxHeight).TrackScroll(bodyScroll).Children(func() {
+				ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
+					approvalOriginRow(c, t, o)
+					approvalImpactLine(c, t, o.Locale)
+					approvalSummarySection(c, t, o, summary, arguments)
+					// The change itself, before the raw payload: a file write/edit is
+					// judged by what it will do to the file, not by its JSON.
+					approvalChangeSection(c, t, o, labels, arguments)
+					approvalArgumentsSection(c, t, o, labels, request, arguments, argsOpen)
+					// The middle choice is session-scoped, not run-scoped: say so once
+					// in quiet copy, including when it expires. The sentence influences
+					// the decision, so it keeps the metadata step (TypeXXS) exactly as
+					// the Modal path renders it — 11px is for micro-labels, not sentences
+					// (DESIGN.md §5.3, 2026-11 audit UD-05).
+					design.Apply(ui.Text(c, T(o.Locale,
+						"「本会话内始终允许」在本会话内不再询问该工具，会话结束后失效。",
+						"\"Always allow in this session\" stops this tool's prompts for this conversation; it expires when the conversation ends.")),
+						t.TextMuted(design.TypeXXS)).MaxLines(2)
+				})
+			})
 			// The inline footer keeps the decision order (deny, session-scoped
 			// allow, allow) without the Modal's danger emphasis: the warning
 			// border and banner already carry the weight, and the deny stays the
-			// safest-looking leftmost action. No action is the Default.
+			// safest-looking leftmost action. No action is the Default. The
+			// footer is fixed outside the scroll: the decision never scrolls away.
 			DialogFooter(c, []DialogAction{
 				{Label: labels.DenyLabel, OnClick: func() {
 					resolve(contracts.ApprovalDeny)

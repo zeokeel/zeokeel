@@ -23,6 +23,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -48,7 +49,7 @@ type Config struct {
 
 // resolved fills the configured strings with their defaults.
 func (c Config) resolved() Config {
-	return Config{Title: firstNonEmpty(c.Title, "洞察")}
+	return Config{Title: textutil.FirstNonEmptyTrimmed(c.Title, "洞察")}
 }
 
 // state is the module's UI state. It is only touched on the UI thread; the
@@ -304,16 +305,6 @@ func (st *state) openSession(sessionID string) {
 		}
 	}
 	st.runtime.Invalidate()
-}
-
-// firstNonEmpty returns the first non-blank value.
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 // insightsErrorText localizes a backend failure: the module's own "insights:"

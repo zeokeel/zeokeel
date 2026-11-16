@@ -23,6 +23,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -951,7 +952,7 @@ func connectorDetailRows(st *state, card connectorCard) []uikit.PropertyRow {
 		case contracts.MCPAuthStateExpired:
 			rows = append(rows, uikit.PropertyRow{Label: st.tr("授权状态", "Authorization"), Value: st.tr("已失效", "Expired")})
 		default:
-			rows = append(rows, uikit.PropertyRow{Label: st.tr("授权状态", "Authorization"), Value: firstNonEmpty(string(card.AuthState), st.tr("未知", "Unknown"))})
+			rows = append(rows, uikit.PropertyRow{Label: st.tr("授权状态", "Authorization"), Value: textutil.FirstNonEmptyTrimmed(string(card.AuthState), st.tr("未知", "Unknown"))})
 		}
 		if card.AuthIssuer != "" {
 			rows = append(rows, uikit.PropertyRow{Label: st.tr("授权服务器", "Authorization server"), Value: card.AuthIssuer, Mono: true})

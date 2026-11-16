@@ -391,6 +391,11 @@ func buildToast(c *ui.Context, st *state, toast ui.Toast) {
 	t := design.Of(c)
 	p := ui.ToastBase(c, toast)
 	level := st.toastLevelFor(t, toast.Type)
+	// The body and the action label localize at render time, like the level
+	// title: a language switch while the toast is alive never leaves a
+	// mixed-language card (US-14).
+	body := localizeToastText(st.locale, toast.Title)
+	actionLabel := localizeToastText(st.locale, toast.Action)
 	box := p.Root.Row().AlignItems(ui.Start).Gap(design.Space2).
 		MinWidth(toastMinWidth).MaxWidth(toastMaxWidth).
 		Padding(design.Space2, design.Space3).
@@ -420,15 +425,15 @@ func buildToast(c *ui.Context, st *state, toast ui.Toast) {
 			})
 			// The notification copy is the body at the metadata size: the title
 			// carries the level, the body the content (V24).
-			design.Apply(ui.Text(c, toast.Title), t.Font(design.TypeXXS)).
+			design.Apply(ui.Text(c, body), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).MaxLines(2)
 			if toast.Description != "" {
-				design.Apply(ui.Text(c, toast.Description), t.Font(design.TypeXXS)).
-					TextColor(t.LabelTertiary).MaxLines(2)
+				design.Apply(ui.Text(c, localizeToastText(st.locale, toast.Description)),
+					t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
 			}
-			if toast.Action != "" {
+			if actionLabel != "" {
 				action := p.ActionButton().Padding(design.Space1, design.Space2).
-					Radius(design.RadiusSM).Label(toast.Action)
+					Radius(design.RadiusSM).Label(actionLabel)
 				switch {
 				case action.Pressed():
 					action = action.Background(t.BgSelected)
@@ -436,7 +441,7 @@ func buildToast(c *ui.Context, st *state, toast ui.Toast) {
 					action = action.Background(t.BgHover)
 				}
 				action.Children(func() {
-					design.Apply(ui.Text(c, toast.Action), t.Font(design.TypeXS)).
+					design.Apply(ui.Text(c, actionLabel), t.Font(design.TypeXS)).
 						FontWeight(600).TextColor(t.Accent)
 				})
 			}
@@ -458,6 +463,91 @@ func buildToast(c *ui.Context, st *state, toast ui.Toast) {
 
 // tr localizes the toast chrome for the current frame.
 func (st *state) tr(zh, en string) string { return uikit.T(st.locale, zh, en) }
+
+// --- render-time copy localization (US-14) ----------------------------------
+//
+// The notification contract carries one Text string, localized by its creator
+// at creation time; the level title is localized here at render time. Switching
+// the language while a toast is alive used to leave a mixed-language card (zh
+// body under an en title). The body and the action label now pass through the
+// same render-time localization: the product's known toast copy translates both
+// ways through the phrasebook below, and unknown copy passes through verbatim
+// (an honest best effort — no invented translation).
+
+// toastPhrase is one known toast copy in both languages.
+type toastPhrase struct{ zh, en string }
+
+// toastPhrases is the product's exact-match toast copy (session/goal/memory/
+// reminder/export/queue outcomes and the host's session action label).
+var toastPhrases = []toastPhrase{
+	{"已停止", "Stopped"},
+	{"已加入排队", "Added to the queue"},
+	{"已复制", "Copied"},
+	{"对话已导出", "Conversation exported"},
+	{"目标已保存", "Goal saved"},
+	{"目标已清除", "Goal cleared"},
+	{"目标已暂停", "Goal paused"},
+	{"目标已继续", "Goal resumed"},
+	{"目标已完成", "Goal completed"},
+	{"计划已提交审阅", "Plan submitted for review"},
+	{"已添加记忆", "Memory added"},
+	{"已删除记忆", "Memory deleted"},
+	{"已更新记忆", "Memory updated"},
+	{"已清空", "Cleared"},
+	{"没有可整理的重复记忆", "No duplicate memories to tidy"},
+	{"提醒已创建", "Reminder created"},
+	{"提醒已删除", "Reminder deleted"},
+	{"会话已归档", "Conversation archived"},
+	{"已打开工作区", "Workspace opened"},
+	{"撤销", "Undo"},
+	{"打开会话", "Open conversation"},
+	{"后台会话已完成", "Background session finished"},
+	{"后台会话运行失败", "Background session run failed"},
+	{"剪贴板里没有图片；请用「附件」或拖拽添加图片", "No image on the clipboard; use Attach or drag an image in"},
+	{"已把光标放到输入框，发送内容由你决定", "The cursor is in the composer; what to send is your call"},
+}
+
+// toastAffixes is dynamic copy with a translatable prefix and suffix around a
+// payload that stays verbatim (a session title, a tool id, a count).
+type toastAffixes struct{ zhPrefix, zhSuffix, enPrefix, enSuffix string }
+
+var toastAffixTable = []toastAffixes{
+	{"导出失败：", "", "Export failed: ", ""},
+	{"停止失败：", "", "Stop failed: ", ""},
+	{"归档失败：", "", "Archive failed: ", ""},
+	{"打开文件失败：", "", "Open file failed: ", ""},
+	{"审批等待：", "", "Approval waiting: ", ""},
+	{"会话「", "」已完成", "Conversation \"", "\" finished"},
+	{"会话「", "」运行失败", "Conversation \"", "\" run failed"},
+	{"已整理 ", " 条", "Tidied ", " memories"},
+	{"已清空 ", " 条记忆", "Cleared ", " memories"},
+}
+
+// localizeToastText renders one toast string in the current locale at render
+// time (US-14): exact phrasebook matches first, then the affix patterns; an
+// unknown string is returned unchanged.
+func localizeToastText(locale contracts.LocaleService, text string) string {
+	english := uikit.Language(locale) == "en"
+	for _, phrase := range toastPhrases {
+		if english && text == phrase.zh {
+			return phrase.en
+		}
+		if !english && text == phrase.en {
+			return phrase.zh
+		}
+	}
+	for _, affix := range toastAffixTable {
+		if english && strings.HasPrefix(text, affix.zhPrefix) && strings.HasSuffix(text, affix.zhSuffix) {
+			payload := strings.TrimSuffix(strings.TrimPrefix(text, affix.zhPrefix), affix.zhSuffix)
+			return affix.enPrefix + payload + affix.enSuffix
+		}
+		if !english && strings.HasPrefix(text, affix.enPrefix) && strings.HasSuffix(text, affix.enSuffix) {
+			payload := strings.TrimSuffix(strings.TrimPrefix(text, affix.enPrefix), affix.enSuffix)
+			return affix.zhPrefix + payload + affix.zhSuffix
+		}
+	}
+	return text
+}
 
 // own registers one contribution and ties its unregistration to ctx's effect
 // lifetime, so activation failure and module disposal leave no residue.

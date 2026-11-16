@@ -25,6 +25,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -75,7 +76,7 @@ func Module() *module.Descriptor[Config] {
 		// Chat is optional so the Home screen still loads in products without
 		// the agent backend; with it the composer creates a real session.
 		chat, _ := ctx.Get(contracts.KeyChat)
-		title := firstNonEmpty(cfg.Title, "首页")
+		title := textutil.FirstNonEmpty(cfg.Title, "首页")
 		// The locale is optional: copy is generated per frame so a language
 		// switch applies on the next frame (zh stays the default).
 		locale, _ := ctx.Get(contracts.KeyLocale)
@@ -461,7 +462,12 @@ func buildNextSteps(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 					runtime.Invalidate()
 				}
 			}
-			start := design.Apply(ui.PrimaryButton(c, tr("新对话", "New chat")), t.PrimaryButton())
+			// The sidebar's 新对话 is the screen's one accent primary on the
+			// landing state; Home's empty-state action drops to the neutral
+			// outlined secondary so first launch does not paint two competing
+			// filled primaries of the same name (DESIGN.md ≤1 primary budget,
+			// 2026-11 audit UD-01).
+			start := design.Apply(ui.Button(c, tr("新对话", "New chat")), t.SecondaryButton())
 			if start.Clicked() {
 				if _, err := chat.NewSession(""); err == nil {
 					_ = nav.Push("session")
@@ -524,13 +530,4 @@ func own(ctx cordis.Context, register func() (func(), error)) error {
 		return err
 	}
 	return nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }

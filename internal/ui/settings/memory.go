@@ -797,37 +797,28 @@ func startMemoryEdit(c *ui.Context, st *memoryPageState, memory contracts.Memory
 	c.Invalidate()
 }
 
-// buildMemoryEditDialog renders the native edit modal: the current text in a
-// text area, a cancel action that closes without saving, and a primary save
-// that calls contracts.MemoryUpdater.Update with the entry's ID, the new text
-// and its existing scope. Failures keep the modal open with an inline error.
+// buildMemoryEditDialog renders the shared edit modal (uikit.MemoryEditDialog,
+// AR-17): the current text in a text area, a cancel action that closes without
+// saving, and a primary save that calls contracts.MemoryUpdater.Update with
+// the entry's ID, the new text and its existing scope. Failures keep the modal
+// open with an inline error.
 func buildMemoryEditDialog(c *ui.Context, t *design.Tokens, updater contracts.MemoryUpdater,
 	st *memoryPageState, locale contracts.LocaleService) {
-	ui.Modal(c, &st.editing, func() {
-		design.Apply(ui.Column(c).Width(design.DialogWidthM).Gap(design.Space3), func(element ui.Element) ui.Element {
-			return element.PaddingX(design.Space5).PaddingY(design.Space2)
-		}).Children(func() {
-			design.Apply(ui.Text(c, localized(locale, "编辑记忆", "Edit memory")),
-				t.Font(design.TypeL)).FontWeight(600).TextColor(t.LabelPrimary)
-			ui.Field(c, localized(locale, "编辑内容", "Edit text"), func() {
-				ui.TextArea(c, &st.editText).
-					Label(inputLabel(locale, localized(locale, "编辑内容", "Edit text"))).
-					FillWidth().MinHeight(design.Space6 * 4).AutoFocus()
-			})
-			if st.editErr != "" {
-				uikit.ErrorLine(c, st.editErr)
-			}
-			uikit.DialogFooter(c, []uikit.DialogAction{
-				{Label: localized(locale, "取消", "Cancel"), OnClick: func() {
-					st.editing = false
-					st.editErr = ""
-					c.Invalidate()
-				}},
-				{Label: localized(locale, "保存", "Save"), Primary: true, OnClick: func() {
-					saveMemoryEdit(c, updater, st, locale)
-				}},
-			})
-		})
+	uikit.MemoryEditDialog(c, t, uikit.MemoryEditOptions{
+		Open:       &st.editing,
+		Text:       &st.editText,
+		Locale:     locale,
+		FieldLabel: localized(locale, "编辑内容", "Edit text"),
+		Multiline:  true,
+		Error:      st.editErr,
+		OnSave: func() {
+			saveMemoryEdit(c, updater, st, locale)
+		},
+		OnCancel: func() {
+			st.editing = false
+			st.editErr = ""
+			c.Invalidate()
+		},
 	})
 }
 

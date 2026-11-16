@@ -19,6 +19,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -42,10 +43,10 @@ type Config struct {
 
 func (c Config) resolved() Config {
 	return Config{
-		Title:         firstNonEmpty(c.Title, "能力"),
-		Description:   firstNonEmpty(c.Description, "管理技能与 MCP 连接器，扩展 ZeoKeel 的能力。"),
-		SkillsSection: firstNonEmpty(c.SkillsSection, "技能"),
-		MCPSection:    firstNonEmpty(c.MCPSection, "连接器"),
+		Title:         textutil.FirstNonEmptyTrimmed(c.Title, "能力"),
+		Description:   textutil.FirstNonEmptyTrimmed(c.Description, "管理技能与 MCP 连接器，扩展 ZeoKeel 的能力。"),
+		SkillsSection: textutil.FirstNonEmptyTrimmed(c.SkillsSection, "技能"),
+		MCPSection:    textutil.FirstNonEmptyTrimmed(c.MCPSection, "连接器"),
 	}
 }
 
@@ -200,13 +201,4 @@ func own(ctx cordis.Context, register func() (func(), error)) error {
 		return err
 	}
 	return nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }

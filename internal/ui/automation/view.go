@@ -11,6 +11,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -99,7 +100,7 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, navigator contracts
 				if index < 0 || index >= len(filtered) {
 					return ""
 				}
-				return firstNonEmpty(filtered[index].Name, filtered[index].ID)
+				return textutil.FirstNonEmptyTrimmed(filtered[index].Name, filtered[index].ID)
 			}
 			ui.List(c, &st.taskList, len(filtered)).
 				Label(st.tr("自动化任务", "Automation tasks")).
@@ -235,7 +236,7 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			ui.Column(c).Grow(1).Shrink(1).MinWidthPercent(0).Gap(design.Space1).Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					design.Apply(ui.Text(c, firstNonEmpty(task.Name, st.tr("(未命名任务)", "(Untitled task)"))),
+					design.Apply(ui.Text(c, textutil.FirstNonEmptyTrimmed(task.Name, st.tr("(未命名任务)", "(Untitled task)"))),
 						t.Font(design.TypeS)).FontWeight(design.WeightSemibold).TextColor(t.LabelPrimary).
 						Grow(1).Shrink(1).MinWidth(design.Space0).MaxLines(1).Ellipsis("…")
 					// A task that was switched off (or whose run is in flight) says
@@ -372,7 +373,7 @@ func buildTaskRowMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRunti
 			st.deleteOpen = true
 			st.deleteTarget = task.ID
 			st.deleteTask = task
-			st.deleteName = firstNonEmpty(task.Name, st.tr("未命名任务", "Untitled task"))
+			st.deleteName = textutil.FirstNonEmptyTrimmed(task.Name, st.tr("未命名任务", "Untitled task"))
 			runtime.Invalidate()
 		}
 	})
@@ -505,9 +506,9 @@ func buildTaskHistory(c *ui.Context, t *design.Tokens, st *state, task contracts
 			latest := task.RunHistory[0]
 			uikit.StatusBadge(c, t, runStatusKind(latest.Status), runStatusLabel(st, latest.Status))
 			detail := automationRunDetail(st, latest)
-			design.Apply(ui.Text(c, firstNonEmpty(detail, "—")), t.Font(design.TypeXXS)).
+			design.Apply(ui.Text(c, textutil.FirstNonEmptyTrimmed(detail, "—")), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…").
-				Tooltip(strings.TrimSpace(firstNonEmpty(latest.Error, latest.Summary)))
+				Tooltip(strings.TrimSpace(textutil.FirstNonEmptyTrimmed(latest.Error, latest.Summary)))
 			if latest.Status == contracts.AutomationRunDelivered {
 				design.Apply(ui.Text(c, automationRunOutcomeHint(st)), t.Font(design.TypeXXS)).
 					TextColor(t.LabelTertiary).NoWrap()
@@ -529,14 +530,14 @@ func buildTaskHistory(c *ui.Context, t *design.Tokens, st *state, task contracts
 			record := record
 			ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					started := firstNonEmpty(uikit.FormatDateTime(st.locale, record.StartedAt), "—")
+					started := textutil.FirstNonEmptyTrimmed(uikit.FormatDateTime(st.locale, record.StartedAt), "—")
 					design.Apply(ui.Text(c, started), t.MonoText(design.TypeXXS)).
 						TextColor(t.LabelTertiary).NoWrap()
 					uikit.StatusBadge(c, t, runStatusKind(record.Status), runStatusLabel(st, record.Status))
-					design.Apply(ui.Text(c, firstNonEmpty(automationRunDetail(st, record), "—")),
+					design.Apply(ui.Text(c, textutil.FirstNonEmptyTrimmed(automationRunDetail(st, record), "—")),
 						t.Font(design.TypeXXS)).
 						TextColor(t.LabelSecondary).Grow(1).MaxLines(1).Ellipsis("…").
-						Tooltip(strings.TrimSpace(firstNonEmpty(record.Error, record.Summary)))
+						Tooltip(strings.TrimSpace(textutil.FirstNonEmptyTrimmed(record.Error, record.Summary)))
 					if sessionID := automationRunSessionID(record); sessionID != "" {
 						st.buildOpenSessionButton(c, t, sessionID)
 					}
@@ -549,7 +550,7 @@ func buildTaskHistory(c *ui.Context, t *design.Tokens, st *state, task contracts
 						t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).NoWrap()
 					return
 				}
-				completed := st.tr("完成：", "Completed: ") + firstNonEmpty(uikit.FormatDateTime(st.locale, record.CompletedAt), "—")
+				completed := st.tr("完成：", "Completed: ") + textutil.FirstNonEmptyTrimmed(uikit.FormatDateTime(st.locale, record.CompletedAt), "—")
 				if duration := automationDurationLabel(record.DurationMS); duration != "" {
 					completed += " · " + st.tr("耗时：", "Duration: ") + duration
 				}
@@ -628,8 +629,8 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 			ui.Field(c, st.tr("权限", "Permission"), func() {
 				buildPermissionSelector(c, st)
 			}).Description(st.tr(
-				"默认全局跟随当前权限；选「所有权限」即无人值守（不会等待审批）。只读/工作区可写在需要审批的工具上可能停下来等人。",
-				"Global default follows the current permission; All permissions means unattended (no approval wait). Read-only/workspace-write may wait for approval on tools that need it."))
+				"默认全局跟随当前权限；选「所有权限」即无人值守（不会等待审批）。只读/工作区可写在需要审批的工具上可能停下来等人。此处权限仅审批：OS 文件沙箱始终跟随全局权限，「所有权限」不解除沙箱。",
+				"Global default follows the current permission; All permissions means unattended (no approval wait). Read-only/workspace-write may wait for approval on tools that need it. This permission is approval-only: the OS file sandbox always follows the global permission, so All permissions here does not lift the sandbox."))
 			ui.Field(c, st.tr("运行会话", "Run session"), func() {
 				ui.Switch(c, &st.formNewSessionPerRun).Label(st.tr("每次新建会话", "New session each run"))
 			}).Description(st.tr(
@@ -908,7 +909,7 @@ func automationModelLabel(st *state, models []contracts.ModelInfo, model string)
 		return st.tr("跟随默认模型", "Use the default model")
 	}
 	if match, ok := automationModelCatalogMatch(models, model); ok {
-		return firstNonEmpty(strings.TrimSpace(match.Name), match.ID)
+		return textutil.FirstNonEmptyTrimmed(strings.TrimSpace(match.Name), match.ID)
 	}
 	return model
 }
@@ -943,7 +944,7 @@ func buildModelSelector(c *ui.Context, st *state) {
 			}
 			for _, model := range models {
 				model := model
-				display := firstNonEmpty(strings.TrimSpace(model.Name), strings.TrimSpace(model.ID))
+				display := textutil.FirstNonEmptyTrimmed(strings.TrimSpace(model.Name), strings.TrimSpace(model.ID))
 				item := m.Item(display)
 				item.Radio(!st.formModelCustom && strings.EqualFold(strings.TrimSpace(st.formModel), strings.TrimSpace(model.ID)))
 				if item.Chosen() {
@@ -1130,7 +1131,7 @@ func automationPermissionLabel(st *state, value string) string {
 func buildWorkspaceSelector(c *ui.Context, st *state) {
 	label := st.tr("跟随当前工作区", "Follow the current workspace")
 	if id := strings.TrimSpace(st.formWorkspaceID); id != "" {
-		label = firstNonEmpty(st.formWorkspaceName, id)
+		label = textutil.FirstNonEmptyTrimmed(st.formWorkspaceName, id)
 	}
 	ui.PopoverMenuButton(c, label, func(m *ui.Menu) {
 		current := m.Item(st.tr("跟随当前工作区", "Follow the current workspace"))
@@ -1149,7 +1150,7 @@ func buildWorkspaceSelector(c *ui.Context, st *state) {
 		}
 		for _, workspace := range workspaces {
 			workspace := workspace
-			name := firstNonEmpty(workspace.Name, workspace.ID)
+			name := textutil.FirstNonEmptyTrimmed(workspace.Name, workspace.ID)
 			item := m.Item(name)
 			item.Checked(workspace.ID == strings.TrimSpace(st.formWorkspaceID))
 			if item.Chosen() {
@@ -1190,8 +1191,8 @@ func buildDeleteDialog(c *ui.Context, t *design.Tokens, service contracts.Automa
 		return
 	}
 	message := st.tr(
-		fmt.Sprintf("“%s”将被删除；删除后可在通知里撤销。", firstNonEmpty(st.deleteName, st.tr("未命名任务", "Untitled task"))),
-		fmt.Sprintf("%q will be deleted. Undo it from the notification.", firstNonEmpty(st.deleteName, st.tr("未命名任务", "Untitled task"))))
+		fmt.Sprintf("“%s”将被删除；删除后可在通知里撤销。", textutil.FirstNonEmptyTrimmed(st.deleteName, st.tr("未命名任务", "Untitled task"))),
+		fmt.Sprintf("%q will be deleted. Undo it from the notification.", textutil.FirstNonEmptyTrimmed(st.deleteName, st.tr("未命名任务", "Untitled task"))))
 	target := st.deleteTarget
 	deleted := st.deleteTask
 	uikit.ConfirmDanger(c, &st.deleteOpen, uikit.ConfirmDangerOptions{
@@ -1232,7 +1233,7 @@ func raiseTaskDeletedToast(st *state, service contracts.AutomationService, task 
 	if st == nil || st.notifier == nil || service == nil {
 		return
 	}
-	name := firstNonEmpty(task.Name, st.tr("未命名任务", "Untitled task"))
+	name := textutil.FirstNonEmptyTrimmed(task.Name, st.tr("未命名任务", "Untitled task"))
 	text := st.tr("已删除任务：", "Task deleted: ") + name
 	undo := func() {
 		restored := task
@@ -1259,7 +1260,7 @@ func raiseTaskDeletedToast(st *state, service contracts.AutomationService, task 
 // unset. It goes through the shared locale helper so every page formats dates
 // the same way.
 func formatTaskTime(st *state, value time.Time) string {
-	return firstNonEmpty(uikit.FormatDateTime(st.locale, value), "—")
+	return textutil.FirstNonEmptyTrimmed(uikit.FormatDateTime(st.locale, value), "—")
 }
 
 // workspaceDisplayName resolves a task's workspace id to its display name. The
@@ -1276,7 +1277,7 @@ func (st *state) workspaceDisplayName(id string) string {
 		if service, ok := st.ctx.Get(contracts.KeyWorkspace); ok && service != nil {
 			if workspaces, err := service.List(context.Background()); err == nil {
 				for _, workspace := range workspaces {
-					name := firstNonEmpty(strings.TrimSpace(workspace.Name), strings.TrimSpace(workspace.ID))
+					name := textutil.FirstNonEmptyTrimmed(strings.TrimSpace(workspace.Name), strings.TrimSpace(workspace.ID))
 					if trimmed := strings.TrimSpace(workspace.ID); trimmed != "" {
 						st.workspaceNames[trimmed] = name
 					}

@@ -20,6 +20,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -399,7 +400,7 @@ func buildModelCatalogSection(c *ui.Context, runtime contracts.UIRuntime, store 
 						if index < 0 || index >= len(models) {
 							return ""
 						}
-						return firstNonEmpty(strings.TrimSpace(models[index].Name), models[index].ID)
+						return textutil.FirstNonEmpty(strings.TrimSpace(models[index].Name), models[index].ID)
 					})
 					ui.List(c, &st.list, len(models)).
 						Label(localized(locale, "模型列表", "Model list")).
@@ -439,7 +440,7 @@ func buildModelCatalogRow(c *ui.Context, t *design.Tokens, store contracts.Setti
 		AlignItems(ui.Start).Gap(design.Space2).Children(func() {
 		ui.Column(c).Gap(design.Space1).Grow(1).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				design.Apply(ui.Text(c, firstNonEmpty(strings.TrimSpace(model.Name), id)),
+				design.Apply(ui.Text(c, textutil.FirstNonEmpty(strings.TrimSpace(model.Name), id)),
 					t.Font(design.TypeS)).FontWeight(design.WeightSemibold).TextColor(primary)
 				if catalogIsDefault(store, models, id) {
 					label := localized(locale, "默认", "Default")
@@ -456,7 +457,7 @@ func buildModelCatalogRow(c *ui.Context, t *design.Tokens, store contracts.Setti
 					TextColor(secondary)
 				design.Apply(ui.Text(c, catalogProviderName(locale, model)),
 					t.Font(design.TypeXXS)).TextColor(secondary)
-				design.Apply(ui.Text(c, firstNonEmpty(baseURL,
+				design.Apply(ui.Text(c, textutil.FirstNonEmpty(baseURL,
 					localized(locale, "未设置地址", "no base URL"))),
 					t.Font(design.TypeXXS), t.MonoFamily()).TextColor(tertiary).
 					MaxLines(1).Grow(1)
@@ -465,7 +466,7 @@ func buildModelCatalogRow(c *ui.Context, t *design.Tokens, store contracts.Setti
 			// only, the key itself is never displayed.
 			meta := []string{catalogKeyState(locale, model)}
 			if model.ContextWindow > 0 {
-				size := formatContextWindow(model.ContextWindow)
+				size := uikit.FormatContextWindow(model.ContextWindow)
 				meta = append(meta, localized(locale, "上下文 "+size, size+" context"))
 			}
 			meta = append(meta, catalogThinkingSummary(locale, model))
@@ -512,18 +513,6 @@ func buildModelCatalogRow(c *ui.Context, t *design.Tokens, store contracts.Setti
 			}
 		})
 	})
-}
-
-// formatContextWindow renders a token count for the list: exact thousands as
-// "128k", other positive values with one decimal.
-func formatContextWindow(tokens int) string {
-	if tokens <= 0 {
-		return ""
-	}
-	if tokens%1000 == 0 {
-		return strconv.Itoa(tokens/1000) + "k"
-	}
-	return strconv.FormatFloat(float64(tokens)/1000, 'f', 1, 64) + "k"
 }
 
 // parseContextWindow parses the optional context-window draft: a malformed,
@@ -681,9 +670,9 @@ func buildCatalogAddDialog(c *ui.Context, t *design.Tokens, runtime contracts.UI
 			})
 
 			testAPIKey := strings.TrimSpace(draft.apiKey)
-			testBaseURL := firstNonEmpty(strings.TrimRight(strings.TrimSpace(draft.baseURL), "/"), fallbackBaseURL)
+			testBaseURL := textutil.FirstNonEmpty(strings.TrimRight(strings.TrimSpace(draft.baseURL), "/"), fallbackBaseURL)
 			if testAPIKey == "" {
-				testAPIKey = firstNonEmpty(inheritedCatalogAPIKey(models, draft.baseURL), fallbackAPIKey)
+				testAPIKey = textutil.FirstNonEmpty(inheritedCatalogAPIKey(models, draft.baseURL), fallbackAPIKey)
 			}
 			buildCatalogCheckRow(c, t, runtime, &draft.check, testBaseURL, testAPIKey, locale)
 			if draft.err != "" {

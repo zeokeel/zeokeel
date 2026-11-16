@@ -14,6 +14,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 )
 
 // capabilityTabSpec is one parallel destination of the Capabilities page.
@@ -36,11 +37,11 @@ type capabilityTabSpec struct {
 func capabilityTabSpecs(cfg Config) []capabilityTabSpec {
 	return []capabilityTabSpec{
 		{
-			ID: "skills", LabelZh: firstNonEmpty(cfg.SkillsSection, "技能"), LabelEn: "Skills",
+			ID: "skills", LabelZh: textutil.FirstNonEmptyTrimmed(cfg.SkillsSection, "技能"), LabelEn: "Skills",
 			Build: buildSkillsTab,
 		},
 		{
-			ID: "connectors", LabelZh: firstNonEmpty(cfg.MCPSection, "连接器"), LabelEn: "Connectors",
+			ID: "connectors", LabelZh: textutil.FirstNonEmptyTrimmed(cfg.MCPSection, "连接器"), LabelEn: "Connectors",
 			Build: buildConnectorsTab,
 		},
 	}

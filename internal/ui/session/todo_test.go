@@ -147,13 +147,21 @@ func TestTodoDockShowsListAndCounts(t *testing.T) {
 	}
 }
 
-// TestTodoDockGroupsByStatus covers the reading order: in-progress, then
-// pending, then completed, stable within a group.
-func TestTodoDockGroupsByStatus(t *testing.T) {
-	h := newTodoHarness(t, todoChat(), todoFixture())
+// TestTodoDockKeepsAgentOrder covers US-11's ordinal contract: the agent writes
+// the list as a numbered plan, so the dock renders it in the agent's order —
+// status grouping must not shuffle 第一步/第二步/第三步 (the old grouped order
+// read 2→3→1). Status stays visible through each row's marker and name.
+func TestTodoDockKeepsAgentOrder(t *testing.T) {
+	todo := &fakeTodoService{}
+	todo.set(
+		contracts.TodoItem{ID: "t1", Content: "第一步：写测试", Status: contracts.TodoStatusPending},
+		contracts.TodoItem{ID: "t2", Content: "第二步：合并发布", Status: contracts.TodoStatusCompleted},
+		contracts.TodoItem{ID: "t3", Content: "第三步：修复构建", Status: contracts.TodoStatusInProgress},
+	)
+	h := newTodoHarness(t, todoChat(), todo)
 	tester := h.tester()
 	tester.Frame()
-	ordered := []string{"进行中 · 修复构建", "待处理 · 写测试", "已完成 · 合并发布"}
+	ordered := []string{"待处理 · 第一步：写测试", "已完成 · 第二步：合并发布", "进行中 · 第三步：修复构建"}
 	var previous float32
 	for _, label := range ordered {
 		info, ok := tester.AccessByRole(ui.RoleListItem, label)
@@ -161,10 +169,20 @@ func TestTodoDockGroupsByStatus(t *testing.T) {
 			t.Fatalf("todo row %q missing; texts = %v", label, tester.Texts())
 		}
 		if previous > 0 && info.Bounds.Y <= previous {
-			t.Fatalf("row %q at Y=%.1f is not below the previous row (Y=%.1f)", label, info.Bounds.Y, previous)
+			t.Fatalf("US-11: row %q at Y=%.1f broke the agent's step order (previous Y=%.1f)",
+				label, info.Bounds.Y, previous)
 		}
 		previous = info.Bounds.Y
 	}
+}
+
+// TestTodoDockDisclosesGlobalScope covers US-11's disclosure: the dock says the
+// list is shared across the whole app, not scoped to the conversation on screen.
+func TestTodoDockDisclosesGlobalScope(t *testing.T) {
+	h := newTodoHarness(t, todoChat(), todoFixture())
+	tester := h.tester()
+	tester.Frame()
+	h.assertTexts(tester, "待办为全应用共享")
 }
 
 // TestTodoDockCollapses covers the collapse: the header toggles the rows, the

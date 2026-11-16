@@ -64,6 +64,10 @@ type fakeChat struct {
 	// running conflict, so the UI's TOCTOU fallback (enqueue instead of a
 	// spurious send error) can be exercised.
 	raceToRunning bool
+	// delayedCancel makes Cancel record the request without settling the run:
+	// the real agent's Cancel only cancels a context, and the run settles later
+	// (UX-06's stopping state). settle finishes it explicitly.
+	delayedCancel bool
 }
 
 func newFakeChat() *fakeChat {
@@ -221,11 +225,29 @@ func (f *fakeChat) Cancel(sessionID string) error {
 		return fmt.Errorf("fake: unknown session %q", sessionID)
 	}
 	f.cancelIDs = append(f.cancelIDs, sessionID)
-	session.Running = false
-	f.sessions[sessionID] = session
+	if !f.delayedCancel {
+		session.Running = false
+		f.sessions[sessionID] = session
+	}
 	f.mu.Unlock()
 	f.emit(sessionID)
 	return nil
+}
+
+// settle finishes a delayed-cancel run: the backend's async settle after the
+// cancel took effect (UX-06). Streaming messages end with the run.
+func (f *fakeChat) settle(sessionID string) {
+	f.mu.Lock()
+	session, ok := f.sessions[sessionID]
+	if ok {
+		session.Running = false
+		for index := range session.Messages {
+			session.Messages[index].Streaming = false
+		}
+		f.sessions[sessionID] = session
+	}
+	f.mu.Unlock()
+	f.emit(sessionID)
 }
 
 // --- optional SessionToolPermissions half ---------------------------------
@@ -619,11 +641,12 @@ func (h *harness) typeSlash(tester *ui.Tester) {
 }
 
 // permissionButtonLabels are the labels the composer's permission button can
-// show: the current permission preset itself (there is no stable 「会话设置」
-// destination name any more). Only the all-permissions warning recolours it.
+// show: the current permission preset itself marked 「全局」 (the switch writes
+// the global agent.permission, 2026-11 audit US-05). Only the all-permissions
+// warning recolours it. The folded overflow entry mirrors the button label.
 var permissionButtonLabels = []string{
-	"工作区修改", "所有权限", "只读",
-	"Workspace-write", "All permissions", "Read-only",
+	"工作区修改（全局）", "所有权限（全局）", "只读（全局）",
+	"Workspace-write (global)", "All permissions (global)", "Read-only (global)",
 }
 
 // openSessionMenu clicks the composer's permission button, which is labeled
@@ -858,10 +881,10 @@ func TestTabPlaceholdersAreNativeTabs(t *testing.T) {
 	h := newHarness(t, chat)
 	tester := h.tester()
 	h.assertTexts(tester, "对话", "轨迹", "记忆", "第一条消息")
-	h.assertNoTexts(tester, "本次会话还没有工具调用。")
+	h.assertNoTexts(tester, "本次会话还没有执行轨迹。")
 
 	h.click(tester, "轨迹")
-	h.assertTexts(tester, "本次会话还没有工具调用。")
+	h.assertTexts(tester, "本次会话还没有执行轨迹。")
 	h.assertNoTexts(tester, "第一条消息")
 
 	h.click(tester, "记忆")

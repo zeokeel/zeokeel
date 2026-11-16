@@ -364,22 +364,22 @@ func ToolPanelSectionView(c *ui.Context, t *design.Tokens, s ToolPanelSection) {
 		if s.Label != "" || s.CopyLabel != "" {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 				design.Apply(ui.Text(c, s.Label), t.Font(design.TypeXXXS)).
-					FontWeight(600).TextColor(t.LabelTertiary).NoWrap()
+					FontWeight(design.WeightSemibold).TextColor(t.LabelTertiary).NoWrap()
 				ui.Spacer(c).Grow(1)
 				if s.CopyLabel != "" {
 					value := s.CopyValue
 					if value == "" {
 						value = s.Text
 					}
-					button := ui.Button(c, "").Label(s.CopyLabel).Tooltip(s.CopyLabel).
-						Size(design.Space6, design.Space6).PaddingX(0).Radius(design.RadiusSM)
-					button.Children(func() {
-						ui.Icon(c, icons.Copy()).Size(design.Space3, design.Space3).
-							TextColor(t.LabelTertiary)
+					IconButton(c, IconButtonOptions{
+						Label:    s.CopyLabel,
+						Tooltip:  s.CopyLabel,
+						Icon:     icons.Copy(),
+						Size:     design.Space3,
+						Variant:  IconButtonNative,
+						InkColor: t.LabelTertiary,
+						OnClick:  func() { c.WriteClipboard(value) },
 					})
-					if button.Clicked() {
-						c.WriteClipboard(value)
-					}
 				}
 			})
 		}

@@ -79,6 +79,10 @@ type ComposerShellOptions struct {
 	QueueSend func() bool
 	// Stop interrupts the running turn; nil leaves no stop control.
 	Stop func()
+	// Stopping marks a requested stop the backend has not settled yet (S8
+	// stopping row, 2026-11 audit UX-06): the stop control reads 停止中… and is
+	// disabled, and neither a click nor Esc fires Stop again while it is set.
+	Stopping bool
 	// OnKey handles the input's keys first: the surface's suggestion menus and
 	// slash/mention/queue semantics run before the shell's defaults.
 	OnKey func(ui.TextKey) bool
@@ -289,7 +293,7 @@ func composerShellKey(o ComposerShellOptions) func(ui.TextKey) bool {
 		if o.OnKey != nil && o.OnKey(k) {
 			return true
 		}
-		if k.Key == ui.KeyEscape && k.Mods == 0 && o.Running && o.Stop != nil {
+		if k.Key == ui.KeyEscape && k.Mods == 0 && o.Running && o.Stop != nil && !o.Stopping {
 			o.Stop()
 			return true
 		}
@@ -353,16 +357,25 @@ func composerShellActions(c *ui.Context, t *design.Tokens, o ComposerShellOption
 			if label == "" {
 				label = T(o.Locale, "停止", "Stop")
 			}
+			if o.Stopping {
+				// The settle is the backend's: say the stop is in flight instead
+				// of claiming it finished, and take the control out of reach so
+				// a second click cannot re-trigger it (S8 stopping, UX-06).
+				label = T(o.Locale, "停止中…", "Stopping…")
+			}
 			stop := design.Apply(ui.Button(c, label), t.DangerButton()).
 				Label(label).Shrink(0)
 			if o.StopTooltip != "" {
 				stop.Tooltip(o.StopTooltip)
 			}
+			if o.Stopping {
+				stop.Disabled(true)
+			}
 			stop.Children(func() {
 				ui.Icon(c, icons.Stop()).Size(design.Space3, design.Space3).
 					TextColor(t.DangerText)
 			})
-			if stop.Clicked() {
+			if stop.Clicked() && !o.Stopping {
 				o.Stop()
 			}
 		}

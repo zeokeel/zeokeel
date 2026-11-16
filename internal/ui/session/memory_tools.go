@@ -12,6 +12,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -185,7 +186,7 @@ func removeMemory(store contracts.MemoryStore, st *state, entry contracts.Memory
 		return
 	}
 	if !store.Remove(context.Background(), id) {
-		st.memoryError = st.tr("删除记忆失败：", "Delete failed: ") + firstNonEmpty(id, st.tr("未知条目", "unknown entry"))
+		st.memoryError = st.tr("删除记忆失败：", "Delete failed: ") + textutil.FirstNonEmptyTrimmed(id, st.tr("未知条目", "unknown entry"))
 		requestMemoryRefresh(st)
 		return
 	}
@@ -266,7 +267,9 @@ func buildMemoryClearDialog(c *ui.Context, runtime contracts.UIRuntime,
 // buildMemoryEditDialog is the native editor for one memory entry: it updates
 // the entry through contracts.MemoryUpdater (the same text, the same scope) and
 // refreshes the cached read model on success. Backends without the update half
-// simply never show the edit action.
+// simply never show the edit action. The anatomy is the shared
+// uikit.MemoryEditDialog (AR-17); this wrapper keeps the tab's save semantics
+// (empty draft disables Save, success toast, read-model refresh).
 func buildMemoryEditDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	store contracts.MemoryStore, st *state) {
 	if !st.memoryEditOpen {
@@ -296,36 +299,24 @@ func buildMemoryEditDialog(c *ui.Context, t *design.Tokens, runtime contracts.UI
 		requestMemoryRefresh(st)
 		runtime.Invalidate()
 	}
-	ui.Modal(c, &st.memoryEditOpen, func() {
-		dialogEnter(c, save)
-		design.Apply(ui.Column(c).Width(design.DialogWidthM).Gap(design.Space4), func(el ui.Element) ui.Element {
-			return el.PaddingX(design.Space6).PaddingY(design.Space2)
-		}).Children(func() {
-			design.Apply(ui.Text(c, st.tr("编辑记忆", "Edit memory")), t.Font(design.TypeL)).
-				FontWeight(600).TextColor(t.LabelPrimary)
-			design.Apply(ui.Text(c, st.tr(
-				"修改这条记忆的内容；作用域和创建时间保持不变。",
-				"Change this memory's text; its scope and creation time are kept.")),
-				t.TextMuted(design.TypeXS)).MaxLines(2)
-			ui.TextInput(c, &st.memoryEditText).Label(st.tr("记忆内容", "Memory text")).FillWidth().
-				OnTextKey(enterTo(save))
-			if st.memoryEditErr != "" {
-				buildDialogError(c, t, st.memoryEditErr)
-			}
-			ui.Divider(c)
-			uikit.DialogFooter(c, []uikit.DialogAction{
-				{Label: st.tr("取消", "Cancel"), OnClick: func() {
-					st.memoryEditOpen = false
-					st.memoryEditID = ""
-					st.memoryEditText = ""
-					st.memoryEditErr = ""
-					runtime.Invalidate()
-				}},
-				{Label: st.tr("保存", "Save"), Primary: true,
-					Disabled: strings.TrimSpace(st.memoryEditText) == "",
-					OnClick:  save},
-			})
-		})
+	uikit.MemoryEditDialog(c, t, uikit.MemoryEditOptions{
+		Open:       &st.memoryEditOpen,
+		Text:       &st.memoryEditText,
+		Locale:     st.locale,
+		FieldLabel: st.tr("记忆内容", "Memory text"),
+		Description: st.tr(
+			"修改这条记忆的内容；作用域和创建时间保持不变。",
+			"Change this memory's text; its scope and creation time are kept."),
+		Error:        st.memoryEditErr,
+		SaveDisabled: strings.TrimSpace(st.memoryEditText) == "",
+		OnSave:       save,
+		OnCancel: func() {
+			st.memoryEditOpen = false
+			st.memoryEditID = ""
+			st.memoryEditText = ""
+			st.memoryEditErr = ""
+			runtime.Invalidate()
+		},
 	})
 }
 
@@ -333,38 +324,40 @@ func buildMemoryEditDialog(c *ui.Context, t *design.Tokens, runtime contracts.UI
 // the scope/created metadata and a row-end delete icon that confirms first.
 func memoryRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	store contracts.MemoryStore, st *state, memory contracts.Memory) {
-	th := t.Theme()
 	ui.Column(c.Key("session.memory." + memory.ID)).FillWidth().Gap(design.Space1).
 		PaddingY(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
 			design.Apply(ui.Text(c, memory.Text), t.Font(design.TypeBody)).
 				TextColor(t.LabelPrimary).Grow(1)
 			if _, editable := store.(contracts.MemoryUpdater); editable {
-				edit := ui.Button(c, "").Label(st.tr("编辑记忆", "Edit memory")).
-					Tooltip(st.tr("编辑这条记忆", "Edit this memory")).
-					Size(th.Space(6), th.Space(6)).PaddingX(design.Space0).Radius(design.RadiusSM)
-				edit.Children(func() {
-					ui.Icon(c, icons.Pencil()).Size(design.Space3, design.Space3).
-						TextColor(t.LabelTertiary)
+				uikit.IconButton(c, uikit.IconButtonOptions{
+					Label:    st.tr("编辑记忆", "Edit memory"),
+					Tooltip:  st.tr("编辑这条记忆", "Edit this memory"),
+					Icon:     icons.Pencil(),
+					Size:     design.Space3,
+					Variant:  uikit.IconButtonNative,
+					InkColor: t.LabelTertiary,
+					OnClick: func() {
+						st.memoryEditOpen = true
+						st.memoryEditID = memory.ID
+						st.memoryEditText = memory.Text
+						st.memoryEditErr = ""
+						runtime.Invalidate()
+					},
 				})
-				if edit.Clicked() {
-					st.memoryEditOpen = true
-					st.memoryEditID = memory.ID
-					st.memoryEditText = memory.Text
-					st.memoryEditErr = ""
+			}
+			uikit.IconButton(c, uikit.IconButtonOptions{
+				Label:    st.tr("删除记忆", "Delete memory"),
+				Tooltip:  st.tr("删除这条记忆", "Delete this memory"),
+				Icon:     icons.Trash(),
+				Size:     design.Space3,
+				Variant:  uikit.IconButtonNative,
+				InkColor: t.LabelTertiary,
+				OnClick: func() {
+					st.memoryConfirm = memory.ID
 					runtime.Invalidate()
-				}
-			}
-			remove := ui.Button(c, "").Label(st.tr("删除记忆", "Delete memory")).
-				Tooltip(st.tr("删除这条记忆", "Delete this memory")).
-				Size(th.Space(6), th.Space(6)).PaddingX(design.Space0).Radius(design.RadiusSM)
-			remove.Children(func() {
-				ui.Icon(c, icons.Trash()).Size(design.Space3, design.Space3).TextColor(t.LabelTertiary)
+				},
 			})
-			if remove.Clicked() {
-				st.memoryConfirm = memory.ID
-				runtime.Invalidate()
-			}
 		})
 		meta := formatTimestamp(st.locale, memory.Created)
 		if scope := memoryScopeLabel(st, memory.Scope); scope != "" {

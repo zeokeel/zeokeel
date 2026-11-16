@@ -17,6 +17,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -55,12 +56,6 @@ const (
 	// bare read failure: the file is fine, only this build's embedded image
 	// preview cannot hold it.
 	imageTooLargeErrPrefix = "image is too large"
-
-	// maxTreeEntries bounds one directory's rendered rows: a directory with
-	// tens of thousands of entries would make the native tree build every row
-	// each frame. The workspace service exposes search for exhaustive lookups,
-	// so the honest cap is enough for the sidebar's browsing purpose.
-	maxTreeEntries = 400
 )
 
 // filePreview is one cached file preview (a tab re-reads a file only when it
@@ -182,7 +177,8 @@ func (st *state) resetFilesState(workspaceKey string) {
 	}
 	st.filesWorkspace = workspaceKey
 	st.filesDirs = make(map[string]*dirListing)
-	st.filesOpen = make(map[string]*bool)
+	st.filesOutline.Open.Clear()
+	st.filesRow = -1
 	st.filesGeneration++
 }
 
@@ -193,7 +189,8 @@ func (st *state) resetFilesState(workspaceKey string) {
 func (st *state) refreshFiles() {
 	st.filesGeneration++
 	st.filesDirs = make(map[string]*dirListing)
-	st.filesOpen = make(map[string]*bool)
+	st.filesOutline.Open.Clear()
+	st.filesRow = -1
 	st.changesGeneration++
 	st.changes = nil
 	st.changesErr = nil
@@ -328,7 +325,7 @@ func artifactKey(artifact contracts.Artifact, index int) string {
 
 // artifactTitle is the row's display title and accessible name.
 func artifactTitle(st *state, artifact contracts.Artifact) string {
-	return firstNonEmpty(artifact.Title, st.tr("未命名产物", "Untitled artifact"))
+	return textutil.FirstNonEmptyTrimmed(artifact.Title, st.tr("未命名产物", "Untitled artifact"))
 }
 
 // buildArtifactRow is one artifact history row: title, time, the explicit

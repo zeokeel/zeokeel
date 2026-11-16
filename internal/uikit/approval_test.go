@@ -14,6 +14,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -421,6 +422,38 @@ func TestApprovalInlineCardRendersBannerAndBody(t *testing.T) {
 	// The card is one named region for assistive technology.
 	if _, ok := tester.AccessByRole(ui.RoleRegion, "需要审批 · 运行命令"); !ok {
 		t.Fatalf("the card is not a named region; texts = %v", tester.Texts())
+	}
+}
+
+// TestApprovalInlineScopeHintUsesMetadataStep pins the scope hint's type step
+// (2026-11 audit UD-05, DESIGN.md §5.3): the sentence explains what "always
+// allow in this session" does and when it expires — it influences the user's
+// decision, so it is metadata (TypeXXS, 12/18), never the 11px micro-label
+// step. The Modal path already renders the same sentence at TypeXXS; the
+// inline card must match it line for line.
+func TestApprovalInlineScopeHintUsesMetadataStep(t *testing.T) {
+	const hint = "「本会话内始终允许」在本会话内不再询问该工具，会话结束后失效。"
+	_, inline := approvalInlineHarness(t,
+		approvalTestRequest("a1", "bash", "运行命令 ls", `{"command":"ls"}`), 1,
+		uikit.ApprovalLabels{}, nil)
+	rect, ok := inline.Find(hint)
+	if !ok {
+		t.Fatalf("inline scope hint missing; texts = %v", inline.Texts())
+	}
+	_, line, _ := design.TypeMetrics(design.TypeXXS)
+	if rect.H < line {
+		t.Errorf("inline scope hint line box = %v, want ≥%v (TypeXXS metadata step; TypeXXXS is micro-labels only, UD-05)",
+			rect.H, line)
+	}
+	_, modal := approvalOpenHarness(t,
+		approvalTestRequest("a2", "bash", "运行命令 ls", `{"command":"ls"}`), 1)
+	mrect, ok := modal.Find(hint)
+	if !ok {
+		t.Fatalf("modal scope hint missing; texts = %v", modal.Texts())
+	}
+	if rect.H != mrect.H {
+		t.Errorf("inline scope hint line box %v differs from the Modal path's %v (one sentence, one type step)",
+			rect.H, mrect.H)
 	}
 }
 

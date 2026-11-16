@@ -13,6 +13,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -66,43 +67,121 @@ func attachmentMIME(path string) string {
 	}
 }
 
-// stageAttachmentFiles reads the picked files into pending attachments, keeping
-// the first readable error for the composer to show in DangerText.
-func stageAttachmentFiles(st *state, paths []string) {
-	st.attachErr = ""
+// attachmentFileResult is one file's staging outcome, computed OFF the UI
+// thread (AR-10): the raw bytes and the decoded preview travel to the frame
+// through UIRuntime.Post; the error stays raw so the UI thread localizes it.
+type attachmentFileResult struct {
+	name       string
+	mime       string
+	data       []byte
+	bitmap     *ui.Bitmap
+	err        error
+	notRegular bool
+	oversized  bool
+}
+
+// readAttachmentFiles is the staging reader seam: stat + ReadFile + preview
+// decode for each path, with no UI state access, so it runs in a background
+// goroutine (tests gate it to prove the frame never waits on the read).
+var readAttachmentFiles = defaultReadAttachmentFiles
+
+// defaultReadAttachmentFiles reads the picked files into staging results,
+// keeping the first failure's cause for the composer to localize. It does the
+// ≤10 MiB ReadFile and the image decode the frame builder must never do (AR-10).
+func defaultReadAttachmentFiles(paths []string) []attachmentFileResult {
+	results := make([]attachmentFileResult, 0, len(paths))
 	for _, path := range paths {
 		name := filepath.Base(path)
+		result := attachmentFileResult{name: name, mime: attachmentMIME(path)}
 		info, err := os.Stat(path)
 		if err != nil || !info.Mode().IsRegular() {
-			st.attachErr = st.tr("无法添加 "+name+"：不是可读的普通文件", "Could not add "+name+": not a readable regular file")
+			result.notRegular = true
+			results = append(results, result)
 			continue
 		}
 		if info.Size() > maxAttachmentBytes {
-			st.attachErr = st.tr(fmt.Sprintf("%s 超过 10 MB 附件上限", name), fmt.Sprintf("%s exceeds the 10 MB attachment limit", name))
+			result.oversized = true
+			results = append(results, result)
 			continue
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
-			st.attachErr = st.tr("无法读取 "+name+"：", "Could not read "+name+": ") + err.Error()
+			result.err = err
+			results = append(results, result)
+			continue
+		}
+		result.data = data
+		// Decode the preview here, while the bytes are already in hand and off
+		// the UI thread: the frame builder only ever looks the bitmap up.
+		attachment := contracts.Attachment{Name: name, MIME: result.mime, Data: data}
+		if bitmap, err := decodeAttachmentThumbnail(attachment); err == nil && bitmap != nil {
+			result.bitmap = bitmap
+		}
+		results = append(results, result)
+	}
+	return results
+}
+
+// applyStagedFiles turns the background read results into pending attachments
+// on the UI thread: IDs, cached previews and the localized first error.
+func applyStagedFiles(st *state, results []attachmentFileResult) {
+	st.attachErr = ""
+	for _, result := range results {
+		switch {
+		case result.notRegular:
+			st.attachErr = st.tr("无法添加 "+result.name+"：不是可读的普通文件",
+				"Could not add "+result.name+": not a readable regular file")
+			continue
+		case result.oversized:
+			st.attachErr = st.tr(fmt.Sprintf("%s 超过 10 MB 附件上限", result.name),
+				fmt.Sprintf("%s exceeds the 10 MB attachment limit", result.name))
+			continue
+		case result.err != nil:
+			st.attachErr = st.tr("无法读取 "+result.name+"：", "Could not read "+result.name+": ") + result.err.Error()
 			continue
 		}
 		st.attachSeq++
 		attachment := contracts.Attachment{
 			ID:   fmt.Sprintf("att-%d", st.attachSeq),
-			Name: name,
-			MIME: attachmentMIME(path),
-			Data: data,
+			Name: result.name,
+			MIME: result.mime,
+			Data: result.data,
 		}
-		// Decode the preview now, while the bytes are already in hand: the
-		// frame builder must never decode an image.
-		if bitmap, err := decodeAttachmentThumbnail(attachment); err == nil && bitmap != nil {
+		if result.bitmap != nil {
 			if st.thumbnails == nil {
 				st.thumbnails = make(map[string]*ui.Bitmap)
 			}
-			st.thumbnails[attachment.ID] = bitmap
+			st.thumbnails[attachment.ID] = result.bitmap
 		}
 		st.pendingAttachments = append(st.pendingAttachments, attachment)
 	}
+}
+
+// stageAttachmentFilesAsync reads the dropped/picked files in a background
+// goroutine and posts only the results to the UI thread (AR-10): a large
+// attachment's ReadFile + decode never blocks a frame. The results land in the
+// conversation that started the staging (a switch mid-read cannot stage into
+// the wrong chat); onApplied, when set, runs after the apply with the number of
+// files actually staged.
+func stageAttachmentFilesAsync(runtime contracts.UIRuntime, st *state, sessionID string, paths []string, onApplied func(staged int)) {
+	if st == nil || len(paths) == 0 {
+		return
+	}
+	go func() {
+		results := readAttachmentFiles(paths)
+		runtime.Post(func() {
+			staged := 0
+			st.withComposerSession(sessionID, func() {
+				before := len(st.pendingAttachments)
+				applyStagedFiles(st, results)
+				staged = len(st.pendingAttachments) - before
+			})
+			if onApplied != nil {
+				onApplied(staged)
+			}
+			runtime.Invalidate()
+		})
+	}()
 }
 
 // pasteClipboardImage stages the clipboard image as a composer attachment (R18):
@@ -178,6 +257,12 @@ func startAttachmentPick(runtime contracts.UIRuntime, st *state) {
 	runtime.Invalidate()
 	go func() {
 		paths, err := AttachmentPicker()
+		// The file reads and preview decodes stay in this background goroutine
+		// too (AR-10): the Post carries only the results, never the I/O.
+		var results []attachmentFileResult
+		if err == nil {
+			results = readAttachmentFiles(paths)
+		}
 		runtime.Post(func() {
 			st.attachBusy = false
 			st.withComposerSession(sessionID, func() {
@@ -189,11 +274,34 @@ func startAttachmentPick(runtime contracts.UIRuntime, st *state) {
 						st.tr("；请拖入文件或粘贴图片", "; drag files in or paste an image instead")
 					return
 				}
-				stageAttachmentFiles(st, paths)
+				applyStagedFiles(st, results)
 			})
 			runtime.Invalidate()
 		})
 	}()
+}
+
+// notifyDropOutsideSession gives a drop that landed while another screen was
+// current a visible outcome (UX-15): the files are staged in the conversation
+// composer, so the toast says so and offers the way there; a host without the
+// action half brings the conversation forward instead of staging silently.
+func notifyDropOutsideSession(st *state, navigator contracts.Navigator, staged int) {
+	if st == nil || navigator == nil || staged == 0 || navigator.Current() == ScreenID {
+		return
+	}
+	text := st.tr("文件已暂存到会话输入框", "Files staged in the conversation composer")
+	if actionNotifier, ok := st.notifier.(contracts.ActionNotifier); ok && st.notifier != nil {
+		actionNotifier.NotifyAction(contracts.NotifyInfo, text,
+			st.tr("前往会话", "Go to conversation"), func() {
+				_ = navigator.Push(ScreenID)
+				if st.runtime != nil {
+					st.runtime.Invalidate()
+				}
+			})
+		return
+	}
+	_ = navigator.Push(ScreenID)
+	st.toast(contracts.NotifyInfo, text)
 }
 
 // removePendingAttachment drops one staged attachment (and its cached preview).
@@ -337,7 +445,7 @@ func buildAttachmentChip(c *ui.Context, t *design.Tokens, st *state, attachment 
 	removable bool, onRemove, onPreview func()) {
 	th := t.Theme()
 	key := "session.attachment." + attachment.ID
-	name := firstNonEmpty(attachment.Name, st.tr("未命名附件", "Untitled attachment"))
+	name := textutil.FirstNonEmptyTrimmed(attachment.Name, st.tr("未命名附件", "Untitled attachment"))
 	if onPreview != nil && !removable {
 		// A sent image's chip is the open-original action: native button metrics
 		// only (no background/border override), so the theme's hover/pressed/
@@ -595,7 +703,7 @@ func buildAttachmentGallery(c *ui.Context, t *design.Tokens, runtime contracts.U
 	fittedW, fittedH := galleryImageSize(entry.bitmap,
 		viewport.W-2*galleryMargin-2*design.Space5,
 		viewport.H-2*galleryMargin-2*design.Space5-chrome)
-	name := firstNonEmpty(attachment.Name, st.tr("未命名图片", "Untitled image"))
+	name := textutil.FirstNonEmptyTrimmed(attachment.Name, st.tr("未命名图片", "Untitled image"))
 	modal := ui.Modal(c, &g.open, func() {
 		ui.Column(c).Gap(design.Space2).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {

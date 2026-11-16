@@ -83,10 +83,16 @@ type AntiPattern struct {
 
 // AllowEntry registers one legal self-drawn area (DESIGN.md §7.1). Missing
 // owner/reason/until, or an expired until, makes the entry invalid (DS-06b).
+// Symbol and Text optionally anchor the entry to one call site (the enclosing
+// function/method name and a normalized source snippet): without them the
+// entry covers every matching call under Paths, the historical file-level
+// behavior (2026-11 audit UD-11).
 type AllowEntry struct {
 	ID     string   `json:"id"`
 	Paths  []string `json:"paths"`
 	Rules  []string `json:"rules,omitempty"`
+	Symbol string   `json:"symbol,omitempty"`
+	Text   string   `json:"text,omitempty"`
 	What   string   `json:"what"`
 	Owner  string   `json:"owner"`
 	Reason string   `json:"reason"`

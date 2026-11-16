@@ -42,16 +42,18 @@ const (
 	// agentHeaderCompactWidth is the header column width under which the agent
 	// entries render in their compact (icon + count) form.
 	agentHeaderCompactWidth float32 = design.TranscriptWidth * 2 / 3
-	// agentRowActionHeight is the compact inline action height.
-	agentRowActionHeight float32 = design.Space6
+	// agentRowActionHeight is the compact inline action height: the control
+	// ladder's compact rung (32), never an off-ladder 24 (2026-11 audit UD-07).
+	agentRowActionHeight float32 = design.RowCompactHeight
 	// maxGeneratedFileRows bounds the turn-tail cards' manual row list (the
 	// cards are one transcript row, so an unbounded list would make the row
 	// enormous); the header count keeps the full deduplicated total.
 	maxGeneratedFileRows = 8
 	// agentHeadingWeight is the heading weight of the agent surfaces' names and
-	// titles (600): the type roles carry no heading weight yet (DESIGN.md D6),
-	// so the surfaces name it once instead of repeating a raw literal.
-	agentHeadingWeight = 600
+	// titles: the type roles carry no heading weight yet (DESIGN.md D6), so the
+	// surfaces name the design token once instead of repeating a raw literal
+	// (2026-11 audit UD-10).
+	agentHeadingWeight = design.WeightSemibold
 	// workbenchSectionMaxHeight bounds each team-workbench column: with the
 	// modal's header and footer, two columns at DialogBodyMax would exceed the
 	// desktop's minimum window height; the lists scroll inside their column
@@ -132,6 +134,12 @@ type agentSurface struct {
 	// stray press can never stop a process.
 	jobStopArmed string
 	jobStopAt    time.Time
+	// jobStaleArmed/jobStaleAt arm the bulk stop of the running jobs that still
+	// follow an older permission identity (2026-11 audit RG-09): the hint's
+	// 「停止这些任务」 waits for a second press within jobStopConfirmWindow, the
+	// same two-stage danger semantic as a single job row's stop.
+	jobStaleArmed bool
+	jobStaleAt    time.Time
 	// jobOutputs holds each job row's expanded output panel, keyed by job id:
 	// its open flag, the bounded output read's state and the panel's scroll.
 	jobOutputs map[string]*jobOutputPanel
@@ -634,7 +642,9 @@ func agentHint(c *ui.Context, t *design.Tokens, text string) {
 // apart.
 func agentRowAction(c *ui.Context, t *design.Tokens, text, accessibleName string, onClick func()) {
 	button := ui.Button(c, text).Label(accessibleName)
-	design.Apply(button, t.Font(design.TypeXXXS))
+	// Button text is never the 11px micro step (2026-11 audit UD-04): the
+	// metadata step (12/18) keeps the short action words readable.
+	design.Apply(button, t.Font(design.TypeXXS))
 	button.Height(agentRowActionHeight).PaddingX(design.Space2).
 		Radius(design.RadiusSM).Shrink(0)
 	if button.Clicked() && onClick != nil {
@@ -646,7 +656,9 @@ func agentRowAction(c *ui.Context, t *design.Tokens, text, accessibleName string
 func agentRowActionTooltip(c *ui.Context, t *design.Tokens, text, accessibleName, tooltip string,
 	onClick func()) {
 	button := ui.Button(c, text).Label(accessibleName).Tooltip(tooltip)
-	design.Apply(button, t.Font(design.TypeXXXS))
+	// Button text is never the 11px micro step (2026-11 audit UD-04): the
+	// metadata step (12/18) keeps the short action words readable.
+	design.Apply(button, t.Font(design.TypeXXS))
 	button.Height(agentRowActionHeight).PaddingX(design.Space2).
 		Radius(design.RadiusSM).Shrink(0)
 	if button.Clicked() && onClick != nil {
@@ -804,8 +816,8 @@ func buildTeamMemberCard(c *ui.Context, t *design.Tokens, st *state, member cont
 				// with the follow-up composer focused.
 				action = st.tr("继续", "Continue")
 				actionLabel = st.tr("继续此队友 ", "Continue teammate ") + name
-				tooltip = st.tr("继续此队友（发送消息会冷恢复它）",
-					"Continue this teammate (a message cold-resumes it)")
+				tooltip = st.tr("继续此队友（发送消息会恢复它之前的会话）",
+					"Continue this teammate (a message resumes its previous conversation)")
 			}
 			agentRowActionTooltip(c, t, action, actionLabel, tooltip, func() {
 				st.openChildView(member.ID)
@@ -1217,8 +1229,8 @@ func buildChildSwitcherRow(c *ui.Context, t *design.Tokens, st *state, agent con
 			} else {
 				actionLabel = st.tr("继续此子代理 ", "Continue subagent ") + name
 			}
-			tooltip = st.tr("继续它（发送消息会冷恢复历史会话）",
-				"Continue it (a message cold-resumes the finished conversation)")
+			tooltip = st.tr("继续它（发送消息会恢复它的历史会话）",
+				"Continue it (a message resumes its finished conversation)")
 		}
 		agentRowActionTooltip(c, t, action, actionLabel, tooltip, func() {
 			st.openChildView(agent.ID)
@@ -1418,6 +1430,7 @@ func buildJobsPanel(c *ui.Context, t *design.Tokens, st *state, jobs contracts.J
 	if st.agents.jobErr != "" {
 		uikit.ErrorLine(c, st.agents.jobErr)
 	}
+	st.buildStalePermissionHint(c, t, jobs)
 	ui.Scroll(c).FillWidth().MaxHeight(design.DialogBodyMax).
 		TrackScroll(&st.agents.jobsScroll).Children(func() {
 		ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
@@ -1447,6 +1460,109 @@ func buildJobsPanel(c *ui.Context, t *design.Tokens, st *state, jobs contracts.J
 	})
 	agentHint(c, t, st.tr("停止会终止任务的进程 · Esc 关闭",
 		"Stopping ends the job's process · Esc closes"))
+}
+
+// stalePermissionJobs reads the optional JobPermissionReporter half of the jobs
+// service (2026-11 audit RG-09): the running jobs still following an older
+// permission identity. A backend without the reporter returns nil.
+func stalePermissionJobs(jobs contracts.JobService) []contracts.BackgroundJob {
+	reporter, ok := jobs.(contracts.JobPermissionReporter)
+	if !ok || reporter == nil {
+		return nil
+	}
+	return reporter.StalePermissionJobs()
+}
+
+// buildStalePermissionHint shows the one-line permission-downgrade awareness row
+// when running jobs still follow an older permission identity: OS confinement is
+// applied at spawn time and is not retroactive, so these jobs keep the old wall
+// until they finish — stopping them is the way to run under the new permission
+// (the KillJob route is fixed, 2026-11 audit RG-01/(c)). The bulk stop uses the
+// same two-stage confirmation as a single job row's stop.
+func (st *state) buildStalePermissionHint(c *ui.Context, t *design.Tokens, jobs contracts.JobService) {
+	stale := stalePermissionJobs(jobs)
+	// Reset a bulk arm that timed out or whose jobs all ended, so a stray second
+	// press can never stop a later process.
+	if st.agents.jobStaleArmed &&
+		(c.Now().Sub(st.agents.jobStaleAt) >= jobStopConfirmWindow || len(stale) == 0) {
+		st.agents.jobStaleArmed = false
+	}
+	if len(stale) == 0 {
+		return
+	}
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		uikit.StatusText(c, t, design.TypeXXS, uikit.StatusNeedsAction,
+			fmt.Sprintf(st.tr("%d 个运行中任务仍按旧权限运行", "%d running jobs still follow the old permission"), len(stale))).
+			Grow(1).MaxLines(2).Tooltip(st.tr(
+			"这些任务在权限变更前启动。OS 沙箱约束在启动时施加、不会追溯变更，它们会保持旧权限直到结束；停止后可按新权限重新启动。",
+			"These jobs started before the permission change. OS confinement is applied at spawn time and is not retroactive; they keep the old permission until they finish. Stop them to restart under the new permission."))
+		stopText := st.tr("停止这些任务", "Stop these jobs")
+		stopLabel := st.tr("停止仍按旧权限运行的任务", "Stop the jobs still following the old permission")
+		tooltip := st.tr("停止会终止这些任务的进程，无法撤销；再按一次确认",
+			"Stopping ends these jobs' processes and cannot be undone; press again to confirm")
+		switch {
+		case st.agents.jobStaleArmed:
+			stopText = st.tr("确认停止", "Confirm stop")
+			stopLabel = st.tr("确认停止仍按旧权限运行的任务", "Confirm stop of the jobs still following the old permission")
+			tooltip = st.tr("再按一次以终止这些任务（3 秒内有效，超时自动取消）",
+				"Press again to end these jobs (valid for 3 seconds, then it resets)")
+		case st.agents.jobKilling != "":
+			stopText = st.tr("停止中…", "Stopping…")
+		}
+		stop := ui.Button(c, stopText).Label(stopLabel).Tooltip(tooltip)
+		design.Apply(stop, t.DangerButton(), t.Font(design.TypeXXS)).
+			Height(agentRowActionHeight).PaddingX(design.Space2).Shrink(0)
+		stop.Disabled(st.agents.jobKilling != "")
+		if stop.Clicked() {
+			if st.agents.jobStaleArmed {
+				st.agents.jobStaleArmed = false
+				st.killStalePermissionJobs(jobs, stale)
+			} else {
+				st.agents.jobStaleArmed = true
+				st.agents.jobStaleAt = c.Now()
+				c.After(jobStopConfirmWindow)
+				st.runtime.Invalidate()
+			}
+		}
+	})
+}
+
+// killStalePermissionJobs stops every running job that still follows the older
+// permission identity in one guarded background pass (the same async shape as a
+// single killBackgroundJob), reporting the first failure through the panel's
+// error line.
+func (st *state) killStalePermissionJobs(jobs contracts.JobService, stale []contracts.BackgroundJob) {
+	if jobs == nil || len(stale) == 0 || st.agents.jobKilling != "" {
+		return
+	}
+	ids := make([]string, 0, len(stale))
+	for _, job := range stale {
+		if id := strings.TrimSpace(job.ID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	st.agents.jobKilling = ids[0]
+	st.agents.jobStopArmed = ""
+	st.agents.jobErr = ""
+	runtime := st.runtime
+	go func() {
+		var firstErr error
+		for _, id := range ids {
+			if err := jobs.KillJob(id); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		runtime.Post(func() {
+			st.agents.jobKilling = ""
+			if firstErr != nil {
+				st.agents.jobErr = st.tr("停止失败：", "Stop failed: ") + firstErr.Error()
+			}
+			runtime.Invalidate()
+		})
+	}()
 }
 
 // backgroundJobStatus maps the rig job state onto the product's status
@@ -1847,8 +1963,8 @@ func buildChildConversationPane(c *ui.Context, t *design.Tokens, runtime contrac
 					buildChildActivitySection(c, t, st, child)
 					switch {
 					case child.Historical && child.Resumable:
-						agentHint(c, t, st.tr("历史记录（应用重启后仍保留）：可继续；发送后会基于已保存的会话冷恢复。",
-							"Finished record (kept after a restart): continuable; sending cold-resumes the saved session."))
+						agentHint(c, t, st.tr("历史记录（应用重启后仍保留）：可继续；发送后会接着已保存的会话继续。",
+							"Finished record (kept after a restart): continuable; sending picks the saved conversation back up."))
 					case child.Historical:
 						agentHint(c, t, st.tr("已结束的记录（应用重启后仍保留）：只读，不能再继续对话。",
 							"Finished record (kept after a restart): read-only, it cannot be continued."))
@@ -2154,8 +2270,8 @@ func buildChildComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRun
 			}
 			hint := st.tr("发送后等待该队友的回复。", "The teammate answers when its next run finishes.")
 			if child.Historical {
-				hint = st.tr("发送后冷恢复这条历史记录，并等待它的回答。",
-					"Sending cold-resumes this finished record and waits for its answer.")
+				hint = st.tr("发送后会恢复这条历史记录的会话，并等待它的回答。",
+					"Sending resumes this record's conversation and waits for its answer.")
 			}
 			agentHint(c, t, hint)
 		})
@@ -2235,19 +2351,18 @@ func buildChildBreadcrumb(c *ui.Context, t *design.Tokens, st *state, chat contr
 	if crumbs.Changed() && st.agents.crumbChosen == 0 {
 		st.exitChildView()
 	}
-	th := t.Theme()
-	switchChip := ui.Button(c, "").Label(st.tr("切换子智能体会话", "Switch child conversation")).
-		Tooltip(st.tr("切换子智能体会话", "Switch child conversation")).
-		Height(t.Scale(th.Space(7))).PaddingX(design.Space2).
-		Radius(design.RadiusSM).Shrink(0).Gap(design.Space1)
-	switchChip.Children(func() {
-		ui.Icon(c, icons.ChevronDown()).Size(design.Space3, design.Space3).
-			TextColor(t.LabelTertiary)
+	switchChip := uikit.IconButton(c, uikit.IconButtonOptions{
+		Label:    st.tr("切换子智能体会话", "Switch child conversation"),
+		Tooltip:  st.tr("切换子智能体会话", "Switch child conversation"),
+		Icon:     icons.ChevronDown(),
+		Size:     design.Space3,
+		Variant:  uikit.IconButtonNative,
+		InkColor: t.LabelTertiary,
+		OnClick: func() {
+			st.agents.childOpen = !st.agents.childOpen
+			st.runtime.Invalidate()
+		},
 	})
-	if switchChip.Clicked() {
-		st.agents.childOpen = !st.agents.childOpen
-		st.runtime.Invalidate()
-	}
 	children := st.childAgentService()
 	if !st.agents.childOpen || children == nil {
 		return

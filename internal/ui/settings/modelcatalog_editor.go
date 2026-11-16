@@ -21,6 +21,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -375,13 +376,19 @@ func catalogDraftModelInfo(draft *catalogEditDraft) contracts.ModelInfo {
 
 // catalogDefaultThinkingOptions lists the default-thinking select: the empty
 // "follow the family default" option first, then the model's effective modes.
-// Labels are disambiguated by ID when two modes share a display name.
+// Labels are disambiguated by ID when two modes share a display name. The
+// "default" mode (no thinking fields) is dropped: it is exactly what the empty
+// 跟随系列默认 override already does, so offering both is a near-synonymous
+// duplicate (2026-11 audit US-07).
 func catalogDefaultThinkingOptions(locale contracts.LocaleService,
 	modes []contracts.ThinkingMode) (labels, ids []string) {
 	labels = []string{localized(locale, "跟随系列默认", "Family default")}
 	ids = []string{""}
 	seen := make(map[string]bool, len(modes))
 	for _, mode := range modes {
+		if mode.ID == contracts.ThinkingModeDefault {
+			continue
+		}
 		label := catalogModeDisplayName(locale, mode)
 		if seen[label] {
 			label += " (" + mode.ID + ")"
@@ -919,7 +926,7 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, runtime contracts.U
 			if testAPIKey == "" && !draft.clearKey {
 				testAPIKey = draft.storedAPIKey
 			}
-			testBaseURL := firstNonEmpty(strings.TrimRight(strings.TrimSpace(draft.baseURL), "/"), fallbackBaseURL)
+			testBaseURL := textutil.FirstNonEmpty(strings.TrimRight(strings.TrimSpace(draft.baseURL), "/"), fallbackBaseURL)
 			if testAPIKey == "" {
 				testAPIKey = fallbackAPIKey
 			}

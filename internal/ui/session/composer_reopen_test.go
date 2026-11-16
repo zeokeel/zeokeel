@@ -55,6 +55,6 @@ func TestSessionStatusStripOmitsSpeedForVeryShortTurn(t *testing.T) {
 	})
 	h := newModelHarness(t, chat, nil)
 	tester := h.tester()
-	h.assertTexts(tester, "1 轮 · 0 步 · 缓存命中 17%")
+	h.assertTexts(tester, "1 轮对话 · 0 步工具调用 · 缓存命中 17%")
 	h.assertNoTexts(tester, "tok/s")
 }

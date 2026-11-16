@@ -29,6 +29,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/lib/openpath"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -204,6 +205,12 @@ func buildSkillsTab(c *ui.Context, t *design.Tokens, st *state) {
 
 	workspaceRoot := skillWorkspaceRoot(st.ctx)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+		// A plain-language intro teaches what a skill is (US-08): the tab otherwise
+		// opens straight into the developer-facing SKILL.md mechanics.
+		design.Apply(ui.Text(c, st.tr(
+			"技能＝给智能体的任务说明书：一个 Markdown 指令包，告诉它如何完成某类任务。",
+			"Skills are task manuals for the agent: Markdown instruction packs that teach it how to do a kind of task.")),
+			t.TextMuted(design.TypeXXS)).MaxLines(2)
 		buildSkillsStatus(c, t, p, st)
 		buildSkillsCollectionRow(c, t, p, st, editor)
 		if p.listErr != nil {
@@ -258,7 +265,7 @@ func buildSkillsTab(c *ui.Context, t *design.Tokens, st *state) {
 			if index < 0 || index >= len(filtered) {
 				return ""
 			}
-			return firstNonEmpty(filtered[index].Name, st.tr("(未命名技能)", "(Unnamed skill)"))
+			return textutil.FirstNonEmptyTrimmed(filtered[index].Name, st.tr("(未命名技能)", "(Unnamed skill)"))
 		}
 		ui.GridView(c, &p.grid, len(filtered), cardGridMinWidth, cardGridHeight, func(index int) {
 			buildSkillCard(c, t, p, st, skills, filtered[index], editor, dataDir, workspaceRoot)
@@ -332,7 +339,7 @@ func buildSkillCard(c *ui.Context, t *design.Tokens, p *skillsState, st *state,
 	skills contracts.SkillsService, skill contracts.Skill, editor contracts.SkillsEditor,
 	dataDir, workspaceRoot string) {
 	key := skillKey(skill)
-	name := firstNonEmpty(skill.Name, st.tr("(未命名技能)", "(Unnamed skill)"))
+	name := textutil.FirstNonEmptyTrimmed(skill.Name, st.tr("(未命名技能)", "(Unnamed skill)"))
 	source, relative := skillDisplayPath(skill.Path, dataDir, workspaceRoot, p.roots)
 	design.Apply(ui.Column(c.Key("skills.card/"+key)), t.Panel()).
 		FillWidth().FillHeight().Padding(design.Space3).Gap(design.Space2).Children(func() {
@@ -413,7 +420,8 @@ func buildSkillsDirectories(c *ui.Context, t *design.Tokens, p *skillsState, st 
 		for _, root := range p.roots {
 			root := root
 			scopeZh, scopeEn := skillRootScope(st.ctx, root)
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+				PaddingEnd(design.Space4).Children(func() {
 				design.Apply(ui.Text(c, st.tr(scopeZh, scopeEn)), t.Font(design.TypeXXS)).
 					TextColor(t.LabelTertiary).Width(design.Space8 * 2).Shrink(0)
 				design.Apply(ui.Text(c, root), t.MonoText(design.TypeXS)).
@@ -611,7 +619,7 @@ func buildSkillPreviewDialog(c *ui.Context, t *design.Tokens, p *skillsState, st
 		p.previewOpen = false
 		return
 	}
-	name := firstNonEmpty(skill.Name, st.tr("(未命名技能)", "(Unnamed skill)"))
+	name := textutil.FirstNonEmptyTrimmed(skill.Name, st.tr("(未命名技能)", "(Unnamed skill)"))
 	_, dataDir := skillEditor(st.ctx)
 	source, relative := skillDisplayPath(skill.Path, dataDir, skillWorkspaceRoot(st.ctx), p.roots)
 	subtitle := relative

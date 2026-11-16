@@ -218,7 +218,7 @@ func ReasoningMarkdown(t *design.Tokens, size float32) *markdown.Options {
 	sizes := [6]float32{1.1, 1.05, 1.0, 0.95, 0.9, 0.85}
 	for index := range theme.Headings {
 		theme.Headings[index].Size = sizes[index]
-		theme.Headings[index].Weight = 600
+		theme.Headings[index].Weight = design.WeightSemibold
 		theme.Headings[index].Color = t.LabelSecondary
 	}
 	theme.Headings[5].Color = t.LabelTertiary
@@ -250,7 +250,7 @@ func MarkdownDoc(t *design.Tokens, size float32) *markdown.Options {
 	sizes := [6]float32{1.15, 1.08, 1.0, 0.95, 0.9, 0.85}
 	for index := range theme.Headings {
 		theme.Headings[index].Size = sizes[index]
-		theme.Headings[index].Weight = 600
+		theme.Headings[index].Weight = design.WeightSemibold
 		theme.Headings[index].Color = t.LabelSecondary
 	}
 	theme.Headings[0].Color = t.LabelPrimary

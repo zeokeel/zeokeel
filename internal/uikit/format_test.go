@@ -115,3 +115,28 @@ func TestFormatShortcutNormalizesEveryNotation(t *testing.T) {
 		}
 	}
 }
+
+// TestFormatContextWindow pins the context-window rendering shared by the
+// model catalog list and the session usage footer (AR-17: the two private
+// formatContextWindow copies converged here): exact thousands as "128k",
+// other positive values with one decimal, non-positive values hidden.
+func TestFormatContextWindow(t *testing.T) {
+	cases := []struct {
+		tokens int
+		want   string
+	}{
+		{0, ""},
+		{-5, ""},
+		{1000, "1k"},
+		{128000, "128k"},
+		{32768, "32.8k"},
+		{1500, "1.5k"},
+		{999, "1.0k"},
+		{2000000, "2000k"},
+	}
+	for _, test := range cases {
+		if got := uikit.FormatContextWindow(test.tokens); got != test.want {
+			t.Errorf("FormatContextWindow(%d) = %q, want %q", test.tokens, got, test.want)
+		}
+	}
+}

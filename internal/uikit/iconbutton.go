@@ -11,6 +11,11 @@ package uikit
 // drawing a ButtonBase of their own (DESIGN.md §7.1), so hover/pressed cannot
 // go missing on one of them again and the sizes stay on design.IconSize*.
 //
+// The Native variant is the one exception to the ButtonBase kernel: it builds
+// the official ui.Button itself, so the chrome's bordered icon actions keep
+// the theme's outlined look and native state machine while converging on this
+// entry's Label, hit-target and ink guarantees (IconButtonNative).
+//
 // The glyph is decoration that assistive technology does not read: the Label
 // names the button. A Tooltip is optional: the shell's drawer close passes
 // none because a keyboard-raised tooltip is an overlay with its own Escape
@@ -40,6 +45,16 @@ const (
 	// DangerText, and the interaction tints stay neutral so the danger color
 	// is never a background wash.
 	IconButtonDanger
+	// IconButtonNative is the official ui.Button's outlined look (surface fill
+	// + hairline border + the theme's own hover/pressed/focused/disabled
+	// states) under the entry's Label, ≥24 hit target and ink guarantees. It
+	// exists so the chrome's bordered icon actions (the top band's quick
+	// actions and inspector toggle, the row ⋯ menus, the inspector's copy and
+	// close) converge on the one icon-button entry without changing their look
+	// (2026-11 audit UD-09). Selected and Toggle are ghost-family states: the
+	// official button carries no selection paint, so a destination that reads
+	// as selected uses Ghost/Subtle instead.
+	IconButtonNative
 )
 
 // IconButtonOptions is one icon-only button, as the shell (collapse/expand,
@@ -109,6 +124,10 @@ func IconButton(c *ui.Context, o IconButtonOptions) ui.Element {
 		target = design.IconSizeL
 	}
 
+	if o.Variant == IconButtonNative {
+		return iconButtonNative(c, t, o, glyph, target)
+	}
+
 	var button ui.Element
 	if o.Key != "" {
 		button = ui.ButtonBase(c.Key(o.Key))
@@ -168,6 +187,49 @@ func IconButton(c *ui.Context, o IconButtonOptions) ui.Element {
 	// did: the settings surface's close mutates the modal's open flag and reads
 	// it right after the build, so mygo's deferred Element.OnClick (which runs
 	// after the view returns) would leave that flag stale for the frame.
+	if o.OnClick != nil && button.Clicked() {
+		o.OnClick()
+	}
+	return button
+}
+
+// iconButtonNative is the Native variant: the official ui.Button's outlined
+// look, not a ButtonBase the entry paints itself. The chrome's bordered icon
+// actions (top band, row ⋯, inspector copy/close) already read as official
+// buttons; converging them on IconButton must not change that look, so this
+// builds a real ui.Button and only fixes the square hit target, the zero side
+// padding and the small control radius the legacy sites set by hand. mygo then
+// owns the whole state machine — surface fill, hairline border, hover, pressed,
+// the focus ring and the disabled dim — so no state can go missing on one of
+// them again (2026-11 audit UD-09). The Label/Tooltip, the ≥24 target and the
+// glyph ink stay the entry's guarantees, exactly as the ghost variants.
+func iconButtonNative(c *ui.Context, t *design.Tokens, o IconButtonOptions, glyph, target float32) ui.Element {
+	var button ui.Element
+	if o.Key != "" {
+		button = ui.Button(c.Key(o.Key), "")
+	} else {
+		button = ui.Button(c, "")
+	}
+	button = button.Label(o.Label).
+		Size(target, target).PaddingX(design.Space0).Radius(design.RadiusSM)
+	if o.Tooltip != "" {
+		button = button.Tooltip(o.Tooltip)
+	}
+	if o.Disabled {
+		button = button.Disabled(true)
+	}
+	color := t.LabelSecondary
+	if o.InkColor.A != 0 {
+		color = o.InkColor
+	}
+	button.Children(func() {
+		switch {
+		case o.Icon != nil:
+			ui.Icon(c, o.Icon).Size(glyph, glyph).TextColor(color)
+		case o.Content != nil:
+			o.Content(c)
+		}
+	})
 	if o.OnClick != nil && button.Clicked() {
 		o.OnClick()
 	}

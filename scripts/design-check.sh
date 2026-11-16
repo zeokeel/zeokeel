@@ -23,8 +23,12 @@ cd "$ROOT"
 
 DS01_MAX="${DS01_MAX:-0}"
 DS03_FONTSIZE_MAX="${DS03_FONTSIZE_MAX:-0}"
-DS03_METRIC_MAX="${DS03_METRIC_MAX:-51}"
-DS06_BUTTONBASE_MAX="${DS06_BUTTONBASE_MAX:-10}"
+# 2026-11 audit UD-20: thresholds tightened to the measured stock after the
+# fix waves (metric 51→21; ButtonBase 10→11 — the RunStatus queue badge is a
+# registered self-drawn site, uikit.run-status-queue-badge). Migrations only
+# lower them further.
+DS03_METRIC_MAX="${DS03_METRIC_MAX:-21}"
+DS06_BUTTONBASE_MAX="${DS06_BUTTONBASE_MAX:-11}"
 DS10_DANGER_DEFAULT_MAX="${DS10_DANGER_DEFAULT_MAX:-0}"
 DS09_STATUS_FUNCS_MAX="${DS09_STATUS_FUNCS_MAX:-0}"
 

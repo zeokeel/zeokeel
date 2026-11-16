@@ -185,13 +185,16 @@ func SessionThread(c *ui.Context, o SessionThreadOptions) {
 
 // sessionBackToLatest shows the floating "back to latest" action over the
 // transcript while the reader is away from its end: it scrolls the official List
-// to the end and resumes the follow (list.md ScrollToEnd/FollowEnd).
+// to the end and resumes the follow (list.md ScrollToEnd/FollowEnd). It is a
+// secondary action, not a primary: while a draft is being written the composer's
+// Send owns the screen's one primary budget, and a second accent fill here read
+// as a competing main action (AP-20, 2026-11 audit UD-13).
 func sessionBackToLatest(c *ui.Context, t *design.Tokens, state *ui.ListState,
 	follow *bool, label string) {
 	ui.Row(c).Absolute().Right(design.Space4).Bottom(design.Space4).Children(func() {
-		button := design.Apply(ui.PrimaryButton(c, label), t.PrimaryButton()).Label(label)
+		button := design.Apply(ui.Button(c, label), t.SecondaryButton()).Label(label)
 		button.Children(func() {
-			ui.Icon(c, icons.ChevronDown()).Size(design.Space3, design.Space3).TextColor(t.OnPrimary)
+			ui.Icon(c, icons.ChevronDown()).Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
 		})
 		if button.Clicked() {
 			state.ScrollToEnd()

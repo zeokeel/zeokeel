@@ -145,7 +145,6 @@ func TestRefreshDropsChangesCaches(t *testing.T) {
 		previews:        map[string]*filePreview{},
 		editors:         map[editorKey]*editor.State{},
 		filesDirs:       map[string]*dirListing{},
-		filesOpen:       map[string]*bool{},
 		filesGeneration: 3,
 	}
 	generation := st.changesGeneration
@@ -224,7 +223,6 @@ func TestWorkspaceIdentityChangeDropsPathCaches(t *testing.T) {
 		changesOpen:     map[string]bool{"note.txt": true},
 		diffs:           map[string]*diffView{"note.txt\x00M": {}},
 		filesDirs:       map[string]*dirListing{},
-		filesOpen:       map[string]*bool{},
 	}
 	generation := st.changesGeneration
 	workspace := &stubWorkspace{current: contracts.Workspace{ID: "ws-b", Root: "/work/beta"}, has: true}

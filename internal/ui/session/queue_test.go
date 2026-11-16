@@ -179,7 +179,8 @@ func TestQueueStopKeepsBackendInbox(t *testing.T) {
 
 // TestQueueRemoveOneAndClearAll covers the popover actions: a row removal calls
 // RemoveQueuedPrompt (the entry is really gone from the backend) and clear-all
-// removes the rest.
+// removes the rest — through the ConfirmDanger gate (UX-04, wave E1): cancel
+// keeps the queue, the explicit confirmation clears it.
 func TestQueueRemoveOneAndClearAll(t *testing.T) {
 	chat := runningChat()
 	h := newPermissionHarness(t, chat, sendWhileRunningSettings(true))
@@ -208,6 +209,26 @@ func TestQueueRemoveOneAndClearAll(t *testing.T) {
 	}
 	h.assertTexts(tester, "清空全部")
 	h.click(tester, "清空全部")
+	// UX-04 (wave E1, uikit.RunStatus): clearing the whole queue is irreversible,
+	// so ConfirmDanger asks first (DESIGN rule 9, Cancel the Default). The inbox
+	// stays intact until the explicit confirmation.
+	h.assertTexts(tester, "清空全部排队消息？", "确认清空", "取消")
+	if queued := chat.queueFor("sess-1"); len(queued) != 1 {
+		t.Fatalf("clear-all acted before confirmation: %+v", queued)
+	}
+	// Cancel keeps the queue.
+	h.click(tester, "取消")
+	tester.Frame()
+	if queued := chat.queueFor("sess-1"); len(queued) != 1 {
+		t.Fatalf("cancel cleared the queue: %+v", queued)
+	}
+	h.assertTexts(tester, "已排队 1 条")
+	// Confirming clears it for real.
+	if !tester.HasText("排队消息") {
+		h.click(tester, "已排队 1 条")
+	}
+	h.click(tester, "清空全部")
+	h.click(tester, "确认清空")
 	h.assertNoTexts(tester, "已排队")
 	if queued := chat.queueFor("sess-1"); len(queued) != 0 {
 		t.Fatalf("clear-all left entries: %+v", queued)

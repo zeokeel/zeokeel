@@ -40,6 +40,10 @@ const (
 	capabilitiesDefaultTeamConcurrent      = 4
 	capabilitiesDefaultShellTimeoutSeconds = 30
 	capabilitiesDefaultShellOutputKiB      = 0
+	// capabilitiesDefaultApprovalTimeoutSeconds is 0 = disabled (the default):
+	// interactive approvals keep waiting; only automation-origin runs may opt
+	// into a per-approval auto-deny (2026-11 audit RG-04, personal-scale ruling).
+	capabilitiesDefaultApprovalTimeoutSeconds = 0
 )
 
 // capabilitiesState is the page's UI-local draft/status state.
@@ -51,6 +55,7 @@ type capabilitiesState struct {
 	teamMax             float64
 	shellTimeoutSeconds float64
 	shellOutputKiB      float64
+	approvalTimeout     float64
 	status              string
 	statusErr           bool
 }
@@ -65,6 +70,7 @@ func newCapabilitiesState() *capabilitiesState {
 		teamMax:             capabilitiesDefaultTeamConcurrent,
 		shellTimeoutSeconds: capabilitiesDefaultShellTimeoutSeconds,
 		shellOutputKiB:      capabilitiesDefaultShellOutputKiB,
+		approvalTimeout:     capabilitiesDefaultApprovalTimeoutSeconds,
 	}
 }
 
@@ -99,6 +105,10 @@ func (st *capabilitiesState) outputValue() int {
 		contracts.CapabilityShellOutputDefaultKiB, contracts.CapabilityMaxShellOutputKiB)
 }
 
+func (st *capabilitiesState) approvalTimeoutValue() int {
+	return capabilitiesRound(st.approvalTimeout, 0, contracts.CapabilityMaxApprovalTimeoutSeconds)
+}
+
 // capabilitiesStored reads one row the same way the modules do: an absent or
 // invalid row falls back to the product default.
 func capabilitiesStored(store contracts.SettingsService, key string, fallback int) int {
@@ -113,6 +123,8 @@ func capabilitiesStored(store contracts.SettingsService, key string, fallback in
 		return contracts.NormalizeShellTimeoutSeconds(raw, fallback)
 	case contracts.SettingToolkitShellMaxOutputKiB:
 		return contracts.NormalizeShellMaxOutputKiB(raw, fallback)
+	case contracts.SettingAgentApprovalTimeoutSeconds:
+		return contracts.NormalizeApprovalTimeoutSeconds(raw)
 	}
 	return fallback
 }
@@ -124,21 +136,24 @@ func (st *capabilitiesState) load(store contracts.SettingsService) {
 	team := capabilitiesDefaultTeamConcurrent
 	timeout := capabilitiesDefaultShellTimeoutSeconds
 	output := capabilitiesDefaultShellOutputKiB
+	approval := capabilitiesDefaultApprovalTimeoutSeconds
 	if store != nil {
 		subagent = capabilitiesStored(store, contracts.SettingAgentSubagentMaxConcurrent, subagent)
 		team = capabilitiesStored(store, contracts.SettingAgentTeamMaxConcurrent, team)
 		timeout = capabilitiesStored(store, contracts.SettingToolkitShellTimeoutSeconds, timeout)
 		output = capabilitiesStored(store, contracts.SettingToolkitShellMaxOutputKiB, output)
+		approval = capabilitiesStored(store, contracts.SettingAgentApprovalTimeoutSeconds, approval)
 	}
 	st.subagentMax = float64(subagent)
 	st.teamMax = float64(team)
 	st.shellTimeoutSeconds = float64(timeout)
 	st.shellOutputKiB = float64(output)
+	st.approvalTimeout = float64(approval)
 	st.status = ""
 	st.statusErr = false
 }
 
-// capabilitiesRows describes the four stored rows in page order.
+// capabilitiesRows describes the stored rows in page order.
 func capabilitiesRows(st *capabilitiesState) []struct {
 	key   string
 	value int
@@ -153,6 +168,7 @@ func capabilitiesRows(st *capabilitiesState) []struct {
 		{contracts.SettingAgentTeamMaxConcurrent, st.teamValue(), capabilitiesDefaultTeamConcurrent},
 		{contracts.SettingToolkitShellTimeoutSeconds, st.timeoutValue(), capabilitiesDefaultShellTimeoutSeconds},
 		{contracts.SettingToolkitShellMaxOutputKiB, st.outputValue(), capabilitiesDefaultShellOutputKiB},
+		{contracts.SettingAgentApprovalTimeoutSeconds, st.approvalTimeoutValue(), capabilitiesDefaultApprovalTimeoutSeconds},
 	}
 }
 
@@ -203,6 +219,7 @@ func (st *capabilitiesState) restoreDefaults(locale contracts.LocaleService) {
 	st.teamMax = capabilitiesDefaultTeamConcurrent
 	st.shellTimeoutSeconds = capabilitiesDefaultShellTimeoutSeconds
 	st.shellOutputKiB = capabilitiesDefaultShellOutputKiB
+	st.approvalTimeout = capabilitiesDefaultApprovalTimeoutSeconds
 	st.status = localized(locale, "已恢复默认（未保存）", "Defaults restored (unsaved)")
 	st.statusErr = false
 }
@@ -261,6 +278,16 @@ func buildCapabilitiesPage(c *ui.Context, store contracts.SettingsService,
 				"Output cap of one command in KiB (at most 4096); 0 uses the tool default. Restart the app to apply."))
 		})
 
+		uikit.Section(c, localized(locale, "审批超时", "Approval timeout"), func(body *ui.Context) {
+			ui.Field(body, localized(locale, "审批超时", "Approval timeout"), func() {
+				ui.NumberInput(body, &st.approvalTimeout,
+					0, contracts.CapabilityMaxApprovalTimeoutSeconds, 30).
+					Label(inputLabel(locale, localized(locale, "审批超时", "Approval timeout")))
+			}).Description(localized(locale,
+				"仅自动化来源的审批等待生效：超过该秒数自动拒绝并记录、通知。0＝关闭（默认），交互审批不受影响；运行级墙钟断路器仍生效。修改后下次运行生效。",
+				"Only approvals from automation-origin runs are bounded: after this many seconds they are auto-denied, recorded and notified. 0 = disabled (default); interactive approvals are unaffected and the run-level wall-clock breaker still applies. A change applies on the next run."))
+		})
+
 		uikit.Section(c, localized(locale, "并行工具上限", "Parallel tool calls"), func(body *ui.Context) {
 			// The agent loop's parallel-tool cap is a rig constant: say so
 			// instead of offering a setting that would do nothing.
@@ -281,5 +308,6 @@ func capabilitiesPageKeywords() []string {
 		"subagent", "子代理", "委派", "delegation", "并发", "concurrency", "parallel",
 		"team", "团队", "member", "成员",
 		"shell", "命令", "command", "超时", "timeout", "输出", "output", "上限", "limit", "kib",
+		"审批", "approval", "自动化", "automation", "拒绝", "deny",
 	}
 }

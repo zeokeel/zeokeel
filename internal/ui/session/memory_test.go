@@ -378,8 +378,10 @@ func TestStreamingAssistantMarkdownRendering(t *testing.T) {
 	tester := h.tester()
 	texts := joinedTexts(tester)
 	// The default standard work-steps mode shows the live activity line, and the
-	// streaming prose under it keeps rendering Markdown.
-	for _, want := range []string{"正在分析请求", "正在分析", "认证模块"} {
+	// streaming prose under it keeps rendering Markdown. US-03: prose already
+	// streaming reads 正在回复 (the old pinned 正在分析请求 claimed analysis
+	// while the answer visibly streamed).
+	for _, want := range []string{"正在回复", "正在分析", "认证模块"} {
 		if !strings.Contains(texts, want) {
 			t.Fatalf("streaming frame does not show %q; texts = %v", want, tester.Texts())
 		}

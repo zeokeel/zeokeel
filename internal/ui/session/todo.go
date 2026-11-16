@@ -11,19 +11,20 @@ package session
 //   - a collapsible header with the title and the completed/total count;
 //   - one row per item with a status marker (hollow = pending, filled = in
 //     progress, check = completed), the in-progress item highlighted;
-//   - grouped reading order (in progress, pending, completed) that keeps the
-//     list order inside a group;
+//   - the agent's own list order (US-11): the list is a numbered plan, so
+//     status grouping must not shuffle the steps' ordinals — status stays
+//     visible through each row's marker and accessible name;
+//   - one quiet line disclosing the store's global scope (US-11);
 //   - nothing at all when the list is empty or the host provides no service.
 //
-// LIMITATION: the current store is process-level (one list for the whole
-// product), not per-session — a todo_write in one conversation is what every
-// conversation's dock shows. The dock does not pretend to scope it per session.
-// The list is read-only here: the agent owns it, and the UI offers no editing or
-// drag-and-drop.
+// SCOPE: the current store is process-level (one list for the whole product),
+// not per-session — a todo_write in one conversation is what every
+// conversation's dock shows. The dock says so in one line instead of pretending
+// to scope it per session. The list is read-only here: the agent owns it, and
+// the UI offers no editing or drag-and-drop.
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -62,7 +63,10 @@ func buildTodoDock(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	if service == nil {
 		return false
 	}
-	todos := orderTodoItems(service.Todos())
+	// The agent's order is the plan's order (US-11): render it as written, so
+	// numbered steps keep their sequence; the status markers carry the grouping
+	// information instead of a re-sort.
+	todos := service.Todos()
 	if len(todos) == 0 {
 		return false
 	}
@@ -95,6 +99,13 @@ func buildTodoDock(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 				TextColor(t.LabelTertiary).NoWrap()
 		})
 		if *open {
+			// The store is process-level: say so once in quiet copy, so a list
+			// written in another conversation is not read as this one's plan
+			// (US-11). A sentence, so it uses the metadata step (TypeXXS).
+			design.Apply(ui.Text(c, st.tr(
+				"待办为全应用共享，不区分当前会话。",
+				"To-dos are shared across the whole app, not scoped to this conversation.")),
+				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
 			list := ui.Local(dock, "session.todo.list", func() ui.ListState { return ui.ListState{} })
 			list.Key = func(index int) any {
 				if index < 0 || index >= len(todos) {
@@ -174,34 +185,6 @@ func todoCompletedCount(todos []contracts.TodoItem) int {
 		}
 	}
 	return completed
-}
-
-// orderTodoItems groups the reading order (in progress, pending, completed)
-// while keeping the agent's list order inside each group. The agent writes the
-// list as a plan, so its order still matters; only the status rank moves a row.
-func orderTodoItems(todos []contracts.TodoItem) []contracts.TodoItem {
-	if len(todos) < 2 {
-		return todos
-	}
-	ordered := append([]contracts.TodoItem(nil), todos...)
-	sort.SliceStable(ordered, func(i, j int) bool {
-		return todoStatusRank(ordered[i].Status) < todoStatusRank(ordered[j].Status)
-	})
-	return ordered
-}
-
-// todoStatusRank is the group order of one status.
-func todoStatusRank(status string) int {
-	switch normalizeTodoStatus(status) {
-	case contracts.TodoStatusInProgress:
-		return 0
-	case contracts.TodoStatusPending:
-		return 1
-	case contracts.TodoStatusCompleted:
-		return 2
-	default:
-		return 3
-	}
 }
 
 // normalizeTodoStatus maps a stored status onto the contract vocabulary (an

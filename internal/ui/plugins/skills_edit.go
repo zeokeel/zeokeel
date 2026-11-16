@@ -25,6 +25,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/lib/openpath"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -347,7 +348,7 @@ func buildSkillCardMenu(c *ui.Context, t *design.Tokens, p *skillsState, st *sta
 	if path == "" {
 		return
 	}
-	name := firstNonEmpty(skill.Name, st.tr("(未命名技能)", "(Unnamed skill)"))
+	name := textutil.FirstNonEmptyTrimmed(skill.Name, st.tr("(未命名技能)", "(Unnamed skill)"))
 	label := st.tr("技能操作", "Skill actions") + " " + name
 	menu := uikit.IconButton(c, uikit.IconButtonOptions{
 		Key: "skills.menu/" + skillKey(skill), Label: label, Tooltip: st.tr("技能操作", "Skill actions"),

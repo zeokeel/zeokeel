@@ -102,13 +102,14 @@ func TestPermissionButtonShowsCurrentPermission(t *testing.T) {
 	assertNoSessionSettingsLabel(t, tester)
 
 	// The menu header is only the group name: the button already shows the
-	// current value, so the menu does not repeat it as a trailing node.
+	// current value (marked 「全局」), so the bare preset text appears only as the
+	// option row's two text nodes.
 	settings.set(contracts.SettingAgentPermission, contracts.PermissionWorkspace)
 	tester.Frame()
 	h.openSessionMenu(tester)
 	assertSessionMenuOnlyPermissions(t, tester)
-	if got := exactTextCount(tester.Texts(), "工作区修改"); got != 3 {
-		t.Fatalf("current permission appears %d times, want button + option (3); texts = %v", got, tester.Texts())
+	if got := exactTextCount(tester.Texts(), "工作区修改"); got != 2 {
+		t.Fatalf("current permission appears %d times, want the option row (2); texts = %v", got, tester.Texts())
 	}
 }
 
