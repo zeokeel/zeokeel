@@ -4,13 +4,12 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.45 — MCP OAuth 2.1 授权与技能卡管理入口** (2026-11-16). Native, compile-time modular
+> **v0.2.46 — 连接器热重载与 GitHub MCP 修复** (2026-11-16). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
-> webview. 本版接入 **zeokeel-rig v0.18.0** 的 MCP OAuth 2.1：连接器表单支持
-> 无认证 / Bearer / OAuth 2.1，未授权卡显示「需要授权」并完成浏览器授权，
-> 令牌保存在本机 settings、支持重新授权/撤销，启动失败的连接器授权后自动重连。
-> 能力页每张技能卡都有 `⋯` 管理入口（默认应用打开 / 文件管理器显示 / 复制路径；
-> dataDir 目录形态技能可编辑/删除），只读技能有明确说明。
+> webview. 本版让 MCP 连接器**新增/编辑/移除/启停立即生效**（连接与工具热重载，
+> 无需重启）；修复 OAuth 连接器 URL 尾斜杠导致的 `resource_mismatch`（GitHub MCP
+> 常见）；GitHub 远程 MCP 明确引导使用 **Bearer 令牌 + GitHub PAT**（GitHub 不支持
+> 动态客户端注册且令牌交换需要 client secret）。
 > See [CHANGELOG.md](CHANGELOG.md).
 
 > **v0.2.24 主要变化**：按 `docs/PRODUCT-BUG-REVIEW-2026-11-11.md` 做 TDD 修复——
