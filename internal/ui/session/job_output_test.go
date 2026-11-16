@@ -38,6 +38,24 @@ func openJobsOverlay(t *testing.T, h *harness, tester *ui.Tester) {
 	h.assertTexts(tester, "后台任务")
 }
 
+// clickJobAction clicks one panel action, scrolling the overlay if the action
+// sits below the visible area (font metrics differ across hosts; the panel is
+// scrollable, so the test must scroll like the user would).
+func clickJobAction(t *testing.T, h *harness, tester *ui.Tester, label string) {
+	t.Helper()
+	for attempt := 0; attempt < 8; attempt++ {
+		if _, ok := tester.Find(label); ok {
+			if err := tester.Click(label); err == nil {
+				tester.Frame()
+				return
+			}
+		}
+		tester.Scroll(700, 500, 0, 120)
+		tester.Frame()
+	}
+	h.click(tester, label)
+}
+
 // expandJobOutput opens one job row's output panel.
 func expandJobOutput(t *testing.T, h *harness, tester *ui.Tester, jobID string) {
 	t.Helper()
@@ -86,11 +104,11 @@ func TestJobOutputPanelCopiesCommandAndOutput(t *testing.T) {
 	expandJobOutput(t, h, tester, "job-1")
 	waitFor(t, tester, func() bool { return tester.HasText("npm test output") }, "job output read")
 
-	h.click(tester, "复制任务命令 job-1")
+	clickJobAction(t, h, tester, "复制任务命令 job-1")
 	if got := tester.Clipboard(); got != "npm test --watch" {
 		t.Fatalf("clipboard after copying the command = %q, want the command", got)
 	}
-	h.click(tester, "复制任务输出 job-1")
+	clickJobAction(t, h, tester, "复制任务输出 job-1")
 	if got := tester.Clipboard(); got != "npm test output\n" {
 		t.Fatalf("clipboard after copying the output = %q, want the output", got)
 	}
@@ -153,7 +171,7 @@ func TestJobOutputPanelTruncationAndInterruptHints(t *testing.T) {
 		// Copy still holds the marker-free text (checked after the click below).
 		t.Fatalf("clipboard changed before any copy: %q", got)
 	}
-	h.click(tester, "复制任务输出 job-2")
+	clickJobAction(t, h, tester, "复制任务输出 job-2")
 	if got := tester.Clipboard(); got != "last line before stop\n" {
 		t.Fatalf("copied output = %q, want the marker-free output", got)
 	}

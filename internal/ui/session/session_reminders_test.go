@@ -19,6 +19,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/session"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
@@ -371,8 +372,13 @@ func TestReminderListShowsOnlyThisSession(t *testing.T) {
 	h.click(tester, "本会话提醒（2）")
 	tester.Frame()
 
+	// The absolute "at" instant is rendered in the host's local zone (the same
+	// DateTime formatting every other timestamp uses), so CI's UTC clock and a
+	// developer's Asia/Shanghai clock agree on the frame.
+	onceLabel := uikit.FormatDateTime(h.ui.Locale(),
+		time.Date(2026, 12, 2, 1, 0, 0, 0, time.UTC)) + " 运行一次"
 	h.assertTexts(tester, "本会话提醒", "每日发布检查", "每天 09:00",
-		"明日提醒", "2026-12-02 09:00 运行一次", "下次运行", "打开自动化页")
+		"明日提醒", onceLabel, "下次运行", "打开自动化页")
 	h.assertNoTexts(tester, "别的会话提醒")
 
 	// The enable switch updates the task and keeps its other fields.
