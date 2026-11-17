@@ -4,6 +4,21 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.49] - 2026-11-17
+
+### Fixed
+
+- **侧栏消息搜索移出 build（AR-02）**：180ms debounce + 后台 goroutine 查询 + `UIRuntime.Post` 回写 + seq/generation 守卫（对齐记忆页搜索模式）；build 内零 I/O；pending 期显示「搜索中…」并抑制过早的「没有匹配」空态；卸载丢弃在途结果。
+- **契约面去具体工具注册表指针（AR-06 收尾）**：`*rigtool.Registry` 服务键从 contracts 迁至 `internal/hosttools.KeyRegistry`（服务名不变，装配零影响）；contracts 不再 import rig/tools；UI/诊断继续消费窄接口 `ToolCatalog{Names,Len}`；import 边界门禁强制 UI 与 rig 具体类型隔离。
+- **agent 浮层空态成句字号（UD-05/UD-15）**：12 处成句收敛共享 `uikit.EmptyState`/TypeXXS；计数/状态词/时钟/ID 等合法微标签保留 11px。
+- **MCP stdio 信任披露（审计 (d)）**：STDIO 连接器表单（添加+编辑）与工作区 mcp.json opt-in 增中英双语风险句——「stdio/命令型连接器与 LSP 由配置直接启动子进程，不经 OS 沙箱包装；配置即代码执行，只应添加你信任的来源」；HTTP 传输不显示；仅披露、不加审批摩擦。
+- **rebind 注释与 full 档行为一致（RG-07）**：fail-closed 承诺限定 wrapping 档，补 full+无工作区时相对路径以进程 cwd 为根的例外披露（与系统提示词/设置文案一致）。
+
+### Notes
+
+- 本版关闭 v0.2.48 发布后复核发现的 5 处波次分配漏项；至此 2026-11 多角色审计的 108 条确认发现中全部产品/rig 侧应修项修复完毕（1 条误报经反证驳回不修；dws 失败归因属外部依赖，仅文档与 Windows 复现步骤）。
+- 审计探针 61/61 保持全绿；全产品测试、-race、designlint（0 new）、design-check 6/6、mygo vet 全绿。
+
 ## [0.2.48] - 2026-11-17
 
 ### Changed
