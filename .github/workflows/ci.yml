@@ -11,9 +11,8 @@ permissions:
 
 env:
   CGO_ENABLED: "0"
-  # Domestic module mirror (also used by the Go checksum DB).
-  GOPROXY: https://goproxy.cn,direct
-  GOSUMDB: sum.golang.org
+  # No module mirror override: the hosted runners reach proxy.golang.org, so the
+  # job uses Go's defaults instead of a third-party mirror.
 
 jobs:
   build-test:
