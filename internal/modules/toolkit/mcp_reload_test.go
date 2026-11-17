@@ -14,6 +14,7 @@ import (
 	rigtool "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 func activateMCPToolkitWithRoot(t *testing.T, config map[string]any,
@@ -35,7 +36,7 @@ func activateMCPToolkitWithRoot(t *testing.T, config map[string]any,
 		t.Fatalf("load toolkit: %v", err)
 	}
 	t.Cleanup(func() { _ = loader.Close() })
-	tools, err := root.Require(contracts.KeyToolkit)
+	tools, err := root.Require(hosttools.KeyRegistry)
 	if err != nil {
 		t.Fatalf("require toolkit: %v", err)
 	}

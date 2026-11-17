@@ -15,6 +15,7 @@ import (
 	rigtool "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 // newTeamModuleService activates the agent module and requires both the team
@@ -23,7 +24,7 @@ func newTeamModuleService(t *testing.T) (*service, contracts.TeamService, cordis
 	t.Helper()
 	ctx := cordis.Root()
 	registry := rigtool.NewRegistry()
-	provide(t, ctx, contracts.KeyToolkit, registry)
+	provide(t, ctx, hosttools.KeyRegistry, registry)
 	provide(t, ctx, contracts.KeySettings, contracts.SettingsService(newFakeSettings(nil)))
 	provide(t, ctx, contracts.KeyLogger, contracts.Logger(&fakeLogger{}))
 	provide(t, ctx, contracts.KeyStore, contracts.Store(newFakeStore()))

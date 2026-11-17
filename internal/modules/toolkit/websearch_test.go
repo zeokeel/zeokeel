@@ -20,6 +20,7 @@ import (
 	rigtool "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 // mutableSettings is a concurrency-safe settings store tests can change between
@@ -90,7 +91,7 @@ func activateWebToolkit(t *testing.T, network bool, settings contracts.SettingsS
 		t.Fatalf("load toolkit: %v", err)
 	}
 	t.Cleanup(func() { _ = loader.Close() })
-	tools, err := root.Require(contracts.KeyToolkit)
+	tools, err := root.Require(hosttools.KeyRegistry)
 	if err != nil {
 		t.Fatalf("require toolkit: %v", err)
 	}

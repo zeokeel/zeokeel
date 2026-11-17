@@ -40,6 +40,7 @@ import (
 	rigteam "github.com/zeokeel/zeokeel-rig/tools/team"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 // effectiveMaxIterations maps the product's "0 means unlimited" setting to the
@@ -151,7 +152,7 @@ type Config struct {
 // Module is the agent backend descriptor. It provides contracts.KeyChat.
 func Module() *module.Descriptor[Config] {
 	return module.Define(ModuleID, func(ctx cordis.Context, cfg Config) error {
-		registry, err := ctx.Require(contracts.KeyToolkit)
+		registry, err := ctx.Require(hosttools.KeyRegistry)
 		if err != nil {
 			return err
 		}
@@ -332,7 +333,7 @@ func Module() *module.Descriptor[Config] {
 			module.Provides(contracts.KeyMemoryExtractor),
 			module.Provides(contracts.KeySessionLogExporter),
 		).
-		AddRequires(module.Requires(contracts.KeyToolkit)).
+		AddRequires(module.Requires(hosttools.KeyRegistry)).
 		AddRequires(module.Requires(contracts.KeySettings)).
 		AddRequires(module.Requires(contracts.KeyLogger)).
 		AddRequires(module.Requires(contracts.KeyStore)).

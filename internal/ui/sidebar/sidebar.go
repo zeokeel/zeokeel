@@ -51,11 +51,14 @@
 //
 // The search field filters sessions case-insensitively by title (an empty
 // title is shown as "未命名会话") and searches message bodies below: the two
-// result kinds share one query. A title miss is never reported as "no results"
-// while message hits are about to show — the quiet "标题无匹配" line follows the
-// message results, and the single "没有匹配" state appears only when neither a
-// title nor a message matched. Snippets are windowed around the first match and
-// the matched words are emphasized.
+// result kinds share one query. The message read never runs inside a build
+// frame: a changed query schedules one debounced background read whose result
+// arrives through UIRuntime.Post with a sequence guard (the session Memory
+// tab's pattern; 2026-11 audit AR-02). A title miss is never reported as "no
+// results" while message hits are about to show — the quiet "标题无匹配" line
+// follows the message results, and the single "没有匹配" state appears only
+// when neither a title nor a message matched. Snippets are windowed around the
+// first match and the matched words are emphasized.
 //
 // When an active session exists the footer shows the quiet rename/delete
 // actions:
@@ -167,10 +170,20 @@ type paneState struct {
 	screens contracts.ScreenLister
 
 	// Full-text message search state: the query the cached hits belong to and
-	// the last result/error. Hits are re-queried only when the query changes.
-	searchQuery string
-	searchHits  []contracts.MessageSearchHit
-	searchErr   error
+	// the last result/error. Hits are re-queried only when the query changes,
+	// and the read itself never runs inside a build frame: a changed query
+	// schedules one debounced background read (searchPendingQuery/searchDue),
+	// searchInFlight names the query whose read is running, and searchSeq is
+	// the generation guard that drops stale results (a newer query or the
+	// module's disposal bumps it). Mirrors the session Memory tab's pattern
+	// (2026-11 audit AR-02).
+	searchQuery        string
+	searchHits         []contracts.MessageSearchHit
+	searchErr          error
+	searchPendingQuery string
+	searchDue          time.Time
+	searchInFlight     string
+	searchSeq          int
 	// searchList backs the message-search hits' official List; searchSel is the
 	// row chosen (hit rows activate their conversation, group headers do not).
 	searchList ui.ListState
@@ -282,7 +295,13 @@ func Module() *module.Descriptor[Config] {
 			return fmt.Errorf("sidebar: subscribe chat: %w", err)
 		}
 		if _, err := ctx.Effect(func() cordis.Effect {
-			return cordis.Effect{cordis.CleanupOf(unsubscribe)}
+			return cordis.Effect{
+				cordis.CleanupOf(unsubscribe),
+				// Disposal drops any message-search read still in flight: its
+				// Post lands after teardown and the sequence guard turns it
+				// into a quiet no-op (2026-11 audit AR-02).
+				cordis.CleanupOf(func() { state.searchSeq++ }),
+			}
 		}); err != nil {
 			unsubscribe()
 			return err
@@ -496,10 +515,11 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 			allSessions := visibleSessions(chat.Sessions())
 			sessions := orderSessionList(filterSessions(allSessions, query, state))
 			// A query has two result kinds: session titles and message bodies.
-			// Both are loaded before either section renders, so a title miss
-			// never reads as "no results" while the message matches below it
-			// are about to show (R11).
-			search := messageSearchFor(state, chat, query)
+			// The message read is debounced in the background (AR-02), so while
+			// it is pending the empty states wait for it: a title miss never
+			// reads as "no results" while the message matches below it are
+			// about to show (R11).
+			search := messageSearchFor(c, runtime, state, chat, query)
 			titleHits := len(sessions)
 			messageHits := len(search.hits)
 			// degradedTitle is the title miss under message hits: the session
@@ -507,7 +527,8 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 			degradedTitle := query != "" && titleHits == 0 && messageHits > 0
 			// overallEmpty is the one "no matches" state: neither a title nor
 			// a message matched, or the host has no message searcher at all.
-			overallEmpty := query != "" && titleHits == 0 && messageHits == 0 && search.err == nil
+			// A pending message read suppresses it until the result lands.
+			overallEmpty := query != "" && titleHits == 0 && messageHits == 0 && search.err == nil && !search.reading
 			switch {
 			case overallEmpty:
 				// One empty state for the whole search, not a session one
@@ -519,15 +540,15 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 				// so a fresh install or a just-added workspace still shows its
 				// group row and new-chat button.
 				buildWorkspaceTree(c, t, chat, nav, runtime, state, workspace,
-					workspaces, allSessions, sessions, query, degradedTitle)
+					workspaces, allSessions, sessions, query, degradedTitle || search.reading)
 			case len(sessions) == 0:
 				// A query with message hits (or a message-search failure) leaves
 				// the session section to the message section below; only the
-				// plain no-query empty state and the unsearched title miss stay
-				// here.
+				// plain no-query empty state and the settled title miss stay
+				// here. A pending message read keeps the section quiet too.
 				if query == "" {
 					sidebarEmptyLine(c, state.T("还没有会话", "No sessions yet"), design.Space1)
-				} else if !degradedTitle {
+				} else if !degradedTitle && !search.reading {
 					sidebarEmptyLine(c, state.T("没有匹配的会话", "No matching sessions"), design.Space1)
 				}
 			default:
@@ -556,21 +577,35 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 // maxMessageHits bounds the message-search result rows shown per query.
 const maxMessageHits = 8
 
+// messageSearchDebounce is how long the message search waits after the last
+// keystroke before reading the store: a typed word costs one background read,
+// not one synchronous full-table query per character (2026-11 audit AR-02).
+// Aligned with the session Memory tab's memorySearchDebounce.
+const messageSearchDebounce = 180 * time.Millisecond
+
 // messageSearchFrame is one frame's full-text search view: whether the host
 // has a message searcher at all, the visible hits for the current query and the
 // last search error. The query's result is cached in the pane state, so a frame
-// searches once per query no matter how many sections read it.
+// searches once per query no matter how many sections read it. reading marks a
+// query whose background read has not landed yet: the frame shows a searching
+// line instead of hits, and the empty states wait for the result.
 type messageSearchFrame struct {
 	available bool
+	reading   bool
 	hits      []contracts.MessageSearchHit
 	err       error
 }
 
-// messageSearchFor resolves the current query's message search: the cached
-// store result, filtered to the conversations the sidebar shows. A host
-// without a store/searcher keeps the title-only behavior (available false).
-func messageSearchFor(state *paneState, chat contracts.ChatService, query string) messageSearchFrame {
+// messageSearchFor resolves the current query's message search from the pane
+// state only — a cache read plus the debounce scheduling, never store I/O
+// inside the build frame (2026-11 audit AR-02). A changed query schedules one
+// debounced background read whose result arrives through UIRuntime.Post; the
+// cached result of the current query is filtered to the conversations the
+// sidebar shows. A host without a store/searcher keeps the title-only behavior
+// (available false).
+func messageSearchFor(c *ui.Context, runtime contracts.UIRuntime, state *paneState, chat contracts.ChatService, query string) messageSearchFrame {
 	if query == "" {
+		state.searchPendingQuery = ""
 		return messageSearchFrame{}
 	}
 	store, ok := state.ctx.Get(contracts.KeyStore)
@@ -581,16 +616,67 @@ func messageSearchFor(state *paneState, chat contracts.ChatService, query string
 	if !ok {
 		return messageSearchFrame{}
 	}
-	if state.searchQuery != query {
-		state.searchQuery = query
+	if state.searchQuery == query {
+		// The cached result belongs to this query: serve it without a read.
+		state.searchPendingQuery = ""
+		return messageSearchFrame{
+			available: true,
+			hits:      visibleMessageHits(state.searchHits, hiddenSessionIDs(chat), maxMessageHits),
+			err:       state.searchErr,
+		}
+	}
+	if state.searchInFlight != query {
+		scheduleMessageSearch(c, runtime, state, searcher, query)
+	} else {
+		state.searchPendingQuery = ""
+	}
+	// The read for this query has not landed: no stale hits, no premature
+	// empty state — the message section shows the searching line.
+	return messageSearchFrame{available: true, reading: true}
+}
+
+// scheduleMessageSearch debounces one changed search query: the read starts on
+// its own goroutine after the user stops typing (messageSearchDebounce), so a
+// typed word costs one read instead of one synchronous SQLite query per
+// keystroke. The frame clock drives the delay (c.After wakes the starting
+// frame), so headless tests stay deterministic with Tester.Advance.
+func scheduleMessageSearch(c *ui.Context, runtime contracts.UIRuntime, state *paneState, searcher contracts.MessageSearcher, query string) {
+	if state.searchPendingQuery != query {
+		state.searchPendingQuery = query
+		state.searchDue = c.Now().Add(messageSearchDebounce)
+		c.After(messageSearchDebounce)
+		return
+	}
+	if !c.Now().Before(state.searchDue) {
+		startMessageRead(runtime, state, searcher, query)
+	}
+}
+
+// startMessageRead reads one query on its own goroutine and publishes the
+// result to the UI thread. A newer read or the module's disposal (searchSeq)
+// drops this one, so a result for an abandoned query never replaces the visible
+// hits and a late result after teardown is a quiet no-op.
+func startMessageRead(runtime contracts.UIRuntime, state *paneState, searcher contracts.MessageSearcher, query string) {
+	state.searchPendingQuery = ""
+	state.searchInFlight = query
+	state.searchSeq++
+	sequence := state.searchSeq
+	go func() {
 		hits, err := searcher.SearchMessages(context.Background(), query, maxMessageHits)
-		state.searchHits, state.searchErr = dedupeMessageHits(hits), err
-	}
-	return messageSearchFrame{
-		available: true,
-		hits:      visibleMessageHits(state.searchHits, hiddenSessionIDs(chat), maxMessageHits),
-		err:       state.searchErr,
-	}
+		hits = dedupeMessageHits(hits)
+		runtime.Post(func() {
+			if sequence != state.searchSeq {
+				return
+			}
+			state.searchInFlight = ""
+			state.searchQuery = query
+			state.searchHits, state.searchErr = hits, err
+			// A new result set starts at its top, not at the previous offset.
+			state.searchList = ui.ListState{}
+			state.searchSel = -1
+			runtime.Invalidate()
+		})
+	}()
 }
 
 // buildMessageSearch renders the durable full-text search results for the
@@ -608,6 +694,18 @@ func buildMessageSearch(c *ui.Context, t *design.Tokens, chat contracts.ChatServ
 		Children(func() {
 			design.Apply(ui.Text(c, state.T("消息搜索", "Message search")), t.SectionLabel()).
 				NoWrap().MaxLines(1)
+			if search.reading {
+				// The read happens off the UI thread (AR-02); say so instead of
+				// flashing an empty state or leaving stale hits looking current
+				// during the debounce. Same anatomy as the Memory tab's line.
+				ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+					ui.Spinner(c).Label(state.T("搜索中…", "Searching…")).
+						Size(design.Space3, design.Space3).TextColor(t.LabelTertiary)
+					design.Apply(ui.Text(c, state.T("搜索中…", "Searching…")),
+						t.TextMuted(design.TypeXXS))
+				})
+				return
+			}
 			if search.err != nil {
 				uikit.ErrorLine(c, state.T("搜索消息失败：", "Message search failed: ")+search.err.Error())
 				return

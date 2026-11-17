@@ -21,6 +21,7 @@ import (
 	"github.com/zeokeel/zeokeel-rig/tools/lsp"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 // errFakeLSPStart is the scripted start failure.
@@ -148,7 +149,7 @@ func loadToolkitFull(t *testing.T, settings contracts.SettingsService, withSetti
 
 func lspToolNames(t *testing.T, root cordis.Context) map[string]bool {
 	t.Helper()
-	registry, err := root.Require(contracts.KeyToolkit)
+	registry, err := root.Require(hosttools.KeyRegistry)
 	if err != nil {
 		t.Fatalf("require toolkit: %v", err)
 	}

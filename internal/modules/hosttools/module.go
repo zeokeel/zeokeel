@@ -1,7 +1,7 @@
 // Package hosttools is ZeoKeel's host-tools kernel module.
 //
 // It puts the product-side agent tools into the shared ZeoKeel Rig tool
-// registry (provided by the toolkit module as contracts.KeyToolkit): ask_user,
+// registry (provided by the toolkit module as hostcaps.KeyRegistry): ask_user,
 // present, plan_review, exit_plan_mode and the DSH goal trio get_goal/
 // create_goal/update_goal. ask_user, plan_review and exit_plan_mode are the
 // official Rig host tools (github.com/zeokeel/zeokeel-rig/tools/hosttools); the
@@ -64,7 +64,7 @@ func Module() *module.Descriptor[Config] {
 // only the tools that need it.
 func ModuleWithHost(host *hostcaps.Host) *module.Descriptor[Config] {
 	return module.Define(ModuleID, func(ctx cordis.Context, cfg Config) error {
-		registry, err := ctx.Require(contracts.KeyToolkit)
+		registry, err := ctx.Require(hostcaps.KeyRegistry)
 		if err != nil {
 			return err
 		}
@@ -122,7 +122,7 @@ func ModuleWithHost(host *hostcaps.Host) *module.Descriptor[Config] {
 		}
 		return nil
 	}).
-		AddRequires(module.Requires(contracts.KeyToolkit)).
+		AddRequires(module.Requires(hostcaps.KeyRegistry)).
 		WithName("ZeoKeel host tools")
 }
 

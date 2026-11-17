@@ -23,6 +23,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/assembly"
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
@@ -348,9 +349,9 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 
 	// The toolkit registry is the product's shared tool catalog: the hosttools
 	// module registered its six tools into it during activation.
-	toolkitRegistry, ok := root.Get(contracts.KeyToolkit)
+	toolkitRegistry, ok := root.Get(hosttools.KeyRegistry)
 	if !ok {
-		t.Fatal("KeyToolkit service is not available on the root")
+		t.Fatal("tool registry service is not available on the root")
 	}
 	hostToolNames := []string{"ask_user", "create_goal", "exit_plan_mode", "get_goal", "plan_review", "present", "update_goal"}
 	for _, name := range hostToolNames {
@@ -470,9 +471,9 @@ func TestDesktopAssemblyHasNoStubTeamTool(t *testing.T) {
 		t.Fatalf("LoadWithBuildInfo(desktop): %v", err)
 	}
 	t.Cleanup(func() { _ = loader.Close() })
-	registry, ok := root.Get(contracts.KeyToolkit)
+	registry, ok := root.Get(hosttools.KeyRegistry)
 	if !ok || registry == nil {
-		t.Fatal("KeyToolkit service is not available on the root")
+		t.Fatal("tool registry service is not available on the root")
 	}
 	names := make(map[string]bool, 128)
 	for _, spec := range registry.Specs() {
@@ -536,9 +537,9 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	// keep their in-process behavior) but hides the plan-review pair: a plan
 	// submitted for review could never be approved in a headless session, so
 	// exposing plan_review/exit_plan_mode only dead-ends the agent.
-	toolkitRegistry, ok := root.Get(contracts.KeyToolkit)
+	toolkitRegistry, ok := root.Get(hosttools.KeyRegistry)
 	if !ok {
-		t.Fatal("KeyToolkit service is not available on the headless root")
+		t.Fatal("tool registry service is not available on the headless root")
 	}
 	registered := make(map[string]bool, len(toolkitRegistry.Specs()))
 	for _, spec := range toolkitRegistry.Specs() {

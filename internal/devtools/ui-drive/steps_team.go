@@ -22,6 +22,7 @@ import (
 	rig "github.com/zeokeel/zeokeel-rig"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 // teamService requires the live team backend.
@@ -35,7 +36,7 @@ func (d *drive) teamService() contracts.TeamService {
 
 // invokeTool runs one registered toolkit tool and reports whether it succeeded.
 func (d *drive) invokeTool(name, arguments string) bool {
-	registry, err := d.root.Require(contracts.KeyToolkit)
+	registry, err := d.root.Require(hosttools.KeyRegistry)
 	if err != nil {
 		return false
 	}
@@ -48,7 +49,7 @@ func (d *drive) invokeTool(name, arguments string) bool {
 // invokeToolResult runs one registered toolkit tool and returns its result
 // content for failure evidence.
 func (d *drive) invokeToolResult(name, arguments string) (bool, string) {
-	registry, err := d.root.Require(contracts.KeyToolkit)
+	registry, err := d.root.Require(hosttools.KeyRegistry)
 	if err != nil {
 		return false, err.Error()
 	}

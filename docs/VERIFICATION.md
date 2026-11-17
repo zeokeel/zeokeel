@@ -53,7 +53,7 @@ $ ./scripts/design-check.sh
 ```
 
 MCP 连接器热重载：toolkit 新增 `contracts.MCPReloader`，设置写入后重建受管连接、
-注销旧工具并注册新工具，`KeyToolkit`/`KeyPlugins`/`KeyMCPAuth` 指针稳定；新增/编辑/
+注销旧工具并注册新工具，`hosttools.KeyRegistry`/`KeyPlugins`/`KeyMCPAuth` 指针稳定；新增/编辑/
 移除/启停/工作区 opt-in 不再要求重启。OAuth URL 保存/加载/合并时去掉路径尾斜杠，
 修复 GitHub MCP 的 `resource_mismatch`；GitHub 表单与注册失败文案引导使用 Bearer PAT
 （GitHub 无 DCR 且令牌交换需 client secret）。

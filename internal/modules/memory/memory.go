@@ -41,6 +41,7 @@ import (
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 	"github.com/zeokeel/zeokeel/internal/memorytools"
 )
 
@@ -104,7 +105,7 @@ func Module() *module.Descriptor[Config] {
 		// store here only succeeds when that name is still free; a duplicate is
 		// logged and leaves the existing tool untouched, so the module can load
 		// no matter which entry order the assembly chooses.
-		if registry, ok := ctx.Get(contracts.KeyToolkit); ok && registry != nil {
+		if registry, ok := ctx.Get(hosttools.KeyRegistry); ok && registry != nil {
 			registerMemoryTools(ctx, registry, store, logger)
 		}
 

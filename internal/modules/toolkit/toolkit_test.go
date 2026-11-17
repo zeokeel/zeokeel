@@ -13,6 +13,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 // TestModuleProvidesRigToolset pins the product/SDK seam: the toolkit module
@@ -40,7 +41,7 @@ func TestModuleProvidesRigToolset(t *testing.T) {
 	}
 	defer func() { _ = loader.Close() }()
 
-	tools, err := root.Require(contracts.KeyToolkit)
+	tools, err := root.Require(hosttools.KeyRegistry)
 	if err != nil {
 		t.Fatalf("require toolkit: %v", err)
 	}
@@ -98,7 +99,7 @@ func TestModuleWiresRemoteMCPServer(t *testing.T) {
 	}
 	defer func() { _ = loader.Close() }()
 
-	tools, err := root.Require(contracts.KeyToolkit)
+	tools, err := root.Require(hosttools.KeyRegistry)
 	if err != nil {
 		t.Fatalf("require toolkit: %v", err)
 	}

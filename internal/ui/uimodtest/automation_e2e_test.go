@@ -19,6 +19,7 @@ import (
 	rig "github.com/zeokeel/zeokeel-rig"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 func TestAutomationTasksEndToEnd(t *testing.T) {
@@ -97,7 +98,7 @@ func TestAutomationTasksEndToEnd(t *testing.T) {
 	}
 
 	// The toolkit's schedule_* tools are backed by the persistent scheduler.
-	registry, ok := root.Get(contracts.KeyToolkit)
+	registry, ok := root.Get(hosttools.KeyRegistry)
 	if !ok {
 		t.Fatal("toolkit registry missing")
 	}

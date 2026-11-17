@@ -273,6 +273,10 @@ func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 				c.Invalidate()
 			}
 		}).Description(mcpWorkspaceHint(st, p))
+		// The opt-in lets repository content define commands that run with the
+		// app's full permissions: disclose the trust exchange next to the path
+		// hint (2026-11 audit (d), disclosure only).
+		uikit.ErrorLine(c, mcpStdioTrustDisclosure(st))
 	})
 
 	if p.formOpen {
@@ -743,6 +747,18 @@ func (p *connectorsState) saveWorkspaceOptIn(st *state, settings contracts.Setti
 		return
 	}
 	st.requestMCPReload(st.tr("已应用工作区 mcp.json 变更", "Workspace mcp.json changes applied"))
+}
+
+// mcpStdioTrustDisclosure is the stdio/LSP trust-channel disclosure (2026-11
+// audit (d)): stdio/command connectors and LSP start child processes directly
+// from configuration, outside the OS sandbox — configuration is code
+// execution. Shared by the connector form's STDIO section and the workspace
+// mcp.json opt-in, in the LSP settings risk-line style. Personal-agent scale:
+// disclosure only, no spawn approval is added.
+func mcpStdioTrustDisclosure(st *state) string {
+	return st.tr(
+		"stdio/命令型连接器与 LSP 由配置直接启动子进程，不经 OS 沙箱包装；配置即代码执行，只应添加你信任的来源。",
+		"stdio/command connectors and LSP start child processes directly from configuration, without OS sandbox wrapping; configuration is code execution — only add sources you trust.")
 }
 
 // mcpWorkspaceHint names the workspace file the opt-in reads and when it

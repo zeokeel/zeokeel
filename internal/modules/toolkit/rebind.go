@@ -162,9 +162,17 @@ func (s *rootScoped) waitClosed(timeout time.Duration) bool {
 }
 
 // buildRootScoped builds the root-dependent slice of the Rig toolset for one
-// workspace root. Empty root means "no workspace open": the sandbox policy then
-// exposes no filesystem root and every write/edit/shell call is denied, which
-// is the intended fail-closed behavior until the user opens a workspace.
+// workspace root. Empty root means "no workspace open": under the wrapping
+// modes (read-only / workspace-write) the sandbox policy then exposes no
+// filesystem root and every write/edit/shell call is denied — the intended
+// fail-closed behavior until the user opens a workspace.
+//
+// Full access is the documented exception (2026-11 audit RG-07): the rig
+// policy admits an empty root list in full mode, and relative paths then
+// resolve against the process working directory, so file/shell tools run
+// unconfined from the process cwd even with no workspace open. The system
+// prompt's working-directory line and the settings sandbox note disclose the
+// same exchange; under full this is a disclosure, not a fail-closed guarantee.
 //
 // mode is the linked OS sandbox mode and runner the optional OS runner to
 // inject; a nil runner keeps the exact pre-sandbox behavior (no wrapping).

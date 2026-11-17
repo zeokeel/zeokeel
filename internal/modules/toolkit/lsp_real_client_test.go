@@ -23,6 +23,7 @@ import (
 	rig "github.com/zeokeel/zeokeel-rig"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 const (
@@ -238,7 +239,7 @@ func TestToolkitLSPPerformsInitializeHandshake(t *testing.T) {
 	settings := newMutableSettings(map[string]string{contracts.SettingLSPServer: raw})
 	root, logger := activateToolkitConfig(t, settings, map[string]any{"root": workspace})
 
-	registry, err := root.Require(contracts.KeyToolkit)
+	registry, err := root.Require(hosttools.KeyRegistry)
 	if err != nil {
 		t.Fatalf("require toolkit: %v", err)
 	}
@@ -317,7 +318,7 @@ func TestToolkitLSPEnforcesSandboxPath(t *testing.T) {
 		"root":        workspace,
 		"deniedGlobs": []any{"**/*.secret"},
 	})
-	registry, err := root.Require(contracts.KeyToolkit)
+	registry, err := root.Require(hosttools.KeyRegistry)
 	if err != nil {
 		t.Fatalf("require toolkit: %v", err)
 	}
@@ -373,7 +374,7 @@ func TestToolkitLSPFailedInitializeRegistersNoTools(t *testing.T) {
 	}
 	settings := newMutableSettings(map[string]string{contracts.SettingLSPServer: raw})
 	root, logger := activateToolkitConfig(t, settings, map[string]any{"root": t.TempDir()})
-	registry, err := root.Require(contracts.KeyToolkit)
+	registry, err := root.Require(hosttools.KeyRegistry)
 	if err != nil {
 		t.Fatalf("require toolkit: %v", err)
 	}

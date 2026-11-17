@@ -18,6 +18,7 @@ import (
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 	"github.com/zeokeel/zeokeel/internal/ui/plugins"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -163,7 +164,7 @@ func newHarness(t *testing.T, service contracts.PluginsService, toolkit *rigtool
 		provide[contracts.PluginsService](t, ctx, contracts.KeyPlugins, service)
 	}
 	if toolkit != nil {
-		provide(t, ctx, contracts.KeyToolkit, toolkit)
+		provide(t, ctx, hosttools.KeyRegistry, toolkit)
 	}
 	activate(t, ctx, plugins.Module(), cfg)
 	return &harness{t: t, uiRoot: uiRoot, ctx: ctx}

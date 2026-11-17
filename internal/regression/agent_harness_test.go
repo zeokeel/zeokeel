@@ -19,6 +19,7 @@ import (
 	rigtool "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 	"github.com/zeokeel/zeokeel/internal/modules/agent"
 	"github.com/zeokeel/zeokeel/internal/modules/approvals"
 	"github.com/zeokeel/zeokeel/internal/modules/sessionstore"
@@ -221,7 +222,7 @@ func startAgentOn(t *testing.T, h *harness, agentConfig agent.Config, model *fak
 	}
 
 	registry := rigtool.NewRegistry(seed...)
-	provide(t, h.ctx, contracts.KeyToolkit, registry)
+	provide(t, h.ctx, hosttools.KeyRegistry, registry)
 	activate(t, h.ctx, sessionstore.Module(), sessionstore.Config{})
 	activate(t, h.ctx, approvals.Module(), approvals.Config{Mode: approvalMode})
 	activate(t, h.ctx, agent.Module(), agentConfig)

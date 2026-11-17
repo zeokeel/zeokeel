@@ -17,6 +17,7 @@ import (
 	rigtool "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 // newSubagentModuleService activates the agent module and returns both the
@@ -28,7 +29,7 @@ func newSubagentModuleService(t *testing.T) (*service, cordis.Context) {
 	settings := newFakeSettings(nil)
 	logger := &fakeLogger{}
 	store := newFakeStore()
-	provide(t, ctx, contracts.KeyToolkit, registry)
+	provide(t, ctx, hosttools.KeyRegistry, registry)
 	provide(t, ctx, contracts.KeySettings, contracts.SettingsService(settings))
 	provide(t, ctx, contracts.KeyLogger, contracts.Logger(logger))
 	provide(t, ctx, contracts.KeyStore, contracts.Store(store))
@@ -261,7 +262,7 @@ func TestSubagentExcludedTools(t *testing.T) {
 func TestSubagentToolsUnregisterOnDispose(t *testing.T) {
 	ctx := cordis.Root()
 	registry := rigtool.NewRegistry()
-	provide(t, ctx, contracts.KeyToolkit, registry)
+	provide(t, ctx, hosttools.KeyRegistry, registry)
 	provide(t, ctx, contracts.KeySettings, contracts.SettingsService(newFakeSettings(nil)))
 	provide(t, ctx, contracts.KeyLogger, contracts.Logger(&fakeLogger{}))
 	provide(t, ctx, contracts.KeyStore, contracts.Store(newFakeStore()))

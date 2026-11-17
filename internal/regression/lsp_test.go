@@ -21,6 +21,7 @@ import (
 	"github.com/zeokeel/zeokeel-rig/tools/lsp"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 	"github.com/zeokeel/zeokeel/internal/modules/toolkit"
 )
 
@@ -198,7 +199,7 @@ func TestToolkitLSPBadConfigDoesNotBlockActivation(t *testing.T) {
 				}
 			}
 			activate(t, h.ctx, toolkit.Module(), toolkit.Config{})
-			registry := requireService(t, h.ctx, contracts.KeyToolkit)
+			registry := requireService(t, h.ctx, hosttools.KeyRegistry)
 			names := toolNames(registry)
 			for _, name := range names {
 				if strings.HasPrefix(name, "lsp_") {
@@ -246,7 +247,7 @@ func TestToolkitLSPToolsCloseOnUnload(t *testing.T) {
 		return session, nil
 	}
 	activate(t, h.ctx, toolkit.Module(), toolkit.Config{})
-	registry := requireService(t, h.ctx, contracts.KeyToolkit)
+	registry := requireService(t, h.ctx, hosttools.KeyRegistry)
 	names := toolNames(registry)
 	counts := map[string]int{}
 	for _, name := range names {

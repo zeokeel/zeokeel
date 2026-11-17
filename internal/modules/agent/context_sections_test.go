@@ -17,6 +17,7 @@ import (
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 // promptMemoryStore is a scriptable contracts.MemoryStore for prompt tests.
@@ -264,7 +265,7 @@ func TestModuleWiresSkillsBackendIntoPrompt(t *testing.T) {
 func activateAgentModule(t *testing.T, skills contracts.SkillsService, memoryStore contracts.MemoryStore) *service {
 	t.Helper()
 	ctx := cordis.Root()
-	provide(t, ctx, contracts.KeyToolkit, rigtools.NewRegistry())
+	provide(t, ctx, hosttools.KeyRegistry, rigtools.NewRegistry())
 	provide(t, ctx, contracts.KeySettings, contracts.SettingsService(newFakeSettings(nil)))
 	provide(t, ctx, contracts.KeyLogger, contracts.Logger(&fakeLogger{}))
 	provide(t, ctx, contracts.KeyStore, contracts.Store(newFakeStore()))

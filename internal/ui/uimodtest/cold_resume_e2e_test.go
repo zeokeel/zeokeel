@@ -15,6 +15,7 @@ import (
 	rig "github.com/zeokeel/zeokeel-rig"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 func TestColdResumeHistoricalTeamMemberE2E(t *testing.T) {
@@ -32,7 +33,7 @@ func TestColdResumeHistoricalTeamMemberE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	toolkit := requireService(t, root, contracts.KeyToolkit)
+	toolkit := requireService(t, root, hosttools.KeyRegistry)
 	team := requireService(t, root, contracts.KeyTeam)
 	spawnCtx := contracts.WithAgentSession(context.Background(), sessionID)
 	result, err := toolkit.Invoke(spawnCtx, rig.ToolCall{

@@ -2,7 +2,7 @@ package toolkit
 
 // Hot reload for MCP: the connectors tab writes settings.mcp.servers /
 // mcp.disabledServers / mcp.workspaceOptIn, then asks this controller to rebuild
-// the MCP half without restarting the app. The shared registry (contracts.KeyToolkit)
+// the MCP half without restarting the app. The shared registry (hosttools.KeyRegistry)
 // and the Plugins read model keep their pointers; only the connections and their
 // tool registrations are replaced.
 

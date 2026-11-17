@@ -16,6 +16,33 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
+// waitSearchTexts settles the sidebar's debounced background message search
+// (2026-11 audit AR-02): advance the frame clock past the debounce window and
+// pump frames until every wanted text shows — the read runs off the UI thread
+// and its result lands through UIRuntime.Post on a later frame.
+func waitSearchTexts(t *testing.T, tester *ui.Tester, timeout time.Duration, wants ...string) {
+	t.Helper()
+	tester.Advance(250 * time.Millisecond)
+	deadline := time.Now().Add(timeout)
+	for {
+		missing := ""
+		for _, want := range wants {
+			if !tester.HasText(want) {
+				missing = want
+				break
+			}
+		}
+		if missing == "" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("search frame missing %q; texts = %v", missing, tester.Texts())
+		}
+		tester.Frame()
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestMessageSearchEndToEnd(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -59,11 +86,7 @@ func TestMessageSearchEndToEnd(t *testing.T) {
 	tester.Frame()
 	tester.Type("目标短语")
 	tester.Frame()
-	for _, want := range []string{"消息搜索", "搜索目标短语", "用户"} {
-		if !tester.HasText(want) {
-			t.Fatalf("search frame missing %q; texts = %v", want, tester.Texts())
-		}
-	}
+	waitSearchTexts(t, tester, 5*time.Second, "消息搜索", "搜索目标短语", "用户")
 	if err := tester.Click("搜索目标短语"); err != nil {
 		t.Fatalf("click search hit: %v; texts = %v", err, tester.Texts())
 	}

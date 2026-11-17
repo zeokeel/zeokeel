@@ -5,7 +5,7 @@
 // compiled-in module inventory. It is a UI module like ui/automation: a kernel
 // Descriptor that requires the host UI runtime and navigator, registers the
 // "plugins" screen and reads optional contracts.PluginsService,
-// contracts.SkillsService and contracts.KeyToolkit (no Requires). Missing
+// contracts.SkillsService and the toolkit read models (no Requires). Missing
 // backends degrade to per-section empty states. Every action runs through its
 // service and invalidates the frame.
 package plugins

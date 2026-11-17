@@ -22,6 +22,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/assembly"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
@@ -270,7 +271,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	if err != nil || len(skills) != 1 || skills[0].Name != "release-checklist" {
 		t.Fatalf("skills = %+v (err %v), want release-checklist", skills, err)
 	}
-	registry, ok := root.Get(contracts.KeyToolkit)
+	registry, ok := root.Get(hosttools.KeyRegistry)
 	if !ok {
 		t.Fatal("toolkit registry missing")
 	}
@@ -554,7 +555,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 
 	// ask_user reaches the real native dialog through the host bridge: the tool
 	// parks until the user picks an option, then returns the answer.
-	toolkit, err := root.Require(contracts.KeyToolkit)
+	toolkit, err := root.Require(hosttools.KeyRegistry)
 	if err != nil {
 		t.Fatalf("require toolkit: %v", err)
 	}

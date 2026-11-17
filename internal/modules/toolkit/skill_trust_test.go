@@ -17,6 +17,7 @@ import (
 	rigtool "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 // fakeSkillStore is a contracts.SkillsService over a fixed skill list.
@@ -72,7 +73,7 @@ func activateWithWorkspaceAndSkills(t *testing.T, workspace contracts.WorkspaceS
 		t.Fatalf("load toolkit: %v", err)
 	}
 	t.Cleanup(func() { _ = loader.Close() })
-	registry, err := root.Require(contracts.KeyToolkit)
+	registry, err := root.Require(hosttools.KeyRegistry)
 	if err != nil {
 		t.Fatalf("require toolkit: %v", err)
 	}

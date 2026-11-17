@@ -697,11 +697,11 @@ func buildTeamPanel(c *ui.Context, t *design.Tokens, st *state, members []contra
 			case len(live) > 0:
 				buildTeamMembersList(c, t, st, &st.agents.teamMembers, live)
 			case len(members) == 0:
-				design.Apply(ui.Text(c, st.tr("还没有队友", "No teammates yet")),
-					t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+				// Empty-state sentences go through the shared single-line entry
+				// (2026-11 audit UD-05/UD-15): never the 11px micro-label step.
+				uikit.EmptyState(c, st.tr("还没有队友", "No teammates yet"))
 			default:
-				design.Apply(ui.Text(c, st.tr("没有正在运行的队友", "No teammate is running")),
-					t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+				uikit.EmptyState(c, st.tr("没有正在运行的队友", "No teammate is running"))
 			}
 			if len(history) > 0 {
 				// The restored records stay after the app restarts: the section
@@ -864,8 +864,7 @@ func buildSharedTasksList(c *ui.Context, t *design.Tokens, st *state) {
 func buildSharedTasksListState(c *ui.Context, t *design.Tokens, st *state, list *ui.ListState) {
 	board := st.taskBoard()
 	if board == nil {
-		design.Apply(ui.Text(c, st.tr("任务板未启用", "Task board is not enabled")),
-			t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+		uikit.EmptyState(c, st.tr("任务板未启用", "Task board is not enabled"))
 		return
 	}
 	if st.agents.tasksErr != "" {
@@ -877,14 +876,13 @@ func buildSharedTasksListState(c *ui.Context, t *design.Tokens, st *state, list 
 			ui.Spinner(c).Label(st.tr("读取任务板", "Loading tasks")).
 				Size(design.Space3, design.Space3).TextColor(t.LabelTertiary)
 			design.Apply(ui.Text(c, st.tr("读取任务板…", "Loading tasks…")),
-				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
 		})
 		return
 	}
 	tasks := st.agents.tasks
 	if len(tasks) == 0 {
-		design.Apply(ui.Text(c, st.tr("还没有共享任务", "No shared tasks yet")),
-			t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+		uikit.EmptyState(c, st.tr("还没有共享任务", "No shared tasks yet"))
 		return
 	}
 	list.Key = func(index int) any {
@@ -1014,7 +1012,7 @@ func buildTeamWorkbench(c *ui.Context, t *design.Tokens, st *state,
 					design.Apply(ui.Text(c, st.tr(
 						"Esc 关闭工作台；团队浮层保持打开。",
 						"Esc closes the workbench; the team overlay stays open.")),
-						t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).Grow(1)
+						t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).Grow(1)
 					closeButton := design.Apply(ui.Button(c, st.tr("关闭", "Close")),
 						t.SecondaryButton()).Height(design.RowCompactHeight).Shrink(0).
 						Label(st.tr("关闭团队工作台", "Close team workbench"))
@@ -1060,11 +1058,9 @@ func buildWorkbenchMembersSection(c *ui.Context, t *design.Tokens, st *state,
 				case len(live) > 0:
 					buildTeamMembersList(c, t, st, &st.agents.workbenchMembers, live)
 				case len(members) == 0:
-					design.Apply(ui.Text(c, st.tr("还没有队友", "No teammates yet")),
-						t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+					uikit.EmptyState(c, st.tr("还没有队友", "No teammates yet"))
 				default:
-					design.Apply(ui.Text(c, st.tr("没有正在运行的队友", "No teammate is running")),
-						t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+					uikit.EmptyState(c, st.tr("没有正在运行的队友", "No teammate is running"))
 				}
 				if len(history) > 0 {
 					agentSectionLabel(c, t, st.tr("已结束", "Finished"))
@@ -2065,8 +2061,7 @@ func buildChildOutput(c *ui.Context, t *design.Tokens, st *state, child contract
 		}
 		ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 			agentSectionLabel(c, t, st.tr("输出", "Output"))
-			design.Apply(ui.Text(c, message), t.Font(design.TypeXXXS)).
-				TextColor(t.LabelTertiary)
+			uikit.EmptyState(c, message)
 		})
 		return
 	}
@@ -2086,8 +2081,7 @@ func buildChildActivitySection(c *ui.Context, t *design.Tokens, st *state, child
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 		agentSectionLabel(c, t, st.tr("活动", "Activity"))
 		if len(child.Activity) == 0 {
-			design.Apply(ui.Text(c, st.tr("还没有活动记录", "No activity recorded yet")),
-				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+			uikit.EmptyState(c, st.tr("还没有活动记录", "No activity recorded yet"))
 			return
 		}
 		st.agents.activityList.Key = func(index int) any {
@@ -2196,9 +2190,8 @@ func buildChildMemoryPane(c *ui.Context, t *design.Tokens, st *state, child cont
 		ui.Column(c).Width(design.TranscriptWidth).MaxWidthPercent(92).
 			Gap(design.Space2).PaddingY(design.Space8).Children(func() {
 			agentSectionLabel(c, t, st.tr("记忆", "Memory"))
-			design.Apply(ui.Text(c, st.tr("子智能体会话没有记忆面板。",
-				"Child conversations have no memory panel.")),
-				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+			uikit.EmptyState(c, st.tr("子智能体会话没有记忆面板。",
+				"Child conversations have no memory panel."))
 		})
 	})
 }
@@ -2581,7 +2574,7 @@ func buildGeneratedFileCard(c *ui.Context, t *design.Tokens, st *state, icon *ui
 		}
 		if hidden := len(files) - len(shown); hidden > 0 {
 			design.Apply(ui.Text(c, fmt.Sprintf(st.tr("还有 %d 个文件", "%d more files"), hidden)),
-				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
 		}
 	})
 }

@@ -20,6 +20,7 @@ import (
 	rig "github.com/zeokeel/zeokeel-rig"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 	"github.com/zeokeel/zeokeel/internal/modules/toolkit"
 )
 
@@ -733,9 +734,9 @@ func TestToolkitAdapterReplacesScheduleTools(t *testing.T) {
 	}
 	defer func() { _ = automationLoader.Close() }()
 
-	toolRegistry, ok := root.Get(contracts.KeyToolkit)
+	toolRegistry, ok := root.Get(hosttools.KeyRegistry)
 	if !ok {
-		t.Fatal("KeyToolkit was not provided")
+		t.Fatal("tool registry (hosttools.KeyRegistry) was not provided")
 	}
 	for _, name := range []string{"schedule_create", "schedule_list", "schedule_update", "schedule_delete"} {
 		found := false

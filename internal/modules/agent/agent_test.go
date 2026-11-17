@@ -27,6 +27,7 @@ import (
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 // fakeSettings is an in-memory contracts.SettingsService.
@@ -112,7 +113,7 @@ func newTestService(t *testing.T, cfg Config, settings *fakeSettings, logger *fa
 	registry := rigtools.NewRegistry(tools...)
 	ctx := cordis.Root()
 
-	provide(t, ctx, contracts.KeyToolkit, registry)
+	provide(t, ctx, hosttools.KeyRegistry, registry)
 	provide(t, ctx, contracts.KeySettings, contracts.SettingsService(settings))
 	provide(t, ctx, contracts.KeyLogger, contracts.Logger(logger))
 	provide(t, ctx, contracts.KeyStore, contracts.Store(newFakeStore()))
@@ -766,7 +767,7 @@ func TestModuleManifest(t *testing.T) {
 		required[requirement.Name] = true
 	}
 	for _, name := range []string{
-		contracts.KeyToolkit.Name(),
+		hosttools.KeyRegistry.Name(),
 		contracts.KeySettings.Name(),
 		contracts.KeyLogger.Name(),
 	} {
@@ -1498,7 +1499,7 @@ func newWorkspaceBackedService(t *testing.T, workspace contracts.WorkspaceServic
 	store := newFakeStore()
 	registry := rigtools.NewRegistry()
 	ctx := cordis.Root()
-	provide(t, ctx, contracts.KeyToolkit, registry)
+	provide(t, ctx, hosttools.KeyRegistry, registry)
 	provide(t, ctx, contracts.KeySettings, contracts.SettingsService(settings))
 	provide(t, ctx, contracts.KeyLogger, contracts.Logger(logger))
 	provide(t, ctx, contracts.KeyStore, contracts.Store(store))

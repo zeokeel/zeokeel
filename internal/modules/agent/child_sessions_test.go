@@ -19,6 +19,7 @@ import (
 	rigtool "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 // bootAgentModuleAt activates the agent module against fake host services with
@@ -27,7 +28,7 @@ import (
 func bootAgentModuleAt(t *testing.T, dataDir string) (*service, contracts.TeamService, contracts.ChildAgentService, cordis.Context) {
 	t.Helper()
 	ctx := cordis.Root()
-	provide(t, ctx, contracts.KeyToolkit, rigtool.NewRegistry())
+	provide(t, ctx, hosttools.KeyRegistry, rigtool.NewRegistry())
 	provide(t, ctx, contracts.KeySettings, contracts.SettingsService(newFakeSettings(nil)))
 	provide(t, ctx, contracts.KeyLogger, contracts.Logger(&fakeLogger{}))
 	provide(t, ctx, contracts.KeyStore, contracts.Store(newFakeStore()))

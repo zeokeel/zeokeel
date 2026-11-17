@@ -656,7 +656,7 @@ Agent 客户端的界面不是一次性输出：用户对界面的操作要作�
 - **安全边界**：workspace `mcp.json` 的 OAuth 配置被忽略并告警；PKCE 必须 S256；MCP 请求只跟随同源重定向；`invalid_grant` 需重新授权。
 - **令牌刷新**：每个 MCP 请求前检查到期时间，**提前 60 秒**单飞刷新；**toolkit 后台每 30s 检查、到期前 5 分钟主动刷新**；401 时刷新并重试一次（请求体可重放时）；refresh token 轮换后写回 settings，持久化失败会清空并要求重新授权。已授权连接器不再显示「重新授权」，只有 Required/Expired 才提供授权入口。UI 详情显示当前 access token 到期时间，刷新后随 `Status` 更新。
 - **Headers 与工具开关**：连接器表单可配置任意 HTTP 请求头（`Name: value` 多行，诊断/模型读取脱敏），用于非标准认证/网关；详情列出该 server 的模型可见工具并支持逐工具 `tools.disabled` 开关，切换后热重载。
-- **热重载（2026-11-16）**：连接器设置写入后，toolkit 经 `contracts.KeyMCPReloader` 重建受管连接、注销旧工具并注册新工具，`contracts.KeyToolkit` / `KeyPlugins` / `KeyMCPAuth` 指针保持稳定；新增/编辑/移除/启停/授权不再要求重启。OAuth 行 URL 在保存与启动前去掉路径尾斜杠（`contracts.NormalizeMCPURL`），避免 PRM resource 尾斜杠误报 `resource_mismatch`。
+- **热重载（2026-11-16）**：连接器设置写入后，toolkit 经 `contracts.KeyMCPReloader` 重建受管连接、注销旧工具并注册新工具，`hosttools.KeyRegistry` / `KeyPlugins` / `KeyMCPAuth` 指针保持稳定；新增/编辑/移除/启停/授权不再要求重启。OAuth 行 URL 在保存与启动前去掉路径尾斜杠（`contracts.NormalizeMCPURL`），避免 PRM resource 尾斜杠误报 `resource_mismatch`。
 - **GitHub 远程 MCP**：`api.githubcopilot.com/mcp` 不提供动态客户端注册，且 GitHub 令牌交换需要 client secret（当前公开客户端不支持）；UI 明确引导选择 **Bearer 令牌 + GitHub PAT**。
 
 ---

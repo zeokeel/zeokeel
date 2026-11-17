@@ -10,8 +10,6 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
-
-	rigtool "github.com/zeokeel/zeokeel-rig/tools"
 )
 
 // BuildFunc builds one contribution inside a mygo frame. The context, and the
@@ -252,9 +250,11 @@ var (
 	KeySettings = cordis.NewServiceKey[SettingsService]("zeokeel/settings")
 	// KeyAppInfo is provided by the appinfo backend module.
 	KeyAppInfo = cordis.NewServiceKey[AppInfo]("zeokeel/appinfo")
-	// KeyToolkit is provided by the toolkit module: the ZeoKeel Rig toolset
-	// (registry + built-in tools) assembled into the product's kernel tree.
-	KeyToolkit = cordis.NewServiceKey[*rigtool.Registry]("zeokeel/toolkit")
+	// The concrete Rig tool registry (*tools.Registry) is provided by the
+	// toolkit module under internal/hosttools.KeyRegistry — a backend seam,
+	// so contracts stays free of the tool framework (2026-11 audit AR-06).
+	// Consumers that only need tool names/count read KeyToolCatalog
+	// (toolcatalog.go) instead.
 	// KeyLogger is provided by the process host; modules log through it.
 	KeyLogger = cordis.NewServiceKey[Logger]("zeokeel/log")
 

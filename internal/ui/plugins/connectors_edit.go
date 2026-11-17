@@ -242,6 +242,11 @@ func (p *connectorsState) buildFormModal(c *ui.Context, t *design.Tokens, st *st
 							}).Description(st.tr("每行一个 KEY=VALUE；值可以包含空格。",
 								"One KEY=VALUE per line; values may contain spaces.")).
 								Error(p.envErr)
+							// The command runs as a child process with the app's
+							// full permissions, outside the OS sandbox: disclose
+							// the trust model before the user saves it (2026-11
+							// audit (d), disclosure only — no spawn approval).
+							uikit.ErrorLine(c, mcpStdioTrustDisclosure(st))
 						})
 					} else {
 						ui.Field(c, "URL", func() {

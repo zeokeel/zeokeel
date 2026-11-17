@@ -33,6 +33,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/assembly"
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
@@ -418,7 +419,7 @@ func main() {
 		a.tester.Frame()
 	}
 	// ask_user: the host bridge + native overlay dialog (the tool parks).
-	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
+	if toolkit, tkErr := a.root.Require(hosttools.KeyRegistry); tkErr == nil {
 		go func() {
 			_, _ = toolkit.Invoke(a.toolContext(context.Background()), rig.ToolCall{
 				ID: "ask-snapshot", Name: "ask_user",
@@ -440,7 +441,7 @@ func main() {
 	}
 
 	// present: artifact preview overlay (markdown body + 关闭).
-	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
+	if toolkit, tkErr := a.root.Require(hosttools.KeyRegistry); tkErr == nil {
 		go func() {
 			_, _ = toolkit.Invoke(a.toolContext(context.Background()), rig.ToolCall{
 				ID: "present-snapshot", Name: "present",
@@ -474,7 +475,7 @@ func main() {
 	a.tester.Frame()
 
 	// plan_review: plan overlay with approve/cancel.
-	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
+	if toolkit, tkErr := a.root.Require(hosttools.KeyRegistry); tkErr == nil {
 		go func() {
 			_, _ = toolkit.Invoke(a.toolContext(context.Background()), rig.ToolCall{
 				ID: "plan-snapshot", Name: "plan_review",
@@ -543,7 +544,7 @@ func main() {
 	// that spawns it is remembered so the cold-resume evidence after the restart
 	// can reopen its durable teammate history.
 	var coldTeamSessionID string
-	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
+	if toolkit, tkErr := a.root.Require(hosttools.KeyRegistry); tkErr == nil {
 		coldTeamSessionID = a.activeSessionID()
 		_, _ = toolkit.Invoke(a.toolContext(context.Background()), rig.ToolCall{
 			ID: "spawn-snapshot", Name: "spawn_teammate",
@@ -829,7 +830,7 @@ func main() {
 	// Background jobs: the header chip appears with a live job and opens the
 	// native jobs overlay (status/command/duration/exit code + the stop action).
 	liveJob := ""
-	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
+	if toolkit, tkErr := a.root.Require(hosttools.KeyRegistry); tkErr == nil {
 		if result, invokeErr := toolkit.Invoke(a.toolContext(context.Background()), rig.ToolCall{
 			ID: "job-snapshot", Name: "bash",
 			Arguments: `{"command":"bash -c 'sleep 60'","run_in_background":true}`,
@@ -864,7 +865,7 @@ func main() {
 		first, _ := board.Create(boardCtx, "发布前检查", "确认文档与截图")
 		pending, _ := board.Create(boardCtx, "编写发布说明", "")
 		_, _ = board.SetStatus(boardCtx, pending.ID, contracts.TaskStatusInProgress)
-		if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil && first.ID != "" {
+		if toolkit, tkErr := a.root.Require(hosttools.KeyRegistry); tkErr == nil && first.ID != "" {
 			_, _ = toolkit.Invoke(boardCtx, rig.ToolCall{
 				ID: "task-snapshot", Name: "team_task_create",
 				Arguments: `{"subject":"更新发布截图","description":"替换三张旧截图并复核","blocked_by":["` + first.ID + `"]}`,
@@ -1221,12 +1222,48 @@ func main() {
 		if err := a.tester.Click("添加连接器"); err == nil {
 			a.tester.Frame()
 			a.render(outDir + "/p2-capabilities-connector-form.png")
+			// The STDIO variant carries the trust disclosure (2026-11 audit
+			// (d)): the command runs as a child process outside the OS sandbox.
+			if err := a.tester.Click("传输 输入"); err == nil {
+				a.tester.Frame()
+				a.tester.Frame()
+				if err := a.tester.Click("STDIO"); err == nil {
+					a.tester.Frame()
+					a.render(outDir + "/p2-capabilities-connector-form-stdio.png")
+				} else {
+					fmt.Println("choose STDIO transport:", err)
+				}
+			}
 			if cancel, ok := a.tester.Find("取消"); ok {
 				a.tester.ClickAt(cancel.X+cancel.W/2, cancel.Y+cancel.H/2)
+				a.tester.Frame()
 				a.tester.Frame()
 			}
 		} else {
 			fmt.Println("open connector form:", err)
+		}
+		// The workspace mcp.json opt-in disclosure (2026-11 audit (d)). The
+		// collapsible's bound toggle lands on the next build pass; the form
+		// modal's dismiss can swallow the first press, so verify and retry.
+		if err := a.tester.Click("连接器选项"); err == nil {
+			a.tester.Frame()
+			a.tester.Frame()
+			if !a.tester.HasText("读取工作区 mcp.json") {
+				if err := a.tester.Click("连接器选项"); err == nil {
+					a.tester.Frame()
+					a.tester.Frame()
+				}
+			}
+			// The toggle lands in the build; Advance runs the surface pass that
+			// paints it for the snapshot (past the disclosure's expand glide).
+			a.tester.Advance(300 * time.Millisecond)
+			a.render(outDir + "/p2-capabilities-connectors-options.png")
+			if err := a.tester.Click("连接器选项"); err == nil {
+				a.tester.Frame()
+				a.tester.Frame()
+			}
+		} else {
+			fmt.Println("open connector options:", err)
 		}
 		a.tester.SetSize(1024, 720)
 		a.tester.Frame()
@@ -1251,6 +1288,16 @@ func main() {
 		a.tester.Frame()
 		a.tester.Type("工作目录")
 		a.render(outDir + "/p2-search.png")
+		// The message read is debounced off the UI thread (2026-11 audit
+		// AR-02): advance the frame clock past the window, pump frames until
+		// the background read's Post lands, and render the settled results.
+		a.tester.Advance(250 * time.Millisecond)
+		for attempt := 0; attempt < 200 && a.tester.HasText("搜索中…"); attempt++ {
+			a.tester.Frame()
+			time.Sleep(time.Millisecond)
+		}
+		a.tester.Frame()
+		a.render(outDir + "/p2-search-results.png")
 	}
 
 	// Clear the sidebar search, then render the host command palette.

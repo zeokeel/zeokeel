@@ -29,13 +29,11 @@ func TestToolCatalogNarrowSurface(t *testing.T) {
 }
 
 func TestKeyToolCatalogIdentity(t *testing.T) {
-	// The new key is additive: the legacy KeyToolkit stays for the B/D-wave
-	// consumer switch (E2 removes it last).
+	// The catalog key is the stable rig-free diagnostic surface. The concrete
+	// registry key ("zeokeel/toolkit") moved to internal/hosttools.KeyRegistry
+	// (AR-06 close-out); contracts no longer declares it.
 	if KeyToolCatalog.Name() != "zeokeel/toolcatalog" {
 		t.Fatalf("KeyToolCatalog name = %q, want zeokeel/toolcatalog", KeyToolCatalog.Name())
-	}
-	if KeyToolkit.Name() != "zeokeel/toolkit" {
-		t.Fatalf("KeyToolkit name = %q, want the legacy key preserved", KeyToolkit.Name())
 	}
 }
 

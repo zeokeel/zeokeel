@@ -57,6 +57,7 @@ func TestMessageHitOpensSessionAndFocusesMessage(t *testing.T) {
 	h.click(tester, "搜索会话与消息")
 	tester.Type("登录")
 	tester.Frame()
+	settleSearch(t, tester, "这里提到登录修复")
 
 	if err := tester.Click("这里提到登录修复"); err != nil {
 		t.Fatalf("click hit row: %v; texts = %v", err, tester.Texts())
@@ -95,6 +96,7 @@ func TestMessageHitWithoutLocatorOnlyOpensSession(t *testing.T) {
 	h.click(tester, "搜索会话与消息")
 	tester.Type("登录")
 	tester.Frame()
+	settleSearch(t, tester, "这里提到登录修复")
 
 	if err := tester.Click("这里提到登录修复"); err != nil {
 		t.Fatalf("click hit row: %v; texts = %v", err, tester.Texts())

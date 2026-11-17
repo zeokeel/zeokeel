@@ -2,8 +2,8 @@ package toolkit
 
 // Narrow tool-catalog provider (2026-11 audit AR-06): diagnostics consumers
 // need only WHICH tools exist, not the concrete rig registry. The toolkit
-// provides contracts.KeyToolCatalog over the same live registry as the legacy
-// KeyToolkit, so Names/Len must always agree with Registry.Specs — including
+// provides contracts.KeyToolCatalog over the same live registry as
+// hosttools.KeyRegistry, so Names/Len must always agree with Registry.Specs — including
 // after an MCP hot reload changes the tool set.
 
 import (

@@ -31,6 +31,7 @@ import (
 	rigschedule "github.com/zeokeel/zeokeel-rig/tools/schedule"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 const (
@@ -99,7 +100,7 @@ func Module() *module.Descriptor[Config] {
 			service.Close()
 			return fmt.Errorf("%s: provide automation service: %w", ModuleID, err)
 		}
-		if registry, ok := ctx.Get(contracts.KeyToolkit); ok {
+		if registry, ok := ctx.Get(hosttools.KeyRegistry); ok {
 			registerScheduleTools(ctx, registry, service, logger)
 		}
 		if _, err := ctx.Effect(func() cordis.Effect {

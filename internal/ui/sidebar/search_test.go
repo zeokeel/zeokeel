@@ -143,6 +143,7 @@ func TestMessageSearchRendersHits(t *testing.T) {
 	h.click(tester, "搜索会话与消息")
 	tester.Type("登录")
 	tester.Frame()
+	settleSearch(t, tester, "如何修复登录问题")
 
 	h.assertTexts(tester, "消息搜索", "项目讨论", "用户", "助手",
 		"如何修复登录问题", "先检查认证模块",
@@ -176,6 +177,7 @@ func TestMessageSearchClickOpensSession(t *testing.T) {
 	h.click(tester, "搜索会话与消息")
 	tester.Type("登录")
 	tester.Frame()
+	settleSearch(t, tester, "这里提到登录修复")
 
 	if err := tester.Click("这里提到登录修复"); err != nil {
 		t.Fatalf("click hit row: %v; texts = %v", err, tester.Texts())
@@ -194,6 +196,7 @@ func TestMessageSearchEmptyAndError(t *testing.T) {
 		h.click(tester, "搜索会话与消息")
 		tester.Type("不存在")
 		tester.Frame()
+		settleSearch(t, tester, "没有匹配")
 		// With no title and no message hit the search shows one overall
 		// empty state, not a "message search" section (R11).
 		h.assertTexts(tester, "没有匹配")
@@ -208,6 +211,7 @@ func TestMessageSearchEmptyAndError(t *testing.T) {
 		h.click(tester, "搜索会话与消息")
 		tester.Type("登录")
 		tester.Frame()
+		settleSearch(t, tester, "搜索消息失败：fts unavailable")
 		h.assertTexts(tester, "消息搜索", "搜索消息失败：fts unavailable")
 	})
 }
@@ -222,6 +226,7 @@ func TestMessageSearchShownWhenTitlesDoNotMatch(t *testing.T) {
 	h.click(tester, "搜索会话与消息")
 	tester.Type("登录")
 	tester.Frame()
+	settleSearch(t, tester, "登录相关讨论")
 
 	// No session title matches "登录", but the message search still renders:
 	// the title miss is one quiet line after the hits, not a headline before
@@ -240,6 +245,7 @@ func TestMessageSearchQueryCache(t *testing.T) {
 	h.click(tester, "搜索会话与消息")
 	tester.Type("登录")
 	tester.Frame()
+	settleSearch(t, tester, "登录相关讨论")
 	if calls := store.callCount(); calls != 1 {
 		t.Fatalf("SearchMessages calls = %d, want 1", calls)
 	}
@@ -256,9 +262,14 @@ func TestMessageSearchQueryCache(t *testing.T) {
 	tester.Key(ui.Cmd, ui.KeyA)
 	tester.Type("认证")
 	tester.Frame()
-	if calls := store.callCount(); calls != 2 || store.lastQuery() != "认证" {
-		t.Fatalf("calls = %d last query = %q, want 2/认证", store.callCount(), store.lastQuery())
+	// The changed query is debounced too: no read inside the typing frame.
+	if calls := store.callCount(); calls != 1 {
+		t.Fatalf("calls = %d inside the typing frame, want the cached 1", calls)
 	}
+	tester.Advance(250 * time.Millisecond)
+	waitSearch(t, tester, "second query read", func() bool {
+		return store.callCount() == 2 && store.lastQuery() == "认证"
+	})
 	// Clearing the field hides the section again.
 	h.click(tester, "搜索会话与消息")
 	tester.Key(ui.Cmd, ui.KeyA)
@@ -279,6 +290,7 @@ func TestMessageSearchLimit(t *testing.T) {
 	h.click(tester, "搜索会话与消息")
 	tester.Type("片段")
 	tester.Frame()
+	settleSearch(t, tester, "命中片段xxxxxxxx")
 	if limit := store.lastLimit(); limit != 8 {
 		t.Fatalf("SearchMessages limit = %d, want 8", limit)
 	}
@@ -320,6 +332,7 @@ func TestMessageSearchHidesExplicitOriginHits(t *testing.T) {
 	clickLabel(t, tester, "搜索会话与消息")
 	tester.Type("命中片段")
 	tester.Frame()
+	settleSearch(t, tester, "可见命中片段")
 
 	h.assertTexts(tester, "消息搜索", "可见命中片段", "用户命中片段")
 	h.assertNoTexts(tester, "每日摘要", "自动化命中片段", "无标题命中片段",
@@ -341,6 +354,7 @@ func TestMessageSearchKeepsStaleHitWithoutProvenance(t *testing.T) {
 	clickLabel(t, tester, "搜索会话与消息")
 	tester.Type("命中片段")
 	tester.Frame()
+	settleSearch(t, tester, "历史命中片段")
 
 	h.assertTexts(tester, "消息搜索", "历史命中片段")
 }
@@ -371,6 +385,7 @@ func TestMessageSearchSnippetWindowAroundMatch(t *testing.T) {
 	clickLabel(t, tester, "搜索会话与消息")
 	tester.Type("工作目录")
 	tester.Frame()
+	settleSearch(t, tester, "工作目录")
 
 	// The row's accessible label names the whole hit; the visible snippet is
 	// the separate text the window builder renders around the match.

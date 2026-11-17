@@ -11,7 +11,6 @@ import (
 	rig "github.com/zeokeel/zeokeel-rig"
 	rigtool "github.com/zeokeel/zeokeel-rig/tools"
 
-	"github.com/zeokeel/zeokeel/internal/contracts"
 	hostcaps "github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
@@ -19,13 +18,13 @@ import (
 
 type fakeToolkitConfig struct{}
 
-// fakeToolkitModule provides a caller-supplied Rig registry as KeyToolkit, the
+// fakeToolkitModule provides a caller-supplied Rig registry as hostcaps.KeyRegistry, the
 // same service the real toolkit module provides.
 func fakeToolkitModule(registry *rigtool.Registry) *module.Descriptor[fakeToolkitConfig] {
 	return module.Define("test/fake-toolkit", func(ctx cordis.Context, _ fakeToolkitConfig) error {
-		_, err := ctx.Provide(contracts.KeyToolkit, registry)
+		_, err := ctx.Provide(hostcaps.KeyRegistry, registry)
 		return err
-	}).AddProvides(module.Provides(contracts.KeyToolkit)).WithName("Fake Rig toolkit")
+	}).AddProvides(module.Provides(hostcaps.KeyRegistry)).WithName("Fake Rig toolkit")
 }
 
 // --- fixtures ---------------------------------------------------------------
@@ -194,7 +193,7 @@ func TestDescriptorMetadata(t *testing.T) {
 	if descriptor.Name == "" {
 		t.Fatal("module has no display name")
 	}
-	if len(descriptor.Requires) != 1 || descriptor.Requires[0].Name != contracts.KeyToolkit.Name() {
+	if len(descriptor.Requires) != 1 || descriptor.Requires[0].Name != hostcaps.KeyRegistry.Name() {
 		t.Fatalf("requires = %+v, want the toolkit key", descriptor.Requires)
 	}
 	if len(descriptor.Provides) != 0 {
@@ -328,7 +327,7 @@ func TestModuleCloseUnregistersTools(t *testing.T) {
 		}
 		t.Fatalf("tools after module close = %v, want none", names)
 	}
-	if _, ok := product.root.Get(contracts.KeyToolkit); ok {
+	if _, ok := product.root.Get(hostcaps.KeyRegistry); ok {
 		t.Fatal("toolkit service survived loader.Close")
 	}
 }

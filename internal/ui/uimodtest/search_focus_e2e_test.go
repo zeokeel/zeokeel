@@ -81,11 +81,7 @@ func TestMessageSearchHitOpensAtMatchedMessageEndToEnd(t *testing.T) {
 	tester.Frame()
 	tester.Type("定位锚点开头")
 	tester.Frame()
-	for _, want := range []string{"消息搜索", "定位锚点开头的问题"} {
-		if !tester.HasText(want) {
-			t.Fatalf("search frame missing %q; texts = %v", want, tester.Texts())
-		}
-	}
+	waitSearchTexts(t, tester, 5*time.Second, "消息搜索", "定位锚点开头的问题")
 	if err := tester.Click("定位锚点开头的问题"); err != nil {
 		t.Fatalf("click search hit: %v; texts = %v", err, tester.Texts())
 	}

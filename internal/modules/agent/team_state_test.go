@@ -17,6 +17,7 @@ import (
 	rig "github.com/zeokeel/zeokeel-rig"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 // gatedProvider is a rig.Provider whose stream blocks until release is closed:
@@ -249,7 +250,7 @@ func TestTeamToolInvocationRecordsActivity(t *testing.T) {
 	provider := newGatedProvider()
 	svc, teamService, ctx := newTeamModuleService(t)
 	svc.providerFactory = func(contracts.ChatConfig) (rig.Provider, error) { return provider, nil }
-	toolkit, err := ctx.Require(contracts.KeyToolkit)
+	toolkit, err := ctx.Require(hosttools.KeyRegistry)
 	if err != nil {
 		t.Fatalf("require toolkit: %v", err)
 	}

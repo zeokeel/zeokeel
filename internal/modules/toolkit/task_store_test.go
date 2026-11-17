@@ -19,6 +19,7 @@ import (
 	rig "github.com/zeokeel/zeokeel-rig"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 // bootTaskBoard activates the toolkit module with one explicit data directory so
@@ -56,7 +57,7 @@ func invokeTaskTool(t *testing.T, root cordis.Context, name, arguments string) (
 // session context.
 func invokeTaskToolIn(t *testing.T, root cordis.Context, ctx context.Context, name, arguments string) (string, bool) {
 	t.Helper()
-	registry, err := root.Require(contracts.KeyToolkit)
+	registry, err := root.Require(hosttools.KeyRegistry)
 	if err != nil {
 		t.Fatalf("require toolkit: %v", err)
 	}

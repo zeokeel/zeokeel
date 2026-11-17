@@ -15,6 +15,7 @@ import (
 	rig "github.com/zeokeel/zeokeel-rig"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 // fakeWorkspace is a mutable WorkspaceService: set changes the current
@@ -96,7 +97,7 @@ func TestToolRootFollowsWorkspace(t *testing.T) {
 	}
 	defer func() { _ = loader.Close() }()
 
-	tools, err := root.Require(contracts.KeyToolkit)
+	tools, err := root.Require(hosttools.KeyRegistry)
 	if err != nil {
 		t.Fatalf("require toolkit: %v", err)
 	}

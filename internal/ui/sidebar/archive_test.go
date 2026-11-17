@@ -155,6 +155,7 @@ func TestArchivedSessionsExcludedFromMessageSearch(t *testing.T) {
 	clickLabel(t, tester, "搜索会话与消息")
 	tester.Type("命中")
 	tester.Frame()
+	settleSearch(t, tester, "可见命中片段")
 
 	h.assertTexts(tester, "消息搜索", "可见命中片段")
 	h.assertNoTexts(tester, "归档会话", "归档命中片段")

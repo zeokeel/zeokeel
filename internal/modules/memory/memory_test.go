@@ -24,6 +24,7 @@ import (
 	rigmemory "github.com/zeokeel/zeokeel-rig/tools/memory"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 // testLogger is a goroutine-safe contracts.Logger test double.
@@ -67,7 +68,7 @@ func (h *harness) close() {
 }
 
 // loadMemory loads the memory module on a fresh kernel root. prepare may
-// provide additional host services (for example KeyToolkit) before loading.
+// provide additional host services (for example hosttools.KeyRegistry) before loading.
 func loadMemory(t *testing.T, dataDir string, cfg map[string]any, prepare func(ctx cordis.Context)) (*harness, error) {
 	t.Helper()
 	root := cordis.Root()
@@ -345,7 +346,7 @@ func TestToolkitToolRegistration(t *testing.T) {
 	dataDir := t.TempDir()
 	registry := rigtools.NewRegistry()
 	h := mustLoadMemory(t, dataDir, nil, func(ctx cordis.Context) {
-		if _, err := ctx.Provide(contracts.KeyToolkit, registry); err != nil {
+		if _, err := ctx.Provide(hosttools.KeyRegistry, registry); err != nil {
 			t.Fatalf("provide toolkit: %v", err)
 		}
 	})
@@ -425,7 +426,7 @@ func TestToolkitDuplicateIsLoggedAndTolerated(t *testing.T) {
 	existing := rigmemory.Tools(nil)[0]
 	registry := rigtools.NewRegistry(existing)
 	h, err := loadMemory(t, dataDir, nil, func(ctx cordis.Context) {
-		if _, err := ctx.Provide(contracts.KeyToolkit, registry); err != nil {
+		if _, err := ctx.Provide(hosttools.KeyRegistry, registry); err != nil {
 			t.Fatalf("provide toolkit: %v", err)
 		}
 	})

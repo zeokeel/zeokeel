@@ -8,8 +8,9 @@
 //     product; their ID routing is kept defensively, see execution_routing.go)
 //   - web fetch/search, and remote MCP servers over Streamable HTTP
 //
-// The resulting *tools.Registry is provided as contracts.KeyToolkit (legacy)
-// and, as the narrow rig-free contracts.ToolCatalog, as contracts.KeyToolCatalog;
+// The resulting *tools.Registry is provided as hosttools.KeyRegistry (the
+// backend seam) and, as the narrow rig-free contracts.ToolCatalog, as
+// contracts.KeyToolCatalog;
 // the host-tools module adds product-only tools to the same registry.
 package toolkit
 
@@ -31,6 +32,7 @@ import (
 	"github.com/zeokeel/zeokeel-rig/tools/web"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 	"github.com/zeokeel/zeokeel/internal/memorytools"
 	"github.com/zeokeel/zeokeel/internal/websearch"
 )
@@ -276,7 +278,7 @@ func Module() *module.Descriptor[Config] {
 			group.close()
 			return err
 		}
-		if _, err := ctx.Provide(contracts.KeyToolkit, registry); err != nil {
+		if _, err := ctx.Provide(hosttools.KeyRegistry, registry); err != nil {
 			closeLSP()
 			controller.close()
 			group.close()
@@ -284,8 +286,8 @@ func Module() *module.Descriptor[Config] {
 		}
 		// The narrow rig-free catalog over the SAME registry (2026-11 audit
 		// AR-06): diagnostics consumers read names/count through it instead of
-		// the concrete rig type. The legacy KeyToolkit stays until every
-		// consumer has switched.
+		// the concrete rig type. The registry itself is provided under
+		// hosttools.KeyRegistry for backend tool wiring.
 		if _, err := ctx.Provide(contracts.KeyToolCatalog, contracts.ToolCatalog(toolCatalog{registry: registry})); err != nil {
 			closeLSP()
 			controller.close()
@@ -375,7 +377,7 @@ func Module() *module.Descriptor[Config] {
 		}
 		return nil
 	}).AddProvides(
-		module.Provides(contracts.KeyToolkit),
+		module.Provides(hosttools.KeyRegistry),
 		module.Provides(contracts.KeyToolCatalog),
 		module.Provides(contracts.KeyPlugins),
 		module.Provides(contracts.KeyTaskBoard),

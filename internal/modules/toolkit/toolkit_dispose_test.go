@@ -24,6 +24,7 @@ import (
 	rig "github.com/zeokeel/zeokeel-rig"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 // activateToolkitForDispose loads the real module against rootDir with a shell
@@ -53,7 +54,7 @@ func activateToolkitForDispose(t *testing.T, rootDir string) (cordis.Context, *m
 // the job id. The marker file appearing later proves the process group survived.
 func startMarkerJob(t *testing.T, root cordis.Context, marker string) string {
 	t.Helper()
-	tools, err := root.Require(contracts.KeyToolkit)
+	tools, err := root.Require(hosttools.KeyRegistry)
 	if err != nil {
 		t.Fatalf("require toolkit: %v", err)
 	}

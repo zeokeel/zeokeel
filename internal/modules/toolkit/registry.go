@@ -35,7 +35,7 @@ func newToolRegistry(tools []rig.Tool, logf func(format string, args ...any)) *r
 // toolCatalog adapts the shared registry to contracts.ToolCatalog (2026-11
 // audit AR-06): consumers that only need the tool names/count depend on the
 // narrow rig-free interface instead of the concrete *rigtool.Registry behind
-// the legacy KeyToolkit. It is a LIVE view — Names/Len read the registry on
+// hosttools.KeyRegistry. It is a LIVE view — Names/Len read the registry on
 // every call, so MCP hot reloads are reflected without re-providing the
 // service. Names follows Registry.Specs order (rig sorts by name); Len uses
 // the registry's cheap count (no spec allocation).
