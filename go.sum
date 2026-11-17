@@ -50,6 +50,8 @@ github.com/zeokeel/zeokeel-rig v0.18.0 h1:WgO+MBBVG/ySOQE6lpndx5+VH/544HUwY/TGSp
 github.com/zeokeel/zeokeel-rig v0.18.0/go.mod h1:B00A4YCGjMifwsh4UNphW8ADXyJu/wovwQaNL+B03qI=
 github.com/zeokeel/zeokeel-rig v0.18.1 h1:Yn7hu6gOGdRen3XvN3Pea2VN4NbW7k2z/j5+y0dJ2zA=
 github.com/zeokeel/zeokeel-rig v0.18.1/go.mod h1:B00A4YCGjMifwsh4UNphW8ADXyJu/wovwQaNL+B03qI=
+github.com/zeokeel/zeokeel-rig v0.19.0 h1:iOXiDzt7U6ps5nXy8vKUFPQPNhWyQ9R0m5MgffuPujk=
+github.com/zeokeel/zeokeel-rig v0.19.0/go.mod h1:B00A4YCGjMifwsh4UNphW8ADXyJu/wovwQaNL+B03qI=
 go.digitalxero.dev/rpm v0.3.4 h1:iq+rx7zB6wQeNhLQ1mcvW92v9ZqNaxCvuu0+nPVit4w=
 go.digitalxero.dev/rpm v0.3.4/go.mod h1:45EsEzHamzqInyWQx9vpj7OYpL0BrkbQF87VdrLn5wo=
 golang.org/x/crypto v0.57.0 h1:3ZVCjf8Ggz7zneR/EHRVx68Ctf+2pmIMP2UFhh9cC6M=

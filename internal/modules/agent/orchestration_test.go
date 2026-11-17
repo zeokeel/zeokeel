@@ -151,12 +151,13 @@ func TestDelegatedParentSpecUsesExplicitBudget(t *testing.T) {
 	svc.providerFactory = func(contracts.ChatConfig) (rig.Provider, error) { return provider, nil }
 
 	spec := svc.delegatedParentSpec("sess-1", "", nil, svc.Config(), provider, contracts.AgentRunOriginSubagent)
-	if spec.MaxIterations != agentIterationLimitUnbounded {
-		t.Fatalf("default delegated budget = %d, want the unlimited sentinel %d (not rig's 20)",
-			spec.MaxIterations, agentIterationLimitUnbounded)
+	// Rig v0.19.0 treats 0 as unlimited, so the child spec passes the
+	// product's "0 means unlimited" policy through unchanged — no sentinel cap.
+	if spec.MaxIterations != 0 {
+		t.Fatalf("default delegated budget = %d, want 0 (unlimited, Rig v0.19.0 semantics)", spec.MaxIterations)
 	}
 	if spec.MaxIterations == 20 {
-		t.Fatal("delegated child falls back to rig's default 20 rounds")
+		t.Fatal("delegated child falls back to rig's old 20-round default")
 	}
 
 	configured := newService(Config{MaxIterations: 40}, rigtools.NewRegistry(), contracts.SettingsService(settings),

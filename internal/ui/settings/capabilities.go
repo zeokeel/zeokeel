@@ -9,10 +9,15 @@ package settings
 //     without a restart;
 //   - Shell command timeout (5–600s) and Shell output cap (0 = the tool default,
 //     or 1–4096 KiB): the toolkit resolves them when the module starts, so a
-//     change applies after a restart (the page says so).
+//     change applies after a restart (the page says so);
+//   - The automation approval timeout (0 = disabled by default): it bounds
+//     approval waits, not tool loops.
 //
-// The agent loop's parallel-tool cap is hardcoded in rig (8); the page states
-// that instead of offering a setting that would not do anything.
+// Loop protection and every tool-loop configuration surface were removed
+// (v0.2.50 user ruling): tools run freely, so this page offers no run budget,
+// repeat limit or iteration knob. The agent loop's parallel-tool cap is
+// hardcoded in rig (8); the page states that instead of offering a setting
+// that would not do anything.
 //
 // The page keeps UI-local float drafts (NumberInput's type), normalizes them
 // against the contracts bounds on load/save, and cleans rows that equal the
@@ -86,7 +91,7 @@ func capabilitiesRound(value float64, lo, hi int) int {
 	return rounded
 }
 
-// draft accessors: the four limits as the integers the setting rows store.
+// draft accessors: the limits as the integers the setting rows store.
 func (st *capabilitiesState) subagentValue() int {
 	return capabilitiesRound(st.subagentMax, contracts.CapabilityMinConcurrency, contracts.CapabilityMaxConcurrency)
 }
@@ -187,7 +192,7 @@ func (st *capabilitiesState) dirty(store contracts.SettingsService) bool {
 }
 
 // save validates the drafts once more (defensive: NumberInput already keeps them
-// in range) and writes the four rows. A value equal to the product default is
+// in range) and writes the rows. A value equal to the product default is
 // cleaned to an empty row, so the modules follow their own config again instead
 // of a redundant copy of the default.
 func (st *capabilitiesState) save(store contracts.SettingsService, locale contracts.LocaleService) {
@@ -284,8 +289,8 @@ func buildCapabilitiesPage(c *ui.Context, store contracts.SettingsService,
 					0, contracts.CapabilityMaxApprovalTimeoutSeconds, 30).
 					Label(inputLabel(locale, localized(locale, "审批超时", "Approval timeout")))
 			}).Description(localized(locale,
-				"仅自动化来源的审批等待生效：超过该秒数自动拒绝并记录、通知。0＝关闭（默认），交互审批不受影响；运行级墙钟断路器仍生效。修改后下次运行生效。",
-				"Only approvals from automation-origin runs are bounded: after this many seconds they are auto-denied, recorded and notified. 0 = disabled (default); interactive approvals are unaffected and the run-level wall-clock breaker still applies. A change applies on the next run."))
+				"仅自动化来源的审批等待生效：超过该秒数自动拒绝并记录、通知。0＝关闭（默认），交互审批不受影响。工具循环不受任何运行级预算限制（循环保护已移除）；无人值守自动化若不想无限等待审批，建议设置本超时。修改后下次运行生效。",
+				"Only approvals from automation-origin runs are bounded: after this many seconds they are auto-denied, recorded and notified. 0 = disabled (default); interactive approvals are unaffected. Tool loops have no run-level budget (loop protection was removed); unattended automation that must not wait for an approval forever should set this timeout. A change applies on the next run."))
 		})
 
 		uikit.Section(c, localized(locale, "并行工具上限", "Parallel tool calls"), func(body *ui.Context) {

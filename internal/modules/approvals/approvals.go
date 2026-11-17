@@ -317,10 +317,13 @@ func (s *service) Request(ctx context.Context, request contracts.ApprovalRequest
 
 	// RG-04 (2026-11 audit, personal-scale ruling): an OPT-IN timeout for
 	// automation-origin requests only. Default 0 = off — interactive approvals
-	// keep waiting exactly as before (the run-level wall-clock breaker still
-	// backstops every run). When configured, an unattended request nobody
-	// answers is auto-denied, recorded and notified instead of parking until
-	// the whole run is cancelled.
+	// keep waiting exactly as before. There is NO run-level time fallback:
+	// loop protection and every tool-loop budget were removed (v0.2.50 user
+	// ruling — tools run freely), so an unattended run has no implicit cancel.
+	// The settings page discloses that unattended automation should set this
+	// timeout when a parked approval must not wait forever. When configured,
+	// an unattended request nobody answers is auto-denied, recorded and
+	// notified instead of parking indefinitely.
 	var timeoutC <-chan time.Time
 	if s.settings != nil && strings.EqualFold(strings.TrimSpace(request.Source), contracts.SessionOriginAutomation) {
 		if seconds := contracts.NormalizeApprovalTimeoutSeconds(

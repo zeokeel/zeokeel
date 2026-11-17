@@ -18,10 +18,6 @@ const (
 	SettingsChatBaseURL      = "chat.baseURL"
 	SettingsChatAPIKey       = "chat.apiKey"
 	SettingsChatSystemPrompt = "chat.systemPrompt"
-	// SettingsChatMaxIterations overrides the agent module's MaxIterations
-	// (model/tool rounds per run); empty or a non-positive value follows the
-	// module config.
-	SettingsChatMaxIterations = "chat.maxIterations"
 	// SettingsChatContextBudget overrides the prompt-token budget used by the
 	// automatic compactor; empty follows the module config and an explicit "0"
 	// disables the budget (no automatic compaction).
@@ -229,10 +225,13 @@ func SessionOriginSettingKey(sessionID string) string {
 // Empty fields fall back to module config, then to the settings store keys
 // above (SettingsChat*), then to the process environment (OPENAI_API_KEY).
 type ChatConfig struct {
-	Model         string
-	BaseURL       string
-	APIKey        string
-	SystemPrompt  string
+	Model        string
+	BaseURL      string
+	APIKey       string
+	SystemPrompt string
+	// MaxIterations is the assembly-level model/tool round cap (0 = unlimited).
+	// It is product definition, not a user setting: no settings row overrides
+	// it (the chat.maxIterations knob was removed in v0.2.50).
 	MaxIterations int
 	ContextBudget int
 	// ReasoningEffort is the default openai reasoning_effort ("low", "medium",
@@ -293,13 +292,16 @@ const (
 	MessageErrorKindNetwork   = "network"
 	MessageErrorKindTimeout   = "timeout"
 	MessageErrorKindContext   = "context"
-	// MessageErrorKindIterations marks the model/tool iteration budget
-	// (chat.maxIterations) running out: the turn is not a provider failure and
-	// the localized copy should point at the limit instead of dumping rig's
-	// internal English diagnostic.
+	// MessageErrorKindIterations marks the assembly-level model/tool iteration
+	// cap (agent.Config.MaxIterations) running out: the turn is not a provider
+	// failure and the localized copy should point at the limit instead of
+	// dumping rig's internal English diagnostic. There is no user settings knob
+	// for the cap (v0.2.50 removal); the default assembly is unlimited.
 	MessageErrorKindIterations = "iterations"
-	// MessageErrorKindLoop marks the product loop breaker (wall-clock, token,
-	// identical-call or no-diff budget) instead of a provider failure.
+	// MessageErrorKindLoop is historical: loop protection was removed in
+	// v0.2.50, so nothing produces it anymore. The kind stays so a durable
+	// run_end persisted by an older version's loop breaker still restores
+	// classified, and the UI renders one neutral historical note.
 	MessageErrorKindLoop = "loop"
 	// MessageErrorKindSandboxDenied marks a failure the OS file sandbox
 	// plausibly caused: rig (v0.18.1+) appends a stable "[sandbox: suspected OS
@@ -357,6 +359,9 @@ func ClassifyError(err error, msg string) string {
 		"rounds without"):
 		return MessageErrorKindIterations
 	case has("loop guard:", "loop guard", "no file diff", "identical tool call repeated"):
+		// Historical only: an old version's loop breaker persisted these
+		// spellings; a restored run_end keeps its classified kind so the UI
+		// can render the neutral legacy note.
 		return MessageErrorKindLoop
 	default:
 		return MessageErrorKindOther

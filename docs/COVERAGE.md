@@ -64,7 +64,7 @@
 | `modelcatalog` | ✅ | `internal/modules/modelcatalog` + composer 模型菜单 + settings「模型」页（模型列表） | **用户配置的模型列表（列表为空时装配默认模型仍生效，UI 标注「默认模型，尚未配置连接」；旧 chat.model/baseURL/apiKey 连接在首次启动时迁移为一行）**、**每模型独立 Base URL/API Key（可同时配置多家服务商）**、per-session 模型切换、**模型 chip 两级菜单（一级「模型／推理等级」，二级模型按服务商分组、推理等级为“跟随模型默认+模式”）**、**每模型默认思考强度（Home composer / 设置编辑弹窗）+ 会话×模型思考覆盖（会话内「推理等级」，默认跟随该模型默认值；切换模型不会串用其他模型的强度）**、自定义模式 JSON 参数、**每模型生成参数（temperature/top_p/max_tokens）**、列表增删改/上下文窗口/默认模型/测试连接、消息元信息行预算显示 |
 | `presets` | ✅（仅后端） | contracts/presets.go + agent 每 run 应用 | **AgentPreset（persona/prompt/tools allowlist/model/order）** 每 run 应用（base→AGENTS→persona→prompt，model 默认、tool allowlist 与模式门禁叠加）；**composer 人设/插入预设与 settings「预设」页已按用户要求删除**，既有数据键保留，不再提供编辑 UI |
 | `prompt` | ✅ | agent SystemPrompt + settings 模型页提示词 + **AGENTS.md 注入** | 系统提示可配置；每次运行读取当前工作区 `AGENTS.md`（文件名可配/32KiB 截断/读取失败告警）追加注入；auto-title 按首条提示生成；review prompt 属 review 工具非目标 |
-| `provider` | ✅ | rig `provider/openai` + agent 模块 + 模型列表每模型连接 | OpenAI Chat Completions 兼容 + **常用服务商预设（DeepSeek/OpenAI/Ollama/通义千问/Kimi/智谱/硅基流动/OpenRouter/Gemini/自定义，添加模型弹窗预填）** + **每模型 Base URL/API Key 解析（列表行优先，chat.*/env 回落）** + **每模型思考/采样参数注入（Request.Extra / AgentSpec Temperature/TopP/MaxTokens）** + **模型页运行参数（最大迭代、上下文预算自动压缩、流完整性开关）** |
+| `provider` | ✅ | rig `provider/openai` + agent 模块 + 模型列表每模型连接 | OpenAI Chat Completions 兼容 + **常用服务商预设（DeepSeek/OpenAI/Ollama/通义千问/Kimi/智谱/硅基流动/OpenRouter/Gemini/自定义，添加模型弹窗预填）** + **每模型 Base URL/API Key 解析（列表行优先，chat.*/env 回落）** + **每模型思考/采样参数注入（Request.Extra / AgentSpec Temperature/TopP/MaxTokens）** + **模型页运行参数（上下文预算自动压缩；最大迭代用户旋钮 v0.2.50 移除——轮数为装配级产品定义、默认不限）** |
 | `runtime` | ✅ | agent + rig agent/gate/compact | 循环/审批/自动压缩/检查点/多模态 parts/subagent runner/team manager/goal 工具与 goal 桥 + **聊天模式（普通/计划/精简/创作）** + **目标暂停/自动续跑**；PTC/workflow/ralph/review 工具为明确非目标 |
 | `session` | ✅ | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher + usage + 排队发送 + goal 续跑/压缩 + tool spill | 发送/取消/历史/恢复/手动压缩/fork/export/附件/重新生成/会话模型/思考强度（模型级默认 + 按（会话×模型）覆盖，按模型系列与自定义模式）/turn usage/排队发送/消息字号/目标续跑 + **大工具结果落盘（>32KiB→`.zeokeel/tool-results`；rig.SpillPolicy 负责写入/命名/清理，模型看到「前缀+绝对路径+字节数+240B preview」摘要，保留 100 个文件，落盘失败保留原文）** |
 | `sessionreference` | ✅ | composer @ 菜单 + agent `references.go` + contracts/sessionreference.go | token 持久化/注入尾部 20 条/8000 rune/session_refs 事件 + **候选排序（ID 精确→前缀→标题，最近优先，上限 8）** + **sessionref: URI 编解码** + **预算错误分类（messages/runes typed error 与事件 budget 字段）** |
@@ -87,7 +87,7 @@
 | Composer 深度（/goal /plan /memory/权限/thinking/@session/presets） | ✅ | `sessionCommands` + `command_dialogs.go` + `commands_help.go` + `compact_command.go` | **15 条命令**（/新会话/副本/导出/设置/目标/审阅/记忆/反馈/停止/附加/帮助/**压缩上下文/完成目标/放弃目标**）+ 权限模式、聊天模式、**模型与推理等级（模型 chip 两级菜单：一级「模型／推理等级」，二级选模型/选该模型推理等级；覆盖按（会话×模型）保存、默认跟随模型）**、@session、预设；目标生命周期（完成/放弃/编辑/暂停/恢复/清除）已全量 |
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar + session B3 顶栏 | 280px sidebar、64px rail、Cmd/Ctrl+B、**Cmd/Ctrl+N 新建会话、Cmd/Ctrl+, 设置、Cmd/Ctrl+K 命令面板**、右栏开关、添加工作区、视图选项（排序/分组持久化）、工作区搜索/置顶/归档；**会话 B3 顶栏**：40px 标题/工作区行（TypeM 16px 标题）+ 32px Tabs 行、浅色 band + 单条底边线、无返回/无 Alt+←、⋯ 会话操作（复制/导出/归档）、右上 palette+inspector；无贡献屏无空工具栏；输入框上方 dock（目标条 + 审批内联卡）；通知右上角（header 下方，最多 2 条） |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
-| Settings 外壳与页面 | ✅ | `internal/ui/settings`、about | **10 页 5 组**：常用（模型/行为与限额）、界面（外观（含快捷键）/通知）、连接（网络与搜索/LSP）、数据（记忆/归档/数据与隐私（含导入/文件隐藏））、关于（关于 hub：构建信息/更新/诊断/架构）；**技能/MCP 两页已删除并迁入能力页，预设页已删除（后端 presets 保留），设置搜索不再命中技能/MCP**；**模型页 = 模型列表（每模型服务商/Base URL/API Key/系列/思考模式/生成参数编辑；添加模型弹窗含常用服务商预填、密钥继承与测试连接，可设默认模型）+ 提示词 + 运行参数（最大迭代默认不限制/上下文预算/流完整性）**；扩展设置在能力页底部「诊断与设置」区（已接线键）；第三方插件市场为明确非目标 |
+| Settings 外壳与页面 | ✅ | `internal/ui/settings`、about | **10 页 5 组**：常用（模型/行为与限额）、界面（外观（含快捷键）/通知）、连接（网络与搜索/LSP）、数据（记忆/归档/数据与隐私（含导入/文件隐藏））、关于（关于 hub：构建信息/更新/诊断/架构）；**技能/MCP 两页已删除并迁入能力页，预设页已删除（后端 presets 保留），设置搜索不再命中技能/MCP**；**模型页 = 模型列表（每模型服务商/Base URL/API Key/系列/思考模式/生成参数编辑；添加模型弹窗含常用服务商预填、密钥继承与测试连接，可设默认模型）+ 提示词 + 运行参数（上下文预算；最大迭代用户旋钮 v0.2.50 移除，轮数装配级默认不限）**；扩展设置在能力页底部「诊断与设置」区（已接线键）；第三方插件市场为明确非目标 |
 | Approval 审批内联卡（V3 强调） | ✅ | `uikit.ApprovalDialog`（Inline）+ `internal/ui/approval` + approvals 模块 | 输入框上方内联卡（警示横幅+警示描边，不遮挡 transcript）；allow/allow-always/deny、无默认焦点、Esc=deny 最早一条且不中断本轮（session 判断审批优先）、多请求计数、非会话屏自动切回会话；旧 Modal 路径保留给 embedder；只读/工作区可写/所有权限三档预设（settings 覆盖；旧 ask/never 存值归一为只读；headless assembly 可配 ask/never 策略） |
 | 右侧栏 | ✅ | rightpanel | 默认收起；多标签：开始引导 / 文件 / 每个打开文件一个可关闭标签；文件页含工作区树、交付区、预览/改动；无概览/工具/日志/变更/团队/任务常驻 pane、无侧边栏终端；en/zh |
 | 文件页 / 文件标签 | ✅ | rightpanel files + workspace | 工作区树/面包屑/文本/Markdown/图片预览/错误态/交付区；打开文件新标签，内容可滚动 |
@@ -161,7 +161,7 @@ ACP 客户端职责（auth/fs/terminal）、系统级全局热键以外的 OS �
   记忆/归档/数据与隐私（含导入/文件隐藏）/关于 hub（更新/诊断/架构））、审批与权限模式（全局权限决定审批与 OS 沙箱两层；
   会话级「所有权限」仅放宽审批）、聊天模式（普通/计划/精简/创作）、
   右栏（开始引导/文件/打开的文件/变更/产物；团队/任务在会话头部浮层，不在右栏）、搜索/fork/导出（Markdown+JSONL，不含反馈——反馈功能已移除）、置顶归档、web search、ask_user/present/plan 审阅、
-  keep-planning、真实 subagent/team 编排、per-session 模型与思考强度/自定义模式与上下文预算与最大迭代、@session 引用、
+  keep-planning、真实 subagent/team 编排、per-session 模型与思考强度/自定义模式与上下文预算（最大迭代用户旋钮 v0.2.50 移除）、@session 引用、
   能力页（技能/连接器页级 Tabs，3 列卡片；MCP HTTP/stdio/server 级开关/连接配置）、桌面单实例/autostart/install-on-restart/toast/代理/托盘/全局热键/主题三态、
   Home composer、能力页技能编辑、记忆管理、工件下载、ACP list/load、导入/更新下载安装调度。"
 - 不要声称"与 old 实现逐像素/逐内部表结构一致"：深度限制见 §5.1，非目标见 §5.2。

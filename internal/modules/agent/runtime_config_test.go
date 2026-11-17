@@ -75,22 +75,23 @@ func TestModelGenerationOptionsReachRequest(t *testing.T) {
 	}
 }
 
+// TestRuntimeLimitSettingsOverrides covers the surviving runtime override: the
+// context budget stays a settings row. The iteration cap is assembly-level
+// product definition — the removed chat.maxIterations user knob is never read.
 func TestRuntimeLimitSettingsOverrides(t *testing.T) {
 	svc := newService(Config{}, rigtoolRegistry(t), newFakeSettings(map[string]string{
-		contracts.SettingsChatMaxIterations: "4",
 		contracts.SettingsChatContextBudget: "12000",
 	}), &fakeLogger{}, nil, fakeApprovals{})
 	cfg := svc.Config()
-	if cfg.MaxIterations != 4 || cfg.ContextBudget != 12000 {
-		t.Fatalf("runtime overrides = iterations %d / budget %d, want 4 / 12000",
+	if cfg.MaxIterations != 0 || cfg.ContextBudget != 12000 {
+		t.Fatalf("runtime overrides = iterations %d / budget %d, want 0 / 12000",
 			cfg.MaxIterations, cfg.ContextBudget)
 	}
 
-	// Explicit zero budget disables compaction; a non-positive iteration value
-	// and malformed numbers fall back to the module config.
+	// Explicit zero budget disables compaction; a malformed budget falls back
+	// to the module config.
 	svc2 := newService(Config{MaxIterations: 20, ContextBudget: 9000},
 		rigtoolRegistry(t), newFakeSettings(map[string]string{
-			contracts.SettingsChatMaxIterations: "0",
 			contracts.SettingsChatContextBudget: "0",
 		}), &fakeLogger{}, nil, fakeApprovals{})
 	cfg = svc2.Config()
@@ -101,7 +102,6 @@ func TestRuntimeLimitSettingsOverrides(t *testing.T) {
 
 	svc3 := newService(Config{MaxIterations: 12, ContextBudget: 5000},
 		rigtoolRegistry(t), newFakeSettings(map[string]string{
-			contracts.SettingsChatMaxIterations: "bogus",
 			contracts.SettingsChatContextBudget: "-5",
 		}), &fakeLogger{}, nil, fakeApprovals{})
 	cfg = svc3.Config()
@@ -111,12 +111,35 @@ func TestRuntimeLimitSettingsOverrides(t *testing.T) {
 	}
 }
 
-func TestEffectiveMaxIterationsUnlimitedDefault(t *testing.T) {
-	if got := effectiveMaxIterations(0); got != agentIterationLimitUnbounded {
-		t.Fatalf("effectiveMaxIterations(0) = %d, want %d (unlimited default)", got, agentIterationLimitUnbounded)
+// TestChatMaxIterationsRowIgnored pins the removal of the user iteration knob:
+// a legacy chat.maxIterations row stored by an older version never changes the
+// effective config — only the assembly-level Config.MaxIterations applies.
+func TestChatMaxIterationsRowIgnored(t *testing.T) {
+	for _, row := range []string{"4", "0", "bogus", "-3"} {
+		svc := newService(Config{MaxIterations: 9}, rigtoolRegistry(t),
+			newFakeSettings(map[string]string{"chat.maxIterations": row}),
+			&fakeLogger{}, nil, fakeApprovals{})
+		if got := svc.Config().MaxIterations; got != 9 {
+			t.Fatalf("legacy chat.maxIterations=%q changed MaxIterations to %d, want the assembly value 9", row, got)
+		}
 	}
-	if got := effectiveMaxIterations(-3); got != agentIterationLimitUnbounded {
-		t.Fatalf("effectiveMaxIterations(-3) = %d, want unbounded", got)
+	// Without an assembly value the default stays 0 = unlimited.
+	svc := newService(Config{}, rigtoolRegistry(t),
+		newFakeSettings(map[string]string{"chat.maxIterations": "4"}),
+		&fakeLogger{}, nil, fakeApprovals{})
+	if got := svc.Config().MaxIterations; got != 0 {
+		t.Fatalf("legacy row resurrected an iteration limit: %d, want 0 (unlimited)", got)
+	}
+}
+
+func TestEffectiveMaxIterationsUnlimitedDefault(t *testing.T) {
+	// Rig v0.19.0 defaults to unlimited rounds (0), so the product passes the
+	// configured value straight through: 0 and negative both mean "no cap".
+	if got := effectiveMaxIterations(0); got != 0 {
+		t.Fatalf("effectiveMaxIterations(0) = %d, want 0 (unlimited default)", got)
+	}
+	if got := effectiveMaxIterations(-3); got != 0 {
+		t.Fatalf("effectiveMaxIterations(-3) = %d, want 0 (unlimited)", got)
 	}
 	if got := effectiveMaxIterations(12); got != 12 {
 		t.Fatalf("effectiveMaxIterations(12) = %d, want 12", got)

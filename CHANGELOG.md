@@ -4,6 +4,21 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.50] - 2026-11-17
+
+### Changed
+
+- **上游 SDK 升级 zeokeel-rig v0.19.0**：模型↔工具轮数**默认不限制**（原生 unlimited 语义；显式配置 >0 的上限能力保留，超限仍返回 `ErrMaxIterations`）。产品侧的不可达 cap 哨兵随之移除，默认装配直接把 0 传为「不限制」。
+- **移除循环保护**：硬循环 breaker（运行时长 / token 预算 / 完全重复次数 / 无变更调用四个运行级预算）与 advisory 重复提醒（3/5/8 次 nudge）全部删除，`agent` 运行不再被任何循环预算取消或干预——工具调用完全自由。
+- **移除全部工具循环配置面**：设置页不再有「循环预算」节与「最大迭代次数」输入，`agent.loopWallClockSeconds` / `agent.loopTokenBudget` / `agent.loopRepeatLimit` / `agent.loopNoDiffCalls` / `chat.maxIterations` 用户键删除（旧存储行被忽略且不再改写）；搜索词汇同步清理。装配级 `agent.Config.MaxIterations` 保留（0=不限制，非用户配置面）。
+- **历史运行兼容**：旧持久化回合若由已移除的循环保护停止，`kind=loop` 仍可恢复，改显示中性历史说明「该回合曾被旧版循环保护停止」（muted，非失败行）；`iterations` 类错误的恢复建议改为「新建会话继续」（不再指向已移除的旋钮）。
+- **审批超时保留**：`agent.approvalTimeoutSeconds`（默认 0=关，仅自动化来源）不受影响；行为页说明更新为「工具循环不受运行级预算限制；无人值守自动化若不想无限等待审批，建议设置本超时」。
+
+### Notes
+
+- 无轮数 / 时长 / token / 重复次数 / 无变更调用的任何兜底限制：长任务可自由运行，跑飞风险由使用者自行承担（个人使用尺度）。需要显式上限的宿主可在装配级设置 `MaxIterations`（>0）。
+- 验证：51 包全量测试、agent `-race`、designlint（0 new）、design-check 6/6、mygo vet、审计探针全绿；新增 `tool_freedom_test.go`（默认装配下 8 次完全相同调用 + 45 次只读调用全部执行且工具结果无任何 nudge/breaker 文本）与键表/设置页/历史文案负向断言。
+
 ## [0.2.49] - 2026-11-17
 
 ### Fixed

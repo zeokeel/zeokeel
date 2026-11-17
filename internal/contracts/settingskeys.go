@@ -23,32 +23,22 @@ const (
 	// unset keeps the agent module's default). Read on every team member
 	// start.
 	SettingAgentTeamMaxConcurrent = "agent.teamMaxConcurrent"
-	// SettingToolkitShellTimeoutSeconds bounds one shell tool execution in
-	// seconds (5–600; unset keeps the toolkit Config's timeout, 30s by
-	// default). The toolkit resolves it at activation, so a change applies
-	// after a restart.
-	// SettingAgentLoopWallClockSeconds bounds one agent run's wall-clock time
-	// in seconds (0 disables; unset keeps the agent default, 30 minutes).
-	SettingAgentLoopWallClockSeconds = "agent.loopWallClockSeconds"
-	// SettingAgentLoopTokenBudget bounds one agent run's total model tokens
-	// (0 disables; unset keeps the agent default, 4,000,000).
-	SettingAgentLoopTokenBudget = "agent.loopTokenBudget"
-	// SettingAgentLoopRepeatLimit cancels a run after this many consecutive
-	// identical tool calls (0 disables; unset keeps 5).
-	SettingAgentLoopRepeatLimit = "agent.loopRepeatLimit"
-	// SettingAgentLoopNoDiffCalls cancels a run after this many consecutive
-	// non-mutating tool calls (0 disables; unset keeps 40).
-	SettingAgentLoopNoDiffCalls = "agent.loopNoDiffCalls"
 	// SettingAgentApprovalTimeoutSeconds bounds how long an approval request
 	// from an AUTOMATION-origin run may wait before it is automatically denied
 	// (recorded and notified). 0 or unset disables the timeout — the default,
-	// so interactive approvals keep waiting exactly as before; the run-level
-	// wall-clock breaker (SettingAgentLoopWallClockSeconds) still applies.
+	// so interactive approvals keep waiting exactly as before. There is NO
+	// run-level time fallback: loop protection and every tool-loop budget were
+	// removed (v0.2.50 user ruling — tools run freely), so an unattended
+	// automation run that must not park forever should set this timeout.
 	// Personal-scale ruling (2026-11 audit RG-04): unattended runs get an
 	// opt-in per-approval deny instead of a whole-run cancel, humans get no
 	// added friction.
 	SettingAgentApprovalTimeoutSeconds = "agent.approvalTimeoutSeconds"
-	SettingToolkitShellTimeoutSeconds  = "toolkit.shellTimeoutSeconds"
+	// SettingToolkitShellTimeoutSeconds bounds one shell tool execution in
+	// seconds (5–600; unset keeps the toolkit Config's timeout, 30s by
+	// default). The toolkit resolves it at activation, so a change applies
+	// after a restart.
+	SettingToolkitShellTimeoutSeconds = "toolkit.shellTimeoutSeconds"
 	// SettingToolkitShellMaxOutputKiB caps one shell tool result in KiB
 	// (0 = the tool default, 1–4096 otherwise; unset keeps the toolkit
 	// Config's maxOutputBytes). The toolkit resolves it at activation, so a

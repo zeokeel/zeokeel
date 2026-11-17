@@ -2308,17 +2308,35 @@ func messageActionTarget(st *state, message contracts.ChatMessage) (chat contrac
 func buildMessageError(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	st *state, message contracts.ChatMessage) {
 	kind := strings.ToLower(strings.TrimSpace(message.ErrorKind))
-	// The iteration budget running out is not a provider failure: explain the
-	// limit and offer the setting that raises it instead of making rig's English
-	// diagnostic the headline.
+	// The iteration cap running out is not a provider failure: explain the
+	// limit instead of making rig's English diagnostic the headline. The cap is
+	// assembly-level product definition (unlimited by default) — there is no
+	// user setting that raises it (v0.2.50 removal), so the way forward is a
+	// new conversation, not a settings action.
 	if kind == contracts.MessageErrorKindIterations {
 		buildRecoveryLine(c, t, st, runtime,
 			st.tr("已达最大迭代次数", "Maximum iterations reached"),
-			recoveryKindModel, strings.TrimSpace(message.Error))
+			"", strings.TrimSpace(message.Error))
 		design.Apply(ui.Text(c, st.tr(
-			"本轮已达到工具/模型迭代上限。建议新建会话继续，或在设置 → 模型中提高最大迭代次数。",
-			"This turn hit the tool/model iteration limit. Start a new conversation to continue, or raise the iteration limit in Settings → Model.")),
+			"本轮已达到工具/模型迭代上限。建议新建会话继续。",
+			"This turn hit the tool/model iteration limit. Start a new conversation to continue.")),
 			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(3)
+		return
+	}
+	// Historical compatibility (v0.2.50): loop protection was removed, so no
+	// live run produces kind loop anymore. A restored run_end persisted by an
+	// older version's breaker gets one neutral historical note — no trip-budget
+	// parsing, no blame copy — with the raw durable error kept as muted
+	// diagnostic detail so no information is lost.
+	if kind == contracts.MessageErrorKindLoop {
+		design.Apply(ui.Text(c, st.tr(
+			"该回合曾被旧版循环保护停止",
+			"This turn was stopped by the legacy loop guard (removed in this version)")),
+			t.TextMuted(design.TypeXS)).MaxLines(2)
+		if strings.TrimSpace(message.Error) != "" {
+			design.Apply(ui.Text(c, message.Error), t.Font(design.TypeXXS)).
+				TextColor(t.LabelTertiary).MaxLines(3)
+		}
 		return
 	}
 	// An OS-sandbox denial is a permission-mode question, not a provider
@@ -2347,8 +2365,6 @@ func buildMessageError(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 		heading = st.tr("请求超时", "Request timed out")
 	case contracts.MessageErrorKindContext:
 		heading, reason = st.tr("上下文超限", "Context limit reached"), st.tr("请压缩或新建会话", "compact or start a new conversation")
-	case contracts.MessageErrorKindLoop:
-		heading, reason = st.tr("循环保护已触发", "Loop guard triggered"), st.tr("已停止重复或无进展的工具循环", "stopped a repeated or no-progress tool loop")
 	case contracts.MessageErrorKindCancelled:
 		heading = st.tr("已取消", "Cancelled")
 	}

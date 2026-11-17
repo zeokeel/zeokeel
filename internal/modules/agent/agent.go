@@ -43,19 +43,17 @@ import (
 	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
-// effectiveMaxIterations maps the product's "0 means unlimited" setting to the
-// cap passed to Rig (which otherwise falls back to its own 20-round default).
+// effectiveMaxIterations maps the product's assembly-level round cap onto the
+// value passed to Rig. Rig's own default is unlimited (0) since v0.19.0, and a
+// non-positive value keeps that meaning, so no sentinel cap is needed. The
+// round cap is product definition, not a user setting: there is no settings
+// knob for it (v0.2.50 removal), and no loop guard stops a run.
 func effectiveMaxIterations(configured int) int {
-	if configured <= 0 {
-		return agentIterationLimitUnbounded
+	if configured < 0 {
+		return 0
 	}
 	return configured
 }
-
-// agentIterationLimitUnbounded is passed to Rig when the product's iteration
-// limit is 0 ("unlimited"): Rig treats 0 as its own 20-round default, so the
-// run loop needs a cap it will never reach in practice.
-const agentIterationLimitUnbounded = 1_000_000
 
 const (
 	// ModuleID is the stable module identity used by assembly documents.
@@ -134,7 +132,8 @@ type Config struct {
 	// SystemPrompt is the default system prompt.
 	SystemPrompt string `json:"systemPrompt"`
 	// MaxIterations bounds the model/tool rounds per run; 0 (the default)
-	// means no practical limit.
+	// means unlimited. This is assembly-level product definition, not a user
+	// configuration knob — no settings row overrides it (v0.2.50 removal).
 	MaxIterations int `json:"maxIterations"`
 	// ContextBudget is the estimated prompt token budget (0 = unlimited).
 	ContextBudget int `json:"contextBudget"`
@@ -1338,7 +1337,7 @@ func (s *service) configForModelLocked(model string, catalog modelCatalogState) 
 		BaseURL:         baseURL,
 		APIKey:          apiKey,
 		SystemPrompt:    systemPrompt,
-		MaxIterations:   s.settingInt(contracts.SettingsChatMaxIterations, s.cfg.MaxIterations, 1),
+		MaxIterations:   s.cfg.MaxIterations,
 		ContextBudget:   s.settingInt(contracts.SettingsChatContextBudget, s.cfg.ContextBudget, 0),
 		ReasoningEffort: sanitizeReasoningEffort(s.cfg.ReasoningEffort),
 	}
@@ -2620,17 +2619,12 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// The product's default is unlimited; Rig treats 0 as its built-in 20-round
 	// default, so a 0 limit is passed as an effectively unreachable cap.
 	maxIterations := effectiveMaxIterations(cfg.MaxIterations)
-	// Loop hygiene: one per-run repeat guard appends a DSH-style advisory
-	// reminder after the Nth consecutive identical tool call without blocking
-	// the call (see loop_guard.go), and the hard loop breaker (loop_breaker.go)
-	// cancels the run on wall-clock/token/repeat/no-diff budgets. The
-	// workspace-root wrapper is outermost so every tool call sees the session's
-	// root even when another workspace is current.
-	loopCtx, loopCancel := context.WithCancel(ctx)
-	defer loopCancel()
-	loopGuard := newRunLoopGuard(loopCancel, s.loopGuardConfig())
-	loopGuard.start()
-	runTools := withLoopGuard(withWorkspaceRoot(withAgentScope(withRepeatGuard(tools, newRepeatToolGuard()), sessionID, origin), workspaceRoot), loopGuard)
+	// Tools run freely (user ruling, v0.2.50): loop protection and every
+	// tool-loop configuration surface are removed — no hard breaker cancels a
+	// run and no advisory reminder rides a tool result. The workspace-root
+	// wrapper is outermost so every tool call sees the session's root even when
+	// another workspace is current.
+	runTools := withWorkspaceRoot(withAgentScope(tools, sessionID, origin), workspaceRoot)
 	spec := rig.AgentSpec{
 		Provider:      provider,
 		Model:         cfg.Model,
@@ -2674,12 +2668,9 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// the model actually saw (MessageUsage.ContextTokens).
 	usage := &turnUsage{model: cfg.Model}
 	emit := func(event rig.Event) {
-		if event.Type == rig.EventUsage && event.Usage != nil {
-			loopGuard.observeUsage(event.Usage.TotalTokens)
-		}
 		s.handleEvent(ctx, sessionID, workspaceRoot, event, usage)
 	}
-	result, runErr := runner.Run(loopCtx, rig.RunRequest{
+	result, runErr := runner.Run(ctx, rig.RunRequest{
 		SessionID: sessionID,
 		Input:     input,
 		Emit:      emit,
@@ -2687,13 +2678,7 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// Context overflow recovery (DSH): compact once and retry the same turn
 	// once. The user message is already durable, so no new input is appended
 	// and executed tools are not replayed.
-	loopGuard.stop()
-	if loopGuard.tripped() && ctx.Err() == nil {
-		// The guard's child context was canceled, not the user's context: report
-		// the concrete budget instead of a generic "context canceled".
-		runErr = loopGuard.err()
-	}
-	if runErr != nil && ctx.Err() == nil && !loopGuard.tripped() && isContextOverflowError(runErr) {
+	if runErr != nil && ctx.Err() == nil && isContextOverflowError(runErr) {
 		if retryResult, retryErr, retried := s.retryContextOverflow(ctx, sessionID, cfg, spec, provider, emit, usage, result); retried {
 			result, runErr = retryResult, retryErr
 		}

@@ -1,5 +1,43 @@
 # Verification log (final)
 
+## 0.2.50 — 2026-11-17 (循环保护与工具循环配置面移除)
+
+```
+$ gofmt -l internal cmd
+(empty)
+$ go build ./...
+OK
+$ go vet ./...
+OK
+$ go tool mygo vet .
+OK
+$ go test ./internal/modules/agent/... ./internal/ui/session/... ./internal/ui/settings/... ./internal/contracts/... -count=1
+all ok
+$ go test -race ./internal/modules/agent/... -count=1
+ok (no data race)
+$ go test ./... -count=1
+51 packages ok, 0 FAIL
+$ go run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./internal/... ./cmd/...
+321 files, 72 violations (all baseline): 0 error, 0 warn, 0 new, 0 blocking
+$ bash scripts/design-check.sh
+6 passed, 0 failed: PASS
+$ go test ./audit/probes/ui/... ./audit/probes/ext/... -count=1
+ok (probesui / probesext，harness 无需改动)
+```
+
+用户最终裁决（取代波H「默认全关+opt-in」规格）：「循环保护…这个不应该设置，让工具自由发挥」＋「不允许自己设置，默认就不允许配置工具循环」＋「把 rig 改了，默认不限制工具调用次数。直接改 sdk」。产品侧本波彻底移除：
+
+- **删硬 breaker**：`agent/loop_breaker.go` 整文件＋`loop_breaker_test.go`；agent.go 全部接线（runLoopGuard 装配/start/trip/observeUsage/stop、loopCtx 子 context、withLoopGuard 工具包装）。`finishWithReason` 通用能力保留（finish/run 共用，读码确证其内部无 loop 专用分支；错误分类走 ClassifyError）。
+- **删 advisory nudge**：`agent/loop_guard.go` 整文件＋`loop_guard_test.go`＋withRepeatGuard 接线（nudge 会诱导模型自停，一并移除）。工具链只剩 workspace/session scope 包装（NoticeSource 能力由其转发，job 通知缝测试原样通过）。
+- **删配置面**：contracts 四键 `agent.loopWallClockSeconds/loopTokenBudget/loopRepeatLimit/loopNoDiffCalls`＋NormalizeLoop* 助手＋CapabilityMaxLoop* 上限常量；`chat.maxIterations` 用户旋钮（contracts 键、模型页高级选项输入/草稿/校验/保存/摘要/搜索项与关键词、agent 读取点）。设置页「循环预算」节整体删除（四输入＋state/load/rows/restore/dirty/save/keywords）。`agent.Config.MaxIterations` 保留为**装配级产品定义**（0=unlimited，注释更新；装配 JSON 均未设值→默认不限），委派子代理沿用同一装配预算。**审批超时保留**（属审批非工具循环），description 与 approvals RG-04 注释改为「无 run 级兜底，无人值守建议审批超时」。
+- **kind loop 历史兼容**：breaker 删除后无新生产者；`contracts.MessageErrorKindLoop` 保留供旧持久化 run_end 恢复（ClassifyError 仍识别旧 "loop guard: …" 文本）；session 对 kind loop 显示历史中性文案 zh「该回合曾被旧版循环保护停止」/ en "This turn was stopped by the legacy loop guard (removed in this version)"，不再解析 trip（`LoopTrip*` 常量、`LoopTripBudget`、`loopTripReason` 删除），原始错误文本保留为 muted 诊断。iterations 文案同步去掉已删旋钮引用（改为「建议新建会话继续」，不再提供「打开模型设置」动作）。
+
+TDD 红→绿：RED——`TestDefaultRunIdenticalCallsCompleteWithoutNudge` 实测工具结果携带 gentle nudge（"You are repeating the exact same tool call…"）；`TestChatMaxIterationsRowIgnored` 实测旧行 chat.maxIterations=4 改变有效配置；`TestNoToolLoopUserSettingsKeys` 实测键表仍定义 5 个用户键；session 帧测试实测旧文案「循环保护已触发：达到…」；settings 帧测试实测「循环预算」节与「最大迭代次数」输入仍在。GREEN——默认装配下 8 次完全相同工具调用＋45 次只读调用全部执行并正常完成（逐次计数断言、无取消/无错误 kind、任何模型请求的工具结果与 transcript 摘要均无 nudge/breaker 文本）；设置页/键表/搜索词汇不存在任何 loop*/maxIterations 用户键（负向断言），旧存储行被忽略且保存不改写。测试变更：删 `contracts/loopbudget_test.go`、`settings/loop_budgets_test.go`；新增 `agent/tool_freedom_test.go`、`contracts/loopkeys_removed_test.go`、`settings/loop_config_removed_test.go`＋`loop_config_removed_internal_test.go`；改写 `session/loop_error_copy_test.go`（5 种旧错误文本×中英历史文案帧测试）、`settings/runtime_settings_test.go`（仅上下文预算）、`agent/runtime_config_test.go`（负向旋钮断言）；`lifecycle_fixes_test.go` 的 iterations-kind 测试改用装配 Config{MaxIterations:1}。
+
+遗留（Lead）：rig v0.19.0 发版（并行子代理）、go.mod 升级、`agentIterationLimitUnbounded` 哨兵清理——本波不碰 rig/go.mod/哨兵（现仍 v0.18.1＋1_000_000 不可达 cap 映射，行为等价 unlimited）。CHANGELOG 由 Lead 发版时撰写。
+
+视觉证据（人工检查亮/暗）：`.cache/wave-h2-shots/behavior-limits-no-loop-light.png` / `-dark.png`（无循环预算节、审批超时保留、旧行被忽略）、`model-advanced-no-iterations-light.png`（高级选项仅上下文预算）、`session-legacy-loop-note-zh.png` / `-zh-dark.png` / `-en.png`（历史中性文案＋iterations 新文案）。
+
 ## 0.2.47 — 2026-11-16 (MCP 稳定刷新、Headers 与技能管理)
 
 ```

@@ -2,10 +2,10 @@ package approvals
 
 // RG-04 (2026-11 audit, personal-scale ruling): approvals get an OPT-IN
 // timeout for automation-origin requests — agent.approvalTimeoutSeconds,
-// default 0 = off (interactive approvals keep waiting exactly as before; the
-// run-level wall-clock breaker still backstops every run). When configured,
-// an automation request that nobody answers is auto-denied, recorded and
-// notified instead of parking until the whole run is cancelled.
+// default 0 = off (interactive approvals keep waiting exactly as before; there
+// is no run-level time fallback — loop protection was removed in v0.2.50).
+// When configured, an automation request that nobody answers is auto-denied,
+// recorded and notified instead of parking until the whole run is cancelled.
 
 import (
 	"context"

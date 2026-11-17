@@ -379,22 +379,18 @@ type moduleState struct {
 	// replace text under the caret.
 	promptInput ui.Handle
 
-	// Runtime limit drafts (persisted by the page's footer Save) plus their
-	// per-field inline validation messages. An empty numeric draft means "use
-	// the module config", so saving it clears the settings row; a value persists
-	// the row.
-	maxIterations     string
+	// Runtime limit draft (persisted by the page's footer Save) plus its
+	// inline validation message. An empty numeric draft means "use the module
+	// config", so saving it clears the settings row; a value persists the row.
+	// The iteration cap has no draft: it is assembly-level product definition,
+	// not a user knob (the chat.maxIterations row was removed in v0.2.50).
 	contextBudget     string
-	iterationsErr     string
 	contextBudgetErr  string
-	seenMaxIterations string
 	seenContextBudget string
-	iterationsInput   ui.Handle
 	budgetInput       ui.Handle
-	// The module-config limits are display-only defaults: they name the
-	// fallback in the empty draft's placeholder/description and the page
-	// summary, but never become drafts or settings rows on their own.
-	moduleMaxIterations int
+	// The module-config limit is a display-only default: it names the fallback
+	// in the empty draft's placeholder/description and the page summary, but
+	// never becomes a draft or settings row on its own.
 	moduleContextBudget int
 }
 
@@ -1046,16 +1042,9 @@ func diagnosticValue(locale contracts.LocaleService, value string) string {
 
 // runtimeSummary is the one-line effective runtime state shown under the
 // collapsed 高级选项 disclosure. An empty draft names the module-config fallback
-// instead of a concrete value.
+// instead of a concrete value. Iterations are not summarized: the cap is
+// assembly-level (unlimited by default) and has no user knob.
 func runtimeSummary(state *moduleState, locale contracts.LocaleService) string {
-	iterations := strings.TrimSpace(state.maxIterations)
-	if iterations == "" {
-		if state.moduleMaxIterations > 0 {
-			iterations = fmt.Sprintf(localized(locale, "模块默认 %d", "module default %d"), state.moduleMaxIterations)
-		} else {
-			iterations = localized(locale, "不限制", "unlimited")
-		}
-	}
 	budget := strings.TrimSpace(state.contextBudget)
 	if budget == "" {
 		if state.moduleContextBudget != 0 {
@@ -1064,8 +1053,7 @@ func runtimeSummary(state *moduleState, locale contracts.LocaleService) string {
 			budget = localized(locale, "默认", "default")
 		}
 	}
-	return localized(locale, "最大迭代 ", "Max iterations ") + iterations +
-		localized(locale, " · 上下文预算 ", " · context budget ") + budget
+	return localized(locale, "上下文预算 ", "Context budget ") + budget
 }
 
 // saveModelPage is the model page's pinned footer action: it validates the
@@ -1162,14 +1150,14 @@ func (st *moduleState) seed(cfg contracts.ChatConfig) {
 	st.seenSystemPrompt = cfg.SystemPrompt
 }
 
-// runtimeRows reads the explicit runtime-limit settings rows: an empty value
-// means the row is absent, so the module config applies.
-func runtimeRows(store contracts.SettingsService) (iterations, contextBudget string) {
+// runtimeRows reads the explicit runtime-limit settings row: an empty value
+// means the row is absent, so the module config applies. The iteration cap is
+// not a settings row (assembly-level only, v0.2.50 removal).
+func runtimeRows(store contracts.SettingsService) (contextBudget string) {
 	if store == nil {
-		return "", ""
+		return ""
 	}
-	return strings.TrimSpace(store.Get(contracts.SettingsChatMaxIterations, "")),
-		strings.TrimSpace(store.Get(contracts.SettingsChatContextBudget, ""))
+	return strings.TrimSpace(store.Get(contracts.SettingsChatContextBudget, ""))
 }
 
 // runtimeDefaultHint names the module-config fallback of an empty runtime draft:
@@ -1184,36 +1172,27 @@ func runtimeDefaultHint(locale contracts.LocaleService, moduleDefault int, fallb
 	return localized(locale, fallbackZh, fallbackEn)
 }
 
-// seedRuntime replaces the runtime-limit drafts and their persisted snapshot.
-// Only the explicit settings rows seed the drafts: the module-config limits are
-// display-only fallbacks named by the empty draft's placeholder/description, so
-// they never seed the drafts. An empty draft therefore keeps the module config
+// seedRuntime replaces the runtime-limit draft and its persisted snapshot.
+// Only the explicit settings row seeds the draft: the module-config limit is a
+// display-only fallback named by the empty draft's placeholder/description, so
+// it never seeds the draft. An empty draft therefore keeps the module config
 // applying until the user types a concrete value.
 func (st *moduleState) seedRuntime(chat contracts.ChatService, store contracts.SettingsService) {
 	var cfg contracts.ChatConfig
 	if chat != nil {
 		cfg = chat.Config()
 	}
-	st.moduleMaxIterations = cfg.MaxIterations
 	st.moduleContextBudget = cfg.ContextBudget
-	st.maxIterations, st.contextBudget = runtimeRows(store)
-	st.seenMaxIterations, st.seenContextBudget = st.maxIterations, st.contextBudget
-	st.iterationsErr, st.contextBudgetErr = "", ""
+	st.contextBudget = runtimeRows(store)
+	st.seenContextBudget = st.contextBudget
+	st.contextBudgetErr = ""
 }
 
-// validateRuntimeDrafts parses the numeric drafts and fills their inline
-// errors. It reports whether both drafts are valid and can be saved. An empty
-// draft is valid: it means "use the module config".
+// validateRuntimeDrafts parses the numeric draft and fills its inline error.
+// It reports whether the draft is valid and can be saved. An empty draft is
+// valid: it means "use the module config".
 func validateRuntimeDrafts(st *moduleState, locale contracts.LocaleService) bool {
-	st.iterationsErr, st.contextBudgetErr = "", ""
-	if raw := strings.TrimSpace(st.maxIterations); raw != "" {
-		value, err := strconv.Atoi(raw)
-		if err != nil || value < 1 {
-			st.iterationsErr = localized(locale,
-				"请输入大于 0 的整数；留空使用模块默认值。",
-				"Enter an integer greater than 0; leave blank to use the module default.")
-		}
-	}
+	st.contextBudgetErr = ""
 	if raw := strings.TrimSpace(st.contextBudget); raw != "" {
 		value, err := strconv.Atoi(raw)
 		if err != nil || value < 0 {
@@ -1222,7 +1201,7 @@ func validateRuntimeDrafts(st *moduleState, locale contracts.LocaleService) bool
 				"Enter an integer greater than or equal to 0; leave blank to use the module default.")
 		}
 	}
-	return st.iterationsErr == "" && st.contextBudgetErr == ""
+	return st.contextBudgetErr == ""
 }
 
 // syncFromConfig refreshes the explicit-save drafts when the persisted
@@ -1233,18 +1212,17 @@ func validateRuntimeDrafts(st *moduleState, locale contracts.LocaleService) bool
 // it always renders the persisted row.
 func (st *moduleState) syncFromConfig(c *ui.Context, chat contracts.ChatService, store contracts.SettingsService) {
 	cfg := effectiveChatConfig(chat, store)
-	iterations, contextBudget := runtimeRows(store)
+	contextBudget := runtimeRows(store)
 	moduleCfg := contracts.ChatConfig{}
 	if chat != nil {
 		moduleCfg = chat.Config()
 	}
 	if cfg.SystemPrompt == st.seenSystemPrompt &&
-		iterations == st.seenMaxIterations && contextBudget == st.seenContextBudget &&
-		moduleCfg.MaxIterations == st.moduleMaxIterations &&
+		contextBudget == st.seenContextBudget &&
 		moduleCfg.ContextBudget == st.moduleContextBudget {
 		return
 	}
-	if st.promptInput.Focused(c) || st.iterationsInput.Focused(c) || st.budgetInput.Focused(c) {
+	if st.promptInput.Focused(c) || st.budgetInput.Focused(c) {
 		return
 	}
 	st.seed(cfg)
@@ -1266,7 +1244,6 @@ func (st *moduleState) discardDrafts(chat contracts.ChatService, store contracts
 // the page.
 func (st *moduleState) dirty() bool {
 	return st.systemPrompt != st.seenSystemPrompt ||
-		st.maxIterations != st.seenMaxIterations ||
 		st.contextBudget != st.seenContextBudget
 }
 
@@ -1404,51 +1381,31 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 					"追加到每次对话的系统提示前；留空使用服务商默认。",
 					"Prepended to every conversation's system prompt; empty uses the provider default."))
 			})
-			// Runtime limits are low-frequency knobs: a native disclosure keeps the
-			// section short. Both drafts save with the page footer, and an empty
-			// draft means "use the module config" (no settings row).
+			// The runtime limit is a low-frequency knob: a native disclosure
+			// keeps the section short. The draft saves with the page footer, and
+			// an empty draft means "use the module config" (no settings row).
+			// Iterations have no knob: the cap is assembly-level (v0.2.50).
 			ui.Divider(c)
 			ui.Collapsible(c, localized(locale, "高级选项", "Advanced options"), &state.runtimeOpen, func() {
-				ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
-					search.regionGrow(c, "model.max-iterations", func(c *ui.Context) {
-						iterationsHint := runtimeDefaultHint(locale, state.moduleMaxIterations,
-							"留空则不限制", "Leave blank for no limit")
-						iterationsLabel := localized(locale, "最大迭代次数", "Max iterations")
-						ui.Field(c, iterationsLabel, func() {
-							input := ui.TextInput(c, &state.maxIterations).
-								Label(inputLabel(locale, iterationsLabel)).
-								Placeholder(iterationsHint).
-								Bind(&state.iterationsInput).FillWidth()
-							if input.Changed() {
-								clearSavedStatus(state)
-							}
-						}).Description(localized(locale,
-							"模型/工具轮数上限；", "Model/tool rounds per run; ") +
-							iterationsHint + localized(locale, "。", "."))
-						if state.iterationsErr != "" {
-							uikit.ErrorLine(c, state.iterationsErr)
+				search.region(c, "model.context-budget", func(c *ui.Context) {
+					budgetHint := runtimeDefaultHint(locale, state.moduleContextBudget,
+						"留空使用模块默认（0 = 不自动压缩）",
+						"Leave blank for the module default (0 = no automatic compaction)")
+					budgetLabel := localized(locale, "上下文预算", "Context budget")
+					ui.Field(c, budgetLabel, func() {
+						input := ui.TextInput(c, &state.contextBudget).
+							Label(inputLabel(locale, budgetLabel)).
+							Placeholder(budgetHint).
+							Bind(&state.budgetInput).FillWidth()
+						if input.Changed() {
+							clearSavedStatus(state)
 						}
-					})
-					search.regionGrow(c, "model.context-budget", func(c *ui.Context) {
-						budgetHint := runtimeDefaultHint(locale, state.moduleContextBudget,
-							"留空使用模块默认（0 = 不自动压缩）",
-							"Leave blank for the module default (0 = no automatic compaction)")
-						budgetLabel := localized(locale, "上下文预算", "Context budget")
-						ui.Field(c, budgetLabel, func() {
-							input := ui.TextInput(c, &state.contextBudget).
-								Label(inputLabel(locale, budgetLabel)).
-								Placeholder(budgetHint).
-								Bind(&state.budgetInput).FillWidth()
-							if input.Changed() {
-								clearSavedStatus(state)
-							}
-						}).Description(localized(locale,
-							"自动压缩的 prompt token 预算；", "Prompt-token budget for automatic compaction; ") +
-							budgetHint + localized(locale, "。", "."))
-						if state.contextBudgetErr != "" {
-							uikit.ErrorLine(c, state.contextBudgetErr)
-						}
-					})
+					}).Description(localized(locale,
+						"自动压缩的 prompt token 预算；", "Prompt-token budget for automatic compaction; ") +
+						budgetHint + localized(locale, "。", "."))
+					if state.contextBudgetErr != "" {
+						uikit.ErrorLine(c, state.contextBudgetErr)
+					}
 				})
 			})
 			if !state.runtimeOpen {
@@ -1646,7 +1603,7 @@ func applyDesktopSetting(state *appearanceState, store contracts.SettingsService
 }
 
 // save writes the page's explicit-save drafts to the settings store: the system
-// prompt and the optional runtime limits. The model list (including the default
+// prompt and the optional context budget. The model list (including the default
 // model mirror) is persisted by the list's own actions instead, because it
 // applies immediately. An empty runtime draft writes an empty row, which means
 // "use the module config"; a value persists that row (an explicit "0" budget
@@ -1656,18 +1613,13 @@ func save(state *moduleState, store contracts.SettingsService) error {
 	if err := store.Set(contracts.SettingsChatSystemPrompt, state.systemPrompt); err != nil {
 		return fmt.Errorf("system prompt: %w", err)
 	}
-	state.maxIterations = strings.TrimSpace(state.maxIterations)
 	state.contextBudget = strings.TrimSpace(state.contextBudget)
-	if err := store.Set(contracts.SettingsChatMaxIterations, state.maxIterations); err != nil {
-		return fmt.Errorf("max iterations: %w", err)
-	}
 	if err := store.Set(contracts.SettingsChatContextBudget, state.contextBudget); err != nil {
 		return fmt.Errorf("context budget: %w", err)
 	}
 	state.seenSystemPrompt = state.systemPrompt
-	state.seenMaxIterations = state.maxIterations
 	state.seenContextBudget = state.contextBudget
-	state.iterationsErr, state.contextBudgetErr = "", ""
+	state.contextBudgetErr = ""
 	return nil
 }
 

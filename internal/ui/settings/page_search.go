@@ -63,12 +63,7 @@ func (s *pageSearch) region(c *ui.Context, anchorKey string, build func(*ui.Cont
 	s.regionElement(c, anchorKey, ui.Column(c).FillWidth(), build)
 }
 
-// regionGrow is region for a region that sits in a Row and keeps its share of
-// the row (the model page's runtime-limit fields).
-func (s *pageSearch) regionGrow(c *ui.Context, anchorKey string, build func(*ui.Context)) {
-	s.regionElement(c, anchorKey, ui.Column(c).FillWidth().Grow(1), build)
-}
-
+// regionElement applies the search highlight to one anchored region.
 func (s *pageSearch) regionElement(c *ui.Context, anchorKey string, element ui.Element, build func(*ui.Context)) {
 	if s.targetedAt(anchorKey) && c.Now().Before(s.until) {
 		t := design.Of(c)
@@ -91,11 +86,12 @@ func (s *pageSearch) regionElement(c *ui.Context, anchorKey string, element ui.E
 // language.
 
 // modelPageKeywords covers the model configuration page: connections, keys,
-// the context budget/compaction and the per-model pricing.
+// the context budget/compaction and the per-model pricing. Iterations are not
+// searchable: the cap is assembly-level and has no user knob (v0.2.50).
 func modelPageKeywords() []string {
 	return []string{"模型", "model", "密钥", "api key", "apikey", "base url", "地址", "端点", "服务商",
 		"provider", "上下文", "context", "上下文预算", "budget", "压缩", "compact", "compaction",
-		"最大迭代", "iterations", "提示词", "prompt", "系统提示词", "价格", "price", "定价", "成本", "cost",
+		"提示词", "prompt", "系统提示词", "价格", "price", "定价", "成本", "cost",
 		"计费", "billing", "温度", "temperature", "top p", "思考", "推理", "reasoning", "测试连接", "目录", "catalog",
 		"生成参数"}
 }
@@ -106,8 +102,6 @@ func modelPageSearchItems(locale contracts.LocaleService) []contracts.SettingsSe
 		{ID: "context-budget", Label: localized(locale, "上下文预算", "Context budget"), AnchorKey: "model.context-budget",
 			Keywords: []string{"压缩", "compact", "compaction", "自动压缩", "上下文", "context",
 				"预算", "budget", "token", "prompt token"}},
-		{ID: "max-iterations", Label: localized(locale, "最大迭代次数", "Max iterations"), AnchorKey: "model.max-iterations",
-			Keywords: []string{"迭代", "iterations", "轮数", "rounds", "上限", "limit"}},
 		{ID: "system-prompt", Label: localized(locale, "系统提示词", "System prompt"), AnchorKey: "model.system-prompt",
 			Keywords: []string{"提示词", "prompt", "系统提示", "system prompt", "instruction"}},
 		{ID: "pricing", Label: localized(locale, "模型价格", "Model pricing"), AnchorKey: "model.catalog",

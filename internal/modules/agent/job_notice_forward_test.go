@@ -1,11 +1,11 @@
 package agent
 
 // End-to-end test for the background-job completion notification seam: the
-// toolkit proxies implement rig.NoticeSource, the run's repeat-guard wrapper
-// forwards that capability, and Rig appends the drained notices as a user
-// message before the next model request. This is what makes Rig's job prompt
-// ("You are notified in-session when a job finishes", copied verbatim from
-// DSH) true; before this seam the notices were queued and never delivered.
+// toolkit proxies implement rig.NoticeSource, the run's workspace/session scope
+// wrappers forward that capability, and Rig appends the drained notices as a
+// user message before the next model request. This is what makes Rig's job
+// prompt ("You are notified in-session when a job finishes", copied verbatim
+// from DSH) true; before this seam the notices were queued and never delivered.
 
 import (
 	"context"

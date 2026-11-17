@@ -50,10 +50,9 @@ const (
 
 // delegatedIterationBudget is the explicit model/tool round budget every
 // delegated child (sync subagent, team member, workflow step, ralph round)
-// receives. The product's "0 means unlimited" main-run policy maps to a cap Rig
-// will never reach, so a child is not silently limited to Rig's 20-round default
-// (the old product behavior, caused by passing cfg.MaxIterations=0 through the
-// parent spec). A configured limit applies to children too.
+// receives. Rig v0.19.0 defaults to unlimited rounds (0), so the product's
+// "0 means unlimited" main-run policy passes through unchanged and a child is
+// not silently limited. A configured limit applies to children too.
 func delegatedIterationBudget(cfg contracts.ChatConfig) int {
 	return effectiveMaxIterations(cfg.MaxIterations)
 }

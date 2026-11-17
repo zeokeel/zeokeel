@@ -5,8 +5,10 @@ package session_test
 //
 //   - ChatMessage.Truncated: the provider cut the answer at the output-token
 //     limit; the last assistant reply says so (foldable explanation).
-//   - MessageErrorKindIterations: the turn hit chat.maxIterations; the localized
-//     heading points at the limit instead of dumping rig's English diagnostic.
+//   - MessageErrorKindIterations: the turn hit the assembly-level iteration
+//     cap; the localized heading points at the limit instead of dumping rig's
+//     English diagnostic. There is no user knob for the cap (v0.2.50 removal),
+//     so the guidance is a new conversation, not a settings action.
 //   - ErrChatCompacting / ErrCompactConflict: a send (or /compact) while the
 //     history is being compacted is explained in Chinese.
 
@@ -72,8 +74,9 @@ func TestTruncatedHintOnlyOnLastReply(t *testing.T) {
 }
 
 // TestIterationsErrorIsLocalized covers MessageErrorKindIterations: the failed
-// turn explains the iteration budget with a way forward, and rig's English
-// diagnostic is not the visible headline.
+// turn explains the iteration cap with a way forward, and rig's English
+// diagnostic is not the visible headline. The cap has no user setting anymore,
+// so no "raise the limit" guidance or model-settings action is offered.
 func TestIterationsErrorIsLocalized(t *testing.T) {
 	chat := newFakeChat()
 	failed := loopStateMessage("m2", nil)
@@ -90,12 +93,9 @@ func TestIterationsErrorIsLocalized(t *testing.T) {
 	h := newHarness(t, chat)
 	tester := h.tester()
 
-	h.assertTexts(tester, "已达最大迭代次数", "提高最大迭代次数", "打开模型设置")
-	h.assertNoTexts(tester, "发送失败：agent: max iterations")
-	h.clickExact(tester, "打开模型设置")
-	if !h.ui.Navigator().SettingsOpen() {
-		t.Fatal("the iterations suggestion did not open the model settings")
-	}
+	h.assertTexts(tester, "已达最大迭代次数", "建议新建会话继续")
+	h.assertNoTexts(tester, "发送失败：agent: max iterations",
+		"提高最大迭代次数", "打开模型设置")
 }
 
 // TestSendWhileCompactingIsLocalized covers ErrChatCompacting on the send path:

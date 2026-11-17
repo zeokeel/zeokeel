@@ -874,12 +874,13 @@ func TestFinishReasonStopIsNotTruncated(t *testing.T) {
 	_ = store
 }
 
-// --- LOOP-P3-3: the iteration budget has a dedicated error kind ------------
+// --- LOOP-P3-3: the iteration cap has a dedicated error kind ---------------
+// The cap is assembly-level product definition (Config.MaxIterations); the
+// chat.maxIterations user knob was removed in v0.2.50.
 
 func TestIterationCapUsesDedicatedErrorKind(t *testing.T) {
-	settings := newFakeSettings(map[string]string{contracts.SettingsChatMaxIterations: "1"})
 	store := newFakeStore()
-	svc := fixService(t, Config{}, rigtools.NewRegistry(&echoTool{}), settings, fakeApprovals{}, store)
+	svc := fixService(t, Config{MaxIterations: 1}, rigtools.NewRegistry(&echoTool{}), newFakeSettings(nil), fakeApprovals{}, store)
 	svc.providerFactory = func(contracts.ChatConfig) (rig.Provider, error) { return &fixAlwaysToolCallsProvider{}, nil }
 	sessionID, err := svc.NewSession("")
 	if err != nil {
