@@ -368,7 +368,9 @@ func buildModelCatalogSection(c *ui.Context, runtime contracts.UIRuntime, store 
 	t := design.Of(c)
 	models, ok := catalogModels(store)
 	ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
-		uikit.SectionAction(c, localized(locale, "模型列表（即时生效）", "Models (apply immediately)"),
+		// The title names the content only; the apply-immediately behavior note
+		// is the section description (same rule as the prompt/runtime section).
+		uikit.SectionAction(c, localized(locale, "模型列表", "Models"),
 			func(*ui.Context) {
 				// Adding a model is a section action, not a page primary: the page's
 				// one filled accent button is the footer's Save (R12).
@@ -378,6 +380,10 @@ func buildModelCatalogSection(c *ui.Context, runtime contracts.UIRuntime, store 
 					c.Invalidate()
 				}
 			}, func(*ui.Context) {
+				design.Apply(ui.Text(c, localized(locale,
+					"列表增删改与默认模型即时生效。",
+					"List edits and the default model apply immediately.")),
+					t.TextMuted(design.TypeXXS)).MaxLines(2)
 				if !ok {
 					uikit.ErrorLine(c, localized(locale,
 						"模型配置无法解析；添加模型会重写该配置。",

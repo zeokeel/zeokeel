@@ -14,13 +14,20 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
+// textScaleChat carries ASCII message bodies on purpose: the assertions measure
+// GLYPH width, and glyph advance is only comparable across hosts when the face
+// covers the script. CI's runner has no CJK face, so a CJK body measured a
+// fallback advance that does not track TextScale and the test failed there while
+// passing on a CJK-equipped host (2026-11-17: this test had been red on master
+// CI for three releases). The chrome control stays localized because the product
+// chrome is what the frame actually renders.
 func textScaleChat() *fakeChat {
 	chat := newFakeChat()
 	chat.addSession(contracts.ChatSession{
 		ID: "sess-1", Title: "字号会话",
 		Messages: []contracts.ChatMessage{
-			{ID: "u1", Role: contracts.ChatRoleUser, Text: "用户气泡文本"},
-			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "助手回复正文文本"},
+			{ID: "u1", Role: contracts.ChatRoleUser, Text: "user bubble text"},
+			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "assistant reply text"},
 		},
 	}, true)
 	return chat
@@ -34,22 +41,20 @@ func textScaleChat() *fakeChat {
 func TestTranscriptFollowsTextScale(t *testing.T) {
 	h := newHarness(t, textScaleChat())
 	tester := h.tester()
-	tester.Frame()
-	tester.Frame()
+	settleFrames(tester)
 
-	bubble1, okB := tester.Find("用户气泡文本")
-	body1, okA := tester.Find("助手回复正文文本")
+	bubble1, okB := tester.Find("user bubble text")
+	body1, okA := tester.Find("assistant reply text")
 	chrome1, okC := tester.Find("对话")
 	if !okB || !okA || !okC {
 		t.Fatalf("baseline texts missing (bubble=%v body=%v chrome=%v)", okB, okA, okC)
 	}
 
 	tester.SetPreferences(ui.Preferences{TextScale: 1.5})
-	tester.Frame()
-	tester.Frame()
+	settleFrames(tester)
 
-	bubble2, okB := tester.Find("用户气泡文本")
-	body2, okA := tester.Find("助手回复正文文本")
+	bubble2, okB := tester.Find("user bubble text")
+	body2, okA := tester.Find("assistant reply text")
 	chrome2, okC := tester.Find("对话")
 	if !okB || !okA || !okC {
 		t.Fatalf("scaled texts missing (bubble=%v body=%v chrome=%v)", okB, okA, okC)
@@ -72,22 +77,28 @@ func TestTranscriptTextScaleKeepsChatFontSizeSetting(t *testing.T) {
 	h := newHarness(t, textScaleChat())
 	tester := h.tester()
 	tester.SetPreferences(ui.Preferences{TextScale: 1.5})
-	tester.Frame()
-	tester.Frame()
-	standard, ok := tester.Find("助手回复正文文本")
+	settleFrames(tester)
+	standard, ok := tester.Find("assistant reply text")
 	if !ok {
 		t.Fatal("standard body missing")
 	}
 	h2 := newPermissionHarness(t, textScaleChat(), newPermissionSettings(map[string]string{contracts.SettingChatFontSize: "large"}))
 	tester2 := h2.tester()
 	tester2.SetPreferences(ui.Preferences{TextScale: 1.5})
-	tester2.Frame()
-	tester2.Frame()
-	large, ok := tester2.Find("助手回复正文文本")
+	settleFrames(tester2)
+	large, ok := tester2.Find("assistant reply text")
 	if !ok {
 		t.Fatal("large body missing")
 	}
 	if large.H <= standard.H {
 		t.Errorf("chat font-size setting lost under TextScale: large %.1f <= standard %.1f", large.H, standard.H)
+	}
+}
+
+// settleFrames advances a few passes so a measurement never reads a frame that
+// is still laying out (CI runners settle slower than a developer machine).
+func settleFrames(tester *ui.Tester) {
+	for range 4 {
+		tester.Frame()
 	}
 }

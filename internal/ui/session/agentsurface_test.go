@@ -953,8 +953,10 @@ func TestTeamOverlayGroupsRestoredHistory(t *testing.T) {
 	tester.Frame()
 
 	h.click(tester, "智能体团队")
+	// 名成员 counts the unfinished roster (the running 在线审查员); the restored
+	// 上次的研究员 is counted in 已结束, so the meta matches the sections (P2).
 	h.assertTexts(tester,
-		"2 名成员 · 1 个运行中 · 1 条已结束",
+		"1 名成员 · 1 个运行中 · 1 条已结束",
 		"成员", "在线审查员", "已结束", "上次的研究员", "历史", "上一轮的答案",
 	)
 	h.assertNoTexts(tester, "别的会话队友")

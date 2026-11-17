@@ -55,10 +55,11 @@ func (n *recordingNotifier) snapshot() (level, text, sessionID string, calls int
 }
 
 // TestRequestNotifiesApprovalWaiting pins the notification the approvals
-// backend raises after a request parks: warning level, the friendly localized
-// tool name (never the raw protocol id), the localized non-user source and the
-// owning conversation as the session tag (a click opens it; the raw id stays out
-// of the visible copy).
+// backend raises after a request parks: warning level, the stable tool id as
+// the payload (the toast overlay localizes it at render time, so a language
+// switch translates the tool name too), the localized non-user source and the
+// owning conversation as the session tag (a click opens it; the session id
+// stays out of the visible copy).
 func TestRequestNotifiesApprovalWaiting(t *testing.T) {
 	svc, err := newService(ModeWorkspace, discardLogger{})
 	if err != nil {
@@ -93,14 +94,14 @@ func TestRequestNotifiesApprovalWaiting(t *testing.T) {
 	if !notifier.system {
 		t.Fatal("the OS half of the notifier was not used")
 	}
-	for _, want := range []string{"团队任务", "自动化"} {
+	for _, want := range []string{"team_task_create", "自动化"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("notification %q does not mention %q", text, want)
 		}
 	}
-	// The design invariant: visible copy never carries the raw tool id or the
-	// raw session id (the session travels as the click tag).
-	for _, raw := range []string{"team_task_create", contracts.SessionOriginAutomation, sessionID} {
+	// The session id never reaches visible copy (it travels as the click tag),
+	// and the origin stays localized (the affix suffix translates it).
+	for _, raw := range []string{contracts.SessionOriginAutomation, sessionID} {
 		if strings.Contains(text, raw) {
 			t.Errorf("notification %q leaked the raw id %q", text, raw)
 		}
@@ -153,9 +154,10 @@ func (l fakeLocale) Language() string    { return l.lang }
 func (l fakeLocale) SetLanguage(string)  {}
 func (l fakeLocale) T(key string) string { return key }
 
-// TestApprovalWaitingText covers the notification copy: localized prefix and
-// tool display name, localized run origin, and no raw protocol id for a tool
-// the kit does not know.
+// TestApprovalWaitingText covers the notification copy: localized prefix, the
+// stable tool id as the payload (the toast overlay resolves the display name
+// at render time, in the language active then — known or unknown id alike),
+// and the localized run origin riding the translatable affix suffix.
 func TestApprovalWaitingText(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -164,41 +166,41 @@ func TestApprovalWaitingText(t *testing.T) {
 		want    string
 	}{
 		{
-			name:    "zh known tool",
+			name:    "zh known tool carries the id",
 			request: contracts.ApprovalRequest{Tool: "bash"},
-			want:    "审批等待：运行命令",
+			want:    "审批等待：bash",
 		},
 		{
 			name:    "zh tool family and automation",
 			request: contracts.ApprovalRequest{Tool: "team_task_create", Source: contracts.SessionOriginAutomation},
-			want:    "审批等待：团队任务（自动化）",
+			want:    "审批等待：team_task_create（自动化）",
 		},
 		{
 			name:    "zh human turn has no source label",
 			request: contracts.ApprovalRequest{Tool: "bash", Source: "user"},
-			want:    "审批等待：运行命令",
+			want:    "审批等待：bash",
 		},
 		{
-			name:    "zh unknown tool keeps a generic label",
+			name:    "zh unknown tool carries the id too",
 			request: contracts.ApprovalRequest{Tool: "acme_ping"},
-			want:    "审批等待：工具调用",
+			want:    "审批等待：acme_ping",
 		},
 		{
 			name:    "zh unknown origin is omitted",
 			request: contracts.ApprovalRequest{Tool: "bash", Source: "some-new-origin"},
-			want:    "审批等待：运行命令",
+			want:    "审批等待：bash",
 		},
 		{
 			name:    "en known tool and subagent",
 			locale:  fakeLocale{lang: "en"},
 			request: contracts.ApprovalRequest{Tool: "bash", Source: contracts.SessionOriginSubagent},
-			want:    "Approval waiting: Run command (Subagent)",
+			want:    "Approval waiting: bash (Subagent)",
 		},
 		{
-			name:    "en unknown tool keeps a generic label",
+			name:    "en unknown tool carries the id too",
 			locale:  fakeLocale{lang: "en"},
 			request: contracts.ApprovalRequest{Tool: "acme_ping"},
-			want:    "Approval waiting: a tool call",
+			want:    "Approval waiting: acme_ping",
 		},
 	}
 	for _, test := range tests {
@@ -208,5 +210,19 @@ func TestApprovalWaitingText(t *testing.T) {
 				t.Fatalf("approvalWaitingText(%+v) = %q, want %q", test.request, got, test.want)
 			}
 		})
+	}
+}
+
+// TestApprovalTimeoutText pins the timeout sibling's copy: the same stable
+// tool-id payload and the automation origin in the translatable suffix.
+func TestApprovalTimeoutText(t *testing.T) {
+	request := contracts.ApprovalRequest{Tool: "team_task_create", Source: contracts.SessionOriginAutomation}
+	zh := &service{}
+	if got, want := zh.approvalTimeoutText(request), "审批超时已自动拒绝：team_task_create（自动化）"; got != want {
+		t.Fatalf("zh approvalTimeoutText = %q, want %q", got, want)
+	}
+	en := &service{locale: fakeLocale{lang: "en"}}
+	if got, want := en.approvalTimeoutText(request), "Approval timed out and was auto-denied: team_task_create (automation)"; got != want {
+		t.Fatalf("en approvalTimeoutText = %q, want %q", got, want)
 	}
 }

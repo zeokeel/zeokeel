@@ -88,6 +88,11 @@ type DiffPreviewOptions struct {
 	// MaxHeight bounds the block's body when the diff does not fit its natural
 	// height; 0 uses DiffPreviewMaxHeight.
 	MaxHeight float32
+	// MinHeight floors the block's body so a height-budgeted parent can never
+	// squeeze the diff into a half-line: the first hunk keeps a readable band
+	// (the approval card sets it on the token grid). 0 leaves the body at its
+	// natural/bounded height. It never raises MaxHeight.
+	MinHeight float32
 	// FitContent lets the viewer take its natural height for any length. Leave
 	// it false on a surface without a height budget (a card): the component
 	// then fits short diffs and bounds long ones at MaxHeight. Set it on a
@@ -271,6 +276,12 @@ func diffPreviewHeader(c *ui.Context, t *design.Tokens, path string, plan diffPr
 // explanation.
 func diffPreviewBody(c *ui.Context, t *design.Tokens, plan diffPreviewPlan,
 	o DiffPreviewOptions, maxHeight float32) {
+	// The floor never exceeds the bound: a caller asking for a taller minimum
+	// than the block may grow gets the bound, not an overflow.
+	minHeight := o.MinHeight
+	if minHeight > maxHeight {
+		minHeight = maxHeight
+	}
 	switch plan.mode {
 	case diffPreviewEmpty:
 		message := strings.TrimSpace(o.EmptyMessage)
@@ -290,6 +301,9 @@ func diffPreviewBody(c *ui.Context, t *design.Tokens, plan diffPreviewPlan,
 			// The scroll sizes to its content up to the block's bound, so a
 			// one-line fallback stays one line high and a huge one scrolls.
 			scroll := ui.Scroll(c).MaxHeight(maxHeight).FillWidth()
+			if minHeight > 0 {
+				scroll.MinHeight(minHeight)
+			}
 			scroll.Children(func() {
 				design.Apply(ui.Text(c, plan.fallback),
 					t.Font(design.TypeXS), t.MonoFamily()).TextColor(t.LabelSecondary)
@@ -301,6 +315,11 @@ func diffPreviewBody(c *ui.Context, t *design.Tokens, plan diffPreviewPlan,
 			// A long diff scrolls inside the official viewer rather than
 			// stretching the card that contains it.
 			viewer.Height(maxHeight)
+		}
+		if minHeight > 0 {
+			// A height-budgeted parent must not squeeze the diff into a
+			// half-line: the first hunk keeps a readable band.
+			viewer.MinHeight(minHeight)
 		}
 	}
 }

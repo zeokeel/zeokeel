@@ -618,7 +618,8 @@ func TestConnectorConnectionTestLocalizesKnownCause(t *testing.T) {
 func TestConnectorDetailsModalShowsMaskedConfigAndRawError(t *testing.T) {
 	service := &connectorPlugins{mcp: []contracts.MCPPlugin{{
 		Name: "srv", ServerName: "fake", Version: "1.2.3", Protocol: "2024-11-05",
-		Tools: 2, Status: "连接失败: dial tcp 127.0.0.1:9: connect: connection refused",
+		Tools:  2,
+		Status: "连接失败: mcp: initialize: mcp: http request: dial tcp 127.0.0.1:9: connect: connection refused",
 	}}}
 	h, _ := newConnectorHarness(t, service, map[string]string{
 		contracts.SettingMCPServers: connectorStdioJSON,
@@ -628,13 +629,22 @@ func TestConnectorDetailsModalShowsMaskedConfigAndRawError(t *testing.T) {
 
 	h.click(tester, "连接器操作 srv")
 	h.click(tester, "详情")
+	// The subtitle is a purpose line; the transport lives once, in the 类型 row.
+	h.assertTexts(tester, "外部 MCP 服务配置与状态")
 	h.assertTexts(tester, "类型", "stdio", "命令", "npx", "-y server-github",
 		"环境变量", "TOKEN=*** · 值已隐藏", "超时", "250 ms",
 		"服务器", "fake", "版本", "1.2.3", "协议", "2024-11-05", "工具数", "2",
 		"状态", "连接失败")
-	// The raw error is available (selectable), the secret env value is masked.
+	// The localized cause leads (the chain's "initialize" classifies as a
+	// handshake failure); the raw backend chain stays folded until the user
+	// asks for it, and the secret env value is masked.
+	h.assertTexts(tester, "协议握手失败（MCP 初始化未完成）", "原始错误")
+	h.assertNoTexts(tester, "dial tcp 127.0.0.1:9", "TOKEN=abc")
+	h.click(tester, "原始错误")
+	// Expanded: the chain is selectable and the repeated "mcp:" wrappers are
+	// stripped (one honest chain, not a prefix pile).
 	h.assertTexts(tester, "dial tcp 127.0.0.1:9")
-	h.assertNoTexts(tester, "TOKEN=abc")
+	h.assertNoTexts(tester, "mcp:")
 	h.click(tester, "关闭")
 	h.assertNoTexts(tester, "250 ms")
 }

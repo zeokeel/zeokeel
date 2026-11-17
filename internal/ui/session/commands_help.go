@@ -18,32 +18,13 @@ import (
 // helpShortcut is one keyboard shortcut row of the help modal.
 type helpShortcut struct{ keys, zh, en string }
 
-// shortcutChordLabel renders a canonical host chord ("cmd+shift+b") as the
-// product's display label ("Cmd/Ctrl + Shift + B"), matching the settings
-// shortcut reference.
+// shortcutChordLabel renders a canonical host chord ("cmd+shift+b") through the
+// shared uikit.FormatShortcut, so the keyboard reference, the command palette and
+// the settings hotkey page all show one notation (bare "+" joins, the command
+// modifier spelled for the platform) instead of drifting spellings (2026-11 UI
+// review P3, unified by lead ruling).
 func shortcutChordLabel(chord string) string {
-	parts := strings.Split(strings.ToLower(strings.TrimSpace(chord)), "+")
-	labels := make([]string, 0, len(parts))
-	for _, part := range parts {
-		switch strings.TrimSpace(part) {
-		case "":
-			continue
-		case "cmd", "command", "cmd/ctrl":
-			labels = append(labels, "Cmd/Ctrl")
-		case "ctrl", "control":
-			labels = append(labels, "Ctrl")
-		case "shift":
-			labels = append(labels, "Shift")
-		case "alt", "option":
-			labels = append(labels, "Alt")
-		default:
-			labels = append(labels, strings.ToUpper(strings.TrimSpace(part)))
-		}
-	}
-	if len(labels) == 0 {
-		return chord
-	}
-	return strings.Join(labels, " + ")
+	return uikit.FormatShortcut(chord)
 }
 
 // shortcutSetting reads one configurable chrome chord from the settings store,
@@ -70,13 +51,13 @@ func (st *state) helpShortcuts() []helpShortcut {
 	sidebar := shortcutChordLabel(st.shortcutSetting(contracts.SettingsUIShortcutToggleSidebar,
 		contracts.DefaultShortcutToggleSidebar))
 	return []helpShortcut{
-		{keys: "Cmd/Ctrl + N", zh: "新会话", en: "New conversation"},
-		{keys: "Cmd/Ctrl + ,", zh: "设置", en: "Settings"},
+		{keys: uikit.FormatShortcut("CmdOrCtrl+N"), zh: "新会话", en: "New conversation"},
+		{keys: uikit.FormatShortcut("CmdOrCtrl+,"), zh: "设置", en: "Settings"},
 		{keys: palette, zh: "打开命令面板", en: "Open the command palette"},
 		{keys: sidebar, zh: "折叠 / 展开侧边栏", en: "Collapse / expand sidebar"},
-		{keys: "Cmd/Ctrl + Alt + I", zh: "切换右侧栏", en: "Toggle the inspector"},
+		{keys: uikit.FormatShortcut("CmdOrCtrl+Alt+I"), zh: "切换右侧栏", en: "Toggle the inspector"},
 		{keys: "Enter", zh: "发送消息", en: "Send the message"},
-		{keys: "Shift + Enter", zh: "换行", en: "New line"},
+		{keys: uikit.FormatShortcut("Shift+Enter"), zh: "换行", en: "New line"},
 		{keys: "Esc", zh: "关闭菜单 / 浮层；审批中为拒绝", en: "Close a menu or overlay; deny in approvals"},
 		{keys: "/", zh: "打开斜杠命令菜单", en: "Open the slash command menu"},
 		{keys: "@", zh: "引用工作区文件或会话", en: "Reference a workspace file or chat"},

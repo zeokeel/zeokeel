@@ -15,7 +15,9 @@ func TestCapabilitiesEnglishCopyAndLanguageSwitch(t *testing.T) {
 	service := &fakePlugins{mcp: []contracts.MCPPlugin{{
 		Name: "files", Status: "已连接", Tools: 2, ServerName: "fake-files",
 	}}}
-	h := newHarness(t, service, nil, plugins.Config{})
+	// The diagnostics group renders when the host provides settings (the
+	// product wiring); without either service the whole group is hidden.
+	h := newHarnessWithSettings(t, service, nil, plugins.Config{}, newFakePluginSettings(nil))
 	tester := h.tester()
 
 	h.assertTexts(tester, "能力", "技能", "连接器", "技能后端未启用", "诊断与设置")

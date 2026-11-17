@@ -172,8 +172,11 @@ func main() {
 	// send order with their local send time. The entries are removed again so
 	// the scripted flow below is unchanged.
 	if queue, ok := chat.(contracts.PromptQueue); ok {
-		if _, err := queue.EnqueuePrompt(context.Background(), sessionID, "运行中排队：先检查编译错误"); err == nil {
-			if _, err := queue.EnqueuePrompt(context.Background(), sessionID, "运行中排队：再补一版发布说明"); err == nil {
+		// Bare drafts, like the real enqueue path: the queue popover row is
+		// already "summary · time", so a fixture prefix would fake a duplicate
+		// disclosure that the product does not render (2026-11-17 review).
+		if _, err := queue.EnqueuePrompt(context.Background(), sessionID, "先检查编译错误"); err == nil {
+			if _, err := queue.EnqueuePrompt(context.Background(), sessionID, "再补一版发布说明"); err == nil {
 				a.tester.Frame()
 				a.render(outDir + "/p2-inbox.png")
 				if rect, ok := a.tester.Find("已排队 2 条"); ok {
@@ -634,15 +637,6 @@ func main() {
 		}
 	}
 
-	// Plan mode: the header badge and composer mode chip.
-	if store, ok := a.root.Get(contracts.KeySettings); ok {
-		_ = store.Set(contracts.SettingAgentMode, contracts.AgentModePlan)
-		a.tester.Frame()
-		a.render(outDir + "/p2-plan-mode.png")
-		_ = store.Set(contracts.SettingAgentMode, contracts.AgentModeNormal)
-		a.tester.Frame()
-	}
-
 	// Notification toast overlay.
 	if notifier, notifierErr := a.root.Require(contracts.KeyNotifier); notifierErr == nil {
 		first := notifier.Notify(contracts.NotifySuccess, "对话已导出")
@@ -815,9 +809,12 @@ func main() {
 	a.waitText("ZeoKeel 工作区", 5*time.Second)
 	a.render(outDir + "/p2-file-preview.png")
 	// The retired Changes pane is folded into the file tab: a changed file's
-	// tab carries the 查看改动 disclosure with its unified diff.
+	// tab carries the 查看改动 disclosure with its unified diff. The collapsed
+	// frame equals the preview frame (the disclosure row is already on it), so
+	// only the expanded diff is written — a second copy under a "-folded" name
+	// was a duplicate review file with no distinct state (2026-11-17 review;
+	// DiffPreview has no hunk-level folding to capture).
 	if a.waitText("查看改动", 5*time.Second) {
-		a.render(outDir + "/p2-file-diff-folded.png")
 		if err := a.tester.Click("查看改动"); err == nil {
 			a.tester.Advance(200 * time.Millisecond)
 			a.tester.Frame()
@@ -843,10 +840,18 @@ func main() {
 				if err := a.tester.Click("1 个后台任务"); err == nil {
 					a.tester.Frame()
 					a.render(outDir + "/p2-jobs.png")
+					// Stopping is two-stage (danger confirm): arm, then
+					// confirm. The single click this scene used before never
+					// stopped the job, so p2-jobs-stopped.png was never written
+					// (2026-11-17 review coverage gap).
 					if a.clickFirstPrefix("停止后台任务 ") {
-						a.waitJobDone(liveJob, 10*time.Second)
 						a.tester.Frame()
-						a.render(outDir + "/p2-jobs-stopped.png")
+						a.render(outDir + "/p2-jobs-stop-armed.png")
+						if a.clickFirstPrefix("确认停止后台任务 ") {
+							a.waitJobDone(liveJob, 10*time.Second)
+							a.tester.Frame()
+							a.render(outDir + "/p2-jobs-stopped.png")
+						}
 					}
 					a.tester.Key(0, ui.KeyEscape)
 					a.tester.Frame()
@@ -1130,6 +1135,12 @@ func main() {
 	a.render(outDir + "/p2-about-diagnostics.png")
 	a.tester.Scroll(740, 500, 0, -700)
 	a.tester.Frame()
+	// The English and dark archive frames must actually show the archive page:
+	// the earlier order switched language/theme while 关于 was open, so both
+	// files were about-page copies (2026-11-17 review coverage gap).
+	if err := a.clickSettingsItem("归档"); err != nil {
+		fmt.Println("reopen archive settings:", err)
+	}
 	a.ui.Locale().SetLanguage("en")
 	a.tester.Frame()
 	a.render(outDir + "/p2-english-archive-settings.png")
@@ -1462,7 +1473,9 @@ func main() {
 	a.tester.Frame()
 	a.render(outDir + "/narrow/narrow-settings.png")
 	a.ui.Navigator().CloseSettings()
-	a.tester.SetSize(1512, 944)
+	// Stay at the narrow size: these three frames are the narrow-window dark
+	// trio the H series asks for, so the earlier 1512x944 reset (which made
+	// them byte-identical to the wide dark frames) is gone (2026-11-17 review).
 	a.tester.Frame()
 	a.ui.Theme().SetDark(true)
 	a.tester.Frame()
@@ -1481,6 +1494,24 @@ func main() {
 			}
 		}
 		a.render(outDir + "/narrow/dark-landing.png")
+		// The session frame is a landed conversation, not a second copy of the
+		// hero: open the first conversation row that actually has a transcript
+		// (the empty ones keep the hero), so the dark narrow frame shows the
+		// reading column and composer in their real density.
+		// Deterministic transcript: open a fresh conversation and let the
+		// scripted model answer, instead of guessing a sidebar row (row titles
+		// are truncated in the narrow sidebar, so a title lookup misses).
+		if liveChat, liveErr := a.root.Require(contracts.KeyChat); liveErr == nil {
+			if id, newErr := liveChat.NewSession("窄窗暗色会话"); newErr == nil {
+				_ = liveChat.SetActiveSession(id)
+				if sendErr := liveChat.Send(id, "检查构建状态并汇总"); sendErr == nil {
+					waitIdle(liveChat, id, 10*time.Second)
+				}
+			}
+			a.tester.Frame()
+			a.clickTab("对话")
+		}
+		a.tester.Frame()
 		a.render(outDir + "/narrow/dark-session.png")
 	}
 	a.ui.Navigator().ToggleSettings()
@@ -1794,6 +1825,10 @@ func boot(baseURL, dataDir string) *app {
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	provide(root, contracts.KeyDataDir, dataDir)
 	provide(root, contracts.KeyUIRuntime, uiRoot.Runtime())
+	// The headless boot wires services by hand (no SetKernelContext), so the
+	// host's toast-placement service must be provided explicitly or snapshots
+	// would render the module's default anchor instead of the product's.
+	provide(root, contracts.KeyToastAnchor, uiRoot.ToastAnchor())
 	provide(root, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(root, contracts.KeyTheme, uiRoot.Theme())
 	provide(root, contracts.KeyLocale, uiRoot.Locale())

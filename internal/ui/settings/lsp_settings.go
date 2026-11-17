@@ -317,30 +317,31 @@ func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, 
 		})
 
 		uikit.Section(c, localized(locale, "工作区配置", "Workspace configuration"), func(*ui.Context) {
-			ui.Form(c, func() {
-				allow := lspWorkspaceOptIn(store.Get(contracts.SettingLSPWorkspaceConfig, ""))
-				if switchField(c,
-					localized(locale, "读取工作区 LSP 配置（.zeokeel/lsp.json）",
-						"Read workspace LSP config (.zeokeel/lsp.json)"),
-					localized(locale,
-						"默认关闭；开启后重启生效；设置页配置优先。",
-						"Off by default; restart to apply; settings-page configuration wins."),
-					&allow) {
-					value := ""
-					if allow {
-						value = "allow"
-					}
-					if err := store.Set(contracts.SettingLSPWorkspaceConfig, value); err != nil {
-						st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
-						st.statusErr = true
-					} else {
-						st.status = localized(locale, "已保存（重启后生效）", "Saved (applies after restart)")
-						st.statusErr = false
-					}
-					c.Invalidate()
+			allow := lspWorkspaceOptIn(store.Get(contracts.SettingLSPWorkspaceConfig, ""))
+			if uikit.SwitchRow(c, uikit.SwitchRowOptions{
+				Label: localized(locale, "读取工作区 LSP 配置（.zeokeel/lsp.json）",
+					"Read workspace LSP config (.zeokeel/lsp.json)"),
+				Description: localized(locale,
+					"默认关闭；开启后重启生效；设置页配置优先。",
+					"Off by default; restart to apply; settings-page configuration wins."),
+				Value: &allow,
+			}) {
+				value := ""
+				if allow {
+					value = "allow"
 				}
-			})
-			uikit.ErrorLine(c, localized(locale,
+				if err := store.Set(contracts.SettingLSPWorkspaceConfig, value); err != nil {
+					st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+					st.statusErr = true
+				} else {
+					st.status = localized(locale, "已保存（重启后生效）", "Saved (applies after restart)")
+					st.statusErr = false
+				}
+				c.Invalidate()
+			}
+			// A static trust disclosure is a caution, not a failure: the shared
+			// warning semantic, red stays for real errors (DESIGN.md §5.2).
+			uikit.WarningLine(c, t, localized(locale,
 				"风险：只应在你信任的仓库中开启；恶意仓库可通过该文件让工具启动任意命令。",
 				"Risk: enable only in repositories you trust; a malicious repository could make tools launch arbitrary commands."))
 		})
@@ -389,13 +390,8 @@ func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, 
 				"重启后生效。",
 				"Applies after a restart."))
 			statusBadgesRow(c, t, st.status, st.statusErr)
-			uikit.DialogFooter(c, []uikit.DialogAction{{
-				Label: localized(locale, "添加", "Add"), Primary: true,
-				OnClick: func() {
-					addLSPServer(st, store, locale)
-					c.Invalidate()
-				},
-			}})
+			// The add submit is the page's one primary in the host's fixed
+			// footer (settings.go page definition); no in-section submit here.
 		})
 
 		if st.confirmRemove != "" {

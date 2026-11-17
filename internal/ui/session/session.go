@@ -311,6 +311,12 @@ type state struct {
 	// lookup (ctx.Get(contracts.KeyMemory)); it is not a Requires dependency.
 	ctx cordis.Context
 
+	// toastAnchor is the optional host toast-placement service, resolved lazily
+	// (reportOverlay). The module reports its popovers' open/close transitions so
+	// the host yields the toast stack while one is open; nil when no host provides
+	// it (2026-11 UI review #13).
+	toastAnchor contracts.ToastAnchorService
+
 	// locale is the host locale service (optional). Copy is generated per frame
 	// with uikit.T so switching the language applies on the next frame.
 	locale contracts.LocaleService

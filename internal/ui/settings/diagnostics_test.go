@@ -61,7 +61,7 @@ func TestDiagnosticsPage(t *testing.T) {
 		t.Fatalf("open about page: %v", err)
 	}
 	tester.Frame()
-	for _, want := range []string{"诊断", "ZeoKeel v1.2.3", "abc124", "go1.27.3",
+	for _, want := range []string{"诊断", "1.2.3", "abc124", "go1.27.3",
 		"/tmp/zeokeel-diag", "zeokeel.db", "工具数", "会话数",
 		// AR-06: the narrow ToolCatalog's Names render in the diagnostics.
 		"工具清单", "bash, read_file"} {

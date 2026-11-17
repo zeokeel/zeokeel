@@ -83,7 +83,7 @@
 | old Shell/UI 能力 | 状态 | 当前实现/证据 | 差异说明 |
 |---|---|---|---|
 | Home / 起始页 | ✅ | `internal/ui/home` | hero/greeting/setup card/**真实 composer（多行输入、Enter 发送、单行动作行：附件菜单（选择文件/手动路径）+ 模型 + 模式 + 发送；发送后建会话并进入）/最近会话 |
-| Composer 基础（输入/附件/发送/停止/模型 chip/@//） | ✅ | `internal/ui/session/view.go`、`attachments.go` | 文本、附件/图片/拖放、发送/停止、per-session 模型菜单、工作区 @、/ 菜单；动作行收敛为附件 + 模型 chip + 权限按钮（按钮文案=当前权限：工作区修改/所有权限/只读）+ 发送 |
+| Composer 基础（输入/附件/发送/停止/模型 chip/@//） | ✅ | `internal/ui/session/view.go`、`attachments.go` | 文本、附件/图片/拖放、发送/停止、per-session 模型菜单、工作区 @、/ 菜单；动作行收敛为附件 + 模型 chip + 权限按钮（按钮文案=当前权限：工作区修改/所有权限/只读）+ 发送；**历史消息附件 chip 与热态同构**（文件名+大小；图片经伴随元数据分片持久化，旧记录回退「图片」+解码大小，2026-11-17 审查） |
 | Composer 深度（/goal /plan /memory/权限/thinking/@session/presets） | ✅ | `sessionCommands` + `command_dialogs.go` + `commands_help.go` + `compact_command.go` | **15 条命令**（/新会话/副本/导出/设置/目标/审阅/记忆/反馈/停止/附加/帮助/**压缩上下文/完成目标/放弃目标**）+ 权限模式、聊天模式、**模型与推理等级（模型 chip 两级菜单：一级「模型／推理等级」，二级选模型/选该模型推理等级；覆盖按（会话×模型）保存、默认跟随模型）**、@session、预设；目标生命周期（完成/放弃/编辑/暂停/恢复/清除）已全量 |
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar + session B3 顶栏 | 280px sidebar、64px rail、Cmd/Ctrl+B、**Cmd/Ctrl+N 新建会话、Cmd/Ctrl+, 设置、Cmd/Ctrl+K 命令面板**、右栏开关、添加工作区、视图选项（排序/分组持久化）、工作区搜索/置顶/归档；**会话 B3 顶栏**：40px 标题/工作区行（TypeM 16px 标题）+ 32px Tabs 行、浅色 band + 单条底边线、无返回/无 Alt+←、⋯ 会话操作（复制/导出/归档）、右上 palette+inspector；无贡献屏无空工具栏；输入框上方 dock（目标条 + 审批内联卡）；通知右上角（header 下方，最多 2 条） |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |

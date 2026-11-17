@@ -75,71 +75,55 @@ func buildNotificationsPage(c *ui.Context, runtime contracts.UIRuntime,
 		uikit.PageHeader(c, localized(locale, "通知", "Notifications"), "")
 		search.region(c, "notifications.toasts", func(c *ui.Context) {
 			uikit.Section(c, localized(locale, "通知气泡", "Notification toasts"), func(*ui.Context) {
-				ui.Form(c, func() {
-					enabled := notificationsSettingEnabled(store.Get(contracts.SettingNotifications, ""))
-					if switchField(c,
-						localized(locale, "显示通知气泡", "Show notification toasts"),
-						"",
-						&enabled) {
-						if err := store.Set(contracts.SettingNotifications, fmt.Sprintf("%t", enabled)); err != nil {
-							st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
-							st.statusErr = true
-						} else {
-							st.status = localized(locale, "已保存", "Saved")
-							st.statusErr = false
-						}
-						// Keep the stored value untouched on failure; the next
-						// frame re-reads it and the description below stays accurate.
-						runtime.Invalidate()
+				enabled := notificationsSettingEnabled(store.Get(contracts.SettingNotifications, ""))
+				if uikit.SwitchRow(c, uikit.SwitchRowOptions{
+					Label: localized(locale, "显示通知气泡", "Show notification toasts"),
+					Value: &enabled,
+				}) {
+					if err := store.Set(contracts.SettingNotifications, fmt.Sprintf("%t", enabled)); err != nil {
+						st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+						st.statusErr = true
+					} else {
+						st.status = localized(locale, "已保存", "Saved")
+						st.statusErr = false
 					}
-				})
+					// Keep the stored value untouched on failure; the next
+					// frame re-reads it and the description below stays accurate.
+					runtime.Invalidate()
+				}
 			})
 		})
 		search.region(c, "notifications.system", func(c *ui.Context) {
 			uikit.Section(c, localized(locale, "系统通知", "System notifications"), func(*ui.Context) {
-				ui.Form(c, func() {
-					enabled := contracts.SystemNotificationsEnabled(
-						store.Get(contracts.SettingSystemNotifications, ""))
-					description := localized(locale,
-						"任务在后台完成或失败时显示系统通知；点击通知会打开对应会话，没有会话的通知只把窗口带到前台。应用内通知气泡照常显示。",
-						"When work finishes or fails in the background, notify the system too. Clicking a notification opens its conversation; one without a conversation only brings the window to the front. In-app toasts still show.")
-					if !systemSupported {
-						description = localized(locale,
-							"当前平台不支持系统通知；应用内通知气泡仍然可用。",
-							"System notifications are not available on this platform; in-app toasts still work.")
+				enabled := contracts.SystemNotificationsEnabled(
+					store.Get(contracts.SettingSystemNotifications, ""))
+				description := localized(locale,
+					"任务在后台完成或失败时显示系统通知；点击通知会打开对应会话，没有会话的通知只把窗口带到前台。应用内通知气泡照常显示。",
+					"When work finishes or fails in the background, notify the system too. Clicking a notification opens its conversation; one without a conversation only brings the window to the front. In-app toasts still show.")
+				if !systemSupported {
+					description = localized(locale,
+						"当前平台不支持系统通知；应用内通知气泡仍然可用。",
+						"System notifications are not available on this platform; in-app toasts still work.")
+				}
+				if uikit.SwitchRow(c, uikit.SwitchRowOptions{
+					Label:       localized(locale, "显示系统通知", "Show system notifications"),
+					Description: description,
+					Value:       &enabled,
+					Disabled:    !systemSupported,
+				}) {
+					if err := store.Set(contracts.SettingSystemNotifications, fmt.Sprintf("%t", enabled)); err != nil {
+						st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+						st.statusErr = true
+					} else {
+						st.status = localized(locale, "已保存", "Saved")
+						st.statusErr = false
 					}
-					if switchFieldDisabled(c,
-						localized(locale, "显示系统通知", "Show system notifications"),
-						description, &enabled, !systemSupported) {
-						if err := store.Set(contracts.SettingSystemNotifications, fmt.Sprintf("%t", enabled)); err != nil {
-							st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
-							st.statusErr = true
-						} else {
-							st.status = localized(locale, "已保存", "Saved")
-							st.statusErr = false
-						}
-						runtime.Invalidate()
-					}
-				})
+					runtime.Invalidate()
+				}
 			})
 		})
 		// One status line for both sections: the last save result, whether it
 		// came from the toast switch or the system switch.
 		statusBadgesRow(c, design.Of(c), st.status, st.statusErr)
 	})
-}
-
-// switchFieldDisabled is switchField with an explicit disabled state: a
-// capability switch (system notifications) whose platform support is missing
-// shows the stored value but cannot change it, and its description says why.
-func switchFieldDisabled(c *ui.Context, label, description string, value *bool, disabled bool) bool {
-	var changed bool
-	ui.Field(c, label, func() {
-		sw := ui.Switch(c, value)
-		if disabled {
-			sw.Disabled(true)
-		}
-		changed = sw.Changed()
-	}).Description(description)
-	return changed
 }

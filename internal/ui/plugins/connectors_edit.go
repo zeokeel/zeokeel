@@ -183,7 +183,9 @@ func (p *connectorsState) buildFormModal(c *ui.Context, t *design.Tokens, st *st
 			Width(design.DialogWidthM).Padding(design.Space4).Gap(design.Space3).Children(func() {
 			uikit.DialogHeader(c, uikit.DialogHeaderOptions{
 				Key: "connectors.form", Title: title,
-				Subtitle: transportDisplay(p.transport),
+				// A purpose line, not the transport: the dropdown below already
+				// shows (and edits) the current HTTP/STDIO value.
+				Subtitle: st.tr("外部 MCP 服务接入", "External MCP server access"),
 				OnClose: func() {
 					p.formOpen = false
 					p.resetFormDraft()
@@ -195,7 +197,10 @@ func (p *connectorsState) buildFormModal(c *ui.Context, t *design.Tokens, st *st
 				testLabel = st.tr("正在测试…", "Testing…")
 			}
 			ui.Scroll(c).FillWidth().MaxHeight(design.DialogBodyMax).Children(func() {
-				ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
+				// The scroll bar overlays the viewport's right edge; the end
+				// padding reserves a gutter so it never presses on the fields'
+				// right edge (the STDIO form's inputs are FillWidth).
+				ui.Column(c).FillWidth().PaddingEnd(design.Space2).Gap(design.Space3).Children(func() {
 					ui.Field(c, st.tr("传输", "Transport"), func() {
 						choice := transportDisplay(p.transport)
 						selector := ui.Select(c, &choice, []string{"HTTP", "STDIO"}).
@@ -225,16 +230,20 @@ func (p *connectorsState) buildFormModal(c *ui.Context, t *design.Tokens, st *st
 									ui.Field(c, st.tr("参数", "Arguments"), func() {
 										ui.TextInput(c, &p.args).
 											Label(inputLabel(st, st.tr("参数", "Arguments"))).
-											Placeholder(st.tr("空格分隔，例如：-y server-github",
-												"Space-separated, e.g. -y server-github")).FillWidth()
+											// The placeholder only exemplifies; the
+											// separator rule lives once, in the helper.
+											Placeholder(st.tr("例如：-y server-github",
+												"e.g. -y server-github")).FillWidth()
 									}).Description(st.tr("空格分隔。", "Space-separated."))
 								})
 							})
 							ui.Field(c, st.tr("环境变量", "Environment"), func() {
 								envInput := ui.TextArea(c, &p.env).
 									Label(inputLabel(st, st.tr("环境变量", "Environment"))).
-									Placeholder(st.tr("每行 KEY=VALUE，例如：GITHUB_TOKEN=abc",
-										"One KEY=VALUE per line, e.g. GITHUB_TOKEN=abc")).
+									// The placeholder only exemplifies; the per-line
+									// format rule lives once, in the helper.
+									Placeholder(st.tr("例如：GITHUB_TOKEN=abc",
+										"e.g. GITHUB_TOKEN=abc")).
 									MinHeight(design.Space6 * 2).FillWidth()
 								if envInput.Changed() {
 									p.envErr = ""
@@ -246,7 +255,8 @@ func (p *connectorsState) buildFormModal(c *ui.Context, t *design.Tokens, st *st
 							// full permissions, outside the OS sandbox: disclose
 							// the trust model before the user saves it (2026-11
 							// audit (d), disclosure only — no spawn approval).
-							uikit.ErrorLine(c, mcpStdioTrustDisclosure(st))
+							// Warning semantic: a static caution, not a failure.
+							uikit.WarningLine(c, t, mcpStdioTrustDisclosure(st))
 						})
 					} else {
 						ui.Field(c, "URL", func() {
@@ -326,7 +336,9 @@ func (p *connectorsState) buildFormModal(c *ui.Context, t *design.Tokens, st *st
 					ui.Field(c, st.tr("超时 (ms)", "Timeout (ms)"), func() {
 						ui.TextInput(c, &p.timeoutMs).
 							Label(inputLabel(st, st.tr("超时 (ms)", "Timeout (ms)"))).
-							Placeholder(st.tr("留空 = 默认 30 秒", "Blank = default 30s")).FillWidth()
+							// The placeholder only exemplifies; the unit/default rule
+							// lives once, in the helper.
+							Placeholder(st.tr("例如：30000", "e.g. 30000")).FillWidth()
 					}).Description(st.tr("毫秒；0 或留空使用默认 30 秒。",
 						"Milliseconds; 0 or blank uses the default 30s."))
 					if p.formErr != "" {
@@ -886,7 +898,9 @@ func (p *connectorsState) buildDetailModal(c *ui.Context, t *design.Tokens, st *
 			Width(design.DialogWidthM).Padding(design.Space4).Gap(design.Space3).Children(func() {
 			uikit.DialogHeader(c, uikit.DialogHeaderOptions{
 				Key: "connectors.detail", Title: card.Name,
-				Subtitle: transportDisplay(card.Transport),
+				// A purpose line, not the transport: the sheet's 类型 row already
+				// carries HTTP/STDIO (same dedup as the form subtitle).
+				Subtitle: st.tr("外部 MCP 服务配置与状态", "External MCP server configuration and status"),
 				OnClose: func() {
 					p.detailOpen = false
 					c.Invalidate()
@@ -895,11 +909,51 @@ func (p *connectorsState) buildDetailModal(c *ui.Context, t *design.Tokens, st *
 			uikit.PropertySheet(c, uikit.PropertySheetOptions{
 				Rows: connectorDetailRows(st, card), Key: "connectors.detail", Locale: st.locale,
 			})
+			// The status value carries the same semantic color as the card's
+			// badge (error red, needs-action amber, success green). PropertySheet
+			// has no per-row value color yet, so this row is drawn with the
+			// sheet's own anatomy (label column + 32 DIP row + divider).
+			// 待 uikit 提供逐行值色后收编。
+			ui.Divider(c)
+			ui.Row(c).FillWidth().Height(design.RowCompactHeight).
+				AlignItems(ui.Center).Gap(design.Space3).Children(func() {
+				design.Apply(ui.Text(c, st.tr("状态", "Status")), t.TextMuted(design.TypeXS)).
+					Width(uikit.PropertySheetLabelWidth).Shrink(0).MaxLines(1)
+				status := design.Apply(ui.Text(c, card.StatusLabel), t.Font(design.TypeXS)).
+					TextColor(connectorStatusTextColor(t, card.StatusKind)).
+					Grow(1).Shrink(1).MaxLines(1).Ellipsis("…")
+				if tooltip := strings.TrimSpace(card.StatusTooltip); tooltip != "" {
+					status = status.Tooltip(tooltip)
+				}
+			})
+			// The authorization state reads the same semantic vocabulary as the
+			// card badge (authorized green, needed/expired amber, unknown quiet),
+			// drawn with the same sheet anatomy as the 状态 row.
+			// 待 uikit 提供逐行值色后收编。
+			if card.AuthMode == contracts.MCPAuthOAuth2 {
+				authValue, authColor := connectorAuthStatusDisplay(st, t, card.AuthState)
+				ui.Divider(c)
+				ui.Row(c).FillWidth().Height(design.RowCompactHeight).
+					AlignItems(ui.Center).Gap(design.Space3).Children(func() {
+					design.Apply(ui.Text(c, st.tr("授权状态", "Authorization")), t.TextMuted(design.TypeXS)).
+						Width(uikit.PropertySheetLabelWidth).Shrink(0).MaxLines(1)
+					design.Apply(ui.Text(c, authValue), t.Font(design.TypeXS)).
+						TextColor(authColor).Grow(1).Shrink(1).MaxLines(1).Ellipsis("…")
+				})
+			}
 			buildConnectorToolList(c, t, st, p, card, catalog)
 			if card.Failure {
-				if raw := strings.TrimSpace(card.RawStatus); raw != "" {
-					design.Apply(ui.Text(c, raw), t.Font(design.TypeXXS)).
-						TextColor(t.DangerText).Selectable().MaxLines(4)
+				// The localized cause leads; the raw backend chain is available
+				// on demand, with the repeated "mcp:" wrappers stripped.
+				if summary := strings.TrimSpace(card.FailureSummary); summary != "" {
+					design.Apply(ui.Text(c, summary), t.Font(design.TypeXS)).
+						TextColor(t.DangerText).MaxLines(2)
+				}
+				if raw := cleanMCPErrorChain(card.RawStatus); raw != "" {
+					ui.Collapsible(c, st.tr("原始错误", "Raw error"), &p.detailErrOpen, func() {
+						design.Apply(ui.Text(c, raw), t.MonoText(design.TypeXXS)).
+							TextColor(t.LabelSecondary).Selectable().MaxLines(6)
+					})
 				}
 			}
 			uikit.DialogFooter(c, []uikit.DialogAction{
@@ -949,16 +1003,8 @@ func connectorDetailRows(st *state, card connectorCard) []uikit.PropertyRow {
 	}
 	if card.AuthMode == contracts.MCPAuthOAuth2 {
 		rows = append(rows, uikit.PropertyRow{Label: st.tr("认证", "Authentication"), Value: "OAuth 2.1"})
-		switch card.AuthState {
-		case contracts.MCPAuthStateAuthorized:
-			rows = append(rows, uikit.PropertyRow{Label: st.tr("授权状态", "Authorization"), Value: st.tr("已授权", "Authorized")})
-		case contracts.MCPAuthStateRequired:
-			rows = append(rows, uikit.PropertyRow{Label: st.tr("授权状态", "Authorization"), Value: st.tr("需要授权", "Authorization needed")})
-		case contracts.MCPAuthStateExpired:
-			rows = append(rows, uikit.PropertyRow{Label: st.tr("授权状态", "Authorization"), Value: st.tr("已失效", "Expired")})
-		default:
-			rows = append(rows, uikit.PropertyRow{Label: st.tr("授权状态", "Authorization"), Value: textutil.FirstNonEmptyTrimmed(string(card.AuthState), st.tr("未知", "Unknown"))})
-		}
+		// The 授权状态 row is drawn by buildDetailModal with a semantic value
+		// color (PropertySheet has no per-row value color yet).
 		if card.AuthIssuer != "" {
 			rows = append(rows, uikit.PropertyRow{Label: st.tr("授权服务器", "Authorization server"), Value: card.AuthIssuer, Mono: true})
 		}
@@ -978,9 +1024,50 @@ func connectorDetailRows(st *state, card connectorCard) []uikit.PropertyRow {
 	}
 	rows = append(rows,
 		uikit.PropertyRow{Label: st.tr("工具数", "Tools"), Value: fmt.Sprintf("%d", card.Tools)},
-		uikit.PropertyRow{Label: st.tr("状态", "Status"), Value: card.StatusLabel},
 	)
+	// The status row is drawn by buildDetailModal with a semantic value color.
 	return rows
+}
+
+// connectorStatusTextColor maps a connection status kind onto the semantic
+// text color the card badge uses, so the same state reads the same color on
+// the card and in the details sheet (DESIGN.md §5.2 status matrix).
+func connectorStatusTextColor(t *design.Tokens, kind uikit.StatusKind) ui.Color {
+	switch kind {
+	case uikit.StatusError:
+		return t.DangerText
+	case uikit.StatusNeedsAction, uikit.StatusInProgress:
+		return t.WarningText
+	case uikit.StatusSuccess:
+		return t.SuccessText
+	default:
+		return t.LabelPrimary
+	}
+}
+
+// connectorAuthStatusDisplay is the OAuth authorization row's localized value
+// and semantic text color, matching the card badge's vocabulary (DESIGN.md
+// §5.2): authorized success, needed/expired needs-action, unknown quiet.
+func connectorAuthStatusDisplay(st *state, t *design.Tokens, authState contracts.MCPAuthState) (string, ui.Color) {
+	switch authState {
+	case contracts.MCPAuthStateAuthorized:
+		return st.tr("已授权", "Authorized"), t.SuccessText
+	case contracts.MCPAuthStateRequired:
+		return st.tr("需要授权", "Authorization needed"), t.WarningText
+	case contracts.MCPAuthStateExpired:
+		return st.tr("已失效", "Expired"), t.WarningText
+	default:
+		return textutil.FirstNonEmptyTrimmed(string(authState), st.tr("未知", "Unknown")), t.LabelTertiary
+	}
+}
+
+// cleanMCPErrorChain strips the repeated "mcp:" wrappers the backend prepends
+// at each layer ("连接失败: mcp: initialize: mcp: http request: …") so the raw
+// error reads as one chain; the technical detail stays verbatim otherwise.
+func cleanMCPErrorChain(raw string) string {
+	cleaned := strings.ReplaceAll(strings.TrimSpace(raw), "mcp: ", "")
+	cleaned = strings.ReplaceAll(cleaned, "mcp:", "")
+	return strings.Join(strings.Fields(cleaned), " ")
 }
 
 // findConnectorCard returns the card with key from the current frame's list.

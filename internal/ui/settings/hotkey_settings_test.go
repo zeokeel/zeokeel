@@ -47,7 +47,30 @@ func TestAppearanceGlobalHotkeySavesTrimmedValue(t *testing.T) {
 	if got := store.get(contracts.SettingGlobalHotkey); got != "Ctrl+Shift+K" {
 		t.Fatalf("%s = %q, want the trimmed accelerator", contracts.SettingGlobalHotkey, got)
 	}
-	h.assertTexts(tester, "已保存", "Ctrl + Shift + K")
+	h.assertTexts(tester, "已保存", "Ctrl+Shift+K")
+}
+
+// TestAppearanceGlobalHotkeyAcceptsSpacedInput pins the parser's dual
+// acceptance after the compact-notation unification (item 12): a spaced chord
+// still parses (tokens are trimmed), saves canonical and displays compact.
+func TestAppearanceGlobalHotkeyAcceptsSpacedInput(t *testing.T) {
+	store := newFakeSettings(nil)
+	h := newHarness(t, &fakeChat{}, store, settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "模型")
+	h.click(tester, "外观")
+
+	h.focusInput(tester, "组合键 输入")
+	tester.Type("Ctrl + Shift + K")
+	tester.Frame()
+	h.click(tester, "保存")
+
+	if got := store.get(contracts.SettingGlobalHotkey); got != "Ctrl+Shift+K" {
+		t.Fatalf("%s = %q, want the canonical accelerator from spaced input",
+			contracts.SettingGlobalHotkey, got)
+	}
+	h.assertTexts(tester, "已保存", "Ctrl+Shift+K", "当前：Ctrl+Shift+K")
 }
 
 func TestAppearanceGlobalHotkeyRejectsInvalidValue(t *testing.T) {
@@ -80,7 +103,7 @@ func TestAppearanceGlobalHotkeyShowsCurrentValue(t *testing.T) {
 	h.click(tester, "模型")
 	h.click(tester, "外观")
 
-	h.assertTexts(tester, "全局热键", "Ctrl + Alt + K", "当前：Ctrl + Alt + K")
+	h.assertTexts(tester, "全局热键", "Ctrl+Alt+K", "当前：Ctrl+Alt+K")
 }
 
 func TestAppearanceGlobalHotkeyEnglish(t *testing.T) {

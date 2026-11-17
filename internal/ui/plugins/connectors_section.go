@@ -147,6 +147,9 @@ type connectorsState struct {
 	toolListOpen bool
 	toolQuery    string
 	toolBusy     bool
+	// detailErrOpen is the raw-error disclosure inside the details modal
+	// (closed each time the modal opens: the localized cause leads).
+	detailErrOpen bool
 
 	// reloading is true while the toolkit rebuilds MCP after a settings write.
 	reloading bool
@@ -211,6 +214,12 @@ func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 	}
 	cards := p.connectorCards(st, service, hasPlugins, authService, hasAuth)
 
+	// The intro line comes first, then the count/action row — the same order
+	// the Skills tab uses, so the two tabs read as one page family.
+	design.Apply(ui.Text(c, st.tr(
+		"连接器把外部 MCP 服务（第三方工具服务，如浏览器、数据库、搜索）接入会话；启用变更在重启后生效。",
+		"Connectors bring external MCP servers (third-party tool services such as browsers, databases and search) into the session; enable changes apply after a restart.")),
+		t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
 	p.buildCollectionRow(c, t, st, service, hasPlugins, settings, hasSettings, len(cards))
 	if p.parseErr != "" {
 		uikit.ErrorLine(c, p.parseErr)
@@ -231,10 +240,6 @@ func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 		uikit.EmptyState(c, st.tr("设置存储未启用", "Settings store not enabled"))
 		return
 	}
-	design.Apply(ui.Text(c, st.tr(
-		"连接器把外部 MCP 服务（第三方工具服务，如浏览器、数据库、搜索）接入会话；启用变更在重启后生效。",
-		"Connectors bring external MCP servers (third-party tool services such as browsers, databases and search) into the session; enable changes apply after a restart.")),
-		t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
 
 	if len(cards) == 0 {
 		uikit.EmptyStateBlock(c,
@@ -275,8 +280,9 @@ func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 		}).Description(mcpWorkspaceHint(st, p))
 		// The opt-in lets repository content define commands that run with the
 		// app's full permissions: disclose the trust exchange next to the path
-		// hint (2026-11 audit (d), disclosure only).
-		uikit.ErrorLine(c, mcpStdioTrustDisclosure(st))
+		// hint (2026-11 audit (d), disclosure only). A static caution is
+		// warning semantic — red stays for real failures.
+		uikit.WarningLine(c, t, mcpStdioTrustDisclosure(st))
 	})
 
 	if p.formOpen {
@@ -621,6 +627,7 @@ func (p *connectorsState) buildCard(c *ui.Context, t *design.Tokens, st *state,
 					p.detailKey = card.Key
 					p.toolListOpen = false
 					p.toolQuery = ""
+					p.detailErrOpen = false
 					c.Invalidate()
 				}
 				// Only a stored settings row can be edited or removed: a live
@@ -698,6 +705,7 @@ func (p *connectorsState) buildCard(c *ui.Context, t *design.Tokens, st *state,
 					t.SecondaryButton()).Clicked() {
 					p.detailOpen = true
 					p.detailKey = card.Key
+					p.detailErrOpen = false
 					c.Invalidate()
 				}
 				return
@@ -709,6 +717,7 @@ func (p *connectorsState) buildCard(c *ui.Context, t *design.Tokens, st *state,
 				t.SecondaryButton()).Clicked() {
 				p.detailOpen = true
 				p.detailKey = card.Key
+				p.detailErrOpen = false
 				c.Invalidate()
 			}
 			retry := design.Apply(ui.Button(c, st.tr("重试", "Retry")),

@@ -66,8 +66,9 @@ func TestTeamEmptyStatesSentenceStep(t *testing.T) {
 	assertMicroStep(t, tester, "共享任务")
 }
 
-// TestTeamNoRunningTeammateSentenceStep covers the finished-only team: the
-// "no teammate is running" line is a sentence, not a micro-label.
+// TestTeamNoRunningTeammateSentenceStep covers the finished-only team: the 成员
+// section's unified empty state ("还没有队友", finished rows live in 已结束) is a
+// sentence, not a micro-label (2026-11 UI review P2).
 func TestTeamNoRunningTeammateSentenceStep(t *testing.T) {
 	h := newAgentSurfaceHarness(t, headerChat("已结束团队"), agentServices{
 		team: &fakeTeam{members: []contracts.TeamMember{
@@ -80,7 +81,7 @@ func TestTeamNoRunningTeammateSentenceStep(t *testing.T) {
 	h.click(tester, "智能体团队")
 	tester.Frame()
 
-	assertSentenceStep(t, tester, "没有正在运行的队友")
+	assertSentenceStep(t, tester, "还没有队友")
 	// The restored record's status word stays a micro-label.
 	assertMicroStep(t, tester, "历史 · 只读")
 }

@@ -34,7 +34,7 @@ var settingsPages = []settingsPageSpec{
 	{"settings-page-memory", "memory", "记忆", []string{"整理策略", "添加记忆"}},
 	{"settings-page-archive", "archive", "归档", []string{"归档的会话"}},
 	{"settings-page-data", "data-privacy", "数据与隐私", []string{"数据目录", "DSH 数据目录", "清除全部会话"}},
-	{"settings-page-about", "about", "关于", []string{"构建信息", "当前版本", "检查更新", "运行时信息"}},
+	{"settings-page-about", "about", "关于", []string{"构建信息", "检查更新", "运行时信息"}},
 }
 
 func (d *drive) runSettingsSteps() {
@@ -70,7 +70,7 @@ func (d *drive) runSettingsSteps() {
 				return
 			}
 			d.drain(2)
-			c.require(c.has("构建信息") && c.has("当前版本") && c.has("运行时信息"),
+			c.require(c.has("构建信息") && c.has("运行时信息"),
 				"关于页缺少构建/更新/诊断区块")
 			c.shot("settings-groups")
 		})

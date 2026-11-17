@@ -217,11 +217,11 @@ func (d *drive) runSessionSteps() {
 		})
 
 	d.step("composer-permission-menu", "session", "输入区：权限按钮只显示权限模式",
-		"工具栏按钮默认显示「工作区修改」（不再是「会话设置」）→ 点击只显示权限三态（工作区修改 / 所有权限 / 只读）→ Esc 关闭", func(c *check) {
+		"工具栏按钮默认显示「工作区修改（全局）」（审计披露文案；不再是「会话设置」）→ 点击只显示权限三态（工作区修改 / 所有权限 / 只读）→ Esc 关闭", func(c *check) {
 			d.resetToSession()
-			c.require(c.has("工作区修改"), "权限按钮没有显示默认「工作区修改」")
+			c.require(c.has("工作区修改（全局）"), "权限按钮没有显示默认「工作区修改（全局）」")
 			c.require(!c.has("会话设置"), "工具栏仍出现「会话设置」")
-			if !c.click("工作区修改") {
+			if !c.click("工作区修改（全局）") {
 				c.failf("composer 缺少权限按钮")
 				return
 			}
@@ -242,7 +242,7 @@ func (d *drive) runSessionSteps() {
 				d.drain(2)
 			}
 			c.require(!c.has("权限模式"), "Esc 后权限菜单仍未关闭")
-			c.require(c.has("工作区修改"), "Esc 后权限按钮没有恢复当前权限文案")
+			c.require(c.has("工作区修改（全局）"), "Esc 后权限按钮没有恢复当前权限文案")
 		})
 
 	d.step("composer-toolbar-groups", "session", "输入区：工具栏分组",
@@ -250,7 +250,7 @@ func (d *drive) runSessionSteps() {
 			d.resetToSession()
 			c.require(c.has("附件"), "composer 缺少附件菜单")
 			c.require(c.has("drive-model"), "composer 缺少模型 chip")
-			c.require(c.has("工作区修改"), "composer 权限按钮没有显示当前权限")
+			c.require(c.has("工作区修改（全局）"), "composer 权限按钮没有显示当前权限")
 			c.require(!c.has("会话设置"), "composer 仍出现「会话设置」")
 			rect, ok := d.find("发送")
 			if !ok {
@@ -258,7 +258,7 @@ func (d *drive) runSessionSteps() {
 				return
 			}
 			c.note("发送 rect=(%.0f,%.0f,%.0f,%.0f)", rect.X, rect.Y, rect.W, rect.H)
-			if !c.click("工作区修改") {
+			if !c.click("工作区修改（全局）") {
 				return
 			}
 			d.drain(2)
@@ -281,7 +281,7 @@ func (d *drive) runSessionSteps() {
 			d.resetToSession()
 			d.drain(3)
 			c.require(d.has("附件"), "窄窗 composer 工具栏缺少附件菜单")
-			c.require(d.has("工作区修改"), "窄窗 composer 权限按钮没有显示当前权限")
+			c.require(d.has("工作区修改（全局）"), "窄窗 composer 权限按钮没有显示当前权限")
 			c.require(d.has("发送"), "窄窗 composer 工具栏缺少发送按钮")
 			if rect, ok := d.find("drive-model"); !ok || rect.W <= 0 {
 				if !c.click("更多") && !c.click("More") {
@@ -293,7 +293,7 @@ func (d *drive) runSessionSteps() {
 					d.drain(2)
 				}
 			}
-			if c.click("工作区修改") {
+			if c.click("工作区修改（全局）") {
 				d.drain(2)
 				c.require(d.has("权限模式"), "窄窗权限菜单缺少权限模式")
 				c.require(!d.has("对话模式"), "窄窗权限菜单仍显示对话模式")

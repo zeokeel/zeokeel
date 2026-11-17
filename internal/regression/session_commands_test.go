@@ -217,9 +217,17 @@ func TestHelpCommandModalAndEscape(t *testing.T) {
 		t.Fatalf("Run /帮助: %v", err)
 	}
 	harness.tester.Frame()
-	for _, want := range []string{"帮助", "斜杠命令", "快捷键", "关闭", "Cmd/Ctrl + K",
-		"Cmd/Ctrl + Alt + I", "切换右侧栏", "新会话", "停止", "附加文件", "帮助"} {
+	for _, want := range []string{"帮助", "斜杠命令", "快捷键", "关闭",
+		"切换右侧栏", "新会话", "停止", "附加文件", "帮助"} {
 		requireHasText(t, harness.tester, want)
+	}
+	// Unified compact chord notation (uikit.FormatShortcut, 2026-11-17 review):
+	// platform-resolved prefix, so accept either platform's rendering.
+	if !harness.tester.HasText("Ctrl+K") && !harness.tester.HasText("Cmd+K") {
+		t.Fatalf("help modal missing palette chord; texts = %v", harness.tester.Texts())
+	}
+	if !harness.tester.HasText("Ctrl+Alt+I") && !harness.tester.HasText("Cmd+Alt+I") {
+		t.Fatalf("help modal missing inspector chord; texts = %v", harness.tester.Texts())
 	}
 	// The modal lists every registered command (session commands included).
 	commandCount := len(harness.h.ui.Runtime().Commands())

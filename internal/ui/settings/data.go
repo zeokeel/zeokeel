@@ -104,9 +104,11 @@ type dataPrivacyState struct {
 func newDataPrivacyState() *dataPrivacyState { return &dataPrivacyState{} }
 
 // buildDataPrivacyPage renders the data directory, bulk session actions and the
-// diagnostic report export. The page has one primary action (open the data
-// directory); the exports are secondary and the bulk clear is a danger action
-// behind the native confirmation dialog.
+// diagnostic report export. Every section-level action sits at its section
+// title's right edge (SectionAction): open the data directory, export/clear
+// sessions, export the report. Inline value actions (copy the path) stay at the
+// row end; the bulk clear is a danger action behind the native confirmation
+// dialog. The page's only footer primary is the denied-globs draft Save.
 func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 	runtime contracts.UIRuntime, chat contracts.ChatService, store contracts.SettingsService,
 	st *dataPrivacyState, importState *importState, locale contracts.LocaleService) {
@@ -129,7 +131,29 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				TextColor(t.LabelTertiary).MaxLines(2)
 		}
 
-		uikit.Section(c, localized(locale, "数据目录", "Data directory"), func(*ui.Context) {
+		// Section-level actions sit at the section title's right edge (the
+		// report export's SectionAction is the page's one placement); inline
+		// value actions (copy the path) stay at the row end next to the value.
+		uikit.SectionAction(c, localized(locale, "数据目录", "Data directory"), func(c *ui.Context) {
+			openButton := design.Apply(ui.Button(c, localized(locale,
+				"打开数据目录", "Open data directory")), t.SecondaryButton()).
+				Tooltip(localized(locale, "在文件管理器中打开数据目录",
+					"Open the data directory in the file manager"))
+			openButton.Disabled(dataDir == "")
+			if openButton.Clicked() && dataDir != "" {
+				if err := openPathFunc(dataDir); err != nil {
+					st.notice = localized(locale, "打开数据目录失败：",
+						"Failed to open data directory: ") + err.Error()
+					st.noticeErr = true
+					st.noticeDetail = ""
+				} else {
+					st.notice = ""
+					st.noticeErr = false
+					st.noticeDetail = ""
+				}
+				c.Invalidate()
+			}
+		}, func(*ui.Context) {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 				value := textutil.FirstNonEmpty(dataDir, localized(locale, "未设置", "Not set"))
 				design.Apply(ui.Text(c, value), t.Font(design.TypeXXS), t.MonoFamily()).
@@ -147,31 +171,32 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 					design.Apply(ui.Badge(c, localized(locale, "已复制", "Copied")), t.Badge()).
 						TextColor(t.SuccessText)
 				}
-				// Opening the directory is a convenience next to the path, not the
-				// page's primary action: a row-level secondary control keeps the
-				// export/clear/report actions as the page's aligned actions.
-				openButton := design.Apply(ui.Button(c, localized(locale,
-					"打开数据目录", "Open data directory")), t.SecondaryButton()).
-					Tooltip(localized(locale, "在文件管理器中打开数据目录",
-						"Open the data directory in the file manager"))
-				openButton.Disabled(dataDir == "")
-				if openButton.Clicked() && dataDir != "" {
-					if err := openPathFunc(dataDir); err != nil {
-						st.notice = localized(locale, "打开数据目录失败：",
-							"Failed to open data directory: ") + err.Error()
-						st.noticeErr = true
-						st.noticeDetail = ""
-					} else {
-						st.notice = ""
-						st.noticeErr = false
-						st.noticeDetail = ""
-					}
-					c.Invalidate()
-				}
 			})
 		})
 
-		uikit.Section(c, localized(locale, "会话数据", "Session data"), func(*ui.Context) {
+		uikit.SectionAction(c, localized(locale, "会话数据", "Session data"), func(c *ui.Context) {
+			// The bulk actions are section-level: they sit at the title's right
+			// edge (export secondary, the confirmed clear danger), not on their
+			// own right-aligned rows. Without a usable list there is nothing to
+			// export or clear, so the title carries no action.
+			if !hasSessionList || len(sessions) == 0 {
+				return
+			}
+			ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				if design.Apply(ui.Button(c, localized(locale,
+					"导出全部会话", "Export all sessions")),
+					t.SecondaryButton()).Clicked() {
+					exportDataSessions(chat, st, locale)
+					c.Invalidate()
+				}
+				if design.Apply(ui.Button(c, localized(locale,
+					"清除全部会话", "Clear all sessions")),
+					t.DangerButton()).Clicked() {
+					st.confirmClear = true
+					c.Invalidate()
+				}
+			})
+		}, func(*ui.Context) {
 			switch {
 			case !hasSessionList:
 				uikit.EmptyState(c, localized(locale,
@@ -185,30 +210,10 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				design.Apply(ui.Text(c, fmt.Sprintf(localized(locale,
 					"共 %d 个会话", "%d sessions"), len(sessions))),
 					t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
-				// The page has no accent primary action: each section's action sits
-				// at its right end (bulk export here, the destructive clear on its
-				// own row below), so the three data actions line up.
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Justify(ui.End).Children(func() {
-					if design.Apply(ui.Button(c, localized(locale,
-						"导出全部会话", "Export all sessions")),
-						t.SecondaryButton()).Clicked() {
-						exportDataSessions(chat, st, locale)
-						c.Invalidate()
-					}
-				})
-				ui.Divider(c)
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					design.Apply(ui.Text(c, localized(locale,
-						"删除全部会话后无法恢复。",
-						"Deleting every session cannot be undone.")),
-						t.TextMuted(design.TypeXXS)).Grow(1).MaxLines(2)
-					if design.Apply(ui.Button(c, localized(locale,
-						"清除全部会话", "Clear all sessions")),
-						t.DangerButton()).Clicked() {
-						st.confirmClear = true
-						c.Invalidate()
-					}
-				})
+				design.Apply(ui.Text(c, localized(locale,
+					"删除全部会话后无法恢复。",
+					"Deleting every session cannot be undone.")),
+					t.TextMuted(design.TypeXXS)).MaxLines(2)
 			}
 		})
 

@@ -385,18 +385,14 @@ func (s *service) Request(ctx context.Context, request contracts.ApprovalRequest
 }
 
 // approvalTimeoutText is the visible copy of the automation approval-timeout
-// auto-deny notification (the waiting notice's sibling): it names the tool by
-// its friendly localized name and says the unattended request was denied
-// because nobody answered within the configured window.
+// auto-deny notification (the waiting notice's sibling): it says the unattended
+// request was denied because nobody answered within the configured window.
+// Like the waiting notice, its payload is the stable tool id the toast overlay
+// localizes at render time (uikit.ToolDisplayName); the automation origin rides
+// the translatable affix suffix (2026-11-17 UI review P3).
 func (s *service) approvalTimeoutText(request contracts.ApprovalRequest) string {
 	english := uikit.Language(s.locale) == "en"
-	name := uikit.ToolDisplayName(s.locale, request.Tool)
-	if name == "" || name == strings.TrimSpace(request.Tool) {
-		name = "工具调用"
-		if english {
-			name = "a tool call"
-		}
-	}
+	name := strings.TrimSpace(request.Tool)
 	if english {
 		return "Approval timed out and was auto-denied: " + name + " (automation)"
 	}
@@ -404,27 +400,20 @@ func (s *service) approvalTimeoutText(request contracts.ApprovalRequest) string 
 }
 
 // approvalWaitingText is the visible copy of the approval-waiting notification.
-// It names the tool by its friendly, localized display name and never by the raw
-// protocol id (the raw id stays in the approval dialog's badge tooltip and the
-// trajectory, where the tool row owns it); a request from a background run
-// carries its localized origin so the user knows why it appeared.
+// The payload is the stable tool id, not a display name frozen at generation
+// time: the toast overlay localizes it at render time (uikit.ToolDisplayName),
+// so a language switch while the toast is alive translates the tool name too
+// (2026-11-17 UI review P3). An id the kit does not know falls back to the id
+// itself at render time (lead ruling); the approval dialog still owns the
+// request's full details. A request from a background run carries its origin
+// in the affix suffix, which the overlay translates with the prefix.
 func (s *service) approvalWaitingText(request contracts.ApprovalRequest) string {
 	english := uikit.Language(s.locale) == "en"
 	text := "审批等待："
 	if english {
 		text = "Approval waiting: "
 	}
-	name := uikit.ToolDisplayName(s.locale, request.Tool)
-	// A tool the kit does not know has no friendly name; its raw protocol id
-	// must not reach visible copy, so the notification falls back to a generic
-	// label (the approval dialog still shows the request's details).
-	if name == "" || name == strings.TrimSpace(request.Tool) {
-		name = "工具调用"
-		if english {
-			name = "a tool call"
-		}
-	}
-	text += name
+	text += strings.TrimSpace(request.Tool)
 	if source := approvalSourceLabel(s.locale, request.Source); source != "" {
 		if english {
 			text += " (" + source + ")"

@@ -119,6 +119,10 @@ func (r *Root) view(c *ui.Context) {
 
 	r.inspectorDrawerShown = false
 	r.inspectorDrawer(c)
+	// The toast stack's anchor is resolved once the chrome layout and the
+	// drawer presentation are known, before the overlay slots (the toasts
+	// module) read it (contracts.ToastAnchorService).
+	r.refreshToastAnchor(c)
 	// The palette is built last: it is the window's top layer, so Cmd+K from
 	// inside the settings modal shows above it instead of behind it (fix round
 	// SH-07), and Escape closes the palette before the surface below it.
@@ -350,13 +354,18 @@ const railSessionLimit = 8
 func (r *Root) railSessionsEntry(c *ui.Context, t *design.Tokens) {
 	label := r.tr("会话", "Sessions")
 	anchor := uikit.IconButton(c, uikit.IconButtonOptions{
-		Key:      "chrome.rail.sessions",
-		Label:    label,
-		Tooltip:  label,
-		Icon:     icons.Message(),
-		Size:     design.IconSizeM,
-		Toggle:   true,
-		Selected: r.railSessionsOpen,
+		Key:     "chrome.rail.sessions",
+		Label:   label,
+		Tooltip: label,
+		Icon:    icons.Message(),
+		Size:    design.IconSizeM,
+		Toggle:  true,
+		// The entry marks the rail's current destination as well as the open
+		// popover: the session screen has no rail row of its own (the tree's
+		// destination in the expanded form), so without this the rail showed
+		// no selected state while the conversation was on screen (2026-11-17
+		// UI review P3). The click stays a popover toggle.
+		Selected: r.railSessionsOpen || r.nav.Current() == sessionScreenID,
 		OnClick: func() {
 			r.railSessionsOpen = !r.railSessionsOpen
 			if r.railSessionsOpen {
@@ -480,41 +489,27 @@ func (r *Root) railSessions() []contracts.ChatSessionInfo {
 	return recent
 }
 
-// screenIcon maps a registered screen id to the shell's icon. The icon set must
-// not collapse two destinations onto one glyph (the audit found the rail drew
-// both Automation and Plugins as the same cube).
+// screenIcon maps a registered screen id to the shell's icon through the
+// shared single navigation table (uikit.ScreenNavSpec, which the sidebar
+// module's rows read too): the expanded sidebar and the collapsed rail cannot
+// drift onto different glyphs (the 2026-11-17 UI review found the rail's
+// private copy missing "insights" and drawing the cube). The rail's own
+// destination set still skips home/session (sidebarRail); the table keeps
+// their glyphs for the forms that do draw them.
 func (r *Root) screenIcon(id string) *ui.SVG {
-	switch id {
-	case "home":
-		return icons.Home()
-	case "session":
-		return icons.Message()
-	case "automation":
-		return icons.Clock()
-	case "plugins":
-		return icons.Plugin()
-	case "settings":
-		return icons.Sliders()
-	default:
-		return icons.Data()
-	}
+	icon, _, _ := uikit.ScreenNavSpec(id)
+	return icon
 }
 
-// screenLabel localizes the shell's destination names; modules keep their own
+// screenLabel localizes the shell's destination names through the same single
+// navigation table (uikit.ScreenNavLabel). A screen the table does not know
+// keeps the module's own registered title, as before; modules keep their own
 // titles for their own navigation rows.
 func (r *Root) screenLabel(spec contracts.ScreenSpec) string {
-	switch spec.ID {
-	case "home":
-		return r.tr("首页", "Home")
-	case "session":
-		return r.tr("对话", "Chat")
-	case "automation":
-		return r.tr("自动化", "Automation")
-	case "plugins":
-		return r.tr("能力", "Capabilities")
-	default:
-		return spec.Title
+	if label := uikit.ScreenNavLabel(r.locale, spec.ID); label != spec.ID {
+		return label
 	}
+	return spec.Title
 }
 
 // screen renders the current module screen between the screen header and the
@@ -1015,6 +1010,13 @@ func (r *Root) hasAnySlot(names ...string) bool {
 	return false
 }
 
+// paletteShortcutColumnWidth is the palette's fixed right-hand shortcut column:
+// every command row reserves it (empty when the command has no chord), so the
+// kbd column's start never drifts with the hint or the chord length. It holds
+// the product's longest palette chords ("Ctrl+Shift+Space") at the TypeXXXS
+// mono step; a longer custom chord ellipsizes rather than moving the column.
+const paletteShortcutColumnWidth = design.Space8 * 4 // 128
+
 // palette is the host command palette: a native Modal with a search field and a
 // native List of the registered commands. Up/Down move the choice, Enter runs
 // it, Escape closes it — the promise the old hand-built row list only printed.
@@ -1180,14 +1182,26 @@ func (r *Root) palette(c *ui.Context) {
 							design.Apply(ui.Text(row.Context, hint), t.Font(design.TypeXXXS)).
 								TextColor(hintColor).MaxLines(1).Ellipsis("…").MaxWidth(240)
 						}
+						// The shortcut column is fixed-width on every row, so
+						// the kbd micro-labels start at one x whether or not a
+						// row carries a chord (2026-11-17 UI review P3: the
+						// old hint-then-shortcut run drifted its start with
+						// the hint length). The chord is normalized by the
+						// product's single formatter (uikit.FormatShortcut:
+						// one platform prefix, one plus notation), shared
+						// with the settings keyboard reference.
 						shortcut := strings.TrimSpace(cmd.Shortcut)
 						if shortcut == "" {
 							shortcut = r.commandShortcut(cmd.ID)
 						}
-						if shortcut != "" {
-							design.Apply(ui.Text(row.Context, shortcut), t.Font(design.TypeXXXS)).
-								TextColor(hintColor).Shrink(0)
-						}
+						ui.Row(row.Context).Width(paletteShortcutColumnWidth).Shrink(0).
+							AlignItems(ui.Center).Children(func() {
+							if shortcut != "" {
+								design.Apply(ui.Text(row.Context, uikit.FormatShortcut(shortcut)),
+									t.MonoText(design.TypeXXXS)).
+									TextColor(hintColor).NoWrap().MaxLines(1).Ellipsis("…")
+							}
+						})
 					})
 				})
 				if item.Clicked() {
@@ -1736,7 +1750,12 @@ func (r *Root) settingsNavColumn(c *ui.Context, t *design.Tokens, selected *stri
 	for _, group := range groups {
 		matchCount += len(group.pages)
 	}
-	ui.Column(c).Width(settingsNavWidth).FillHeight().Children(func() {
+	// The navigation is a sunken surface (S1), as the window's own sidebar:
+	// ui.Sidebar's default theme.Surface is lighter than the modal panel in
+	// the dark theme, which inverted the ramp (dark navigation must sit below
+	// the page, 2026-11-17 UI review P2). BgSidebar keeps both themes on the
+	// shell's ramp.
+	ui.Column(c).Width(settingsNavWidth).FillHeight().Background(t.BgSidebar).Children(func() {
 		ui.Column(c).FillWidth().Shrink(0).Gap(design.Space1).
 			Padding(design.Space3, design.Space3, design.Space2, design.Space3).Children(func() {
 			ui.SearchField(c, &r.settingsQuery).
@@ -1804,7 +1823,10 @@ func (r *Root) settingsNavColumn(c *ui.Context, t *design.Tokens, selected *stri
 			}
 			r.slot(c, contracts.SlotSettingsSidebar)
 		}).Label(r.tr("设置导航", "Settings navigation")).
-			Grow(1).Shrink(1).FillWidth().PaddingY(design.Space1)
+			Grow(1).Shrink(1).FillWidth().PaddingY(design.Space1).
+			// The native Sidebar paints theme.Surface by default; the sunken
+			// navigation token keeps the dark ramp below the modal panel.
+			Background(t.BgSidebar)
 	})
 }
 
@@ -1970,13 +1992,14 @@ func (r *Root) settings(c *ui.Context, open *bool) {
 			// scrolling body, so it is visible without scrolling to the end.
 			if current.Footer != nil || r.hasAnySlot(contracts.SlotSettingsPageFooter) {
 				ui.Column(c).FillWidth().Shrink(0).PaddingX(design.Space4).Children(func() {
-					ui.Divider(c)
-					ui.Row(c).FillWidth().Shrink(0).PaddingY(design.Space2).Children(func() {
-						r.slot(c, contracts.SlotSettingsPageFooter)
-						if current.Footer != nil {
-							r.safeBuild(c, current.Footer)
-						}
-					})
+					// External slot contributions stay as bare content above the
+					// page's own footer; uikit.PageFooter draws the divider and
+					// action row (the single source — the host must not add a
+					// second divider or row wrapper around it).
+					r.slot(c, contracts.SlotSettingsPageFooter)
+					if current.Footer != nil {
+						r.safeBuild(c, current.Footer)
+					}
 				})
 			}
 		})

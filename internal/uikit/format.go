@@ -66,12 +66,14 @@ func FormatContextWindow(tokens int) string {
 }
 
 // FormatShortcut normalizes one of the product's shortcut notations into the
-// single display form the UI shows: modifiers joined with " + ", the command
-// modifier spelled for the platform ("Cmd" on macOS, "Ctrl" elsewhere), and
-// ordinary keys uppercase. It accepts every notation already in the repository
-// — "CmdOrCtrl+Shift+Space", "Cmd/Ctrl + N", "Ctrl+Alt+P", "cmd+k" — so a
-// keyboard reference table, the command palette and the inspector cards can
-// share one formatter instead of three spellings (V11).
+// single display form the UI shows: modifiers joined with a bare "+" (no spaces,
+// the command palette's notation), the command modifier spelled for the platform
+// ("Cmd" on macOS, "Ctrl" elsewhere), and ordinary keys uppercase. It accepts
+// every notation already in the repository — "CmdOrCtrl+Shift+Space",
+// "Cmd/Ctrl + N", "Ctrl+Alt+P", "cmd+k" — so the settings hotkey page, the
+// keyboard reference table, the command palette and the inspector cards share one
+// formatter instead of several spellings (V11; 2026-11 UI review P3 dropped the
+// spaces around the plus so every surface matches the palette's "Cmd+K").
 func FormatShortcut(raw string) string {
 	return formatShortcutFor(runtime.GOOS, raw)
 }
@@ -118,7 +120,7 @@ func formatShortcutFor(goos, raw string) string {
 		}
 	}
 	parts = append(parts, formatShortcutKey(key))
-	return strings.Join(parts, " + ")
+	return strings.Join(parts, "+")
 }
 
 // formatShortcutKey renders the final key of a shortcut: letters uppercase,

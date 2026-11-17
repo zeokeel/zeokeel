@@ -880,7 +880,9 @@ func buildMessageHitRowContent(c *ui.Context, t *design.Tokens, state *paneState
 				TextColor(t.LabelTertiary)
 		})
 		if snippet := strings.TrimSpace(hit.Snippet); snippet != "" {
-			buildHighlightedSnippet(c, t, query, snippet)
+			// The backend snippet is raw Markdown; clean it at render so the hit
+			// reads as prose, not "## … ```bash … - …" noise (2026-11 UI review P2).
+			buildHighlightedSnippet(c, t, query, uikit.PreviewProse(snippet, 0))
 		}
 	})
 }
@@ -1887,44 +1889,24 @@ func rowTint(t *design.Tokens, el ui.Element, selected bool) ui.Element {
 	}
 }
 
-// ScreenNavSpec is the single navigation mapping for a registered screen id:
-// its glyph and its localized labels. The expanded sidebar rows and the host's
-// collapsed rail must both read it (the host rail draws the same destinations),
-// so a new screen adds its entry here once and the rail cannot drift onto a
-// different glyph or an untranslated label.
+// ScreenNavSpec delegates to the shared uikit navigation table — the single
+// source both the expanded sidebar rows and the host's collapsed rail read. The
+// table moved to uikit so uiroot can consume it without importing this UI module
+// (module boundary); the exported entry point stays for existing callers/tests
+// (2026-11 UI review, boundary ruling).
 func ScreenNavSpec(id string) (icon *ui.SVG, zh, en string) {
-	switch id {
-	case "home":
-		return icons.Home(), "首页", "Home"
-	case "session":
-		return icons.Message(), "对话", "Chat"
-	case "automation":
-		return icons.Clock(), "自动化", "Automation"
-	case "insights":
-		return icons.Activity(), "洞察", "Insights"
-	case "plugins":
-		return icons.Plugin(), "能力", "Capabilities"
-	case "settings":
-		return icons.Sliders(), "设置", "Settings"
-	default:
-		return icons.Data(), "", ""
-	}
+	return uikit.ScreenNavSpec(id)
 }
 
 // ScreenNavIcon is ScreenNavSpec's glyph, for the sidebar rows.
 func ScreenNavIcon(id string) *ui.SVG {
-	icon, _, _ := ScreenNavSpec(id)
-	return icon
+	return uikit.ScreenNavIcon(id)
 }
 
 // ScreenNavLabel is ScreenNavSpec's localized label; an unregistered id falls
 // back to the id itself.
 func ScreenNavLabel(locale contracts.LocaleService, id string) string {
-	_, zh, en := ScreenNavSpec(id)
-	if zh == "" && en == "" {
-		return id
-	}
-	return uikit.T(locale, zh, en)
+	return uikit.ScreenNavLabel(locale, id)
 }
 
 // screenNavIcon maps a registered screen id to the same glyph the host's

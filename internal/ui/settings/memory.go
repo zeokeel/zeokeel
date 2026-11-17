@@ -239,47 +239,31 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 
 		// Adding a memory stays next to the list it extends, before the policy
 		// and extraction sections (H19): the old order buried the add form
-		// below two long policy blocks.
-		uikit.Section(c, localized(locale, "添加记忆", "Add memory"), func(*ui.Context) {
-			draft := strings.TrimSpace(st.draft)
-			// One add path for the button and for Enter in the field, so the two
-			// cannot drift (mygo text-input.md: Submitted is Enter in a text
-			// input; a desktop form's single-line field submits on Enter).
-			add := func() {
-				content := strings.TrimSpace(st.draft)
-				if content == "" {
-					return
-				}
-				// The empty scope lets the durable store apply its configured
-				// default (Config.Scope, FR-25) instead of hardcoding global.
-				_, err := store.Add(context.Background(), contracts.Memory{Text: content})
-				if err != nil {
-					st.notice = localized(locale, "添加记忆失败：", "Failed to add memory: ") + err.Error()
-					st.noticeErr = true
-				} else {
-					st.draft = ""
-					st.notice = localized(locale, "已添加", "Added")
-					st.noticeErr = false
-					st.invalidateMemories()
-				}
-				c.Invalidate()
+		// below two long policy blocks. Adding applies at once, so it is a
+		// section action; the page's one primary is the footer's policy Save.
+		uikit.SectionAction(c, localized(locale, "添加记忆", "Add memory"), func(c *ui.Context) {
+			if design.Apply(ui.Button(c, localized(locale, "添加", "Add")), t.SecondaryButton()).
+				Disabled(strings.TrimSpace(st.draft) == "").Clicked() {
+				addMemoryEntry(c, store, st, locale)
 			}
+		}, func(*ui.Context) {
 			ui.Field(c, localized(locale, "记忆内容", "Memory text"), func() {
 				input := ui.TextInput(c, &st.draft).
 					Label(inputLabel(locale, localized(locale, "记忆内容", "Memory text"))).
-					Placeholder(localized(locale, "记忆内容", "Memory text")).FillWidth()
+					// The placeholder exemplifies an entry instead of repeating
+					// the field label.
+					Placeholder(localized(locale, "例如：发布前先跑 go test ./...",
+						"e.g. Run go test ./... before a release")).FillWidth()
+				// One add path for the button and for Enter in the field, so the
+				// two cannot drift (mygo text-input.md: Submitted is Enter in a
+				// text input; a desktop form's single-line field submits on Enter).
 				if input.Submitted() {
-					add()
+					addMemoryEntry(c, store, st, locale)
 				}
 			})
 			if st.notice != "" && st.noticeErr {
 				uikit.ErrorLine(c, st.notice)
 			}
-			uikit.DialogFooter(c, []uikit.DialogAction{{
-				Label: localized(locale, "添加", "Add"), Primary: true,
-				Disabled: draft == "",
-				OnClick:  add,
-			}})
 			if st.notice != "" && !st.noticeErr {
 				statusBadgesRow(c, t, st.notice, false)
 			}
@@ -343,6 +327,80 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 	})
 }
 
+// addMemoryEntry persists the add draft at once (the section action and the
+// field's Enter share it): success clears the draft and refreshes the list, a
+// failure keeps the draft and reports in the page's danger line.
+func addMemoryEntry(c *ui.Context, store contracts.MemoryStore, st *memoryPageState, locale contracts.LocaleService) {
+	content := strings.TrimSpace(st.draft)
+	if content == "" {
+		return
+	}
+	// The empty scope lets the durable store apply its configured default
+	// (Config.Scope, FR-25) instead of hardcoding global.
+	_, err := store.Add(context.Background(), contracts.Memory{Text: content})
+	if err != nil {
+		st.notice = localized(locale, "添加记忆失败：", "Failed to add memory: ") + err.Error()
+		st.noticeErr = true
+	} else {
+		st.draft = ""
+		st.notice = localized(locale, "已添加", "Added")
+		st.noticeErr = false
+		st.invalidateMemories()
+	}
+	c.Invalidate()
+}
+
+// memoryPolicyDirty reports whether the consolidation steppers hold an unsaved
+// edit — the memory page's footer-save draft. Without a loaded policy (no
+// consolidator on the store) there is nothing to save.
+func memoryPolicyDirty(st *memoryPageState, store contracts.SettingsService) bool {
+	if store == nil || !st.policyLoaded {
+		return false
+	}
+	entries, _ := parseMemoryPolicyInt(st.maxEntries)
+	age, _ := parseMemoryPolicyInt(st.maxAgeDays)
+	storedEntries, _ := parseMemoryPolicyInt(store.Get(contracts.SettingMemoryMaxEntries, ""))
+	storedAge, _ := parseMemoryPolicyInt(store.Get(contracts.SettingMemoryMaxAgeDays, ""))
+	return entries != storedEntries || age != storedAge
+}
+
+// saveMemoryPolicy is the footer's Save: it persists the normalized steppers
+// without running a consolidation (the policy applies to the backend's
+// automatic consolidation). The section's 按策略整理 action saves and
+// consolidates at once via applyMemoryPolicy.
+func saveMemoryPolicy(c *ui.Context, settingsStore contracts.SettingsService,
+	st *memoryPageState, locale contracts.LocaleService) {
+	maxEntries, entriesOK := parseMemoryPolicyInt(st.maxEntries)
+	maxAgeDays, ageOK := parseMemoryPolicyInt(st.maxAgeDays)
+	st.policyWarn = ""
+	if !entriesOK || !ageOK {
+		st.policyWarn = localized(locale,
+			"无效数字，已按 0（不限）处理",
+			"Invalid number; using 0 (unlimited)")
+	}
+	st.maxEntries = strconv.Itoa(maxEntries)
+	st.maxAgeDays = strconv.Itoa(maxAgeDays)
+	st.maxEntriesNum = float64(maxEntries)
+	st.maxAgeDaysNum = float64(maxAgeDays)
+	var saveErr error
+	if settingsStore != nil {
+		if err := settingsStore.Set(contracts.SettingMemoryMaxEntries, st.maxEntries); err != nil {
+			saveErr = err
+		}
+		if err := settingsStore.Set(contracts.SettingMemoryMaxAgeDays, st.maxAgeDays); err != nil && saveErr == nil {
+			saveErr = err
+		}
+	}
+	if saveErr != nil {
+		st.policyNotice = localized(locale, "保存策略失败：", "Failed to save policy: ") + saveErr.Error()
+		st.policyErr = true
+	} else {
+		st.policyNotice = localized(locale, "已保存", "Saved")
+		st.policyErr = false
+	}
+	c.Invalidate()
+}
+
 // parseMemoryPolicyInt parses one policy input: empty means 0 (unlimited),
 // negative or non-numeric input is invalid and normalized to 0.
 func parseMemoryPolicyInt(raw string) (int, bool) {
@@ -379,10 +437,20 @@ func buildMemoryConsolidationPanel(c *ui.Context, t *design.Tokens, store contra
 			}
 		}
 	}
-	uikit.Section(c, localized(locale, "整理策略", "Consolidation policy"), func(*ui.Context) {
+	// Consolidating applies at once (it also saves the steppers): a section
+	// action. The footer's Save only persists the policy edit, so the helper
+	// names the button that actually consolidates instead of promising a
+	// consolidation on a save that does not run one.
+	uikit.SectionAction(c, localized(locale, "整理策略", "Consolidation policy"), func(c *ui.Context) {
+		if design.Apply(ui.Button(c, localized(locale, "按策略整理", "Consolidate")), t.SecondaryButton()).
+			Tooltip(localized(locale, "保存当前策略并立即整理一次",
+				"Save the current policy and consolidate once now")).Clicked() {
+			applyMemoryPolicy(c, consolidator, settingsStore, st, locale)
+		}
+	}, func(*ui.Context) {
 		design.Apply(ui.Text(c, localized(locale,
-			"0 或留空表示不限制；保存后立即整理。",
-			"0 or empty means unlimited; consolidation runs on save.")),
+			"0 或留空表示不限制；点「按策略整理」保存并立即整理。",
+			"0 or empty means unlimited; Consolidate saves and runs immediately.")),
 			t.TextMuted(design.TypeXXS)).MaxLines(2)
 		ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
 			ui.Column(c).FillWidth().Grow(1).Children(func() {
@@ -396,8 +464,8 @@ func buildMemoryConsolidationPanel(c *ui.Context, t *design.Tokens, store contra
 					if entries.Changed() {
 						st.maxEntries = strconv.Itoa(int(st.maxEntriesNum))
 					}
-				}).Description(localized(locale, "超过后删除最旧的记忆；0 表示不限。",
-					"Entries beyond the cap are the oldest ones; 0 means unlimited."))
+				}).Description(localized(locale, "超过后删除最旧的记忆。",
+					"The oldest entries beyond the cap are removed."))
 			})
 			ui.Column(c).FillWidth().Grow(1).Children(func() {
 				ui.Field(c, localized(locale, "保留天数", "Max age (days)"), func() {
@@ -407,8 +475,8 @@ func buildMemoryConsolidationPanel(c *ui.Context, t *design.Tokens, store contra
 					if days.Changed() {
 						st.maxAgeDays = strconv.Itoa(int(st.maxAgeDaysNum))
 					}
-				}).Description(localized(locale, "早于该天数的记忆会被删除；0 表示不限。",
-					"Memories older than this many days are dropped; 0 means unlimited."))
+				}).Description(localized(locale, "早于该天数的记忆会被删除。",
+					"Memories older than this many days are dropped."))
 			})
 		})
 		if st.policyWarn != "" {
@@ -418,12 +486,6 @@ func buildMemoryConsolidationPanel(c *ui.Context, t *design.Tokens, store contra
 			uikit.ErrorLine(c, st.policyNotice)
 		}
 		statusBadgesRow(c, t, st.policyNotice, st.policyErr)
-		uikit.DialogFooter(c, []uikit.DialogAction{{
-			Label: localized(locale, "按策略整理", "Consolidate"), Primary: true,
-			OnClick: func() {
-				applyMemoryPolicy(c, consolidator, settingsStore, st, locale)
-			},
-		}})
 	})
 }
 
@@ -652,23 +714,20 @@ func buildMemoryExtractionPanel(c *ui.Context, t *design.Tokens, kctx cordis.Con
 		toggleLabel := localized(locale,
 			"启用模型提取（从最近对话提取记忆，会调用模型）",
 			"Enable model extraction (extract memories from recent chats; calls the model)")
-		ui.Form(c, func() {
-			if switchField(c, toggleLabel,
-				"",
-				&enabled) {
-				value := ""
-				if enabled {
-					value = "true"
-				}
-				if err := settingsStore.Set(contracts.SettingMemoryExtractEnabled, value); err != nil {
-					setMemoryNotice(st, localized(locale, "保存失败：", "Save failed: ")+err.Error(), true)
-				} else {
-					setMemoryNotice(st, localized(locale, "已保存", "Saved"), false)
-				}
-				c.Invalidate()
+		if uikit.SwitchRow(c, uikit.SwitchRowOptions{Label: toggleLabel, Value: &enabled}) {
+			value := ""
+			if enabled {
+				value = "true"
 			}
-		})
-		uikit.ErrorLine(c, localized(locale,
+			if err := settingsStore.Set(contracts.SettingMemoryExtractEnabled, value); err != nil {
+				setMemoryNotice(st, localized(locale, "保存失败：", "Save failed: ")+err.Error(), true)
+			} else {
+				setMemoryNotice(st, localized(locale, "已保存", "Saved"), false)
+			}
+			c.Invalidate()
+		}
+		// A static cost/privacy caution is warning semantic, not a failure.
+		uikit.WarningLine(c, t, localized(locale,
 			"会消耗模型额度并向服务商发送对话内容。",
 			"Uses your model quota and sends conversation content to the provider."))
 
@@ -713,8 +772,9 @@ func buildMemoryExtractionPanel(c *ui.Context, t *design.Tokens, kctx cordis.Con
 // memoryDraftDirty reports whether the 添加记忆 input holds an unsaved draft.
 func memoryDraftDirty(st *memoryPageState) bool { return strings.TrimSpace(st.draft) != "" }
 
-// discardMemoryDraft clears the add-memory draft and the transient notices, so
-// the host's Discard action reopens a clean memory page.
+// discardMemoryDraft clears the add-memory draft and the transient notices and
+// reloads the consolidation steppers from the store, so the host's Discard
+// action reopens a clean memory page (including the footer-save policy draft).
 func discardMemoryDraft(st *memoryPageState) {
 	st.draft = ""
 	st.notice = ""
@@ -722,6 +782,7 @@ func discardMemoryDraft(st *memoryPageState) {
 	st.policyNotice = ""
 	st.policyErr = false
 	st.policyWarn = ""
+	st.policyLoaded = false
 }
 
 // memoryRowLabel is the accessible text of one memory row: its full body, with

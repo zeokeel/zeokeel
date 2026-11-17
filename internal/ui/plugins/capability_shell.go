@@ -101,15 +101,33 @@ func buildCapabilityPage(c *ui.Context, cfg Config, st *state) {
 // buildCapabilityDiagnostics is the shared footer of the capability page: the
 // compiled-in module inventory and the curated plugin settings stay available
 // below every tab. They are diagnostic/settings surfaces, not a third
-// capability, so they do not become a tab.
+// capability, so they do not become a tab. The area is one section: the group
+// heading owns a divider and the two inventories are named subgroups inside it
+// (an orphan heading directly followed by a peer section read as an empty
+// section). Without either service the whole group is hidden.
 func buildCapabilityDiagnostics(c *ui.Context, t *design.Tokens, st *state) {
-	ui.Divider(c)
-	design.Apply(ui.Text(c, st.tr("诊断与设置", "Diagnostics & settings")),
-		t.Font(design.TypeM)).FontWeight(design.WeightSemibold).TextColor(t.LabelPrimary).
-		Role(ui.RoleHeading).Level(2)
-
 	settings, hasSettings := st.ctx.Get(contracts.KeySettings)
+	hasSettings = hasSettings && settings != nil
 	modulesLister, hasModules := st.ctx.Get(contracts.KeyModuleLister)
-	buildModulesSection(c, t, st, modulesLister, hasModules)
-	buildPluginParamsSection(c, t, st, settings, hasSettings)
+	hasModules = hasModules && modulesLister != nil
+	if !hasModules && !hasSettings {
+		return
+	}
+	ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
+		ui.Divider(c)
+		design.Apply(ui.Text(c, st.tr("诊断与设置", "Diagnostics & settings")),
+			t.Font(design.TypeM)).FontWeight(design.WeightSemibold).TextColor(t.LabelPrimary).
+			Role(ui.RoleHeading).Level(2)
+		buildModulesSection(c, t, st, modulesLister, hasModules)
+		buildPluginParamsSection(c, t, st, settings, hasSettings)
+	})
+}
+
+// capabilityGroupLabel is a subgroup title inside 诊断与设置: one type step
+// below the group's TypeM heading and a level-3 heading, so the inventories
+// read as groups of one section rather than peer sections.
+func capabilityGroupLabel(c *ui.Context, t *design.Tokens, title string) {
+	design.Apply(ui.Text(c, title), t.Font(design.TypeXS)).
+		FontWeight(design.WeightSemibold).TextColor(t.LabelSecondary).
+		Role(ui.RoleHeading).Level(3)
 }

@@ -649,6 +649,48 @@
         "single-tab-stop"
       ],
       "doc": "docs/DESIGN.md §6.2 / docs/AGENT-SURFACES.md S7"
+    },
+    {
+      "id": "uikit.warning-line",
+      "entry": "uikit.WarningLine",
+      "package": "internal/uikit",
+      "status": "static risk/trust disclosure in the warning semantic (2026-11-17 review)",
+      "allowed": [
+        "uikit.WarningLine"
+      ],
+      "forbidden": [
+        "ErrorLine_for_static_disclosure",
+        "danger_ink",
+        "neutral_text"
+      ]
+    },
+    {
+      "id": "uikit.page-footer",
+      "entry": "uikit.PageFooter",
+      "package": "internal/uikit",
+      "status": "settings page fixed footer: one primary, rightmost; disabled primary uses DisabledPrimary (2026-11-17 review)",
+      "allowed": [
+        "uikit.PageFooter"
+      ],
+      "forbidden": [
+        "mid_page_primary",
+        "two_primaries",
+        "danger_as_default"
+      ]
+    },
+    {
+      "id": "uikit.switch-row",
+      "entry": "uikit.SwitchRow",
+      "package": "internal/uikit",
+      "status": "boolean setting row: left-edge label, trailing switch, description on the section edge (2026-11-17 review)",
+      "allowed": [
+        "uikit.SwitchRow"
+      ],
+      "forbidden": [
+        "right_aligned_label_column",
+        "description_under_control",
+        "bare_switch_without_label"
+      ]
     }
   ],
   "scenarios": [

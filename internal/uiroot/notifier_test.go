@@ -283,6 +283,37 @@ func TestNotifierOSNotificationTarget(t *testing.T) {
 	}
 }
 
+// TestNotifierOSMirrorBodyLocalizes covers the OS mirror's render-time body
+// localizer (2026-11-17 UI review P3): the toasts module installs the same
+// localization its cards apply, so an approval notice carrying a stable tool
+// id reaches the notification center as friendly copy, not the raw id. Nil
+// keeps mirroring the text as created.
+func TestNotifierOSMirrorBodyLocalizes(t *testing.T) {
+	service := newNotifierService(nil, "ZeoKeel")
+	service.setOSNotifier(func(string, string, string) error { return nil })
+	notification := contracts.Notification{ID: "notice-1", Text: "审批等待：bash"}
+
+	// Without a localizer the body mirrors as created.
+	if _, _, _, body, ok := service.osNotificationTarget(notification); !ok || body != "审批等待：bash" {
+		t.Fatalf("bare mirror body = %q (ok=%v), want the text as created", body, ok)
+	}
+
+	service.SetLocalizer(func(text string) string {
+		if text == "审批等待：bash" {
+			return "Approval waiting: Run command"
+		}
+		return text
+	})
+	if _, _, _, body, ok := service.osNotificationTarget(notification); !ok || body != "Approval waiting: Run command" {
+		t.Fatalf("localized mirror body = %q (ok=%v), want the translated copy", body, ok)
+	}
+
+	service.SetLocalizer(nil)
+	if _, _, _, body, ok := service.osNotificationTarget(notification); !ok || body != "审批等待：bash" {
+		t.Fatalf("cleared localizer body = %q (ok=%v), want the text as created again", body, ok)
+	}
+}
+
 func TestNotifierSystemNotificationSwitchOffSkipsOS(t *testing.T) {
 	settings := &fakeNotifierSettings{}
 	root := New(Config{AppName: "ZeoKeelTest", Settings: settings})

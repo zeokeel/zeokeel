@@ -557,12 +557,17 @@ func buildConversationTitle(c *ui.Context, t *design.Tokens, st *state, chat con
 	// still bounded so a very long title cannot push the utilities off. The old
 	// 7 * 32 cap (220 px) truncated ordinary titles even after the zero-value
 	// agent entries were removed.
-	titleElement := design.Apply(ui.Text(c, title), t.Font(design.TypeM)).
-		FontWeight(600).TextColor(t.LabelPrimary).Shrink(1).MinWidth(0).
+	// The title keeps a readable floor at EVERY width, not only once the measured
+	// band width reports narrow: st.headerWidth lags one frame (it is the previous
+	// frame's laid-out width), so on the frame the inspector docks the band is
+	// already narrow while headerWidth still reads wide. A conditional floor let
+	// the title collapse to a single "…" there (2026-11 UI review P2). The floor is
+	// eight TypeM CJK glyphs plus the ellipsis; the metadata entries compact to
+	// icon+count on a narrow band (buildAgentRunBand) to give the title its room.
+	design.Apply(ui.Text(c, title), t.Font(design.TypeM)).
+		FontWeight(600).TextColor(t.LabelPrimary).Shrink(1).
+		MinWidth(design.Space8*4 + design.Space4).
 		MaxWidth(design.Space8 * 14).MaxLines(1).Ellipsis("…").Tooltip(title)
-	if st.headerWidth > 0 && st.headerWidth < 560 {
-		titleElement.MinWidth(120)
-	}
 	if showWorkspace {
 		buildHeaderWorkspace(c, t, st)
 	}
@@ -984,12 +989,12 @@ func failedNoticeMarker(status string) string {
 }
 
 // noticeSummary flattens one child answer/error into a short single line,
-// dropping Markdown markers and fences so the receipt reads as a notice.
+// dropping Markdown structure (fence blocks with their language tag and content,
+// heading/list/quote markers, inline code/emphasis) so the receipt reads as a
+// notice rather than "```bash … - …" noise. The caller bounds the length
+// (truncateRunes / MaxLines); PreviewProse only cleans (2026-11 UI review P2).
 func noticeSummary(text string) string {
-	text = strings.ReplaceAll(text, "```", " ")
-	text = strings.Join(strings.Fields(text), " ")
-	text = strings.TrimLeft(text, "#>*- ")
-	return text
+	return uikit.PreviewProse(text, 0)
 }
 
 // mergeChildNotices places derived receipts chronologically among the settled
@@ -1207,7 +1212,21 @@ func buildHero(c *ui.Context, t *design.Tokens, cfg Config, runtime contracts.UI
 			// starts typing in it, not another empty conversation.
 			buttonLabel = st.tr("开始输入", "Start typing")
 		}
-		button := design.Apply(ui.PrimaryButton(c, buttonLabel), t.PrimaryButton())
+		// One primary per screen (DESIGN rule 10 / AP-20): while the composer's
+		// send is the enabled primary (a draft or staged attachment + a ready
+		// model), the hero action yields to secondary — the send button is what
+		// commits the draft, so two filled accent buttons must not compete
+		// (2026-11 UI review P2). With no draft the send is disabled and the hero
+		// keeps the primary.
+		sendEnabled := (strings.TrimSpace(st.draft) != "" || len(st.pendingAttachments) > 0) &&
+			strings.TrimSpace(chat.Config().Model) != ""
+		var button ui.Element
+		if sendEnabled {
+			button = design.Apply(ui.Button(c, buttonLabel), t.SecondaryButton())
+		} else {
+			button = design.Apply(ui.PrimaryButton(c, buttonLabel), t.PrimaryButton())
+		}
+		button = button.Label(buttonLabel)
 		if button.Clicked() {
 			if hasSession {
 				st.focusComposer = true
@@ -2716,7 +2735,7 @@ func buildTrajectoryRow(c *ui.Context, t *design.Tokens, st *state,
 				ui.Icon(c, icons.Message()).Size(design.Space4, design.Space4).TextColor(t.LabelTertiary)
 				design.Apply(ui.Text(c, st.tr("正文", "Reply text")), t.Font(design.TypeXXS)).
 					TextColor(t.LabelSecondary).NoWrap()
-				design.Apply(ui.Text(c, uikit.ToolPreview(item.text, 96)), t.Font(design.TypeXXS)).
+				design.Apply(ui.Text(c, uikit.PreviewProse(item.text, 96)), t.Font(design.TypeXXS)).
 					TextColor(t.LabelTertiary).Grow(1).MinWidthPercent(0).MaxLines(1).Ellipsis("…")
 			})
 		default:
@@ -3032,8 +3051,18 @@ func buildMemoryAdd(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 			})
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			ui.Spacer(c).Grow(1)
-			add := design.Apply(ui.PrimaryButton(c, st.tr("添加记忆", "Add memory")), t.PrimaryButton()).
-				Disabled(draft == "")
+			// A disabled primary keeps the composer send's neutral disabled look
+			// (t.DisabledPrimary + the native Disabled state), not mygo's 50%
+			// accent wash that still read as a clickable brand-blue button
+			// (2026-11 UI review P2). Enabled and disabled share one metric set.
+			label := st.tr("添加记忆", "Add memory")
+			var add ui.Element
+			if draft == "" {
+				add = design.Apply(ui.Button(c, label), t.DisabledPrimary()).Disabled(true)
+			} else {
+				add = design.Apply(ui.PrimaryButton(c, label), t.PrimaryButton())
+			}
+			add = add.Label(label)
 			if add.Clicked() && draft != "" {
 				submitMemoryDraft(store, st, runtime)
 			}
@@ -3279,6 +3308,10 @@ func buildComposer(
 			buildSessionStatusStrip(ic, t, chat, st, chatSession)
 		},
 	})
+	// The queued-prompts (inbox) popover is a reported overlay: ComposerShell
+	// flips queueMenuOpen on an outside click, so report after it builds
+	// (2026-11 UI review #13).
+	st.reportOverlay("queue", st.queueMenuOpen)
 	// An empty draft forgets an earlier Esc dismissal: typing the same "/" or
 	// "@..." again after clearing the input must reopen the menu instead of
 	// silently staying dismissed for the rest of the session.
@@ -3306,6 +3339,11 @@ func buildComposer(
 			suggestionRow = buildSlashPopover(c, t, runtime, st, query, composerCard)
 		}
 	}
+	// The slash and @ suggestion menus are one reported overlay site (only one
+	// shows at a time): the toast stack yields while a suggestion menu is open
+	// (2026-11 UI review #13). The menus are derived from the draft each frame, so
+	// a built suggestion row is the open signal.
+	st.reportOverlay("suggestion", suggestionRow.Valid())
 	if suggestionRow.Valid() && composerInput.Valid() {
 		// The composer keeps the keyboard focus while a suggestion menu is open;
 		// the highlighted option is its ActiveDescendant, so assistive technology
@@ -3769,7 +3807,10 @@ func buildSessionThinkingChoices(m *ui.Menu, runtime contracts.UIRuntime, st *st
 		followLabel = st.tr("默认（跟随模型）", "Default (follow model)")
 	}
 	follow := m.Item(followLabel)
-	follow.Tooltip(st.tr("不设置覆盖，使用模型/提供方自身的默认推理设置。",
+	// The trade-off copy is an inline subtitle (a second muted line inside the
+	// submenu row), not a Tooltip: a tooltip floats above the submenu and covered
+	// the parent menu's first row and target band (2026-11 UI review P2).
+	follow.Subtitle(st.tr("不设置覆盖，使用模型/提供方自身的默认推理设置。",
 		"No override: use the model/provider's own default reasoning setting."))
 	followChecked := thinking.explicit == "" ||
 		(familyDefault && strings.EqualFold(thinking.explicit, contracts.ThinkingModeDefault))
@@ -3786,9 +3827,11 @@ func buildSessionThinkingChoices(m *ui.Menu, runtime contracts.UIRuntime, st *st
 		}
 		item := m.Item(mode.DisplayName(st.english()))
 		// Each strength档 teaches its trade-off (deeper = slower/costlier) so the
-		// choice is informed rather than a guess (2026-11 audit US-07).
+		// choice is informed rather than a guess (2026-11 audit US-07). The hint is
+		// an inline subtitle, not a floating tooltip that would cover the parent
+		// menu (2026-11 UI review P2).
 		if hint := thinkingModeHint(st, mode.ID); hint != "" {
-			item.Tooltip(hint)
+			item.Subtitle(hint)
 		}
 		item.Radio(strings.EqualFold(thinking.explicit, mode.ID))
 		if item.Chosen() {
@@ -3800,8 +3843,10 @@ func buildSessionThinkingChoices(m *ui.Menu, runtime contracts.UIRuntime, st *st
 }
 
 // thinkingModeHint is one reasoning mode's plain-language trade-off hint, shown
-// as the menu item's tooltip (2026-11 audit US-07). The default mode carries no
-// hint (it is the follow row's subject); unknown/custom modes keep none.
+// as the menu item's inline subtitle (2026-11 audit US-07; 2026-11 UI review P2
+// moved it off the floating tooltip that covered the parent menu). The default
+// mode carries no hint (it is the follow row's subject); unknown/custom modes
+// keep none.
 func thinkingModeHint(st *state, modeID string) string {
 	switch modeID {
 	case contracts.ThinkingModeReasoningLow:
@@ -4012,7 +4057,10 @@ func buildModelChip(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 			if m.Item(st.tr("打开模型设置…", "Open model settings…")).Chosen() {
 				openSettingsPage(navigator, settingsPageModel)
 			}
-		}).Tooltip(tooltip)
+		}, ui.PopoverMenuButtonOptions{Open: &st.agents.modelMenuOpen}).Tooltip(tooltip)
+		// The model menu (and its 模型/推理等级 submenus) is one reported overlay:
+		// the toast stack yields while it is open (2026-11 UI review #13).
+		st.reportOverlay("model", st.agents.modelMenuOpen)
 	} else {
 		modelButton := ui.Button(c, model).Tooltip(st.tr("打开模型设置", "Open model settings"))
 		if modelButton.Clicked() {

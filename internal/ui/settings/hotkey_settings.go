@@ -1,12 +1,13 @@
 package settings
 
 // The appearance page's global-hotkey section (H6): the accelerator is shown in
-// the same friendly form as the shortcut page (Cmd/Ctrl + Shift + Space), the
+// the same friendly form as the shortcut page (Cmd/Ctrl+Shift+Space), the
 // user can record a combination by pressing it instead of writing Electron
 // accelerator syntax, and quick presets cover the common choices. Typing is
-// still accepted: the display form "Cmd/Ctrl + Shift + K" and the stored form
-// "CmdOrCtrl+Shift+K" both parse. The host registers the accelerator at the next
-// start; the page validates the format and persists the trimmed value.
+// still accepted: the display form "Cmd/Ctrl+Shift+K" and the stored form
+// "CmdOrCtrl+Shift+K" both parse (spaced input like "Ctrl + Shift + K" is
+// trimmed per token). The host registers the accelerator at the next start;
+// the page validates the format and persists the trimmed value.
 
 import (
 	"strconv"
@@ -241,7 +242,7 @@ func buildGlobalHotkeySection(c *ui.Context, t *design.Tokens, state *appearance
 				} else {
 					input := ui.TextInput(c, &state.hotkeyText).
 						Label(inputLabel(locale, localized(locale, "组合键", "Shortcut"))).
-						Placeholder("Ctrl + Shift + Space").FillWidth()
+						Placeholder("Ctrl+Shift+Space").FillWidth()
 					if input.Changed() {
 						state.syncHotkeyDraft(locale)
 					}
@@ -338,8 +339,8 @@ func globalHotkeyConflict(locale contracts.LocaleService, draft string, store co
 // globalHotkeyInvalidMessage is the localized validation error.
 func globalHotkeyInvalidMessage(locale contracts.LocaleService) string {
 	return localized(locale,
-		"全局热键格式无效：请按下「录入」按组合键，或输入如 Cmd/Ctrl + Shift + Space",
-		"Invalid global hotkey: press Record and press the combination, or type e.g. Cmd/Ctrl + Shift + Space")
+		"全局热键格式无效：请按下「录入」按组合键，或输入如 Cmd/Ctrl+Shift+Space",
+		"Invalid global hotkey: press Record and press the combination, or type e.g. Cmd/Ctrl+Shift+Space")
 }
 
 // validGlobalHotkeyValue mirrors the host's accelerator rules: empty disables;
