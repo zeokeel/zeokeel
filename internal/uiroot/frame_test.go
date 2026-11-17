@@ -8,6 +8,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // TestValidateLifecycle covers Root.Validate: a UI assembly without a screen is
@@ -612,7 +613,9 @@ func TestInspectorDrawerIsModal(t *testing.T) {
 }
 
 // TestPaletteShowsCommandShortcut covers H26's palette half: a command that
-// declares a shortcut shows it in the palette row.
+// declares a shortcut shows it in the palette row, normalized by the product's
+// single formatter (uikit.FormatShortcut) rather than the raw registration
+// notation (2026-11-17 UI review P3: one platform prefix, one plus notation).
 func TestPaletteShowsCommandShortcut(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
@@ -623,7 +626,7 @@ func TestPaletteShowsCommandShortcut(t *testing.T) {
 	tt.Key(ui.Cmd, ui.KeyK)
 	tt.Frame()
 	requireHasText(t, tt, "演示命令")
-	requireHasText(t, tt, "Cmd/Ctrl + Alt + D")
+	requireHasText(t, tt, uikit.FormatShortcut("Cmd/Ctrl + Alt + D"))
 }
 
 // heightScreen returns a screen shaped like a session: a FillHeight column with

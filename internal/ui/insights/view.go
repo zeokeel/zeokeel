@@ -242,7 +242,10 @@ func buildDailySection(c *ui.Context, t *design.Tokens, st *state, data contract
 		}
 		columns := []ui.TableColumn{
 			{Title: st.tr("日期", "Day"), MinWidth: design.Space8 * 4, MaxWidth: design.Space8 * 6},
-			{Title: st.tr("词元 tokens", "Tokens"), Width: design.Space8 * 3, Align: ui.End},
+			// The header names the metric only: "词元 tokens" truncated at this
+			// column width while the row had room to spare; the unit stays on
+			// the KPI label above.
+			{Title: st.tr("词元", "Tokens"), Width: design.Space8 * 3, Align: ui.End},
 		}
 		if daysCostVisible(days) {
 			columns = append(columns, ui.TableColumn{
@@ -311,7 +314,7 @@ func buildModelSection(c *ui.Context, t *design.Tokens, st *state, data contract
 		columns := []ui.TableColumn{
 			{Title: st.tr("模型", "Model"), MinWidth: design.Space8 * 5, MaxWidth: design.Space8 * 10},
 			{Title: st.tr("调用", "Calls"), Width: design.Space8 * 2, Align: ui.End},
-			{Title: st.tr("词元 tokens", "Tokens"), Width: design.Space8 * 3, Align: ui.End},
+			{Title: st.tr("词元", "Tokens"), Width: design.Space8 * 3, Align: ui.End},
 			{Title: st.tr("缓存", "Cached"), Width: design.Space8 * 3, Align: ui.End},
 		}
 		if modelsCostVisible(rows) {
@@ -371,7 +374,7 @@ func buildWorkspaceSection(c *ui.Context, t *design.Tokens, st *state, data cont
 		columns := []ui.TableColumn{
 			{Title: st.tr("工作区", "Workspace"), MinWidth: design.Space8 * 5, MaxWidth: design.Space8 * 10},
 			{Title: st.tr("会话", "Sessions"), Width: design.Space8 * 2, Align: ui.End},
-			{Title: st.tr("词元 tokens", "Tokens"), Width: design.Space8 * 3, Align: ui.End},
+			{Title: st.tr("词元", "Tokens"), Width: design.Space8 * 3, Align: ui.End},
 		}
 		if workspacesCostVisible(rows) {
 			columns = append(columns, ui.TableColumn{

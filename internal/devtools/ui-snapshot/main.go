@@ -172,8 +172,11 @@ func main() {
 	// send order with their local send time. The entries are removed again so
 	// the scripted flow below is unchanged.
 	if queue, ok := chat.(contracts.PromptQueue); ok {
-		if _, err := queue.EnqueuePrompt(context.Background(), sessionID, "运行中排队：先检查编译错误"); err == nil {
-			if _, err := queue.EnqueuePrompt(context.Background(), sessionID, "运行中排队：再补一版发布说明"); err == nil {
+		// Bare drafts, like the real enqueue path: the queue popover row is
+		// already "summary · time", so a fixture prefix would fake a duplicate
+		// disclosure that the product does not render (2026-11-17 review).
+		if _, err := queue.EnqueuePrompt(context.Background(), sessionID, "先检查编译错误"); err == nil {
+			if _, err := queue.EnqueuePrompt(context.Background(), sessionID, "再补一版发布说明"); err == nil {
 				a.tester.Frame()
 				a.render(outDir + "/p2-inbox.png")
 				if rect, ok := a.tester.Find("已排队 2 条"); ok {
@@ -1794,6 +1797,10 @@ func boot(baseURL, dataDir string) *app {
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	provide(root, contracts.KeyDataDir, dataDir)
 	provide(root, contracts.KeyUIRuntime, uiRoot.Runtime())
+	// The headless boot wires services by hand (no SetKernelContext), so the
+	// host's toast-placement service must be provided explicitly or snapshots
+	// would render the module's default anchor instead of the product's.
+	provide(root, contracts.KeyToastAnchor, uiRoot.ToastAnchor())
 	provide(root, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(root, contracts.KeyTheme, uiRoot.Theme())
 	provide(root, contracts.KeyLocale, uiRoot.Locale())

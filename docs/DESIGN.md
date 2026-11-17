@@ -617,13 +617,15 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 只读展示 | `uikit.PropertySheet`（首选）/ `KeyValueRows`（Deprecated）/ `Bullet` | 属性表：160 DIP 标签列 + 值左对齐 + 32 行 + Divider + 值可选中；`KeyValueRows` 旧的右对齐形态只留给未迁移调用点 |
 | 阅读列 | `uikit.ReadingColumn` | 960 居中、`MaxWidthPercent(92)`、无 `Grow`、PaddingX 16 / Gap 20；SessionThread / Context / Goal dock / 子会话 banner 共用 |
 | 分段控件 | `uikit.SegmentedControl` | 包官方 `ui.SegmentedBase`；选中段 `BgSelected` + `LabelPrimary` + 600 + 2 DIP Accent 下划线；设置页 / Insights 唯一入口 |
-| 差异预览 | `DiffPreview` | 官方 `editor.NewBuffer` + `DiffState` + `DiffView`；块头路径 + `+N −M`、高度上限、二进制/超大回退；审批「将改动」与后续工具卡共用 |
+| 差异预览 | `DiffPreview` | 官方 `editor.NewBuffer` + `DiffState` + `DiffView`；块头路径 + `+N −M`、高度上限、二进制/超大回退；审批「将改动」与后续工具卡共用；`DiffPreviewOptions.MinHeight` 给高度预算内的父容器保底可读带（审批卡 128 DIP；2026-11-17 审查 P1：diff 不得被裁半行） |
 | 输入框工具栏 | `ComposerToolbar` / `ComposerAttachButton` | 官方 `ui.Toolbar` 封装（单 Tab stop、左右键、溢出菜单、原生 hover/pressed/focus）；附件按钮直连原生文件选择器（拖入/粘贴保留，无手动路径） |
 | 列表行强调 | `OnAccentBadge` | List 选中 accent 行上的可读徽章（AccentText 填充 + accent 文字；status label 语义保留） |
 | 对话框 | `DialogFooter` + `DialogAction` / `uikit.DialogHeader` / `uikit.ConfirmDanger` / `uikit.MemoryEditDialog` | 唯一动作条（危险→次要→主操作最右）；`DialogHeader` 统一图标/标题/副标题/关闭；`ConfirmDanger` 是不可逆动作的唯一入口（取消 Default、危险非 Default）；`MemoryEditDialog` 是记忆编辑的唯一解剖（设置页多行/会话页单行两形态，AR-17）；`Default` 仅无文本输入时用；审批无 Default |
-| 工具行 | `ToolRow` + `ToolRowOptions` / `ToolPanelSectionView` / `ToolPreview` / `ToolDisplayName` / `ToolIcon` | 工具调用统一解剖（图标/名/状态/预览/详情段/团队跳转）；状态 gutter 是**固定宽度左边框**（active 染色、完成态透明），只换色不 reflow |
+| 工具行 | `ToolRow` + `ToolRowOptions` / `ToolPanelSectionView` / `ToolPreview` / `ToolDisplayName` / `ToolIcon` | 工具调用统一解剖（图标/名/状态/预览/详情段/团队跳转）；状态 gutter 是**固定宽度左边框**（active 染色、完成态透明），只换色不 reflow；状态列（含 spinner 槽）固定宽，四态预览左缘对齐（2026-11-17 审查） |
+| 散文预览 | `PreviewProse` | 轨迹正文/队友回执/搜索 snippet 的单行散文预览：剥离 fence（含内容与语言标签）/标题/列表/强调/内联码后压空白截断；与 `ToolPreview`（命令原样）严格分工，镜像后端 `collapseTeamText`（2026-11-17 审查 P2） |
+| 导航映射 | `ScreenNavSpec` / `ScreenNavIcon` / `ScreenNavLabel` | 注册 screen 的 glyph+双语标签**单一映射表**；展开侧栏行与宿主折叠 rail 共同消费（2026-11-17 审查 rail 图标漂移修复；原在 sidebar，下沉 uikit 以守 uiroot 边界） |
 | 输入辅助 | `EnterTo` | 单行输入 Enter→动作（有文本输入时替代 Default） |
-| 文案/locale | `T` / `FormatDateTime` / `FormatClock` / `Language` / `FormatCompactCount` / `FormatContextWindow` / `FormatShortcut` | 本地化与格式化；`FormatCompactCount` 紧凑用量（K/M/B）；`FormatContextWindow` 上下文窗口（128k/32.8k，模型目录与用量尾行共用，AR-17）；`FormatShortcut` 统一键位记法（平台化 `Cmd/Ctrl + N`） |
+| 文案/locale | `T` / `FormatDateTime` / `FormatClock` / `Language` / `FormatCompactCount` / `FormatContextWindow` / `FormatShortcut` | 本地化与格式化；`FormatCompactCount` 紧凑用量（K/M/B）；`FormatContextWindow` 上下文窗口（128k/32.8k，模型目录与用量尾行共用，AR-17）；`FormatShortcut` 统一键位记法（平台化前缀 + 无空格加号 `Ctrl+Alt+I`；palette/设置热键页/会话键盘参考同源，2026-11-17 审查） |
 | 检查器文档 | `uikit.MarkdownDoc(t, size)` | 320px 检查器内的文件/产物预览（13px 正文，H1≈15，不再用默认 22px H1） |
 | 阅读区 Markdown | `uikit.ChatMarkdown` | 主阅读列（会话正文）的 Markdown 主题：14px 正文 + 1.55 比例行高；H1 17–18 / H2≤16 / H3≤15，均在屏幕标题之下；显式收紧标题上下距；行内代码用 `BgStrong` 底 + 等宽；引用/分隔线用 `BorderL2`；表格头 `BgStrong`；链接 Accent + 500 字重；暗色同构 |
 | 代码围栏 | `uikit.MarkdownCodeBlock` | 会话/推理/检查器 Markdown 的统一代码块：填充 `BgStrong`、无边框、`RadiusSM`；只有语言真实命名时才显示语言标签（不再把 `text` 当成标题）；官方 Copy 按钮保留复制反馈；流式/高亮/横向滚动沿用官方 `CodeBlockView` |

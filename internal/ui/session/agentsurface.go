@@ -27,6 +27,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
+	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
@@ -87,6 +88,14 @@ type agentSurface struct {
 	teamOpen  bool
 	childOpen bool
 	jobsOpen  bool
+	// modelMenuOpen backs the composer model chip's menu (PopoverMenuButton's
+	// Open), so its open/close is reported to the toast anchor like the overlays.
+	modelMenuOpen bool
+
+	// overlayReported tracks the last open/close state reported to the host toast
+	// anchor per popover site, so reportOverlay fires once per transition (the
+	// host's open/close count stays paired across idle frames).
+	overlayReported map[string]bool
 
 	// The overlays' scroll offsets and list state (stable row identity).
 	teamScroll     ui.ScrollState
@@ -472,6 +481,37 @@ func agentStatusFill(t *design.Tokens, kind uikit.StatusKind) ui.Color {
 	}
 }
 
+// toastAnchorService resolves the optional host toast-placement service, caching
+// it on the state (the host registers it on the kernel root). A minimal host
+// without the service returns nil and reporting is a no-op.
+func (st *state) toastAnchorService() contracts.ToastAnchorService {
+	if st.toastAnchor == nil && st.ctx != (cordis.Context{}) {
+		st.toastAnchor, _ = st.ctx.Get(contracts.KeyToastAnchor)
+	}
+	return st.toastAnchor
+}
+
+// reportOverlay reports one module-owned popover's open/close transition to the
+// host toast anchor so the stack yields while the overlay is open. It fires once
+// per transition (idempotent across idle frames), keeping the host's open/close
+// count paired; the host floors the count at zero. Call it after the popover
+// builds so the open flag reflects any outside-click close (2026-11 UI review
+// #13). No-op when the host provides no service.
+func (st *state) reportOverlay(site string, open bool) {
+	anchor := st.toastAnchorService()
+	if anchor == nil {
+		return
+	}
+	if st.agents.overlayReported == nil {
+		st.agents.overlayReported = make(map[string]bool)
+	}
+	if st.agents.overlayReported[site] == open {
+		return
+	}
+	st.agents.overlayReported[site] = open
+	anchor.ReportOverlay(open)
+}
+
 // buildTeamEntry is the header's 智能体团队 entry: a users glyph, the words (the
 // count alone on a narrow band) and the live member count, opening the native
 // team overlay. The entry stays visible whenever the host provides the team
@@ -512,12 +552,14 @@ func buildTeamEntry(c *ui.Context, t *design.Tokens, st *state, members []contra
 		st.runtime.Invalidate()
 	}
 	if !st.agents.teamOpen {
+		st.reportOverlay("team", false)
 		return
 	}
 	ui.PopoverBase(c, chip, &st.agents.teamOpen, func(panel ui.Element) {
 		agentPanelStyle(panel, t, design.DialogWidthCompact)
 		buildTeamPanel(c, t, st, members, running)
 	})
+	st.reportOverlay("team", st.agents.teamOpen)
 }
 
 // visibleTeamMembers scopes the restored history to the active conversation
@@ -540,10 +582,27 @@ func visibleTeamMembers(members []contracts.TeamMember, activeID string) []contr
 	return out
 }
 
-// splitTeamMembers separates the live members from the restored history rows.
+// teamMemberFinished reports whether a member belongs in the 已结束 section
+// rather than the live 成员 roster: a restored historical record, or a live
+// member whose run reached a terminal state (done/failed/interrupted). A
+// completed-but-not-closed teammate is finished too, so it must not sit under
+// 成员 (2026-11 UI review P2: 成员节 = 未结束 roster).
+func teamMemberFinished(member contracts.TeamMember) bool {
+	if member.Historical {
+		return true
+	}
+	switch uikit.ParseRunState(member.RunState) {
+	case uikit.RunStateDone, uikit.RunStateFailed, uikit.RunStateInterrupted:
+		return true
+	}
+	return false
+}
+
+// splitTeamMembers separates the unfinished (live) roster from the finished
+// members (restored history plus terminal-run live rows).
 func splitTeamMembers(members []contracts.TeamMember) (live, history []contracts.TeamMember) {
 	for _, member := range members {
-		if member.Historical {
+		if teamMemberFinished(member) {
 			history = append(history, member)
 		} else {
 			live = append(live, member)
@@ -563,22 +622,27 @@ func teamRunningCount(members []contracts.TeamMember) int {
 	return running
 }
 
-// teamMemberCounts is the overlay's and the tooltip's member summary; the
-// historical rows are named separately so a reopened team does not read as
-// live.
+// teamMemberCounts is the overlay's and the tooltip's member summary. The counts
+// match the section semantics (2026-11 UI review P2): 名成员 is the unfinished
+// roster shown under 成员, 运行中 the runs in flight, and 已结束 the finished
+// members in their own section — so a team of only finished members reads
+// "0 名成员 · … · N 条已结束", not "N 名成员" over an empty 成员 section.
 func teamMemberCounts(st *state, members []contracts.TeamMember, running int) string {
-	counts := fmt.Sprintf(st.tr("%d 名成员 · %d 个运行中", "%d members · %d running"), len(members), running)
-	if history := countHistory(members); history > 0 {
-		counts += fmt.Sprintf(st.tr(" · %d 条已结束", " · %d finished"), history)
+	finished := countFinished(members)
+	live := len(members) - finished
+	counts := fmt.Sprintf(st.tr("%d 名成员 · %d 个运行中", "%d members · %d running"), live, running)
+	if finished > 0 {
+		counts += fmt.Sprintf(st.tr(" · %d 条已结束", " · %d finished"), finished)
 	}
 	return counts
 }
 
-// countHistory counts the restored (historical) rows of a member snapshot.
-func countHistory(members []contracts.TeamMember) int {
+// countFinished counts the finished members of a snapshot (restored history plus
+// terminal-run live rows) — the 已结束 section's count.
+func countFinished(members []contracts.TeamMember) int {
 	count := 0
 	for _, member := range members {
-		if member.Historical {
+		if teamMemberFinished(member) {
 			count++
 		}
 	}
@@ -693,15 +757,14 @@ func buildTeamPanel(c *ui.Context, t *design.Tokens, st *state, members []contra
 		TrackScroll(&st.agents.teamScroll).Children(func() {
 		ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 			agentSectionLabel(c, t, st.tr("成员", "Members"))
-			switch {
-			case len(live) > 0:
+			if len(live) > 0 {
 				buildTeamMembersList(c, t, st, &st.agents.teamMembers, live)
-			case len(members) == 0:
-				// Empty-state sentences go through the shared single-line entry
-				// (2026-11 audit UD-05/UD-15): never the 11px micro-label step.
+			} else {
+				// 成员 is the unfinished roster; finished members sit in 已结束
+				// below. One empty-state wording whether or not finished rows exist
+				// (2026-11 UI review P2). Empty-state sentences go through the shared
+				// single-line entry (2026-11 audit UD-05/UD-15): never the 11px step.
 				uikit.EmptyState(c, st.tr("还没有队友", "No teammates yet"))
-			default:
-				uikit.EmptyState(c, st.tr("没有正在运行的队友", "No teammate is running"))
 			}
 			if len(history) > 0 {
 				// The restored records stay after the app restarts: the section
@@ -1050,17 +1113,16 @@ func buildWorkbenchMembersSection(c *ui.Context, t *design.Tokens, st *state,
 	members []contracts.TeamMember) {
 	live, history := splitTeamMembers(members)
 	ui.Column(c).Grow(1).Shrink(1).MinWidthPercent(0).Gap(design.Space2).Children(func() {
-		agentSectionLabel(c, t, fmt.Sprintf(st.tr("成员 · %d", "Members · %d"), len(members)))
+		// The count matches the section: 成员 is the unfinished roster (finished
+		// members are counted in 已结束 below), same口径 as the overlay (P2).
+		agentSectionLabel(c, t, fmt.Sprintf(st.tr("成员 · %d", "Members · %d"), len(live)))
 		ui.Scroll(c).FillWidth().MaxHeight(workbenchSectionMaxHeight).
 			TrackScroll(&st.agents.workbenchMembersScroll).Children(func() {
 			ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-				switch {
-				case len(live) > 0:
+				if len(live) > 0 {
 					buildTeamMembersList(c, t, st, &st.agents.workbenchMembers, live)
-				case len(members) == 0:
+				} else {
 					uikit.EmptyState(c, st.tr("还没有队友", "No teammates yet"))
-				default:
-					uikit.EmptyState(c, st.tr("没有正在运行的队友", "No teammate is running"))
 				}
 				if len(history) > 0 {
 					agentSectionLabel(c, t, st.tr("已结束", "Finished"))
@@ -1138,12 +1200,14 @@ func buildSubagentEntry(c *ui.Context, t *design.Tokens, st *state, activeID str
 		st.runtime.Invalidate()
 	}
 	if !st.agents.childOpen {
+		st.reportOverlay("child", false)
 		return
 	}
 	ui.PopoverBase(c, chip, &st.agents.childOpen, func(panel ui.Element) {
 		agentPanelStyle(panel, t, design.DialogWidthS)
 		buildChildSwitcher(c, t, st, agents)
 	})
+	st.reportOverlay("child", st.agents.childOpen)
 }
 
 // buildChildSwitcher is the child switcher overlay: every child agent with its
@@ -1399,12 +1463,14 @@ func buildJobsEntry(c *ui.Context, t *design.Tokens, st *state, sessionID string
 		st.runtime.Invalidate()
 	}
 	if !st.agents.jobsOpen {
+		st.reportOverlay("jobs", false)
 		return
 	}
 	ui.PopoverBase(c, chip, &st.agents.jobsOpen, func(panel ui.Element) {
 		agentPanelStyle(panel, t, design.DialogWidthCompact)
 		buildJobsPanel(c, t, st, jobs, list, running, visibleHistory)
 	})
+	st.reportOverlay("jobs", st.agents.jobsOpen)
 }
 
 // buildJobsPanel is the jobs overlay: status, command, duration and exit code
@@ -1454,8 +1520,15 @@ func buildJobsPanel(c *ui.Context, t *design.Tokens, st *state, jobs contracts.J
 			buildExecutionHistoryGroup(c, t, st, history)
 		})
 	})
-	agentHint(c, t, st.tr("停止会终止任务的进程 · Esc 关闭",
-		"Stopping ends the job's process · Esc closes"))
+	// The stop warning is only meaningful while something is running: an idle
+	// overlay (history only) keeps just the close hint, not a stop promise about
+	// processes that no longer exist (2026-11 UI review P3).
+	if running > 0 {
+		agentHint(c, t, st.tr("停止会终止任务的进程 · Esc 关闭",
+			"Stopping ends the job's process · Esc closes"))
+	} else {
+		agentHint(c, t, st.tr("Esc 关闭", "Esc closes"))
+	}
 }
 
 // stalePermissionJobs reads the optional JobPermissionReporter half of the jobs
@@ -2221,10 +2294,14 @@ func buildChildComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRun
 				uikit.ErrorLine(c, st.agents.childSendErr)
 			}
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				// The input and the send action share one control tier (32 DIP,
+				// design.RowCompactHeight): the default input height (~31) sat off
+				// the 4-DIP grid next to the 36 DIP send (2026-11 UI review P3).
 				input := ui.TextInput(c, &st.agents.childDraft).
 					Label(st.tr("发送给 ", "Send to ") + name).
 					Placeholder(placeholder).
-					Bind(&st.agents.childInput).FillWidth().Grow(1)
+					Bind(&st.agents.childInput).FillWidth().Grow(1).
+					Height(design.RowCompactHeight)
 				if st.agents.childFocus {
 					st.agents.childFocus = false
 					st.agents.childInput.Focus(c)
@@ -2243,7 +2320,8 @@ func buildChildComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRun
 				} else {
 					send = design.Apply(ui.Button(c, sendLabel), t.DisabledPrimary())
 				}
-				send = send.Label(st.tr("发送消息给 ", "Send message to ") + name).Shrink(0)
+				send = send.Label(st.tr("发送消息给 ", "Send message to ") + name).Shrink(0).
+					Height(design.RowCompactHeight)
 				if !canSend {
 					send = send.Disabled(true)
 				}

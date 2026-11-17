@@ -76,54 +76,52 @@ func pluginParamSpecs() []pluginParamSpec {
 	}
 }
 
-// buildPluginParamsSection renders the plugin parameter section as a
-// uikit.Section (the same title/divider language as the other settings pages)
-// holding a native Collapsible with the rows, plus its native edit modal.
-// Hidden without a settings service.
+// buildPluginParamsSection renders the plugin parameter inventory as a named
+// subgroup of the capability page's 诊断与设置 section: a native Collapsible
+// with the rows, plus its native edit modal. Hidden without a settings service.
 func buildPluginParamsSection(c *ui.Context, t *design.Tokens, st *state,
 	settings contracts.SettingsService, hasSettings bool) {
 	if !hasSettings || settings == nil {
 		return
 	}
 	specs := pluginParamSpecs()
-	uikit.Section(c, st.tr("扩展设置", "Extension settings"), func(c *ui.Context) {
-		design.Apply(ui.Text(c, st.tr(
-			"只展示已被产品实际消费的设置；敏感值仅显示是否已设置。",
-			"Only settings actually consumed by the product are shown; sensitive values only report whether they are set.")),
-			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
-		if st.paramNotice != "" {
-			if st.paramErr {
-				uikit.ErrorLine(c, st.paramNotice)
-			} else {
-				design.Apply(ui.Text(c, st.paramNotice), t.Font(design.TypeXXS)).TextColor(t.SuccessText)
-			}
+	capabilityGroupLabel(c, t, st.tr("扩展设置", "Extension settings"))
+	design.Apply(ui.Text(c, st.tr(
+		"只展示已被产品实际消费的设置；敏感值仅显示是否已设置。",
+		"Only settings actually consumed by the product are shown; sensitive values only report whether they are set.")),
+		t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
+	if st.paramNotice != "" {
+		if st.paramErr {
+			uikit.ErrorLine(c, st.paramNotice)
+		} else {
+			design.Apply(ui.Text(c, st.paramNotice), t.Font(design.TypeXXS)).TextColor(t.SuccessText)
 		}
-		open := st.paramsOpen
-		ui.Collapsible(c, st.tr("显示参数", "Show parameters"), &open, func() {
-			st.paramsList.Key = func(index int) any {
-				if index < 0 || index >= len(specs) {
-					return nil
-				}
-				if key := strings.TrimSpace(specs[index].Key); key != "" {
-					return key
-				}
-				return specs[index].TitleZH
+	}
+	open := st.paramsOpen
+	ui.Collapsible(c, st.tr("显示参数", "Show parameters"), &open, func() {
+		st.paramsList.Key = func(index int) any {
+			if index < 0 || index >= len(specs) {
+				return nil
 			}
-			st.paramsList.Label = func(index int) string {
-				if index < 0 || index >= len(specs) {
-					return ""
-				}
-				return st.tr(specs[index].TitleZH, specs[index].TitleEN)
+			if key := strings.TrimSpace(specs[index].Key); key != "" {
+				return key
 			}
-			ui.List(c, &st.paramsList, len(specs)).
-				Label(st.tr("扩展设置列表", "Extension settings list")).
-				Gap(design.Space1).
-				Rows(func(row ui.ListRow) {
-					buildPluginParamRow(row.Context, t, st, settings, specs[row.Index])
-				})
-		})
-		st.paramsOpen = open
+			return specs[index].TitleZH
+		}
+		st.paramsList.Label = func(index int) string {
+			if index < 0 || index >= len(specs) {
+				return ""
+			}
+			return st.tr(specs[index].TitleZH, specs[index].TitleEN)
+		}
+		ui.List(c, &st.paramsList, len(specs)).
+			Label(st.tr("扩展设置列表", "Extension settings list")).
+			Gap(design.Space1).
+			Rows(func(row ui.ListRow) {
+				buildPluginParamRow(row.Context, t, st, settings, specs[row.Index])
+			})
 	})
+	st.paramsOpen = open
 	if st.paramEditing {
 		buildPluginParamModal(c, t, st, settings)
 	}

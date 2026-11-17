@@ -163,7 +163,10 @@ if _, err := ctx.Effect(func() cordis.Effect {
 `KeyAppInfo`、`KeyLogger`、`KeyScreenLister`；可选服务还包括 `KeyForegroundSession`
 （uiroot 提供，供后台完成通知判断当前前台会话）、`KeyExecutionHistory`（toolkit 提供，只读
 durable 执行域历史）与 `KeySessionFocus`（session 模块提供，侧栏搜索命中交接过话到消息定位；
-sidebar 消费，无服务时仅打开会话）。
+sidebar 消费，无服务时仅打开会话）、`KeyToastAnchor`（uiroot 提供，toasts 模块可选消费：
+宿主按 chrome 几何与浮层开态锚定通知栈——modal/palette/rail popover/drawer/模块
+`ReportOverlay` 期间让位窗口右下，否则 header band 之下、主内容列右缘；无服务时模块
+回退默认右上。2026-11-17 审查 P1/P2：toast 不得压页头动作/检查器头行/打开的浮层）。
 
 ## 7. 装配
 

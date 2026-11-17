@@ -101,12 +101,12 @@ func TestFormatShortcutNormalizesEveryNotation(t *testing.T) {
 	cases := []struct {
 		raw, want string
 	}{
-		{"CmdOrCtrl+Shift+Space", primary + " + Shift + Space"},
-		{"Cmd/Ctrl + N", primary + " + N"},
-		{"Ctrl+Alt+P", "Ctrl + Alt + P"},
-		{"cmd+k", primary + " + K"},
-		{" cmd + alt + i ", primary + " + Alt + I"},
-		{"Ctrl+,", "Ctrl + ,"},
+		{"CmdOrCtrl+Shift+Space", primary + "+Shift+Space"},
+		{"Cmd/Ctrl + N", primary + "+N"},
+		{"Ctrl+Alt+P", "Ctrl+Alt+P"},
+		{"cmd+k", primary + "+K"},
+		{" cmd + alt + i ", primary + "+Alt+I"},
+		{"Ctrl+,", "Ctrl+,"},
 		{"", ""},
 	}
 	for _, tc := range cases {

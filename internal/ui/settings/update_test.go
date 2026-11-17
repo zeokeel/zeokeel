@@ -136,7 +136,7 @@ func TestUpdatePageWithoutBackend(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "关于")
-	h.assertTexts(tester, "更新", "当前版本", "dev", "更新服务未启用")
+	h.assertTexts(tester, "更新", "构建信息", "dev", "更新服务未启用")
 	// The description mentions 检查更新; the action button itself must be absent.
 	if got := exactTextCount(tester.Texts(), "检查更新"); got != 0 {
 		t.Fatalf("检查更新 button labels = %d, want 0; texts = %v", got, tester.Texts())
@@ -156,7 +156,7 @@ func TestUpdateCheckShowsNewVersion(t *testing.T) {
 	h := newHarnessWithUpdate(t, &fakeChat{}, newFakeSettings(nil), settings.Config{},
 		update, contracts.AppInfo{Name: "ZeoKeel", Version: "1.0.0"})
 	tester := openUpdatePage(t, h)
-	h.assertTexts(tester, "当前版本", "1.0.0", "检查更新")
+	h.assertTexts(tester, "构建信息", "1.0.0", "检查更新")
 
 	h.click(tester, "检查更新")
 	waitForText(t, tester, "1.2.0")

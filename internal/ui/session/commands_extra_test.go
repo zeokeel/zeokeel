@@ -12,6 +12,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // commandsOf returns the registered commands of one attachmentHarness.
@@ -162,8 +163,8 @@ func TestHelpModalListsCommandsAndShortcuts(t *testing.T) {
 	}
 	tester.Frame()
 	h.assertTexts(tester, "帮助", "斜杠命令", "停止", "附加文件", "帮助",
-		"快捷键", "Cmd/Ctrl + K", "打开命令面板", "Cmd/Ctrl + B",
-		"Cmd/Ctrl + Alt + I", "切换右侧栏", "Enter", "发送消息")
+		"快捷键", uikit.FormatShortcut("CmdOrCtrl+K"), "打开命令面板", uikit.FormatShortcut("CmdOrCtrl+B"),
+		uikit.FormatShortcut("CmdOrCtrl+Alt+I"), "切换右侧栏", "Enter", "发送消息")
 
 	// The command list is the official List: named for assistive technology and
 	// with its rows exposed by the command titles.
@@ -207,20 +208,24 @@ func TestHelpModalShortcutsFollowSettings(t *testing.T) {
 	}
 	tester.Frame()
 
-	// Defaults plus the fixed chords the host and composer register.
-	for _, want := range []string{"Cmd/Ctrl + N", "Cmd/Ctrl + ,", "Cmd/Ctrl + K",
-		"Cmd/Ctrl + B", "Cmd/Ctrl + Alt + I", "新会话", "设置", "发送消息"} {
+	// Defaults plus the fixed chords the host and composer register, all through
+	// the shared formatter (bare "+" joins, platform command modifier).
+	for _, want := range []string{uikit.FormatShortcut("CmdOrCtrl+N"), uikit.FormatShortcut("CmdOrCtrl+,"),
+		uikit.FormatShortcut("CmdOrCtrl+K"), uikit.FormatShortcut("CmdOrCtrl+B"),
+		uikit.FormatShortcut("CmdOrCtrl+Alt+I"), "新会话", "设置", "发送消息"} {
 		requireSessionText(t, tester, want)
 	}
 
-	// A customized chord is rendered as the product's display label.
+	// A customized chord is rendered through the same formatter. The custom
+	// values differ from the defaults on every platform (alt+k vs cmd+k, alt+b vs
+	// cmd+b), so the default labels disappear once the settings row is set.
 	settings.set(contracts.SettingsUIShortcutCommandPalette, "alt+k")
-	settings.set(contracts.SettingsUIShortcutToggleSidebar, "ctrl+b")
+	settings.set(contracts.SettingsUIShortcutToggleSidebar, "alt+b")
 	tester.Frame()
-	requireSessionText(t, tester, "Alt + K")
-	requireSessionText(t, tester, "Ctrl + B")
-	requireSessionNoText(t, tester, "Cmd/Ctrl + K")
-	requireSessionNoText(t, tester, "Cmd/Ctrl + B")
+	requireSessionText(t, tester, uikit.FormatShortcut("alt+k"))
+	requireSessionText(t, tester, uikit.FormatShortcut("alt+b"))
+	requireSessionNoText(t, tester, uikit.FormatShortcut("CmdOrCtrl+K"))
+	requireSessionNoText(t, tester, uikit.FormatShortcut("CmdOrCtrl+B"))
 }
 
 // requireSessionText fails when the frame does not show text.

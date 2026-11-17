@@ -5,6 +5,7 @@ package settings
 // the settings sidebar has one version/help destination instead of three.
 
 import (
+	"runtime"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -30,8 +32,25 @@ func aboutValue(locale contracts.LocaleService, value string) string {
 	return trimmed
 }
 
-// buildAboutHubPage renders the merged About page: the version/build identity,
-// the development disclosure, the update section and the diagnostics section.
+// buildFactRows is the About page's one build-identity table: the facts the
+// old 构建信息 / 当前版本 / 运行时信息 sections each repeated (version, commit,
+// build time, Go) live here once. The version keeps the update section's
+// fallback chain (build metadata → check result → "dev"); the other build
+// metadata renders empty/"unknown" as the one placeholder aboutValue defines.
+func buildFactRows(info contracts.AppInfo, updateCurrent string, locale contracts.LocaleService) []diagnosticRow {
+	return []diagnosticRow{
+		{Label: localized(locale, "名称", "Name"), Value: aboutValue(locale, info.Name)},
+		{Label: localized(locale, "版本", "Version"), Value: textutil.FirstNonEmpty(info.Version, updateCurrent, "dev")},
+		{Label: "Commit", Value: aboutValue(locale, info.Commit)},
+		{Label: localized(locale, "构建时间", "Build time"), Value: aboutValue(locale, info.BuildTime)},
+		{Label: "Go", Value: aboutValue(locale, textutil.FirstNonEmpty(info.GoVersion, runtime.Version()))},
+		{Label: localized(locale, "平台", "Platform"), Value: runtime.GOOS + "/" + runtime.GOARCH},
+	}
+}
+
+// buildAboutHubPage renders the merged About page: the one build-facts table,
+// the development disclosure, the update section (status + actions only) and
+// the diagnostics section (runtime/storage facts only).
 func buildAboutHubPage(c *ui.Context, kctx cordis.Context, info contracts.AppInfo,
 	update *updateState, diagnostics *diagnosticsState, about *aboutState,
 	locale contracts.LocaleService) {
@@ -40,19 +59,18 @@ func buildAboutHubPage(c *ui.Context, kctx cordis.Context, info contracts.AppInf
 	if name := strings.TrimSpace(info.Name); name != "" {
 		heading += " " + name
 	}
+	buildRows := buildFactRows(info, update.info.CurrentVersion, locale)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		uikit.PageHeader(c, heading, "")
 
 		uikit.Section(c, localized(locale, "构建信息", "Build information"), func(c *ui.Context) {
+			sheet := make([]uikit.PropertyRow, len(buildRows))
+			for index, row := range buildRows {
+				sheet[index] = uikit.PropertyRow{Label: row.Label, Value: row.Value}
+			}
 			uikit.PropertySheet(c, uikit.PropertySheetOptions{
-				Rows: []uikit.PropertyRow{
-					{Label: localized(locale, "名称", "Name"), Value: aboutValue(locale, info.Name)},
-					{Label: localized(locale, "版本", "Version"), Value: aboutValue(locale, info.Version)},
-					{Label: localized(locale, "提交", "Commit"), Value: aboutValue(locale, info.Commit)},
-					{Label: localized(locale, "构建时间", "Build time"), Value: aboutValue(locale, info.BuildTime)},
-					{Label: "Go", Value: aboutValue(locale, info.GoVersion)},
-				},
-				Key: "about.build", Locale: locale,
+				Rows: sheet,
+				Key:  "about.build", Locale: locale,
 			})
 		})
 
@@ -77,9 +95,9 @@ func buildAboutHubPage(c *ui.Context, kctx cordis.Context, info contracts.AppInf
 		// hosttools.KeyRegistry.
 		catalog, _ := kctx.Get(contracts.KeyToolCatalog)
 		chat, _ := kctx.Get(contracts.KeyChat)
-		rows, keys := diagnosticsRows(info, dataDir, catalog, chat, store, locale)
+		rows, keys := diagnosticsRows(dataDir, catalog, chat, store, locale)
 		modules := loadedModulesFromContext(kctx)
-		buildDiagnosticsPage(c, t, diagnostics, rows, keys, modules, locale, false)
+		buildDiagnosticsPage(c, t, diagnostics, buildRows, rows, keys, modules, locale, false)
 	})
 }
 

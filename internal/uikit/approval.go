@@ -61,6 +61,13 @@ const approvalArgumentsMaxHeight float32 = design.Space8*4 + design.Space3
 // whole card inside the session dock's minimum-window budget.
 const approvalInlineBodyMaxHeight float32 = design.Space8*5 + design.Space3
 
+// approvalDiffMinHeight floors the inline card's change block so the diff — the
+// thing being judged — can never be squeezed into a half-line by the summary
+// above it (2026-11 UI review P1). 128 DIP on the 4-DIP token grid keeps a full
+// first hunk readable; the body's total budget (approvalInlineBodyMaxHeight) is
+// unchanged, and the body scroll carries the rest (UX-02).
+const approvalDiffMinHeight float32 = design.Space8 * 4
+
 // ApprovalLabels is the configurable copy of one approval card. Empty fields
 // fall back to the localized product defaults, so a host that only overrides
 // one label keeps the rest. The caller localizes the fields it passes (the
@@ -195,35 +202,45 @@ func approvalInlineCard(c *ui.Context, o ApprovalDialogOptions, labels ApprovalL
 	// open flag across frames and starts collapsed for each new request.
 	argsOpen := ui.Local(root, "argsOpen", func() bool { return false })
 	// The middle section's scroll offset is element-local too (keyed by the
-	// request through root): each new request starts at its top (UX-02).
+	// request through root): each new request starts fresh (UX-02).
 	bodyScroll := ui.Local(root, "bodyScroll", func() ui.ScrollState { return ui.ScrollState{} })
+	// Whether this request's diff has already been revealed into the bounded
+	// body scroll. root is keyed by request.ID, so the flag resets per request;
+	// it fires once so the user can then scroll the body freely (2026-11 P1).
+	diffRevealed := ui.Local(root, "diffRevealed", func() bool { return false })
 	root.Children(func() {
 		// The warning banner: the card's one strong emphasis, so it reads as a
-		// decision to make, not as another tool result.
-		design.Apply(ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2),
+		// decision to make, not as another tool result. The sandbox impact
+		// disclosure lives here (below the title row), NOT in the scrolling body:
+		// the body reveals the diff on first frame, and this safety copy must stay
+		// visible no matter where the body is scrolled (2026-11 UI review P1, A′).
+		design.Apply(ui.Column(c).FillWidth().Gap(design.Space1),
 			func(el ui.Element) ui.Element {
 				return el.Background(t.Warning.Alpha(0.22)).
 					Padding(design.Space2, design.Space3).
 					Radius(design.RadiusLG, design.RadiusLG, design.RadiusXS, design.RadiusXS)
 			}).Children(func() {
-			ui.Icon(c, icons.Shield()).Size(design.Space3, design.Space3).
-				TextColor(t.WarningText)
-			design.Apply(ui.Text(c, labels.Title), t.Font(design.TypeS)).
-				Bold().TextColor(t.WarningText).NoWrap()
-			// The friendly name is what the user reads; the raw tool ID stays in
-			// the tooltip (and is what the backend reports back).
-			design.Apply(ui.Text(c, toolName), t.Font(design.TypeXXXS)).
-				TextColor(t.WarningText).Tooltip(request.Tool).NoWrap()
-			ui.Spacer(c).Grow(1)
-			if o.Pending > 1 {
-				// The rest wait behind this one; the banner counts them instead
-				// of rendering more cards.
-				design.Apply(ui.Text(c, fmt.Sprintf(T(o.Locale,
-					"还有 %d 条待审批", "%d more pending approvals"), o.Pending-1)),
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				ui.Icon(c, icons.Shield()).Size(design.Space3, design.Space3).
+					TextColor(t.WarningText)
+				design.Apply(ui.Text(c, labels.Title), t.Font(design.TypeS)).
+					Bold().TextColor(t.WarningText).NoWrap()
+				// The friendly name is what the user reads; the raw tool ID stays in
+				// the tooltip (and is what the backend reports back).
+				design.Apply(ui.Text(c, toolName), t.Font(design.TypeXXXS)).
+					TextColor(t.WarningText).Tooltip(request.Tool).NoWrap()
+				ui.Spacer(c).Grow(1)
+				if o.Pending > 1 {
+					// The rest wait behind this one; the banner counts them instead
+					// of rendering more cards.
+					design.Apply(ui.Text(c, fmt.Sprintf(T(o.Locale,
+						"还有 %d 条待审批", "%d more pending approvals"), o.Pending-1)),
+						t.Font(design.TypeXXXS)).TextColor(t.WarningText).NoWrap()
+				}
+				design.Apply(ui.Text(c, T(o.Locale, "Esc 拒绝", "Esc denies")),
 					t.Font(design.TypeXXXS)).TextColor(t.WarningText).NoWrap()
-			}
-			design.Apply(ui.Text(c, T(o.Locale, "Esc 拒绝", "Esc denies")),
-				t.Font(design.TypeXXXS)).TextColor(t.WarningText).NoWrap()
+			})
+			approvalImpactLine(c, t, o.Locale)
 		})
 		// The neutral body: what will run, the details and the decision. The
 		// body keeps the raised surface so the warning banner is the only
@@ -241,11 +258,17 @@ func approvalInlineCard(c *ui.Context, o ApprovalDialogOptions, labels ApprovalL
 				MaxHeight(approvalInlineBodyMaxHeight).TrackScroll(bodyScroll).Children(func() {
 				ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 					approvalOriginRow(c, t, o)
-					approvalImpactLine(c, t, o.Locale)
 					approvalSummarySection(c, t, o, summary, arguments)
 					// The change itself, before the raw payload: a file write/edit is
-					// judged by what it will do to the file, not by its JSON.
-					approvalChangeSection(c, t, o, labels, arguments)
+					// judged by what it will do to the file, not by its JSON. The diff
+					// body keeps a readable floor (approvalDiffMinHeight) and is revealed
+					// into the bounded body once per request, so the summary above can
+					// never leave the first hunk as a half-line below the fold (P1).
+					changeBlock := approvalChangeSection(c, t, o, labels, arguments, approvalDiffMinHeight)
+					if changeBlock.Valid() && !*diffRevealed {
+						*diffRevealed = true
+						changeBlock.ScrollIntoView()
+					}
 					approvalArgumentsSection(c, t, o, labels, request, arguments, argsOpen)
 					// The middle choice is session-scoped, not run-scoped: say so once
 					// in quiet copy, including when it expires. The sentence influences
@@ -329,8 +352,9 @@ func approvalRequestBody(c *ui.Context, o ApprovalDialogOptions, labels Approval
 		approvalImpactLine(c, t, o.Locale)
 		approvalSummarySection(c, t, o, summary, arguments)
 		// The change itself, before the raw payload: a file write/edit is
-		// judged by what it will do to the file, not by its JSON.
-		approvalChangeSection(c, t, o, labels, arguments)
+		// judged by what it will do to the file, not by its JSON. The Modal keeps
+		// its natural diff height (no inline floor).
+		approvalChangeSection(c, t, o, labels, arguments, 0)
 		approvalArgumentsSection(c, t, o, labels, request, arguments, argsOpen)
 		ui.Divider(c)
 		// The product's one dialog action bar: the destructive Deny first, the
@@ -564,20 +588,25 @@ func approvalFirstLine(text string) string {
 // what the call will write, and the arguments hold exactly that. A call whose
 // arguments cannot be turned into an honest diff shows a bounded mono preview
 // with the reason instead (uikit.DiffPreview), never a blank or fake diff.
+// minHeight floors the diff body (the inline card passes approvalDiffMinHeight
+// so the summary can never squeeze the diff into a half-line; the Modal passes
+// 0 and keeps its natural height). It returns the change block element so the
+// inline card can reveal the first hunk into its bounded body scroll.
 func approvalChangeSection(c *ui.Context, t *design.Tokens, o ApprovalDialogOptions,
-	labels ApprovalLabels, arguments string) {
+	labels ApprovalLabels, arguments string, minHeight float32) ui.Element {
 	change := approvalChangeFor(o.Locale, o.Request.Tool, arguments)
 	if !change.show {
-		return
+		return ui.Element{}
 	}
 	design.Apply(ui.Text(c, labels.ChangeLabel), t.TextMuted(design.TypeXS))
-	DiffPreview(c, DiffPreviewOptions{
+	return DiffPreview(c, DiffPreviewOptions{
 		Key:          "approval.change." + o.Request.ID,
 		Path:         change.path,
 		Old:          change.old,
 		New:          change.new,
 		FallbackText: change.fallback,
 		FallbackNote: change.note,
+		MinHeight:    minHeight,
 		Locale:       o.Locale,
 	})
 }

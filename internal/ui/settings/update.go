@@ -165,16 +165,9 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 		}
 		uikit.SectionAction(c, localized(locale, "更新", "Update"), checkAction, nil)
 
-		uikit.Section(c, localized(locale, "当前版本", "Current version"), func(body *ui.Context) {
-			// The running build is a one-row property sheet, the same shape the
-			// other read-only pages draw (DESIGN.md §5.2).
-			uikit.PropertySheet(body, uikit.PropertySheetOptions{
-				Rows: []uikit.PropertyRow{
-					{Label: localized(locale, "版本", "Version"), Value: current, Mono: true},
-				},
-				Key: "update.current", Locale: locale,
-			})
-		})
+		// The running version is shown once, in the About page's build-facts
+		// table above; this section owns only the update status and actions.
+		// `current` still feeds the latest-version fallback below.
 
 		if !hasUpdate {
 			uikit.EmptyState(c, localized(locale,

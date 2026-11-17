@@ -52,7 +52,10 @@ func (d *drive) runPaletteSteps() {
 			d.typeText("切换右侧栏")
 			d.drain(2)
 			c.require(c.has("切换右侧栏"), "过滤后没有「切换右侧栏」命令")
-			c.require(c.has("Cmd/Ctrl + Alt + I") || c.has("Cmd/Ctrl + Alt"),
+			// Unified chord notation (uikit.FormatShortcut): platform-resolved
+			// prefix, compact or legacy spaced plus both accepted.
+			c.require(c.has("Ctrl+Alt+I") || c.has("Ctrl + Alt + I") ||
+				c.has("Cmd+Alt+I") || c.has("Cmd/Ctrl + Alt + I"),
 				"命令面板行尾没有显示快捷键 chord；texts=%v", paletteTailTexts(d))
 			// The right sidebar's page commands render their chords too: the
 			// retired pane-switch commands are gone with the 8-pane inspector.

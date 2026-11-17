@@ -211,6 +211,12 @@ func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 	}
 	cards := p.connectorCards(st, service, hasPlugins, authService, hasAuth)
 
+	// The intro line comes first, then the count/action row — the same order
+	// the Skills tab uses, so the two tabs read as one page family.
+	design.Apply(ui.Text(c, st.tr(
+		"连接器把外部 MCP 服务（第三方工具服务，如浏览器、数据库、搜索）接入会话；启用变更在重启后生效。",
+		"Connectors bring external MCP servers (third-party tool services such as browsers, databases and search) into the session; enable changes apply after a restart.")),
+		t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
 	p.buildCollectionRow(c, t, st, service, hasPlugins, settings, hasSettings, len(cards))
 	if p.parseErr != "" {
 		uikit.ErrorLine(c, p.parseErr)
@@ -231,10 +237,6 @@ func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 		uikit.EmptyState(c, st.tr("设置存储未启用", "Settings store not enabled"))
 		return
 	}
-	design.Apply(ui.Text(c, st.tr(
-		"连接器把外部 MCP 服务（第三方工具服务，如浏览器、数据库、搜索）接入会话；启用变更在重启后生效。",
-		"Connectors bring external MCP servers (third-party tool services such as browsers, databases and search) into the session; enable changes apply after a restart.")),
-		t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
 
 	if len(cards) == 0 {
 		uikit.EmptyStateBlock(c,
@@ -275,8 +277,9 @@ func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 		}).Description(mcpWorkspaceHint(st, p))
 		// The opt-in lets repository content define commands that run with the
 		// app's full permissions: disclose the trust exchange next to the path
-		// hint (2026-11 audit (d), disclosure only).
-		uikit.ErrorLine(c, mcpStdioTrustDisclosure(st))
+		// hint (2026-11 audit (d), disclosure only). A static caution is
+		// warning semantic — red stays for real failures.
+		warningLine(c, t, mcpStdioTrustDisclosure(st))
 	})
 
 	if p.formOpen {
@@ -747,6 +750,21 @@ func (p *connectorsState) saveWorkspaceOptIn(st *state, settings contracts.Setti
 		return
 	}
 	st.requestMCPReload(st.tr("已应用工作区 mcp.json 变更", "Workspace mcp.json changes applied"))
+}
+
+// warningLine draws one static risk disclosure in the warning semantic: the
+// alert triangle and the message use the warning tokens, keeping red for real
+// errors and destructive actions (DESIGN.md §5.2 — a trust disclosure is a
+// caution, not a failure). The row anatomy mirrors uikit.ErrorLine (icon +
+// selectable message); the shared WarningLine composition belongs to uikit,
+// this is the module-local build with design tokens + official widgets.
+func warningLine(c *ui.Context, t *design.Tokens, text string) {
+	ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(design.Space2).Children(func() {
+		ui.Icon(c, icons.AlertTriangle()).Size(design.Space3, design.Space3).
+			TextColor(t.WarningText)
+		design.Apply(ui.Text(c, text), t.Font(design.TypeXS)).
+			TextColor(t.WarningText).Grow(1).Selectable()
+	})
 }
 
 // mcpStdioTrustDisclosure is the stdio/LSP trust-channel disclosure (2026-11

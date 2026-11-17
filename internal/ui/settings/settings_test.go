@@ -809,7 +809,7 @@ func TestSettingsGroupingMergedPagesAndAliases(t *testing.T) {
 		{"search", "搜索后端"},
 		{"capabilities", "委派并发"},
 		{"import", "导入服务未启用"},
-		{"update", "当前版本"},
+		{"update", "构建信息"},
 		{"diagnostics", "运行时信息"},
 	}
 	for _, alias := range aliases {

@@ -56,7 +56,9 @@ func TestInspectorPageShortcuts(t *testing.T) {
 	tester.Type("文件页")
 	tester.Frame()
 	tester.Frame()
-	if !tester.HasText("Ctrl+Alt+P") {
+	// Accept both the legacy spaced chord and the unified compact notation
+	// (uikit.FormatShortcut normalization, 2026-11-17 review).
+	if !tester.HasText("Ctrl+Alt+P") && !tester.HasText("Ctrl + Alt + P") {
 		t.Fatalf("files page command shortcut missing from the palette; texts = %v", tester.Texts())
 	}
 	tester.Key(0, ui.KeyEscape)

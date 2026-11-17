@@ -158,6 +158,9 @@ func (d *drive) boot() error {
 	}}
 	provide(root, contracts.KeyDataDir, d.dataDir)
 	provide(root, contracts.KeyUIRuntime, uiRoot.Runtime())
+	// Hand-wired boot: provide the host toast anchor so driven frames match
+	// the real desktop placement (see ui-snapshot boot for the same note).
+	provide(root, contracts.KeyToastAnchor, uiRoot.ToastAnchor())
 	provide(root, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(root, contracts.KeyTheme, uiRoot.Theme())
 	provide(root, contracts.KeyLocale, uiRoot.Locale())

@@ -6,14 +6,17 @@
 // thread with UIRuntime.Post) and registers one overlay.toasts slot item. The
 // handler only queues the notification; the overlay's build drains the queue
 // into native toasts and paints them with a branded look of our own
-// (ui.ToastViewportBase), so the notification never covers the conversation
-// composer, a dialog footer or the app's top header: the stack is a top-right
-// popup below the header (which holds the window title, tabs and the right-side
-// actions), laid out from the top down. At most toastMaxVisible toasts show at
-// once (the rest wait in a visible queue count) and an ActionNotification's
-// action label renders as the toast's button. Fading, hover/focus pause, the
-// timeout, Escape and the screen-reader announcements stay the framework's. The
-// module is only loaded by products with the desktop notifier bridge.
+// (ui.ToastViewportBase). Where the stack sits is the host's call when it
+// provides contracts.ToastAnchorService: below the screen header band at the
+// main column's right edge, or yielded to the window's bottom-right while a
+// modal or overlay is open. Without the service the module keeps its own
+// default: a top-right popup below the header (which holds the window title,
+// tabs and the right-side actions), laid out from the top down. At most
+// toastMaxVisible toasts show at once (the rest wait in a visible queue count)
+// and an ActionNotification's action label renders as the toast's button.
+// Fading, hover/focus pause, the timeout, Escape and the screen-reader
+// announcements stay the framework's. The module is only loaded by products
+// with the desktop notifier bridge.
 package toasts
 
 import (
@@ -97,6 +100,11 @@ type state struct {
 	// runtime requests the next frame after a toast closes so the queue's head
 	// can take the freed slot.
 	runtime contracts.UIRuntime
+	// kernel resolves the optional host toast anchor lazily: a host may bind
+	// the service after this module activates, so the lookup retries per frame
+	// until it lands (nil keeps the module's default placement).
+	kernel cordis.Context
+	anchor contracts.ToastAnchorService
 
 	pending []contracts.Notification
 	// queue holds accepted notifications waiting for a free slot; at most
@@ -144,7 +152,8 @@ func Module() *module.Descriptor[Config] {
 		}
 		settings, _ := ctx.Get(contracts.KeySettings)
 		locale, _ := ctx.Get(contracts.KeyLocale)
-		st := &state{notifier: notifier, locale: locale, settings: settings, runtime: runtime, showing: make(map[string]string)}
+		st := &state{notifier: notifier, locale: locale, settings: settings, runtime: runtime, kernel: ctx, showing: make(map[string]string)}
+		st.anchor, _ = ctx.Get(contracts.KeyToastAnchor)
 
 		// The handler may run on the notifier's goroutine: only queue the
 		// notification, and let the UI thread's frame drain it (mygo's native
@@ -334,15 +343,40 @@ func buildOverlay(c *ui.Context, st *state) {
 	})
 }
 
-// buildToastViewport places the toast stack in the top-right corner of the
-// window, below the app's top header: toasts start under the header's title row,
-// tab row and right-side actions and stack downward from the top, aligned to the
-// right edge. The framework keeps the pointer pass-through, hover pause and
-// screen-reader roles.
+// toastAnchor resolves the optional host placement service, retrying the
+// kernel lookup per frame until a host that bound it late lands. ok=false
+// keeps the module's default top-right placement.
+func (st *state) toastAnchor() (contracts.ToastAnchor, bool) {
+	if st.anchor == nil && st.kernel != (cordis.Context{}) {
+		st.anchor, _ = st.kernel.Get(contracts.KeyToastAnchor)
+	}
+	if st.anchor == nil {
+		return contracts.ToastAnchor{}, false
+	}
+	return st.anchor.Anchor(), true
+}
+
+// buildToastViewport places the toast stack where the host anchors it
+// (contracts.ToastAnchorService): below the screen header band at the main
+// content column's right edge, or — while a modal or overlay is open — grown
+// upward from the window's bottom-right corner, clear of the dialog and the
+// composer the scrim disables. Without the service the stack keeps its default
+// top-right place below the app header. The queue count rides the same anchor.
+// The framework keeps the pointer pass-through, hover pause and screen-reader
+// roles.
 func buildToastViewport(c *ui.Context, st *state, viewport ui.Element, toasts []ui.Toast) {
-	viewport.FillWidth().
-		Padding(toastTopInset, design.Space4, design.Space3, design.Space4).
-		AlignItems(ui.End).Justify(ui.Start).Gap(design.Space2)
+	viewport.FillWidth().AlignItems(ui.End).Gap(design.Space2)
+	if anchor, ok := st.toastAnchor(); ok {
+		viewport.Padding(anchor.Top, anchor.Right, anchor.Bottom, design.Space4)
+		if anchor.FromBottom {
+			viewport.Justify(ui.End)
+		} else {
+			viewport.Justify(ui.Start)
+		}
+	} else {
+		viewport.Padding(toastTopInset, design.Space4, design.Space3, design.Space4).
+			Justify(ui.Start)
+	}
 	for _, toast := range toasts {
 		buildToast(c, st, toast)
 	}

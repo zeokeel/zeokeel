@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,6 +34,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
@@ -283,7 +283,7 @@ type appearanceState struct {
 	// field (the host registers it at the next start; empty disables it).
 	globalHotkey string
 	// hotkeyText is the friendly display draft bound to the input
-	// ("Cmd/Ctrl + Shift + Space"), parsed back into globalHotkey on edit.
+	// ("Cmd/Ctrl+Shift+Space"), parsed back into globalHotkey on edit.
 	hotkeyText  string
 	hotkeyError string
 	// savingHotkey/captureText/captureFocus/captureInput are the key recorder's
@@ -565,9 +565,12 @@ type diagnosticsState struct {
 }
 
 // buildDiagnosticsPage renders the read-only runtime/storage summary (the old
-// shell's diagnostics view) with a native copy action.
+// shell's diagnostics view) with a native copy action. buildRows are the About
+// page's build-facts table: shown once above (not repeated in the runtime
+// sheet) but included in the copy, so a bug report still carries the version,
+// commit and Go build.
 func buildDiagnosticsPage(c *ui.Context, t *design.Tokens, state *diagnosticsState,
-	rows, keys []diagnosticRow, modules []contracts.ModuleInfo, locale contracts.LocaleService, showHeader bool) {
+	buildRows, rows, keys []diagnosticRow, modules []contracts.ModuleInfo, locale contracts.LocaleService, showHeader bool) {
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		if showHeader {
 			uikit.PageHeader(c, localized(locale, "诊断", "Diagnostics"), "")
@@ -617,10 +620,13 @@ func buildDiagnosticsPage(c *ui.Context, t *design.Tokens, state *diagnosticsSta
 
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			if ui.Button(c, localized(locale, "复制诊断信息", "Copy diagnostics")).Clicked() {
-				// The copy is the whole sheet: the runtime rows and the (already
-				// masked) setting keys, so a bug report carries the same detail
-				// the page shows.
+				// The copy is the whole page: the build facts, the runtime rows
+				// and the (already masked) setting keys, so a bug report carries
+				// the same detail the page shows.
 				var builder strings.Builder
+				for _, row := range buildRows {
+					fmt.Fprintf(&builder, "%s: %s\n", row.Label, row.Value)
+				}
 				for _, row := range rows {
 					fmt.Fprintf(&builder, "%s: %s\n", row.Label, row.Value)
 				}
@@ -736,7 +742,7 @@ func Module() *module.Descriptor[Config] {
 					buildPage(c, runtime, state, catalog, chat, modelLabels(), store, locale, modelSearch)
 				},
 				Footer: func(c *ui.Context) {
-					uikit.DialogFooter(c, []uikit.DialogAction{{
+					pageFooter(c, []uikit.DialogAction{{
 						Label: modelLabels().saveLabel, Primary: true,
 						Disabled: !state.dirty(),
 						OnClick: func() {
@@ -763,7 +769,7 @@ func Module() *module.Descriptor[Config] {
 					buildBehaviorPage(c, runtime, store, locale, behavior, sandboxService, chat, capabilities, behaviorSearch)
 				},
 				Footer: func(c *ui.Context) {
-					uikit.DialogFooter(c, []uikit.DialogAction{
+					pageFooter(c, []uikit.DialogAction{
 						{Label: localized(locale, "恢复限额默认", "Restore limit defaults"), OnClick: func() {
 							capabilities.restoreDefaults(locale)
 							c.Invalidate()
@@ -801,7 +807,7 @@ func Module() *module.Descriptor[Config] {
 						appearanceLabels(), shortcuts, appearanceSearch)
 				},
 				Footer: func(c *ui.Context) {
-					uikit.DialogFooter(c, []uikit.DialogAction{{
+					pageFooter(c, []uikit.DialogAction{{
 						Label: appearanceLabels().saveLabel, Primary: true,
 						Disabled: !appearance.dirty(),
 						OnClick: func() {
@@ -837,7 +843,7 @@ func Module() *module.Descriptor[Config] {
 					buildNetworkPage(c, ctx, store, runtime, network, search, locale)
 				},
 				Footer: func(c *ui.Context) {
-					uikit.DialogFooter(c, []uikit.DialogAction{{
+					pageFooter(c, []uikit.DialogAction{{
 						Label: localized(locale, "保存", "Save"), Primary: true,
 						Disabled: !network.dirty(store) && !search.dirty(store),
 						OnClick: func() {
@@ -865,6 +871,23 @@ func Module() *module.Descriptor[Config] {
 					syncer.sync()
 					buildLSPPage(c, store, lsp, locale)
 				},
+				// The add form's submit is the page's one primary and lives in
+				// the host's fixed footer (rule 14): the old in-section button
+				// scrolled out of sight on a short window. Validation stays on
+				// click, so an empty draft reports the missing name/command
+				// instead of silently doing nothing.
+				Footer: func(c *ui.Context) {
+					if store == nil {
+						return
+					}
+					pageFooter(c, []uikit.DialogAction{{
+						Label: localized(locale, "添加", "Add"), Primary: true,
+						OnClick: func() {
+							addLSPServer(lsp, store, locale)
+							c.Invalidate()
+						},
+					}})
+				},
 				Dirty: func() bool { return lspDraftDirty(lsp) },
 				Discard: func() {
 					discardLSPDraft(lsp)
@@ -878,7 +901,31 @@ func Module() *module.Descriptor[Config] {
 					syncer.sync()
 					buildMemoryPage(c, design.Of(c), ctx, memoryPage, store, locale)
 				},
-				Dirty: func() bool { return memoryDraftDirty(memoryPage) },
+				// The consolidation steppers are the page's explicit-save draft;
+				// their Save lives in the host's fixed footer (rule 14), so the
+				// submit never scrolls out of sight. Adding a memory and running
+				// a consolidation stay section actions (they apply at once).
+				// Without a consolidator the page has no draft and the footer
+				// builds nothing.
+				Footer: func(c *ui.Context) {
+					memoryStore, ok := ctx.Get(contracts.KeyMemory)
+					if !ok || memoryStore == nil {
+						return
+					}
+					if _, ok := memoryStore.(contracts.MemoryConsolidator); !ok {
+						return
+					}
+					pageFooter(c, []uikit.DialogAction{{
+						Label: localized(locale, "保存", "Save"), Primary: true,
+						Disabled: !memoryPolicyDirty(memoryPage, store),
+						OnClick: func() {
+							saveMemoryPolicy(c, store, memoryPage, locale)
+						},
+					}})
+				},
+				Dirty: func() bool {
+					return memoryDraftDirty(memoryPage) || memoryPolicyDirty(memoryPage, store)
+				},
 				Discard: func() {
 					discardMemoryDraft(memoryPage)
 				},
@@ -906,7 +953,7 @@ func Module() *module.Descriptor[Config] {
 					buildDataPrivacyPage(c, design.Of(c), ctx, runtime, chat, store, dataPrivacy, importState, locale)
 				},
 				Footer: func(c *ui.Context) {
-					uikit.DialogFooter(c, []uikit.DialogAction{{
+					pageFooter(c, []uikit.DialogAction{{
 						Label: localized(locale, "保存", "Save"), Primary: true,
 						Disabled: !deniedGlobsDirty(dataPrivacy, store),
 						OnClick: func() {
@@ -976,31 +1023,21 @@ func Module() *module.Descriptor[Config] {
 		WithName("ZeoKeel settings pages")
 }
 
-// diagnosticsRows collects the read-only diagnostics values. Optional services
-// degrade to explicit "未启用" values instead of hiding the row. The tool surface
-// is the narrow contracts.ToolCatalog (names + count), never the concrete rig
-// registry, so this UI module imports no backend tool framework (AR-06).
-func diagnosticsRows(info contracts.AppInfo, dataDir string, catalog contracts.ToolCatalog,
+// diagnosticsRows collects the read-only runtime/storage diagnostics values.
+// Build identity (name/version/commit/build time/Go/platform) lives once in the
+// About page's build-facts table (buildFactRows), not repeated here. Optional
+// services degrade to explicit "未启用" values instead of hiding the row. The
+// tool surface is the narrow contracts.ToolCatalog (names + count), never the
+// concrete rig registry, so this UI module imports no backend tool framework
+// (AR-06).
+func diagnosticsRows(dataDir string, catalog contracts.ToolCatalog,
 	chat contracts.ChatService, store contracts.SettingsService, locale contracts.LocaleService) ([]diagnosticRow, []diagnosticRow) {
-	name := info.Name
-	if name == "" {
-		name = "ZeoKeel"
-	}
-	version := info.Version
-	if version == "" {
-		version = "dev"
-	}
 	rows := []diagnosticRow{
-		{localized(locale, "应用", "Application"), name + " v" + version},
-		{"Commit", diagnosticValue(locale, info.Commit)},
-		{localized(locale, "构建时间", "Build time"), diagnosticValue(locale, info.BuildTime)},
-		{localized(locale, "Go 版本", "Go version"), textutil.FirstNonEmpty(info.GoVersion, runtime.Version())},
-		{localized(locale, "平台", "Platform"), runtime.GOOS + "/" + runtime.GOARCH},
 		{localized(locale, "数据目录", "Data directory"), textutil.FirstNonEmpty(dataDir, localized(locale, "未设置", "not set"))},
 		{localized(locale, "会话数据库", "Session database"), localized(locale, "zeokeel.db（数据目录）", "zeokeel.db (data directory)")},
 	}
 	if dataDir != "" {
-		rows[6].Value = filepath.Join(dataDir, "zeokeel.db")
+		rows[1].Value = filepath.Join(dataDir, "zeokeel.db")
 	}
 	toolCount := 0
 	toolNames := localized(locale, "未启用", "not enabled")
@@ -1027,17 +1064,6 @@ func diagnosticsRows(info contracts.AppInfo, dataDir string, catalog contracts.T
 		sort.Slice(keys, func(i, j int) bool { return keys[i].Label < keys[j].Label })
 	}
 	return rows, keys
-}
-
-// diagnosticValue renders one build value: empty and the assembly's raw
-// "unknown" build metadata read as the friendly placeholder (the About page's
-// rule, kept local because UI modules do not import each other).
-func diagnosticValue(locale contracts.LocaleService, value string) string {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" || strings.EqualFold(trimmed, "unknown") {
-		return localized(locale, "未知", "unknown")
-	}
-	return trimmed
 }
 
 // runtimeSummary is the one-line effective runtime state shown under the
@@ -1317,16 +1343,105 @@ func switchInline(c *ui.Context, label string, value *bool) bool {
 	return changed
 }
 
-func switchField(c *ui.Context, label, description string, value *bool) bool {
+// switchRow renders one boolean setting as a full-width row: the visible label
+// at the section's left edge, the native switch at the row's trailing edge, and
+// the description below aligned with the section edge (not indented under a
+// control column). Every settings toggle row shares this anatomy, so the switch
+// sits at the same x on every page; the shared ui.Form label column made
+// multi-switch sections ragged (the short label right-aligned against the long
+// one) and orphaned the description under the control. LabelledBy ties the
+// caption to the switch for assistive technology and gives a caption click to
+// the switch, exactly as a Field label does (mygo form.md "Labels of your own").
+// The caller handles the Changed result right where the setting lives.
+func switchRow(c *ui.Context, label, description string, value *bool, disabled bool) bool {
+	t := design.Of(c)
 	var changed bool
-	ui.Field(c, label, func() {
-		// The field names the switch for assistive technology; do not set a
-		// second Label on it, which would make the field's visible label
-		// untargetable.
-		sw := ui.Switch(c, value)
-		changed = sw.Changed()
-	}).Description(description)
+	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			caption := design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).
+				TextColor(t.LabelPrimary).Grow(1)
+			sw := ui.Switch(c, value).LabelledBy(caption)
+			if disabled {
+				sw.Disabled(true)
+			}
+			changed = sw.Changed()
+		})
+		if description != "" {
+			design.Apply(ui.Text(c, description), t.TextMuted(design.TypeXXS))
+		}
+	})
 	return changed
+}
+
+// warningLine draws one static risk disclosure in the warning semantic: the
+// alert triangle and the message use the warning tokens, keeping red for real
+// errors and destructive actions (DESIGN.md §5.2 — a trust disclosure is a
+// caution, not a failure). The row anatomy mirrors uikit.ErrorLine (icon +
+// selectable message); the shared WarningLine composition belongs to uikit,
+// this is the module-local build with design tokens + official widgets.
+func warningLine(c *ui.Context, text string) {
+	t := design.Of(c)
+	ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(design.Space2).Children(func() {
+		ui.Icon(c, icons.AlertTriangle()).Size(design.Space3, design.Space3).
+			TextColor(t.WarningText)
+		design.Apply(ui.Text(c, text), t.Font(design.TypeXS)).
+			TextColor(t.WarningText).Grow(1).Selectable()
+	})
+}
+
+// pageFooter is the settings page's fixed action bar: the same right-aligned
+// desktop order as uikit.DialogFooter (danger and secondary actions first, the
+// primary last) with one difference — a disabled primary takes the composer's
+// neutral disabled look (a plain ui.Button with t.DisabledPrimary()) instead of
+// mygo's 50% accent wash, whose white label reads only ~2.3:1 on the faded
+// fill. The composer's disabled send applies the same preset, so a disabled
+// page primary and a disabled send are the same color. The shared DialogFooter
+// helper belongs to uikit; this local build carries the mechanism until that
+// integration lands.
+func pageFooter(c *ui.Context, actions []uikit.DialogAction) {
+	t := design.Of(c)
+	ordered := make([]uikit.DialogAction, 0, len(actions))
+	for _, action := range actions {
+		if action.Danger {
+			ordered = append(ordered, action)
+		}
+	}
+	for _, action := range actions {
+		if !action.Danger && !action.Primary {
+			ordered = append(ordered, action)
+		}
+	}
+	for _, action := range actions {
+		if action.Primary {
+			ordered = append(ordered, action)
+		}
+	}
+	ui.Row(c).FillWidth().Justify(ui.End).AlignItems(ui.Center).
+		Gap(design.Space2).Children(func() {
+		for _, action := range ordered {
+			action := action
+			var button ui.Element
+			switch {
+			case action.Primary && action.Disabled:
+				button = design.Apply(ui.Button(c, action.Label), t.DisabledPrimary())
+			case action.Primary:
+				button = design.Apply(ui.PrimaryButton(c, action.Label), t.PrimaryButton())
+			case action.Danger:
+				button = design.Apply(ui.Button(c, action.Label), t.DangerButton())
+			default:
+				button = design.Apply(ui.Button(c, action.Label), t.SecondaryButton())
+			}
+			if action.Disabled {
+				button = button.Disabled(true)
+			}
+			if action.Default && !action.Disabled {
+				button = button.AutoFocus()
+			}
+			if action.OnClick != nil && button.Clicked() {
+				action.OnClick()
+			}
+		}
+	})
 }
 
 // inputLabel appends the localized "input" suffix used by native input labels.
@@ -1485,23 +1600,24 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 
 		search.region(c, "appearance.desktop", func(c *ui.Context) {
 			uikit.Section(c, localized(locale, "桌面集成", "Desktop integration"), func(*ui.Context) {
-				ui.Form(c, func() {
-					if switchField(c,
-						localized(locale, "开机自启动", "Launch at login"),
-						"",
-						&state.autostart) {
-						applyDesktopSetting(state, store, contracts.SettingAutostart,
-							fmt.Sprintf("%t", state.autostart), locale)
-					}
-					if switchField(c,
-						localized(locale, "关闭时最小化到托盘", "Close to system tray"),
-						localized(locale, "关闭窗口后应用继续在托盘运行，任务不中断。修改后重启应用生效。",
-							"Keep running in the system tray after closing the window, so tasks continue. Takes effect after a restart."),
-						&state.closeToTray) {
-						applyDesktopSetting(state, store, contracts.SettingCloseToTray,
-							fmt.Sprintf("%t", state.closeToTray), locale)
-					}
-				})
+				// One row per switch (label left, switch trailing): a shared
+				// Form label column right-aligned the two labels against each
+				// other and orphaned the tray description under the control.
+				if switchRow(c,
+					localized(locale, "开机自启动", "Launch at login"),
+					"",
+					&state.autostart, false) {
+					applyDesktopSetting(state, store, contracts.SettingAutostart,
+						fmt.Sprintf("%t", state.autostart), locale)
+				}
+				if switchRow(c,
+					localized(locale, "关闭时最小化到托盘", "Close to system tray"),
+					localized(locale, "关闭窗口后应用继续在托盘运行，任务不中断。修改后重启应用生效。",
+						"Keep running in the system tray after closing the window, so tasks continue. Takes effect after a restart."),
+					&state.closeToTray, false) {
+					applyDesktopSetting(state, store, contracts.SettingCloseToTray,
+						fmt.Sprintf("%t", state.closeToTray), locale)
+				}
 			})
 		})
 

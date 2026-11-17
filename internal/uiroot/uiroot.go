@@ -99,6 +99,14 @@ type Root struct {
 	plan             *planService
 	notifier         *notifierService
 
+	// overlayReports counts module-reported transient overlays
+	// (contracts.ToastAnchorService.ReportOverlay); toastAnchorCache is the
+	// toast placement the last view computed; toastAnchorProvided guards the
+	// one-time anchor-service registration on the kernel root.
+	overlayReports      atomic.Int32
+	toastAnchorCache    contracts.ToastAnchor
+	toastAnchorProvided bool
+
 	mu         sync.Mutex
 	invalidate func()
 	frames     atomic.Uint64
@@ -415,6 +423,7 @@ func New(cfg Config) *Root {
 		return r.tr("打开会话", "Open conversation")
 	})
 	r.registerHostCommands()
+	r.provideToastAnchor(kernelContext)
 	return r
 }
 
@@ -517,6 +526,7 @@ func (r *Root) SetKernelContext(ctx cordis.Context) {
 	r.mu.Lock()
 	r.kernelContext = ctx
 	r.mu.Unlock()
+	r.provideToastAnchor(ctx)
 }
 
 // AppName returns the product name shown in the title bar and UI.

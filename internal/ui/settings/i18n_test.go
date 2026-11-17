@@ -87,9 +87,11 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 	h.assertTexts(tester, "Data & privacy", "Data directory", "Session data",
 		"Import service is not enabled")
 
-	// About: the merged build information + update + diagnostics hub.
+	// About: the merged build-facts table + update status/actions + diagnostics
+	// hub (the old separate Current version section is deduplicated into the
+	// build-facts table).
 	h.click(tester, "About")
-	h.assertTexts(tester, "About", "Build information", "Current version",
+	h.assertTexts(tester, "About", "Build information", "Version",
 		"Update service is not enabled", "Runtime information", "Data directory",
 		"Session database", "Copy diagnostics")
 
@@ -136,7 +138,7 @@ func TestSettingsEnglishUpdatePage(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "About")
-	h.assertTexts(tester, "Update", "Current version", "1.0.0", "Check for updates")
+	h.assertTexts(tester, "Update", "Build information", "1.0.0", "Check for updates")
 	h.click(tester, "Check for updates")
 	waitForText(t, tester, "Latest version")
 	h.assertTexts(tester, "Update available", "Release notes", "Copy download link",

@@ -323,7 +323,10 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 	tester.Frame()
 	tester.Frame()
-	for _, want := range []string{"检查更新", "当前版本"} {
+	// The 2026-11-17 review dedup moved the version/commit facts into the
+	// about page's single build-facts table; the update page keeps only the
+	// update status and its actions, so the check action is the assertion.
+	for _, want := range []string{"检查更新"} {
 		if !tester.HasText(want) {
 			t.Fatalf("update page missing %q; texts = %v", want, tester.Texts())
 		}

@@ -69,6 +69,13 @@ const toolSectionMaxHeight float32 = design.Space8 * 5
 // tool anatomy).
 const toolRowGutterWidth float32 = design.Space1 * 3 / 4
 
+// toolRowStatusColumnWidth fixes the compact row's status column so the params
+// (preview) left edge is constant across states (2026-11 UI review P3): a
+// reserved spinner slot (design.Space3) + the row gap (design.Space2) + a
+// status-text area (design.Space8*2) wide enough for the longest status label, so
+// neither the running spinner nor a shorter/longer status word shifts the preview.
+const toolRowStatusColumnWidth float32 = design.Space3 + design.Space2 + design.Space8*2
+
 // ToolRowOptions is one compact transcript tool row.
 type ToolRowOptions struct {
 	// Key is the row's stable identity (one per tool call).
@@ -156,22 +163,29 @@ func toolCallHead(c *ui.Context, t *design.Tokens, o toolCallHeadOptions) {
 	ui.Icon(c, icon).Size(design.Space3, design.Space3).TextColor(t.LabelTertiary)
 	design.Apply(ui.Text(c, o.Name), t.Font(design.TypeXXS)).
 		TextColor(t.LabelSecondary).MaxLines(1).Ellipsis("…")
-	switch {
-	case o.Badge:
+	if o.Badge {
 		if o.Status != "" {
 			StatusBadge(c, t, o.Kind, o.Status)
 		}
-	case o.Running:
-		ui.Spinner(c).Label(o.Status).Size(design.Space3, design.Space3).
-			TextColor(o.StatusColor)
+		return
+	}
+	// The compact row's status is a fixed-width column so the preview/params left
+	// edge is constant across states: the running spinner occupies a reserved slot
+	// (empty when settled) and the status text a fixed area, so neither the spinner
+	// nor a shorter/longer status word shifts the params (2026-11 UI review P3).
+	ui.Row(c).Width(toolRowStatusColumnWidth).Shrink(0).AlignItems(ui.Center).
+		Gap(design.Space2).Children(func() {
+		ui.Row(c).Width(design.Space3).Shrink(0).Justify(ui.Center).Children(func() {
+			if o.Running {
+				ui.Spinner(c).Label(o.Status).Size(design.Space3, design.Space3).
+					TextColor(o.StatusColor)
+			}
+		})
 		if o.Status != "" {
 			design.Apply(ui.Text(c, o.Status), t.Font(design.TypeXXXS)).
 				TextColor(o.StatusColor).NoWrap()
 		}
-	case o.Status != "":
-		design.Apply(ui.Text(c, o.Status), t.Font(design.TypeXXXS)).
-			TextColor(o.StatusColor).NoWrap()
-	}
+	})
 }
 
 // toolRowGutterInk is a state's gutter fill: the semantic fill token of

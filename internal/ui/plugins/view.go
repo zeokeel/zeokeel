@@ -27,8 +27,11 @@ const (
 	cardGridHeight float32 = design.Space8 * 4
 	// connectorCardHeight is the connectors card's fixed height; a failed card
 	// adds a red summary line and the detail/retry actions, so it is one step
-	// taller than a skill card.
-	connectorCardHeight float32 = design.Space8*5 + design.Space2*2
+	// taller than a skill card. The extra Space4 keeps the trailing enable
+	// switch row inside the card's bottom padding: at the old height the
+	// failed card's content overflowed the inner box and pressed the switch
+	// against the card's bottom border.
+	connectorCardHeight float32 = design.Space8*5 + design.Space2*2 + design.Space4
 	// cardGridViewportThreeRows/twoRows bound each grid's own scroll area before
 	// it scrolls instead of pushing the page footer away.
 	cardGridViewportThreeRows float32 = cardGridHeight*3 + design.Space2*3

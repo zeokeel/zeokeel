@@ -293,7 +293,7 @@ func (d *drive) runTeamSteps() {
 				c.failf("无法打开团队浮层；texts=%v", paletteTailTexts(d))
 				return
 			}
-			c.mustText("1 名成员 · 0 个运行中", "已完成")
+			c.mustText("0 名成员 · 0 个运行中 · 1 条已结束", "已完成")
 			if d.hasExactText("运行中") {
 				c.failf("只有一个已结束队友时浮层仍显示「运行中」：availability 被当成了 running")
 			}
@@ -317,7 +317,7 @@ func (d *drive) runTeamSteps() {
 				c.failf("无法打开团队浮层")
 				return
 			}
-			c.mustText("2 名成员 · 1 个运行中", "运行中", "已完成")
+			c.mustText("1 名成员 · 1 个运行中 · 1 条已结束", "运行中", "已完成")
 			c.note("同一帧：running 队友=运行中，finished 队友=已完成")
 			c.shot("team-states")
 			d.closeOverlay()
@@ -618,8 +618,8 @@ func (d *drive) runTeamSteps() {
 			}
 			d.drain(3)
 			c.mustText("历史研究员", "历史", "可继续",
-				"发送后冷恢复这条历史记录，并等待它的回答。")
-			c.require(d.has("继续该队友…") || d.has("发送后冷恢复这条历史记录，并等待它的回答。"),
+				"发送后会恢复这条历史记录的会话，并等待它的回答。")
+			c.require(d.has("继续该队友…") || d.has("发送后会恢复这条历史记录的会话，并等待它的回答。"),
 				"冷恢复会话缺少继续输入提示")
 			c.shot("team-history-child")
 			if !d.childBridge(title) {

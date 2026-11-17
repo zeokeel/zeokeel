@@ -195,7 +195,10 @@ func (p *connectorsState) buildFormModal(c *ui.Context, t *design.Tokens, st *st
 				testLabel = st.tr("正在测试…", "Testing…")
 			}
 			ui.Scroll(c).FillWidth().MaxHeight(design.DialogBodyMax).Children(func() {
-				ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
+				// The scroll bar overlays the viewport's right edge; the end
+				// padding reserves a gutter so it never presses on the fields'
+				// right edge (the STDIO form's inputs are FillWidth).
+				ui.Column(c).FillWidth().PaddingEnd(design.Space2).Gap(design.Space3).Children(func() {
 					ui.Field(c, st.tr("传输", "Transport"), func() {
 						choice := transportDisplay(p.transport)
 						selector := ui.Select(c, &choice, []string{"HTTP", "STDIO"}).
@@ -246,7 +249,8 @@ func (p *connectorsState) buildFormModal(c *ui.Context, t *design.Tokens, st *st
 							// full permissions, outside the OS sandbox: disclose
 							// the trust model before the user saves it (2026-11
 							// audit (d), disclosure only — no spawn approval).
-							uikit.ErrorLine(c, mcpStdioTrustDisclosure(st))
+							// Warning semantic: a static caution, not a failure.
+							warningLine(c, t, mcpStdioTrustDisclosure(st))
 						})
 					} else {
 						ui.Field(c, "URL", func() {

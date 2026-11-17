@@ -704,22 +704,41 @@ func TestApprovalInlineCardShowsWriteDiff(t *testing.T) {
 	if !strings.Contains(info.Value, "func main()") {
 		t.Fatalf("the diff does not show the written content; a11y value = %q", info.Value)
 	}
-	// The block sits after the summary and before the raw arguments.
-	summary, ok := tester.Find("摘要")
-	if !ok {
-		t.Fatalf("the summary label is missing; texts = %v", tester.Texts())
+	// A′ (2026-11 UI review P1): the sandbox impact disclosure lives in the fixed
+	// banner (always visible), and the diff's first hunk is revealed into the
+	// bounded body on the first frame instead of sitting below the summary's fold.
+	title, okTitle := tester.Find("需要审批")
+	disclosure, okDisclosure := tester.Find("允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。")
+	change, okChange := tester.Find("将改动")
+	allow, okAllow := tester.Find("允许")
+	if !okTitle || !okDisclosure || !okChange || !okAllow {
+		t.Fatalf("banner/disclosure/change/footer missing; texts = %v", tester.Texts())
 	}
-	change, ok := tester.Find("将改动")
-	if !ok {
-		t.Fatalf("the change label is missing; texts = %v", tester.Texts())
+	// The disclosure stays visible in the banner, on the line below the title.
+	if disclosure.H <= 0 || !(title.Y < disclosure.Y) {
+		t.Fatalf("the sandbox disclosure is not always visible in the banner: title=%+v disclosure=%+v", title, disclosure)
 	}
-	arguments, ok := tester.Find("原始参数")
-	if !ok {
-		t.Fatalf("the raw arguments disclosure is missing; texts = %v", tester.Texts())
+	// The diff region keeps its readable floor (≥128 DIP) and is revealed below
+	// the banner — not a half-line squeezed by the summary.
+	if info.Bounds.H < 128 {
+		t.Fatalf("the diff region spans %.1f DIP, want the ≥128 readable floor", info.Bounds.H)
 	}
-	if !(summary.Y < change.Y && change.Y < arguments.Y) {
-		t.Fatalf("section order y = summary %.1f, change %.1f, arguments %.1f; want summary < change < arguments",
-			summary.Y, change.Y, arguments.Y)
+	if !(disclosure.Y < info.Bounds.Y) {
+		t.Fatalf("the diff is not revealed below the banner disclosure: disclosure.Y=%.1f diff.Y=%.1f", disclosure.Y, info.Bounds.Y)
+	}
+	// The change label scrolled above the fold to make room (the reveal happened),
+	// and the diff's first line sits at/below the body viewport top — complete,
+	// not clipped in half.
+	if change.W != 0 {
+		t.Fatalf("the change label was not scrolled out; the diff first hunk is not revealed: %+v", change)
+	}
+	if info.Bounds.Y < change.Y {
+		t.Fatalf("the diff first line is clipped above the body viewport: diff.Y=%.1f viewportTop=%.1f", info.Bounds.Y, change.Y)
+	}
+	// The body's total budget is unchanged (UX-02): banner + bounded middle +
+	// footer span a bounded card, not a window-filling one.
+	if span := allow.Y + allow.H - title.Y; span > 320 {
+		t.Fatalf("the approval card spans %.1f DIP, want the bounded middle (≤320)", span)
 	}
 }
 
