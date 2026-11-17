@@ -43,16 +43,20 @@ func countNear(img *image.RGBA, r ui.Rect, want ui.Color) int {
 
 func TestWarningLineUsesWarningNotDangerInk(t *testing.T) {
 	tk := design.Light()
+	// ASCII copy: CI's runner has no CJK face, so a CJK label measures zero
+	// width and paints no pixels — the ink scan would be vacuous there. The
+	// semantic under test (warning token, never danger) is locale-independent.
+	const message = "Allowed to run inside the sandbox policy."
 	tester := ui.NewTester(func(c *ui.Context) {
-		uikit.WarningLine(c, design.Of(c), "允许后将在沙箱策略限制内执行。")
+		uikit.WarningLine(c, design.Of(c), message)
 	}, 400, 80)
-	tester.SetLocale("zh-Hans")
+	tester.SetLocale("en")
 	tester.Frame()
 
 	if _, ok := tester.AccessByRole(ui.RoleAlert, ""); !ok {
 		t.Fatalf("the warning line is not a role-alert region; texts = %v", tester.Texts())
 	}
-	rect, ok := tester.Find("允许后将在沙箱策略限制内执行。")
+	rect, ok := tester.Find(message)
 	if !ok {
 		t.Fatalf("warning text missing; texts = %v", tester.Texts())
 	}

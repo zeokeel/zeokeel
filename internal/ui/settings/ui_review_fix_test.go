@@ -250,8 +250,13 @@ func TestLSPWorkspaceRiskIsWarning(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
 	tester := h.tester()
 	tester.Frame()
+	// English copy: CI has no CJK face, so a CJK label measures zero width and
+	// paints no pixels — the ink scan would be vacuous there (2026-11-17). The
+	// semantic under test is locale-independent.
+	h.uiRoot.Locale().SetLanguage("en")
+	tester.Frame()
 	h.click(tester, "LSP")
-	risk := "风险：只应在你信任的仓库中开启；恶意仓库可通过该文件让工具启动任意命令。"
+	risk := "Risk: enable only in repositories you trust; a malicious repository could make tools launch arbitrary commands."
 	h.assertTexts(tester, risk)
 	assertTextInk(t, tester, risk, design.Light(), design.Light().WarningText, design.Light().DangerText)
 
@@ -267,8 +272,10 @@ func TestMemoryExtractionCautionIsWarning(t *testing.T) {
 	provide[contracts.MemoryStore](t, h.ctx, contracts.KeyMemory, newFakeMemoryStore())
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "记忆")
-	caution := "会消耗模型额度并向服务商发送对话内容。"
+	h.uiRoot.Locale().SetLanguage("en")
+	tester.Frame()
+	h.click(tester, "Memory")
+	caution := "Uses your model quota and sends conversation content to the provider."
 	h.assertTexts(tester, caution)
 	assertTextInk(t, tester, caution, design.Light(), design.Light().WarningText, design.Light().DangerText)
 }
@@ -429,31 +436,39 @@ func assertDisabledPrimaryInk(t *testing.T, tester *ui.Tester, label string, tok
 // TestDisabledFooterPrimaryMatchesComposerTokens covers both themes: a clean
 // page's disabled Save is the neutral disabled control (same tokens as the
 // composer's disabled send), and an enabled Save keeps the accent fill.
+//
+// The page runs in English on purpose: CI's runner has no CJK face, so a CJK
+// label measures zero width and paints no pixels, making the label-ink half of
+// the assertion vacuous there (2026-11-17). The token semantics under test are
+// locale-independent.
 func TestDisabledFooterPrimaryMatchesComposerTokens(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
+	h.uiRoot.Locale().SetLanguage("en")
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "模型")
-	requireFooterDisabled(t, tester, "保存", true, "model clean (light)")
-	assertDisabledPrimaryInk(t, tester, "保存", design.Light())
+	h.click(tester, "Model")
+	requireFooterDisabled(t, tester, "Save", true, "model clean (light)")
+	assertDisabledPrimaryInk(t, tester, "Save", design.Light())
 
 	// Enabled primary keeps the brand accent fill (the gray-out is disabled-only).
-	h.focusInput(tester, "系统提示词 输入")
-	tester.Type("请简短回答。")
+	h.focusInput(tester, "System prompt")
+	tester.Type("Keep it short.")
 	tester.Frame()
-	requireFooterDisabled(t, tester, "保存", false, "model dirty")
-	rect := footerPrimary(t, tester, "保存").Bounds
+	requireFooterDisabled(t, tester, "Save", false, "model dirty")
+	rect := footerPrimary(t, tester, "Save").Bounds
 	fill := statusPixel(t, tester.Image(), int(rect.X)+4, int(rect.Y+rect.H/2))
 	if !statusColorNear(fill, design.Light().Accent, 3) {
 		t.Fatalf("enabled primary fill = %+v, want the accent %+v", fill, design.Light().Accent)
 	}
 
-	// Dark theme: the same neutral mechanism on the dark palette.
+	// The dark theme keeps the same neutral disabled control; Appearance is a
+	// clean page, so its footer primary is disabled again.
 	h.uiRoot.Theme().SetDark(true)
 	tester.Frame()
-	h.click(tester, "外观")
-	requireFooterDisabled(t, tester, "保存", true, "appearance clean (dark)")
-	assertDisabledPrimaryInk(t, tester, "保存", design.Dark())
+	h.click(tester, "Appearance")
+	tester.Frame()
+	requireFooterDisabled(t, tester, "Save", true, "appearance clean (dark)")
+	assertDisabledPrimaryInk(t, tester, "Save", design.Dark())
 }
 
 // --- phase 2: disclosure dedup + section-action placement ---------------------
