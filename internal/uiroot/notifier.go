@@ -57,6 +57,11 @@ type notifierService struct {
 	// sessionActionLabel localizes the session action's button. Nil falls back
 	// to the product's Chinese default, used by bare notifier services.
 	sessionActionLabel func() string
+	// localize renders one notification body in the current language at
+	// delivery time, the same copy the in-app toast cards show (the text may
+	// carry a stable tool id the toast overlay translates). The toasts module
+	// installs it; nil mirrors the text as created.
+	localize func(string) string
 }
 
 // defaultSessionActionLabel is the session action's copy when no localizer is
@@ -77,6 +82,17 @@ func newNotifierService(settings contracts.SettingsService, appName string) *not
 func (s *notifierService) SetHandler(fn func(contracts.Notification)) {
 	s.mu.Lock()
 	s.handler = fn
+	s.mu.Unlock()
+}
+
+// SetLocalizer installs the render-time body localizer the toast overlay
+// applies to its cards, so the OS mirror reads the same translated copy (an
+// approval notice carries a stable tool id, not a frozen display name). Nil
+// clears it. The toasts module installs it through an optional interface, so a
+// bare notifier service keeps mirroring the text as created.
+func (s *notifierService) SetLocalizer(fn func(string) string) {
+	s.mu.Lock()
+	s.localize = fn
 	s.mu.Unlock()
 }
 
@@ -194,7 +210,7 @@ func (s *notifierService) osNotificationTarget(notification contracts.Notificati
 	notify func(id, title, body string) error, id, title, body string, ok bool,
 ) {
 	s.mu.Lock()
-	notify, settings, appName := s.osNotify, s.settings, s.appName
+	notify, settings, appName, localize := s.osNotify, s.settings, s.appName, s.localize
 	s.mu.Unlock()
 	if notify == nil {
 		return nil, "", "", "", false
@@ -206,6 +222,9 @@ func (s *notifierService) osNotificationTarget(notification contracts.Notificati
 	body = strings.TrimSpace(notification.Text)
 	if id == "" || body == "" {
 		return nil, "", "", "", false
+	}
+	if localize != nil {
+		body = localize(body)
 	}
 	title = appName
 	if title == "" {

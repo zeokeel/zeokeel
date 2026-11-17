@@ -20,13 +20,18 @@ type Notification struct {
 	ID string
 	// Level is one of the Notify* constants.
 	Level string
-	// Text is the toast copy.
 	// SessionID optionally names the conversation a click should open. The
 	// desktop host records it when the notifier supports SessionNotifier, and
 	// the in-app toast then offers an "open conversation" action with the same
 	// behavior as the OS notification click.
 	SessionID string
-	Text      string
+	// Text is the toast copy, localized by its creator at generation time; the
+	// desktop toast overlay re-localizes the product's known copy at render
+	// time (and the OS mirror at delivery). Approval notices carry the stable
+	// tool id as their payload, which the overlay resolves with
+	// uikit.ToolDisplayName in the active language — a client that shows Text
+	// verbatim (ACP/headless) sees the id, not the friendly name.
+	Text string
 	// ActionLabel names the optional action button ("Undo"); Action runs on the
 	// UI thread when it is pressed. Both empty/zero for a plain notification.
 	// A session-tagged notification gets both filled by the desktop notifier

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-16",
+  "generated": "2026-11-17",
   "ignored": [
     {
       "rule": "DS-03",
@@ -69,7 +69,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/plugins/plugin_params.go",
-      "line": 142,
+      "line": 140,
       "text": "Padding(design.Space2, 0)",
       "owner": "plugins",
       "expires": "2027-06-30"
@@ -77,7 +77,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/plugins/plugin_params.go",
-      "line": 145,
+      "line": 143,
       "text": "FontWeight(600)",
       "owner": "plugins",
       "expires": "2027-06-30"
@@ -85,7 +85,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/plugins/plugin_params.go",
-      "line": 210,
+      "line": 208,
       "text": "FontWeight(600)",
       "owner": "plugins",
       "expires": "2027-06-30"
@@ -117,7 +117,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/session/commands_help.go",
-      "line": 108,
+      "line": 89,
       "text": "FontWeight(600)",
       "owner": "session",
       "expires": "2027-06-30"
@@ -125,7 +125,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/session/commands_help.go",
-      "line": 115,
+      "line": 96,
       "text": "FontWeight(600)",
       "owner": "session",
       "expires": "2027-06-30"
@@ -133,7 +133,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/session/commands_help.go",
-      "line": 131,
+      "line": 112,
       "text": "FontWeight(600)",
       "owner": "session",
       "expires": "2027-06-30"
@@ -141,7 +141,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/session/commands_help.go",
-      "line": 131,
+      "line": 112,
       "text": "Width(120)",
       "owner": "session",
       "expires": "2027-06-30"
@@ -149,7 +149,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/session/commands_help.go",
-      "line": 138,
+      "line": 119,
       "text": "FontWeight(600)",
       "owner": "session",
       "expires": "2027-06-30"
@@ -157,7 +157,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/session/commands_help.go",
-      "line": 144,
+      "line": 125,
       "text": "Width(150)",
       "owner": "session",
       "expires": "2027-06-30"
@@ -165,7 +165,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/session/view.go",
-      "line": 561,
+      "line": 568,
       "text": "FontWeight(600)",
       "owner": "session",
       "expires": "2027-06-30"
@@ -173,23 +173,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/session/view.go",
-      "line": 561,
-      "text": "MinWidth(0)",
-      "owner": "session",
-      "expires": "2027-06-30"
-    },
-    {
-      "rule": "DS-03",
-      "file": "internal/ui/session/view.go",
-      "line": 564,
-      "text": "MinWidth(120)",
-      "owner": "session",
-      "expires": "2027-06-30"
-    },
-    {
-      "rule": "DS-03",
-      "file": "internal/ui/session/view.go",
-      "line": 717,
+      "line": 722,
       "text": "MaxWidth(140)",
       "owner": "session",
       "expires": "2027-06-30"
@@ -197,7 +181,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/session/view.go",
-      "line": 898,
+      "line": 903,
       "text": "Gap(0)",
       "owner": "session",
       "expires": "2027-06-30"
@@ -205,7 +189,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/session/view.go",
-      "line": 1199,
+      "line": 1204,
       "text": "FontWeight(600)",
       "owner": "session",
       "expires": "2027-06-30"
@@ -213,7 +197,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/session/view.go",
-      "line": 1285,
+      "line": 1304,
       "text": "FontWeight(600)",
       "owner": "session",
       "expires": "2027-06-30"
@@ -221,7 +205,7 @@
     {
       "rule": "DS-06",
       "file": "internal/ui/session/view.go",
-      "line": 4681,
+      "line": 4729,
       "text": "ui.ButtonBase(c.Key(\"session.slash.\"+cmd.ID))",
       "owner": "session",
       "expires": "2027-06-30"
@@ -229,7 +213,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/session/view.go",
-      "line": 4695,
+      "line": 4743,
       "text": "FontWeight(600)",
       "owner": "session",
       "expires": "2027-06-30"
@@ -237,7 +221,7 @@
     {
       "rule": "DS-06",
       "file": "internal/ui/session/view.go",
-      "line": 5158,
+      "line": 5206,
       "text": "ui.ButtonBase(c.Key(key))",
       "owner": "session",
       "expires": "2027-06-30"
@@ -325,7 +309,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/settings/settings.go",
-      "line": 1399,
+      "line": 1439,
       "text": "Height(56)",
       "owner": "settings",
       "expires": "2027-06-30"
@@ -341,7 +325,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/sidebar/sidebar.go",
-      "line": 654,
+      "line": 752,
       "text": "FontWeight(600)",
       "owner": "sidebar",
       "expires": "2027-06-30"
@@ -349,7 +333,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/sidebar/sidebar.go",
-      "line": 775,
+      "line": 873,
       "text": "FontWeight(600)",
       "owner": "sidebar",
       "expires": "2027-06-30"
@@ -357,7 +341,7 @@
     {
       "rule": "DS-06",
       "file": "internal/ui/sidebar/sidebar.go",
-      "line": 1342,
+      "line": 1442,
       "text": "ui.ButtonBase(c)",
       "owner": "sidebar",
       "expires": "2027-06-30"
@@ -365,7 +349,7 @@
     {
       "rule": "DS-06",
       "file": "internal/ui/sidebar/sidebar.go",
-      "line": 1509,
+      "line": 1609,
       "text": "ui.ButtonBase(c)",
       "owner": "sidebar",
       "expires": "2027-06-30"
@@ -373,7 +357,7 @@
     {
       "rule": "DS-06",
       "file": "internal/ui/sidebar/sidebar.go",
-      "line": 2125,
+      "line": 2205,
       "text": "ui.ButtonBase(c)",
       "owner": "sidebar",
       "expires": "2027-06-30"
@@ -381,7 +365,7 @@
     {
       "rule": "DS-06",
       "file": "internal/ui/sidebar/sidebar.go",
-      "line": 2300,
+      "line": 2380,
       "text": "ui.ButtonBase(c)",
       "owner": "sidebar",
       "expires": "2027-06-30"
@@ -389,7 +373,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/sidebar/sidebar.go",
-      "line": 2349,
+      "line": 2429,
       "text": "FontWeight(600)",
       "owner": "sidebar",
       "expires": "2027-06-30"
@@ -397,7 +381,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/toasts/toasts.go",
-      "line": 418,
+      "line": 465,
       "text": "FontWeight(600)",
       "owner": "toasts",
       "expires": "2027-06-30"
@@ -405,7 +389,7 @@
     {
       "rule": "DS-03",
       "file": "internal/ui/toasts/toasts.go",
-      "line": 445,
+      "line": 492,
       "text": "FontWeight(600)",
       "owner": "toasts",
       "expires": "2027-06-30"
@@ -445,7 +429,7 @@
     {
       "rule": "DS-03",
       "file": "internal/uiroot/frame.go",
-      "line": 177,
+      "line": 181,
       "text": "Padding(0, design.Space4, 0, design.Space4)",
       "owner": "uiroot",
       "expires": "2027-06-30"
@@ -453,7 +437,7 @@
     {
       "rule": "DS-03",
       "file": "internal/uiroot/frame.go",
-      "line": 177,
+      "line": 181,
       "text": "Height(64)",
       "owner": "uiroot",
       "expires": "2027-06-30"
@@ -461,7 +445,7 @@
     {
       "rule": "DS-03",
       "file": "internal/uiroot/frame.go",
-      "line": 179,
+      "line": 183,
       "text": "Size(28, 28)",
       "owner": "uiroot",
       "expires": "2027-06-30"
@@ -469,7 +453,7 @@
     {
       "rule": "DS-03",
       "file": "internal/uiroot/frame.go",
-      "line": 180,
+      "line": 184,
       "text": "FontWeight(600)",
       "owner": "uiroot",
       "expires": "2027-06-30"
@@ -477,7 +461,7 @@
     {
       "rule": "DS-03",
       "file": "internal/uiroot/frame.go",
-      "line": 236,
+      "line": 240,
       "text": "Padding(design.Space3, 0, design.Space3, 0)",
       "owner": "uiroot",
       "expires": "2027-06-30"
@@ -485,7 +469,7 @@
     {
       "rule": "DS-06",
       "file": "internal/uiroot/frame.go",
-      "line": 417,
+      "line": 426,
       "text": "ui.ButtonBase(c.Key(\"chrome.rail.session.\"+session.ID))",
       "owner": "uiroot",
       "expires": "2027-06-30"
@@ -493,7 +477,7 @@
     {
       "rule": "DS-03",
       "file": "internal/uiroot/frame.go",
-      "line": 525,
+      "line": 520,
       "text": "Padding(24)",
       "owner": "uiroot",
       "expires": "2027-06-30"
@@ -501,7 +485,7 @@
     {
       "rule": "DS-03",
       "file": "internal/uiroot/frame.go",
-      "line": 569,
+      "line": 564,
       "text": "MinWidth(0)",
       "owner": "uiroot",
       "expires": "2027-06-30"
@@ -509,7 +493,7 @@
     {
       "rule": "DS-03",
       "file": "internal/uiroot/frame.go",
-      "line": 789,
+      "line": 784,
       "text": "Padding(0, 0, design.Space2, 0)",
       "owner": "uiroot",
       "expires": "2027-06-30"
@@ -517,7 +501,7 @@
     {
       "rule": "DS-03",
       "file": "internal/uiroot/frame.go",
-      "line": 791,
+      "line": 786,
       "text": "FontWeight(600)",
       "owner": "uiroot",
       "expires": "2027-06-30"
@@ -525,7 +509,7 @@
     {
       "rule": "DS-03",
       "file": "internal/uiroot/frame.go",
-      "line": 980,
+      "line": 975,
       "text": "FontWeight(600)",
       "owner": "uiroot",
       "expires": "2027-06-30"
@@ -533,7 +517,7 @@
     {
       "rule": "DS-03",
       "file": "internal/uiroot/frame.go",
-      "line": 1031,
+      "line": 1033,
       "text": "FontWeight(600)",
       "owner": "uiroot",
       "expires": "2027-06-30"
@@ -541,7 +525,7 @@
     {
       "rule": "DS-06",
       "file": "internal/uiroot/frame.go",
-      "line": 1156,
+      "line": 1158,
       "text": "ui.ButtonBase(row.Context)",
       "owner": "uiroot",
       "expires": "2027-06-30"
@@ -549,7 +533,7 @@
     {
       "rule": "DS-03",
       "file": "internal/uiroot/frame.go",
-      "line": 1177,
+      "line": 1179,
       "text": "FontWeight(600)",
       "owner": "uiroot",
       "expires": "2027-06-30"
@@ -557,7 +541,7 @@
     {
       "rule": "DS-03",
       "file": "internal/uiroot/frame.go",
-      "line": 1181,
+      "line": 1183,
       "text": "MaxWidth(240)",
       "owner": "uiroot",
       "expires": "2027-06-30"
@@ -565,7 +549,7 @@
     {
       "rule": "DS-03",
       "file": "internal/uiroot/frame.go",
-      "line": 1196,
+      "line": 1210,
       "text": "MaxHeight(320)",
       "owner": "uiroot",
       "expires": "2027-06-30"
@@ -573,7 +557,7 @@
     {
       "rule": "DS-03",
       "file": "internal/uiroot/frame.go",
-      "line": 1951,
+      "line": 1973,
       "text": "Padding(0, design.Space4, design.Space4)",
       "owner": "uiroot",
       "expires": "2027-06-30"

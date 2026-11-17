@@ -614,7 +614,10 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 |---|---|---|
 | 页面结构 | `PageHeader` / `Section` / `PageHeaderAction` / `SectionAction` | 页头/小节/动作位置（heading role 已内置） |
 | 空态/错误 | `EmptyState` / `EmptyStateBlock` / `uikit.EmptyStateHero` / `ErrorLine` | 行内空态 / 带下一步动作 / hero（图标+标题+primary）/ RoleAlert 错误行 |
-| 只读展示 | `uikit.PropertySheet`（首选）/ `KeyValueRows`（Deprecated）/ `Bullet` | 属性表：160 DIP 标签列 + 值左对齐 + 32 行 + Divider + 值可选中；`KeyValueRows` 旧的右对齐形态只留给未迁移调用点 |
+| 静态披露 | `uikit.WarningLine` | 静态风险/信任披露：`AlertTriangle` + `WarningText` + RoleAlert，**绝不用 danger ink**（红只留真错误与危险动作，§5.2；2026-11-17 审查：LSP 风险与 stdio 披露曾误用 ErrorLine 红） |
+| 设置表单行 | `uikit.SwitchRow` | 布尔设置行统一解剖：标签在节左缘、开关在行尾、描述对齐节左缘（替代 macOS 式右对齐标签列，跨页开关 x 一致） |
+| 设置页脚 | `uikit.PageFooter` | 设置页固定动作条：顶 Divider + 右对齐（危险/次要在前、唯一 primary 最右），禁用 primary 走 `t.DisabledPrimary()`+`Disabled(true)`（与 composer 禁用发送同令牌；rule 14 提交型页面主操作落点） |
+| 只读展示 | `uikit.PropertySheet`（首选）/ `KeyValueRows`（Deprecated）/ `Bullet` | 属性表：160 DIP 标签列 + 值左对齐 + 32 行 + Divider + 值可选中；`KeyValueRows` 旧的右对齐形态只留给未迁移调用点；`PropertySheetOptions.FullWidth` 让分隔线与父容器（分节）同宽——仅上下文页这类「kv 与分节混排」的页面启用，settings/plugins 保持 bounded 默认（2026-11-17 审查：行线右缘不齐） |
 | 阅读列 | `uikit.ReadingColumn` | 960 居中、`MaxWidthPercent(92)`、无 `Grow`、PaddingX 16 / Gap 20；SessionThread / Context / Goal dock / 子会话 banner 共用 |
 | 分段控件 | `uikit.SegmentedControl` | 包官方 `ui.SegmentedBase`；选中段 `BgSelected` + `LabelPrimary` + 600 + 2 DIP Accent 下划线；设置页 / Insights 唯一入口 |
 | 差异预览 | `DiffPreview` | 官方 `editor.NewBuffer` + `DiffState` + `DiffView`；块头路径 + `+N −M`、高度上限、二进制/超大回退；审批「将改动」与后续工具卡共用；`DiffPreviewOptions.MinHeight` 给高度预算内的父容器保底可读带（审批卡 128 DIP；2026-11-17 审查 P1：diff 不得被裁半行） |
@@ -627,7 +630,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 输入辅助 | `EnterTo` | 单行输入 Enter→动作（有文本输入时替代 Default） |
 | 文案/locale | `T` / `FormatDateTime` / `FormatClock` / `Language` / `FormatCompactCount` / `FormatContextWindow` / `FormatShortcut` | 本地化与格式化；`FormatCompactCount` 紧凑用量（K/M/B）；`FormatContextWindow` 上下文窗口（128k/32.8k，模型目录与用量尾行共用，AR-17）；`FormatShortcut` 统一键位记法（平台化前缀 + 无空格加号 `Ctrl+Alt+I`；palette/设置热键页/会话键盘参考同源，2026-11-17 审查） |
 | 检查器文档 | `uikit.MarkdownDoc(t, size)` | 320px 检查器内的文件/产物预览（13px 正文，H1≈15，不再用默认 22px H1） |
-| 阅读区 Markdown | `uikit.ChatMarkdown` | 主阅读列（会话正文）的 Markdown 主题：14px 正文 + 1.55 比例行高；H1 17–18 / H2≤16 / H3≤15，均在屏幕标题之下；显式收紧标题上下距；行内代码用 `BgStrong` 底 + 等宽；引用/分隔线用 `BorderL2`；表格头 `BgStrong`；链接 Accent + 500 字重；暗色同构 |
+| 阅读区 Markdown | `uikit.ChatMarkdown` | 主阅读列（会话正文）的 Markdown 主题：14px 正文 + 1.55 比例行高；H1 17–18 / H2≤16 / H3≤15，均在屏幕标题之下；显式收紧标题上下距；行内代码用 `BgStrong` 底 + 等宽；引用/分隔线用 `BorderL2`；表格头 `BgStrong`；链接 Accent + 500 字重；暗色同构；**图片加载失败回退**：无 `LoadImage` 时经 `Options.Block` 渲染「图片图标 + alt 文本 + 图片未加载」，不留裸 alt 灰 chip（2026-11-17 审查） |
 | 代码围栏 | `uikit.MarkdownCodeBlock` | 会话/推理/检查器 Markdown 的统一代码块：填充 `BgStrong`、无边框、`RadiusSM`；只有语言真实命名时才显示语言标签（不再把 `text` 当成标题）；官方 Copy 按钮保留复制反馈；流式/高亮/横向滚动沿用官方 `CodeBlockView` |
 | accent 行徽章 | `uikit.OnAccentBadge` | **仅**在 Accent 填充的瞬态行（palette/菜单选中项）使用；持久导航改为 tint + 普通 `uikit.Badge`（AP-19） |
 

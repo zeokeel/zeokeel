@@ -250,7 +250,10 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			ui.Field(c, localized(locale, "记忆内容", "Memory text"), func() {
 				input := ui.TextInput(c, &st.draft).
 					Label(inputLabel(locale, localized(locale, "记忆内容", "Memory text"))).
-					Placeholder(localized(locale, "记忆内容", "Memory text")).FillWidth()
+					// The placeholder exemplifies an entry instead of repeating
+					// the field label.
+					Placeholder(localized(locale, "例如：发布前先跑 go test ./...",
+						"e.g. Run go test ./... before a release")).FillWidth()
 				// One add path for the button and for Enter in the field, so the
 				// two cannot drift (mygo text-input.md: Submitted is Enter in a
 				// text input; a desktop form's single-line field submits on Enter).
@@ -461,8 +464,8 @@ func buildMemoryConsolidationPanel(c *ui.Context, t *design.Tokens, store contra
 					if entries.Changed() {
 						st.maxEntries = strconv.Itoa(int(st.maxEntriesNum))
 					}
-				}).Description(localized(locale, "超过后删除最旧的记忆；0 表示不限。",
-					"Entries beyond the cap are the oldest ones; 0 means unlimited."))
+				}).Description(localized(locale, "超过后删除最旧的记忆。",
+					"The oldest entries beyond the cap are removed."))
 			})
 			ui.Column(c).FillWidth().Grow(1).Children(func() {
 				ui.Field(c, localized(locale, "保留天数", "Max age (days)"), func() {
@@ -472,8 +475,8 @@ func buildMemoryConsolidationPanel(c *ui.Context, t *design.Tokens, store contra
 					if days.Changed() {
 						st.maxAgeDays = strconv.Itoa(int(st.maxAgeDaysNum))
 					}
-				}).Description(localized(locale, "早于该天数的记忆会被删除；0 表示不限。",
-					"Memories older than this many days are dropped; 0 means unlimited."))
+				}).Description(localized(locale, "早于该天数的记忆会被删除。",
+					"Memories older than this many days are dropped."))
 			})
 		})
 		if st.policyWarn != "" {
@@ -711,7 +714,7 @@ func buildMemoryExtractionPanel(c *ui.Context, t *design.Tokens, kctx cordis.Con
 		toggleLabel := localized(locale,
 			"启用模型提取（从最近对话提取记忆，会调用模型）",
 			"Enable model extraction (extract memories from recent chats; calls the model)")
-		if switchRow(c, toggleLabel, "", &enabled, false) {
+		if uikit.SwitchRow(c, uikit.SwitchRowOptions{Label: toggleLabel, Value: &enabled}) {
 			value := ""
 			if enabled {
 				value = "true"
@@ -724,7 +727,7 @@ func buildMemoryExtractionPanel(c *ui.Context, t *design.Tokens, kctx cordis.Con
 			c.Invalidate()
 		}
 		// A static cost/privacy caution is warning semantic, not a failure.
-		warningLine(c, localized(locale,
+		uikit.WarningLine(c, t, localized(locale,
 			"会消耗模型额度并向服务商发送对话内容。",
 			"Uses your model quota and sends conversation content to the provider."))
 

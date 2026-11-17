@@ -167,9 +167,19 @@ func Module() *module.Descriptor[Config] {
 				runtime.Invalidate()
 			})
 		})
+		// The OS mirror reads the same render-time localization the in-app
+		// cards apply: an approval notice's text carries a stable tool id the
+		// overlay translates, and the notification center must not show the
+		// raw id. Optional half — a bare notifier mirrors the text as created.
+		if localizer, ok := notifier.(toastLocalizer); ok {
+			localizer.SetLocalizer(func(text string) string { return localizeToastText(st.locale, text) })
+		}
 		if err := own(ctx, func() (func(), error) {
 			return func() {
 				notifier.SetHandler(nil)
+				if localizer, ok := notifier.(toastLocalizer); ok {
+					localizer.SetLocalizer(nil)
+				}
 				st.pending = nil
 				st.queue = nil
 				st.showing = nil
@@ -177,6 +187,9 @@ func Module() *module.Descriptor[Config] {
 			}, nil
 		}); err != nil {
 			notifier.SetHandler(nil)
+			if localizer, ok := notifier.(toastLocalizer); ok {
+				localizer.SetLocalizer(nil)
+			}
 			return err
 		}
 
@@ -498,6 +511,11 @@ func buildToast(c *ui.Context, st *state, toast ui.Toast) {
 // tr localizes the toast chrome for the current frame.
 func (st *state) tr(zh, en string) string { return uikit.T(st.locale, zh, en) }
 
+// toastLocalizer is the optional notifier half the desktop bridge implements
+// (uiroot.notifierService.SetLocalizer): it applies this module's render-time
+// body localization to the OS notification mirror too.
+type toastLocalizer interface{ SetLocalizer(func(string) string) }
+
 // --- render-time copy localization (US-14) ----------------------------------
 //
 // The notification contract carries one Text string, localized by its creator
@@ -542,24 +560,49 @@ var toastPhrases = []toastPhrase{
 }
 
 // toastAffixes is dynamic copy with a translatable prefix and suffix around a
-// payload that stays verbatim (a session title, a tool id, a count).
-type toastAffixes struct{ zhPrefix, zhSuffix, enPrefix, enSuffix string }
+// payload. The payload stays verbatim by default (a session title, a count, an
+// error string — copy the kit cannot translate); an affix whose payload is
+// itself translatable (the approval notices' stable tool id) sets payload to
+// localize it at render time as well (2026-11-17 UI review P3).
+type toastAffixes struct {
+	zhPrefix, zhSuffix, enPrefix, enSuffix string
+	payload                                func(contracts.LocaleService, string) string
+}
+
+// approvalToolPayload localizes an approval notification's tool-id payload at
+// render time: a known id takes the kit's friendly name in the current
+// language; an unknown id falls back to the original string (lead ruling
+// 2026-11-17), which also passes a legacy display-name payload through
+// verbatim instead of inventing a translation.
+func approvalToolPayload(locale contracts.LocaleService, id string) string {
+	return uikit.ToolDisplayName(locale, id)
+}
 
 var toastAffixTable = []toastAffixes{
-	{"导出失败：", "", "Export failed: ", ""},
-	{"停止失败：", "", "Stop failed: ", ""},
-	{"归档失败：", "", "Archive failed: ", ""},
-	{"打开文件失败：", "", "Open file failed: ", ""},
-	{"审批等待：", "", "Approval waiting: ", ""},
-	{"会话「", "」已完成", "Conversation \"", "\" finished"},
-	{"会话「", "」运行失败", "Conversation \"", "\" run failed"},
-	{"已整理 ", " 条", "Tidied ", " memories"},
-	{"已清空 ", " 条记忆", "Cleared ", " memories"},
+	{"导出失败：", "", "Export failed: ", "", nil},
+	{"停止失败：", "", "Stop failed: ", "", nil},
+	{"归档失败：", "", "Archive failed: ", "", nil},
+	{"打开文件失败：", "", "Open file failed: ", "", nil},
+	// The approval notices carry a tool-id payload the overlay localizes. The
+	// origin-specific suffixes must precede the suffix-less entry: its empty
+	// suffix matches every tail and would swallow the origin otherwise.
+	{"审批等待：", "（自动化）", "Approval waiting: ", " (Automation)", approvalToolPayload},
+	{"审批等待：", "（子代理）", "Approval waiting: ", " (Subagent)", approvalToolPayload},
+	{"审批等待：", "", "Approval waiting: ", "", approvalToolPayload},
+	{"审批超时已自动拒绝：", "（自动化）", "Approval timed out and was auto-denied: ", " (automation)", approvalToolPayload},
+	{"会话「", "」已完成", "Conversation \"", "\" finished", nil},
+	{"会话「", "」运行失败", "Conversation \"", "\" run failed", nil},
+	{"已整理 ", " 条", "Tidied ", " memories", nil},
+	{"已清空 ", " 条记忆", "Cleared ", " memories", nil},
 }
 
 // localizeToastText renders one toast string in the current locale at render
 // time (US-14): exact phrasebook matches first, then the affix patterns; an
-// unknown string is returned unchanged.
+// unknown string is returned unchanged. An affix with a payload localizer
+// resolves its payload in the active language even when the copy already
+// matches that language — the approval notices carry a stable tool id, not a
+// display name, so the id must become a name in every locale (2026-11-17 UI
+// review P3).
 func localizeToastText(locale contracts.LocaleService, text string) string {
 	english := uikit.Language(locale) == "en"
 	for _, phrase := range toastPhrases {
@@ -571,14 +614,23 @@ func localizeToastText(locale contracts.LocaleService, text string) string {
 		}
 	}
 	for _, affix := range toastAffixTable {
-		if english && strings.HasPrefix(text, affix.zhPrefix) && strings.HasSuffix(text, affix.zhSuffix) {
-			payload := strings.TrimSuffix(strings.TrimPrefix(text, affix.zhPrefix), affix.zhSuffix)
+		zhMatch := strings.HasPrefix(text, affix.zhPrefix) && strings.HasSuffix(text, affix.zhSuffix)
+		enMatch := strings.HasPrefix(text, affix.enPrefix) && strings.HasSuffix(text, affix.enSuffix)
+		if !zhMatch && !enMatch {
+			continue
+		}
+		prefix, suffix := affix.zhPrefix, affix.zhSuffix
+		if enMatch && !zhMatch {
+			prefix, suffix = affix.enPrefix, affix.enSuffix
+		}
+		payload := strings.TrimSuffix(strings.TrimPrefix(text, prefix), suffix)
+		if affix.payload != nil {
+			payload = affix.payload(locale, payload)
+		}
+		if english {
 			return affix.enPrefix + payload + affix.enSuffix
 		}
-		if !english && strings.HasPrefix(text, affix.enPrefix) && strings.HasSuffix(text, affix.enSuffix) {
-			payload := strings.TrimSuffix(strings.TrimPrefix(text, affix.enPrefix), affix.enSuffix)
-			return affix.zhPrefix + payload + affix.zhSuffix
-		}
+		return affix.zhPrefix + payload + affix.zhSuffix
 	}
 	return text
 }

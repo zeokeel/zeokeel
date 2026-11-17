@@ -64,8 +64,16 @@ type PropertyRow struct {
 type PropertySheetOptions struct {
 	// Rows are the label/value rows, in display order.
 	Rows []PropertyRow
-	// MaxWidth bounds the sheet; zero uses PropertySheetDefaultMaxWidth.
+	// MaxWidth bounds the sheet; zero uses PropertySheetDefaultMaxWidth. Ignored
+	// when FullWidth is set.
 	MaxWidth float32
+	// FullWidth spans the sheet and its row dividers across the parent's full
+	// width, matching the enclosing section's divider, instead of the bounded
+	// default measure (the Context page's kv dividers stopped at the value
+	// column's right edge while the section divider ran full width — 2026-11 UI
+	// review B4). The label column stays fixed and the value left-aligned, so the
+	// value remains one glance from the label even on a wide sheet.
+	FullWidth bool
 	// Key namespaces the copy controls when a page shows more than one sheet:
 	// the same row label in two sheets must not share one widget identity.
 	Key string
@@ -89,7 +97,11 @@ func PropertySheet(c *ui.Context, o PropertySheetOptions) {
 	if key == "" {
 		key = "uikit.property-sheet"
 	}
-	ui.Column(c).FillWidth().MaxWidth(maxWidth).Gap(design.Space0).Children(func() {
+	sheet := ui.Column(c).FillWidth().Gap(design.Space0)
+	if !o.FullWidth {
+		sheet = sheet.MaxWidth(maxWidth)
+	}
+	sheet.Children(func() {
 		for index, row := range o.Rows {
 			row := row
 			if index > 0 {

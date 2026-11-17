@@ -147,6 +147,9 @@ type connectorsState struct {
 	toolListOpen bool
 	toolQuery    string
 	toolBusy     bool
+	// detailErrOpen is the raw-error disclosure inside the details modal
+	// (closed each time the modal opens: the localized cause leads).
+	detailErrOpen bool
 
 	// reloading is true while the toolkit rebuilds MCP after a settings write.
 	reloading bool
@@ -279,7 +282,7 @@ func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 		// app's full permissions: disclose the trust exchange next to the path
 		// hint (2026-11 audit (d), disclosure only). A static caution is
 		// warning semantic — red stays for real failures.
-		warningLine(c, t, mcpStdioTrustDisclosure(st))
+		uikit.WarningLine(c, t, mcpStdioTrustDisclosure(st))
 	})
 
 	if p.formOpen {
@@ -624,6 +627,7 @@ func (p *connectorsState) buildCard(c *ui.Context, t *design.Tokens, st *state,
 					p.detailKey = card.Key
 					p.toolListOpen = false
 					p.toolQuery = ""
+					p.detailErrOpen = false
 					c.Invalidate()
 				}
 				// Only a stored settings row can be edited or removed: a live
@@ -701,6 +705,7 @@ func (p *connectorsState) buildCard(c *ui.Context, t *design.Tokens, st *state,
 					t.SecondaryButton()).Clicked() {
 					p.detailOpen = true
 					p.detailKey = card.Key
+					p.detailErrOpen = false
 					c.Invalidate()
 				}
 				return
@@ -712,6 +717,7 @@ func (p *connectorsState) buildCard(c *ui.Context, t *design.Tokens, st *state,
 				t.SecondaryButton()).Clicked() {
 				p.detailOpen = true
 				p.detailKey = card.Key
+				p.detailErrOpen = false
 				c.Invalidate()
 			}
 			retry := design.Apply(ui.Button(c, st.tr("重试", "Retry")),
@@ -750,21 +756,6 @@ func (p *connectorsState) saveWorkspaceOptIn(st *state, settings contracts.Setti
 		return
 	}
 	st.requestMCPReload(st.tr("已应用工作区 mcp.json 变更", "Workspace mcp.json changes applied"))
-}
-
-// warningLine draws one static risk disclosure in the warning semantic: the
-// alert triangle and the message use the warning tokens, keeping red for real
-// errors and destructive actions (DESIGN.md §5.2 — a trust disclosure is a
-// caution, not a failure). The row anatomy mirrors uikit.ErrorLine (icon +
-// selectable message); the shared WarningLine composition belongs to uikit,
-// this is the module-local build with design tokens + official widgets.
-func warningLine(c *ui.Context, t *design.Tokens, text string) {
-	ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(design.Space2).Children(func() {
-		ui.Icon(c, icons.AlertTriangle()).Size(design.Space3, design.Space3).
-			TextColor(t.WarningText)
-		design.Apply(ui.Text(c, text), t.Font(design.TypeXS)).
-			TextColor(t.WarningText).Grow(1).Selectable()
-	})
 }
 
 // mcpStdioTrustDisclosure is the stdio/LSP trust-channel disclosure (2026-11

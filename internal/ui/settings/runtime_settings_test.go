@@ -83,7 +83,7 @@ func TestModelRuntimeOptionalDraftsRender(t *testing.T) {
 	h.assertTexts(tester, "上下文预算 模块默认 9000")
 	h.assertNoTexts(tester, "流完整性校验", "最大迭代")
 	expandRuntimeAdvanced(t, h, tester)
-	h.assertTexts(tester, "提示词与运行参数（页脚保存）", "上下文预算",
+	h.assertTexts(tester, "提示词与运行参数", "本节草稿由页脚「保存」统一写入。", "上下文预算",
 		"上下文预算 输入",
 		"自动压缩的 prompt token 预算；留空使用模块默认 9000")
 	h.assertNoTexts(tester, "使用默认上限（不限制）", "使用默认预算",
@@ -175,7 +175,8 @@ func TestModelRuntimeEnglishCopy(t *testing.T) {
 	for range 4 {
 		tester.Frame()
 	}
-	h.assertTexts(tester, "Prompt & runtime (saved by the footer)", "Context budget",
+	h.assertTexts(tester, "Prompt & runtime", "The footer Save writes this section's drafts.",
+		"Context budget",
 		"Prompt-token budget for automatic compaction; Leave blank for the module default 500.")
 	h.assertNoTexts(tester, "Use default limit (unlimited)", "Use default budget",
 		"Stream completeness", "Max iterations")

@@ -64,8 +64,8 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 	// Model page: the model list is the only model surface; the footer Save
 	// owns only the prompt/runtime drafts.
 	h.click(tester, "Model")
-	h.assertTexts(tester, "Model", "Models (apply immediately)", "Add model",
-		"Prompt & runtime (saved by the footer)", "System prompt",
+	h.assertTexts(tester, "Model", "Models", "List edits and the default model apply immediately.", "Add model",
+		"Prompt & runtime", "The footer Save writes this section's drafts.", "System prompt",
 		"Save", "Default model", "Not configured", "No models yet")
 
 	// Appearance page: the keyboard shortcuts moved into its desktop-shortcut
@@ -107,8 +107,8 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 		"Interface & notifications", "Appearance", "Network & search",
 		"Data & privacy", "About")
 	h.click(tester, "模型")
-	h.assertTexts(tester, "模型列表（即时生效）", "添加模型",
-		"提示词与运行参数（页脚保存）", "保存", "还没有模型")
+	h.assertTexts(tester, "模型列表", "列表增删改与默认模型即时生效。", "添加模型",
+		"提示词与运行参数", "本节草稿由页脚「保存」统一写入。", "保存", "还没有模型")
 }
 
 // TestSettingsEnglishConfigOverrides pins that explicit assembly labels still

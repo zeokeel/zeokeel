@@ -34,7 +34,6 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
@@ -742,13 +741,16 @@ func Module() *module.Descriptor[Config] {
 					buildPage(c, runtime, state, catalog, chat, modelLabels(), store, locale, modelSearch)
 				},
 				Footer: func(c *ui.Context) {
-					pageFooter(c, []uikit.DialogAction{{
-						Label: modelLabels().saveLabel, Primary: true,
-						Disabled: !state.dirty(),
-						OnClick: func() {
-							saveModelPage(c, state, store, locale)
+					uikit.PageFooter(c, uikit.PageFooterOptions{
+						Key: "settings.footer.model",
+						Primary: uikit.DialogAction{
+							Label:    modelLabels().saveLabel,
+							Disabled: !state.dirty(),
+							OnClick: func() {
+								saveModelPage(c, state, store, locale)
+							},
 						},
-					}})
+					})
 				},
 				Dirty: state.dirty,
 				Discard: func() {
@@ -769,17 +771,22 @@ func Module() *module.Descriptor[Config] {
 					buildBehaviorPage(c, runtime, store, locale, behavior, sandboxService, chat, capabilities, behaviorSearch)
 				},
 				Footer: func(c *ui.Context) {
-					pageFooter(c, []uikit.DialogAction{
-						{Label: localized(locale, "恢复限额默认", "Restore limit defaults"), OnClick: func() {
-							capabilities.restoreDefaults(locale)
-							c.Invalidate()
-						}},
-						{Label: localized(locale, "保存", "Save"), Primary: true,
+					uikit.PageFooter(c, uikit.PageFooterOptions{
+						Key: "settings.footer.behavior",
+						Secondary: []uikit.DialogAction{
+							{Label: localized(locale, "恢复限额默认", "Restore limit defaults"), OnClick: func() {
+								capabilities.restoreDefaults(locale)
+								c.Invalidate()
+							}},
+						},
+						Primary: uikit.DialogAction{
+							Label:    localized(locale, "保存", "Save"),
 							Disabled: !capabilities.dirty(store),
 							OnClick: func() {
 								capabilities.save(store, locale)
 								c.Invalidate()
-							}},
+							},
+						},
 					})
 				},
 				Dirty: func() bool {
@@ -807,13 +814,16 @@ func Module() *module.Descriptor[Config] {
 						appearanceLabels(), shortcuts, appearanceSearch)
 				},
 				Footer: func(c *ui.Context) {
-					pageFooter(c, []uikit.DialogAction{{
-						Label: appearanceLabels().saveLabel, Primary: true,
-						Disabled: !appearance.dirty(),
-						OnClick: func() {
-							applyAppearancePage(c, appearance, store, locale)
+					uikit.PageFooter(c, uikit.PageFooterOptions{
+						Key: "settings.footer.appearance",
+						Primary: uikit.DialogAction{
+							Label:    appearanceLabels().saveLabel,
+							Disabled: !appearance.dirty(),
+							OnClick: func() {
+								applyAppearancePage(c, appearance, store, locale)
+							},
 						},
-					}})
+					})
 				},
 				Dirty: appearance.dirty,
 				Discard: func() {
@@ -843,19 +853,22 @@ func Module() *module.Descriptor[Config] {
 					buildNetworkPage(c, ctx, store, runtime, network, search, locale)
 				},
 				Footer: func(c *ui.Context) {
-					pageFooter(c, []uikit.DialogAction{{
-						Label: localized(locale, "保存", "Save"), Primary: true,
-						Disabled: !network.dirty(store) && !search.dirty(store),
-						OnClick: func() {
-							saveNetworkSettings(network, store, locale)
-							// The two halves share one footer: a rejected proxy
-							// must not let the search half write a partial save.
-							if !network.statusErr {
-								saveSearchSettings(search, store, locale)
-							}
-							c.Invalidate()
+					uikit.PageFooter(c, uikit.PageFooterOptions{
+						Key: "settings.footer.network",
+						Primary: uikit.DialogAction{
+							Label:    localized(locale, "保存", "Save"),
+							Disabled: !network.dirty(store) && !search.dirty(store),
+							OnClick: func() {
+								saveNetworkSettings(network, store, locale)
+								// The two halves share one footer: a rejected proxy
+								// must not let the search half write a partial save.
+								if !network.statusErr {
+									saveSearchSettings(search, store, locale)
+								}
+								c.Invalidate()
+							},
 						},
-					}})
+					})
 				},
 				Dirty: func() bool { return network.dirty(store) || search.dirty(store) },
 				Discard: func() {
@@ -880,13 +893,16 @@ func Module() *module.Descriptor[Config] {
 					if store == nil {
 						return
 					}
-					pageFooter(c, []uikit.DialogAction{{
-						Label: localized(locale, "添加", "Add"), Primary: true,
-						OnClick: func() {
-							addLSPServer(lsp, store, locale)
-							c.Invalidate()
+					uikit.PageFooter(c, uikit.PageFooterOptions{
+						Key: "settings.footer.lsp",
+						Primary: uikit.DialogAction{
+							Label: localized(locale, "添加", "Add"),
+							OnClick: func() {
+								addLSPServer(lsp, store, locale)
+								c.Invalidate()
+							},
 						},
-					}})
+					})
 				},
 				Dirty: func() bool { return lspDraftDirty(lsp) },
 				Discard: func() {
@@ -915,13 +931,16 @@ func Module() *module.Descriptor[Config] {
 					if _, ok := memoryStore.(contracts.MemoryConsolidator); !ok {
 						return
 					}
-					pageFooter(c, []uikit.DialogAction{{
-						Label: localized(locale, "保存", "Save"), Primary: true,
-						Disabled: !memoryPolicyDirty(memoryPage, store),
-						OnClick: func() {
-							saveMemoryPolicy(c, store, memoryPage, locale)
+					uikit.PageFooter(c, uikit.PageFooterOptions{
+						Key: "settings.footer.memory",
+						Primary: uikit.DialogAction{
+							Label:    localized(locale, "保存", "Save"),
+							Disabled: !memoryPolicyDirty(memoryPage, store),
+							OnClick: func() {
+								saveMemoryPolicy(c, store, memoryPage, locale)
+							},
 						},
-					}})
+					})
 				},
 				Dirty: func() bool {
 					return memoryDraftDirty(memoryPage) || memoryPolicyDirty(memoryPage, store)
@@ -953,14 +972,17 @@ func Module() *module.Descriptor[Config] {
 					buildDataPrivacyPage(c, design.Of(c), ctx, runtime, chat, store, dataPrivacy, importState, locale)
 				},
 				Footer: func(c *ui.Context) {
-					pageFooter(c, []uikit.DialogAction{{
-						Label: localized(locale, "保存", "Save"), Primary: true,
-						Disabled: !deniedGlobsDirty(dataPrivacy, store),
-						OnClick: func() {
-							saveDeniedGlobs(dataPrivacy, store, locale)
-							c.Invalidate()
+					uikit.PageFooter(c, uikit.PageFooterOptions{
+						Key: "settings.footer.data-privacy",
+						Primary: uikit.DialogAction{
+							Label:    localized(locale, "保存", "Save"),
+							Disabled: !deniedGlobsDirty(dataPrivacy, store),
+							OnClick: func() {
+								saveDeniedGlobs(dataPrivacy, store, locale)
+								c.Invalidate()
+							},
 						},
-					}})
+					})
 				},
 				Dirty: func() bool { return deniedGlobsDirty(dataPrivacy, store) },
 				Discard: func() {
@@ -1343,107 +1365,6 @@ func switchInline(c *ui.Context, label string, value *bool) bool {
 	return changed
 }
 
-// switchRow renders one boolean setting as a full-width row: the visible label
-// at the section's left edge, the native switch at the row's trailing edge, and
-// the description below aligned with the section edge (not indented under a
-// control column). Every settings toggle row shares this anatomy, so the switch
-// sits at the same x on every page; the shared ui.Form label column made
-// multi-switch sections ragged (the short label right-aligned against the long
-// one) and orphaned the description under the control. LabelledBy ties the
-// caption to the switch for assistive technology and gives a caption click to
-// the switch, exactly as a Field label does (mygo form.md "Labels of your own").
-// The caller handles the Changed result right where the setting lives.
-func switchRow(c *ui.Context, label, description string, value *bool, disabled bool) bool {
-	t := design.Of(c)
-	var changed bool
-	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			caption := design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).
-				TextColor(t.LabelPrimary).Grow(1)
-			sw := ui.Switch(c, value).LabelledBy(caption)
-			if disabled {
-				sw.Disabled(true)
-			}
-			changed = sw.Changed()
-		})
-		if description != "" {
-			design.Apply(ui.Text(c, description), t.TextMuted(design.TypeXXS))
-		}
-	})
-	return changed
-}
-
-// warningLine draws one static risk disclosure in the warning semantic: the
-// alert triangle and the message use the warning tokens, keeping red for real
-// errors and destructive actions (DESIGN.md §5.2 — a trust disclosure is a
-// caution, not a failure). The row anatomy mirrors uikit.ErrorLine (icon +
-// selectable message); the shared WarningLine composition belongs to uikit,
-// this is the module-local build with design tokens + official widgets.
-func warningLine(c *ui.Context, text string) {
-	t := design.Of(c)
-	ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(design.Space2).Children(func() {
-		ui.Icon(c, icons.AlertTriangle()).Size(design.Space3, design.Space3).
-			TextColor(t.WarningText)
-		design.Apply(ui.Text(c, text), t.Font(design.TypeXS)).
-			TextColor(t.WarningText).Grow(1).Selectable()
-	})
-}
-
-// pageFooter is the settings page's fixed action bar: the same right-aligned
-// desktop order as uikit.DialogFooter (danger and secondary actions first, the
-// primary last) with one difference — a disabled primary takes the composer's
-// neutral disabled look (a plain ui.Button with t.DisabledPrimary()) instead of
-// mygo's 50% accent wash, whose white label reads only ~2.3:1 on the faded
-// fill. The composer's disabled send applies the same preset, so a disabled
-// page primary and a disabled send are the same color. The shared DialogFooter
-// helper belongs to uikit; this local build carries the mechanism until that
-// integration lands.
-func pageFooter(c *ui.Context, actions []uikit.DialogAction) {
-	t := design.Of(c)
-	ordered := make([]uikit.DialogAction, 0, len(actions))
-	for _, action := range actions {
-		if action.Danger {
-			ordered = append(ordered, action)
-		}
-	}
-	for _, action := range actions {
-		if !action.Danger && !action.Primary {
-			ordered = append(ordered, action)
-		}
-	}
-	for _, action := range actions {
-		if action.Primary {
-			ordered = append(ordered, action)
-		}
-	}
-	ui.Row(c).FillWidth().Justify(ui.End).AlignItems(ui.Center).
-		Gap(design.Space2).Children(func() {
-		for _, action := range ordered {
-			action := action
-			var button ui.Element
-			switch {
-			case action.Primary && action.Disabled:
-				button = design.Apply(ui.Button(c, action.Label), t.DisabledPrimary())
-			case action.Primary:
-				button = design.Apply(ui.PrimaryButton(c, action.Label), t.PrimaryButton())
-			case action.Danger:
-				button = design.Apply(ui.Button(c, action.Label), t.DangerButton())
-			default:
-				button = design.Apply(ui.Button(c, action.Label), t.SecondaryButton())
-			}
-			if action.Disabled {
-				button = button.Disabled(true)
-			}
-			if action.Default && !action.Disabled {
-				button = button.AutoFocus()
-			}
-			if action.OnClick != nil && button.Clicked() {
-				action.OnClick()
-			}
-		}
-	})
-}
-
 // inputLabel appends the localized "input" suffix used by native input labels.
 func inputLabel(locale contracts.LocaleService, label string) string {
 	return label + localized(locale, " 输入", " input")
@@ -1481,10 +1402,14 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 		})
 
 		// Prompt and runtime knobs are the page's explicit-save section: the
-		// host footer's Save is the page's one primary, and this section says so
-		// in its title; the model list above applies immediately (R12).
-		uikit.Section(c, localized(locale, "提示词与运行参数（页脚保存）",
-			"Prompt & runtime (saved by the footer)"), func(*ui.Context) {
+		// host footer's Save is the page's one primary. The title names the
+		// content only; the save mechanism is the section's description, not
+		// title chrome (the model list above applies immediately, R12).
+		uikit.Section(c, localized(locale, "提示词与运行参数", "Prompt & runtime"), func(*ui.Context) {
+			design.Apply(ui.Text(c, localized(locale,
+				"本节草稿由页脚「保存」统一写入。",
+				"The footer Save writes this section's drafts.")),
+				t.TextMuted(design.TypeXXS)).MaxLines(2)
 			search.region(c, "model.system-prompt", func(c *ui.Context) {
 				ui.Field(c, labels.systemPromptLabel, func() {
 					prompt := ui.TextArea(c, &state.systemPrompt).Label(inputLabel(locale, labels.systemPromptLabel)).
@@ -1603,18 +1528,19 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 				// One row per switch (label left, switch trailing): a shared
 				// Form label column right-aligned the two labels against each
 				// other and orphaned the tray description under the control.
-				if switchRow(c,
-					localized(locale, "开机自启动", "Launch at login"),
-					"",
-					&state.autostart, false) {
+				if uikit.SwitchRow(c, uikit.SwitchRowOptions{
+					Label: localized(locale, "开机自启动", "Launch at login"),
+					Value: &state.autostart,
+				}) {
 					applyDesktopSetting(state, store, contracts.SettingAutostart,
 						fmt.Sprintf("%t", state.autostart), locale)
 				}
-				if switchRow(c,
-					localized(locale, "关闭时最小化到托盘", "Close to system tray"),
-					localized(locale, "关闭窗口后应用继续在托盘运行，任务不中断。修改后重启应用生效。",
+				if uikit.SwitchRow(c, uikit.SwitchRowOptions{
+					Label: localized(locale, "关闭时最小化到托盘", "Close to system tray"),
+					Description: localized(locale, "关闭窗口后应用继续在托盘运行，任务不中断。修改后重启应用生效。",
 						"Keep running in the system tray after closing the window, so tasks continue. Takes effect after a restart."),
-					&state.closeToTray, false) {
+					Value: &state.closeToTray,
+				}) {
 					applyDesktopSetting(state, store, contracts.SettingCloseToTray,
 						fmt.Sprintf("%t", state.closeToTray), locale)
 				}

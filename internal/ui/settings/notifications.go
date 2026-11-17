@@ -76,10 +76,10 @@ func buildNotificationsPage(c *ui.Context, runtime contracts.UIRuntime,
 		search.region(c, "notifications.toasts", func(c *ui.Context) {
 			uikit.Section(c, localized(locale, "通知气泡", "Notification toasts"), func(*ui.Context) {
 				enabled := notificationsSettingEnabled(store.Get(contracts.SettingNotifications, ""))
-				if switchRow(c,
-					localized(locale, "显示通知气泡", "Show notification toasts"),
-					"",
-					&enabled, false) {
+				if uikit.SwitchRow(c, uikit.SwitchRowOptions{
+					Label: localized(locale, "显示通知气泡", "Show notification toasts"),
+					Value: &enabled,
+				}) {
 					if err := store.Set(contracts.SettingNotifications, fmt.Sprintf("%t", enabled)); err != nil {
 						st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
 						st.statusErr = true
@@ -105,9 +105,12 @@ func buildNotificationsPage(c *ui.Context, runtime contracts.UIRuntime,
 						"当前平台不支持系统通知；应用内通知气泡仍然可用。",
 						"System notifications are not available on this platform; in-app toasts still work.")
 				}
-				if switchRow(c,
-					localized(locale, "显示系统通知", "Show system notifications"),
-					description, &enabled, !systemSupported) {
+				if uikit.SwitchRow(c, uikit.SwitchRowOptions{
+					Label:       localized(locale, "显示系统通知", "Show system notifications"),
+					Description: description,
+					Value:       &enabled,
+					Disabled:    !systemSupported,
+				}) {
 					if err := store.Set(contracts.SettingSystemNotifications, fmt.Sprintf("%t", enabled)); err != nil {
 						st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
 						st.statusErr = true

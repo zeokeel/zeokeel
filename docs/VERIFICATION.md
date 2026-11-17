@@ -409,6 +409,11 @@ snapshot renderer PNG steps: 47
 docs/screenshots files: 48
 ```
 
+**Keep the devtools expectations in sync with the copy they assert**（2026-11-17 UI 审查）：
+`ui-drive` 的步骤把当轮可见文案/几何写死在断言里（权限按钮「工作区修改（全局）」、冷恢复提示、`FormatShortcut` 记法、关于页区块名、团队 meta 口径）。改这些文案或记法时**同一个 PR 内**同步 `internal/devtools/ui-drive/steps_*.go`，否则驱动器会报「产品缺陷」，而实际是期望过时——本次审查有 3 条 FAIL 即由此产生（产品行为正确）。
+
+同理：快照场景要断言自己拍到的东西——`ui-snapshot` 里每个 `render` 前确认所在屏/浮层/尺寸与文件名一致（曾出现 `p2-plan-mode` ≡ `p2-team-history`、`narrow/dark-*` 实为 1512×944、`p2-archive-settings-dark` 实拍关于页等 6 处错标，已在本次修正）。
+
 ## Known remaining gaps (from docs/COVERAGE.md §5)
 
 ```

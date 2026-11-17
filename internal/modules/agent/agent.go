@@ -15,6 +15,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -2544,6 +2545,13 @@ func buildUserInput(prompt string, attachments []contracts.Attachment) []rig.Mes
 	for _, attachment := range attachments {
 		if attachment.IsImage() {
 			if dataURL := attachment.DataURL(); dataURL != "" {
+				// A companion metadata text part — the same "[附件] name (N bytes)"
+				// shape a file attachment uses — persists the name and size so a
+				// restored image chip reads like the hot one; the bytes themselves
+				// travel in the data URL. userMessageContent merges the two back into
+				// one attachment and keeps the metadata out of the prompt body
+				// (2026-11 UI review C).
+				parts = append(parts, rig.TextPart(attachmentText(attachment)))
 				parts = append(parts, rig.ImagePart(dataURL, ""))
 				continue
 			}
@@ -3309,13 +3317,27 @@ func messageText(message rig.Message) string {
 func userMessageContent(message rig.Message) (string, []contracts.Attachment) {
 	var textParts []string
 	var attachments []contracts.Attachment
+	// pendingMeta is an attachment metadata text part ("[附件] name (N bytes)")
+	// waiting for the image part it describes; a file attachment's metadata is
+	// flushed on its own. The metadata never enters textParts, so it does not
+	// render as prompt body, echo into the transcript or export as user input
+	// (2026-11 UI review C).
+	var pendingMeta *contracts.Attachment
+	flushMeta := func() {
+		if pendingMeta != nil {
+			attachments = append(attachments, *pendingMeta)
+			pendingMeta = nil
+		}
+	}
 	for _, part := range message.Content {
 		switch part.Type {
 		case rig.PartText:
-			if name, ok := parseAttachmentText(part.Text); ok {
-				attachments = append(attachments, contracts.Attachment{Name: name})
+			if name, size, ok := parseAttachmentText(part.Text); ok {
+				flushMeta()
+				pendingMeta = &contracts.Attachment{Name: name, Bytes: size}
 				continue
 			}
+			flushMeta()
 			if part.Text != "" {
 				textParts = append(textParts, part.Text)
 			}
@@ -3323,21 +3345,39 @@ func userMessageContent(message rig.Message) (string, []contracts.Attachment) {
 			if part.ImageURL == "" {
 				continue
 			}
-			attachments = append(attachments, contracts.Attachment{
-				Name: "图片",
-				MIME: dataURLMIME(part.ImageURL),
-			})
+			// The bytes persisted in the data URL recover the size, MIME and
+			// thumbnail; the companion metadata part (when present) restores the
+			// original file name. An old record without metadata keeps the generic
+			// "图片" name and still decodes its size — no error (backward compat).
+			data, _ := decodeDataURL(part.ImageURL)
+			attachment := contracts.Attachment{
+				Name:  "图片",
+				MIME:  dataURLMIME(part.ImageURL),
+				Data:  data,
+				Bytes: len(data),
+			}
+			if pendingMeta != nil {
+				attachment.Name = pendingMeta.Name
+				if pendingMeta.Bytes > 0 {
+					attachment.Bytes = pendingMeta.Bytes
+				}
+				pendingMeta = nil
+			}
+			attachments = append(attachments, attachment)
 		}
 	}
+	flushMeta()
 	return strings.Join(textParts, ""), attachments
 }
 
 // parseAttachmentText reports whether text is one of the attachment text parts
-// written by attachmentText and returns its display name.
-func parseAttachmentText(text string) (string, bool) {
+// written by attachmentText and returns its display name and persisted byte size
+// (the " (N bytes)" suffix). The size lets a restored chip show the same size as
+// the hot one even when its Data is not loaded (2026-11 UI review C).
+func parseAttachmentText(text string) (string, int, bool) {
 	const prefix = "[附件] "
 	if !strings.HasPrefix(text, prefix) {
-		return "", false
+		return "", 0, false
 	}
 	header := text
 	if newline := strings.IndexByte(header, '\n'); newline >= 0 {
@@ -3345,16 +3385,41 @@ func parseAttachmentText(text string) (string, bool) {
 	}
 	rest := strings.TrimPrefix(header, prefix)
 	name := rest
+	size := 0
 	if open := strings.LastIndex(rest, " ("); open >= 0 {
-		if suffix := rest[open:]; strings.HasSuffix(suffix, " bytes)") {
+		suffix := rest[open:]
+		if strings.HasSuffix(suffix, " bytes)") {
 			name = rest[:open]
+			digits := strings.TrimSuffix(strings.TrimPrefix(suffix, " ("), " bytes)")
+			if n, err := strconv.Atoi(digits); err == nil && n >= 0 {
+				size = n
+			}
 		}
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = "附件"
 	}
-	return name, true
+	return name, size, true
+}
+
+// decodeDataURL decodes a base64 data URL's payload back into bytes, so the
+// restore path recovers an image's content (and thus its size, MIME and
+// thumbnail) from the persisted URL. It returns nil for a non-data URL, a
+// non-base64 URL or invalid base64.
+func decodeDataURL(dataURL string) ([]byte, bool) {
+	if !strings.HasPrefix(dataURL, "data:") {
+		return nil, false
+	}
+	comma := strings.IndexByte(dataURL, ',')
+	if comma < 0 || !strings.Contains(dataURL[:comma], ";base64") {
+		return nil, false
+	}
+	data, err := base64.StdEncoding.DecodeString(dataURL[comma+1:])
+	if err != nil {
+		return nil, false
+	}
+	return data, true
 }
 
 // dataURLMIME extracts the media type from a data URL ("" for other URLs).

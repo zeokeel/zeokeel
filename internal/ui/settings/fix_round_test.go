@@ -186,9 +186,10 @@ func TestAppearanceReReadsThemeOnReentry(t *testing.T) {
 	}
 }
 
-// TestDataPageActionsAlignedRight covers ST-03: opening the data directory is a
-// row action beside the path, and the export/clear/report actions sit at the
-// right end of their sections.
+// TestDataPageActionsAlignedRight covers ST-03 as refined by the 2026-11-17
+// review P3: the section-level actions (open/export/clear/report) sit at the
+// right end of their section title rows (SectionAction); the inline copy stays
+// beside the path value on the row below the title.
 func TestDataPageActionsAlignedRight(t *testing.T) {
 	store := newFakeSettings(nil)
 	chat := &fakeChat{}
@@ -203,15 +204,24 @@ func TestDataPageActionsAlignedRight(t *testing.T) {
 	if !ok {
 		t.Fatalf("copy action missing; texts = %v", tester.Texts())
 	}
+	titleRect, ok := tester.Find("数据目录")
+	if !ok {
+		t.Fatalf("data directory title missing; texts = %v", tester.Texts())
+	}
 	openRect, ok := tester.Find("打开数据目录")
 	if !ok {
 		t.Fatalf("open-directory action missing; texts = %v", tester.Texts())
 	}
-	if diff := openRect.Y - copyRect.Y; diff > 24 || diff < -24 {
-		t.Fatalf("open-directory action is not inline with the path row: copy.Y=%v open.Y=%v", copyRect.Y, openRect.Y)
+	if diff := openRect.Y - titleRect.Y; diff > 24 || diff < -24 {
+		t.Fatalf("open-directory action is not on the section title row: title.Y=%v open.Y=%v",
+			titleRect.Y, openRect.Y)
 	}
-	if openRect.X < copyRect.X {
-		t.Fatalf("open-directory action is not on the row's right: copy.X=%v open.X=%v", copyRect.X, openRect.X)
+	if openRect.X < 600 {
+		t.Fatalf("open-directory action is not at the title row's right end: %v", openRect)
+	}
+	if copyRect.Y <= openRect.Y {
+		t.Fatalf("inline copy must stay on the path row below the title: copy.Y=%v open.Y=%v",
+			copyRect.Y, openRect.Y)
 	}
 	exportRect, ok := tester.Find("导出全部会话")
 	if !ok {

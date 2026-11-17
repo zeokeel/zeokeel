@@ -2717,14 +2717,20 @@ func (st *state) previewGeneratedFile(previewer contracts.FilePreviewer, path st
 // when the session has none); the header, the breadcrumb and the parent crumb
 // all read the same name.
 func sessionTitle(st *state, chat contracts.ChatService, cfg Config) string {
-	title := st.localized(cfg.Title, "对话", "Chat")
-	if chat == nil {
-		return title
+	if chat != nil {
+		if session, ok := chat.Session(chat.ActiveSession()); ok {
+			if title := strings.TrimSpace(session.Title); title != "" {
+				return title
+			}
+			// An open conversation with no title yet reads the same as its sidebar
+			// row ("未命名会话"/"Untitled session"), not the screen's generic "对话"
+			// fallback, so the header and the sidebar never name one session two
+			// ways (2026-11 UI review B5). The backend auto-titles it from the first
+			// prompt.
+			return st.tr("未命名会话", "Untitled session")
+		}
 	}
-	if session, ok := chat.Session(chat.ActiveSession()); ok && strings.TrimSpace(session.Title) != "" {
-		title = session.Title
-	}
-	return title
+	return st.localized(cfg.Title, "对话", "Chat")
 }
 
 // --- team controls (P1-2): stop and close a teammate -----------------------

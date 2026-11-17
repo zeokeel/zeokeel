@@ -185,3 +185,54 @@ func TestConnectorsTabLeadsWithIntro(t *testing.T) {
 			intro.Y, count.Y)
 	}
 }
+
+// TestConnectorFormDisclosureOnce pins the form's single-disclosure rule: each
+// field's format/default rule lives once in its helper, the placeholder only
+// exemplifies, and the modal subtitle is a purpose line (the transport dropdown
+// already shows and edits the current HTTP/STDIO value).
+func TestConnectorFormDisclosureOnce(t *testing.T) {
+	h, _ := newConnectorHarness(t, &connectorPlugins{}, nil)
+	tester := h.tester()
+	h.click(tester, "连接器")
+	h.click(tester, "添加连接器")
+
+	// The subtitle names the purpose, not the transport value.
+	h.assertTexts(tester, "外部 MCP 服务接入")
+	// Timeout: the unit/default rule once (helper); the placeholder exemplifies
+	// (placeholders are the input's accessible Placeholder, not a text node).
+	h.assertTexts(tester, "毫秒；0 或留空使用默认 30 秒。")
+	h.assertNoTexts(tester, "留空 = 默认 30 秒")
+	timeout, ok := tester.AccessByRole(ui.RoleTextField, "超时 (ms) 输入")
+	if !ok || timeout.Placeholder != "例如：30000" {
+		t.Fatalf("timeout placeholder = %q (ok=%v), want the example value",
+			timeout.Placeholder, ok)
+	}
+
+	// STDIO args/env: the separator/format rule once in the helper.
+	chooseConnectorTransport(t, h, tester, "STDIO")
+	h.assertTexts(tester, "空格分隔。", "每行一个 KEY=VALUE；值可以包含空格。")
+	args, ok := tester.AccessByRole(ui.RoleTextField, "参数 输入")
+	if !ok || args.Placeholder != "例如：-y server-github" {
+		t.Fatalf("args placeholder = %q (ok=%v), want the example value", args.Placeholder, ok)
+	}
+	env, ok := tester.AccessByRole(ui.RoleTextField, "环境变量 输入")
+	if !ok || env.Placeholder != "例如：GITHUB_TOKEN=abc" {
+		t.Fatalf("env placeholder = %q (ok=%v), want the example value", env.Placeholder, ok)
+	}
+}
+
+// TestConnectorDetailsAuthStatusRow pins the authorization row in the details
+// modal: the sheet keeps the plain 认证 mode row, and the 授权状态 row carries
+// the localized state (the semantic color mapping is unit-tested in both
+// themes by TestConnectorAuthStatusDisplaySemantic).
+func TestConnectorDetailsAuthStatusRow(t *testing.T) {
+	auth := &fakeMCPAuth{status: contracts.MCPAuthStatus{State: contracts.MCPAuthStateRequired}}
+	h, _ := newAuthConnectorHarness(t, &connectorPlugins{}, map[string]string{
+		contracts.SettingMCPServers: oauthConnectorJSON,
+	}, auth)
+	tester := h.tester()
+	h.click(tester, "连接器")
+	h.click(tester, "连接器操作 notion")
+	h.click(tester, "详情")
+	h.assertTexts(tester, "认证", "OAuth 2.1", "授权状态", "需要授权")
+}

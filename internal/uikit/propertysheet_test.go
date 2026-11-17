@@ -82,6 +82,43 @@ func TestPropertySheetHonorsMaxWidth(t *testing.T) {
 	}
 }
 
+// TestPropertySheetFullWidthSpansParent covers the Context page's kv dividers
+// (2026-11 UI review B4): with FullWidth the sheet (and its row dividers) spans
+// the parent's full width like the enclosing section divider, while the value
+// stays left-aligned right after the fixed label column.
+func TestPropertySheetFullWidthSpansParent(t *testing.T) {
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).FillWidth().Children(func() {
+			uikit.PropertySheet(c, uikit.PropertySheetOptions{
+				Rows:      []uikit.PropertyRow{{Label: "窗口", Value: "128K tokens"}},
+				FullWidth: true,
+			})
+		})
+	}, 1000, 200)
+	label, ok := tt.Find("窗口")
+	if !ok {
+		t.Fatalf("label missing; texts = %v", tt.Texts())
+	}
+	value, ok := tt.Find("128K tokens")
+	if !ok {
+		t.Fatalf("value missing; texts = %v", tt.Texts())
+	}
+	// The value box fills the parent width (1000) minus the label column and gap,
+	// not the bounded default measure — so the row divider runs full width.
+	want := 1000 - uikit.PropertySheetLabelWidth - design.Space3
+	if math.Abs(float64(value.W-want)) > 1 {
+		t.Fatalf("FullWidth value width = %v, want %v (the parent's full measure)", value.W, want)
+	}
+	if value.W <= uikit.PropertySheetDefaultMaxWidth-uikit.PropertySheetLabelWidth {
+		t.Fatalf("FullWidth sheet stayed bounded (value.W=%v)", value.W)
+	}
+	// The value still sits left-aligned right after the label column.
+	wantLeft := label.X + uikit.PropertySheetLabelWidth + design.Space3
+	if math.Abs(float64(value.X-wantLeft)) > 1 {
+		t.Fatalf("FullWidth value left = %v, want %v (still left-aligned)", value.X, wantLeft)
+	}
+}
+
 func TestPropertySheetEmptyValueShowsPlaceholder(t *testing.T) {
 	tt := ui.NewTester(propertySheetView([]uikit.PropertyRow{
 		{Label: "提交", Value: ""},

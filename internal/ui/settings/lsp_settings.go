@@ -318,13 +318,14 @@ func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, 
 
 		uikit.Section(c, localized(locale, "工作区配置", "Workspace configuration"), func(*ui.Context) {
 			allow := lspWorkspaceOptIn(store.Get(contracts.SettingLSPWorkspaceConfig, ""))
-			if switchRow(c,
-				localized(locale, "读取工作区 LSP 配置（.zeokeel/lsp.json）",
+			if uikit.SwitchRow(c, uikit.SwitchRowOptions{
+				Label: localized(locale, "读取工作区 LSP 配置（.zeokeel/lsp.json）",
 					"Read workspace LSP config (.zeokeel/lsp.json)"),
-				localized(locale,
+				Description: localized(locale,
 					"默认关闭；开启后重启生效；设置页配置优先。",
 					"Off by default; restart to apply; settings-page configuration wins."),
-				&allow, false) {
+				Value: &allow,
+			}) {
 				value := ""
 				if allow {
 					value = "allow"
@@ -338,9 +339,9 @@ func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, 
 				}
 				c.Invalidate()
 			}
-			// A static trust disclosure is a caution, not a failure: warning
-			// semantic, red stays for real errors (DESIGN.md §5.2).
-			warningLine(c, localized(locale,
+			// A static trust disclosure is a caution, not a failure: the shared
+			// warning semantic, red stays for real errors (DESIGN.md §5.2).
+			uikit.WarningLine(c, t, localized(locale,
 				"风险：只应在你信任的仓库中开启；恶意仓库可通过该文件让工具启动任意命令。",
 				"Risk: enable only in repositories you trust; a malicious repository could make tools launch arbitrary commands."))
 		})

@@ -255,10 +255,10 @@ func MarkdownDoc(t *design.Tokens, size float32) *markdown.Options {
 	}
 	theme.Headings[0].Color = t.LabelPrimary
 	theme.Headings[5].Color = t.LabelTertiary
-	return &markdown.Options{
+	return withMarkdownImageFallback(&markdown.Options{
 		Theme:      theme,
 		Extensions: parser.Default,
 		Reveal:     &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1},
 		CodeBlock:  MarkdownCodeBlock,
-	}
+	})
 }

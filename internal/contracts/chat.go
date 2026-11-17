@@ -413,6 +413,12 @@ type Attachment struct {
 	MIME string
 	// Data is the raw file content; empty for restored/read-only chips.
 	Data []byte
+	// Bytes is the persisted size in bytes for a restored chip whose Data is not
+	// loaded (the read model keeps the name and size even when the content is not
+	// fetched back). Size prefers live Data and falls back to Bytes, so a hot chip
+	// and a restored chip report the same size (2026-11 UI review C). Zero means
+	// unknown; old records without it still derive the size from Data.
+	Bytes int
 }
 
 // IsImage reports whether the attachment is an image the provider can accept
@@ -421,8 +427,14 @@ func (a Attachment) IsImage() bool {
 	return strings.HasPrefix(a.MIME, "image/")
 }
 
-// Size is the attachment size in bytes.
-func (a Attachment) Size() int { return len(a.Data) }
+// Size is the attachment size in bytes: the live content length when Data is
+// loaded, otherwise the persisted Bytes of a restored chip.
+func (a Attachment) Size() int {
+	if len(a.Data) > 0 {
+		return len(a.Data)
+	}
+	return a.Bytes
+}
 
 // DataURL encodes the attachment as a data URL (used for rig image parts).
 func (a Attachment) DataURL() string {

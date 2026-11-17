@@ -310,7 +310,7 @@ func buildContextOverview(c *ui.Context, t *design.Tokens, st *state, data contr
 		// bounded, left-aligned value, not a label/value pair stretched across
 		// the whole reading column.
 		uikit.PropertySheet(body, uikit.PropertySheetOptions{
-			Rows: rows, Key: "context.overview",
+			Rows: rows, Key: "context.overview", FullWidth: true,
 		})
 
 		snapshot := data.Snapshot
@@ -351,7 +351,7 @@ func buildContextOverview(c *ui.Context, t *design.Tokens, st *state, data contr
 				},
 			)
 			uikit.PropertySheet(body, uikit.PropertySheetOptions{
-				Rows: snapshotRows, Key: "context.snapshot",
+				Rows: snapshotRows, Key: "context.snapshot", FullWidth: true,
 			})
 			buildContextToolsRow(body, t, st, snapshot.Tools)
 			buildContextInjectedRow(body, t, st, snapshot.Injected)
@@ -484,7 +484,10 @@ func buildContextSections(c *ui.Context, t *design.Tokens, st *state, snapshot c
 				cell.Tooltip(tip)
 			}
 		}).Label(st.tr("系统提示分段列表", "System prompt sections")).
-			MaxWidth(design.TranscriptWidth).MaxHeight(design.Space6 * 7)
+			MaxWidth(design.TranscriptWidth)
+			// No inner MaxHeight: the table takes its natural height and the page
+			// scrolls around it. A bounded inner scroll on a few-row table was a
+			// nested wheel trap (2026-11 UI review B4).
 
 		// The section sums are the prompt's real size; the estimated-prompt share
 		// only appears when the window is known, so no fake percentage is drawn.
@@ -512,7 +515,7 @@ func buildContextSections(c *ui.Context, t *design.Tokens, st *state, snapshot c
 			})
 		}
 		uikit.PropertySheet(body, uikit.PropertySheetOptions{
-			Rows: rows, Key: "context.sections",
+			Rows: rows, Key: "context.sections", FullWidth: true,
 		})
 	})
 }

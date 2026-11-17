@@ -1229,7 +1229,8 @@ func TestSendWithAttachmentsImage(t *testing.T) {
 
 // TestSendAttachmentsOnly covers a blank prompt with attachments: it is
 // allowed, the title comes from the first attachment and the provider receives
-// only the image part.
+// the image part plus its companion metadata text part (name/size persistence,
+// 2026-11 UI review C).
 func TestSendAttachmentsOnly(t *testing.T) {
 	provider := &captureProvider{}
 	svc, _ := newAttachmentService(t, provider)
@@ -1249,8 +1250,12 @@ func TestSendAttachmentsOnly(t *testing.T) {
 		t.Fatalf("session title = %q, want the first attachment name", session.Title)
 	}
 	userMessage := lastUserMessage(t, provider.lastRequest())
-	if len(userMessage.Content) != 1 || userMessage.Content[0].Type != rig.PartImageURL {
-		t.Fatalf("attachment-only content = %+v, want exactly one image part", userMessage.Content)
+	// One image part plus its "[附件] name (N bytes)" metadata text part.
+	if len(userMessage.Content) != 2 ||
+		userMessage.Content[0].Type != rig.PartText ||
+		userMessage.Content[0].Text != "[附件] cat.png (8 bytes)" ||
+		userMessage.Content[1].Type != rig.PartImageURL {
+		t.Fatalf("attachment-only content = %+v, want a metadata text part + one image part", userMessage.Content)
 	}
 }
 
@@ -1317,7 +1322,9 @@ func TestTextAttachmentParts(t *testing.T) {
 }
 
 // TestRestoredAttachmentChips covers the restart read model: image data URLs
-// and attachment text parts are turned back into chips without their bytes.
+// decode back into bytes (size/MIME/thumbnail) and attachment text parts restore
+// the name and size. An old image record without a metadata part keeps the
+// generic name and still decodes its size (2026-11 UI review C).
 func TestRestoredAttachmentChips(t *testing.T) {
 	converted := chatMessagesFromRig([]rig.Message{
 		{Role: rig.RoleUser, Content: []rig.ContentPart{
@@ -1335,11 +1342,15 @@ func TestRestoredAttachmentChips(t *testing.T) {
 	if first.Text != "看看" || len(first.Attachments) != 1 {
 		t.Fatalf("restored image message = %+v", first)
 	}
-	if first.Attachments[0].Name != "图片" || first.Attachments[0].MIME != "image/png" || len(first.Attachments[0].Data) != 0 {
+	// Old record (no metadata part): generic name, but the data URL decodes to
+	// its bytes so the size is honest ("AAAA" base64 → 3 bytes).
+	if first.Attachments[0].Name != "图片" || first.Attachments[0].MIME != "image/png" ||
+		len(first.Attachments[0].Data) != 3 || first.Attachments[0].Size() != 3 {
 		t.Fatalf("restored image chip = %+v", first.Attachments[0])
 	}
 	second := converted[1]
-	if second.Text != "" || len(second.Attachments) != 1 || second.Attachments[0].Name != "notes.txt" {
+	if second.Text != "" || len(second.Attachments) != 1 || second.Attachments[0].Name != "notes.txt" ||
+		second.Attachments[0].Size() != 5 {
 		t.Fatalf("restored text-attachment message = %+v", second)
 	}
 }
@@ -1369,7 +1380,10 @@ func TestAttachmentsSurviveRestart(t *testing.T) {
 	if user.Text != "图里是什么" || len(user.Attachments) != 1 {
 		t.Fatalf("restored user message = %+v", user)
 	}
-	if user.Attachments[0].Name != "图片" || user.Attachments[0].MIME != "image/png" {
+	// The companion metadata part persists the name, so the restored chip reads
+	// like the hot one (cat.png + its size), not the generic "图片" (review C).
+	if user.Attachments[0].Name != "cat.png" || user.Attachments[0].MIME != "image/png" ||
+		user.Attachments[0].Size() != 8 {
 		t.Fatalf("restored chip = %+v", user.Attachments[0])
 	}
 }

@@ -152,6 +152,9 @@ func TestMemoryFooterSaveVisibleAtShortWindow(t *testing.T) {
 	// sits inside the short window without any scrolling.
 	requireFooterDisabled(t, tester, "保存", true, "memory policy clean")
 	assertInsideWindow(t, tester, "保存", 720)
+	// Exactly one "保存": PageFooter draws one primary and (after the 2026-11-17
+	// label dedupe, matching DialogFooter) registers one text node for it. A
+	// stray in-section submit would add a second.
 	if got := exactTextCount(tester.Texts(), "保存"); got != 1 {
 		t.Fatalf("保存 labels = %d, want the footer's one primary; texts = %v", got, tester.Texts())
 	}
@@ -197,6 +200,7 @@ func TestLSPFooterAddVisibleAtShortWindow(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "LSP")
 
+	// Exactly one "添加": one footer primary, no in-section submit.
 	if got := exactTextCount(tester.Texts(), "添加"); got != 1 {
 		t.Fatalf("添加 labels = %d, want the footer's one primary; texts = %v", got, tester.Texts())
 	}
@@ -365,16 +369,13 @@ func TestAboutPlaceholderUnified(t *testing.T) {
 // and not the old 50% accent wash with white text.
 func assertDisabledPrimaryInk(t *testing.T, tester *ui.Tester, label string, tokens *design.Tokens) {
 	t.Helper()
-	rect, ok := tester.Find(label)
-	if !ok {
-		t.Fatalf("footer primary %q missing; texts = %v", label, tester.Texts())
-	}
+	// The button box (not the text node): PageFooter no longer adds a redundant
+	// .Label, so Find would return just the text. Sample inside the left padding.
+	rect := footerPrimary(t, tester, label).Bounds
 	img := tester.Image()
 	backdrop := tokens.BgBase // the footer sits on the modal panel (S0)
 	wantFill := tokens.BgStrong.Alpha(0.5).Over(backdrop)
-	// The label box is the text; the button's horizontal padding carries the
-	// fill a few DIP left of it.
-	fill := statusPixel(t, img, int(rect.X)-8, int(rect.Y+rect.H/2))
+	fill := statusPixel(t, img, int(rect.X)+4, int(rect.Y+rect.H/2))
 	if !statusColorNear(fill, wantFill, 3) {
 		t.Fatalf("disabled primary fill = %+v, want the composer's neutral disabled fill %+v",
 			fill, wantFill)
@@ -414,11 +415,8 @@ func TestDisabledFooterPrimaryMatchesComposerTokens(t *testing.T) {
 	tester.Type("请简短回答。")
 	tester.Frame()
 	requireFooterDisabled(t, tester, "保存", false, "model dirty")
-	rect, ok := tester.Find("保存")
-	if !ok {
-		t.Fatal("enabled Save missing")
-	}
-	fill := statusPixel(t, tester.Image(), int(rect.X)-8, int(rect.Y+rect.H/2))
+	rect := footerPrimary(t, tester, "保存").Bounds
+	fill := statusPixel(t, tester.Image(), int(rect.X)+4, int(rect.Y+rect.H/2))
 	if !statusColorNear(fill, design.Light().Accent, 3) {
 		t.Fatalf("enabled primary fill = %+v, want the accent %+v", fill, design.Light().Accent)
 	}
@@ -429,4 +427,110 @@ func TestDisabledFooterPrimaryMatchesComposerTokens(t *testing.T) {
 	h.click(tester, "外观")
 	requireFooterDisabled(t, tester, "保存", true, "appearance clean (dark)")
 	assertDisabledPrimaryInk(t, tester, "保存", design.Dark())
+}
+
+// --- phase 2: disclosure dedup + section-action placement ---------------------
+
+// TestModelSectionTitleNamesContentOnly pins the de-mechanized section title:
+// the title names the content, the footer-save mechanism moved to the section
+// description (zh + en).
+func TestModelSectionTitleNamesContentOnly(t *testing.T) {
+	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "模型")
+	h.assertTexts(tester, "提示词与运行参数", "本节草稿由页脚「保存」统一写入。")
+	h.assertNoTexts(tester, "（页脚保存）")
+	// The model list section follows the same rule: content name in the title,
+	// the apply-immediately behavior note in the description.
+	h.assertTexts(tester, "模型列表", "列表增删改与默认模型即时生效。")
+	h.assertNoTexts(tester, "（即时生效）")
+
+	h.uiRoot.Locale().SetLanguage("en")
+	tester.Frame()
+	h.assertTexts(tester, "Prompt & runtime", "The footer Save writes this section's drafts.")
+	h.assertNoTexts(tester, "saved by the footer")
+	h.assertTexts(tester, "Models", "List edits and the default model apply immediately.")
+	h.assertNoTexts(tester, "(apply immediately)")
+}
+
+// TestMemoryPolicyUnlimitedDisclosedOnce pins the single disclosure of the
+// unlimited rule: the section helper says "0/empty = unlimited" once; the two
+// stepper descriptions explain only what their value does.
+func TestMemoryPolicyUnlimitedDisclosedOnce(t *testing.T) {
+	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
+	provide[contracts.MemoryStore](t, h.ctx, contracts.KeyMemory, newFakeMemoryConsolidator())
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "记忆")
+	h.assertTexts(tester, "0 或留空表示不限制；点「按策略整理」保存并立即整理。",
+		"超过后删除最旧的记忆。", "早于该天数的记忆会被删除。")
+	h.assertNoTexts(tester, "0 表示不限")
+}
+
+// TestMemoryAddPlaceholderExemplifies pins the add-memory placeholder: it
+// exemplifies an entry instead of repeating the field label.
+func TestMemoryAddPlaceholderExemplifies(t *testing.T) {
+	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
+	provide[contracts.MemoryStore](t, h.ctx, contracts.KeyMemory, newFakeMemoryStore())
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "记忆")
+	// The placeholder is the input's accessible Placeholder (not a text node):
+	// it exemplifies an entry instead of repeating the field label.
+	info, ok := tester.AccessByRole(ui.RoleTextField, "记忆内容 输入")
+	if !ok || info.Placeholder != "例如：发布前先跑 go test ./..." {
+		t.Fatalf("add-memory placeholder = %q (ok=%v), want the example entry",
+			info.Placeholder, ok)
+	}
+	if info.Placeholder == "记忆内容" {
+		t.Fatal("the placeholder must not repeat the field label")
+	}
+}
+
+// TestDataPrivacySectionActionsAtTitle pins the unified section-action
+// placement: open/export/clear sit on their section title rows (SectionAction),
+// while the inline copy stays on the path value row below the title.
+func TestDataPrivacySectionActionsAtTitle(t *testing.T) {
+	chat := &fakeChat{}
+	seedDataPageSessions(chat)
+	h := newHarness(t, chat, newFakeSettings(nil), settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "数据与隐私")
+
+	sameRow := func(title, action string) {
+		t.Helper()
+		tr, ok := tester.Find(title)
+		if !ok {
+			t.Fatalf("section title %q missing; texts = %v", title, tester.Texts())
+		}
+		ar, ok := tester.Find(action)
+		if !ok {
+			t.Fatalf("section action %q missing; texts = %v", action, tester.Texts())
+		}
+		tc, ac := tr.Y+tr.H/2, ar.Y+ar.H/2
+		if d := tc - ac; d > 2 || d < -2 {
+			t.Fatalf("%q (centerY %v) is not on the %q title row (centerY %v)",
+				action, ac, title, tc)
+		}
+	}
+	sameRow("数据目录", "打开数据目录")
+	sameRow("会话数据", "导出全部会话")
+	sameRow("会话数据", "清除全部会话")
+	sameRow("诊断报告", "导出诊断报告")
+
+	// The inline copy stays next to the path value, below the title row.
+	title, ok := tester.Find("数据目录")
+	if !ok {
+		t.Fatal("数据目录 title missing")
+	}
+	copyRect, ok := tester.Find("复制")
+	if !ok {
+		t.Fatalf("inline copy missing; texts = %v", tester.Texts())
+	}
+	if copyRect.Y+copyRect.H/2 <= title.Y+title.H/2+2 {
+		t.Fatalf("copy (centerY %v) must stay inline on the path row, below the title (centerY %v)",
+			copyRect.Y+copyRect.H/2, title.Y+title.H/2)
+	}
 }

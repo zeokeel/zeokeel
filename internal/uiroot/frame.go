@@ -1992,13 +1992,14 @@ func (r *Root) settings(c *ui.Context, open *bool) {
 			// scrolling body, so it is visible without scrolling to the end.
 			if current.Footer != nil || r.hasAnySlot(contracts.SlotSettingsPageFooter) {
 				ui.Column(c).FillWidth().Shrink(0).PaddingX(design.Space4).Children(func() {
-					ui.Divider(c)
-					ui.Row(c).FillWidth().Shrink(0).PaddingY(design.Space2).Children(func() {
-						r.slot(c, contracts.SlotSettingsPageFooter)
-						if current.Footer != nil {
-							r.safeBuild(c, current.Footer)
-						}
-					})
+					// External slot contributions stay as bare content above the
+					// page's own footer; uikit.PageFooter draws the divider and
+					// action row (the single source — the host must not add a
+					// second divider or row wrapper around it).
+					r.slot(c, contracts.SlotSettingsPageFooter)
+					if current.Footer != nil {
+						r.safeBuild(c, current.Footer)
+					}
 				})
 			}
 		})

@@ -554,8 +554,8 @@ func TestSettingsSearchLocatesModelPricing(t *testing.T) {
 	typeSettingsSearch(t, tester, "价格")
 	settleSettingsSearch(tester)
 
-	h.assertTexts(tester, "模型列表（即时生效）")
-	requireRevealedInsideDialog(t, tester, "模型列表（即时生效）")
+	h.assertTexts(tester, "模型列表")
+	requireRevealedInsideDialog(t, tester, "模型列表")
 }
 
 // TestSettingsSearchLocatesNotifications covers the notifications page by an
@@ -595,7 +595,7 @@ func TestSettingsSearchKeepsMigratedAliases(t *testing.T) {
 		query string
 		want  string
 	}{
-		{query: "密钥", want: "模型列表（即时生效）"},
+		{query: "密钥", want: "模型列表"},
 		{query: "沙箱", want: "OS 沙箱"},
 		{query: "proxy", want: "代理配置"},
 		{query: "去重", want: "未启用记忆后端"},
