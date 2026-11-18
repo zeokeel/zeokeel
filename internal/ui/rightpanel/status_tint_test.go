@@ -40,6 +40,13 @@ func statusColorNear(got, want ui.Color, tolerance int) bool {
 	return close(got.R, want.R) && close(got.G, want.G) && close(got.B, want.B)
 }
 
+// tintScore ranks how far a pixel sits from the neutral row background toward
+// the status fill: a tinted pixel is greener than the row it sits on, an
+// anti-aliased edge is only half way there.
+func tintScore(c ui.Color) int {
+	return int(c.G) - (int(c.R)+int(c.B))/2
+}
+
 // assertStatusBadgeTint asserts the pill showing label paints fill at alpha over
 // the row's own background: the status tint a StatusBadge has, not the neutral
 // badge fill AP-21 forbids.
@@ -51,11 +58,29 @@ func assertStatusBadgeTint(t *testing.T, tester *ui.Tester, label string, fill u
 	}
 	img := tester.Image()
 	// The badge's horizontal padding is Space2; sample inside its left edge.
-	pill := statusPixel(t, img, int(rect.X)-4, int(rect.Y+rect.H/2))
+	// The canvas' text metrics differ between machines (the CI runner's font
+	// stack is not this one), so the text rect—and with it the exact pixel—can
+	// move a DIP or two and land on the pill's anti-aliased edge. Take the most
+	// saturated of a short horizontal run inside the pill instead of one pixel:
+	// the fill is the tinted extreme, the edges are blends toward the row.
+	mid := int(rect.Y + rect.H/2)
+	var pill ui.Color
+	best := -1
+	for dx := -7; dx <= -1; dx++ {
+		candidate := statusPixel(t, img, int(rect.X)+dx, mid)
+		if score := tintScore(candidate); score > best {
+			pill, best = candidate, score
+		}
+	}
 	// The 8 DIP gap to the next child is bare row background.
-	backdrop := statusPixel(t, img, int(rect.X+rect.W)+12, int(rect.Y+rect.H/2))
+	backdrop := statusPixel(t, img, int(rect.X+rect.W)+12, mid)
 	want := fill.Alpha(alpha).Over(backdrop)
-	if !statusColorNear(pill, want, 3) {
+	// Two independent checks, because a single-pixel blend is machine
+	// dependent: the sampled fill must read as a status tint at all (a neutral
+	// badge keeps the row's hue, so its green channel does not lead), and it
+	// must sit within a small distance of the token blend. The first check is
+	// what AP-21 is about; the second keeps the alpha honest.
+	if tintScore(pill) < 5 || !statusColorNear(pill, want, 12) {
 		t.Fatalf("%q badge fill = %+v, want the status tint %+v over the row %+v (AP-21: neutral badge + status-colored text)",
 			label, pill, want, backdrop)
 	}
