@@ -309,5 +309,5 @@ func TestMessageSearchDisposeDuringRead(t *testing.T) {
 		tester.Frame()
 		time.Sleep(time.Millisecond)
 	}
-	h.assertNoTexts(tester, "新对话", "如何修复登录问题")
+	h.assertNoTexts(tester, "新建会话", "如何修复登录问题")
 }

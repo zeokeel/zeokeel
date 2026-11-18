@@ -28,7 +28,7 @@ func buildScreenHeaderSlot(c *ui.Context, cfg Config, st *state) {
 	description := st.tr(
 		"跨会话汇总 token 用量、成本、工具调用与会话排行。",
 		"Cross-session totals for tokens, cost, tool calls and the busiest conversations.")
-	design.Apply(ui.Text(c, title), t.Font(design.TypeM)).FontWeight(design.WeightSemibold).
+	design.Apply(ui.Text(c, title), t.Font(design.TypeM)).
 		TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…").Tooltip(description)
 }
 
@@ -67,42 +67,46 @@ func buildScreen(c *ui.Context, cfg Config, st *state) {
 			// centers it instead of stretching the tables' numeric columns to the
 			// screen's far right.
 			uikit.ReadingColumn(c, func(c *ui.Context) {
-				buildToolbar(c, t, st)
-				switch {
-				case st.service == nil:
-					uikit.EmptyStateBlock(c,
-						st.tr("洞察后端未启用", "Insights backend not enabled"),
-						st.tr("当前构建没有加载跨会话用量汇总模块。",
-							"This build does not load the cross-session usage aggregation module."), nil)
-				case st.errText != "":
-					buildErrorState(c, t, st)
-				case !st.hasData && st.loading:
-					buildLoadingState(c, t, st)
-				case !st.hasData:
-					uikit.EmptyStateBlock(c,
-						st.tr("还没有可统计的用量", "No usage to aggregate yet"),
-						st.tr("运行一轮对话后，这里会按天、模型、工作区和会话汇总 token、成本与工具调用。",
-							"Run one turn and tokens, cost and tool calls are summarized here by day, model, workspace and conversation."), nil)
-				case insightsEmpty(st.data):
-					uikit.EmptyStateBlock(c,
-						st.tr("这个时间范围内还没有用量", "No usage in this time range"),
-						st.tr("换到更长的范围，或先运行一轮对话。",
-							"Switch to the longer range, or run a turn first."), nil)
-				default:
-					buildKPI(c, t, st, st.data)
-					if st.data.Truncated {
-						design.Apply(ui.Text(c, st.tr(
-							fmt.Sprintf("统计达到单会话读取上限，较早的事件可能未计入（%d 个会话）。",
-								st.data.TruncatedSessions),
-							fmt.Sprintf("The per-session read bound was reached; older events may be missing (%d conversations).",
-								st.data.TruncatedSessions))), t.Font(design.TypeXXS)).
-							TextColor(t.LabelTertiary).MaxLines(2)
+				// Bottom breathing room: the last table/row keeps a Space4 gap
+				// from the container's edge instead of being flush with it.
+				ui.Column(c).FillWidth().Padding(design.Space0, design.Space0, design.Space4, design.Space0).Children(func() {
+					buildToolbar(c, t, st)
+					switch {
+					case st.service == nil:
+						uikit.EmptyStateBlock(c,
+							st.tr("洞察后端未启用", "Insights backend not enabled"),
+							st.tr("当前构建没有加载跨会话用量汇总模块。",
+								"This build does not load the cross-session usage aggregation module."), nil)
+					case st.errText != "":
+						buildErrorState(c, t, st)
+					case !st.hasData && st.loading:
+						buildLoadingState(c, t, st)
+					case !st.hasData:
+						uikit.EmptyStateBlock(c,
+							st.tr("还没有可统计的用量", "No usage to aggregate yet"),
+							st.tr("运行一轮对话后，这里会按天、模型、工作区和会话汇总 token、成本与工具调用。",
+								"Run one turn and tokens, cost and tool calls are summarized here by day, model, workspace and conversation."), nil)
+					case insightsEmpty(st.data):
+						uikit.EmptyStateBlock(c,
+							st.tr("这个时间范围内还没有用量", "No usage in this time range"),
+							st.tr("换到更长的范围，或先运行一轮对话。",
+								"Switch to the longer range, or run a turn first."), nil)
+					default:
+						buildKPI(c, t, st, st.data)
+						if st.data.Truncated {
+							design.Apply(ui.Text(c, st.tr(
+								fmt.Sprintf("统计达到单会话读取上限，较早的事件可能未计入（%d 个会话）。",
+									st.data.TruncatedSessions),
+								fmt.Sprintf("The per-session read bound was reached; older events may be missing (%d conversations).",
+									st.data.TruncatedSessions))), t.Font(design.TypeXXS)).
+								TextColor(t.LabelTertiary).MaxLines(2)
+						}
+						buildDailySection(c, t, st, st.data)
+						buildModelSection(c, t, st, st.data)
+						buildWorkspaceSection(c, t, st, st.data)
+						buildSessionSection(c, t, st, st.data)
 					}
-					buildDailySection(c, t, st, st.data)
-					buildModelSection(c, t, st, st.data)
-					buildWorkspaceSection(c, t, st, st.data)
-					buildSessionSection(c, t, st, st.data)
-				}
+				})
 			})
 		})
 	})
@@ -184,7 +188,7 @@ func buildErrorState(c *ui.Context, t *design.Tokens, st *state) {
 func buildKPI(c *ui.Context, t *design.Tokens, st *state, data contracts.Insights) {
 	totals := data.Totals
 	ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(design.Space5).Children(func() {
-		kpiCell(c, t, st.tr("词元 tokens", "Tokens"), uikit.FormatCompactCount(totals.TotalTokens),
+		kpiCell(c, t, st.tr("tokens", "Tokens"), uikit.FormatCompactCount(totals.TotalTokens),
 			fmt.Sprintf(st.tr("输入 %s · 输出 %s", "%s in · %s out"),
 				uikit.FormatCompactCount(totals.PromptTokens),
 				uikit.FormatCompactCount(totals.CompletionTokens)))
@@ -196,7 +200,7 @@ func buildKPI(c *ui.Context, t *design.Tokens, st *state, data contracts.Insight
 			kpiCell(c, t, st.tr("成本", "Cost"), formatCostUSD(totals.CostUSD), hint)
 		}
 		kpiCell(c, t, st.tr("会话", "Sessions"), fmt.Sprintf("%d", totals.Sessions),
-			fmt.Sprintf(st.tr("%d 轮对话 · %d 步工具调用", "%d turns · %d tool steps"), totals.Turns, totals.Steps))
+			fmt.Sprintf(st.tr("%d 轮 · %d 次工具调用", "%d turns · %d tool calls"), totals.Turns, totals.Steps))
 		toolHint := ""
 		if totals.Compactions > 0 || totals.Spills > 0 {
 			toolHint = fmt.Sprintf(st.tr("压缩 %d · 溢出 %d", "%d compactions · %d spills"),
@@ -218,8 +222,10 @@ func buildKPI(c *ui.Context, t *design.Tokens, st *state, data contracts.Insight
 func kpiCell(c *ui.Context, t *design.Tokens, label, value, hint string) {
 	ui.Column(c).Grow(1).Shrink(1).MinWidth(design.Space8 * 3).Gap(design.Space1).Children(func() {
 		design.Apply(ui.Text(c, label), t.TextMuted(design.TypeXXS)).MaxLines(1).Ellipsis("…")
-		design.Apply(ui.Text(c, value), t.Font(design.TypeM)).FontWeight(design.WeightSemibold).
-			TextColor(t.LabelPrimary).MaxLines(1).NoWrap()
+		// Tabular digits keep a value from shifting its neighbours as it changes
+		// (B-spec §4.9); TypeM already carries the 600 weight.
+		design.Apply(ui.Text(c, value), t.Font(design.TypeM)).
+			TextColor(t.LabelPrimary).MaxLines(1).NoWrap().FontFeatures("tnum")
 		if hint != "" {
 			design.Apply(ui.Text(c, hint), t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).
 				MaxLines(1).Ellipsis("…")
@@ -241,11 +247,11 @@ func buildDailySection(c *ui.Context, t *design.Tokens, st *state, data contract
 			return
 		}
 		columns := []ui.TableColumn{
-			{Title: st.tr("日期", "Day"), MinWidth: design.Space8 * 4, MaxWidth: design.Space8 * 6},
+			{Title: st.tr("日期", "Day"), MinWidth: design.Space8 * 3},
 			// The header names the metric only: "词元 tokens" truncated at this
 			// column width while the row had room to spare; the unit stays on
 			// the KPI label above.
-			{Title: st.tr("词元", "Tokens"), Width: design.Space8 * 3, Align: ui.End},
+			{Title: st.tr("tokens", "Tokens"), Width: design.Space8 * 3, Align: ui.End},
 		}
 		if daysCostVisible(days) {
 			columns = append(columns, ui.TableColumn{
@@ -312,9 +318,9 @@ func buildModelSection(c *ui.Context, t *design.Tokens, st *state, data contract
 			return
 		}
 		columns := []ui.TableColumn{
-			{Title: st.tr("模型", "Model"), MinWidth: design.Space8 * 5, MaxWidth: design.Space8 * 10},
+			{Title: st.tr("模型", "Model"), MinWidth: design.Space8 * 4},
 			{Title: st.tr("调用", "Calls"), Width: design.Space8 * 2, Align: ui.End},
-			{Title: st.tr("词元", "Tokens"), Width: design.Space8 * 3, Align: ui.End},
+			{Title: st.tr("tokens", "Tokens"), Width: design.Space8 * 3, Align: ui.End},
 			{Title: st.tr("缓存", "Cached"), Width: design.Space8 * 3, Align: ui.End},
 		}
 		if modelsCostVisible(rows) {
@@ -372,9 +378,9 @@ func buildWorkspaceSection(c *ui.Context, t *design.Tokens, st *state, data cont
 		rows := data.Workspaces
 		count := len(rows)
 		columns := []ui.TableColumn{
-			{Title: st.tr("工作区", "Workspace"), MinWidth: design.Space8 * 5, MaxWidth: design.Space8 * 10},
+			{Title: st.tr("工作区", "Workspace"), MinWidth: design.Space8 * 4},
 			{Title: st.tr("会话", "Sessions"), Width: design.Space8 * 2, Align: ui.End},
-			{Title: st.tr("词元", "Tokens"), Width: design.Space8 * 3, Align: ui.End},
+			{Title: st.tr("tokens", "Tokens"), Width: design.Space8 * 3, Align: ui.End},
 		}
 		if workspacesCostVisible(rows) {
 			columns = append(columns, ui.TableColumn{

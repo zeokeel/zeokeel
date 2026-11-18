@@ -278,7 +278,14 @@ func TaskStatusLabel(locale contracts.LocaleService, status string) string {
 // §5.2). Unnamed and non-failure states stay neutral.
 func StatusColor(t *design.Tokens, kind StatusKind) ui.Color {
 	switch kind {
-	case StatusRunning, StatusInProgress, StatusNeedsAction:
+	case StatusRunning, StatusInProgress:
+		// Running is not a warning: the work is going as asked, so the word
+		// stays neutral and the accent lives in the spinner or dot beside it.
+		// Warning is reserved for the states that need the user (a pending
+		// approval, an expired authorization), which is how VS Code, Carbon
+		// and Linear split "in progress" from "needs attention".
+		return t.LabelSecondary
+	case StatusNeedsAction:
 		return t.WarningText
 	case StatusSuccess:
 		return t.SuccessText
@@ -294,7 +301,9 @@ func StatusColor(t *design.Tokens, kind StatusKind) ui.Color {
 // not write text).
 func statusFill(t *design.Tokens, kind StatusKind) ui.Color {
 	switch kind {
-	case StatusRunning, StatusInProgress, StatusNeedsAction:
+	case StatusRunning, StatusInProgress:
+		return t.Accent
+	case StatusNeedsAction:
 		return t.Warning
 	case StatusSuccess:
 		return t.Success

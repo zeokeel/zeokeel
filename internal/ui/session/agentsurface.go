@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/markdown"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -413,7 +412,13 @@ func buildAgentRunBand(c *ui.Context, t *design.Tokens, st *state, chat contract
 			buildSubagentEntry(c, t, st, activeID, compact)
 			buildJobsEntry(c, t, st, activeID, history, compact)
 			if pending > 0 {
-				uikit.StatusBadge(c, t, uikit.StatusPending,
+				// A pending approval is needs-action, not "queued": the state
+				// matrix gives running the accent and warning the states that wait
+				// on the user, so the chip carries WarningText on a 12% Warning
+				// tint like the approval card's own edge. Painted neutral it read
+				// as one more quiet instrument while the run was in fact blocked
+				// on a decision (2026-11 audit).
+				uikit.StatusBadge(c, t, uikit.StatusNeedsAction,
 					fmt.Sprintf(st.tr("待审批 %d", "%d awaiting approval"), pending)).
 					Tooltip(st.tr("待审批的请求在上方输入框旁处理",
 						"Pending approvals are handled above the composer"))
@@ -449,15 +454,41 @@ func pendingApprovalCount(st *state) int {
 	return len(approvals.Pending())
 }
 
-// agentEntryButton is one header entry: an icon, optional words and count, and
-// the entries' common metrics. The accessible name (Label) is the stable entry
-// name even when the compact form hides the words; the Tooltip carries the
-// numbers.
-func agentEntryButton(c *ui.Context, t *design.Tokens, label, tooltip string) ui.Element {
-	th := t.Theme()
-	return ui.Button(c, "").Label(label).Tooltip(tooltip).
-		Height(t.Scale(th.Space(7))).PaddingX(design.Space2).
-		Radius(design.RadiusSM).Shrink(0).Gap(design.Space1)
+// agentEntryButton is one header entry: an icon, its words and the count, on the
+// entries' common metrics. The words stay at every width — a narrow band shrinks
+// the padding and ellipsizes the label instead of dropping it (VD-21) — and the
+// Tooltip carries the exact numbers.
+func agentEntryButton(c *ui.Context, t *design.Tokens, label, tooltip string, compact bool) ui.Element {
+	padding := design.Space2
+	if compact {
+		// A narrow band shrinks the entry's padding, never its words: the entry is
+		// the feature's one visible name, and an icon alone stopped saying which
+		// feature it opens (VD-21 / AGENTS §3.17).
+		padding = design.Space1
+	}
+	// A label-shaped button, not an outlined control: no edge, a neutral fill at
+	// rest and the selection tint under the pointer (B-spec §3.1.2). The fill is
+	// drawn here because a background override turns off mygo's own button face
+	// states, so every state is covered by hand and fades over MotionFast.
+	button := ui.Button(c, "").Label(label).Tooltip(tooltip).
+		Height(t.Scale(design.ControlCompactHeight)).PaddingX(padding).
+		Radius(design.RadiusSM).Shrink(1).Gap(design.Space1).
+		Background(t.BgHover)
+	switch {
+	case button.Pressed():
+		button = button.Background(t.BgSelected)
+	case button.Hovered() || button.Focused():
+		button = button.Background(t.BgSelected)
+	}
+	return button.Transition(design.TransitionColors(c))
+}
+
+// agentEntryText is one entry's words: 12/500 (a label, not metadata), ellipsized
+// rather than dropped when the band is narrow.
+func agentEntryText(c *ui.Context, t *design.Tokens, label string) ui.Element {
+	return design.Apply(ui.Text(c, label), t.Font(design.TypeXXS)).
+		FontWeight(design.WeightMedium).TextColor(t.LabelSecondary).
+		MaxLines(1).Ellipsis("…").MaxWidth(design.Space8 * 5)
 }
 
 // agentCountText renders the quiet count beside an entry's words.
@@ -471,7 +502,9 @@ func agentCountText(c *ui.Context, t *design.Tokens, count int) {
 func agentStatusFill(t *design.Tokens, kind uikit.StatusKind) ui.Color {
 	switch kind {
 	case uikit.StatusRunning, uikit.StatusInProgress:
-		return t.Warning
+		// Running is the accent role, not a warning: warning is for the states
+		// that need the user (F-06, DESIGN.md §3.7).
+		return t.Accent
 	case uikit.StatusSuccess:
 		return t.Success
 	case uikit.StatusError:
@@ -489,6 +522,27 @@ func (st *state) toastAnchorService() contracts.ToastAnchorService {
 		st.toastAnchor, _ = st.ctx.Get(contracts.KeyToastAnchor)
 	}
 	return st.toastAnchor
+}
+
+// anyOverlayOpen reports whether one of this screen's floating layers is open.
+// The window-wide Escape must stand down while one is: a window shortcut takes
+// the key before an overlay's own handler, so it would swallow the Escape that
+// closes the popover (the team/subagent/jobs panels, the model and permission
+// menus, the queue and usage popovers, the suggestion menus).
+func (st *state) anyOverlayOpen() bool {
+	if st == nil {
+		return false
+	}
+	// The flags themselves, not the reported map: a host without the toast
+	// anchor service still opens these popovers, and the Escape contract must not
+	// depend on a reporting side channel. The find bar and the suggestion menus
+	// are deliberately absent: the session's own Escape arbitration closes them
+	// (find first, then the menus), so it has to stay live while they are open.
+	return st.queueMenuOpen || st.statusDetailOpen ||
+		st.draftOverwriteOpen || st.agents.teamOpen || st.agents.childOpen ||
+		st.agents.jobsOpen || st.agents.modelMenuOpen || st.agents.workbenchOpen ||
+		st.reminders.listOpen || st.reminders.createOpen || st.memoryEditOpen ||
+		st.agents.closeMember != ""
 }
 
 // reportOverlay reports one module-owned popover's open/close transition to the
@@ -524,13 +578,10 @@ func buildTeamEntry(c *ui.Context, t *design.Tokens, st *state, members []contra
 	// (user correction to the v0.2.19 subtraction pass).
 	label := st.tr("智能体团队", "Agent team")
 	tooltip := teamMemberCounts(st, members, running)
-	chip := agentEntryButton(c, t, label, tooltip)
+	chip := agentEntryButton(c, t, label, tooltip, compact)
 	chip.Children(func() {
-		ui.Icon(c, icons.Users()).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
-		if !compact {
-			design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).FontWeight(agentHeadingWeight).
-				TextColor(t.LabelSecondary).NoWrap()
-		}
+		ui.Icon(c, icons.Users()).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelSecondary)
+		agentEntryText(c, t, label)
 		// A zero count is not information worth a header glyph: it made an idle
 		// band read "0 / 0" even though the entries themselves are the point.
 		// The tooltip and the accessible label still carry the exact count.
@@ -846,19 +897,21 @@ func buildTeamMemberCard(c *ui.Context, t *design.Tokens, st *state, member cont
 				if !member.Historical && st.agents.childID == member.ID {
 					design.Apply(ui.Badge(c, st.tr("当前", "Current")), t.Badge())
 				}
-				if member.Historical {
-					history := st.tr("历史", "History")
-					if member.Resumable {
-						history += st.tr(" · 可继续", " · continuable")
-					} else {
-						history += st.tr(" · 只读", " · read-only")
-					}
-					design.Apply(ui.Text(c, history), t.Font(design.TypeXXXS)).
-						TextColor(t.LabelTertiary).NoWrap()
-				}
 				ui.Spacer(c)
-				uikit.StatusText(c, t, design.TypeXXXS, kind,
-					uikit.RunStateLabel(st.locale, member.RunState))
+				// One status word, not two: a finished member used to carry both a
+				// 历史 chip and the run state beside it, which read as two competing
+				// states (visual audit). The state phrase absorbs the affordance:
+				// 已结束 · 可继续 / 已结束 · 只读.
+				status := uikit.RunStateLabel(st.locale, member.RunState)
+				if member.Historical {
+					status = st.tr("已结束", "Finished")
+					if member.Resumable {
+						status += st.tr(" · 可继续", " · continuable")
+					} else {
+						status += st.tr(" · 只读", " · read-only")
+					}
+				}
+				uikit.StatusText(c, t, design.TypeXXXS, kind, status)
 			})
 			design.Apply(ui.Text(c, agentMemberActivity(st, member)), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
@@ -893,7 +946,15 @@ func buildTeamMemberCard(c *ui.Context, t *design.Tokens, st *state, member cont
 // newest tracked team activity, else the retained answer, else the empty state.
 func agentMemberActivity(st *state, member contracts.TeamMember) string {
 	if len(member.Activity) > 0 {
-		if text := strings.TrimSpace(member.Activity[len(member.Activity)-1].Text); text != "" {
+		last := member.Activity[len(member.Activity)-1]
+		if text := strings.TrimSpace(last.Text); text != "" {
+			// A close entry is the backend's record of the gesture, not a state:
+			// "关闭「研究员」" beside a finished member reads as an action still
+			// waiting to happen (visual audit). The card states the state instead.
+			if last.Kind == contracts.TeamActivityClose ||
+				strings.HasPrefix(text, st.tr("关闭", "Closed")) {
+				return st.tr("「", "“") + agentDisplayName(member.Name, member.ID) + st.tr("」已结束", "” finished")
+			}
 			return text
 		}
 	}
@@ -1182,18 +1243,10 @@ func buildSubagentEntry(c *ui.Context, t *design.Tokens, st *state, activeID str
 		// Zero is not worth a header number; the entry stays for discoverability.
 		visual = st.tr("子智能体", "Subagents")
 	}
-	chip := agentEntryButton(c, t, label, tooltip)
+	chip := agentEntryButton(c, t, label, tooltip, compact)
 	chip.Children(func() {
-		ui.Icon(c, icons.Activity()).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
-		if compact {
-			if len(agents) > 0 {
-				design.Apply(ui.Text(c, fmt.Sprintf("%d", len(agents))),
-					t.Font(design.TypeXS)).TextColor(t.LabelSecondary).NoWrap()
-			}
-		} else {
-			design.Apply(ui.Text(c, visual), t.Font(design.TypeXS)).
-				TextColor(t.LabelSecondary).NoWrap()
-		}
+		ui.Icon(c, icons.Activity()).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelSecondary)
+		agentEntryText(c, t, visual)
 	})
 	if chip.Clicked() {
 		st.agents.childOpen = !st.agents.childOpen
@@ -1274,8 +1327,8 @@ func buildChildSwitcherRow(c *ui.Context, t *design.Tokens, st *state, agent con
 				design.Apply(ui.Text(c, childAgentMeta(st, agent)), t.Font(design.TypeXXXS)).
 					TextColor(t.LabelTertiary).NoWrap()
 				ui.Spacer(c)
-				uikit.StatusText(c, t, design.TypeXXXS, kind,
-					uikit.RunStateLabel(st.locale, agent.Status))
+				statusKind, statusText := childAgentStatusPhrase(st, agent)
+				uikit.StatusText(c, t, design.TypeXXXS, statusKind, statusText)
 			})
 			design.Apply(ui.Text(c, childAgentActivityLine(st, agent)), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
@@ -1298,21 +1351,32 @@ func buildChildSwitcherRow(c *ui.Context, t *design.Tokens, st *state, agent con
 	})
 }
 
-// childAgentMeta is the switcher's quiet type line: the kind and the follow-up
-// capability, plus the model when the backend names one.
+// childAgentStatusPhrase is the child's one status expression: the live run state,
+// or — for a restored record — the ended state and what it can still do
+// (已结束 · 可继续 / 已结束 · 只读). The switcher row and the child's own header
+// both read it, so a child never carries two competing status words (visual
+// audit: 已完成 / 已结束记录 / 可继续 stood side by side).
+func childAgentStatusPhrase(st *state, agent contracts.ChildAgent) (uikit.StatusKind, string) {
+	kind := uikit.ParseRunState(agent.Status).Kind()
+	if !agent.Historical {
+		return kind, uikit.RunStateLabel(st.locale, agent.Status)
+	}
+	text := st.tr("已结束", "Finished")
+	if agent.Resumable {
+		text += st.tr(" · 可继续", " · continuable")
+	} else {
+		text += st.tr(" · 只读", " · read-only")
+	}
+	return kind, text
+}
+
+// childAgentMeta is the switcher's quiet type line: the kind, the live follow-up
+// mode, and the model when the backend names one. A restored record carries no
+// mode here: its state and capability are the status phrase beside this line, and
+// the durability note says the rest.
 func childAgentMeta(st *state, agent contracts.ChildAgent) string {
 	parts := []string{childAgentKindLabel(st, agent.Kind)}
-	if agent.Historical {
-		// A restored row has no live backend; only a resumable record can still
-		// take a follow-up (cold resume from the durable child session), so the
-		// capability line never promises more than the backend offers.
-		parts = append(parts, st.tr("已结束记录", "Finished record"))
-		if agent.Resumable {
-			parts = append(parts, childAgentModeLabel(st, contracts.ChildAgentContinuable))
-		} else {
-			parts = append(parts, st.tr("只读", "read-only"))
-		}
-	} else {
+	if !agent.Historical {
 		parts = append(parts, childAgentModeLabel(st, agent.Mode))
 	}
 	if model := strings.TrimSpace(agent.Model); model != "" {
@@ -1438,20 +1502,10 @@ func buildJobsEntry(c *ui.Context, t *design.Tokens, st *state, sessionID string
 		tooltipParts = append(tooltipParts, fmt.Sprintf(
 			st.tr("历史 %d 条", "%d in history"), len(visibleHistory)))
 	}
-	chip := agentEntryButton(c, t, label, strings.Join(tooltipParts, " · "))
+	chip := agentEntryButton(c, t, label, strings.Join(tooltipParts, " · "), compact)
 	chip.Children(func() {
-		ui.Icon(c, icons.Clock()).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
-		if compact {
-			// A zero live count says nothing: the history-only entry keeps the
-			// glyph and its accessible name, without a "0".
-			if len(list) > 0 {
-				design.Apply(ui.Text(c, fmt.Sprintf("%d", len(list))),
-					t.Font(design.TypeXS)).TextColor(t.LabelSecondary).NoWrap()
-			}
-		} else {
-			design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).
-				TextColor(t.LabelSecondary).NoWrap()
-		}
+		ui.Icon(c, icons.Clock()).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelSecondary)
+		agentEntryText(c, t, label)
 	})
 	if chip.Clicked() {
 		st.agents.jobsOpen = !st.agents.jobsOpen
@@ -1579,8 +1633,12 @@ func (st *state) buildStalePermissionHint(c *ui.Context, t *design.Tokens, jobs 
 			stopText = st.tr("停止中…", "Stopping…")
 		}
 		stop := ui.Button(c, stopText).Label(stopLabel).Tooltip(tooltip)
+		// One width for all three states (停止这些任务 / 确认停止 / 停止中…): the
+		// widest label's measure, so arming and settling never move the row's
+		// other controls sideways (visual audit: the button grew 44→74 DIP).
 		design.Apply(stop, t.DangerButton(), t.Font(design.TypeXXS)).
-			Height(agentRowActionHeight).PaddingX(design.Space2).Shrink(0)
+			Height(agentRowActionHeight).PaddingX(design.Space2).Shrink(0).
+			MinWidth(design.Space8 * 3)
 		stop.Disabled(st.agents.jobKilling != "")
 		if stop.Clicked() {
 			if st.agents.jobStaleArmed {
@@ -2056,7 +2114,6 @@ func buildChildConversationPane(c *ui.Context, t *design.Tokens, runtime contrac
 // buildChildHeader is the child view's status line: the truthful run state, the
 // agent family, the model, the usage and the elapsed time.
 func buildChildHeader(c *ui.Context, t *design.Tokens, st *state, child contracts.ChildAgent) {
-	kind := uikit.ParseRunState(child.Status).Kind()
 	// The raw child ID (member-1) is an internal key, not user copy: it moves
 	// into the quiet line's tooltip as the session ID instead of occupying its
 	// own row under the status (R6).
@@ -2066,7 +2123,8 @@ func buildChildHeader(c *ui.Context, t *design.Tokens, st *state, child contract
 	}
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			uikit.StatusBadge(c, t, kind, uikit.RunStateLabel(st.locale, child.Status))
+			statusKind, statusText := childAgentStatusPhrase(st, child)
+			uikit.StatusBadge(c, t, statusKind, statusText)
 			meta := design.Apply(ui.Text(c, childAgentMeta(st, child)), t.Font(design.TypeXXS)).
 				TextColor(t.LabelSecondary)
 			if sessionID != "" {
@@ -2140,7 +2198,7 @@ func buildChildOutput(c *ui.Context, t *design.Tokens, st *state, child contract
 	}
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 		agentSectionLabel(c, t, st.tr("输出", "Output"))
-		markdown.View(c, output, st.markdownOptions(t))
+		uikit.MarkdownReply(c, output, st.markdownOptions(t))
 	})
 	if st.agents.childReplyFor == child.ID && strings.TrimSpace(st.agents.childReply) != "" {
 		buildChildTextSection(c, t, st.tr("最新回复", "Latest reply"), st.agents.childReply)
@@ -2269,9 +2327,12 @@ func buildChildMemoryPane(c *ui.Context, t *design.Tokens, st *state, child cont
 	})
 }
 
-// buildChildComposer is the continuable teammate's message box: Enter or 发送
-// calls ChildAgentService.SendChildAgent off the UI thread and shows the
-// answer it returns.
+// buildChildComposer is the continuable teammate's message box. It is the
+// conversation's own composer shell — the same card, the same 32 DIP send control
+// and the same toolbar slot — with only what a child needs: its draft, its
+// placeholder and the answer note. A bare text field with a small button read as
+// a different product from the parent composer right above it (p2-team-child
+// audit).
 func buildChildComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	st *state, child contracts.ChildAgent) {
 	children := st.childAgentService()
@@ -2287,65 +2348,44 @@ func buildChildComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRun
 			placeholder = st.tr("继续该子代理…", "Continue this subagent…")
 		}
 	}
-	ui.Row(c).FillWidth().Justify(ui.Center).PaddingY(design.Space3).Children(func() {
-		ui.Column(c).Width(design.TranscriptWidth).MaxWidthPercent(92).
-			Gap(design.Space2).Children(func() {
-			if st.agents.childSendErr != "" {
-				uikit.ErrorLine(c, st.agents.childSendErr)
+	sending := st.agents.childSending
+	var errs []string
+	if st.agents.childSendErr != "" {
+		errs = []string{st.agents.childSendErr}
+	}
+	uikit.ComposerShell(c, uikit.ComposerShellOptions{
+		Key:         "session.child.composer",
+		Draft:       &st.agents.childDraft,
+		Placeholder: placeholder,
+		Locale:      st.locale,
+		Focus:       &st.agents.childFocus,
+		CardLabel:   st.tr("发送给 ", "Send to ") + name,
+		// The input's name is the card's own, unique per child, and it does not
+		// move when the placeholder switches between 继续该队友… and 继续该子代理…:
+		// the placeholder stays visual copy (QA: two child names collided because
+		// the accessible name was the placeholder).
+		InputLabel:      st.tr("发送给 ", "Send to ") + name,
+		SendLabel:       st.tr("发送", "Send"),
+		SendEnabled:     strings.TrimSpace(st.agents.childDraft) != "" && !sending,
+		SendDescription: st.tr("发送消息给 ", "Send message to ") + name,
+		Send: func() bool {
+			if sending {
+				return false
 			}
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				// The input and the send action share one control tier (32 DIP,
-				// design.RowCompactHeight): the default input height (~31) sat off
-				// the 4-DIP grid next to the 36 DIP send (2026-11 UI review P3).
-				input := ui.TextInput(c, &st.agents.childDraft).
-					Label(st.tr("发送给 ", "Send to ") + name).
-					Placeholder(placeholder).
-					Bind(&st.agents.childInput).FillWidth().Grow(1).
-					Height(design.RowCompactHeight)
-				if st.agents.childFocus {
-					st.agents.childFocus = false
-					st.agents.childInput.Focus(c)
-				}
-				submitted := input.Submitted()
-				// The empty draft's send button must not keep the accent fill:
-				// mygo's 50% accent wash on a disabled primary still reads as a
-				// clickable brand-blue button. The neutral enabled-shaped
-				// DisabledPrimary keeps the size and the native disabled state,
-				// and the accent primary comes back once there is text to send.
-				sendLabel := st.tr("发送", "Send")
-				canSend := strings.TrimSpace(st.agents.childDraft) != "" && !st.agents.childSending
-				var send ui.Element
-				if canSend {
-					send = design.Apply(ui.PrimaryButton(c, sendLabel), t.PrimaryButton())
-				} else {
-					send = design.Apply(ui.Button(c, sendLabel), t.DisabledPrimary())
-				}
-				send = send.Label(st.tr("发送消息给 ", "Send message to ") + name).Shrink(0).
-					Height(design.RowCompactHeight)
-				if !canSend {
-					send = send.Disabled(true)
-				}
-				clicked := send.Clicked()
-				if st.agents.childSending {
-					ui.Spinner(c).Label(st.tr("发送中", "Sending")).
-						Size(design.Space4, design.Space4).TextColor(t.Accent)
-				}
-				if (submitted || clicked) && !st.agents.childSending {
-					st.sendChildMessage(children, child.ID)
-				}
-			})
-			if st.agents.childSending {
-				agentHint(c, t, st.tr("已发送，等待该队友的回复。",
-					"Sent; waiting for the teammate's reply."))
-				return
+			st.sendChildMessage(children, child.ID)
+			return true
+		},
+		Errors: errs,
+		Hint: func(*ui.Context) string {
+			if sending {
+				return st.tr("已发送，等待该队友的回复。", "Sent; waiting for the teammate's reply.")
 			}
-			hint := st.tr("发送后等待该队友的回复。", "The teammate answers when its next run finishes.")
 			if child.Historical {
-				hint = st.tr("发送后会恢复这条历史记录的会话，并等待它的回答。",
+				return st.tr("发送后会恢复这条历史记录的会话，并等待它的回答。",
 					"Sending resumes this record's conversation and waits for its answer.")
 			}
-			agentHint(c, t, hint)
-		})
+			return st.tr("发送后等待该队友的回复。", "The teammate answers when its next run finishes.")
+		},
 	})
 }
 
@@ -2529,7 +2569,7 @@ func turnGeneratedFiles(messages []contracts.ChatMessage) generatedFiles {
 			// Only a successful call produced a file: a failed, cancelled,
 			// denied or still-running write must never be presented as
 			// delivered or edited (the cards offer actions on the path).
-			if uikit.ParseToolStatus(call.Status) != uikit.ToolStatusSuccess {
+			if uikit.ToolCallStatusKind(call) != uikit.StatusSuccess {
 				continue
 			}
 			path := generatedFileFromToolCall(call)

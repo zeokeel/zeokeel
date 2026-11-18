@@ -53,7 +53,7 @@ func ComposerToolbar(c *ui.Context, o ComposerToolbarOptions) ui.Element {
 		if o.Items != nil {
 			o.Items(c)
 		}
-	}).Label(label)
+	}).Label(label).Height(design.RowCompactHeight)
 }
 
 // ComposerAttachOptions is the composer's attach control: a quiet toolbar
@@ -107,7 +107,9 @@ func ComposerAttachButton(c *ui.Context, o ComposerAttachOptions) ui.Element {
 	if o.Busy {
 		button = button.Disabled(true)
 	}
-	design.Apply(button, t.TextMuted(design.TypeXS))
+	// 28 DIP, the compact control height: the toolbar row is 32 and its controls
+	// sit one step inside it (B-spec §3.2.7: toolbar 32, buttons 28).
+	design.Apply(button, t.TextMuted(design.TypeXS)).Height(design.ControlCompactHeight)
 	button.Children(func() {
 		ui.Icon(c, icons.File()).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
 		design.Apply(ui.Text(c, label), t.Font(design.TypeXS))

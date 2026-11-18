@@ -134,7 +134,13 @@ func IconButton(c *ui.Context, o IconButtonOptions) ui.Element {
 	} else {
 		button = ui.ButtonBase(c)
 	}
-	button = button.Size(target, target).Center().Radius(design.RadiusSM)
+	// The fill fades between states over MotionFast instead of switching: a
+	// hard cut on every hover is the single largest "this feels cheap"
+	// difference against the tools this product sits next to. The element's
+	// identity is stable (the caller's Key, or its place in the row), which is
+	// what mygo's transition needs.
+	button = button.Size(target, target).Center().Radius(design.RadiusSM).
+		Transition(design.TransitionColors(c))
 	if o.Toggle {
 		// A destination of the shell's rail is a toggle-like control: only the
 		// toggle role carries Selected's state to assistive technology as

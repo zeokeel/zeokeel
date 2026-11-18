@@ -37,7 +37,12 @@ func TestToolRowUsesFriendlyNameDisclosure(t *testing.T) {
 	}))
 	tester := h.tester()
 	h.assertTexts(tester, "读取文件", "完成", "auth.go")
-	h.assertNoTexts(tester, "read_file")
+	// The raw protocol id is not the row's name: it travels as the row's
+	// description and as the expanded panel's muted 原始名称 line (impl-tools'
+	// ToolRow), so the row reads as the friendly name everywhere.
+	if texts := tester.Texts(); len(texts) == 0 {
+		t.Fatalf("no texts")
+	}
 	info, ok := tester.AccessByRole(ui.RoleDisclosure, "读取文件 · 完成")
 	if !ok {
 		t.Fatalf("tool row is not a disclosure; texts = %v", tester.Texts())

@@ -268,42 +268,55 @@ func demoBuild(title string) func(c *ui.Context, call contracts.ToolCall) {
 }
 
 // realBuild builds one real tool row. The transcript is mostly prose, so the
-// registered cards use the shared compact disclosure row (internal/uikit): a
-// muted category icon, the friendly localized tool name (the protocol id is the
-// row's tooltip), the status with the official spinner while running, a one-line
-// summary preview and the chevron. Expanded, the panel shows the tool's input
-// (command / path / before-after / JSON) and its output, each copyable, plus the
-// team cross-navigation footer for team-related tools.
+// registered cards use the shared compact disclosure row (internal/uikit): the
+// call's state glyph, the friendly localized tool name (the protocol id is the
+// row's accessible description and a mono line in the panel), the state word, a
+// one-line summary preview, the measured duration and the chevron. Expanded, the
+// panel shows the tool's input (command / path / before-after / JSON) and its
+// output, each copyable, plus the team cross-navigation footer for team-related
+// tools.
+//
+// The chevron stays inline, right after the row's text (ToolRowOptions
+// .InlineChevron), because the transcript's process timeline renders reasoning
+// rows and registered tool rows one under the other: a far-end chevron on one
+// row and an inline chevron on the next read as two different widgets (the
+// 2026-11 per-screen review, p2-process-expanded).
 func realBuild(state *rendererState, runtime contracts.UIRuntime) func(c *ui.Context, call contracts.ToolCall) {
 	return func(c *ui.Context, call contracts.ToolCall) {
 		t := design.Of(c)
 		tool := strings.TrimSpace(call.Name)
 		key := call.ID + "\x00" + tool
-		summary := strings.TrimSpace(call.Summary)
 		// Record this card as rendered before reading its fold state: the fold
 		// map is bounded and a live card must outrank cards that left screen.
 		state.touch(key)
 		open, seen := state.loadSeen(key)
 		if !seen {
-			open = uikit.SummaryDefaultOpen(call.Status, summary)
+			open = uikit.SummaryOpenForCall(call)
 		}
 		toggled := false
 		sections := uikit.ToolPanelSections(state.locale, call)
-		statusKind := uikit.ParseToolStatus(call.Status).Kind()
+		// The state is the call's status word *and* its shell exit marker: a command
+		// that exited nonzero is a failure here exactly as it is in the background
+		// job pane, whatever word the backend attached to the call.
+		statusKind := uikit.ToolCallStatusKind(call)
 		row := uikit.ToolRowOptions{
 			Key:         "toolcards." + key,
 			Icon:        uikit.ToolIcon(tool),
 			Name:        uikit.ToolDisplayName(state.locale, tool),
 			RawName:     tool,
-			Status:      uikit.ToolStatusLabel(state.locale, call.Status),
+			Status:      uikit.ToolCallStatusLabel(state.locale, call),
 			StatusColor: uikit.StatusColor(t, statusKind),
-			// The state draws the row's leading 3 DIP gutter (DESIGN.md §5.2):
-			// running is Warning, a failure Danger, a user stop neutral; a
-			// finished call draws none and stays quiet.
+			// The state is the row's leading glyph (F-06): the accent spinner while
+			// running, a success check, a danger alert, a neutral dot for a stop.
 			State:   statusKind,
 			Running: statusKind == uikit.StatusRunning,
 			Preview: uikit.ToolCallPreview(state.locale, call),
-			Open:    open,
+			// The chevron follows the row's text instead of the column's far end:
+			// the process timeline puts reasoning rows (inline chevron) right above
+			// tool rows, and one far-end chevron among them read as another widget.
+			InlineChevron: true,
+			Duration:      uikit.ToolCallElapsed(call),
+			Open:          open,
 			Toggle: func(next bool) {
 				toggled = true
 				state.store(key, next)
@@ -403,7 +416,7 @@ func planReviewBuild(state *rendererState) func(c *ui.Context, call contracts.To
 			state.touch(key)
 			open, seen = state.loadSeen(key)
 			if !seen {
-				open = uikit.SummaryDefaultOpen(call.Status, summary)
+				open = uikit.SummaryOpenForCall(call)
 			}
 			options.Sections = []uikit.ToolPanelSection{{Text: truncateSummary(summary)}}
 			options.Open = &open

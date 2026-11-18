@@ -16,10 +16,32 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// accentPixels counts the light theme's accent color in the frame image, which
-// is how a chosen List row paints: about one row's worth (~19k pixels) when the
-// palette shows its choice, and a few hundred for focus rings when it does not.
-func accentPixels(tt *ui.Tester) int {
+// selectionPixels counts the pixels of the light theme's persistent selection
+// tint (BgSelected: brand royal at 9% over the white palette panel, #E9EEFE) —
+// about one row's worth when the palette paints its chosen row. The tint is the
+// transient selection's fill as well as the persistent one's (B-spec §3.1.4): a
+// command palette never paints a full accent block, so the count of tinted
+// pixels is the evidence that the keyboard's target is on screen.
+func selectionPixels(tt *ui.Tester) int {
+	img := tt.Image()
+	n := 0
+	for y := 0; y < img.Rect.Dy(); y++ {
+		for x := 0; x < img.Rect.Dx(); x++ {
+			r, g, b, _ := img.At(x, y).RGBA()
+			r8, g8, b8 := r>>8, g>>8, b>>8
+			if r8 >= 226 && r8 <= 240 && g8 >= 232 && g8 <= 244 && b8 >= 248 {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// accentStripePixels counts the brand accent pixels inside the palette's list:
+// the 2 DIP stripe the chosen row carries. It is small (one 2x36 stripe, plus
+// the caption's caret and focus ring), which is exactly the point — the accent
+// marks the choice, it does not fill it.
+func accentStripePixels(tt *ui.Tester) int {
 	img := tt.Image()
 	n := 0
 	for y := 0; y < img.Rect.Dy(); y++ {
@@ -70,8 +92,8 @@ func TestPaletteKeepsChosenRowVisibleAfterReopen(t *testing.T) {
 	r.togglePalette()
 	tt.Frame()
 	requireHasText(t, tt, "命令面板")
-	if got := accentPixels(tt); got < 5000 {
-		t.Fatalf("reopened palette paints no chosen row: accent pixels = %d (a row is about 19k); selected = %d",
+	if got := selectionPixels(tt); got < 5000 {
+		t.Fatalf("reopened palette paints no chosen row: selection pixels = %d (a row is about 19k); selected = %d",
 			got, r.paletteSelected)
 	}
 	if r.paletteSelected != 0 {
@@ -122,8 +144,8 @@ func TestPaletteReopenStartsFromFirstRow(t *testing.T) {
 	if r.paletteSelected != 0 {
 		t.Fatalf("reopened palette selected = %d, want the first row (0)", r.paletteSelected)
 	}
-	if got := accentPixels(tt); got < 5000 {
-		t.Fatalf("reopened palette paints no chosen row: accent pixels = %d", got)
+	if got := selectionPixels(tt); got < 5000 {
+		t.Fatalf("reopened palette paints no chosen row: selection pixels = %d", got)
 	}
 }
 
@@ -163,8 +185,8 @@ func TestPaletteFilterChangeChoosesFirstVisibleRow(t *testing.T) {
 	if r.paletteSelected != 0 {
 		t.Fatalf("paletteSelected after clearing the filter = %d, want the first row Alpha (0)", r.paletteSelected)
 	}
-	if got := accentPixels(tt); got < 5000 {
-		t.Fatalf("filtered palette paints no chosen row: accent pixels = %d (a row is about 19k)", got)
+	if got := selectionPixels(tt); got < 5000 {
+		t.Fatalf("filtered palette paints no chosen row: selection pixels = %d (a row is about 19k)", got)
 	}
 	// Enter runs the row the user sees.
 	tt.Key(0, ui.KeyEnter)
@@ -297,10 +319,10 @@ func TestRailNewChatActionAndScreenSet(t *testing.T) {
 	r.SetSidebarCollapsed(true)
 	tt.Frame()
 
-	// The rail's icon buttons carry their accessible names; "新对话" is the
+	// The rail's icon buttons carry their accessible names; "新建会话" is the
 	// action, the remaining module screens are destinations (Home is retired
 	// from product navigation).
-	if _, ok := tt.AccessByRole(ui.RoleButton, "新对话"); !ok {
+	if _, ok := tt.AccessByRole(ui.RoleButton, "新建会话"); !ok {
 		t.Fatalf("rail has no new-chat action; texts = %v", tt.Texts())
 	}
 	if _, ok := tt.AccessByRole(ui.RoleToggleButton, "对话"); ok {
@@ -316,7 +338,7 @@ func TestRailNewChatActionAndScreenSet(t *testing.T) {
 
 	// The rail action creates a session through the same path as the tray and
 	// the Cmd/Ctrl+N shortcut.
-	if info, ok := tt.AccessByRole(ui.RoleButton, "新对话"); ok {
+	if info, ok := tt.AccessByRole(ui.RoleButton, "新建会话"); ok {
 		tt.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
 		tt.Frame()
 	}

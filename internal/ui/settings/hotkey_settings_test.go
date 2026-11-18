@@ -22,7 +22,7 @@ func TestAppearanceGlobalHotkeyDefaultsEmpty(t *testing.T) {
 	h.click(tester, "模型")
 	h.click(tester, "外观")
 
-	h.assertTexts(tester, "全局热键", "组合键 输入", "录入")
+	h.assertTexts(tester, "全局热键", "组合键 输入", "录制")
 	joined := strings.Join(tester.Texts(), " ")
 	for _, want := range []string{"留空关闭", "点「保存」并重启后生效"} {
 		if !strings.Contains(joined, want) {
@@ -86,7 +86,7 @@ func TestAppearanceGlobalHotkeyRejectsInvalidValue(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "保存")
 
-	h.assertTexts(tester, "全局热键格式无效")
+	h.assertTexts(tester, "组合键格式无效")
 	if !strings.Contains(strings.Join(tester.Texts(), " "), "保存失败：") {
 		t.Fatalf("invalid apply does not report the failure; texts = %v", tester.Texts())
 	}
@@ -139,7 +139,7 @@ func TestHotkeyRecordCapture(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "外观")
 
-	h.click(tester, "录入")
+	h.click(tester, "录制")
 	h.assertTexts(tester, "按下组合键，Esc 取消")
 	tester.Key(ui.Cmd|ui.Shift, ui.KeyK)
 	tester.Frame()
@@ -155,7 +155,7 @@ func TestHotkeyRecordCapture(t *testing.T) {
 	tester.Key(ui.Cmd, ui.KeyA)
 	tester.Key(0, ui.KeyBackspace)
 	tester.Frame()
-	h.click(tester, "录入")
+	h.click(tester, "录制")
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
 	h.assertNoTexts(tester, "按下组合键，Esc 取消")
@@ -185,5 +185,5 @@ func TestHotkeyInvalidDraftShowsInlineError(t *testing.T) {
 	h.focusInput(tester, "组合键 输入")
 	tester.Type("banana")
 	tester.Frame()
-	h.assertTexts(tester, "全局热键格式无效")
+	h.assertTexts(tester, "组合键格式无效")
 }

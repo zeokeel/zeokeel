@@ -80,7 +80,7 @@ func TestPermissionMenuTwoLayerDisclosure(t *testing.T) {
 	// The session carries a full approval override, but the OS sandbox still
 	// follows the global workspace preset — the two layers are disclosed.
 	h.assertTexts(tester, "当前会话：审批＝所有权限（会话级覆盖）")
-	h.assertTexts(tester, "OS 沙箱＝工作区修改（跟随全局）")
+	h.assertTexts(tester, "系统沙箱＝工作区修改（跟随全局）")
 }
 
 // TestPermissionMenuDisclosureAbsentWithoutReadModel covers a stripped backend

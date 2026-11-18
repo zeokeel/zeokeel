@@ -363,7 +363,7 @@ func TestNoPendingRendersNoBanner(t *testing.T) {
 	tester.Frame()
 
 	h.assertTexts(tester, "会话屏")
-	h.assertNoTexts(tester, "需要审批", "允许", "拒绝", "本会话内始终允许")
+	h.assertNoTexts(tester, "需要审批", "允许一次", "拒绝")
 }
 
 // TestPendingRendersInlineBanner covers the card anatomy: the oldest pending
@@ -378,36 +378,39 @@ func TestPendingRendersInlineBanner(t *testing.T) {
 	h.frames(tester, 2)
 
 	h.assertTexts(tester,
-		"会话屏", "需要审批", "运行命令", "还有 1 条待审批", "Esc 拒绝",
+		"会话屏", "需要审批", "运行命令", "还有 1 条",
+		"Esc", "Ctrl+Enter", "拒绝本次", "按所选范围允许",
 		"命令", "运行命令 ls", "原始参数",
-		"允许", "本会话内始终允许", "拒绝",
+		"允许一次", "拒绝", "更多",
 		"允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。",
 	)
-	// The friendly name is the visible copy; the raw tool id only lives in the
-	// tooltip, and the raw arguments are collapsed details.
-	h.assertNoTexts(tester, "bash", `{"command":"ls"}`, "参数详情")
+	// The raw tool id is visible mono copy; the raw arguments are collapsed
+	// details.
+	h.assertTexts(tester, "bash")
+	h.assertNoTexts(tester, `{"command":"ls"}`, "参数详情")
 	// The queued second request waits behind the first instead of replacing it.
 	h.assertNoTexts(tester, "写入文件")
 
-	// The footer keeps the desktop decision order: deny, session-scoped allow,
-	// primary allow.
+	// The footer is deny, then the one accent fill, then the scope menu; the
+	// session-scoped allow lives inside that menu, so the screen keeps exactly one
+	// primary action.
 	deny, ok := tester.Find("拒绝")
 	if !ok {
 		t.Fatalf("deny action missing; texts = %v", tester.Texts())
 	}
-	always, ok := tester.Find("本会话内始终允许")
-	if !ok {
-		t.Fatalf("session-scoped allow action missing; texts = %v", tester.Texts())
-	}
-	allow, ok := tester.Find("允许")
+	allow, ok := tester.Find("允许一次")
 	if !ok {
 		t.Fatalf("allow action missing; texts = %v", tester.Texts())
 	}
-	if !(deny.X < always.X && always.X < allow.X) {
-		t.Fatalf("footer order x = deny %.1f, always %.1f, allow %.1f; want deny < always < allow",
-			deny.X, always.X, allow.X)
+	more, ok := tester.Find("更多")
+	if !ok {
+		t.Fatalf("scope menu missing; texts = %v", tester.Texts())
 	}
-	if tester.Focused("拒绝") || tester.Focused("允许") || tester.Focused("本会话内始终允许") {
+	if !(deny.X < allow.X && allow.X < more.X) {
+		t.Fatalf("footer order x = deny %.1f, allow %.1f, more %.1f; want deny < allow < more",
+			deny.X, allow.X, more.X)
+	}
+	if tester.Focused("拒绝") || tester.Focused("允许一次") || tester.Focused("更多") {
 		t.Fatalf("the approval card must not autofocus an action; texts = %v", tester.Texts())
 	}
 }
@@ -424,16 +427,18 @@ func TestApprovalCardIsRegionExposed(t *testing.T) {
 	}
 }
 
-// TestDecisionButtonsResolveOnce covers the three explicit decisions: each
-// resolves the displayed request with its decision exactly once and removes the
-// card.
+// TestDecisionButtonsResolveOnce covers the explicit decisions: each resolves
+// the displayed request with its decision exactly once and removes the card. The
+// session-scoped allow is chosen in the scope menu first, then sent by the same
+// single accent action.
 func TestDecisionButtonsResolveOnce(t *testing.T) {
 	cases := []struct {
 		label    string
+		menu     string
 		decision contracts.ApprovalDecision
 	}{
-		{label: "允许", decision: contracts.ApprovalAllow},
-		{label: "本会话内始终允许", decision: contracts.ApprovalAllowAlways},
+		{label: "允许一次", decision: contracts.ApprovalAllow},
+		{label: "本会话内始终允许", menu: "本会话内始终允许该工具", decision: contracts.ApprovalAllowAlways},
 		{label: "拒绝", decision: contracts.ApprovalDeny},
 	}
 	for _, test := range cases {
@@ -443,6 +448,12 @@ func TestDecisionButtonsResolveOnce(t *testing.T) {
 			h.approvals.add(pendingRequest("r1", "bash", "运行命令", `{"command":"ls"}`))
 			h.frames(tester, 2)
 			h.assertTexts(tester, "需要审批")
+			if test.menu != "" {
+				h.click(tester, "更多")
+				h.frames(tester, 1)
+				h.click(tester, test.menu)
+				h.frames(tester, 1)
+			}
 
 			h.click(tester, test.label)
 			h.frames(tester, 3)
@@ -471,7 +482,7 @@ func TestResolvedRequestDoesNotReopen(t *testing.T) {
 	h.frames(tester, 2)
 	h.assertTexts(tester, "第一个")
 
-	h.click(tester, "允许")
+	h.click(tester, "允许一次")
 	// The backend still lists s1; the card must not reopen for it.
 	h.frames(tester, 3)
 	if got := h.approvals.resolved(); len(got) != 1 {
@@ -655,10 +666,12 @@ func TestConfigLabels(t *testing.T) {
 	tester := h.tester()
 	h.approvals.add(pendingRequest("c1", "bash", "run", `{"command":"ls"}`))
 	h.frames(tester, 2)
+	// The custom primary label and the custom deny label are shown verbatim; the
+	// session-scoped allow is a scope in the menu, so its custom copy is not a
+	// footer button any more.
 	h.assertTexts(tester, "Approve tool call", "Arguments", "运行命令",
-		"Allow once", "Always allow", "Reject")
+		"Allow once", "Reject", "更多")
 	h.assertNoTexts(tester, "需要审批")
-	h.assertNoExactTexts(tester, "允许")
 }
 
 // TestLongArgumentsAreTruncated covers the bounded arguments block: a huge tool
@@ -694,14 +707,15 @@ func TestEmptyArgumentsFallback(t *testing.T) {
 	h.assertNoTexts(tester, "原始参数")
 }
 
-// TestSummaryLabelFollowsToolKind covers S-08: only shell/terminal calls label
-// their summary 命令; a file read keeps the neutral 摘要.
+// TestSummaryLabelFollowsToolKind covers the target block's semantic label: a
+// shell call is a command, a file read a path — the card never calls a read a
+// command to run.
 func TestSummaryLabelFollowsToolKind(t *testing.T) {
 	h := newHarness(t, approval.Config{})
 	tester := h.tester()
 	h.approvals.add(pendingRequest("f1", "read_file", "读取 internal/app.go", `{"path":"internal/app.go"}`))
 	h.frames(tester, 2)
-	h.assertTexts(tester, "摘要")
+	h.assertTexts(tester, "路径")
 	for _, text := range tester.Texts() {
 		if text == "命令" {
 			t.Fatalf("read_file summary is labelled 命令; texts = %v", tester.Texts())

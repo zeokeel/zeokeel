@@ -123,16 +123,16 @@ func TestRunStatusQueuePopover(t *testing.T) {
 	if !queueOpen {
 		t.Fatal("clicking the queue badge did not open the popover")
 	}
-	if _, ok := tt.AccessByRole(ui.RoleList, "排队消息"); !ok {
+	if _, ok := tt.AccessByRole(ui.RoleList, "队列中的消息"); !ok {
 		t.Fatalf("queue popover has no named list; texts = %v", tt.Texts())
 	}
 	if !tt.HasText("第一条排队消息") || !tt.HasText("第二条排队消息") {
 		t.Fatalf("queue rows missing; texts = %v", tt.Texts())
 	}
-	if _, ok := tt.AccessByRole(ui.RoleButton, "取消排队"); !ok {
+	if _, ok := tt.AccessByRole(ui.RoleButton, "取消第 1 条排队消息"); !ok {
 		t.Fatalf("queue rows have no cancel control; texts = %v", tt.Texts())
 	}
-	if err := tt.Click("取消排队"); err != nil {
+	if err := tt.Click("取消第 1 条排队消息"); err != nil {
 		t.Fatalf("cancel queued prompt: %v", err)
 	}
 	tt.Frame()
@@ -189,7 +189,7 @@ func TestRunStatusQueuePopover(t *testing.T) {
 		t.Fatalf("reopen queue popover for resume: %v", err)
 	}
 	tt.Frame()
-	if err := tt.Click("发送排队消息"); err != nil {
+	if err := tt.Click("发送队列中的消息"); err != nil {
 		t.Fatalf("resume queue: %v", err)
 	}
 	tt.Frame()
@@ -283,7 +283,7 @@ func TestRunStatusQueueTargetSizes(t *testing.T) {
 		t.Fatalf("queue badge height = %v, want ≥%v (compact chip step)",
 			badge.Bounds.H, design.ControlCompactHeight)
 	}
-	remove := requireButton(t, tt, ui.RoleButton, "取消排队")
+	remove := requireButton(t, tt, ui.RoleButton, "取消第 1 条排队消息")
 	if remove.Bounds.W < design.IconSizeL || remove.Bounds.H < design.IconSizeL {
 		t.Fatalf("remove target = %vx%v, want ≥%vx%v",
 			remove.Bounds.W, remove.Bounds.H, design.IconSizeL, design.IconSizeL)
@@ -318,20 +318,33 @@ func TestRunStatusQueueBadgeStates(t *testing.T) {
 	info := requireButton(t, tt, ui.RoleButton, "已排队 1 条")
 	cx, cy := info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2
 	tt.Move(cx, cy)
+	tt.Advance(design.MotionFast + 20*time.Millisecond)
 	tt.Frame()
 	requirePixel(t, tt, x, y, over(tokens.BgSelected, tokens.BgBase))
 
 	// Press keeps the deeper tint and darkens the count ink to AccentPressed:
 	// the frame must contain the pressed ink inside the badge.
 	tt.Press(cx, cy)
+	tt.Advance(design.MotionFast + 20*time.Millisecond)
 	tt.Frame()
+	// The count is mono 12 now, so its strokes are thin enough that the
+	// antialiasing may leave no fully saturated pixel: the scan accepts the
+	// closest ink within a few steps of the token (the pressed state must still
+	// be visibly darker than the resting accent text).
 	pressedInk := 0
 	hoverImage := tt.Image()
+	diff := func(a, b uint8) int {
+		if a > b {
+			return int(a - b)
+		}
+		return int(b - a)
+	}
 	for py := int(info.Bounds.Y); py < int(info.Bounds.Y+info.Bounds.H); py++ {
 		for px := int(info.Bounds.X); px < int(info.Bounds.X+info.Bounds.W); px++ {
 			got := hoverImage.RGBAAt(px, py)
-			if got.R == tokens.AccentPressed.R && got.G == tokens.AccentPressed.G &&
-				got.B == tokens.AccentPressed.B && got.A == 255 {
+			if got.A == 255 && diff(got.R, tokens.AccentPressed.R) <= 24 &&
+				diff(got.G, tokens.AccentPressed.G) <= 24 &&
+				diff(got.B, tokens.AccentPressed.B) <= 24 {
 				pressedInk++
 			}
 		}
@@ -341,10 +354,12 @@ func TestRunStatusQueueBadgeStates(t *testing.T) {
 	}
 	tt.Release(cx, cy)
 	tt.Move(0, 0)
+	tt.Advance(design.MotionFast + 20*time.Millisecond)
 	tt.Frame()
 
 	// The open popover is the selected state: the deeper tint without hover.
 	queueOpen = true
+	tt.Advance(design.MotionFast + 20*time.Millisecond)
 	tt.Frame()
 	requirePixel(t, tt, x, y, over(tokens.BgSelected, tokens.BgBase))
 	queueOpen = false
@@ -352,6 +367,7 @@ func TestRunStatusQueueBadgeStates(t *testing.T) {
 
 	// Keyboard focus rings the badge (the base's native ring) and tints it.
 	tt.Key(0, ui.KeyTab)
+	tt.Advance(design.MotionFast + 20*time.Millisecond)
 	tt.Frame()
 	if !tt.Focused("已排队 1 条") {
 		t.Fatalf("Tab did not focus the queue badge; texts = %v", tt.Texts())

@@ -19,9 +19,11 @@ func view(c *ui.Context) {
 	uikit.Section(c, "小节标题", func(c *ui.Context) {
 		uikit.Bullet(c, "第一条要点")
 		uikit.Bullet(c, "第二条要点")
-		uikit.KeyValueRows(c, []uikit.KeyValue{
-			{Key: "版本", Value: "v0.1.0"},
-			{Key: "平台", Value: "linux"},
+		uikit.PropertySheet(c, uikit.PropertySheetOptions{
+			Rows: []uikit.PropertyRow{
+				{Label: "版本", Value: "v0.1.0"},
+				{Label: "平台", Value: "linux"},
+			},
 		})
 	})
 	uikit.EmptyState(c, "暂无内容")

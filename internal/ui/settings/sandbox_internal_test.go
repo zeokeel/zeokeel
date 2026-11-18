@@ -95,7 +95,7 @@ func TestSandboxStatusText(t *testing.T) {
 			locale:   zh,
 			status:   contracts.SandboxStatus{Available: true, Platform: "linux"},
 			mode:     contracts.PermissionFull,
-			want:     "完全访问：OS 沙箱不包装命令（平台：linux）",
+			want:     "完全访问：系统沙箱不包装命令（平台：linux）",
 			wantKind: uikit.StatusNeedsAction,
 		},
 		{
@@ -133,7 +133,7 @@ func TestSandboxNoteTextModeConditioned(t *testing.T) {
 	if strings.Contains(full, "始终启用、不可关闭") {
 		t.Fatalf("full-access note still claims always-on wrapping: %q", full)
 	}
-	if !strings.Contains(full, "所有权限") || !strings.Contains(full, "不经 OS 沙箱包装") {
+	if !strings.Contains(full, "所有权限") || !strings.Contains(full, "不经系统沙箱包装") {
 		t.Fatalf("full-access note does not disclose the passthrough: %q", full)
 	}
 }

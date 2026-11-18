@@ -49,7 +49,10 @@ func TestTaskHistoryCollapsedDeliveredState(t *testing.T) {
 	tester := h.tester()
 
 	// The collapsed row shows the delivered state and never claims a result.
-	h.assertTexts(tester, "巡检", "运行历史", "已投递", "最新运行摘要", "结果由会话决定", "打开会话")
+	// The collapsed line carries the state and the hint; the session link moved
+	// into the row's ⋯ menu (density rule: three visible targets per row).
+	h.assertTexts(tester, "巡检", "运行历史", "已启动", "最新运行摘要", "结果由会话决定")
+	h.assertNoTexts(tester, "打开会话")
 	h.assertNoTexts(tester, "旧失败摘要", "还没有运行记录")
 }
 
@@ -63,7 +66,7 @@ func TestTaskHistoryCollapsedCompletedState(t *testing.T) {
 
 	// A settled success is 已完成, not a bare delivery.
 	h.assertTexts(tester, "已完成", "最新运行摘要")
-	h.assertNoTexts(tester, "已投递", "结果由会话决定")
+	h.assertNoTexts(tester, "已启动", "结果由会话决定")
 }
 
 func TestTaskHistoryExpandsAndCollapses(t *testing.T) {
@@ -134,5 +137,5 @@ func TestTaskHistoryDeliveredEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Delivered", "The result depends on that session")
+	h.assertTexts(tester, "Started", "The result depends on that session")
 }

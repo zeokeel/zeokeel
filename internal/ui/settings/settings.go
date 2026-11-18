@@ -180,48 +180,55 @@ func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store con
 		if showHeader {
 			uikit.PageHeader(c, title, "")
 		}
-		uikit.Section(c, localized(locale, "桌面快捷键", "Desktop shortcuts"), func(*ui.Context) {
-			// H23: restoring the defaults is a page action, not a form row: it
-			// sits at the section's top right, away from the editable fields.
-			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
-				// Restoring the defaults is recoverable, so it is not a danger
-				// action (DESIGN.md §5.2); the confirmation still guards the
-				// overwrite of the user's custom chords.
+		// The section's one utility action sits on the section's title row
+		// (uikit.SectionAction, B-spec §3.4): restoring the defaults is
+		// recoverable, so it is not a danger action (DESIGN.md §5.2); the
+		// confirmation still guards the overwrite of the user's custom chords.
+		uikit.SectionAction(c, localized(locale, "桌面快捷键", "Desktop shortcuts"),
+			func(c *ui.Context) {
 				if design.Apply(ui.Button(c, localized(locale, "恢复默认", "Restore defaults")),
 					t.SecondaryButton()).Tooltip(localized(locale,
 					"恢复两项快捷键的默认值", "Restore both default shortcuts")).Clicked() {
 					st.confirmRestore = true
 					c.Invalidate()
 				}
+			},
+			func(c *ui.Context) {
+				toggleDisplay := shortcutDisplay(toggleSidebarChoices(),
+					store.Get(contracts.SettingsUIShortcutToggleSidebar, contracts.DefaultShortcutToggleSidebar))
+				paletteDisplay := shortcutDisplay(commandPaletteChoices(),
+					store.Get(contracts.SettingsUIShortcutCommandPalette, contracts.DefaultShortcutCommandPalette))
+				// One table shape: a hairline between the two rows, declared once
+				// (A1 F-05), and the two pickers on the 320 DIP control column.
+				ui.Column(c).FillWidth().Dividers(1, t.BorderL2).Children(func() {
+					ui.Row(c).FillWidth().PaddingY(design.Space2).
+						AlignItems(ui.Center).Gap(design.Space3).Children(func() {
+						design.Apply(ui.Text(c, localized(locale, "折叠 / 展开侧边栏", "Collapse / expand sidebar")),
+							t.Text(design.TypeBody)).Grow(1)
+						choice := toggleDisplay
+						selectControl := ui.Select(c, &choice, shortcutChoiceLabels(toggleSidebarChoices())).
+							Label(localized(locale, "侧边栏快捷键", "Sidebar shortcut")).
+							Width(controlWidth).Shrink(0)
+						if selectControl.Changed() {
+							_ = store.Set(contracts.SettingsUIShortcutToggleSidebar,
+								shortcutChord(toggleSidebarChoices(), choice))
+						}
+					})
+					ui.Row(c).FillWidth().PaddingY(design.Space2).
+						AlignItems(ui.Center).Gap(design.Space3).Children(func() {
+						design.Apply(ui.Text(c, localized(locale, "打开命令面板", "Open command palette")),
+							t.Text(design.TypeBody)).Grow(1)
+						choice := paletteDisplay
+						selectControl := ui.Select(c, &choice, shortcutChoiceLabels(commandPaletteChoices())).
+							Label(localized(locale, "命令面板快捷键", "Command palette shortcut")).
+							Width(controlWidth).Shrink(0)
+						if selectControl.Changed() {
+							_ = store.Set(contracts.SettingsUIShortcutCommandPalette,
+								shortcutChord(commandPaletteChoices(), choice))
+						}
+					})
+				})
 			})
-			toggleDisplay := shortcutDisplay(toggleSidebarChoices(),
-				store.Get(contracts.SettingsUIShortcutToggleSidebar, contracts.DefaultShortcutToggleSidebar))
-			ui.Row(c).FillWidth().PaddingY(design.Space2).
-				AlignItems(ui.Center).Gap(design.Space3).Children(func() {
-				design.Apply(ui.Text(c, localized(locale, "折叠 / 展开侧边栏", "Collapse / expand sidebar")),
-					t.Text(design.TypeBody)).Grow(1)
-				choice := toggleDisplay
-				selectControl := ui.Select(c, &choice, shortcutChoiceLabels(toggleSidebarChoices())).
-					Label(localized(locale, "侧边栏快捷键", "Sidebar shortcut"))
-				if selectControl.Changed() {
-					_ = store.Set(contracts.SettingsUIShortcutToggleSidebar, shortcutChord(toggleSidebarChoices(), choice))
-				}
-			})
-			ui.Divider(c)
-			paletteDisplay := shortcutDisplay(commandPaletteChoices(),
-				store.Get(contracts.SettingsUIShortcutCommandPalette, contracts.DefaultShortcutCommandPalette))
-			ui.Row(c).FillWidth().PaddingY(design.Space2).
-				AlignItems(ui.Center).Gap(design.Space3).Children(func() {
-				design.Apply(ui.Text(c, localized(locale, "打开命令面板", "Open command palette")),
-					t.Text(design.TypeBody)).Grow(1)
-				choice := paletteDisplay
-				selectControl := ui.Select(c, &choice, shortcutChoiceLabels(commandPaletteChoices())).
-					Label(localized(locale, "命令面板快捷键", "Command palette shortcut"))
-				if selectControl.Changed() {
-					_ = store.Set(contracts.SettingsUIShortcutCommandPalette, shortcutChord(commandPaletteChoices(), choice))
-				}
-			})
-		})
 		uikit.Section(c, localized(locale, "全部快捷键", "All shortcuts"), func(*ui.Context) {
 			for index, row := range shortcutReferenceRows(locale, runtime) {
 				if index > 0 {
@@ -596,19 +603,19 @@ func buildDiagnosticsPage(c *ui.Context, t *design.Tokens, state *diagnosticsSta
 							t.TextMuted(design.TypeXS))
 						return
 					}
-					ui.Column(c).FillWidth().Gap(design.Space0).Children(func() {
-						for index, pair := range keys {
-							if index > 0 {
-								ui.Divider(c)
-							}
+					// One table shape: rows separated by hairline dividers declared
+					// a tooltip is an overlay that takes the first Escape).
+					ui.Column(c).FillWidth().Dividers(1, t.BorderL1).Children(func() {
+						for _, pair := range keys {
+							pair := pair
 							ui.Row(c).FillWidth().Height(design.Space8).
 								AlignItems(ui.Center).Gap(design.Space3).Children(func() {
 								design.Apply(ui.Text(c, pair.Label), t.MonoText(design.TypeXS)).
 									TextColor(t.LabelSecondary).Width(design.Space8 * 7).
-									Shrink(0).MaxLines(1).Ellipsis("…").Tooltip(pair.Label)
+									Shrink(0).MaxLines(1).Ellipsis("…")
 								design.Apply(ui.Text(c, pair.Value), t.MonoText(design.TypeXS)).
 									TextColor(t.LabelPrimary).Grow(1).MaxLines(1).
-									Ellipsis("…").Tooltip(pair.Value).Selectable()
+									Ellipsis("…").Selectable()
 							})
 						}
 					})
@@ -774,7 +781,7 @@ func Module() *module.Descriptor[Config] {
 					uikit.PageFooter(c, uikit.PageFooterOptions{
 						Key: "settings.footer.behavior",
 						Secondary: []uikit.DialogAction{
-							{Label: localized(locale, "恢复限额默认", "Restore limit defaults"), OnClick: func() {
+							{Label: localized(locale, "恢复默认值", "Restore defaults"), OnClick: func() {
 								capabilities.restoreDefaults(locale)
 								c.Invalidate()
 							}},
@@ -1366,8 +1373,29 @@ func switchInline(c *ui.Context, label string, value *bool) bool {
 }
 
 // inputLabel appends the localized "input" suffix used by native input labels.
+//
+// Convention: EVERY text field and text area in the settings surface and the
+// plugins dialogs names itself through this helper (or its plugins twin
+// inputLabel/skillInputLabel), so the accessible name is uniform — "代理地址 输入"
+// on the settings pages reads the same as "URL 输入" in the connector form. The
+// ui.Field caption stays the human label ("代理地址"); the suffix marks the
+// control itself, which is what a screen reader announces on focus. A switch, a
+// select or a search field is not an input and keeps its bare name.
 func inputLabel(locale contracts.LocaleService, label string) string {
 	return label + localized(locale, " 输入", " input")
+}
+
+// rowActionLabel names one row's inline action for assistive technology:
+// "记忆操作：<行名>" / "Memory actions: <row>". A page of identical ⋯ buttons was
+// indistinguishable to a screen reader and to scripted interaction, which had to
+// fall back to "the same-named control nearest the row" (2026-11-18 review). The
+// visible glyph does not change.
+func rowActionLabel(locale contracts.LocaleService, action, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return action
+	}
+	return action + localized(locale, "：", ": ") + name
 }
 
 // buildPage builds the model settings page. The model list is the page's model
@@ -1390,7 +1418,7 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 	// stale configuration over it.
 	state.syncFromConfig(c, chat, store)
 	effective := effectiveChatConfig(chat, store)
-	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+	ui.Column(c).FillWidth().Gap(design.SpaceScreen).Children(func() {
 		uikit.PageHeader(c, labels.title, "")
 
 		// One page owns the model configuration: every row carries its own
@@ -1465,22 +1493,56 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 		if defaultModel == "" {
 			defaultModel = strings.TrimSpace(effective.Model)
 		}
-		active := strings.TrimSpace(chat.ActiveSession())
-		if active == "" {
-			active = localized(locale, "无活动会话", "No active session")
+		// The row names the conversation, never its internal id: settings is a
+		// product surface, and sess-1794… is a storage handle (2026-11-18 review).
+		sessionRow := sessionTitleRow(chat, locale)
+		rows := []uikit.PropertyRow{}
+		if sessionRow != "" {
+			rows = append(rows, uikit.PropertyRow{
+				Label: localized(locale, "当前会话", "Current session"), Value: sessionRow,
+			})
 		}
+		rows = append(rows, uikit.PropertyRow{
+			Label: localized(locale, "默认模型", "Default model"),
+			Value: textutil.FirstNonEmpty(defaultModel,
+				localized(locale, "未配置", "Not configured")),
+		})
 		uikit.Section(c, localized(locale, "当前", "Current"), func(body *ui.Context) {
 			uikit.PropertySheet(body, uikit.PropertySheetOptions{
-				Rows: []uikit.PropertyRow{
-					{Label: localized(locale, "当前会话", "Current session"), Value: active},
-					{Label: localized(locale, "默认模型", "Default model"),
-						Value: textutil.FirstNonEmpty(defaultModel,
-							localized(locale, "未配置", "Not configured"))},
-				},
-				Key: "runtime.current", Locale: locale,
+				Rows: rows, Key: "runtime.current", Locale: locale,
 			})
 		})
 	})
+}
+
+// sessionTitleRow returns the active conversation's display title for the
+// read-only 当前 section, or "" when no session is active (the row is omitted
+// rather than showing an empty id). The id is deliberately never rendered: the
+// settings surface speaks product language, not storage handles.
+func sessionTitleRow(chat contracts.ChatService, locale contracts.LocaleService) string {
+	if chat == nil {
+		return ""
+	}
+	id := strings.TrimSpace(chat.ActiveSession())
+	if id == "" {
+		return ""
+	}
+	title := ""
+	if infos := chat.Sessions(); infos != nil {
+		for _, info := range infos {
+			if info.ID == id {
+				title = info.Title
+				break
+			}
+		}
+	}
+	if strings.TrimSpace(title) == "" {
+		if session, ok := chat.Session(id); ok {
+			title = session.Title
+		}
+	}
+	return textutil.FirstNonEmptyTrimmed(title,
+		localized(locale, "未命名会话", "Untitled conversation"))
 }
 
 // --- appearance page -------------------------------------------------------
@@ -1493,7 +1555,7 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 	theme contracts.ThemeService, runtime contracts.UIRuntime, locale contracts.LocaleService,
 	labels buildAppearanceLabels, shortcuts *shortcutsState, search *pageSearch) {
 	t := design.Of(c)
-	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+	ui.Column(c).FillWidth().Gap(design.SpaceScreen).Children(func() {
 		uikit.PageHeader(c, labels.title, "")
 
 		search.region(c, "appearance.theme", func(c *ui.Context) {
@@ -1512,7 +1574,10 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 		search.region(c, "appearance.language", func(c *ui.Context) {
 			uikit.Section(c, localized(locale, "语言", "Language"), func(*ui.Context) {
 				choice := languageChoice(state.language)
-				selectControl := ui.Select(c, &choice, languageOptions).Label(labels.languageLabel)
+				// The language picker is a form control: the 320 DIP column, not
+				// the page's full measure (B-spec §3.4.4).
+				selectControl := ui.Select(c, &choice, languageOptions).
+					Label(labels.languageLabel).Width(controlWidth)
 				if selectControl.Changed() {
 					state.language = languageCode(choice)
 					locale.SetLanguage(state.language)

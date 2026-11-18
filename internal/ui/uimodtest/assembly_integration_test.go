@@ -96,17 +96,28 @@ func TestDesktopProductAssemblyShowsAllDemoModules(t *testing.T) {
 
 	tester := ui.NewTester(uiRoot.View, 1200, 800)
 	// The product lands on the session screen (the DSH shell): its empty
-	// conversation hero, the brand sidebar's new-chat action and the key
+	// conversation hero, the brand sidebar's new-session action and the key
 	// orchestration entries (team + subagents, visible at zero) are the demo
 	// modules' visible contributions.
+	//
+	// B-spec v2 renamed the hero and the sidebar action (会话/Session wording):
+	// the hero headline is 发第一条消息 and the action is 新建会话. The old
+	// 开始新对话 / 还没有消息… sentence is gone, so the frame must not show it
+	// either — a stale string here would mean a second, older hero survived.
 	for _, want := range []string{
-		"开始新对话",
-		"还没有消息，开始一段新对话吧。",
-		"新对话",
+		"发第一条消息",
+		"描述你想完成的事，ZeoKeel 会读代码、改文件并验证结果。",
+		"新建会话",
 		"智能体团队",
+		"开始前还需要：", // the first-run checklist under the hero
 	} {
 		if !tester.HasText(want) {
 			t.Fatalf("desktop frame does not show %q; texts = %v", want, tester.Texts())
+		}
+	}
+	for _, gone := range []string{"开始新对话", "还没有消息，开始一段新对话吧。"} {
+		if tester.HasText(gone) {
+			t.Fatalf("desktop frame still shows the superseded empty-state copy %q; texts = %v", gone, tester.Texts())
 		}
 	}
 

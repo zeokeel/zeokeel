@@ -6,15 +6,17 @@ package session_test
 
 import (
 	"image/color"
+	"math"
 	"testing"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 )
 
-// TestFirstRunChecklistCardUsesPanelPreset probes the card's corner: at 4 DIP
-// along the diagonal a RadiusLG (16) corner has already cut away to the page
-// base, while the old RadiusMD (10) corner would still show the raised fill.
+// TestFirstRunChecklistCardUsesPanelPreset probes the card's corner: along the
+// top-left diagonal the first border pixel sits at about R·(1−1/√2), so the
+// panel preset's RadiusLG corner is distinguishable from a RadiusMD one while
+// the ladder's own value stays the single source (it was 16, it is 12 now).
 func TestFirstRunChecklistCardUsesPanelPreset(t *testing.T) {
 	chat := newFakeChat()
 	chat.config = contracts.ChatConfig{} // no model/key → the checklist shows
@@ -45,8 +47,12 @@ func TestFirstRunChecklistCardUsesPanelPreset(t *testing.T) {
 	if firstBorder < 0 {
 		t.Fatalf("UD-22: no card border found along the corner diagonal")
 	}
-	if firstBorder < 4 {
-		t.Fatalf("UD-22: card corner border at diagonal d=%d, want ≥4 "+
-			"(RadiusLG panel preset, not the hand-picked RadiusMD)", firstBorder)
+	// The expected offset comes from the token, not from a literal: a panel
+	// corner (RadiusLG) cuts at ~R·(1−1/√2), while the old hand-picked RadiusMD
+	// cuts earlier. The frame may round one DIP either way.
+	want := int(math.Round(float64(design.RadiusLG) * (1 - 1/math.Sqrt2)))
+	if firstBorder < want-1 {
+		t.Fatalf("UD-22: card corner border at diagonal d=%d, want ≥%d "+
+			"(RadiusLG %.0f panel preset, not the hand-picked RadiusMD)", firstBorder, want-1, design.RadiusLG)
 	}
 }

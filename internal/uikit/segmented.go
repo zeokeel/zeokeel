@@ -46,10 +46,15 @@ type SegmentedOptions struct {
 // It keeps mygo's SegmentedBase behavior unchanged: the track is a radio group
 // named by options.Label of radio buttons named by the segment labels, one Tab
 // stop that goes to the chosen segment, and the arrows choose among the
-// segments. The control owns only the look — a BgHover track on the
-// ControlHeight metric, the chosen segment's BgSelected tint with LabelPrimary
-// 600 text and the 2 DIP Accent boundary, the other segments in LabelSecondary
-// — so every caller gets the same appearance in both themes.
+// segments. The control owns only the look: a sunken BgStrong track and the
+// chosen segment as a raised block (BgRaised fill + 1 DIP BorderL3 + LabelPrimary
+// label), the other segments quiet LabelSecondary on the track.
+//
+// The earlier look put a 2 DIP Accent underline on the chosen segment; at the
+// segment radius its ends were clipped, so it read as a crooked rule, and
+// track/chosen/accent stacked three blues (A3 VD-12). The raised-block anatomy
+// is the same "selected = surface + border" vocabulary as the product's cards,
+// and it leaves the Accent budget to the page's primary action.
 //
 // The return value is mygo's Changed notice: it reports the new choice in the
 // build pass after the widget took it, once (the widget has already written
@@ -67,24 +72,27 @@ func SegmentedControl(c *ui.Context, options SegmentedOptions) bool {
 	}
 	parts := ui.SegmentedBase(ctx, options.Selected, len(options.Labels))
 	parts.Track.Label(options.Label).Height(design.ControlHeight).
-		Padding(design.Space1).Radius(design.RadiusMD).
-		Background(t.BgHover).Children(func() {
+		Padding(design.SpaceInline).Radius(design.RadiusMD).
+		Background(t.BgStrong).Children(func() {
 		for index, label := range options.Labels {
-			// The boundary width is reserved on every segment, so the chosen
-			// segment's 2 DIP underline does not move its label by the border:
-			// the labels of a control all sit on one baseline.
-			segment := parts.Segment(index).Height(design.ControlHeight-design.Space2).
+			// Every segment reserves the 1 DIP border, so choosing a segment
+			// does not move its label by the width of the outline: the labels of
+			// one control all sit on one baseline.
+			segment := parts.Segment(index).Height(design.ControlHeight - design.Space2).
 				PaddingX(design.Space4).Radius(design.RadiusSM).Center().
-				BorderWidth(0, 0, 2, 0).Label(label)
+				BorderWidth(1).Label(label)
 			if index == *options.Selected {
-				// The persistent selection look plus the 2 DIP Accent
-				// underline that makes the choice visible against the track
-				// (audit V4: the chosen segment used to read as unselected).
-				segment.Background(t.BgSelected).BorderColor(t.Accent).
-					FontWeight(design.WeightSemibold).TextColor(t.LabelPrimary)
+				// The raised block: surface + hairline edge, the product's one
+				// selection vocabulary outside the accent fill (A3 VD-12). TypeS
+				// already carries the 500 weight.
+				segment.Background(t.BgRaised).BorderColor(t.BorderL3).
+					TextColor(t.LabelPrimary)
 			} else {
-				segment.BorderColor(ui.Transparent).TextColor(t.LabelSecondary)
+				segment.Background(ui.Transparent).BorderColor(ui.Transparent).
+					TextColor(t.LabelSecondary)
 			}
+			// The look changes over 80 ms instead of snapping (B-spec §1.5).
+			segment = segment.Transition(design.TransitionColors(c))
 			segment.Children(func() {
 				design.Apply(ui.Text(c, label), t.Font(design.TypeS)).MaxLines(1)
 			})

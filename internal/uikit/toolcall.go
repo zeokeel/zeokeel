@@ -90,14 +90,19 @@ type ToolCallCardOptions struct {
 // something to read.
 func ToolCallCard(c *ui.Context, o ToolCallCardOptions) {
 	t := design.Of(c)
-	kind := ParseToolStatus(o.Call.Status).Kind()
+	// The state — and with it the glyph and the semantic color — comes from the
+	// call's status word *and* its shell exit marker, the same decision the compact
+	// row and the background job pane make (uikit.ToolCallStatusKind). A caller that
+	// overrides the status label (the demo probe shows the backend's raw word) can
+	// therefore never leave the mark behind: the word and the icon are one status.
+	kind := ToolCallStatusKind(o.Call)
 	name := o.Title
 	if name == "" {
 		name = ToolDisplayName(o.Locale, o.Call.Name)
 	}
 	status := o.StatusLabel
 	if status == "" {
-		status = ToolStatusLabel(o.Locale, o.Call.Status)
+		status = ToolCallStatusLabel(o.Locale, o.Call)
 	}
 	stepLabel := ""
 	if o.Steps > 0 {
@@ -187,10 +192,29 @@ func ToolCallCard(c *ui.Context, o ToolCallCardOptions) {
 	})
 }
 
-// SummaryDefaultOpen reports whether a tool call's detail starts expanded (H15):
+// SummaryOpenForCall reports whether a tool call's detail starts expanded (H15):
 // failures first, and very short results are cheap to show. The compact row and
 // the complete card share the rule, so one call never gets two disclosure
 // defaults.
+//
+// A call is judged by the same folded state the row draws (ToolCallStatusKind), so
+// a shell command that exited nonzero opens its output even though the backend
+// called the call a success — that output is exactly what the reader needs then.
+// Prefer this over SummaryDefaultOpen wherever the call record is at hand.
+func SummaryOpenForCall(call contracts.ToolCall) bool {
+	if ToolCallStatusKind(call) == StatusError {
+		return true
+	}
+	return len([]rune(strings.TrimSpace(call.Summary))) <= 160
+}
+
+// SummaryDefaultOpen reports whether a tool call's detail starts expanded from its
+// status word alone.
+//
+// Deprecated: it cannot see a shell call's exit marker, so it answers "not a
+// failure" for a command that exited nonzero under a success word. Use
+// SummaryOpenForCall with the call record; this form stays for the callers the
+// session surface has not moved over yet.
 func SummaryDefaultOpen(status, summary string) bool {
 	if ParseToolStatus(status).Kind() == StatusError {
 		return true

@@ -1,9 +1,9 @@
 package session_test
 
-// 2026-11 UI review P2 (DESIGN rule 10 / AP-20): the empty-state hero action and
-// the composer send must never both be filled accent primaries. With no draft the
-// send is disabled and the hero keeps the primary; once a draft (or staged
-// attachment) makes send the enabled primary, the hero yields to secondary.
+// 2026-11 UI review P2 (DESIGN rule 10 / AP-20) after the copy audit: the empty
+// conversation's hero no longer carries a filled accent action at all (a button
+// that only moved the caret was removed, A5 F-13), so the composer's send is the
+// screen's one primary — and it only paints the accent fill once it can send.
 
 import (
 	"testing"
@@ -22,21 +22,16 @@ func TestHeroAndComposerKeepSinglePrimary(t *testing.T) {
 		return channelSpread(sendButtonFill(t, tester, label)) > 40
 	}
 
-	// Empty draft: the hero is the one primary; send is the neutral disabled look.
-	if !isAccent("开始输入") {
-		t.Fatalf("the hero action is not the primary on an empty draft")
-	}
+	// Empty draft: no accent fill anywhere — the disabled send keeps the visible
+	// neutral look (BgStrong + tertiary ink, VD-20) and the hero has no action.
 	if isAccent("发送") {
-		t.Fatalf("the disabled send still paints an accent fill on an empty draft")
+		t.Fatalf("the disabled send paints an accent fill on an empty draft")
 	}
+	h.assertNoTexts(tester, "开始输入", "开始新对话")
 
-	// A staged draft makes send the enabled primary; the hero yields to secondary
-	// so the screen keeps exactly one accent primary.
+	// A staged draft makes send the screen's one enabled primary.
 	h.click(tester, "检查当前工作区并给出摘要")
 	tester.Frame()
-	if isAccent("开始输入") {
-		t.Fatalf("the hero stayed primary with a draft: two accent primaries on screen")
-	}
 	if !isAccent("发送") {
 		t.Fatalf("the enabled send is not the accent primary with a draft")
 	}

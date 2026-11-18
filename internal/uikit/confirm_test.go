@@ -31,6 +31,10 @@ func TestConfirmDangerDefaultsToCancel(t *testing.T) {
 	if !tester.HasText("删除模型") || !tester.HasText("确认删除") {
 		t.Fatalf("confirmation not shown; texts = %v", tester.Texts())
 	}
+	// The safe action takes the keyboard from the dialog's second frame: the
+	// opening frame must leave the focus record alone so mygo can hand the
+	// keyboard back to the trigger when the dialog closes (A4-I-02).
+	tester.Frame()
 	if !tester.Focused("取消") {
 		t.Fatalf("safe action does not carry the focus")
 	}

@@ -311,7 +311,7 @@ func TestTaskListRenders(t *testing.T) {
 
 	h.assertTexts(tester, "自动化", "新建任务",
 		"每日依赖巡检", "每 60 秒", "下次运行：", "上次运行：",
-		"立即运行", "编辑", "任务操作",
+		"立即运行", "任务操作",
 		"停用任务", "每 5 分钟", "上次错误：exit status 1")
 }
 
@@ -397,7 +397,7 @@ func TestRunNowAndDelete(t *testing.T) {
 		t.Fatalf("RunNow calls = %v, want [task-1]", got)
 	}
 
-	h.click(tester, "任务操作")
+	h.click(tester, "任务操作：巡检")
 	h.click(tester, "删除任务")
 	h.assertTexts(tester, "删除自动化任务")
 	h.click(tester, "确认删除")
@@ -525,7 +525,7 @@ func TestDeleteTaskRaisesUndoToast(t *testing.T) {
 	notifier := &automationNotifier{}
 	h := newHarnessWithNotifier(t, service, notifier, automation.Config{})
 	tester := h.tester()
-	h.click(tester, "任务操作")
+	h.click(tester, "任务操作：巡检")
 	h.click(tester, "删除任务")
 	h.click(tester, "确认删除")
 
@@ -567,7 +567,9 @@ func TestEditTaskFlow(t *testing.T) {
 	tester := h.tester()
 	h.assertTexts(tester, "每周巡检", "每天 09:00")
 
-	h.click(tester, "编辑")
+	// Edit lives in the row's ⋯ menu now (A3 VD-18: at most two actions).
+	h.click(tester, "任务操作：每周巡检")
+	h.click(tester, "编辑任务")
 	h.assertTexts(tester, "编辑自动化任务", "任务名称", "运行计划")
 
 	// Replace the name and the schedule, then save.

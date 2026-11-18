@@ -596,7 +596,7 @@ func TestSettingsSearchKeepsMigratedAliases(t *testing.T) {
 		want  string
 	}{
 		{query: "密钥", want: "模型列表"},
-		{query: "沙箱", want: "OS 沙箱"},
+		{query: "沙箱", want: "系统沙箱"},
 		{query: "proxy", want: "代理配置"},
 		{query: "去重", want: "未启用记忆后端"},
 		{query: "语言服务", want: "语言服务器"},

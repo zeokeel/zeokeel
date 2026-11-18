@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
@@ -42,13 +44,13 @@ func TestTeamOverlayResumableHistoryOffersContinue(t *testing.T) {
 	tester.Frame()
 
 	h.click(tester, "智能体团队")
-	h.assertTexts(tester, "上次的研究员", "历史 · 可继续")
+	h.assertTexts(tester, "上次的研究员", "已结束 · 可继续")
 	if _, ok := tester.Find("继续此队友 上次的研究员"); !ok {
 		t.Fatalf("resumable historical member has no continue action; texts = %v", tester.Texts())
 	}
 	h.click(tester, "继续此队友 上次的研究员")
 	// The action opens the child conversation with its cold-resume composer.
-	h.assertTexts(tester, "上次的研究员", "已结束记录 · 可继续",
+	h.assertTexts(tester, "上次的研究员", "已结束 · 可继续",
 		"历史记录（应用重启后仍保留）：可继续；发送后会接着已保存的会话继续。",
 		"发送给 上次的研究员")
 }
@@ -70,7 +72,7 @@ func TestTeamOverlayNonResumableHistoryIsReadOnly(t *testing.T) {
 	tester.Frame()
 
 	h.click(tester, "智能体团队")
-	h.assertTexts(tester, "历史 · 只读")
+	h.assertTexts(tester, "已结束 · 只读")
 	if _, ok := tester.Find("继续此队友 旧的队友"); ok {
 		t.Fatalf("non-resumable history shows a continue action; texts = %v", tester.Texts())
 	}
@@ -93,7 +95,7 @@ func TestHistoricalChildResumeSendCallsChildAgentService(t *testing.T) {
 	tester.Frame()
 
 	h.click(tester, "子智能体 1")
-	h.assertTexts(tester, "队友 · 已结束记录 · 可继续")
+	h.assertTexts(tester, "队友", "已结束 · 可继续")
 	h.click(tester, "继续此队友 上次的研究员")
 	h.assertTexts(tester, "发送给 上次的研究员",
 		"发送后会恢复这条历史记录的会话，并等待它的回答。")
@@ -106,7 +108,7 @@ func TestHistoricalChildResumeSendCallsChildAgentService(t *testing.T) {
 	tester.Frame()
 	tester.Type("继续检查剩余文档")
 	tester.Frame()
-	h.click(tester, "发送消息给 上次的研究员")
+	clickRoleButton(t, tester, "发送")
 
 	// While the backend works the UI says it sent the message and is waiting —
 	// no invented progress bar or completion.
@@ -148,7 +150,7 @@ func TestHistoricalChildResumeSendErrorsAreLocalized(t *testing.T) {
 		tester.Frame()
 		tester.Type("再试一次")
 		tester.Frame()
-		h.click(tester, "发送消息给 上次的研究员")
+		clickRoleButton(t, tester, "发送")
 		waitFor(t, tester, func() bool { return tester.HasText(tc.want) }, "localized send error")
 	}
 }
@@ -165,7 +167,7 @@ func TestHistoricalSubagentSwitcherOffersContinue(t *testing.T) {
 	tester.Frame()
 
 	h.click(tester, "子智能体 1")
-	h.assertTexts(tester, "子智能体 · 已结束记录 · 可继续")
+	h.assertTexts(tester, "子智能体", "已结束 · 可继续")
 	if _, ok := tester.Find("继续此子代理 上次的子代理"); !ok {
 		t.Fatalf("resumable historical subagent has no continue action; texts = %v", tester.Texts())
 	}
@@ -202,7 +204,7 @@ func TestColdResumeEnglishCopy(t *testing.T) {
 	tester.Frame()
 
 	h.click(tester, "Subagents 1")
-	h.assertTexts(tester, "Teammate · Finished record · Continuable")
+	h.assertTexts(tester, "Teammate", "Finished · continuable")
 	if _, ok := tester.Find("Continue teammate 上次的研究员"); !ok {
 		t.Fatalf("English continue action missing; texts = %v", tester.Texts())
 	}
@@ -219,8 +221,12 @@ func TestColdResumeEnglishCopy(t *testing.T) {
 	tester.Frame()
 	tester.Type("continue")
 	tester.Frame()
-	if _, ok := tester.Find("Send message to 上次的研究员"); !ok {
-		t.Fatalf("English send action missing; texts = %v", tester.Texts())
+	// The send control is the composer shell's square: its accessible name is the
+	// shell's own "Send" (the description names the recipient).
+	if info, ok := tester.AccessByRole(ui.RoleButton, "Send"); !ok {
+		t.Fatalf("English send control missing; texts = %v", tester.Texts())
+	} else if info.Description == "" {
+		t.Fatalf("English send control has no description; %+v", info)
 	}
 	// The English header/hint never leaks raw Chinese keys.
 	for _, text := range tester.Texts() {

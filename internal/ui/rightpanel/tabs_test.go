@@ -262,7 +262,7 @@ func TestTabUnderlineVocabulary(t *testing.T) {
 	img := tester.Image()
 	// The label is centered in the 32 DIP tab; the underline is the tab's
 	// bottom 2 DIP border.
-	underlineY := int(active.Y+active.H/2-16) + 31
+	underlineY := int(active.Y+active.H/2-design.ControlHeight/2) + int(design.ControlHeight) - 1
 	x := int(active.X) + 2
 	r, g, b, _ := img.At(x, underlineY).RGBA()
 	got := [3]uint32{r >> 8, g >> 8, b >> 8}

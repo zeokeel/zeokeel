@@ -2,9 +2,8 @@ package insights_test
 
 // Frame tests for the Insights screen's terminology fixes (2026-11 wave D):
 //
-//   - US-08: the KPI "tokens" label is localized (the zh interface no longer
-//     shows a bare English "tokens"), and the screen carries a visible
-//     plain-language intro line.
+//   - A5 §3.1: the usage unit is "tokens" in both languages — 词元 is gone — and
+//     the screen carries a visible plain-language intro line.
 //   - US-09: the sessions KPI's 轮/步 detail is plain language — a step is a
 //     tool call, said explicitly (the status-bar labels stay, rule 17, but
 //     they teach instead of puzzling).
@@ -15,15 +14,17 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// TestInsightsTokensLabelLocalized covers US-08: the zh KPI label names tokens
-// in Chinese instead of a bare English word.
-func TestInsightsTokensLabelLocalized(t *testing.T) {
+// TestInsightsTokensUnitNamed covers A5 §3.1: the unit is spelled "tokens" in
+// the zh interface too (词元 is retired), so the KPI label and the table headers
+// teach one name for the unit.
+func TestInsightsTokensUnitNamed(t *testing.T) {
 	service := &fakeInsights{result: sampleInsights()}
 	h := newHarness(t, service, &fakeChat{})
 	tester := h.tester(1280, 800)
 	h.waitForText(tester, "发布检查")
 
-	h.assertTexts(tester, "词元")
+	h.assertTexts(tester, "tokens")
+	h.assertNoTexts(tester, "词元")
 }
 
 // TestInsightsIntroGuidance covers US-08: the empty state carries a
@@ -47,5 +48,5 @@ func TestInsightsTurnsStepsPlainLanguage(t *testing.T) {
 	h.waitForText(tester, "发布检查")
 
 	// sampleInsights totals: Turns 6, Steps 10.
-	h.assertTexts(tester, "6 轮对话", "10 步工具调用")
+	h.assertTexts(tester, "6 轮", "10 次工具调用")
 }

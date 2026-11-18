@@ -227,7 +227,7 @@ func TestWorkspaceRowNewChatErrorsAreInline(t *testing.T) {
 	}
 }
 
-// TestPrimaryNewChatUnfoldsCurrentWorkspaceGroup covers the global 新对话
+// TestPrimaryNewChatUnfoldsCurrentWorkspaceGroup covers the global 新建会话
 // button: after creating a session it unfolds the current workspace's group so
 // the fresh row is visible.
 func TestPrimaryNewChatUnfoldsCurrentWorkspaceGroup(t *testing.T) {
@@ -242,7 +242,7 @@ func TestPrimaryNewChatUnfoldsCurrentWorkspaceGroup(t *testing.T) {
 		t.Fatalf("the workspace group did not fold: %+v", item)
 	}
 
-	h.click(tester, "新对话")
+	h.click(tester, "新建会话")
 	tester.Frame()
 
 	if created := chat.createdSessions(); len(created) != 1 {

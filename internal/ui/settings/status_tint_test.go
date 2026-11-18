@@ -48,8 +48,13 @@ func assertStatusBadgeTint(t *testing.T, tester *ui.Tester, label string, fill u
 		t.Fatalf("frame does not show the status %q; texts = %v", label, tester.Texts())
 	}
 	img := tester.Image()
-	pill := statusPixel(t, img, int(rect.X)-4, int(rect.Y+rect.H/2))
-	backdrop := statusPixel(t, img, int(rect.X+rect.W)+12, int(rect.Y+rect.H/2))
+	// The badge pads Space1 (4 DIP) horizontally in the v2 label, so the
+	// pill's fill is visible 2 DIPs left of the text bounds. The backdrop is
+	// probed on the same row 10 DIPs left of the text: outside the pill but
+	// still inside the row, which avoids landing on a neighbouring status
+	// badge when two sit side by side.
+	pill := statusPixel(t, img, int(rect.X)-2, int(rect.Y+rect.H/2))
+	backdrop := statusPixel(t, img, int(rect.X)-10, int(rect.Y+rect.H/2))
 	want := fill.Alpha(alpha).Over(backdrop)
 	if !statusColorNear(pill, want, 3) {
 		t.Fatalf("%q badge fill = %+v, want the status tint %+v over the row %+v (AP-21: neutral badge + status-colored text)",

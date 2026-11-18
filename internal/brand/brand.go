@@ -8,8 +8,11 @@ import "github.com/egoist/mygo/ui"
 // inheriting mygo's per-platform defaults (13px on macOS, 14px elsewhere)
 // or its 6px stock corner.
 const (
-	// Radius rounds every control and panel: 10 DIPs.
-	Radius float32 = 10
+	// Radius rounds every control: 8 DIPs. The desktop ladder is 4/6/8/12/16
+	// (inline marker, chip, control, card, composer); a 10 DIP control read
+	// as a consumer pill next to 32 DIP rows, so the control step dropped to
+	// the enterprise 8.
+	Radius float32 = 8
 	// Spacing is the design-system unit for padding, gaps and control sizes:
 	// 4 DIPs, the 4px grid the existing screens already follow.
 	Spacing float32 = 4
@@ -109,4 +112,18 @@ func applyMetrics(t *ui.Theme) {
 	t.Spacing = Spacing
 	t.FontSize = FontSize
 	t.Font = SystemFont
+	// The focus ring sits two DIPs outside the element instead of hugging its
+	// edge: the ring then never covers the control's own border or label, and
+	// a 2 DIP band reads as the keyboard state rather than as a second border.
+	t.FocusRingWidth = 2
+	t.FocusRingOffset = 2
+	// One scroll bar across the product: a 10 DIP hit area with a 10 DIP
+	// rounded thumb and no painted track, so the bar is present when the
+	// pointer is near it and quiet otherwise. The thumb colors come from the
+	// palette (Scrollbar) and brighten on hover and while dragging.
+	t.ScrollbarStyle = ui.ScrollbarStyle{
+		TrackWidth: 10,
+		ThumbWidth: 10,
+		MinLength:  24,
+	}
 }

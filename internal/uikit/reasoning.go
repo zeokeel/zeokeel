@@ -23,6 +23,21 @@ import (
 	"github.com/zeokeel/zeokeel/internal/icons"
 )
 
+// reasoningRuleWidth is the 2 DIP rule down the reasoning body's left edge: the
+// same rule weight as a quote bar and the approval card's status rail, derived
+// from the 4 DIP grid instead of a bare literal.
+const reasoningRuleWidth float32 = design.Space1 / 2
+
+// reasoningMetadata draws one metadata item of the folded summary (the trace's
+// duration, its line count): a middle dot and the value in the micro step, so
+// the items read as one muted tail behind the 思考 label.
+func reasoningMetadata(c *ui.Context, t *design.Tokens, text string) {
+	design.Apply(ui.Text(c, "·"), t.Font(design.TypeXXXS)).
+		TextColor(t.LabelTertiary).NoWrap().Shrink(0)
+	design.Apply(ui.Text(c, text), t.Font(design.TypeXXXS)).
+		TextColor(t.LabelTertiary).NoWrap().Shrink(0)
+}
+
 // ReasoningTraceOptions is one reasoning disclosure.
 type ReasoningTraceOptions struct {
 	// Key is the trace's stable identity (the message ID), so the fold survives
@@ -60,6 +75,11 @@ type ReasoningTraceOptions struct {
 	// transcript activity band starts its copy on the same x. It is the band's
 	// marker column; the default false keeps the old inline glyph.
 	MarkerColumn bool
+	// Duration is the trace's formatted elapsed time ("2.5s"), drawn in the
+	// folded summary between a middle dot and the chevron. Empty omits it: a
+	// multi-segment trace has no per-segment time to report, and an approximate
+	// number would misstate what the reader is judging.
+	Duration string
 }
 
 // ReasoningTrace draws one reasoning disclosure (ui.CollapsibleBase): the whole
@@ -77,7 +97,7 @@ func ReasoningTrace(c *ui.Context, o ReasoningTraceOptions) {
 	if open == nil {
 		open = new(bool)
 	}
-	label := T(o.Locale, "思考", "Reasoning")
+	label := T(o.Locale, "思考", "Thinking")
 	if o.Streaming {
 		label = T(o.Locale, "思考中…", "Thinking…")
 	}
@@ -88,65 +108,51 @@ func ReasoningTrace(c *ui.Context, o ReasoningTraceOptions) {
 		parts = ui.CollapsibleBase(c, open)
 	}
 	// The trigger names itself for assistive technology: 思考中… while the model
-	// thinks, 思考 once it finished. The line-count hint stays visual only.
-	trigger := parts.Trigger.FillWidth().AlignItems(ui.Center).
-		Gap(design.Space2).PaddingY(design.Space1).Radius(design.RadiusSM).
-		Label(label)
-	if o.MarkerColumn {
-		// The activity band's tool rows reserve the same 3 DIP state lane on
-		// their left edge (toolRowGutterWidth), so reasoning and tool rows keep
-		// their glyphs on one x even though only tool rows ever tint the lane.
-		trigger = trigger.BorderWidth(design.Space0, design.Space0, design.Space0, toolRowGutterWidth).
-			BorderColor(ui.Transparent)
-	}
+	// thinks, 思考 once it finished. The duration and the line count are visual
+	// metadata only.
+	trigger := parts.Trigger.FillWidth().Height(design.RowCompactHeight).
+		AlignItems(ui.Center).Gap(design.Space2).PaddingX(design.Space2).
+		Radius(design.RadiusSM).Label(label).Transition(design.TransitionColors(c))
+	// The marker column and the standalone glyph are the same 16 DIP slot with the
+	// same gap, so a reasoning row and a tool row start their copy on one x in the
+	// activity band as well as outside it.
 	if parts.Trigger.Hovered() || parts.Trigger.Focused() {
 		trigger.Background(t.BgHover)
 	}
 	trigger.Children(func() {
-		if o.MarkerColumn {
-			// The band's fixed marker column: the type glyph (or the official
-			// spinner while the model thinks) at a constant x, muted so it never
-			// competes with the reply prose.
-			ui.Row(c).Width(design.Space4).Shrink(0).Justify(ui.Center).Children(func() {
-				if o.Streaming {
-					ui.Spinner(c).Label(T(o.Locale, "思考中", "Thinking")).
-						Size(design.Space3, design.Space3).TextColor(t.LabelTertiary)
-					return
-				}
-				ui.Icon(c, icons.Sparkles()).Size(design.Space4, design.Space4).
-					TextColor(t.LabelTertiary)
-			})
-			design.Apply(ui.Text(c, label), t.Font(design.TypeXXS)).
-				TextColor(t.LabelSecondary)
-			if !o.Streaming {
-				if lines := ReasoningLineCount(o.Reasoning); lines > 1 {
-					design.Apply(ui.Text(c, fmt.Sprintf(
-						T(o.Locale, "%d 行", "%d lines"), lines)), t.Font(design.TypeXXXS)).
-						TextColor(t.LabelTertiary)
-				}
+		// The glyph always owns the same 16 DIP slot: in the activity band (where
+		// the tool rows put their state glyph in that slot) and on its own, so a
+		// reasoning row and a tool row start their copy on one x. The official
+		// spinner stands in while the model thinks, in the accent role.
+		ui.Row(c).Width(design.Space4).Shrink(0).Justify(ui.Center).Children(func() {
+			if o.Streaming {
+				ui.Spinner(c).Label(T(o.Locale, "思考中", "Thinking")).
+					Size(design.Space3, design.Space3).TextColor(t.Accent)
+				return
 			}
-		} else if o.Streaming {
-			ui.Spinner(c).Label(T(o.Locale, "思考中", "Thinking")).
-				Size(design.Space3, design.Space3).TextColor(t.LabelTertiary)
-			design.Apply(ui.Text(c, label), t.Font(design.TypeXXS)).
-				TextColor(t.LabelSecondary)
-		} else {
-			ui.Icon(c, icons.Sparkles()).Size(design.Space3, design.Space3).
+			ui.Icon(c, icons.Sparkles()).Size(design.Space4, design.Space4).
 				TextColor(t.LabelTertiary)
-			design.Apply(ui.Text(c, label), t.Font(design.TypeXXS)).
-				TextColor(t.LabelSecondary)
-			if lines := ReasoningLineCount(o.Reasoning); lines > 1 {
-				design.Apply(ui.Text(c, fmt.Sprintf(
-					T(o.Locale, "%d 行", "%d lines"), lines)), t.Font(design.TypeXXXS)).
-					TextColor(t.LabelTertiary)
-			}
+		})
+		// The folded summary is one quiet line: 思考 13/500, then the trace's
+		// metadata — how long it took and how many lines it holds — so the
+		// reader can decide whether it is worth opening (A2 §6.6).
+		design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).
+			FontWeight(design.WeightMedium).TextColor(t.LabelSecondary).NoWrap()
+		if o.Streaming {
+			return
+		}
+		if o.Duration != "" {
+			reasoningMetadata(c, t, o.Duration)
+		}
+		if lines := ReasoningLineCount(o.Reasoning); lines > 1 {
+			reasoningMetadata(c, t, fmt.Sprintf(T(o.Locale, "%d 行", "%d lines"), lines))
 		}
 		chevron := func() {
 			ui.Icon(c, icons.ChevronRight()).Size(design.Space3, design.Space3).
 				TextColor(t.LabelTertiary).Rotate(90 * parts.Progress())
 		}
 		if o.InlineChevron {
-			// The chevron sits right after the label/line count (the row gap is
+			// The chevron sits right after the label/metadata (the row gap is
 			// the 8 DIP spacing) and the spacer takes the rest of the line.
 			chevron()
 			ui.Spacer(c).Grow(1)
@@ -162,9 +168,14 @@ func ReasoningTrace(c *ui.Context, o ReasoningTraceOptions) {
 		if options == nil {
 			options = ReasoningMarkdown(t, 0)
 		}
-		design.Apply(ui.Column(c), t.Gap(design.Space1)).
-			PaddingStart(design.Space3 + design.Space2).PaddingEnd(design.Space2).
-			PaddingY(design.Space1).Children(func() {
+		// The reasoning body is secondary content and says so: a 2 DIP BorderL2
+		// rule down its left edge (the product's quote/indent rule), one Space3
+		// of room inside, and the 13/20 XS step through the muted Markdown theme.
+		design.Apply(ui.Column(c).FillWidth(), func(el ui.Element) ui.Element {
+			return el.BorderWidth(design.Space0, design.Space0, design.Space0, reasoningRuleWidth).
+				BorderColor(t.BorderL2).Transition(design.TransitionHeight(c))
+		}).PaddingStart(design.Space3).PaddingEnd(design.Space2).
+			PaddingY(design.Space1).Gap(design.Space1).Children(func() {
 			if o.Streaming {
 				markdown.Stream(c, o.Reasoning, options)
 				return

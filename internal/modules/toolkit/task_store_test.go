@@ -1295,3 +1295,28 @@ func TestTaskBoardMigrationTombstonesDoNotHideNewTasks(t *testing.T) {
 		t.Fatalf("new task hidden by a legacy tombstone: %+v", tasks)
 	}
 }
+
+// TestTeamTaskCreateEmptyArgsReturnsAParameterError covers the model's way out of
+// a malformed call: team_task_create with no subject must come back as an error
+// result the model reads (and can retry with), never an empty result that leaves
+// the turn waiting. The tool's schema marks subject required; a model that sends
+// {} anyway gets the reason in words.
+func TestTeamTaskCreateEmptyArgsReturnsAParameterError(t *testing.T) {
+	for _, arguments := range []string{`{}`, `{"subject":"   "}`, `{"subject":""}`} {
+		root, loader := bootTaskBoard(t, t.TempDir())
+		content, ok := invokeTaskToolIn(t, root, context.Background(), "team_task_create", arguments)
+		if ok {
+			t.Fatalf("team_task_create %s succeeded; want a parameter error result", arguments)
+		}
+		if !strings.Contains(strings.ToLower(content), "subject") {
+			t.Fatalf("team_task_create %s error = %q, want it to name the missing subject",
+				arguments, content)
+		}
+		if tasks := boardTasks(t, root); len(tasks) != 0 {
+			t.Fatalf("team_task_create %s created %d tasks; want none", arguments, len(tasks))
+		}
+		if err := loader.Close(); err != nil {
+			t.Fatalf("close loader: %v", err)
+		}
+	}
+}

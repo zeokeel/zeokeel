@@ -2,7 +2,7 @@ package automation_test
 
 // Depth tests for the second audit batch: the catalog model picker (E-09), the
 // schedule validation + next-run preview + localized errors (E-10), the Run now
-// in-flight state with "已投递" semantics and the session link (E-11), and the
+// in-flight state with "已启动" semantics and the session link (E-11), and the
 // Esc-cancel/inline-form empty-state rules (E-12).
 
 import (
@@ -261,16 +261,18 @@ func TestRunNowShowsPendingThenDeliveredAndSessionLink(t *testing.T) {
 	}
 	h.assertTexts(tester, "运行中")
 	// The in-flight state is the card's, not a claim that the run finished.
-	h.assertNoTexts(tester, "已投递")
+	h.assertNoTexts(tester, "已启动")
 
 	completeRun(service, "task-1", "sess-9")
 	tester.Frame()
 	h.assertNoTexts(tester, "运行中")
 	// The backend settled the run: the card reports completion, not delivery.
-	h.assertTexts(tester, "已完成", "打开会话")
-	h.assertNoTexts(tester, "已投递", "结果由会话决定")
+	h.assertTexts(tester, "已完成")
+	h.assertNoTexts(tester, "已启动", "结果由会话决定", "打开会话")
 
-	h.click(tester, "打开会话")
+	// The session link lives in the row menu now.
+	h.click(tester, "任务操作：巡检")
+	h.click(tester, "打开最近运行的会话")
 	if got := chat.activeSession(); got != "sess-9" {
 		t.Fatalf("active session = %q, want sess-9", got)
 	}

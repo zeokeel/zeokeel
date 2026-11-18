@@ -75,12 +75,17 @@ func TestToastLevelRowChangeNeverClears(t *testing.T) {
 	requireHasText(t, harness.tester, "visible-error")
 
 	// The next delivery is shown too; the two old toasts expire normally.
+	// The success/info card expires on its own clock; the error card is sticky by
+	// contract (B-spec §3.1.5) and leaves only when the user closes it, so the
+	// new delivery takes the freed slot and a click clears the error.
 	harness.raise(t, "notice-i2", contracts.NotifyInfo, "info-after-row")
 	harness.tester.Advance(5 * time.Second)
 	harness.tester.Frame()
 	harness.tester.Frame()
 	requireHasText(t, harness.tester, "info-after-row")
 	requireNoText(t, harness.tester, "visible-info")
+	requireHasText(t, harness.tester, "visible-error")
+	flushToasts(harness)
 	requireNoText(t, harness.tester, "visible-error")
 
 	// Case/whitespace variants and unknown level names in the row are ignored

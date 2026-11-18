@@ -131,7 +131,7 @@ func TestExportHiddenWithoutActiveSession(t *testing.T) {
 	chat := newFakeChat()
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.assertTexts(tester, "开始新对话")
+	h.assertTexts(tester, "发第一条消息")
 	h.assertNoTexts(tester, "会话操作")
 }
 

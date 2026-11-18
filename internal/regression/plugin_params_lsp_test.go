@@ -64,7 +64,7 @@ func TestPluginParamsSection(t *testing.T) {
 		"搜索端点", "web.search.endpoint", "https://search.example.test/api",
 		"API Key", "API Key 已设置",
 		"子代理深度", "编译期常量", "子代理并发",
-		"只展示已被产品实际消费的设置；敏感值仅显示是否已设置。")
+		"只列出本产品实际用到的设置；密钥类值只显示「已设置 / 未设置」。")
 	// Sensitive values never appear in the frame.
 	for _, text := range tester.Texts() {
 		if strings.Contains(text, "secret-search-key-123") {
@@ -82,8 +82,9 @@ func TestPluginParamsSection(t *testing.T) {
 		t.Fatalf("edit endpoint: %v; texts = %v", err, tester.Texts())
 	}
 	settlePluginFrame(tester)
-	requireHasTexts(t, tester, "编辑参数", "参数：web.search.endpoint", "新值：搜索端点", "保存")
-	if err := tester.Click("新值：搜索端点"); err != nil {
+	requireHasTexts(t, tester, "编辑参数", "参数：web.search.endpoint",
+		"新值：搜索端点 输入", "保存")
+	if err := tester.Click("新值：搜索端点 输入"); err != nil {
 		t.Fatalf("focus endpoint input: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
@@ -124,7 +125,7 @@ func TestPluginParamsSection(t *testing.T) {
 		t.Fatalf("re-edit API key: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	if err := tester.Click("新值：API Key"); err != nil {
+	if err := tester.Click("新值：API Key 输入"); err != nil {
 		t.Fatalf("focus API key input: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()

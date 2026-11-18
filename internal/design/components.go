@@ -47,6 +47,25 @@ const (
 // the host and the modules cannot drift: window chrome (sidebar, rail,
 // inspector), the readable content column and the settings surface.
 const (
+	// BandHeight is the window's top band row (screen title + actions): 48,
+	// one step above the 40 it used to be, so a 14 DIP semibold title, a 32 DIP
+	// chip and a 28 DIP icon button all breathe in one row.
+	BandHeight float32 = 48
+	// BrandRowHeight is the sidebar's brand row (mark + wordmark + collapse):
+	// 56, tighter than the old 64 so the navigation starts higher.
+	BrandRowHeight float32 = 56
+	// PaletteWidth is the command palette's card width: wide enough for a
+	// command, its section and its shortcut on one row, narrower than a form
+	// dialog.
+	PaletteWidth float32 = 640
+	// FooterHeight is a surface's fixed action bar (settings page, long form):
+	// 56 DIP with a hairline on top, holding 32 DIP buttons in its right corner.
+	FooterHeight float32 = 56
+	// ToastWidth bounds a toast card (max 320, min 240): a two-line notice,
+	// never a banner across the reading column.
+	ToastWidth    float32 = 320
+	ToastMinWidth float32 = 240
+
 	// SidebarWidth is the expanded source column.
 	SidebarWidth float32 = 280
 	// SidebarRailWidth is the collapsed icon rail.
@@ -60,16 +79,23 @@ const (
 	ContentMinWidth float32 = 520
 	// SettingsWidth/SettingsHeight are the settings surface's preferred size;
 	// it never grows past the window minus SettingsMargin.
-	SettingsWidth  float32 = 820
+	SettingsWidth  float32 = 880
 	SettingsHeight float32 = 760
 	// SettingsMargin is the free space kept around the settings surface; the
 	// surface grows with the window so a long page list stays visible rather
 	// than scrolling the last pages out of reach.
 	SettingsMargin float32 = 24
-	// TranscriptWidth is the conversation reading measure. It is the width the
-	// transcript, composer and composer dock share, so a change keeps them
-	// aligned; narrower windows still fall back to 92% of the content column.
+	// TranscriptWidth is the conversation column: the width the transcript,
+	// composer and composer dock share, so a change keeps them aligned; narrower
+	// windows still fall back to 92% of the content column. It bounds blocks
+	// (code fences, tables, tool cards, approval cards) rather than paragraphs.
 	TranscriptWidth float32 = 960
+	// ProseMeasure is the reading measure of a text block inside that column:
+	// paragraphs, lists and quotes. At 14 DIP it holds roughly 45 Chinese
+	// characters or 90 Latin characters per line, the comfortable range for
+	// both scripts; a fence or a table keeps the wider column so it does not
+	// squeeze into two narrow columns.
+	ProseMeasure float32 = 640
 
 	// DialogWidthS/M/L are the widths of the modal forms, in the order of the
 	// content they hold: a single prompt, a form, a long form or preview. They
@@ -100,17 +126,32 @@ const (
 	IconSizeL float32 = 24
 )
 
-// Brand radii. RadiusMD is the control corner of the theme (brand.Radius);
-// the smaller steps round inline chips and the larger ones the nested
-// surfaces above a control: cards, the composer and dialogs. RadiusMax is
-// the pill for badges, not a real corner size.
+// Brand radii. The ladder is 4 / 6 / 8 / 12 / 16: an inline marker, a chip,
+// a control (RadiusMD is the theme's brand.Radius), a card or dialog, and the
+// composer. Rounder steps read as consumer software, so the product stops at
+// 16; RadiusMax is only for an avatar, never for a status label (those are
+// RadiusXS chips, not pills).
 const (
 	RadiusXS  float32 = 4
-	RadiusSM  float32 = 8
+	RadiusSM  float32 = 6
 	RadiusMD  float32 = brand.Radius
-	RadiusLG  float32 = 16
-	RadiusXL  float32 = 20
+	RadiusLG  float32 = 12
+	RadiusXL  float32 = 16
 	RadiusMax float32 = 999
+)
+
+// Semantic spacing aliases. They add no values (each is an existing Space
+// step); they name the rhythm so a reviewer can check one rule: inline gaps
+// use Inline, rows use Row, blocks inside a card use Group, cards within a
+// section use Section, page regions use Screen, and the top of a page uses
+// Page. Using the next step up (not 10 or 14) is what keeps the 4 DIP grid.
+const (
+	SpaceInline  = Space1 // 4: icon to text, kbd to label
+	SpaceRow     = Space2 // 8: row padding, gap between rows
+	SpaceGroup   = Space3 // 12: blocks inside a card
+	SpaceSection = Space4 // 16: card to card, panel sections
+	SpaceScreen  = Space6 // 24: page regions, settings sections
+	SpacePage    = Space8 // 32: page top
 )
 
 // SectionLabel is a small uppercase sidebar section title.
@@ -122,27 +163,47 @@ func (t *Tokens) SectionLabel() Style {
 	}
 }
 
-// Panel is a bordered surface (independent cards, composer, dialogs). Use it
-// for objects, not for every section: sections are spacing and a title.
+// SurfaceSunken is the surface one step below a floating overlay (S4): the
+// settings dialog's navigation column. In the light ramp that step is the
+// window's own sidebar (S1), one shade under the white panel. In the dark ramp
+// the window sidebar is DARKER than the page, so inside a floating panel it
+// would read as a hole; the raised surface (S2) is the step below the overlay
+// there. One helper so both themes keep the ramp's direction instead of the
+// same token name meaning two different depths.
+func (t *Tokens) SurfaceSunken() ui.Color {
+	if t.Dark {
+		return t.BgRaised
+	}
+	return t.BgSidebar
+}
+
+// Panel is a bordered surface (independent cards, tool cards, dialogs). Use it
+// for objects, not for every section: sections are spacing and a title. The
+// border is BorderL3 — the edge of something the pointer can enter — and the
+// card carries no shadow: elevation is reserved for floating layers.
 func (t *Tokens) Panel() Style {
 	return func(el ui.Element) ui.Element {
-		return el.Background(t.BgRaised).Border(1, t.BorderL2).Radius(RadiusLG)
+		return el.Background(t.BgRaised).Border(1, t.BorderL3).Radius(RadiusLG)
 	}
 }
 
-// ShadowComposer is the soft elevation of the composer card.
+// ShadowComposer is kept for callers that still want a lifted input surface;
+// the composer preset itself is flat (see Composer).
 func (t *Tokens) ShadowComposer() Style {
 	return func(el ui.Element) ui.Element {
 		return el.Shadow(0, 2, 4, 0, ui.RGBA(0, 0, 0, 0.05))
 	}
 }
 
-// Composer is the message input box: the brand's raised, rounded card with
-// the soft composer shadow. The width is left to the content column so the
-// composer can never be wider than the surface it lives in.
+// Composer is the message input box: a raised card with a hairline border and
+// the largest corner in the product (RadiusXL), flat on the page. The soft
+// drop shadow it used to carry made it read as a floating dialog over the
+// transcript; the shell now treats it as the docked bottom surface, separated
+// by its edge alone. The width is left to the content column so the composer
+// can never be wider than the surface it lives in.
 func (t *Tokens) Composer() Style {
 	return func(el ui.Element) ui.Element {
-		return Apply(el, t.Panel(), t.ShadowComposer(), func(e ui.Element) ui.Element {
+		return Apply(el, t.Panel(), func(e ui.Element) ui.Element {
 			return e.Radius(RadiusXL)
 		})
 	}
@@ -175,7 +236,12 @@ func (t *Tokens) PrimaryButtonLarge() Style {
 func (t *Tokens) DisabledPrimary() Style {
 	return func(el ui.Element) ui.Element {
 		return el.Height(ControlHeight).PaddingX(Space4).Radius(RadiusMD).FontWeight(WeightMedium).
-			Background(t.BgStrong).TextColor(t.LabelTertiary)
+			Background(t.BgStrong).TextColor(t.LabelTertiary).
+			// The composer's disabled send keeps its full-strength neutral fill
+			// and a hairline; the framework's automatic dimming would halve it
+			// into an invisible ghost (VD-20). The footer's disabled primary is
+			// the same control in another place, so it uses the same tokens.
+			Border(1, t.BorderL2).DimDisabled(false)
 	}
 }
 
@@ -219,24 +285,45 @@ func (t *Tokens) DangerButton() Style {
 	}
 }
 
-// Badge is a small rounded label for status, type, permission and counts —
-// not for ordinary metadata.
+// Badge is a small label for status, type, permission and counts — not for
+// ordinary metadata. It is a crisp 4 DIP chip rather than a pill: a status
+// label is information, not decoration, and the pill shape read as consumer
+// software next to 32 DIP rows.
 func (t *Tokens) Badge() Style {
 	return func(el ui.Element) ui.Element {
-		return el.PaddingX(Space2).PaddingY(Space1).Radius(RadiusMax).
-			Background(t.BgHover).TextColor(t.LabelSecondary)
+		return Apply(el, t.Font(TypeXXXS), func(e ui.Element) ui.Element {
+			return e.PaddingX(Space1).PaddingY(1).Radius(RadiusXS).
+				Background(t.BgHover).TextColor(t.LabelSecondary)
+		})
+	}
+}
+
+// Kbd is the keyboard key cap: a 16 DIP tall chip with the short key label,
+// used in menus, the command palette, tooltips and the composer hint. It is
+// deliberately smaller than a badge so it recedes into the hint line.
+func (t *Tokens) Kbd() Style {
+	return func(el ui.Element) ui.Element {
+		return Apply(el, t.Font(TypeXXXS), func(e ui.Element) ui.Element {
+			return e.Height(16).PaddingX(Space1).MinWidth(16).
+				Radius(RadiusXS).Border(1, t.BorderL2).
+				Background(t.BgStrong).TextColor(t.LabelSecondary)
+		})
 	}
 }
 
 // ShadowOverlay is the elevation of floating surfaces above the page: menus,
-// popovers, palettes and toasts (not cards, which are flat in this product).
-// It is stronger in the dark theme, where a soft shadow reads less.
+// popovers, palettes, dialogs and toasts (not cards, which are flat in this
+// product). It is two stacked shadows — a tight contact shadow and a wide
+// ambient one — so the layer reads as raised without a dark halo, and it is
+// stronger in the dark theme, where a soft shadow reads less.
 func (t *Tokens) ShadowOverlay() Style {
-	alpha := float32(0.12)
+	contact := float32(0.06)
+	ambient := float32(0.10)
 	if t.Dark {
-		alpha = 0.32
+		contact, ambient = 0.20, 0.34
 	}
 	return func(el ui.Element) ui.Element {
-		return el.Shadow(0, 8, 24, 0, ui.RGBA(0, 0, 0, alpha))
+		return el.Shadow(0, 1, 2, 0, ui.RGBA(0, 0, 0, contact)).
+			Shadow(0, 10, 30, 0, ui.RGBA(0, 0, 0, ambient))
 	}
 }

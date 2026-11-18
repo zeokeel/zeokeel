@@ -24,7 +24,7 @@ func TestApprovalFooterHasNoDefaultAction(t *testing.T) {
 
 	h.approvals.add(pendingRequest("r1", "bash", "第一个", `{"command":"ls"}`))
 	h.frames(tester, 2)
-	if tester.Focused("拒绝") || tester.Focused("允许") || tester.Focused("本会话内始终允许") {
+	if tester.Focused("拒绝") || tester.Focused("允许一次") || tester.Focused("更多") {
 		t.Fatalf("first request: an action was auto-focused; texts = %v", tester.Texts())
 	}
 	tester.Key(0, ui.KeyEnter)
@@ -42,7 +42,7 @@ func TestApprovalFooterHasNoDefaultAction(t *testing.T) {
 	h.approvals.add(pendingRequest("r2", "write_file", "第二个", `{"path":"x"}`))
 	h.frames(tester, 2)
 	h.assertTexts(tester, "第二个")
-	if tester.Focused("拒绝") || tester.Focused("允许") {
+	if tester.Focused("拒绝") || tester.Focused("允许一次") {
 		t.Fatalf("second request: an action was auto-focused; texts = %v", tester.Texts())
 	}
 	tester.Key(0, ui.KeyEnter)
@@ -51,7 +51,7 @@ func TestApprovalFooterHasNoDefaultAction(t *testing.T) {
 		t.Fatalf("second request: decisions after Enter = %v, want still 1", got)
 	}
 	h.assertTexts(tester, "需要审批")
-	h.click(tester, "允许")
+	h.click(tester, "允许一次")
 	if got := h.approvals.resolved(); len(got) != 2 || got[1] != contracts.ApprovalAllow {
 		t.Fatalf("second request: decisions after clicking Allow = %v, want [deny allow]", got)
 	}

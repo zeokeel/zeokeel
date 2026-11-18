@@ -96,7 +96,10 @@ func TestScreenNavSpecIsTheSingleSource(t *testing.T) {
 		hasGlyph bool
 	}{
 		{"home", "首页", "Home", true},
-		{"session", "对话", "Chat", true},
+		// The session destination is named by the object it shows (会话/Session),
+		// not by the conversation activity; 「对话」 survives only as the tab
+		// label inside the session (2026-11 copy audit F-02).
+		{"session", "会话", "Session", true},
 		{"automation", "自动化", "Automation", true},
 		{"insights", "洞察", "Insights", true},
 		{"plugins", "能力", "Capabilities", true},

@@ -10,6 +10,7 @@ package uikit_test
 import (
 	"image/color"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -227,6 +228,8 @@ func TestIconButtonHoverAndFocusTint(t *testing.T) {
 	info := requireButton(t, tt, ui.RoleButton, "刷新")
 	tt.Move(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
 	tt.Frame()
+	// The fill fades over MotionFast (80ms); settle before reading the pixel.
+	tt.Advance(design.MotionFast + 20*time.Millisecond)
 	requirePixel(t, tt, x, y, over(tokens.BgHover, tokens.BgBase))
 
 	// With the pointer away, the keyboard focus alone keeps the hover tint;
@@ -257,6 +260,7 @@ func TestIconButtonSubtleKeepsAQuietFill(t *testing.T) {
 	info := requireButton(t, tt, ui.RoleButton, "复制")
 	tt.Move(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
 	tt.Frame()
+	tt.Advance(design.MotionFast + 20*time.Millisecond)
 	requirePixel(t, tt, x, y, over(tokens.BgSelected, tokens.BgBase))
 }
 

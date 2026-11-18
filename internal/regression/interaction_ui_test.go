@@ -135,7 +135,8 @@ func TestInteractionModuleEscapeDismisses(t *testing.T) {
 }
 
 // TestInteractionModuleQuestionQueueFIFO covers two queued questions: only the
-// oldest is shown, answering it opens the next one on the following frame.
+// oldest is shown, and answering it — choosing a radio row, then the card's one
+// accent Submit (B-spec-v2 §3.3.3) — opens the next one on the following frame.
 func TestInteractionModuleQuestionQueueFIFO(t *testing.T) {
 	harness := startInteractionUI(t)
 	harness.interaction.trigger(contracts.UserQuestion{ID: "q-first", Text: "first question", Options: []string{"ok"}})
@@ -143,9 +144,21 @@ func TestInteractionModuleQuestionQueueFIFO(t *testing.T) {
 	harness.tester.Frame()
 	requireHasText(t, harness.tester, "first question")
 	requireNoText(t, harness.tester, "second question")
+	// The choice list is the official radio group plus the fixed "其他…" row.
+	requireHasText(t, harness.tester, "其他…")
 
 	if err := harness.tester.Click("ok"); err != nil {
-		t.Fatalf("click first answer: %v; texts = %v", err, harness.tester.Texts())
+		t.Fatalf("pick the first answer: %v; texts = %v", err, harness.tester.Texts())
+	}
+	harness.tester.Frame()
+	// Selecting is not answering: the question is still on screen and nothing has
+	// been sent to the agent yet.
+	requireHasText(t, harness.tester, "first question")
+	if answers := harness.interaction.answerCalls(); len(answers) != 0 {
+		t.Fatalf("selecting an option answered %v; want nothing", answers)
+	}
+	if err := harness.tester.Click("提交"); err != nil {
+		t.Fatalf("submit the first answer: %v; texts = %v", err, harness.tester.Texts())
 	}
 	harness.tester.Frame()
 	requireNoText(t, harness.tester, "first question")

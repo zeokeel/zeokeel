@@ -230,7 +230,7 @@ func buildGlobalHotkeySection(c *ui.Context, t *design.Tokens, state *appearance
 					capture := ui.TextInput(c, &state.captureText).
 						Label(localized(locale, "录制全局热键", "Record global hotkey")).
 						Placeholder(localized(locale, "按下组合键…", "Press a combination…")).
-						FillWidth()
+						Width(controlWidth)
 					capture = capture.Bind(&state.captureInput)
 					capture.OnTextKey(func(k ui.TextKey) bool {
 						return state.captureHotkey(k, locale)
@@ -242,14 +242,14 @@ func buildGlobalHotkeySection(c *ui.Context, t *design.Tokens, state *appearance
 				} else {
 					input := ui.TextInput(c, &state.hotkeyText).
 						Label(inputLabel(locale, localized(locale, "组合键", "Shortcut"))).
-						Placeholder("Ctrl+Shift+Space").FillWidth()
+						Placeholder("Ctrl+Shift+Space").Width(controlWidth)
 					if input.Changed() {
 						state.syncHotkeyDraft(locale)
 					}
 				}
-				recordLabel := localized(locale, "录入", "Record")
+				recordLabel := localized(locale, "录制", "Record")
 				if state.capturing {
-					recordLabel = localized(locale, "取消录入", "Cancel recording")
+					recordLabel = localized(locale, "取消录制", "Cancel recording")
 				}
 				if design.Apply(ui.Button(c, recordLabel), t.SecondaryButton()).
 					Tooltip(localized(locale, "按键录入组合键", "Record a key combination")).
@@ -266,6 +266,20 @@ func buildGlobalHotkeySection(c *ui.Context, t *design.Tokens, state *appearance
 			"Empty disables it; applies after Save and a restart.")).
 			Error(state.hotkeyError)
 		if state.capturing {
+			// Esc cancels the recording from the page's own scope as well as from
+			// the capture field's OnTextKey: the settings surface registers Esc on
+			// its content column (the ancestor chain that dismisses the surface),
+			// and the recorder must win that key while it is capturing — a focused
+			// field handles it first, and this page-scoped shortcut covers the
+			// frame before the field's focus request lands.
+			c.OnShortcut(0, ui.KeyEscape, func() {
+				if !state.capturing {
+					return
+				}
+				state.capturing = false
+				state.captureText = ""
+				c.Invalidate()
+			})
 			design.Apply(ui.Text(c, localized(locale, "按下组合键，Esc 取消",
 				"Press the combination; Esc cancels")), t.TextMuted(design.TypeXXS))
 		}
@@ -339,8 +353,8 @@ func globalHotkeyConflict(locale contracts.LocaleService, draft string, store co
 // globalHotkeyInvalidMessage is the localized validation error.
 func globalHotkeyInvalidMessage(locale contracts.LocaleService) string {
 	return localized(locale,
-		"全局热键格式无效：请按下「录入」按组合键，或输入如 Cmd/Ctrl+Shift+Space",
-		"Invalid global hotkey: press Record and press the combination, or type e.g. Cmd/Ctrl+Shift+Space")
+		"组合键格式无效。点「录制」后按下组合键，或输入如 Ctrl+Shift+Space。",
+		"That shortcut is not valid. Click Record and press the keys, or type one like Ctrl+Shift+Space.")
 }
 
 // validGlobalHotkeyValue mirrors the host's accelerator rules: empty disables;

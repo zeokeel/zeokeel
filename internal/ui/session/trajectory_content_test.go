@@ -55,7 +55,8 @@ func TestTrajectoryIncludesReasoningAndBody(t *testing.T) {
 			disclosures[0].Y, tool.Y, disclosures[1].Y, body.Y)
 	}
 
-	// A thinking row jumps back to its message, like the tool rows do.
+	// A thinking row jumps back to its message, like the tool rows do: the jump
+	// is the row's trailing action, revealed on hover/focus (VD-17).
 	if err := tester.Click("在对话中定位 思考"); err != nil {
 		t.Fatalf("thinking row has no locate action: %v; texts = %v", err, tester.Texts())
 	}

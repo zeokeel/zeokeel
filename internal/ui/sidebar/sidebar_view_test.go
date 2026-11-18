@@ -211,7 +211,7 @@ func TestSidebarOnlyAutomationSessionsShowsEmptyState(t *testing.T) {
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
 
-	h.assertTexts(tester, "还没有会话", "新对话")
+	h.assertTexts(tester, "还没有会话", "新建会话")
 	h.assertNoTexts(tester, "自动化: 每日摘要")
 }
 

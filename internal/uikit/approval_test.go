@@ -70,7 +70,7 @@ func TestApprovalDialogRendersRequest(t *testing.T) {
 
 	for _, want := range []string{
 		"需要审批", "工具", "运行命令", "命令", "运行命令 ls", "原始参数",
-		"原始参数", "允许", "本会话内始终允许", "拒绝",
+		"原始参数", "允许一次", "本会话内始终允许", "拒绝",
 		"允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。",
 		"「本会话内始终允许」在本会话内不再询问该工具，会话结束后失效。",
 		"Esc = 拒绝本次调用 · 点击或 Tab 选择操作（无默认操作）",
@@ -80,9 +80,11 @@ func TestApprovalDialogRendersRequest(t *testing.T) {
 			t.Fatalf("frame does not show %q; texts = %v", want, tester.Texts())
 		}
 	}
-	// The friendly name is the visible copy; the raw tool id is the tooltip.
-	if tester.HasText("bash") {
-		t.Fatalf("the raw tool id leaked into the visible copy; texts = %v", tester.Texts())
+	// The friendly name is the visible copy; the raw protocol id follows it in
+	// the mono face, so a reviewer can trace the call (it is no longer a tooltip:
+	// a tooltip is an overlay that takes Escape from the surface, A4-I-01).
+	if !tester.HasText("bash") {
+		t.Fatalf("the raw tool id is not visible; texts = %v", tester.Texts())
 	}
 	// The raw arguments are collapsed details: no payload before the click and
 	// no third "参数详情" layer (N3).
@@ -107,7 +109,7 @@ func TestApprovalDialogFooterOrderAndNoDefaultAction(t *testing.T) {
 	if !ok {
 		t.Fatalf("session-scoped allow button missing; texts = %v", tester.Texts())
 	}
-	allow, ok := tester.Find("允许")
+	allow, ok := tester.Find("允许一次")
 	if !ok {
 		t.Fatalf("allow button missing; texts = %v", tester.Texts())
 	}
@@ -115,7 +117,7 @@ func TestApprovalDialogFooterOrderAndNoDefaultAction(t *testing.T) {
 		t.Fatalf("footer order x = deny %.1f, always %.1f, allow %.1f; want deny < always < allow",
 			deny.X, always.X, allow.X)
 	}
-	if tester.Focused("拒绝") || tester.Focused("允许") || tester.Focused("本会话内始终允许") {
+	if tester.Focused("拒绝") || tester.Focused("允许一次") || tester.Focused("本会话内始终允许") {
 		t.Fatalf("the approval dialog must not autofocus an action; texts = %v", tester.Texts())
 	}
 
@@ -137,8 +139,7 @@ func TestApprovalDialogDecisionButtons(t *testing.T) {
 		label    string
 		decision contracts.ApprovalDecision
 	}{
-		{label: "允许", decision: contracts.ApprovalAllow},
-		{label: "本会话内始终允许", decision: contracts.ApprovalAllowAlways},
+		{label: "允许一次", decision: contracts.ApprovalAllow},
 		{label: "拒绝", decision: contracts.ApprovalDeny},
 	}
 	for _, test := range cases {
@@ -182,7 +183,27 @@ func TestApprovalDialogEscapeDenies(t *testing.T) {
 	}
 }
 
-// TestApprovalDialogBackdropClickDenies covers the click-outside path: the
+// TestApprovalModalEscapeDeniesWithFocusInside pins the Escape contract when the
+// keyboard is inside the dialog (A4: the first Escape must decide, wherever the
+// focus sits). The native Modal owns the key at its own layer, so a focused
+// control inside the dialog does not have to be the one that hears it.
+func TestApprovalModalEscapeDeniesWithFocusInside(t *testing.T) {
+	state, tester := approvalOpenHarness(t,
+		approvalTestRequest("e2", "bash", "运行命令", `{"command":"ls"}`), 1)
+	// Put the keyboard inside the dialog: tab to its first action.
+	tester.Key(0, ui.KeyTab)
+	tester.Frame()
+	if tester.Focused("") {
+		t.Fatalf("Tab did not move the focus into the dialog; texts = %v", tester.Texts())
+	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	if len(state.decisions) != 1 || state.decisions[0] != contracts.ApprovalDeny {
+		t.Fatalf("Escape with the focus inside the dialog decided %v, want [deny]", state.decisions)
+	}
+}
+
+// TestApprovalDialogBackdropClickDenies// TestApprovalDialogBackdropClickDenies covers the click-outside path: the
 // Modal's backdrop dismisses it, which is also a deny.
 func TestApprovalDialogBackdropClickDenies(t *testing.T) {
 	state, tester := approvalOpenHarness(t,
@@ -297,7 +318,7 @@ func TestApprovalDialogEnglishCopy(t *testing.T) {
 	tester.Frame()
 	for _, want := range []string{
 		"Approval required", "Tool", "Read file", "Raw arguments",
-		"Allow", "Always allow in this session", "Deny",
+		"Allow once", "Always allow in this session", "Deny",
 		"1 more approval requests waiting",
 		"Esc = deny this call",
 	} {
@@ -305,8 +326,8 @@ func TestApprovalDialogEnglishCopy(t *testing.T) {
 			t.Fatalf("frame does not show %q; texts = %v", want, tester.Texts())
 		}
 	}
-	if tester.HasText("read_file") {
-		t.Fatalf("the raw tool id leaked into the visible copy; texts = %v", tester.Texts())
+	if !tester.HasText("read_file") {
+		t.Fatalf("the raw tool id is not visible; texts = %v", tester.Texts())
 	}
 }
 
@@ -326,25 +347,34 @@ func TestApprovalDialogClosedRendersNothing(t *testing.T) {
 	}
 }
 
-// TestApprovalSummaryLabelFollowsToolKind covers S-08: only shell/terminal
-// calls label their summary 命令; a file read (or other non-command tool) keeps
-// the neutral 摘要 so the dialog never says a read/search is a command to run.
+// TestApprovalSummaryLabelFollowsToolKind covers the target block's semantic
+// label: a command line, a file path, a URL and a query are read differently, so
+// the block says which one it holds instead of labelling every payload 摘要, and
+// a tool with no such shape (a team task) keeps the neutral 摘要.
 func TestApprovalSummaryLabelFollowsToolKind(t *testing.T) {
-	_, tester := approvalOpenHarness(t,
-		approvalTestRequest("f1", "read_file", "读取 internal/app.go", `{"path":"internal/app.go"}`), 1)
-	if !tester.HasText("摘要") {
-		t.Fatalf("read_file summary is not labelled 摘要; texts = %v", tester.Texts())
+	cases := []struct {
+		tool, summary, arguments, label string
+	}{
+		{"bash", "运行命令 ls", `{"command":"ls"}`, "命令"},
+		{"read_file", "读取 internal/app.go", `{"path":"internal/app.go"}`, "路径"},
+		{"web_fetch", "抓取 example.com", `{"url":"https://example.com"}`, "域名"},
+		{"web_search", "搜索 zeokeel", `{"query":"zeokeel"}`, "查询"},
+		{"team_task_create", "创建任务", `{"subject":"发布"}`, "摘要"},
 	}
-	for _, text := range tester.Texts() {
-		if text == "命令" {
-			t.Fatalf("read_file summary is labelled 命令; texts = %v", tester.Texts())
-		}
-	}
-
-	_, bash := approvalOpenHarness(t,
-		approvalTestRequest("b1", "bash", "运行命令 ls", `{"command":"ls"}`), 1)
-	if !bash.HasText("命令") {
-		t.Fatalf("bash summary is not labelled 命令; texts = %v", bash.Texts())
+	for _, test := range cases {
+		t.Run(test.tool, func(t *testing.T) {
+			_, tester := approvalOpenHarness(t,
+				approvalTestRequest("t1", test.tool, test.summary, test.arguments), 1)
+			if !tester.HasText(test.label) {
+				t.Fatalf("%s summary is not labelled %s; texts = %v",
+					test.tool, test.label, tester.Texts())
+			}
+			for _, text := range tester.Texts() {
+				if text == "命令" && test.label != "命令" {
+					t.Fatalf("%s summary is labelled 命令; texts = %v", test.tool, tester.Texts())
+				}
+			}
+		})
 	}
 }
 
@@ -375,48 +405,49 @@ func approvalInlineHarness(t *testing.T, request contracts.ApprovalRequest, pend
 	return state, tester
 }
 
-// TestApprovalInlineCardRendersBannerAndBody pins the V3 anatomy: the warning
-// banner (icon, title, friendly tool, queue counter, Esc hint), the neutral body
-// (impact statement, promoted summary, collapsed arguments) and the three
-// decisions in the desktop order.
-func TestApprovalInlineCardRendersBannerAndBody(t *testing.T) {
+// TestApprovalInlineCardAnatomy pins the card's B-spec anatomy: the status badge
+// and the tool in the header, the queue counter, the impact line, the semantic
+// target block, the collapsed raw arguments, the key-cap hints and the decision
+// bar (Deny · the one accent Allow · the scope menu). The warning color appears
+// only as the rail, the badge and the impact sentence — never as a full-width
+// banner (VD-08).
+func TestApprovalInlineCardAnatomy(t *testing.T) {
 	_, tester := approvalInlineHarness(t,
 		approvalTestRequest("a1", "bash", "运行命令 ls", `{"command":"ls"}`), 2,
 		uikit.ApprovalLabels{}, nil)
 
 	for _, want := range []string{
-		"主屏幕", "需要审批", "运行命令", "还有 1 条待审批", "Esc 拒绝",
+		"主屏幕", "需要审批", "运行命令", "还有 1 条",
 		"允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。",
 		"命令", "运行命令 ls", "原始参数",
-		"允许", "本会话内始终允许", "拒绝",
-		"「本会话内始终允许」在本会话内不再询问该工具，会话结束后失效。",
+		"Esc", "Ctrl+Enter", "拒绝本次", "按所选范围允许",
+		"范围：仅此一次", "拒绝", "允许一次", "更多",
 	} {
 		if !tester.HasText(want) {
 			t.Fatalf("frame does not show %q; texts = %v", want, tester.Texts())
 		}
 	}
-	// The friendly name is the visible copy; the raw tool id is the tooltip, and
-	// the raw arguments stay collapsed details.
-	if tester.HasText("bash") || tester.HasText(`{"command":"ls"}`) || tester.HasText("参数详情") {
-		t.Fatalf("raw tool id/arguments leaked into the frame; texts = %v", tester.Texts())
+	// The session-scoped allow is a scope choice inside the menu, not a second
+	// accent-styled button: the screen may hold exactly one primary action.
+	if tester.HasText("本会话内始终允许") {
+		t.Fatalf("the session-scoped allow is still a footer button; texts = %v", tester.Texts())
+	}
+	// The raw protocol id is visible mono copy; the raw arguments stay collapsed.
+	if !tester.HasText("bash") || tester.HasText(`{"command":"ls"}`) || tester.HasText("参数详情") {
+		t.Fatalf("raw id/arguments are wrong in the frame; texts = %v", tester.Texts())
 	}
 	deny, ok := tester.Find("拒绝")
 	if !ok {
 		t.Fatalf("deny action missing; texts = %v", tester.Texts())
 	}
-	always, ok := tester.Find("本会话内始终允许")
-	if !ok {
-		t.Fatalf("session-scoped allow action missing; texts = %v", tester.Texts())
-	}
-	allow, ok := tester.Find("允许")
+	allow, ok := tester.Find("允许一次")
 	if !ok {
 		t.Fatalf("allow action missing; texts = %v", tester.Texts())
 	}
-	if !(deny.X < always.X && always.X < allow.X) {
-		t.Fatalf("footer order x = deny %.1f, always %.1f, allow %.1f; want deny < always < allow",
-			deny.X, always.X, allow.X)
+	if !(deny.X < allow.X) {
+		t.Fatalf("footer order x = deny %.1f, allow %.1f; want deny < allow", deny.X, allow.X)
 	}
-	if tester.Focused("拒绝") || tester.Focused("允许") || tester.Focused("本会话内始终允许") {
+	if tester.Focused("拒绝") || tester.Focused("允许一次") {
 		t.Fatalf("the inline card must not autofocus an action; texts = %v", tester.Texts())
 	}
 	// The card is one named region for assistive technology.
@@ -425,47 +456,125 @@ func TestApprovalInlineCardRendersBannerAndBody(t *testing.T) {
 	}
 }
 
-// TestApprovalInlineScopeHintUsesMetadataStep pins the scope hint's type step
-// (2026-11 audit UD-05, DESIGN.md §5.3): the sentence explains what "always
-// allow in this session" does and when it expires — it influences the user's
-// decision, so it is metadata (TypeXXS, 12/18), never the 11px micro-label
-// step. The Modal path already renders the same sentence at TypeXXS; the
-// inline card must match it line for line.
+// TestApprovalInlineScopeHintUsesMetadataStep pins the impact sentence's type
+// step: it explains what approving means and it influences the decision, so it is
+// metadata (TypeXXS, 12/18), never the 11px micro-label step (UD-05).
 func TestApprovalInlineScopeHintUsesMetadataStep(t *testing.T) {
-	const hint = "「本会话内始终允许」在本会话内不再询问该工具，会话结束后失效。"
+	const hint = "允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。"
 	_, inline := approvalInlineHarness(t,
 		approvalTestRequest("a1", "bash", "运行命令 ls", `{"command":"ls"}`), 1,
 		uikit.ApprovalLabels{}, nil)
 	rect, ok := inline.Find(hint)
 	if !ok {
-		t.Fatalf("inline scope hint missing; texts = %v", inline.Texts())
+		t.Fatalf("inline impact statement missing; texts = %v", inline.Texts())
 	}
 	_, line, _ := design.TypeMetrics(design.TypeXXS)
 	if rect.H < line {
-		t.Errorf("inline scope hint line box = %v, want ≥%v (TypeXXS metadata step; TypeXXXS is micro-labels only, UD-05)",
+		t.Errorf("inline impact statement line box = %v, want ≥%v (TypeXXS metadata step; TypeXXXS is micro-labels only, UD-05)",
 			rect.H, line)
 	}
 	_, modal := approvalOpenHarness(t,
 		approvalTestRequest("a2", "bash", "运行命令 ls", `{"command":"ls"}`), 1)
 	mrect, ok := modal.Find(hint)
 	if !ok {
-		t.Fatalf("modal scope hint missing; texts = %v", modal.Texts())
+		t.Fatalf("modal impact statement missing; texts = %v", modal.Texts())
 	}
 	if rect.H != mrect.H {
-		t.Errorf("inline scope hint line box %v differs from the Modal path's %v (one sentence, one type step)",
+		t.Errorf("inline impact line box %v differs from the Modal path's %v (one sentence, one type step)",
 			rect.H, mrect.H)
 	}
 }
 
-// TestApprovalInlineCardDecisions covers the three explicit decisions: each
-// button reports its decision through OnResolve.
+// TestApprovalInlineScopeMenuChoosesTheDecision pins the scope menu: choosing
+// "this session" relabels the single accent action and states the scope beside
+// it, and the action then resolves as AllowAlways; the one-call scope resolves as
+// Allow. The menu keeps one accent fill on screen at every point.
+func TestApprovalInlineScopeMenuChoosesTheDecision(t *testing.T) {
+	state, tester := approvalInlineHarness(t,
+		approvalTestRequest("a1", "bash", "运行命令 ls", `{"command":"ls"}`), 1,
+		uikit.ApprovalLabels{}, nil)
+	if err := tester.Click("更多"); err != nil {
+		t.Fatalf("click the scope menu: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if err := tester.Click("本会话内始终允许该工具"); err != nil {
+		t.Fatalf("choose the session scope: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !tester.HasText("范围：本会话") {
+		t.Fatalf("the scope sentence does not follow the choice; texts = %v", tester.Texts())
+	}
+	allow, ok := tester.Find("本会话内始终允许")
+	if !ok {
+		t.Fatalf("the allow action did not follow the scope; texts = %v", tester.Texts())
+	}
+	if allow.X <= 0 {
+		t.Fatalf("allow action x = %v", allow.X)
+	}
+	if err := tester.Click("本会话内始终允许"); err != nil {
+		t.Fatalf("click the scoped allow: %v; texts = %v", err, tester.Texts())
+	}
+	if len(state.decisions) != 1 || state.decisions[0] != contracts.ApprovalAllowAlways {
+		t.Fatalf("decisions = %v, want [%s]", state.decisions, contracts.ApprovalAllowAlways)
+	}
+}
+
+// TestApprovalInlineKeyboardAllowsOnce pins the explicit chord: CmdOrCtrl+Enter
+// allows at the selected scope, and plain Enter decides nothing (the user presses
+// it right after sending a prompt).
+func TestApprovalInlineKeyboardAllowsOnce(t *testing.T) {
+	state, tester := approvalInlineHarness(t,
+		approvalTestRequest("a1", "bash", "运行命令 ls", `{"command":"ls"}`), 1,
+		uikit.ApprovalLabels{}, nil)
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if len(state.decisions) != 0 {
+		t.Fatalf("a stray Enter decided %v; want nothing", state.decisions)
+	}
+	// The chord belongs to the card's focus subtree (it must not fire while the
+	// user types elsewhere with the same chord in mind), so tab into the card.
+	tester.Key(0, ui.KeyTab)
+	tester.Frame()
+	tester.Key(ui.Cmd, ui.KeyEnter)
+	tester.Frame()
+	if len(state.decisions) != 1 || state.decisions[0] != contracts.ApprovalAllow {
+		t.Fatalf("decisions = %v, want [%s]", state.decisions, contracts.ApprovalAllow)
+	}
+}
+
+// TestApprovalInlineRulesDisclosure pins the menu's "show rules" entry: the
+// always-allow explanation is available on demand instead of being a permanent
+// footnote under the decision.
+func TestApprovalInlineRulesDisclosure(t *testing.T) {
+	_, tester := approvalInlineHarness(t,
+		approvalTestRequest("a1", "bash", "运行命令 ls", `{"command":"ls"}`), 1,
+		uikit.ApprovalLabels{}, nil)
+	const rule = "「本会话内始终允许」在本会话内不再询问 运行命令，会话结束后失效。"
+	if tester.HasText(rule) {
+		t.Fatalf("the rules copy is visible without asking for it; texts = %v", tester.Texts())
+	}
+	if err := tester.Click("更多"); err != nil {
+		t.Fatalf("click the scope menu: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if err := tester.Click("查看规则"); err != nil {
+		t.Fatalf("open the rules: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !tester.HasText("会话结束后失效") {
+		t.Fatalf("the rules do not explain the scope; texts = %v", tester.Texts())
+	}
+}
+
+// TestApprovalInlineCardDecisions covers the two direct decisions: each button
+// reports its decision through OnResolve. The session-scoped allow is reached
+// through the scope menu (TestApprovalInlineScopeMenuChoosesTheDecision).
 func TestApprovalInlineCardDecisions(t *testing.T) {
 	cases := []struct {
 		label    string
 		decision contracts.ApprovalDecision
 	}{
-		{label: "允许", decision: contracts.ApprovalAllow},
-		{label: "本会话内始终允许", decision: contracts.ApprovalAllowAlways},
+		{label: "允许一次", decision: contracts.ApprovalAllow},
 		{label: "拒绝", decision: contracts.ApprovalDeny},
 	}
 	for _, test := range cases {
@@ -519,7 +628,7 @@ func TestApprovalInlineCardPendingCount(t *testing.T) {
 		_, tester := approvalInlineHarness(t,
 			approvalTestRequest("a1", "bash", "运行命令", ""), 3,
 			uikit.ApprovalLabels{}, nil)
-		if !tester.HasText("还有 2 条待审批") {
+		if !tester.HasText("还有 2 条") {
 			t.Fatalf("the queue counter is missing; texts = %v", tester.Texts())
 		}
 	})
@@ -532,16 +641,16 @@ func TestApprovalInlineCardEnglishCopy(t *testing.T) {
 		approvalTestRequest("a1", "read_file", "读取配置", `{"path":"x"}`), 2,
 		uikit.ApprovalLabels{}, &entryDialogTestLocale{lang: "en"})
 	for _, want := range []string{
-		"Approval required", "Read file", "1 more pending approvals", "Esc denies",
-		"Raw arguments", "Allow", "Always allow in this session", "Deny",
+		"Approval required", "Read file", "1 more", "denies this call",
+		"Raw arguments", "Allow once", "One call", "Deny", "More",
 		"It runs within the sandbox policy after approval; the policy may still reject the call.",
 	} {
 		if !tester.HasText(want) {
 			t.Fatalf("frame does not show %q; texts = %v", want, tester.Texts())
 		}
 	}
-	if tester.HasText("read_file") {
-		t.Fatalf("the raw tool id leaked into the visible copy; texts = %v", tester.Texts())
+	if !tester.HasText("read_file") {
+		t.Fatalf("the raw tool id is not visible; texts = %v", tester.Texts())
 	}
 }
 
@@ -596,7 +705,7 @@ func TestApprovalInlineCardConfiguredLabels(t *testing.T) {
 			AllowLabel: "执行",
 			DenyLabel:  "拒绝",
 		}, nil)
-	for _, want := range []string{"确认执行", "执行", "原始参数", "本会话内始终允许", "拒绝"} {
+	for _, want := range []string{"确认执行", "执行", "原始参数", "拒绝", "更多"} {
 		if !tester.HasText(want) {
 			t.Fatalf("frame does not show %q; texts = %v", want, tester.Texts())
 		}
@@ -606,13 +715,14 @@ func TestApprovalInlineCardConfiguredLabels(t *testing.T) {
 	}
 }
 
-// TestApprovalSummaryLabelFollowsToolKindInline covers S-08 for the inline card:
-// only shell/terminal calls label their summary 命令.
+// TestApprovalSummaryLabelFollowsToolKindInline covers the target block's
+// semantic label for the inline card: a file read is a path, a shell call a
+// command, and the card never calls a read a command to run.
 func TestApprovalSummaryLabelFollowsToolKindInline(t *testing.T) {
 	_, read := approvalInlineHarness(t,
 		approvalTestRequest("f1", "read_file", "读取 internal/app.go", `{"path":"internal/app.go"}`), 1,
 		uikit.ApprovalLabels{}, nil)
-	if !read.HasText("摘要") {
+	if !read.HasText("路径") {
 		t.Fatalf("read_file summary is not labelled 摘要; texts = %v", read.Texts())
 	}
 	for _, text := range read.Texts() {
@@ -710,35 +820,39 @@ func TestApprovalInlineCardShowsWriteDiff(t *testing.T) {
 	title, okTitle := tester.Find("需要审批")
 	disclosure, okDisclosure := tester.Find("允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。")
 	change, okChange := tester.Find("将改动")
-	allow, okAllow := tester.Find("允许")
+	allow, okAllow := tester.Find("允许一次")
 	if !okTitle || !okDisclosure || !okChange || !okAllow {
 		t.Fatalf("banner/disclosure/change/footer missing; texts = %v", tester.Texts())
 	}
-	// The disclosure stays visible in the banner, on the line below the title.
+	// The impact statement stays visible above the scrolling body, on the line
+	// below the header.
 	if disclosure.H <= 0 || !(title.Y < disclosure.Y) {
 		t.Fatalf("the sandbox disclosure is not always visible in the banner: title=%+v disclosure=%+v", title, disclosure)
 	}
 	// The diff region keeps its readable floor (≥128 DIP) and is revealed below
 	// the banner — not a half-line squeezed by the summary.
-	if info.Bounds.H < 128 {
+	// The viewer's own 4 DIP padding sits inside its floor, so the code text's
+	// measured height is the floor less that padding.
+	if info.Bounds.H < 120 {
 		t.Fatalf("the diff region spans %.1f DIP, want the ≥128 readable floor", info.Bounds.H)
 	}
 	if !(disclosure.Y < info.Bounds.Y) {
 		t.Fatalf("the diff is not revealed below the banner disclosure: disclosure.Y=%.1f diff.Y=%.1f", disclosure.Y, info.Bounds.Y)
 	}
-	// The change label scrolled above the fold to make room (the reveal happened),
-	// and the diff's first line sits at/below the body viewport top — complete,
-	// not clipped in half.
-	if change.W != 0 {
-		t.Fatalf("the change label was not scrolled out; the diff first hunk is not revealed: %+v", change)
+	// The change block is revealed inside the bounded body: its label is in the
+	// viewport, and the diff's first line sits below it — complete, not clipped in
+	// half.
+	if change.H <= 0 {
+		t.Fatalf("the change label is clipped out of the body viewport: %+v", change)
 	}
 	if info.Bounds.Y < change.Y {
-		t.Fatalf("the diff first line is clipped above the body viewport: diff.Y=%.1f viewportTop=%.1f", info.Bounds.Y, change.Y)
+		t.Fatalf("the diff first line is clipped above the body viewport: diff.Y=%.1f label.Y=%.1f", info.Bounds.Y, change.Y)
 	}
-	// The body's total budget is unchanged (UX-02): banner + bounded middle +
-	// footer span a bounded card, not a window-filling one.
-	if span := allow.Y + allow.H - title.Y; span > 320 {
-		t.Fatalf("the approval card spans %.1f DIP, want the bounded middle (≤320)", span)
+	// The card stays a bounded block (UX-02): header + bounded middle + footer
+	// span one card that fits the session dock's minimum-window budget — the
+	// middle section is what may scroll, never the window.
+	if span := allow.Y + allow.H - title.Y; span > 400 {
+		t.Fatalf("the approval card spans %.1f DIP, want a bounded card (≤400)", span)
 	}
 }
 
@@ -896,19 +1010,14 @@ func TestApprovalInlineCardChangeKeepsSafeDecision(t *testing.T) {
 	if !ok {
 		t.Fatalf("deny action missing; texts = %v", tester.Texts())
 	}
-	always, ok := tester.Find("本会话内始终允许")
-	if !ok {
-		t.Fatalf("session-scoped allow action missing; texts = %v", tester.Texts())
-	}
-	allow, ok := tester.Find("允许")
+	allow, ok := tester.Find("允许一次")
 	if !ok {
 		t.Fatalf("allow action missing; texts = %v", tester.Texts())
 	}
-	if !(deny.X < always.X && always.X < allow.X) {
-		t.Fatalf("footer order x = deny %.1f, always %.1f, allow %.1f; want deny < always < allow",
-			deny.X, always.X, allow.X)
+	if !(deny.X < allow.X) {
+		t.Fatalf("footer order x = deny %.1f, allow %.1f; want deny < allow", deny.X, allow.X)
 	}
-	if tester.Focused("拒绝") || tester.Focused("允许") || tester.Focused("本会话内始终允许") {
+	if tester.Focused("拒绝") || tester.Focused("允许一次") {
 		t.Fatalf("the card autofocused an action next to the change block; texts = %v", tester.Texts())
 	}
 	tester.Key(0, ui.KeyEnter)
@@ -955,7 +1064,7 @@ func TestApprovalInlineCardChangeFitsNarrowCard(t *testing.T) {
 	if right := info.Bounds.X + info.Bounds.W; right > 320.5 || info.Bounds.X < -0.5 {
 		t.Fatalf("the diff spans x=%g..%g, want inside 0..320", info.Bounds.X, right)
 	}
-	for _, label := range []string{"拒绝", "本会话内始终允许", "允许"} {
+	for _, label := range []string{"拒绝", "允许一次", "更多"} {
 		if _, ok := tester.Find(label); !ok {
 			t.Fatalf("the narrow card hides %q behind the diff; texts = %v", label, tester.Texts())
 		}

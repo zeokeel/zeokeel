@@ -112,7 +112,7 @@ func TestQueueBackendInboxKeepsComposerVisible(t *testing.T) {
 		requireHasText(t, harness.tester, "停止")
 		requireNoText(t, harness.tester, "回复生成中，Enter 暂不可用；草稿会保留，本轮结束后可发送")
 		harness.typeQueuePrompt(t, "排队", "默认排队")
-		requireHasText(t, harness.tester, "已排队 1 条")
+		requireHasText(t, harness.tester, "×1")
 		if sends := harness.chat.recordedSends(); len(sends) != 0 {
 			t.Fatalf("value %q: Enter sent while running instead of enqueueing: %v", value, sends)
 		}
@@ -129,9 +129,9 @@ func TestQueueBackendInboxKeepsComposerVisible(t *testing.T) {
 func TestQueueDrainFIFOByBackend(t *testing.T) {
 	harness := startQueueUI(t, "true")
 	harness.typeQueuePrompt(t, "排队", "第一条")
-	requireHasText(t, harness.tester, "已排队 1 条")
+	requireHasText(t, harness.tester, "×1")
 	harness.typeQueuePrompt(t, "排队", "第二条")
-	requireHasText(t, harness.tester, "已排队 2 条")
+	requireHasText(t, harness.tester, "×2")
 	if got := len(harness.chat.recordedSends()); got != 0 {
 		t.Fatalf("queued prompts were sent while running: %v", harness.chat.recordedSends())
 	}
@@ -147,7 +147,7 @@ func TestQueueDrainFIFOByBackend(t *testing.T) {
 	if len(sends) != 1 || sends[0] != "sess-run:第一条" {
 		t.Fatalf("backend FIFO drain = %v, want the first prompt", sends)
 	}
-	requireHasText(t, harness.tester, "已排队 1 条")
+	requireHasText(t, harness.tester, "×1")
 
 	// The drained prompt started its own run; settle it and drain the second.
 	harness.flipRunning(t, false)
@@ -171,7 +171,7 @@ func TestQueueDrainFIFOByBackend(t *testing.T) {
 func TestQueueStopKeepsInbox(t *testing.T) {
 	harness := startQueueUI(t, "true")
 	harness.typeQueuePrompt(t, "排队", "停后保留")
-	requireHasText(t, harness.tester, "已排队 1 条")
+	requireHasText(t, harness.tester, "×1")
 
 	if err := harness.tester.Click("停止"); err != nil {
 		t.Fatalf("click 停止: %v; texts = %v", err, harness.tester.Texts())
@@ -186,18 +186,18 @@ func TestQueueStopKeepsInbox(t *testing.T) {
 	if queued := harness.chat.queueFor("sess-run"); len(queued) != 1 {
 		t.Fatalf("stopping cleared the backend inbox: %+v", queued)
 	}
-	requireHasText(t, harness.tester, "已排队 1 条")
+	requireHasText(t, harness.tester, "×1")
 
 	// The popover lists the backend inbox; the old paused/resume copy is gone.
-	if err := harness.tester.Click("已排队 1 条"); err != nil {
+	if err := harness.tester.Click("×1"); err != nil {
 		t.Fatalf("open queue popover: %v; texts = %v", err, harness.tester.Texts())
 	}
 	harness.tester.Frame()
-	requireHasText(t, harness.tester, "排队消息")
-	requireHasText(t, harness.tester, "取消排队")
+	requireHasText(t, harness.tester, "队列中的消息")
+	requireHasText(t, harness.tester, "取消第 1 条排队消息")
 	requireHasText(t, harness.tester, "清空全部")
-	requireNoText(t, harness.tester, "已停止：排队消息不会自动发送")
-	requireNoText(t, harness.tester, "发送排队消息")
+	requireNoText(t, harness.tester, "已停止：队列中的消息不会自动发送")
+	requireNoText(t, harness.tester, "发送队列中的消息")
 }
 
 // TestQueueRemoveAndClearGoToBackend covers the popover mutations: a row
@@ -208,13 +208,13 @@ func TestQueueRemoveAndClearGoToBackend(t *testing.T) {
 	harness := startQueueUI(t, "true")
 	harness.typeQueuePrompt(t, "排队", "甲条")
 	harness.typeQueuePrompt(t, "排队", "乙条")
-	requireHasText(t, harness.tester, "已排队 2 条")
+	requireHasText(t, harness.tester, "×2")
 
-	if err := harness.tester.Click("已排队 2 条"); err != nil {
+	if err := harness.tester.Click("×2"); err != nil {
 		t.Fatalf("open queue popover: %v", err)
 	}
 	harness.tester.Frame()
-	if err := harness.tester.Click("取消排队"); err != nil {
+	if err := harness.tester.Click("取消第 1 条排队消息"); err != nil {
 		t.Fatalf("remove queued row: %v; texts = %v", err, harness.tester.Texts())
 	}
 	harness.tester.Frame()
@@ -222,12 +222,12 @@ func TestQueueRemoveAndClearGoToBackend(t *testing.T) {
 	if len(queued) != 1 || queued[0].Text != "乙条" {
 		t.Fatalf("inbox after removing the first row = %+v", queued)
 	}
-	requireHasText(t, harness.tester, "已排队 1 条")
+	requireHasText(t, harness.tester, "×1")
 
 	// Clear-all asks first: the popover yields to the ConfirmDanger modal and
 	// the queue survives behind the scrim until the explicit danger click.
-	if !harness.tester.HasText("排队消息") {
-		if err := harness.tester.Click("已排队 1 条"); err != nil {
+	if !harness.tester.HasText("取消第 1 条排队消息") {
+		if err := harness.tester.Click("×1"); err != nil {
 			t.Fatalf("reopen queue popover: %v", err)
 		}
 		harness.tester.Frame()
@@ -237,7 +237,7 @@ func TestQueueRemoveAndClearGoToBackend(t *testing.T) {
 	}
 	harness.tester.Frame()
 	requireHasText(t, harness.tester, "清空全部排队消息？")
-	requireHasText(t, harness.tester, "已排队 1 条")
+	requireHasText(t, harness.tester, "×1")
 	if queued := harness.chat.queueFor("sess-run"); len(queued) != 1 {
 		t.Fatalf("opening the confirmation cleared the inbox early: %+v", queued)
 	}
@@ -248,13 +248,13 @@ func TestQueueRemoveAndClearGoToBackend(t *testing.T) {
 	}
 	harness.tester.Frame()
 	requireNoText(t, harness.tester, "清空全部排队消息？")
-	requireHasText(t, harness.tester, "已排队 1 条")
+	requireHasText(t, harness.tester, "×1")
 	if queued := harness.chat.queueFor("sess-run"); len(queued) != 1 || queued[0].Text != "乙条" {
 		t.Fatalf("cancelling the confirmation dropped the inbox: %+v", queued)
 	}
 
 	// The explicit danger click empties the backend inbox.
-	if err := harness.tester.Click("已排队 1 条"); err != nil {
+	if err := harness.tester.Click("×1"); err != nil {
 		t.Fatalf("reopen queue popover after cancel: %v", err)
 	}
 	harness.tester.Frame()
@@ -303,13 +303,13 @@ func TestQueueErrorsStayVisible(t *testing.T) {
 	// Removal failure: the row stays and the popover says why.
 	harness.flipRunning(t, true)
 	harness.typeQueuePrompt(t, "排队", "移除失败")
-	requireHasText(t, harness.tester, "已排队 1 条")
+	requireHasText(t, harness.tester, "×1")
 	harness.chat.setRemoveError(errors.New("inbox locked"))
-	if err := harness.tester.Click("已排队 1 条"); err != nil {
+	if err := harness.tester.Click("×1"); err != nil {
 		t.Fatalf("open queue popover: %v", err)
 	}
 	harness.tester.Frame()
-	if err := harness.tester.Click("取消排队"); err != nil {
+	if err := harness.tester.Click("取消第 1 条排队消息"); err != nil {
 		t.Fatalf("remove queued row: %v", err)
 	}
 	harness.tester.Frame()
@@ -365,7 +365,7 @@ func TestQueuePerSessionAndOwnerDrain(t *testing.T) {
 	harness := startQueueUI(t, "true")
 	harness.chat.addSession(contracts.ChatSession{ID: "sess-other", Title: "Other"}, false)
 	harness.typeQueuePrompt(t, "排队", "给第一个会话")
-	requireHasText(t, harness.tester, "已排队 1 条")
+	requireHasText(t, harness.tester, "×1")
 
 	if err := harness.chat.SetActiveSession("sess-other"); err != nil {
 		t.Fatalf("SetActiveSession: %v", err)
@@ -381,7 +381,7 @@ func TestQueuePerSessionAndOwnerDrain(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		harness.tester.Frame()
 	}
-	requireHasText(t, harness.tester, "已排队 1 条")
+	requireHasText(t, harness.tester, "×1")
 
 	// Leave again, settle its run: the backend drains it into its owner.
 	if err := harness.chat.SetActiveSession("sess-other"); err != nil {

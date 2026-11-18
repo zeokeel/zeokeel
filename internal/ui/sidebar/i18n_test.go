@@ -95,10 +95,10 @@ func TestSidebarEnglishCopyAndLanguageSwitch(t *testing.T) {
 
 	// The Home row is gone (home stays a registered screen only, not a sidebar
 	// destination); the generic module-screen rows remain.
-	h.assertTexts(tester, "New chat", "Search chats and messages", "Settings", "Project Alpha",
+	h.assertTexts(tester, "New session", "Search sessions…", "Settings", "Project Alpha",
 		"Automation", "Capabilities")
 	h.assertNoTexts(tester, "Show archived", "Hide archived", "Home")
-	h.assertNoTexts(tester, "新对话", "搜索会话与消息", "设置", "显示已归档", "首页", "自动化", "插件")
+	h.assertNoTexts(tester, "新建会话", "搜索会话与消息", "设置", "显示已归档", "首页", "自动化", "插件")
 
 	// Row menu: every session action is English.
 	openRowMenu(t, tester, "Project Alpha")
@@ -127,9 +127,9 @@ func TestSidebarEnglishCopyAndLanguageSwitch(t *testing.T) {
 	// Switching the host language takes effect on the next frame.
 	h.uiRoot.Locale().SetLanguage("zh")
 	tester.Frame()
-	h.assertTexts(tester, "新对话", "搜索会话与消息", "设置",
+	h.assertTexts(tester, "新建会话", "搜索会话与消息", "设置",
 		"自动化", "能力")
-	h.assertNoTexts(tester, "New chat", "Search chats and messages", "Settings", "Show archived",
+	h.assertNoTexts(tester, "New session", "Search sessions…", "Settings", "Show archived",
 		"首页", "Home", "Automation", "Plugins", "显示已归档", "隐藏已归档")
 	openRowMenu(t, tester, "Project Alpha")
 	h.assertTexts(tester, "重命名", "删除", "创建副本", "设为当前", "置顶会话", "归档会话")
@@ -153,7 +153,7 @@ func TestSidebarEnglishWorkspaceBadgesAndEmptyStates(t *testing.T) {
 	// The archived session (Beta) is owned by the settings archive page now: it
 	// never renders in the sidebar, even with the legacy view setting on.
 	h.assertTexts(tester, "Workspace", "Ungrouped", "Alpha", "Gamma", "Pinned",
-		"New chat in “ZeoKeel”")
+		"New session in “ZeoKeel”")
 	h.assertNoTexts(tester, "Beta", "Archived", "Running", "Show archived", "Hide archived",
 		"工作区", "未分组", "置顶", "已归档", "运行中", "在“ZeoKeel”中新建会话")
 
@@ -162,7 +162,7 @@ func TestSidebarEnglishWorkspaceBadgesAndEmptyStates(t *testing.T) {
 	emptyTester := empty.tester()
 	emptyTester.Frame()
 	empty.assertTexts(emptyTester, "No sessions yet")
-	clickLabel(t, emptyTester, "Search chats and messages")
+	clickLabel(t, emptyTester, "Search sessions…")
 	emptyTester.Type("zzz")
 	emptyTester.Frame()
 	empty.assertTexts(emptyTester, "No matches")
@@ -192,7 +192,7 @@ func TestSidebarEnglishUntitledSearch(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "Untitled session")
 
-	clickLabel(t, tester, "Search chats and messages")
+	clickLabel(t, tester, "Search sessions…")
 	tester.Type("Untitled")
 	tester.Frame()
 	h.assertTexts(tester, "Untitled session")

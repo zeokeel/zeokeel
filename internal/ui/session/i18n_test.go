@@ -79,16 +79,16 @@ func TestSessionI18nEmptyHero(t *testing.T) {
 	chat.addSession(contracts.ChatSession{ID: "sess-empty", Title: "空会话"}, true)
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.assertTexts(tester, "开始新对话", "还没有消息，开始一段新对话吧。", "开始输入")
+	h.assertTexts(tester, "发第一条消息", "描述你想完成的事，ZeoKeel 会读代码、改文件并验证结果。",
+		"检查当前工作区并给出摘要")
 
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
 	h.assertTexts(tester,
-		"Start a new conversation",
-		"No messages yet. Start a new conversation.",
-		"Start typing",
+		"Send your first message",
+		"Describe what you want done — ZeoKeel reads the code, edits files and verifies the result.",
 		"Ask ZeoKeel…", "Send")
-	h.assertNoTexts(tester, "开始新对话")
+	h.assertNoTexts(tester, "发第一条消息")
 }
 
 func TestSessionI18nRunningAndToolStatus(t *testing.T) {

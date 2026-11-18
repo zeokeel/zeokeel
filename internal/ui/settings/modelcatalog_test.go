@@ -493,13 +493,13 @@ func TestModelDeletePromotesFirstRemainingAndClearsEmptyList(t *testing.T) {
 	tester := openModelPage(t, h)
 
 	// Removing the default row promotes the first remaining row.
-	h.click(tester, "模型操作 m1")
-	h.click(tester, "删除模型")
+	h.click(tester, "模型操作：m1")
+	h.click(tester, "移除模型")
 	tester.Frame()
-	h.assertTexts(tester, "删除模型", "确认删除")
-	h.click(tester, "确认删除")
+	h.assertTexts(tester, "移除模型", "移除")
+	h.click(tester, "移除")
 	tester.Frame()
-	h.assertTexts(tester, "已删除模型", "m2")
+	h.assertTexts(tester, "已移除模型", "m2")
 	h.assertNoTexts(tester, "M1")
 
 	models := catalogStoredModels(t, store)
@@ -514,10 +514,10 @@ func TestModelDeletePromotesFirstRemainingAndClearsEmptyList(t *testing.T) {
 	}
 
 	// Removing the last row clears the list and the default mirror.
-	h.click(tester, "模型操作 m2")
-	h.click(tester, "删除模型")
+	h.click(tester, "模型操作：m2")
+	h.click(tester, "移除模型")
 	tester.Frame()
-	h.click(tester, "确认删除")
+	h.click(tester, "移除")
 	tester.Frame()
 	h.assertTexts(tester, "还没有模型")
 	if got := store.get(contracts.SettingModelCatalogModels); got != "[]" {
@@ -545,10 +545,10 @@ func TestModelDeleteNonDefaultKeepsMirror(t *testing.T) {
 	})
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := openModelPage(t, h)
-	h.click(tester, "模型操作 m2")
-	h.click(tester, "删除模型")
+	h.click(tester, "模型操作：m2")
+	h.click(tester, "移除模型")
 	tester.Frame()
-	h.click(tester, "确认删除")
+	h.click(tester, "移除")
 	tester.Frame()
 	if got := store.get(contracts.SettingsChatModel); got != "m1" {
 		t.Fatalf("deleting a non-default row changed the mirror: %q", got)
@@ -643,9 +643,9 @@ func TestModelThinkingSummaryAndEditConfig(t *testing.T) {
 	scrollDialogBody(t, tester, 300)
 	h.click(tester, "添加思考模式")
 	tester.Frame()
-	clearAndType(t, h, tester, "模式 1 ID", "speed")
-	clearAndType(t, h, tester, "模式 1 名称", "极速")
-	clearAndType(t, h, tester, "模式 1 参数",
+	clearAndType(t, h, tester, "模式 1 ID 输入", "speed")
+	clearAndType(t, h, tester, "模式 1 名称 输入", "极速")
+	clearAndType(t, h, tester, "模式 1 参数 输入",
 		`{"enable_thinking": false, "thinking_budget": 1024}`)
 	h.click(tester, "保存模型")
 	tester.Frame()
@@ -734,16 +734,16 @@ func TestModelEditorValidationKeepsModalOpen(t *testing.T) {
 	expandCatalogAdvanced(t, h, tester)
 	scrollDialogBody(t, tester, 300)
 	h.click(tester, "添加思考模式")
-	clearAndType(t, h, tester, "模式 1 ID", "bad")
+	clearAndType(t, h, tester, "模式 1 ID 输入", "bad")
 
 	// Not JSON at all.
-	clearAndType(t, h, tester, "模式 1 参数", "not json")
+	clearAndType(t, h, tester, "模式 1 参数 输入", "not json")
 	h.click(tester, "保存模型")
 	tester.Frame()
 	h.assertTexts(tester, "不是有效 JSON", "自定义思考模式")
 
 	// Valid JSON but not an object.
-	clearAndType(t, h, tester, "模式 1 参数", "[1,2]")
+	clearAndType(t, h, tester, "模式 1 参数 输入", "[1,2]")
 	h.click(tester, "保存模型")
 	tester.Frame()
 	h.assertTexts(tester, "必须是 JSON 对象")
@@ -753,7 +753,7 @@ func TestModelEditorValidationKeepsModalOpen(t *testing.T) {
 	}
 
 	// Removing the broken row and saving succeeds.
-	h.click(tester, "删除思考模式 1")
+	h.click(tester, "移除思考模式 1")
 	h.click(tester, "保存模型")
 	tester.Frame()
 	h.assertNoTexts(tester, "自定义思考模式")

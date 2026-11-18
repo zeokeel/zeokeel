@@ -22,7 +22,9 @@ import (
 func PageHeader(c *ui.Context, title, subtitle string) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-		design.Apply(ui.Text(c, title), t.Font(design.TypeL)).FontWeight(design.WeightSemibold).
+		// TypeL carries the semibold weight now (design.TypeMetrics): passing it
+		// again here would be a second, drifting source for the same value.
+		design.Apply(ui.Text(c, title), t.Font(design.TypeL)).
 			TextColor(t.LabelPrimary).Role(ui.RoleHeading).Level(1)
 		if subtitle != "" {
 			design.Apply(ui.Text(c, subtitle), t.TextMuted(design.TypeXS)).MaxLines(2)
@@ -37,9 +39,11 @@ func PageHeader(c *ui.Context, title, subtitle string) {
 func Section(c *ui.Context, title string, body func(body *ui.Context)) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		design.Apply(ui.Text(c, title), t.Font(design.TypeM)).FontWeight(design.WeightSemibold).
+		// A section is spacing, not a rule: the title carries the hierarchy and
+		// the body starts Space2 below it. A divider inside every section is the
+		// border-per-block pattern the design contract rejects (DESIGN.md §3).
+		design.Apply(ui.Text(c, title), t.Font(design.TypeM)).
 			TextColor(t.LabelPrimary).Role(ui.RoleHeading).Level(2)
-		ui.Divider(c)
 		if body != nil {
 			body(c)
 		}
@@ -69,13 +73,12 @@ func SectionAction(c *ui.Context, title string, action func(*ui.Context), body f
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Text(c, title), t.Font(design.TypeM)).FontWeight(design.WeightSemibold).
+			design.Apply(ui.Text(c, title), t.Font(design.TypeM)).
 				TextColor(t.LabelPrimary).Role(ui.RoleHeading).Level(2).Grow(1)
 			if action != nil {
 				action(c)
 			}
 		})
-		ui.Divider(c)
 		if body != nil {
 			body(c)
 		}
@@ -88,35 +91,6 @@ func Bullet(c *ui.Context, text string) {
 	ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
 		design.Apply(ui.Text(c, "•"), t.Font(design.TypeXS)).TextColor(t.LabelTertiary)
 		design.Apply(ui.Text(c, text), t.Font(design.TypeXS)).TextColor(t.LabelSecondary).Grow(1)
-	})
-}
-
-// KeyValue is one row of KeyValueRows.
-type KeyValue struct {
-	Key   string
-	Value string
-}
-
-// KeyValueRows draws label/value rows with the label muted on the left and the
-// value right-aligned.
-//
-// Deprecated: use PropertySheet (propertysheet.go) for a label/value table. The
-// right-aligned form is not the product's property-sheet shape: it throws the
-// value to the page's right edge (the Context overview measured ~1050 DIP
-// between a label and its value) and has no divider or bounded measure. This
-// helper stays only for the callers the shared-layer migration has not reached
-// yet (the inspector and the plugins page).
-func KeyValueRows(c *ui.Context, rows []KeyValue) {
-	t := design.Of(c)
-	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-		for _, row := range rows {
-			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Center).Children(func() {
-				design.Apply(ui.Text(c, row.Key), t.TextMuted(design.TypeXS))
-				ui.Spacer(c).Grow(1)
-				design.Apply(ui.Text(c, row.Value), t.Font(design.TypeXS)).
-					TextColor(t.LabelPrimary).Selectable()
-			})
-		}
 	})
 }
 
@@ -171,6 +145,11 @@ type DialogAction struct {
 	// dialog whose input should keep the keyboard focus submits on the
 	// input's Submitted() instead (see EnterTo).
 	Default bool
+	// Focus gives the button the keyboard this frame without the "born this
+	// frame" restriction of Default: a dialog that must record its opener for
+	// the focus return (A4-I-02) takes the keyboard on its second frame with
+	// this, then drops it so Tab keeps working.
+	Focus   bool
 	OnClick func()
 }
 
@@ -212,7 +191,9 @@ func DialogFooter(c *ui.Context, actions []DialogAction) {
 			if action.Disabled {
 				button.Disabled(true)
 			}
-			if action.Default && !action.Disabled {
+			if action.Focus && !action.Disabled {
+				button = button.Focus()
+			} else if action.Default && !action.Disabled {
 				button = button.AutoFocus()
 			}
 			if action.OnClick != nil && button.Clicked() {
@@ -335,6 +316,14 @@ type ConfirmDangerOptions struct {
 	// Confirm is the destructive verb ("确认删除"); Cancel is the safe verb.
 	Confirm string
 	Cancel  string
+	// Trigger is the control that opened the confirmation — typically the "⋯"
+	// button whose menu item chose the destructive action. The dialog hands the
+	// keyboard back to it when it closes: mygo returns the focus to the element
+	// that had it as an overlay opened, and a dialog opened from a menu item
+	// records the item instead of the button (A4-I-02). Bind it once in the
+	// caller's state: `handle := &ui.Handle{}`, `trigger.Bind(handle)` on the
+	// button, `handle` in this option. Nil keeps the framework's own return.
+	Trigger *ui.Handle
 	// OnConfirm runs after the danger action is chosen.
 	OnConfirm func()
 }
@@ -360,33 +349,64 @@ func ConfirmDanger(c *ui.Context, open *bool, o ConfirmDangerOptions) {
 	if confirm == "" {
 		confirm = "删除"
 	}
-	ui.Modal(c, open, func() {
-		design.Apply(ui.Column(c.Key(key)), t.Panel()).
-			Width(design.DialogWidthXS).Padding(design.Space4).Gap(design.Space3).
-			Children(func() {
-				DialogHeader(c, DialogHeaderOptions{
-					Key:   key + ".header",
-					Title: o.Title,
-				})
-				design.Apply(ui.Text(c, o.Message), t.Font(design.TypeBody)).
-					TextColor(t.LabelSecondary).MaxLines(4)
-				DialogFooter(c, []DialogAction{
-					{
-						Label: cancel, Default: true,
-						OnClick: func() { *open = false },
-					},
-					{
-						Label: confirm, Danger: true,
-						OnClick: func() {
-							*open = false
-							if o.OnConfirm != nil {
-								o.OnConfirm()
-							}
-						},
-					},
-				})
+	returnFocus := func() {
+		if o.Trigger != nil {
+			o.Trigger.Focus(c)
+		}
+	}
+	el := ui.Modal(c, open, func() {
+		// The panel is built inside the modal: an element created outside it would
+		// sit on the page while the dialog is closed, and the dialog's own state
+		// (the keyboard hand-over below) is keyed to it.
+		panel := design.Apply(ui.Column(c.Key(key)), t.Panel()).
+			Width(design.DialogWidthXS).Padding(design.Space4).Gap(design.Space3)
+		// The safe action takes the keyboard from the dialog's second frame, not
+		// its first (A4-I-02). mygo records the element that had the focus as an
+		// overlay opens, to give it back when the overlay closes; a focus request
+		// inside the opening frame makes it record the dialog itself, so the
+		// trigger never gets the focus back and the keyboard lands nowhere after a
+		// cancel or a confirm. One frame later the record is the trigger, and the
+		// dialog still owns Enter by the time the user could press it.
+		settled := ui.Local(panel, "settled", func() bool { return false })
+		keyboard := ui.Local(panel, "keyboard", func() bool { return false })
+		panel.Children(func() {
+			DialogHeader(c, DialogHeaderOptions{
+				Key:   key + ".header",
+				Title: o.Title,
 			})
+			design.Apply(ui.Text(c, o.Message), t.Font(design.TypeBody)).
+				TextColor(t.LabelSecondary).MaxLines(4)
+			// The keyboard request is one-shot: asking every frame would fight the
+			// Tab key.
+			takeKeyboard := *settled && !*keyboard
+			*keyboard = *keyboard || takeKeyboard
+			DialogFooter(c, []DialogAction{
+				{
+					Label: cancel, Focus: takeKeyboard,
+					OnClick: func() {
+						*open = false
+						returnFocus()
+					},
+				},
+				{
+					Label: confirm, Danger: true,
+					OnClick: func() {
+						*open = false
+						returnFocus()
+						if o.OnConfirm != nil {
+							o.OnConfirm()
+						}
+					},
+				},
+			})
+			*settled = true
+		})
 	})
+	// Escape and a backdrop click dismiss the dialog themselves; the keyboard
+	// still goes back to the trigger.
+	if el.Dismissed() {
+		returnFocus()
+	}
 }
 
 // EmptyStateHero is the landing empty state: one quiet glyph, a title, a hint

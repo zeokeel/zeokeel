@@ -199,8 +199,9 @@ func TestReasoningTraceInlineChevron(t *testing.T) {
 }
 
 // TestReasoningTraceMarkerColumn covers the activity band's fixed marker column:
-// the type glyph gets a fixed 16 DIP column, so the label copy starts a little
-// further right than the old inline glyph, and the disclosure still works.
+// the type glyph owns the same 16 DIP slot as the band's tool rows, so a
+// reasoning row and a tool row start their copy on one x, and the disclosure
+// still works.
 func TestReasoningTraceMarkerColumn(t *testing.T) {
 	open := false
 	toggles := make([]bool, 0, 1)
@@ -230,8 +231,8 @@ func TestReasoningTraceMarkerColumn(t *testing.T) {
 	if !ok {
 		t.Fatalf("plain trace line count missing; texts = %v", plainTT.Texts())
 	}
-	if markerLines.X <= plainLines.X {
-		t.Fatalf("marker column copy X=%.1f, plain X=%.1f: the fixed marker column should shift the label",
+	if markerLines.X != plainLines.X {
+		t.Fatalf("marker column copy X=%.1f, plain X=%.1f: the marker column and the inline glyph must share one slot, so reasoning and tool rows line up",
 			markerLines.X, plainLines.X)
 	}
 	if err := tt.Click("思考"); err != nil {

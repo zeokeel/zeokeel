@@ -349,7 +349,7 @@ func TestSkillsCardsRender(t *testing.T) {
 
 	// The editor half is optional: no create/Edit/Delete, but every card still
 	// exposes its read-only management menu.
-	h.assertTexts(tester, "技能操作 alpha", "技能操作 beta",
+	h.assertTexts(tester, "技能操作：alpha", "技能操作：beta",
 		"工作区/自定义目录中的技能只读；用卡片 ⋯ 打开文件或所在目录，或在上方操作行新建一个可编辑的技能。")
 	h.assertNoTexts(tester, "新建技能", "编辑技能", "删除技能")
 }
@@ -600,7 +600,7 @@ func TestSkillsEditModal(t *testing.T) {
 	skills.setList(dataDirSkill(dataDir, "alpha", "old desc", "old body"))
 	tester := h.tester()
 
-	h.click(tester, "技能操作 alpha")
+	h.click(tester, "技能操作：alpha")
 	h.click(tester, "编辑技能")
 	h.assertTexts(tester, "编辑技能", "alpha", "名称不可修改", "描述", "内容", "保存", "取消")
 	focusSkillField(t, tester, "描述 输入")
@@ -634,7 +634,7 @@ func TestSkillsDeleteConfirmEscapeCancel(t *testing.T) {
 	skills.setList(dataDirSkill(dataDir, "alpha", "Alpha", "# Alpha"))
 	tester := h.tester()
 
-	h.click(tester, "技能操作 alpha")
+	h.click(tester, "技能操作：alpha")
 	h.click(tester, "删除技能")
 	h.assertTexts(tester, "删除技能", "确认删除")
 	if !tester.HasText("alpha") {
@@ -659,7 +659,7 @@ func TestSkillsDeleteConfirms(t *testing.T) {
 	skills.setList(dataDirSkill(dataDir, "alpha", "Alpha", "# Alpha"))
 	tester := h.tester()
 
-	h.click(tester, "技能操作 alpha")
+	h.click(tester, "技能操作：alpha")
 	h.click(tester, "删除技能")
 	h.click(tester, "确认删除")
 
@@ -680,7 +680,7 @@ func TestSkillsEditorActionsHiddenWithoutEditor(t *testing.T) {
 	skills.setList(dataDirSkill(dataDir, "alpha", "Alpha", "# Alpha"))
 	tester := h.tester()
 
-	h.assertTexts(tester, "alpha", "查看内容", "技能操作 alpha")
+	h.assertTexts(tester, "alpha", "查看内容", "技能操作：alpha")
 	h.assertNoTexts(tester, "新建技能", "编辑技能", "删除技能")
 }
 
@@ -710,7 +710,7 @@ func TestSkillsReadOnlyCardMenuActions(t *testing.T) {
 	skills.setList(contracts.Skill{Name: "alpha", Description: "Alpha", Path: path})
 	tester := h.tester()
 
-	h.click(tester, "技能操作 alpha")
+	h.click(tester, "技能操作：alpha")
 	h.assertTexts(tester, "用默认应用打开", "在文件管理器中显示", "复制路径")
 	h.assertNoTexts(tester, "编辑技能", "删除技能")
 	if err := tester.Click("用默认应用打开"); err != nil {
@@ -721,7 +721,7 @@ func TestSkillsReadOnlyCardMenuActions(t *testing.T) {
 		t.Fatalf("open with default app = %v, want [%s]", opened, path)
 	}
 
-	h.click(tester, "技能操作 alpha")
+	h.click(tester, "技能操作：alpha")
 	if err := tester.Click("在文件管理器中显示"); err != nil {
 		t.Fatalf("reveal action: %v", err)
 	}
@@ -743,7 +743,7 @@ func TestSkillsTopLevelMarkdownSkillStaysReadOnly(t *testing.T) {
 		Path: filepath.Join(dataDir, "skills", "top.md"),
 	})
 	tester := h.tester()
-	h.click(tester, "技能操作 top")
+	h.click(tester, "技能操作：top")
 	h.assertTexts(tester, "用默认应用打开", "在文件管理器中显示", "复制路径")
 	h.assertNoTexts(tester, "编辑技能", "删除技能")
 }
@@ -795,7 +795,7 @@ func TestSkillsDisableToggle(t *testing.T) {
 	skills.setList(contracts.Skill{Name: "alpha", Path: filepath.Join(workspaceRoot, "skills", "alpha", "SKILL.md")})
 	tester := h.tester()
 
-	h.click(tester, "技能操作 alpha")
+	h.click(tester, "技能操作：alpha")
 	if err := tester.Click("禁用技能"); err != nil {
 		t.Fatalf("disable skill: %v; texts = %v", err, tester.Texts())
 	}
@@ -805,7 +805,7 @@ func TestSkillsDisableToggle(t *testing.T) {
 	}
 	h.assertTexts(tester, "已禁用")
 
-	h.click(tester, "技能操作 alpha")
+	h.click(tester, "技能操作：alpha")
 	if err := tester.Click("启用技能"); err != nil {
 		t.Fatalf("enable skill: %v; texts = %v", err, tester.Texts())
 	}
@@ -828,7 +828,7 @@ func TestSkillsCopyToEditable(t *testing.T) {
 	skills.bodies["alpha"] = "# Alpha body"
 	tester := h.tester()
 
-	h.click(tester, "技能操作 alpha")
+	h.click(tester, "技能操作：alpha")
 	if err := tester.Click("复制到我的技能"); err != nil {
 		t.Fatalf("copy skill: %v; texts = %v", err, tester.Texts())
 	}
@@ -851,7 +851,7 @@ func TestSkillsEnglishCopy(t *testing.T) {
 
 	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Skills", "Connectors", "New skill", "View content", "Skill actions alpha")
+	h.assertTexts(tester, "Skills", "Connectors", "New skill", "View content", "Skill actions: alpha")
 
 	h.click(tester, "New skill")
 	h.assertTexts(tester, "Name", "Description", "Body", "Create", "Cancel")
@@ -864,7 +864,7 @@ func TestSkillsEnglishCopy(t *testing.T) {
 	h.click(tester, "Create")
 	h.assertTexts(tester, "Skill created", "english-skill")
 
-	h.click(tester, "Skill actions alpha")
+	h.click(tester, "Skill actions: alpha")
 	h.click(tester, "Edit skill")
 	h.assertTexts(tester, "Edit skill", "The name cannot be changed", "Save", "Cancel")
 }

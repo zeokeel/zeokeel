@@ -1,7 +1,7 @@
 package uikit_test
 
 // Headless tests for the shared property sheet (uikit.PropertySheet): the fixed
-// 160 DIP label column, the left-aligned value on a 32 DIP row, the divider
+// 120 DIP label column, the left-aligned value on a 32 DIP row, the divider
 // between rows, the selectable value and the empty-value placeholder. The
 // pages that migrated to the sheet (About/Diagnostics/Network/Update/Context)
 // keep their own frame tests; this file pins the shared geometry and states.

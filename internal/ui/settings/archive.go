@@ -100,7 +100,7 @@ func buildArchivePage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 	navigator, _ := kctx.Get(contracts.KeyNavigator)
 	archiver, canArchive := chat.(contracts.SessionArchiver)
 
-	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+	ui.Column(c).FillWidth().Gap(design.SpaceScreen).Children(func() {
 		uikit.PageHeader(c, localized(locale, "归档", "Archived"), "")
 		if st.openErr != "" {
 			uikit.ErrorLine(c, st.openErr)
@@ -163,13 +163,13 @@ func buildArchivePage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 		// native alert dialog, like every other destructive settings action.
 		if st.confirmDelete != "" {
 			title := localized(locale, "删除归档会话", "Delete archived session")
-			message := localized(locale, "确认删除这条归档会话？此操作无法撤销。",
+			message := localized(locale, "删除这条归档会话？无法撤销。",
 				"Delete this archived session? This cannot be undone.")
 			for _, session := range archived {
 				if session.ID == st.confirmDelete {
-					message = localized(locale, "确认删除「", "Delete \"") +
+					message = localized(locale, "删除「", "Delete \"") +
 						archiveSessionLabel(locale, session) +
-						localized(locale, "」？此操作无法撤销。", "\"? This cannot be undone.")
+						localized(locale, "」？无法撤销。", "\"? This cannot be undone.")
 					break
 				}
 			}
@@ -177,7 +177,7 @@ func buildArchivePage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				Key:     "archive.delete",
 				Title:   title,
 				Message: message,
-				Confirm: localized(locale, "确认删除", "Confirm delete"),
+				Confirm: localized(locale, "删除", "Delete"),
 				Cancel:  localized(locale, "取消", "Cancel"),
 				OnConfirm: func() {
 					if st.pendingDeleteID != "" {
@@ -224,11 +224,10 @@ func buildArchiveRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 		// archived sessions never paints one red button per row.
 		label := localized(locale, "归档会话操作", "Archived session actions")
 		menu := uikit.IconButton(c, uikit.IconButtonOptions{
-			Key:     "archive-actions/" + session.ID,
-			Label:   label,
-			Tooltip: label,
-			Icon:    icons.More(),
-			Size:    design.IconSizeS,
+			Key:   "archive-actions/" + session.ID,
+			Label: label,
+			Icon:  icons.More(),
+			Size:  design.IconSizeS,
 		})
 		menu.PopoverMenuButton(func(m *ui.Menu) {
 			remove := m.Item(localized(locale, "删除会话", "Delete session"))

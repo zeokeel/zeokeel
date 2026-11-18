@@ -30,6 +30,13 @@ type ToastAnchorService interface {
 	// overlay. Calls must pair one open with one close; the host's count
 	// floors at zero so a stray close never disables the yield.
 	ReportOverlay(open bool)
+	// ReportDockTop reports the top of the bottom dock the current screen
+	// stacks above its status strip (the conversation's composer plus the
+	// approval card, todo plan and goal bar). The stack is placed above that
+	// line so a notice never covers an approval's decision buttons — the one
+	// control a user must reach while a notice is up. A screen without a dock
+	// reports zero, and the host keeps its own inset.
+	ReportDockTop(top float32)
 }
 
 // ToastAnchor places the toast stack inside the window. Top/Right/Bottom are

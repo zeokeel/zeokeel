@@ -50,7 +50,7 @@ func TestBehaviorPageSandboxAlwaysOn(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为与限额")
-	h.assertTexts(tester, "OS 沙箱", "状态：", "已启用（平台：linux）",
+	h.assertTexts(tester, "系统沙箱", "状态：", "已启用（平台：linux）",
 		"不可关闭")
 	// There is no enable/disable control anymore.
 	h.assertNoTexts(tester, "启用 OS 沙箱")
@@ -78,7 +78,7 @@ func TestBehaviorPageSandboxWithoutService(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为与限额")
-	h.assertTexts(tester, "OS 沙箱", "未加载 sandbox 模块")
+	h.assertTexts(tester, "系统沙箱", "未加载 sandbox 模块")
 }
 
 // TestBehaviorPageSandboxEnglish covers the English copy and status line.

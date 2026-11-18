@@ -120,7 +120,9 @@ func assertDockGeometry(t *testing.T, tester *ui.Tester, width, height int, acti
 	}
 	input, okInput := tester.Find("输入消息…")
 	action, okAction := tester.Find(actionLabel)
-	allow, okAllow := tester.Find("允许")
+	// The approval card's positive action reads 允许一次 since the S4 rewrite
+	// (B-spec §3.3.2: 拒绝 · 允许一次 · ⋯).
+	allow, okAllow := tester.Find("允许一次")
 	banner, okBanner := tester.Find("需要审批")
 	if !okInput {
 		t.Fatalf("%dx%d: composer input missing; texts = %v", width, height, tester.Texts())
@@ -247,7 +249,9 @@ func TestApprovalCardMiddleBounded(t *testing.T) {
 	tester.Frame()
 
 	banner, okBanner := tester.Find("需要审批")
-	allow, okAllow := tester.Find("允许")
+	// The approval card's positive action reads 允许一次 since the S4 rewrite
+	// (B-spec §3.3.2: 拒绝 · 允许一次 · ⋯).
+	allow, okAllow := tester.Find("允许一次")
 	if !okBanner || !okAllow {
 		t.Fatalf("approval card missing; texts = %v", tester.Texts())
 	}

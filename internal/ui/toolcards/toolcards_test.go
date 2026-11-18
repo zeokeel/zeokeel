@@ -239,8 +239,15 @@ func TestStatusBadgesUseThemeSemantics(t *testing.T) {
 		{ID: "w1", Name: "write_file", Status: "ok"},
 	}, nil, nil)
 	tester := h.tester()
-	h.assertTexts(tester, "运行中", "失败", "完成")
+	// A running call and a failure state themselves in words beside the state
+	// glyph; a finished call stays quiet (its check glyph and accessible name
+	// carry it, B-spec-v2 §3.3.1).
+	h.assertTexts(tester, "运行中", "失败")
 	h.assertNoTexts(tester, "running", "error") // labels replace raw statuses
+	if _, ok := tester.AccessByRole(ui.RoleGroup, "写入文件 · 完成"); !ok {
+		t.Fatalf("the finished call does not state its status to assistive technology; texts = %v",
+			tester.Texts())
+	}
 }
 
 func TestSummaryCollapsible(t *testing.T) {
@@ -253,8 +260,8 @@ func TestSummaryCollapsible(t *testing.T) {
 	tester := h.tester()
 	// H15: a short result starts expanded; the row is one official disclosure
 	// named by the friendly tool name (no separate 详情 button).
-	h.assertTexts(tester, "运行命令", "完成", summary)
-	h.assertNoTexts(tester, "b1", "bash", "详情") // call ID and raw name are hidden
+	h.assertTexts(tester, "运行命令", summary)
+	h.assertNoTexts(tester, "b1", "详情") // call ID stays hidden
 	info, ok := tester.AccessByRole(ui.RoleDisclosure, "运行命令 · 完成")
 	if !ok || !info.Expanded {
 		t.Fatalf("summary disclosure: %+v found %v; texts = %v", info, ok, tester.Texts())

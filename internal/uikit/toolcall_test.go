@@ -8,6 +8,7 @@ package uikit_test
 // status colors and the panel/line degradation are the card's contract.
 
 import (
+	"image/color"
 	"slices"
 	"strings"
 	"testing"
@@ -316,5 +317,51 @@ func TestToolCallCardFooter(t *testing.T) {
 	tt.Frame()
 	if clicks != 1 {
 		t.Fatalf("footer action calls = %d, want 1", clicks)
+	}
+}
+
+// TestToolCallCardShellExitCodeIsAFailure is the decision card's half of the
+// audit's exit-code bug: bash reports "success" and appends "[exit code: 2]", and
+// the complete card must draw the danger mark — the alert glyph in DangerText and
+// the 失败 word — exactly as the compact row and the background job pane do, even
+// though nothing overrode its status.
+func TestToolCallCardShellExitCodeIsAFailure(t *testing.T) {
+	call := contracts.ToolCall{
+		ID: "exit2", Name: "bash", Status: "success",
+		Summary: "ls: cannot access 'dist/': No such file or directory\n[exit code: 2]",
+	}
+	open := false
+	tester := ui.NewTester(toolCardView(uikit.ToolCallCardOptions{
+		Key: "test.card.exit", Call: call, Open: &open,
+		Sections: []uikit.ToolPanelSection{{Label: "输出", Text: call.Summary, Mono: true}},
+	}), 560, 320)
+	tester.SetLocale("zh-Hans")
+	tester.Frame()
+
+	if _, ok := tester.Find("失败"); !ok {
+		t.Fatalf("the card hides the failure word of a nonzero exit; texts = %v", tester.Texts())
+	}
+	// The glyph is the card's leading mark, in the danger ink: it sits in the 16 DIP
+	// slot just before the tool name.
+	name, ok := tester.Find("运行命令")
+	if !ok {
+		t.Fatalf("the card has no tool name; texts = %v", tester.Texts())
+	}
+	want := design.Light().DangerText
+	ink := dominantInk(tester, int(name.X-design.Space4), int(name.Y), int(design.Space4))
+	if !closeColor(ink, color.RGBA{R: want.R, G: want.G, B: want.B, A: want.A}, 90) {
+		t.Fatalf("the failed card's leading glyph ink = %v, want the danger ink %v", ink, want)
+	}
+	// The result opens by default on a failure, so the exit marker is readable
+	// without a click (H15) — the same rule the compact row follows.
+	if uikit.SummaryOpenForCall(call) != true {
+		t.Fatal("a nonzero exit does not open the card's detail by default")
+	}
+	// And the neutral cases stay neutral.
+	if got := uikit.ToolCallStatusKind(contracts.ToolCall{Name: "bash", Status: "success", Summary: "[exit code: 0]"}); got != uikit.StatusSuccess {
+		t.Fatalf("exit 0 folded to %v, want StatusSuccess", got)
+	}
+	if got := uikit.ToolCallStatusKind(contracts.ToolCall{Name: "read_file", Status: "success", Summary: "[exit code: 2]"}); got != uikit.StatusSuccess {
+		t.Fatalf("a non-shell tool was re-classified by text that mentions a code: %v", got)
 	}
 }

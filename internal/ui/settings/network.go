@@ -44,7 +44,7 @@ func newNetworkState() *networkState { return &networkState{} }
 // host at the next start.
 func buildNetworkPage(c *ui.Context, kctx cordis.Context, store contracts.SettingsService, runtime contracts.UIRuntime, st *networkState, search *searchState, locale contracts.LocaleService) {
 	t := design.Of(c)
-	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+	ui.Column(c).FillWidth().Gap(design.SpaceScreen).Children(func() {
 		uikit.PageHeader(c, localized(locale, "网络与搜索", "Network & search"), "")
 
 		if !st.loaded {
@@ -73,12 +73,12 @@ func buildNetworkPage(c *ui.Context, kctx cordis.Context, store contracts.Settin
 			ui.Field(c, localized(locale, "代理地址", "Proxy URL"), func() {
 				ui.TextInput(c, &st.proxy).
 					Label(inputLabel(locale, localized(locale, "代理地址", "Proxy URL"))).
-					Placeholder("http://127.0.0.1:7890").FillWidth()
+					Placeholder("http://127.0.0.1:7890").Width(controlWidth)
 			}).Description(localized(locale, "留空表示直连。", "Leave empty to connect directly."))
 			ui.Field(c, "NO_PROXY", func() {
 				ui.TextInput(c, &st.noProxy).
 					Label(inputLabel(locale, "NO_PROXY")).
-					Placeholder("localhost,127.0.0.1,::1").FillWidth()
+					Placeholder("localhost,127.0.0.1,::1").Width(controlWidth)
 			}).Description(localized(locale, "逗号分隔的直连主机列表。",
 				"Comma-separated hosts that connect directly."))
 			design.Apply(ui.Text(c, localized(locale,

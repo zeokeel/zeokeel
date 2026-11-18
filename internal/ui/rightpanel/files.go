@@ -258,7 +258,7 @@ func buildArtifactsSection(c *ui.Context, t *design.Tokens, artifacts contracts.
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			ui.Icon(c, icons.Data()).Size(design.Space3, design.Space3).TextColor(t.LabelTertiary)
 			design.Apply(ui.Text(c, st.tr("交付区", "Deliverables")), t.Font(design.TypeXXS)).
-				TextColor(t.LabelSecondary).Grow(1).Bold()
+				TextColor(t.LabelSecondary).Grow(1)
 		})
 		if st.artifactsErr != "" {
 			uikit.ErrorLine(c, st.artifactsErr)
@@ -270,9 +270,8 @@ func buildArtifactsSection(c *ui.Context, t *design.Tokens, artifacts contracts.
 				// not the neutral badge + status-colored text AP-21 forbids.
 				uikit.StatusBadge(c, t, uikit.StatusSuccess, st.artifactsNotice)
 				if st.artifactsSavedPath != "" {
-					design.Apply(ui.Text(c, st.artifactsSavedPath), t.Font(design.TypeXXXS)).
-						TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…").
-						Tooltip(st.artifactsSavedPath)
+					design.Apply(ui.Text(c, st.artifactsSavedPath), t.Font(design.TypeXXS)).
+						TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…")
 				}
 			})
 		}
@@ -335,20 +334,38 @@ func buildArtifactRow(row ui.ListRow, t *design.Tokens, st *state,
 	runtime contracts.UIRuntime, artifact contracts.Artifact, title string, open bool, toggle func()) {
 	c := row.Context
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		// The artifact row is 32 DIP with the metadata step for its time and
+		// its actions revealed on hover or focus (B-spec §3.5): at 320 DIP the
+		// row reads as one object, and the actions belong to the row the
+		// pointer is on. No Tooltip on the download action: the panel can be a
+		// drawer, and a tooltip would take its first Escape (A4-I-01).
+		head := ui.Row(c).FillWidth().Height(design.RowCompactHeight).
+			AlignItems(ui.Center).Gap(design.Space2).PaddingX(design.Space1).
+			Radius(design.RadiusSM).Transition(design.TransitionColors(c))
+		revealed := head.Hovered() || head.FocusWithin()
+		if head.Hovered() {
+			head = head.Background(t.BgHover)
+		}
+		head.Children(func() {
 			design.Apply(ui.Text(c, title), t.Font(design.TypeXS)).
-				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…").Bold()
+				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 			design.Apply(ui.Text(c, uikit.FormatClock(st.locale, artifact.CreatedAt)),
-				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).NoWrap()
+				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).NoWrap()
 			previewLabel := st.tr("预览", "Preview")
 			if open {
 				previewLabel = st.tr("收起", "Hide")
 			}
-			if ui.Button(c, previewLabel).Clicked() {
+			preview := ui.Button(c, previewLabel).Radius(design.RadiusSM)
+			if !revealed {
+				preview = preview.Opacity(0).IgnoreInput(true)
+			}
+			if preview.Clicked() {
 				toggle()
 			}
-			download := ui.Button(c, st.tr("下载", "Download")).
-				Tooltip(st.tr("保存为 Markdown", "Save as Markdown"))
+			download := ui.Button(c, st.tr("下载", "Download")).Radius(design.RadiusSM)
+			if !revealed {
+				download = download.Opacity(0).IgnoreInput(true)
+			}
 			if download.Clicked() {
 				saveArtifact(st, runtime, artifact)
 			}

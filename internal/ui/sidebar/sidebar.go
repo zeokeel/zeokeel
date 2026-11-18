@@ -97,7 +97,7 @@ import (
 
 // Config is the module's typed assembly config.
 type Config struct {
-	// NewChatLabel is the primary action label (default "新对话").
+	// NewChatLabel is the primary action label (default "新建会话").
 	NewChatLabel string `json:"newChatLabel"`
 	// SettingsLabel is the footer settings button label (default "设置").
 	SettingsLabel string `json:"settingsLabel"`
@@ -112,6 +112,35 @@ type Config struct {
 // the UI thread.
 type paneState struct {
 	query string
+
+	// lastNewChat is when the "new session" row last created a session. One
+	// pointer press can rebuild this row more than once inside the same input
+	// event (the handler invalidates the frame and posts a navigation), and a
+	// double click is one intent: without this guard one click made two empty
+	// sessions (A4-I-04). The window is the desktop's double-click interval, so
+	// a deliberate second click still starts a second session.
+	lastNewChat time.Time
+
+	// sessionMenuFocus holds one focus handle per row ⋯ button (session rows and
+	// workspace group rows), so a confirmation the menu opened can give the
+	// keyboard back to that button when it closes (A4 focus-return).
+	sessionMenuFocus map[string]*ui.Handle
+	// deleteTrigger is the ⋯ button that opened the pending session delete
+	// confirmation; workspaceMenuTrigger is the group row's, for the workspace
+	// delete.
+	deleteTrigger        *ui.Handle
+	workspaceMenuTrigger *ui.Handle
+	// sessionListFocus is the handle of the session list, the element a closed
+	// dialog gives the keyboard back to.
+	sessionListFocus *ui.Handle
+	// deleteWasOpen records that the confirmation was up, so a close that only
+	// becomes visible on a later frame still returns the keyboard to the row.
+	deleteWasOpen bool
+	// focusReturn names the session whose row action must stay revealed while a
+	// dialog hands the keyboard back to it: the ⋯ is a hover-only control, and a
+	// hidden control cannot take the focus. Cleared on the frame the focus
+	// arrives.
+	focusReturn string
 
 	// locale localizes the sidebar's own copy on every frame, so a language
 	// switch takes effect on the next frame without restarting the module.
@@ -223,9 +252,61 @@ type paneState struct {
 // T returns the localized copy for the current frame.
 func (state *paneState) T(zh, en string) string { return uikit.T(state.locale, zh, en) }
 
-// newChatLabel is the primary action label for the current frame.
+// newChatLabel is the primary action label for the current frame. The product
+// names the object it creates (会话 / Session) rather than the conversation
+// activity, so the button, the accessibility name and the list headers all say
+// one word for one thing (2026-11 copy audit F-02).
 func (state *paneState) newChatLabel() string {
-	return textutil.FirstNonEmpty(state.cfgNewChatLabel, state.T("新对话", "New chat"))
+	return textutil.FirstNonEmpty(state.cfgNewChatLabel, state.T("新建会话", "New session"))
+}
+
+// newChatDoubleClickWindow is the interval inside which a second "new session"
+// press is the same intent as the first (the desktop's double-click time).
+const newChatDoubleClickWindow = 350 * time.Millisecond
+
+// sessionMenuHandle returns the stable focus handle of one row's ⋯ button,
+// creating it on first use: the widget identity must survive frames, so it
+// lives with the pane's state rather than in the build.
+func (state *paneState) sessionMenuHandle(id string) *ui.Handle {
+	if state.sessionMenuFocus == nil {
+		state.sessionMenuFocus = make(map[string]*ui.Handle)
+	}
+	if handle, ok := state.sessionMenuFocus[id]; ok {
+		return handle
+	}
+	handle := &ui.Handle{}
+	state.sessionMenuFocus[id] = handle
+	return handle
+}
+
+// sessionListHandle is the stable handle of the list that owns the session
+// rows. A dialog hands the keyboard back HERE rather than to a row's ⋯: the
+// list is always on screen and always in the accessibility tree, while the ⋯
+// exists only while its row is hovered or focused (A4-I-02).
+func (state *paneState) sessionListHandle() *ui.Handle {
+	if state.sessionListFocus == nil {
+		state.sessionListFocus = &ui.Handle{}
+	}
+	return state.sessionListFocus
+}
+
+// groupMenuHandle is sessionMenuHandle for a workspace group row's ⋯ button,
+// and remembers it as the trigger of that group's delete confirmation.
+func (state *paneState) groupMenuHandle(key string) *ui.Handle {
+	handle := state.sessionMenuHandle("workspace/" + key)
+	state.workspaceMenuTrigger = handle
+	return handle
+}
+
+// claimNewChat reports whether this press may create a session: it is the first
+// press inside the double-click window. See paneState.lastNewChat.
+func (state *paneState) claimNewChat() bool {
+	now := time.Now()
+	if !state.lastNewChat.IsZero() && now.Sub(state.lastNewChat) < newChatDoubleClickWindow {
+		return false
+	}
+	state.lastNewChat = now
+	return true
 }
 
 // settingsLabel is the footer settings label for the current frame.
@@ -235,7 +316,7 @@ func (state *paneState) settingsLabel() string {
 
 // sessionsTitle is the flat session-list section label for the current frame.
 func (state *paneState) sessionsTitle() string {
-	return textutil.FirstNonEmpty(state.cfgSessionsTitle, state.T("会话", "Chats"))
+	return textutil.FirstNonEmpty(state.cfgSessionsTitle, state.T("会话", "Sessions"))
 }
 
 // sessionTitle is the displayed title of one session in the current language.
@@ -371,46 +452,49 @@ func Module() *module.Descriptor[Config] {
 		WithName("ZeoKeel sidebar")
 }
 
-// buildPrimary is the brand "new chat" action: the official primary button at
-// the standard 36 DIP control height with the NewChat glyph and its label as
-// the content; the label stays the accessible name. With an active session the
-// action drops to the neutral outlined secondary style: a chosen session row
-// and a filled accent button next to it would be two loud accent blocks on one
-// screen, and the screen's single primary belongs to the composer then (DESIGN
-// §5.2 accent budget). The landing/empty state keeps the filled primary.
-// Creating a chat in the current workspace also unfolds that workspace's group,
-// so the fresh row is visible.
+// buildPrimary is the sidebar's "new session" row: a 32 DIP ghost row (no edge,
+// RadiusSM, BgHover under the pointer) with the Plus glyph, the label at 14/500
+// and the Cmd/Ctrl+N key cap at the row's trailing edge — the first row of the
+// source list rather than a filled dialog button (B-spec §3.1).
+//
+// It is deliberately NOT an accent-filled primary: the window's one filled
+// primary is the composer's send while a conversation is open, and a filled
+// button beside a selected row would be a second loud accent block on one
+// screen (DESIGN §5.2 accent budget). The row keeps its button role and label,
+// so Enter and Space still activate it and assistive technology still names it.
+// Creating a session in the current workspace also unfolds that workspace's
+// group, so the fresh row is visible.
 func buildPrimary(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState) {
 	label := state.newChatLabel()
-	hasSelection := strings.TrimSpace(chat.ActiveSession()) != ""
+	// The chord is the product's one formatter, so the cap follows the platform
+	// (Cmd+N on macOS, Ctrl+N elsewhere) and matches the help table and the
+	// command palette (A5 copy audit F-10).
+	chord := uikit.FormatShortcut("CmdOrCtrl+N")
 	ui.Row(c).FillWidth().
-		Padding(design.Space2, design.Space3, design.Space2, design.Space3).
+		Padding(design.Space2, design.Space3, design.Space1, design.Space3).
 		Children(func() {
-			var button ui.Element
-			iconColor, textColor := t.AccentText, t.AccentText
-			if hasSelection {
-				// The outlined secondary action: the native button look keeps
-				// hover/pressed/disabled, the brand fixes the control metrics.
-				button = design.Apply(ui.Button(c, ""), t.SecondaryButton()).
-					FillWidth().Label(label)
-				iconColor, textColor = t.Accent, t.LabelPrimary
-			} else {
-				button = design.Apply(ui.PrimaryButton(c, ""), t.PrimaryButton()).
-					FillWidth().Label(label)
-			}
-			// The action reads as the first row of the source list, not as a
-			// centered dialog button: its glyph and label sit at the start like
-			// the navigation and session rows below, so the column has one
-			// left-aligned reading edge.
-			button.Children(func() {
+			// A ghost row, not a native button: the official Button would paint a
+			// surface and a hairline edge, and §2 allows no borders inside the
+			// sidebar. ButtonBase keeps the pointer, the keyboard (Enter/Space),
+			// the focus ring and the accessible role; rowTintTransition paints
+			// the hover/selection fill and fades it over MotionFast.
+			row := ui.ButtonBase(c).FillWidth().Height(design.RowCompactHeight).
+				PaddingX(design.Space2).Radius(design.RadiusSM).Label(label)
+			row = rowTintTransition(c, t, row, false)
+			row.Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					ui.Icon(c, icons.NewChat()).Size(design.IconSizeS, design.IconSizeS).TextColor(iconColor)
-					design.Apply(ui.Text(c, label), t.Text(design.TypeBody)).
-						FontWeight(design.WeightMedium).TextColor(textColor).MaxLines(1)
+					ui.Icon(c, icons.Plus()).Size(design.IconSizeS, design.IconSizeS).
+						TextColor(t.LabelSecondary)
+					design.Apply(ui.Text(c, label), t.Text(design.TypeS)).
+						TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+					// The key cap is the visible chord (B-spec §3.1), not a
+					// tooltip: a tooltip is an overlay that would take the first
+					// Escape from the surface (A4-I-01).
+					uikit.Kbd(c, t, chord)
 				})
 			})
-			if button.Clicked() {
+			if row.Clicked() && state.claimNewChat() {
 				// NewSession marks the session active; navigate afterwards. A
 				// headless or partial assembly may not have the screen yet, so a
 				// failed push must not break the frame.
@@ -502,7 +586,12 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 			}
 			ui.Row(c).FillWidth().Padding(design.Space0, design.Space1, design.Space0, design.Space1).
 				Children(func() {
-					searchLabel := state.T("搜索会话与消息", "Search chats and messages")
+					// The English name has to survive the 242 DIP the sidebar
+					// gives the field: "Search sessions and messages" was cut to
+					// "…and message:" there, so the English is the short form
+					// (the Chinese already fits). One string serves as the
+					// accessible label and the placeholder, so both stay honest.
+					searchLabel := state.T("搜索会话与消息", "Search sessions…")
 					ui.SearchField(c, &state.query).
 						Label(searchLabel).
 						Placeholder(searchLabel).FillWidth()
@@ -716,7 +805,7 @@ func buildMessageSearch(c *ui.Context, t *design.Tokens, chat contracts.ChatServ
 			}
 			design.Apply(ui.Text(c, state.T(
 				strconv.Itoa(len(visibleHits))+" 条消息", strconv.Itoa(len(visibleHits))+" messages")),
-				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
 			rows := messageSearchRows(groupMessageHits(visibleHits, state))
 			if state.searchSel >= len(rows) {
 				state.searchSel = -1
@@ -874,9 +963,9 @@ func buildMessageHitRowContent(c *ui.Context, t *design.Tokens, state *paneState
 			} else {
 				ui.Spacer(c).Grow(1)
 			}
-			design.Apply(ui.Text(c, messageRoleLabel(hit.Role, state)), t.Font(design.TypeXXXS)).
+			design.Apply(ui.Text(c, messageRoleLabel(hit.Role, state)), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary)
-			design.Apply(ui.Text(c, formatHitTime(state.locale, hit.CreatedAt)), t.Font(design.TypeXXXS)).
+			design.Apply(ui.Text(c, formatHitTime(state.locale, hit.CreatedAt)), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary)
 		})
 		if snippet := strings.TrimSpace(hit.Snippet); snippet != "" {
@@ -1170,7 +1259,7 @@ func buildWorkspaceTree(
 		ui.Column(c).FillWidth().Gap(design.Space1).
 			Padding(design.Space2, design.Space2, design.Space0, design.Space2).Children(func() {
 			uikit.EmptyState(c, state.T("还没有工作区", "No workspaces yet"))
-			uikit.EmptyState(c, state.T("点击 + 添加工作区", "Click + to add a workspace"))
+			uikit.EmptyState(c, state.T("选择 + 添加工作区", "Select + to add a workspace"))
 		})
 		return
 	}
@@ -1440,7 +1529,7 @@ func buildWorkspaceGroupRow(c *ui.Context, t *design.Tokens, chat contracts.Chat
 	// Grow, not FillWidth: the row prefix already spent the leading slot, and a
 	// 100%-width child would overflow it and squeeze the row-end actions.
 	row := ui.ButtonBase(c).Grow(1).Shrink(1).Height(design.RowCompactHeight).PaddingEnd(design.Space2).
-		Radius(design.RadiusSM).Label(name)
+		Radius(design.RadiusSM).Label(name).Transition(design.TransitionColors(c))
 	// The row action buttons stay out of the way until the row is hovered,
 	// focused or the current workspace, as the session rows' action does. The
 	// prefix (built before this content) reads the hover from the previous
@@ -1466,7 +1555,8 @@ func buildWorkspaceGroupRow(c *ui.Context, t *design.Tokens, chat contracts.Chat
 			// so a long single-token workspace name cannot push the row's
 			// count/actions (⋯/⊕) outside the 280-DIP sidebar.
 			design.Apply(ui.Text(c, name), t.Text(design.TypeXS)).
-				FontWeight(design.WeightMedium).TextColor(textColor).Grow(1).MinWidth(design.Space0).MaxLines(1).Ellipsis("…")
+				FontWeight(design.WeightMedium).TextColor(textColor).Grow(1).
+				MinWidth(design.Space0).MaxLines(1).Ellipsis("…")
 			// A folded group still says what is happening inside it, so a
 			// running or unread conversation is findable without unfolding
 			// every workspace. An open group leaves that to its rows.
@@ -1523,7 +1613,7 @@ func buildWorkspaceNewChatAction(c *ui.Context, t *design.Tokens,
 	workspace contracts.WorkspaceService, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState,
 	key, name string, revealed bool) {
-	label := fmt.Sprintf(state.T("在“%s”中新建会话", "New chat in “%s”"), name)
+	label := fmt.Sprintf(state.T("在“%s”中新建会话", "New session in “%s”"), name)
 	activate := func() {
 		state.workspaceNewChatErr = ""
 		if _, err := workspace.Open(context.Background(), workspaceIDFromTreeKey(key)); err != nil {
@@ -1532,7 +1622,7 @@ func buildWorkspaceNewChatAction(c *ui.Context, t *design.Tokens,
 			return
 		}
 		if _, err := chat.NewSession(""); err != nil {
-			state.workspaceNewChatErr = state.T("新建会话失败：", "Could not start a new chat: ") + err.Error()
+			state.workspaceNewChatErr = state.T("新建会话失败：", "Could not start a new session: ") + err.Error()
 			runtime.Invalidate()
 			return
 		}
@@ -1604,19 +1694,21 @@ func buildWorkspaceRowActions(c *ui.Context, t *design.Tokens, workspace contrac
 	runtime contracts.UIRuntime, state *paneState, tree *workspaceTreeGroups, key, name string,
 	revealed bool) {
 	menuLabel := state.T("工作区操作：", "Workspace actions: ") + name
-	// ≥24 DIP hit target (AP-17, audit UD-08), matching the session ⋯ and the
-	// IconButton guarantee; the glyph stays on the design icon step.
-	more := ui.ButtonBase(c).Size(design.IconSizeL, design.IconSizeL).Center().Radius(design.RadiusSM).
-		Label(menuLabel).Tooltip(menuLabel)
-	// The registered rich row paints pressed as well as hovered (audit UD-18):
-	// rowTint is the product's one ButtonBase state vocabulary.
-	more = rowTint(t, more, false)
+	// Same one icon-button entry as the session row's ⋯ (A1 matrix
+	// "sidebar.go:1609 → 迁移"): Label, ≥24 DIP target, ink and the colour
+	// transition come from uikit.IconButton instead of a hand-written
+	// ButtonBase state machine. Tertiary ink: this is the quieter of the two
+	// row actions and it sits above the group's conversations.
+	more := uikit.IconButton(c, uikit.IconButtonOptions{
+		Key:      "sidebar.workspace.menu/" + key,
+		Label:    menuLabel,
+		Icon:     icons.More(),
+		Size:     design.IconSizeS,
+		InkColor: t.LabelTertiary,
+	}).Bind(state.groupMenuHandle(key))
 	if !revealed {
 		more = more.Opacity(0).IgnoreInput(true)
 	}
-	more.Children(func() {
-		ui.Icon(c, icons.More()).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelTertiary)
-	})
 	more.PopoverMenuButton(workspaceGroupMenu(state, runtime, workspace, tree, key, name),
 		ui.PopoverMenuButtonOptions{At: ui.AnchorBottomEnd, Self: ui.AnchorTopEnd})
 }
@@ -1834,10 +1926,20 @@ func buildFlatSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatSe
 	// quiet selection tint, not the accent block (V1).
 	ui.Themed(c, sessionSelectionTheme(t)).Background(ui.Transparent).FillWidth().Children(func() {
 		list = ui.List(c, &state.sessionList, len(sessions)).Rows(func(row ui.ListRow) {
+			// One row height for every conversation row, in the tree or the
+			// flat fallback list: 32 DIP (B-spec §3.1), not the 36 DIP control
+			// step the fallback used to take.
 			buildSessionRow(row.Context, t, chat, nav, runtime, state, sessions[row.Index],
-				sessions[row.Index].ID == active, row.Index == state.sessionRow, design.ControlHeight, false)
-		})
+				sessions[row.Index].ID == active, row.Index == state.sessionRow, design.RowCompactHeight, false)
+		}).Bind(state.sessionListHandle())
 	})
+	if state.focusReturn != "" {
+		// The dialog that owed the keyboard is gone: take it here, on the frame
+		// the list is certainly on screen. The current row stays the session the
+		// action was taken on, so the keyboard continues where it was.
+		state.focusReturn = ""
+		list.Focus(ui.FocusOptions{PreventScroll: true})
+	}
 	if list.Submitted() && state.sessionRow >= 0 && state.sessionRow < len(sessions) {
 		openSession(chat, nav, runtime, state, sessions[state.sessionRow].ID)
 	}
@@ -1876,6 +1978,12 @@ const selectedBarWidth = design.Space1 / 2
 // pressed use the stronger selection tint, hover the lighter hover tint. mygo's
 // ButtonBase has no look of its own, so a row must paint all three explicitly
 // (native buttons carry their own state machine).
+//
+// The tint fades over design.MotionFast instead of switching: a fill that cuts
+// on every hover is the largest "this feels cheap" difference against the tools
+// this product sits beside (B-spec §1.5/§4.1). The transition is attached by the
+// caller through rowTintTransition, because mygo needs the element's identity to
+// stay stable across the frames it animates between.
 func rowTint(t *design.Tokens, el ui.Element, selected bool) ui.Element {
 	switch {
 	case el.Pressed():
@@ -1887,6 +1995,13 @@ func rowTint(t *design.Tokens, el ui.Element, selected bool) ui.Element {
 	default:
 		return el
 	}
+}
+
+// rowTintTransition attaches the row's colour transition, then paints the
+// state. A row that only calls rowTint would still cut; this is the one call a
+// self-drawn row needs, so the timing cannot go missing on one of them.
+func rowTintTransition(c *ui.Context, t *design.Tokens, el ui.Element, selected bool) ui.Element {
+	return rowTint(t, el.Transition(design.TransitionColors(c)), selected)
 }
 
 // ScreenNavSpec delegates to the shared uikit navigation table — the single
@@ -2116,6 +2231,7 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 			state.deleteErr = ""
 			state.deleteTarget = session.ID
 			state.deleteTitle = state.sessionTitle(session)
+			state.deleteTrigger = state.sessionMenuHandle(session.ID)
 		}
 		if !active {
 			m.Separator()
@@ -2183,13 +2299,17 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 			if !leadingInPrefix {
 				sessionLeadingGlyph(c, t, state, session, chosen || active)
 			}
-			titleText := design.Apply(ui.Text(c, label), t.Text(design.TypeS)).
+			// The session row's title is the 13 DIP list step, 500 at rest
+			// (B-spec §3.1: 会话行 32 高、标题 13). One role carries 13 and its
+			// baked weight is 400, so the row names the weight explicitly: the
+			// resting/read vs unread pair IS this row's affordance, and the
+			// unread one must scan stronger before its dot registers. This is
+			// the single documented exception to the role-baked weight rule.
+			titleText := design.Apply(ui.Text(c, label), t.Text(design.TypeXS)).
+				FontWeight(design.WeightMedium).
 				TextColor(t.LabelPrimary).Grow(1).MinWidth(design.Space0).MaxLines(1).Ellipsis("…")
-			// A background answer that has not been read yet reads as a
-			// slightly stronger title, so the row is findable by scanning even
-			// before the unread dot registers.
-			if active || chosen || session.Unread {
-				titleText = titleText.FontWeight(design.WeightMedium)
+			if session.Unread {
+				titleText = titleText.FontWeight(design.WeightSemibold)
 			}
 			// Pinned is a stable property, not a run state, so it keeps the
 			// quiet badge; the live run state moved to the row end (see below).
@@ -2201,19 +2321,31 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 			// title.
 		})
 		menuLabel := state.T("会话操作：", "Session actions: ") + label
-		c.Key("session/" + session.ID + "/menu")
-		more := ui.ButtonBase(c).Size(design.IconSizeL, design.IconSizeL).Center().Radius(design.RadiusSM).
-			Label(menuLabel).Tooltip(menuLabel)
-		moreColor := t.LabelSecondary
-		// Pressed as well as hovered, through the product's one ButtonBase
-		// state vocabulary (audit UD-18).
-		more = rowTint(t, more, false)
+		// The row's ⋯ is the product's one icon-button entry, not a fourth
+		// hand-written state machine: uikit.IconButton carries the Label, the
+		// ≥24 DIP hit target, the ink and the MotionFast colour transition
+		// between rest, hover and pressed (2026-11 audit UD-09/UD-18, A1
+		// matrix "sidebar.go:2205 → 迁移"). Ghost, not the outlined Native
+		// look: §2 forbids borders inside a sidebar row, and the row's own
+		// hover tint already says the row is live.
+		// Bound to the row's stable handle: the delete confirmation gives the
+		// keyboard back through it when it closes (A4-I-02). No Tooltip — the
+		// open menu is an Escape-owning surface (A4-I-01).
+		more := uikit.IconButton(c, uikit.IconButtonOptions{
+			Key:      "sidebar.session.menu/" + session.ID,
+			Label:    menuLabel,
+			Icon:     icons.More(),
+			Size:     design.IconSizeS,
+			InkColor: t.LabelSecondary,
+		}).Bind(state.sessionMenuHandle(session.ID))
 		if !revealed {
+			// Built always so assistive technology can name it, out of the
+			// pointer's way until the row is hovered or focused. v0.9.2 cannot
+			// animate the opacity of an element that is already built (only
+			// Enter/Exit motions fade), so the reveal itself is instant; the
+			// button's own colour transition is what fades.
 			more = more.Opacity(0).IgnoreInput(true)
 		}
-		more.Children(func() {
-			ui.Icon(c, icons.More()).Size(design.IconSizeS, design.IconSizeS).TextColor(moreColor)
-		})
 		// The menu opens below the button, lined up with its end, so it never
 		// overhangs the sidebar's content.
 		more.PopoverMenuButton(menu, ui.PopoverMenuButtonOptions{
@@ -2329,7 +2461,19 @@ func switchSessionWorkspace(chat contracts.ChatService, state *paneState, sessio
 func buildFooter(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime,
 	state *paneState, label string) {
+	// A modal can flip the dialog's open flag while it dismisses itself, after
+	// the builders ran: the frame that sees it already closed must still do the
+	// close bookkeeping, or the keyboard return never happens (A4-I-02).
+	if !state.deleteOpen && state.deleteWasOpen {
+		state.deleteWasOpen = false
+		state.focusReturn = state.deleteTarget
+		state.deleteTarget = ""
+		state.deleteTitle = ""
+		state.deleteErr = ""
+		runtime.Invalidate()
+	}
 	if state.deleteOpen {
+		state.deleteWasOpen = true
 		deleteTitle := textutil.FirstNonEmpty(state.deleteTitle, state.T("未命名会话", "Untitled session"))
 		target := state.deleteTarget
 		messageTemplate := state.T("“%s”及其全部消息将被删除，此操作无法撤销。",
@@ -2337,7 +2481,7 @@ func buildFooter(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 		message := fmt.Sprintf(messageTemplate, deleteTitle)
 		buildDangerConfirm(c, t, &state.deleteOpen,
 			state.T("删除会话", "Delete session"), message, state.deleteErr,
-			state.T("删除", "Delete"), state.T("取消", "Cancel"),
+			state.T("删除", "Delete"), state.T("取消", "Cancel"), state.deleteTrigger,
 			func() {
 				if err := chat.DeleteSession(target); err != nil {
 					// A failed delete keeps the dialog open and names the
@@ -2356,6 +2500,18 @@ func buildFooter(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 				// failure; only a real close drops the pending target.
 				if state.deleteOpen {
 					return
+				}
+				// The keyboard goes back to the ⋯ that opened the dialog on the
+				// NEXT frame: the modal restores focus to its own opener while it
+				// closes, so a request made in this frame is overwritten
+				// (A4 focus-return).
+				// The keyboard goes back to this row's action on the next build,
+				// where the row can make its ⋯ visible before focusing it: a
+				// hover-only control is out of the accessibility tree and cannot
+				// take the focus (A4-I-02).
+				if state.deleteTrigger != nil {
+					state.deleteTrigger = nil
+					state.focusReturn = target
 				}
 				state.deleteTarget = ""
 				state.deleteTitle = ""
@@ -2379,7 +2535,7 @@ func buildFooter(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 				c.Key("sidebar/footer/settings")
 				settingsRow := ui.ButtonBase(c).FillWidth().Height(design.ControlHeight).
 					PaddingX(design.Space3).Radius(design.RadiusSM).Label(label)
-				settingsRow = rowTint(t, settingsRow, false)
+				settingsRow = rowTintTransition(c, t, settingsRow, false)
 				settingsRow.Children(func() {
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 						ui.Icon(c, icons.Sliders()).Size(design.IconSizeS, design.IconSizeS).

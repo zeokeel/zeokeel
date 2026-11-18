@@ -65,7 +65,7 @@ func TestCreateFormWorkspaceAndPermissionSelectors(t *testing.T) {
 	h.assertTexts(tester, "项目一")
 
 	h.click(tester, "默认全局")
-	h.assertTexts(tester, "只读", "工作区可写", "所有权限")
+	h.assertTexts(tester, "只读", "工作区修改", "所有权限")
 	h.assertNoTexts(tester, "询问", "从不", "全部允许")
 	h.click(tester, "所有权限")
 	h.assertTexts(tester, "所有权限")

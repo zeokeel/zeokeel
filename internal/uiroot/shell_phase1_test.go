@@ -126,10 +126,11 @@ func TestInspectorDrawerEscapeOnceAndRestoresFocus(t *testing.T) {
 	if _, ok := tt.AccessByRole(ui.RoleDialog, "检查器"); ok {
 		t.Fatal("drawer still renders after Escape")
 	}
-	// The focus is back on the inspector toggle, whose label is now the
-	// "open" wording.
-	if info, ok := tt.AccessByRole(ui.RoleButton, "打开右侧栏"); !ok || !info.Focused {
-		t.Fatalf("focus after close = %+v (present=%v), want the inspector toggle focused", info, ok)
+	// The focus is back on the control that carries the inspector toggle: at
+	// this window's width the band folded its trailing cluster into one ⋯
+	// (VD-01), so the keyboard returns there.
+	if info, ok := tt.AccessByRole(ui.RoleToggleButton, "更多操作"); !ok || !info.Focused {
+		t.Fatalf("focus after close = %+v (present=%v), want the band's overflow control focused", info, ok)
 	}
 }
 
@@ -349,7 +350,7 @@ func TestRailAnnouncesCurrentScreen(t *testing.T) {
 		t.Fatalf("rail Plugins does not report the current screen: %+v ok=%v", plugins, ok)
 	}
 	// The primary action survives the collapse as an icon action.
-	if _, ok := tt.AccessByRole(ui.RoleButton, "新对话"); !ok {
+	if _, ok := tt.AccessByRole(ui.RoleButton, "新建会话"); !ok {
 		t.Fatalf("rail has no new-chat action; texts: %v", tt.Texts())
 	}
 

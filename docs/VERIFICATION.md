@@ -1,5 +1,38 @@
 # Verification log (final)
 
+## 0.2.51 — 2026-11-18（视觉语言 v2 重设计 + mygo v0.9.2）
+
+```
+$ gofmt -l internal cmd
+(empty)
+$ go build ./...
+OK
+$ go vet ./...
+OK
+$ go tool mygo vet .
+OK
+$ go test ./... -count=1
+all packages ok, 0 FAIL（含 audit/probes 13 条历史探针已迁移到 v2 契约）
+$ go run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
+555 files, 51 violations (all baseline): 0 error, 0 warn, 0 new, 0 blocking
+$ bash scripts/design-check.sh
+6 passed, 0 failed: PASS
+$ go run ./internal/devtools/ui-snapshot .cache/ui-conformance-final
+128 PNG（亮/暗/窄窗/动态：流式回复、MCP 测试连接、Skill 编辑、三附件）
+$ A3-qa/measure.sh .cache/ui-conformance-final --baseline .cache/ui-conformance
+视觉不变量：PASS 51 / FAIL 2（diff 场景画布裁切，harness 问题）/ WARN 2（行距信息项）
+逐屏人工复核：docs/research/redesign-2026-11/A3-qa/per-screen-verdict.md（128 张）
+$ A4-qa/check.sh --with-drive
+交互闸门：GREEN（LOCKED 6/6、套件 0 FAIL、DRIVE-a4qa 0 FAIL、3 条已登记限制）
+控件清点：docs/research/redesign-2026-11/A4-qa/A4-control-inventory.tsv（400 行）
+```
+
+- 依赖：`github.com/egoist/mygo v0.9.0 → v0.9.2`（`registry.json.source.mygo` 与文档锚点同步）。
+- 设计语言：Linear 精确中性 + Primer 企业清晰（`docs/research/redesign-2026-11/A2-industry-design-languages.md` 4.60/4.50）；token 变更见 `docs/DESIGN.md` §5、决策记录 D8–D10、框架缺口 §7.4.1。
+- 证据目录：`docs/research/redesign-2026-11/`（BRIEF / A1 组件盘点 / A2 业界研究 / A3 视觉审计 / A4 交互审计 / A5 文案审计 / B-spec-v2 / A3-qa / A4-qa）。
+- 视觉证据：`.cache/ui-conformance-final/`（p1 会话与审批、p2 设置/能力/右栏/上下文/暗色、narrow 1024 四屏）。
+
+
 ## 0.2.50 — 2026-11-17 (循环保护与工具循环配置面移除)
 
 ```

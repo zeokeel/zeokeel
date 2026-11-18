@@ -370,11 +370,13 @@ func assertDisabledPrimaryInk(t *testing.T, tester *ui.Tester, label string, tok
 	rect := footerPrimary(t, tester, label).Bounds
 	img := tester.Image()
 	backdrop := tokens.BgBase // the footer sits on the modal panel (S0)
-	// A disabled control must not keep the brand accent fill: mygo washes the
-	// custom fill by 50% over the panel. Sampling a solid area is stable; the
-	// label ink is left to the renderer (2026-11-17: pixel text scans are not
+	// A disabled control must not keep the brand accent fill, and it must stay
+	// legible: the 2026-11-18 review (VD-20) replaced the framework's 50% wash
+	// (1.05:1 against the panel) with the solid neutral fill and a hairline, the
+	// same control as the composer's disabled send. Sampling a solid area is
+	// stable; the label ink is left to the renderer (pixel text scans are not
 	// portable across font stacks and only repeated the token contract).
-	wantFill := tokens.BgStrong.Alpha(0.5).Over(backdrop)
+	wantFill := tokens.BgStrong.Over(backdrop)
 	fill := statusPixel(t, img, int(rect.X)+4, int(rect.Y+rect.H/2))
 	if !statusColorNear(fill, wantFill, 3) {
 		t.Fatalf("disabled primary fill = %+v, want the neutral disabled fill %+v",

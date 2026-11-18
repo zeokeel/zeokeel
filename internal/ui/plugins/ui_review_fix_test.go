@@ -232,7 +232,7 @@ func TestConnectorDetailsAuthStatusRow(t *testing.T) {
 	}, auth)
 	tester := h.tester()
 	h.click(tester, "连接器")
-	h.click(tester, "连接器操作 notion")
+	h.click(tester, "连接器操作：notion")
 	h.click(tester, "详情")
 	h.assertTexts(tester, "认证", "OAuth 2.1", "授权状态", "需要授权")
 }

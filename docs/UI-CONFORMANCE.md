@@ -1,10 +1,10 @@
-# UI 官方一致性清单（mygo v0.9.0）
+# UI 官方一致性清单（mygo v0.9.2）
 
-这份清单把 `design-guide` 与 mygo v0.9.0 的官方能力映射到本仓库的用法，目的是让
+这份清单把 `design-guide` 与 mygo v0.9.2 的官方能力映射到本仓库的用法，目的是让
 下一次 UI 改动的第一步是「查官方文档/组件」，而不是「先手搓一个」。新增/修改 UI 时
 先对照本表，再读官方文档。
 
-官方源：`go list -m -f '{{.Dir}}' github.com/egoist/mygo` 指向的模块目录（当前 v0.9.0；
+官方源：`go list -m -f '{{.Dir}}' github.com/egoist/mygo` 指向的模块目录（当前 v0.9.2；
 `docs/ui/*.md`、`examples/*`、`ui/` 源码）。**不要用旧版本的行号/语义**；升级时先 `go get` 再复核。
 
 ## 1. 官方标准件速查（按场景）
@@ -84,10 +84,30 @@
 - **全局浮层顺序**：命令面板构建在 overlays（设置面）之后，叠在设置面之上；Esc 由最上层先消费
   （官方 `OverlayShortcut` 语义）。设置面内 Cmd+K 必须可用，不能静默失效。
 
+## 1.2 v0.9.2 新增/未用能力（2026-11-18 重设计轮启用）
+
+> 这些 API 在 v0.9.1/v0.9.2 已存在，但全仓此前 0 使用；重设计轮按 R1–R10 接入。
+> 证据：`docs/research/redesign-2026-11/A1-component-inventory.md` §3。
+
+| 能力 | API | 用途 | 注意 |
+|---|---|---|---|
+| 颜色/尺寸过渡 | `Element.Transition(ui.ElementTransition{Colors:true, Duration: design.MotionFast})` | hover/pressed 渐亮，**所有手绘状态都必须接** | 元素要跨帧同一身份（`c.Key` 或稳定位置）；统一走 `design.TransitionColors(c)` |
+| 展开/折叠 | `Transition{Height:true}` | 推理块、工具详情、参数展开 | 配 `HoldPlace` 防跳；统一 `design.TransitionHeight(c)` |
+| 浮层进出 | `Transition{Enter:&Motion{Opacity:0,Y:8}, Exit:&Motion{...}, Duration, ExitDuration}` | 菜单/对话框/命令面板 | 不做缩放（原生文字会糊）；统一 `design.TransitionOverlay(c)` |
+| 流式跟随 | `ListState.FollowAnimation` | 新行从下方滑入 | `design.ListFollowAnimation(c)`（ReduceMotion 返回 nil） |
+| 列表重排 | `ListState.MoveAnimation`（v0.9.1 `ui/list_move.go`） | 折叠/重排时行滑到新位置 | 需要稳定 `Key`；`design.ListMoveAnimation(c)` |
+| 绘制期截断 | `Element.TruncateStart()` / `TruncateMiddle()` | 长路径/模型 id/会话标题保尾或保中 | 需 `SingleLine()` 或 `MaxLines(n)`；文档未记载（以源码为准）；数据层 `runes[:n]` 不再新增 |
+| 一次声明分隔 | `Element.Dividers(1, color)` | 属性表/设置行 | 替代循环内 `if i>0 { Divider }` |
+| 滚动条外观 | `Theme.ScrollbarStyle` | 全产品 10 DIP 圆角 thumb、无 track | 已由 `brand.applyMetrics` 统一设置，不要逐屏覆写 |
+| 逐菜单换肤 | `PopoverMenuButtonOptions{Panel, Item}`（v0.9.2） | 个别菜单需要不同表面时 | 默认不要用，保持一套菜单外观 |
+| 小节吸顶 | `Element.Sticky(...)` | 长列表分组标题 | 仅在长分组（任务板/文件树）使用 |
+
+**明确不采用**：`Recorder`（帧录制，测试已有 Tester.Image+Advance）、`Touch`（桌面三平台无触屏）、`Element.Access/AccessChildren` 与 `Context.TextSystem()`（参数类型在 `mygo/internal/*`，对外不可调用）。
+
 ## 2. 写 UI 的固定流程
 
 1. **先查表**：本条功能在官方有没有标准件？有就先用官方组件/API，禁止先手搓。
-2. **读源码确认签名**：`docs/ui/<file>.md` 与 `ui/*.go` 可能不同步，以 v0.9.0 源码为准。
+2. **读源码确认签名**：`docs/ui/<file>.md` 与 `ui/*.go` 可能不同步，以 v0.9.2 源码为准。
 3. **实现**：在 view 回调内 build；状态归模块实例；控件身份用 `c.Key`；跨线程走
    `UIRuntime.Post`；不要在 build 里做 I/O（缓存 + 显式刷新，见 memory/files 页）。
 4. **可访问性**：每个无文本控件 `Label`；页面标题 heading；列表/建议菜单补 role 与
@@ -97,7 +117,7 @@
    - 新交互：`ui.NewTester` 帧测试（键盘 ↑↓/Enter/Tab/Esc、焦点归还、a11y role）
    - 新界面：`go run ./internal/devtools/ui-snapshot <dir>` 生成 1280/1024/暗色快照并看图
    - 涉及 `InactiveAccent`、菜单、Markdown 行为时，抓 active/inactive 双态
-   - 程序化 `Focus()` 会把元素滚入视野（v0.9.0 行为）；不需要改变滚动的焦点变化用
+   - 程序化 `Focus()` 会把元素滚入视野（v0.9.2 行为）；不需要改变滚动的焦点变化用
      `Focus(ui.FocusOptions{PreventScroll: true})`，且须有帧测试证据（先有反证）
 6. **收口**：删除被替换的手写逻辑与死代码；若确实要偏离官方，在代码注释里写清理由
    （例：composer 的发送/排队/停止放在 `ui.Toolbar` 外，因为溢出菜单会吞掉主操作；左半工具栏走 `uikit.ComposerToolbar` 仍是官方 Toolbar）。

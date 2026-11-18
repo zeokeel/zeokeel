@@ -41,7 +41,12 @@ func Module() *module.Descriptor[Config] {
 		}
 		locale, _ := ctx.Get(contracts.KeyLocale)
 		title := textutil.FirstNonEmpty(cfg.Title, "欢迎使用 ZeoKeel")
-		message := textutil.FirstNonEmpty(cfg.Message, "这是一个独立编译的 UI 模块，通过注入点出现在宿主中。")
+		// The default body states the product's one promise, not how the module
+		// is wired: the module's own implementation note ("这是一个独立编译的 UI
+		// 模块…") was user-visible copy in a bare assembly (2026-11 copy audit
+		// F-05).
+		message := textutil.FirstNonEmpty(cfg.Message,
+			"读代码、改文件、跑验证：描述你想完成的事，剩下的交给它。")
 		// services is this window's frame services, captured while the module's
 		// hero builds: a command may run from the palette after a frame, and the
 		// clipboard must not be reached through a stored ui.Context.

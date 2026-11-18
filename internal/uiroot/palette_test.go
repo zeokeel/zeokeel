@@ -213,8 +213,8 @@ func TestPaletteLongListKeepsChosenRowVisible(t *testing.T) {
 	}
 	// Opening paints the chosen first row inside the viewport.
 	requireTextInsideList(t, tt, "演示命令 00")
-	if got := accentPixels(tt); got < 5000 {
-		t.Fatalf("opened palette paints no chosen row: accent pixels = %d", got)
+	if got := selectionPixels(tt); got < 5000 {
+		t.Fatalf("opened palette paints no chosen row: selection pixels = %d", got)
 	}
 
 	// Move the choice to the last command: every frame keeps the chosen row
@@ -228,7 +228,7 @@ func TestPaletteLongListKeepsChosenRowVisible(t *testing.T) {
 			r.paletteSelected, commandCount-1, commandCount-1)
 	}
 	requireTextInsideList(t, tt, fmt.Sprintf("演示命令 %02d", commandCount-1))
-	if got := accentPixels(tt); got < 5000 {
+	if got := selectionPixels(tt); got < 5000 {
 		t.Fatalf("scrolled palette paints no chosen row: accent pixels = %d", got)
 	}
 
@@ -243,8 +243,8 @@ func TestPaletteLongListKeepsChosenRowVisible(t *testing.T) {
 		t.Fatalf("reopened palette selected = %d, want the first row (0)", r.paletteSelected)
 	}
 	requireTextInsideList(t, tt, "演示命令 00")
-	if got := accentPixels(tt); got < 5000 {
-		t.Fatalf("reopened palette paints no chosen row: accent pixels = %d", got)
+	if got := selectionPixels(tt); got < 5000 {
+		t.Fatalf("reopened palette paints no chosen row: selection pixels = %d", got)
 	}
 }
 

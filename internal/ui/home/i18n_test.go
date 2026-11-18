@@ -20,23 +20,23 @@ func TestHomeEnglishCopyAndLanguageSwitch(t *testing.T) {
 
 	// Default Chinese copy.
 	h.assertTexts(tester, "编译期模块化的桌面 AI agent。",
-		"还没有会话。开始第一次对话，或先完成下面的准备：", "配置模型", "新对话")
+		"还没有会话", "尚未配置模型。添加服务商与密钥后才能发送消息。", "配置模型")
 
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
 	h.assertTexts(tester,
 		"A compile-time modular desktop AI agent.",
-		"No conversations yet. Start the first one, or get these ready first:",
-		"Configure model",
-		"New chat")
-	h.assertNoTexts(tester, "编译期模块化的桌面 AI agent。", "新对话", "配置模型")
+		"No sessions yet",
+		"No model configured yet. Add a provider and API key before sending.",
+		"Configure model")
+	h.assertNoTexts(tester, "编译期模块化的桌面 AI agent。", "配置模型")
 
 	// Switching back restores the Chinese copy on the next frame.
 	h.ui.Locale().SetLanguage("zh")
 	tester.Frame()
 	h.assertTexts(tester, "编译期模块化的桌面 AI agent。",
-		"还没有会话。开始第一次对话，或先完成下面的准备：", "配置模型", "新对话")
-	h.assertNoTexts(tester, "No conversations yet.", "New chat", "Configure model")
+		"还没有会话", "配置模型")
+	h.assertNoTexts(tester, "No sessions yet", "Configure model")
 }
 
 func TestHomeEnglishFallbackHeroHint(t *testing.T) {
@@ -46,12 +46,14 @@ func TestHomeEnglishFallbackHeroHint(t *testing.T) {
 	activate(t, h, home.Module(), home.Config{})
 	tester := ui.NewTester(h.ui.View, 1200, 800)
 	tester.Frame()
-	h.assertTexts(tester, "这是 home 的默认 Hero 空态。")
+	// A chat-less assembly gets one honest line instead of the module's
+	// implementation note (2026-11 copy audit F-05).
+	h.assertTexts(tester, "选择一项开始，或打开工作区。")
 
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "This is Home's default hero empty state.")
-	h.assertNoTexts(tester, "这是 home 的默认 Hero 空态。")
+	h.assertTexts(tester, "Pick something to start, or open a workspace.")
+	h.assertNoTexts(tester, "选择一项开始，或打开工作区。")
 }
 
 // TestHomeEnglishGreetingWithConfiguredChineseDefault covers the assembly

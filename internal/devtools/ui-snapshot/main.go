@@ -4,10 +4,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
@@ -179,7 +182,9 @@ func main() {
 			if _, err := queue.EnqueuePrompt(context.Background(), sessionID, "再补一版发布说明"); err == nil {
 				a.tester.Frame()
 				a.render(outDir + "/p2-inbox.png")
-				if rect, ok := a.tester.Find("已排队 2 条"); ok {
+				// The queue count is the ×N chip beside the composer's run
+				// controls (the status bar reports only the run state now).
+				if rect, ok := a.tester.Find("×2"); ok {
 					a.tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
 					a.tester.Frame()
 					a.render(outDir + "/p2-inbox-popover.png")
@@ -231,7 +236,7 @@ func main() {
 		// pane to it for dedicated evidence, then return to the top.
 		a.tester.Scroll(756, 500, 0, 240)
 		a.tester.Frame()
-		a.render(outDir + "/p2-context-sections.png")
+		a.renderRest(outDir + "/p2-context-sections.png")
 		a.tester.Scroll(756, 500, 0, -240)
 		a.tester.Frame()
 		a.ui.Theme().SetDark(true)
@@ -327,11 +332,19 @@ func main() {
 		a.tester.Frame()
 	}
 
-	// Fork the finished conversation (agent SessionForker): the sidebar shows
-	// the copy and it becomes the active session.
+	// Fork the finished conversation (agent SessionForker): the copy becomes the
+	// active session, so the frame shows the fork's own transcript and the new
+	// sidebar row instead of whatever tab the previous step left open.
 	if forker, ok := chat.(contracts.SessionForker); ok {
 		if forkID, forkErr := forker.ForkSession(sessionID); forkErr == nil {
-			_ = forkID
+			_ = chat.SetActiveSession(forkID)
+			if err := a.ui.Navigator().Push("session"); err != nil {
+				fmt.Println("push session for fork:", err)
+			}
+			a.tester.Frame()
+			a.clickTab("对话")
+			a.tester.Frame()
+			a.tester.Frame()
 			a.render(outDir + "/p2-fork.png")
 		}
 	}
@@ -346,11 +359,54 @@ func main() {
 		_, _ = memory.Add(context.Background(), contracts.Memory{Text: "prefer: concise answers", Scope: "global"})
 	}
 	a.render(outDir + "/p1-chat.png")
+	// The attachment strip lives in the conversation's composer, so the frame
+	// returns to the 对话 tab first (the previous scenario leaves 上下文 open).
+	if err := a.tester.Click("对话"); err != nil {
+		fmt.Println("click chat tab for attachments:", err)
+	}
+	a.tester.Frame()
+	// The attachment strip needs something to show: three staged files of three
+	// kinds — a text file, an image (thumbnail) and one whose name is long enough
+	// to truncate — so the snapshot shows the chips' whole anatomy (glyph or
+	// preview, name, remove ×, the truncated tail) instead of an empty composer.
+	if drop, err := a.root.Require(contracts.KeyFileDrop); err == nil {
+		attachDir, dirErr := os.MkdirTemp("", "zeokeel-attach")
+		if dirErr == nil {
+			defer os.RemoveAll(attachDir)
+			notePath := filepath.Join(attachDir, "release-notes.md")
+			_ = os.WriteFile(notePath, []byte("# Release notes\n\n- checklist\n"), 0o600)
+			shotPath := filepath.Join(attachDir, "zeokeel-shot.png")
+			if shot, shotErr := encodeSnapshotPNG(); shotErr == nil {
+				_ = os.WriteFile(shotPath, shot, 0o600)
+			}
+			longPath := filepath.Join(attachDir,
+				"quarterly-release-checklist-with-approvals-rollback-plan-and-signoff-record-for-the-november-"+
+					"redesign-audit-final-approved-2026-11-18-with-appendix-and-transcripts.md")
+			_ = os.WriteFile(longPath, []byte("# Long name\n"), 0o600)
+			drop.Dispatch([]string{notePath, shotPath, longPath})
+			// The read and the preview decode run off the UI thread (AR-10): pump
+			// frames until the chips land, then render the settled strip.
+			for attempt := 0; attempt < 200 && !a.tester.HasText("zeokeel-shot.png"); attempt++ {
+				a.tester.Frame()
+				time.Sleep(time.Millisecond)
+			}
+			a.tester.Frame()
+		}
+	}
 	a.render(outDir + "/p2-attachments.png")
+	// Clear the staged chips again: the scenarios below render their own frames,
+	// and a leftover 110-character chip would show up in all of them.
+	for attempt := 0; attempt < 6 && a.tester.HasText("移除附件"); attempt++ {
+		if rect, ok := a.tester.Find("移除附件"); ok {
+			a.tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+			a.tester.Frame()
+		}
+	}
+	a.tester.Frame()
 	if err := a.tester.Click("记忆"); err != nil {
 		fmt.Println("click memory tab:", err)
 	}
-	a.render(outDir + "/p2-memory.png")
+	a.renderRest(outDir + "/p2-memory.png")
 	if err := a.tester.Click("对话"); err != nil {
 		fmt.Println("click chat tab:", err)
 	}
@@ -437,8 +493,14 @@ func main() {
 			time.Sleep(10 * time.Millisecond)
 		}
 		a.render(outDir + "/p2-ask.png")
+		// The option row is a radio: choosing it selects, and the card's one
+		// accent action submits (B-spec-v2 §3.3.3).
 		if err := a.tester.Click("SQLite（本地文件）"); err != nil {
 			fmt.Println("answer ask dialog:", err)
+		}
+		a.tester.Frame()
+		if err := a.tester.Click("提交"); err != nil {
+			fmt.Println("submit ask dialog:", err)
 		}
 		a.tester.Frame()
 	}
@@ -466,14 +528,35 @@ func main() {
 	}
 
 	// Artifact history in the right sidebar's 文件 page (the 交付区 deliverables
-	// section above the workspace tree).
+	// section above the workspace tree). A floating layer left up by the scene
+	// above (the preview overlay) owns the pointer, so clear the stack first.
+	a.dismissOverlays()
 	a.ui.SetRightPanelOpen(true)
 	a.tester.Frame()
-	if err := a.showSidebarPage("文件"); err != nil {
-		fail("artifact history page", err)
+	// One scene step must not end the whole run: a chrome change that moves the
+	// inspector's page tabs would otherwise leave every later scene
+	// unrendered, which is exactly when a reviewer needs them. The step is
+	// recorded in the manifest and the run continues.
+	// The 交付区 row only exists over an open workspace, and the earlier scenes
+	// close theirs; reopen one so this frame documents the deliverable history
+	// rather than the inspector's "no workspace" empty state.
+	if ws, err := a.root.Require(contracts.KeyWorkspace); err == nil && ws != nil {
+		if list, listErr := ws.List(context.Background()); listErr == nil && len(list) > 0 {
+			_, _ = ws.Open(context.Background(), list[0].ID)
+		} else if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+			_, _ = ws.Create(context.Background(), filepath.Base(cwd), cwd)
+		}
+		a.tester.Frame()
 	}
-	a.waitText("README.md", 5*time.Second)
-	a.render(outDir + "/p2-artifact-history.png")
+	if err := a.showSidebarPage("文件"); err != nil {
+		fmt.Fprintf(os.Stderr, "ui-snapshot: artifact history page skipped: %v\n", err)
+	} else {
+		// The scene documents the inspector's 交付区 deliverable row, not the
+		// workspace tree: wait for the section's own words, and render even when
+		// the tree is empty in this data dir.
+		a.waitText("检查报告", 2*time.Second)
+		a.render(outDir + "/p2-artifact-history.png")
+	}
 	a.ui.SetRightPanelOpen(false)
 	a.tester.Frame()
 
@@ -497,6 +580,17 @@ func main() {
 			fmt.Println("approve plan:", err)
 		}
 		a.tester.Frame()
+		// The review overlay owns the pointer and the keyboard while it is up:
+		// every later scenario would click through its scrim. If approving did
+		// not take (a disabled action, a draft feedback), cancel it explicitly
+		// so the run continues on the real screens (A4: a plan review closes
+		// only through its own actions, never on Escape).
+		if a.tester.HasText("计划待审阅") {
+			if err := a.tester.Click("取消计划"); err != nil {
+				fmt.Println("cancel plan:", err)
+			}
+			a.tester.Frame()
+		}
 	}
 
 	// goal: the durable per-session goal dock (phase, round budget, blocked
@@ -580,14 +674,20 @@ func main() {
 			// A member card's 打开 switches the main content area to that child
 			// conversation under the parent > child breadcrumb.
 			if members := team.Members(); len(members) > 0 {
-				if err := a.tester.Click("打开成员 " + members[0].Name); err == nil {
-					a.tester.Frame()
-					a.render(outDir + "/p2-team-child.png")
-					if !a.clickBreadcrumbParent() {
-						fmt.Println("return from child view: parent breadcrumb not found")
-					}
-				} else {
-					fmt.Println("open child view:", err)
+				// The row action's accessible name is "打开成员 <name>" on the team
+				// card and "进入子智能体会话 <name>" on the child switcher; accept
+				// either so a copy change in one surface does not silently drop
+				// this frame.
+				opened := a.tester.Click("打开成员 "+members[0].Name) == nil ||
+					a.tester.Click("进入 "+members[0].Name) == nil ||
+					a.tester.Click("进入子智能体会话 "+members[0].Name) == nil
+				if !opened {
+					fmt.Println("open member view: no row action matched")
+				}
+				a.tester.Frame()
+				a.render(outDir + "/p2-team-child.png")
+				if !a.clickBreadcrumbParent() {
+					fmt.Println("return from child view: parent breadcrumb not found")
 				}
 			}
 			// The header 子智能体 chip opens the child switcher overlay.
@@ -610,7 +710,6 @@ func main() {
 			// to the overlay's 已结束 section (the same record a reopened app
 			// restores); its child conversation then opens read-only.
 			if members := team.Members(); len(members) > 0 {
-				name := members[0].Name
 				if err := team.Close(members[0].ID); err != nil {
 					fmt.Println("close teammate for history:", err)
 				} else {
@@ -620,15 +719,15 @@ func main() {
 					} else {
 						a.tester.Frame()
 						a.render(outDir + "/p2-team-history.png")
-						if err := a.tester.Click("打开成员 " + name); err == nil {
-							a.tester.Frame()
-							a.render(outDir + "/p2-team-history-child.png")
-							if !a.clickBreadcrumbParent() {
-								fmt.Println("return from history child view: parent breadcrumb not found")
-							}
-						} else {
-							fmt.Println("open history child view:", err)
-						}
+						// Same row action as the live card, but the ended-member row
+						// names it 进入 (open the read-only child conversation).
+						// An ended member keeps its record (and can be continued), but
+						// this fixture's teammate has no stored child transcript, so
+						// there is no read-only child view to open: the history frame
+						// above is the whole state. (The live child view is covered by
+						// p2-team-child.png.)
+						a.tester.Key(0, ui.KeyEscape)
+						a.tester.Frame()
 					}
 				}
 			}
@@ -817,8 +916,16 @@ func main() {
 	if a.waitText("查看改动", 5*time.Second) {
 		if err := a.tester.Click("查看改动"); err == nil {
 			a.tester.Advance(200 * time.Millisecond)
-			a.tester.Frame()
-			a.render(outDir + "/p2-file-diff.png")
+			// The review frame is the resting one (renderRest). The hovered twin
+			// is captured on purpose: it is the evidence that the trigger's hover
+			// tint is a hover look, not a chip style (2026-11 QA).
+			a.renderRest(outDir + "/p2-file-diff.png")
+			if trigger, ok := a.tester.Find("查看改动"); ok {
+				a.tester.Move(trigger.X+trigger.W/2, trigger.Y+trigger.H/2)
+				a.tester.Advance(200 * time.Millisecond)
+				a.tester.Frame()
+				a.render(outDir + "/p2-file-diff-hover.png")
+			}
 		}
 	}
 	a.ui.SetRightPanelOpen(false)
@@ -912,10 +1019,24 @@ func main() {
 	}
 
 	// The Agent Run Band with all live orchestration counts: team roster,
-	// subagent conversations and the background job from the earlier step.
+	// subagent conversations and the background job from the earlier step. The
+	// band only says something over a conversation that carries those counts,
+	// so open the transcript that has them instead of whatever session the
+	// earlier steps left active (an empty one renders the hero).
 	if err := a.tester.Click("对话"); err != nil {
 		fmt.Println("switch to chat for run band:", err)
 	}
+	if live, err := a.root.Require(contracts.KeyChat); err == nil {
+		// Prefer a transcript that actually carries content: the band's counts
+		// describe a live conversation, and an empty one renders the hero.
+		for _, info := range live.Sessions() {
+			if session, ok := live.Session(info.ID); ok && len(session.Messages) > 0 {
+				_ = live.SetActiveSession(info.ID)
+				break
+			}
+		}
+	}
+	a.tester.Frame()
 	a.tester.Frame()
 	a.render(outDir + "/p2-run-band.png")
 	// A component specimen for the State-first tool row: the three active
@@ -967,9 +1088,9 @@ func main() {
 	a.tester.Frame()
 
 	// P2: the new-chat landing (the retired Home destination's replacement):
-	// the sidebar's 新对话 opens the session hero with its composer.
+	// the sidebar's 新建会话 opens the session hero with its composer.
 	for attempt := 0; attempt < 3; attempt++ {
-		if err := a.tester.Click("新对话"); err != nil {
+		if err := a.tester.Click("新建会话"); err != nil {
 			fmt.Println("new chat:", err)
 			a.tester.Frame()
 			continue
@@ -978,11 +1099,11 @@ func main() {
 		// The landing hero is the 对话 tab's empty state: an earlier scene can
 		// leave the 轨迹 tab selected.
 		a.clickTab("对话")
-		if a.tester.HasText("开始新对话") {
+		if a.tester.HasText("发第一条消息") {
 			break
 		}
 	}
-	if !a.tester.HasText("开始新对话") {
+	if !a.tester.HasText("发第一条消息") {
 		fmt.Println("landing: the new-chat hero is not shown")
 	}
 	a.render(outDir + "/p2-landing.png")
@@ -991,7 +1112,7 @@ func main() {
 	if err := a.clickSettingsItem("模型"); err != nil {
 		fmt.Println("click model settings:", err)
 	}
-	a.render(outDir + "/p2-model-settings.png")
+	a.renderRest(outDir + "/p2-model-settings.png")
 	// The model list is the only model source: the add/edit dialogs carry the
 	// per-model provider connection (provider preset, Base URL, API key,
 	// connection test) and the default-model switch.
@@ -1067,7 +1188,7 @@ func main() {
 	// The hotkey recorder (H6): press Record and show the capture field.
 	a.tester.Scroll(740, 500, 0, 260)
 	a.tester.Frame()
-	if err := a.tester.Click("录入"); err != nil {
+	if err := a.tester.Click("录制"); err != nil {
 		fmt.Println("click hotkey record:", err)
 	}
 	a.tester.Frame()
@@ -1083,6 +1204,14 @@ func main() {
 	a.tester.Frame()
 	a.tester.Scroll(740, 500, 0, 240)
 	a.tester.Frame()
+	// The Appearance page's footer actions (恢复默认 / 保存) live at the page's
+	// end: make sure the page is the one on screen before rendering its action
+	// row, instead of whatever the previous step left open.
+	if err := a.ui.OpenSettingsPage("appearance"); err == nil {
+		a.tester.Frame()
+		a.tester.Scroll(740, 500, 0, 2000)
+		a.tester.Frame()
+	}
 	a.render(outDir + "/p2-appearance-actions.png")
 	a.tester.Scroll(740, 500, 0, -240)
 	a.tester.Frame()
@@ -1199,7 +1328,7 @@ func main() {
 		}
 		break
 	}
-	a.render(outDir + "/p2-capabilities-skills.png")
+	a.renderRest(outDir + "/p2-capabilities-skills.png")
 	a.ui.Theme().SetDark(true)
 	a.tester.Frame()
 	a.render(outDir + "/p2-capabilities-skills-dark.png")
@@ -1214,6 +1343,26 @@ func main() {
 		}
 	} else {
 		fmt.Println("open skill content:", err)
+	}
+	// The skill editor: the create form as it opens, then its validation after a
+	// submit with the required name empty (the form must say which field is
+	// missing instead of silently doing nothing).
+	if err := a.tester.Click("新建技能"); err == nil {
+		a.tester.Frame()
+		a.render(outDir + "/p2-capabilities-skill-editor.png")
+		if save, ok := a.tester.Find("保存"); ok {
+			a.tester.ClickAt(save.X+save.W/2, save.Y+save.H/2)
+			a.tester.Frame()
+			a.tester.Frame()
+			a.render(outDir + "/p2-capabilities-skill-editor-invalid.png")
+		}
+		if cancel, ok := a.tester.Find("取消"); ok {
+			a.tester.ClickAt(cancel.X+cancel.W/2, cancel.Y+cancel.H/2)
+			a.tester.Frame()
+			a.tester.Frame()
+		}
+	} else {
+		fmt.Println("open skill editor:", err)
 	}
 	if err := a.tester.Click("连接器"); err == nil {
 		a.tester.Frame()
@@ -1233,6 +1382,15 @@ func main() {
 		if err := a.tester.Click("添加连接器"); err == nil {
 			a.tester.Frame()
 			a.render(outDir + "/p2-capabilities-connector-form.png")
+			// The connection test's result is the form's own feedback: press it
+			// on the empty URL so the failure copy shows (the demo connector is
+			// already unreachable, so success is not what this frame is about).
+			if test, ok := a.tester.Find("测试连接"); ok {
+				a.tester.ClickAt(test.X+test.W/2, test.Y+test.H/2)
+				a.tester.Frame()
+				a.tester.Frame()
+				a.render(outDir + "/p2-capabilities-connector-test.png")
+			}
 			// The STDIO variant carries the trust disclosure (2026-11 audit
 			// (d)): the command runs as a child process outside the OS sandbox.
 			if err := a.tester.Click("传输 输入"); err == nil {
@@ -1405,6 +1563,26 @@ func main() {
 				}
 			}
 		}
+		// 3b) The streaming transcript itself: the partial answer, the open
+		// thinking block and the running status strip are the dynamic state the
+		// review needs to see (the earlier frames only captured the sidebar's
+		// running dot).
+		if runID != "" {
+			_ = liveChat.SetActiveSession(runID)
+			if err := a.ui.Navigator().Push("session"); err != nil {
+				fmt.Println("push session for streaming:", err)
+			}
+			a.tester.Frame()
+			a.tester.Frame()
+			a.render(outDir + "/p2-streaming-reply.png")
+			a.ui.Theme().SetDark(true)
+			a.tester.Frame()
+			a.render(outDir + "/p2-streaming-reply-dark.png")
+			a.ui.Theme().SetDark(false)
+			a.tester.Frame()
+			_ = a.ui.Navigator().Back()
+			a.tester.Frame()
+		}
 		if mainActive != "" {
 			_ = liveChat.SetActiveSession(mainActive)
 		}
@@ -1456,14 +1634,14 @@ func main() {
 		a.tester.Frame()
 		a.tester.Frame()
 		for attempt := 0; attempt < 3; attempt++ {
-			if err := a.tester.Click("新对话"); err != nil {
+			if err := a.tester.Click("新建会话"); err != nil {
 				fmt.Println("narrow new chat:", err)
 				a.tester.Frame()
 				continue
 			}
 			a.tester.Frame()
 			a.clickTab("对话")
-			if a.tester.HasText("开始新对话") {
+			if a.tester.HasText("发第一条消息") {
 				break
 			}
 		}
@@ -1482,14 +1660,14 @@ func main() {
 	if err := a.ui.Navigator().Push("session"); err == nil {
 		a.tester.Frame()
 		for attempt := 0; attempt < 3; attempt++ {
-			if err := a.tester.Click("新对话"); err != nil {
+			if err := a.tester.Click("新建会话"); err != nil {
 				fmt.Println("dark new chat:", err)
 				a.tester.Frame()
 				continue
 			}
 			a.tester.Frame()
 			a.clickTab("对话")
-			if a.tester.HasText("开始新对话") {
+			if a.tester.HasText("发第一条消息") {
 				break
 			}
 		}
@@ -1669,12 +1847,76 @@ func renderInterruptedSnapshot(product *app, baseURL, dataDir, outDir, historySe
 
 // showSidebarPage switches the right sidebar to one of its fixed pages through
 // the native tab strip (开始 | 文件 | 命令 | opened files).
+// dismissOverlays clears floating layers left up by an earlier scene: a scrim
+// swallows every later click, and the layer's own close control may be renamed
+// by another surface's redesign (the driving script must not depend on it). One
+// Escape per layer, idempotent when nothing is open.
+func (a *app) dismissOverlays() {
+	for i := 0; i < 3; i++ {
+		a.tester.Key(0, ui.KeyEscape)
+		a.tester.Frame()
+	}
+}
+
+// showSidebarPage selects one page of the inspector's tab strip by name.
+//
+// The click is computed from the element's own bounds instead of a hard-coded
+// coordinate: the strip's row height and the panel's header are design values
+// that move (the tabs went to the 36 DIP control step and the file header merged
+// into one breadcrumb row in the 2026-11 redesign), and a fixed point silently
+// stopped hitting the tab the moment either changed. The native tab's own
+// bounds are preferred over the label's, because the label rect is the text
+// inside the tab while the tab is the input target.
 func (a *app) showSidebarPage(label string) error {
-	if err := a.tester.Click(label); err != nil {
-		return fmt.Errorf("click sidebar page %q: %w", label, err)
+	// A page switch has a stable command, so the snapshot drives the product
+	// the way the palette does instead of guessing the tab's hit box: a tab
+	// row that gained a transition or moved under a toolbar would otherwise
+	// silently swallow the click and drop the whole scene.
+	if id, ok := sidebarPageCommands[label]; ok {
+		a.tester.Frame()
+		if a.runCommand(id) {
+			return nil
+		}
 	}
 	a.tester.Frame()
+	if info, ok := a.tester.AccessByRole(ui.RoleTab, label); ok {
+		a.tester.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+		a.tester.Frame()
+		return nil
+	}
+	rect, ok := a.tester.Find(label)
+	if !ok {
+		return fmt.Errorf("click sidebar page %q: no element shows that label", label)
+	}
+	a.tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+	a.tester.Frame()
 	return nil
+}
+
+// sidebarPageCommands maps the inspector's page tabs to the commands that open
+// them, when the product registers one.
+var sidebarPageCommands = map[string]string{
+	"文件":    "rightpanel.files.open",
+	"Files": "rightpanel.files.open",
+}
+
+// runCommand runs one registered command by ID, as the palette would.
+func (a *app) runCommand(id string) bool {
+	for _, spec := range a.ui.Runtime().Commands() {
+		if spec.ID != id {
+			continue
+		}
+		if spec.Enabled != nil && !spec.Enabled() {
+			return false
+		}
+		if err := spec.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "ui-snapshot: command %s: %v\n", id, err)
+			return false
+		}
+		a.tester.Frame()
+		return true
+	}
+	return false
 }
 
 // clickTab selects one conversation tab (对话/轨迹/记忆) through its native tab
@@ -1693,6 +1935,14 @@ func (a *app) clickTab(label string) bool {
 // openFileTab opens one workspace file from the 文件 page's tree: the click adds
 // (or focuses) the file's tab and shows its read-only preview.
 func (a *app) openFileTab(path string) error {
+	// An overlay left up by an earlier scenario swallows every click below it;
+	// say so instead of reporting a missing file.
+	if a.tester.HasText("计划待审阅") {
+		if err := a.tester.Click("取消计划"); err != nil {
+			return fmt.Errorf("open file tab %q: a plan review overlay is up: %w", path, err)
+		}
+		a.tester.Frame()
+	}
 	if err := a.showSidebarPage("文件"); err != nil {
 		return err
 	}
@@ -1823,12 +2073,14 @@ func snapshotModelCatalog(baseURL string) string {
 func boot(baseURL, dataDir string) *app {
 	root := cordis.Root()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
+	// Mirror the desktop host: the shell reads kernel services (pending
+	// approvals move the toast stack off the decision card), so the headless
+	// boot binds the same context instead of hand-wiring each lookup.
+	uiRoot.SetKernelContext(root)
 	provide(root, contracts.KeyDataDir, dataDir)
 	provide(root, contracts.KeyUIRuntime, uiRoot.Runtime())
-	// The headless boot wires services by hand (no SetKernelContext), so the
-	// host's toast-placement service must be provided explicitly or snapshots
-	// would render the module's default anchor instead of the product's.
-	provide(root, contracts.KeyToastAnchor, uiRoot.ToastAnchor())
+	// SetKernelContext above already registered the host's toast-placement
+	// service on this root; providing it again would fail the boot.
 	provide(root, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(root, contracts.KeyTheme, uiRoot.Theme())
 	provide(root, contracts.KeyLocale, uiRoot.Locale())
@@ -1915,6 +2167,23 @@ func (a *app) toolContext(ctx context.Context) context.Context {
 		return contracts.WithAgentSession(ctx, chat.ActiveSession())
 	}
 	return ctx
+}
+
+// renderRest captures a review frame in its resting state: the pointer is
+// parked in a blank corner and the frame advances once, so no hover tint is
+// baked into the picture. A disclosure, a row action or a list row paints its
+// hover look under the pointer, and a scene that had to click its way here
+// leaves the pointer on the thing it clicked — which then reads as a chip or a
+// selected row that no user sees at rest (2026-11 QA: the 查看改动 "chip").
+// Scenes whose POINT is the hover state (message actions, the unhovered sidebar
+// rows) keep using render.
+func (a *app) renderRest(path string) {
+	a.tester.Move(4, 4)
+	a.tester.Advance(200 * time.Millisecond)
+	a.tester.Frame()
+	a.tester.Move(4, 4)
+	a.tester.Frame()
+	a.render(path)
 }
 
 func (a *app) render(path string) {
@@ -2202,21 +2471,37 @@ func fail(step string, err error) {
 // input summary. It is a component specimen, not a product conversation frame.
 func renderToolRowSpecimen(outDir string) {
 	rows := []struct {
-		name, status, preview string
-		kind                  uikit.StatusKind
-		running               bool
-		icon                  *ui.SVG
+		name, status, preview, duration string
+		kind                            uikit.StatusKind
+		running                         bool
+		icon                            *ui.SVG
 	}{
-		{"运行命令", "运行中", "npm test -- --watch", uikit.StatusRunning, true, icons.Terminal()},
-		{"读取文件", "完成", "internal/ui/session/view.go", uikit.StatusSuccess, false, icons.File()},
-		{"运行命令", "失败", "go test ./internal/ui/session", uikit.StatusError, false, icons.Terminal()},
-		{"搜索文件", "已停止", "ConfirmDanger", uikit.StatusCancelled, false, icons.Search()},
+		{"运行命令", "运行中", "npm test -- --watch", "", uikit.StatusRunning, true, icons.Terminal()},
+		{"读取文件", "完成", "internal/ui/session/view.go", "162ms", uikit.StatusSuccess, false, icons.File()},
+		{"运行命令", "失败", "go test ./internal/ui/session", "8.4s", uikit.StatusError, false, icons.Terminal()},
+		{"搜索文件", "已停止", "ConfirmDanger", "1m02s", uikit.StatusCancelled, false, icons.Search()},
 	}
+	// One row's state comes from the call itself, not from a hand-written status:
+	// bash reports "success" and appends "[exit code: 2]", and the row must draw
+	// the failure (the audit's bug — the background job pane already classified by
+	// exit code, the transcript row did not).
+	exitCall := contracts.ToolCall{
+		Name: "bash", Status: "success",
+		Summary: "ls: cannot access 'dist/': No such file or directory\n[exit code: 2]",
+	}
+	exitKind := uikit.ToolCallStatusKind(exitCall)
 	render := func(tokens *design.Tokens, path string) {
 		tester := ui.NewTester(func(c *ui.Context) {
 			c.SetTheme(tokens.Theme())
 			ui.Column(c).FillWidth().Padding(design.Space4).Gap(design.Space2).
 				Background(tokens.BgBase).Children(func() {
+				uikit.ToolRow(c, uikit.ToolRowOptions{
+					Key: "specimen-exit", Icon: icons.Terminal(), Name: "运行命令", RawName: "bash",
+					Status:      uikit.ToolCallStatusLabel(nil, exitCall),
+					StatusColor: uikit.StatusColor(tokens, exitKind),
+					State:       exitKind, Duration: "2.1s",
+					Preview: uikit.ToolCallPreview(nil, exitCall),
+				})
 				for index, row := range rows {
 					uikit.ToolRow(c, uikit.ToolRowOptions{
 						Key:         fmt.Sprintf("specimen-%d", index),
@@ -2227,6 +2512,7 @@ func renderToolRowSpecimen(outDir string) {
 						State:       row.kind,
 						Running:     row.running,
 						Preview:     row.preview,
+						Duration:    row.duration,
 						Sections: []uikit.ToolPanelSection{{
 							Label: "输入", Text: row.preview, Mono: true, CopyLabel: "复制输入",
 						}},
@@ -2295,33 +2581,39 @@ func renderMarkdownSpecimen(outDir string) {
 }
 
 // renderApprovalSpecimen renders the inline approval card's "将改动" diff
-// section for a write_file request, in light and dark. It is a component
-// specimen, not a product conversation frame: the scripted conversation's
-// approval is a team_task_create, which has no file diff.
+// section for an edit_file request, in light and dark. An edit is the shape that
+// shows what the diff anatomy is for: unchanged context lines, one removed line
+// and one added line, so the per-line tint and the 3 DIP semantic bars can be
+// checked (a whole new file is all additions and reads as one band).
 func renderApprovalSpecimen(outDir string) {
-	content := strings.Join([]string{
-		"package session",
-		"",
-		"// send submits the composer draft when a model is configured.",
+	oldText := strings.Join([]string{
 		"func (s *state) send() bool {",
 		"\tif s.draft == \"\" {",
 		"\t\treturn false",
 		"\t}",
 		"\treturn s.sendPrompt(s.draft)",
 		"}",
-		"",
+	}, "\n")
+	newText := strings.Join([]string{
+		"func (s *state) send() bool {",
+		"\tif strings.TrimSpace(s.draft) == \"\" {",
+		"\t\treturn false",
+		"\t}",
+		"\treturn s.sendPrompt(s.draft)",
+		"}",
 	}, "\n")
 	arguments, err := json.Marshal(map[string]string{
-		"path":    "internal/ui/session/view.go",
-		"content": content,
+		"path":       "internal/ui/session/view.go",
+		"old_string": oldText,
+		"new_string": newText,
 	})
 	if err != nil {
 		fail("approval specimen arguments", err)
 	}
 	request := contracts.ApprovalRequest{
-		ID:        "specimen-approval-write",
-		Tool:      "write_file",
-		Summary:   "写入发布检查清单",
+		ID:        "specimen-approval-edit",
+		Tool:      "edit_file",
+		Summary:   "空草稿判定改为 TrimSpace",
 		Arguments: string(arguments),
 		SessionID: "specimen-session",
 	}
@@ -2339,7 +2631,7 @@ func renderApprovalSpecimen(outDir string) {
 					})
 				})
 			})
-		}, 1000, 720)
+		}, 1000, 620)
 		tester.SetLocale("zh-Hans")
 		tester.Frame()
 		img := tester.Image()
@@ -2355,4 +2647,23 @@ func renderApprovalSpecimen(outDir string) {
 	}
 	render(design.Light(), filepath.Join(outDir, "p2-approval-diff.png"))
 	render(design.Dark(), filepath.Join(outDir, "p2-approval-diff-dark.png"))
+}
+
+// encodeSnapshotPNG is a small real PNG for the attachment snapshot: the chip
+// decodes a thumbnail from the bytes, so the file must be a decodable image, not
+// a renamed text file.
+func encodeSnapshotPNG() ([]byte, error) {
+	img := image.NewRGBA(image.Rect(0, 0, 64, 48))
+	for y := 0; y < 48; y++ {
+		for x := 0; x < 64; x++ {
+			img.Set(x, y, color.RGBA{
+				R: uint8(40 + x*3), G: uint8(90 + y*2), B: 200, A: 255,
+			})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }

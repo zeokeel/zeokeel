@@ -137,7 +137,7 @@ func TestChildViewKeepsApprovalBanner(t *testing.T) {
 		t.Fatalf("Esc in the child view denied the hidden approval: %v", denied)
 	}
 	h.assertTexts(tester, "审批内联卡", "帮我发布")
-	if _, ok := tester.Find("队友 · 可继续"); ok {
+	if _, ok := tester.Find("队友 · 已结束 · 可继续"); ok {
 		t.Fatalf("Esc did not return to the parent conversation; texts = %v", tester.Texts())
 	}
 }
@@ -247,8 +247,8 @@ func TestChildSendingResetsOnReopen(t *testing.T) {
 	tester.Frame()
 	tester.Type("第一条")
 	tester.Frame()
-	h.click(tester, "发送消息给 文档审查员")
-	h.assertTexts(tester, "发送中")
+	clickRoleButton(t, tester, "发送")
+	h.assertTexts(tester, "已发送，等待该队友的回复。")
 
 	// Leave and re-enter: the in-flight send belongs to the previous visit and
 	// must not disable the new one.
@@ -263,7 +263,7 @@ func TestChildSendingResetsOnReopen(t *testing.T) {
 	tester.Frame()
 	tester.Type("第二条")
 	tester.Frame()
-	info, ok := tester.AccessByRole(ui.RoleButton, "发送消息给 文档审查员")
+	info, ok := tester.AccessByRole(ui.RoleButton, "发送")
 	if !ok {
 		t.Fatalf("child send action missing after re-entry; texts = %v", tester.Texts())
 	}

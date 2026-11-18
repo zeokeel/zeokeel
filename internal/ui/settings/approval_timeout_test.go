@@ -21,7 +21,7 @@ func TestBehaviorApprovalTimeoutDefaultAndDescription(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "行为与限额")
 
-	h.assertTexts(tester, "审批超时", "仅自动化来源")
+	h.assertTexts(tester, "审批超时", "仅约束自动化来源")
 	requireNumberValue(t, tester, "审批超时", "0")
 }
 
@@ -43,7 +43,7 @@ func TestBehaviorApprovalTimeoutSaves(t *testing.T) {
 	}
 
 	// Restoring the default disables the timeout and cleans the stored row.
-	h.click(tester, "恢复限额默认")
+	h.click(tester, "恢复默认值")
 	requireNumberValue(t, tester, "审批超时", "0")
 	h.click(tester, "保存")
 	if got := store.Get(contracts.SettingAgentApprovalTimeoutSeconds, ""); got != "" {

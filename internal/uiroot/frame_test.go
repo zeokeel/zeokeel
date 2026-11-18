@@ -430,7 +430,7 @@ func TestCommandPaletteShortcut(t *testing.T) {
 	tt.Frame()
 	tt.Key(ui.Cmd, ui.KeyK)
 	tt.Frame()
-	for _, want := range []string{"命令面板", "打开设置", "其他命令", "Esc 关闭"} {
+	for _, want := range []string{"命令面板", "打开设置", "其他命令", "选择", "运行", "关闭", "Esc"} {
 		requireHasText(t, tt, want)
 	}
 

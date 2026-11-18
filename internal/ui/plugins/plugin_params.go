@@ -87,8 +87,8 @@ func buildPluginParamsSection(c *ui.Context, t *design.Tokens, st *state,
 	specs := pluginParamSpecs()
 	capabilityGroupLabel(c, t, st.tr("扩展设置", "Extension settings"))
 	design.Apply(ui.Text(c, st.tr(
-		"只展示已被产品实际消费的设置；敏感值仅显示是否已设置。",
-		"Only settings actually consumed by the product are shown; sensitive values only report whether they are set.")),
+		"只列出本产品实际用到的设置；密钥类值只显示「已设置 / 未设置」。",
+		"Only settings this product uses are listed; secret values show set / not set.")),
 		t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
 	if st.paramNotice != "" {
 		if st.paramErr {
@@ -211,7 +211,7 @@ func buildPluginParamModal(c *ui.Context, t *design.Tokens, st *state, settings 
 			// The dialog's only field takes the focus as it opens and Enter
 			// submits the dialog, as in a desktop form.
 			input := ui.TextInput(c, &st.paramDraft).
-				Label(st.tr("新值：", "New value: ") + st.paramTitle).
+				Label(inputLabel(st, st.tr("新值：", "New value: ")+st.paramTitle)).
 				Placeholder(st.tr("留空保持不变", "Leave blank to keep the current value")).
 				FillWidth().AutoFocus().OnTextKey(uikit.EnterTo(save))
 			if st.paramSensitive {

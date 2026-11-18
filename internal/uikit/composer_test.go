@@ -186,22 +186,27 @@ func TestComposerSlotsAndWidth(t *testing.T) {
 			ui.Button(c, "附件").Label("附件")
 			ui.Button(c, "模型").Label("模型")
 		}
-		o.Queue = []string{"排队中的消息"}
+		o.QueueCount = 1
 		o.QueueOpen = &queueOpen
 		o.Errors = []string{"第二条错误"}
 		o.Hint = func(*ui.Context) string {
-			if width > 0 && width < design.TranscriptWidth {
-				return "" // a narrow composer folds the hint into the send tooltip
+			if width > 0 && width < design.TranscriptWidth-2*design.Space4 {
+				return "" // a narrow composer folds the hint into the send description
 			}
 			return "Enter 发送"
 		}
 	})
 	wide := ui.NewTester(view, 1200, 400)
 	wide.Frame()
-	if width != design.TranscriptWidth {
-		t.Fatalf("wide composer width = %v, want the transcript width %v", width, design.TranscriptWidth)
+	// A wide composer spans the transcript's text column: the reading frame is
+	// uikit.ReadingColumn's (960, capped at 92% of the window) minus its 16 DIP
+	// inner padding on each side, so the card's edge lines up with the message
+	// column's text edge (VD-24).
+	wantWide := design.TranscriptWidth - 2*design.Space4
+	if width != wantWide {
+		t.Fatalf("wide composer width = %v, want the transcript text width %v", width, wantWide)
 	}
-	for _, want := range []string{"附件：a.txt", "模型", "已排队 1 条", "发送失败：网络", "第二条错误", "Enter 发送"} {
+	for _, want := range []string{"附件：a.txt", "模型", "×1", "发送失败：网络", "第二条错误", "Enter 发送"} {
 		if !wide.HasText(want) {
 			t.Fatalf("composer slot %q missing; texts = %v", want, wide.Texts())
 		}
@@ -220,25 +225,35 @@ func TestComposerSlotsAndWidth(t *testing.T) {
 	}
 }
 
-// TestComposerQueueStatus covers the shell's queue area: the shared queue badge
-// (RunStatus) with its popover and per-row cancel, plus the delivery error row.
+// TestComposerQueueStatus covers the shell's queue area: the ×N chip beside the
+// run controls, the panel it opens (rows, per-row cancel, clear), and the
+// delivery error row the card still owns.
 func TestComposerQueueStatus(t *testing.T) {
 	st := &composerTestState{focus: true}
 	queueOpen := false
 	cancelled := 0
 	tt := ui.NewTester(composerTestView(st, func(o *uikit.ComposerShellOptions) {
 		o.Running = true
-		o.Queue = []string{"第一条排队消息", "第二条排队消息"}
+		o.QueueCount = 2
 		o.QueueOpen = &queueOpen
-		o.QueueList = &ui.ListState{}
 		o.QueueError = "排队发送失败：超时"
-		o.OnQueueCancel = func(index int) { cancelled += index + 1 }
 		o.OnQueueClear = func() {}
+		o.QueuePanel = func(c *ui.Context, anchor ui.Element) {
+			uikit.QueuePanel(c, design.Of(c), uikit.QueuePanelOptions{
+				Queued:    []string{"第一条排队消息", "第二条排队消息"},
+				Running:   true,
+				Open:      &queueOpen,
+				List:      &ui.ListState{},
+				KeyPrefix: "test.queue",
+				OnCancel:  func(index int) { cancelled += index + 1 },
+				OnClear:   func() {},
+			}, anchor)
+		}
 		o.Stop = func() {}
 	}), 900, 500)
 	tt.Frame()
-	if !tt.HasText("已排队 2 条") {
-		t.Fatalf("composer queue badge missing; texts = %v", tt.Texts())
+	if !tt.HasText("×2") {
+		t.Fatalf("composer queue chip missing; texts = %v", tt.Texts())
 	}
 	if !tt.HasText("排队发送失败：超时") {
 		t.Fatalf("composer queue error missing; texts = %v", tt.Texts())
@@ -246,14 +261,14 @@ func TestComposerQueueStatus(t *testing.T) {
 	if tt.HasText("第一条排队消息") {
 		t.Fatalf("queue rows leak before the badge opens; texts = %v", tt.Texts())
 	}
-	if err := tt.Click("已排队 2 条"); err != nil {
-		t.Fatalf("open queue popover: %v", err)
+	if err := tt.Click("×2"); err != nil {
+		t.Fatalf("open queue panel: %v", err)
 	}
 	tt.Frame()
 	if !queueOpen || !tt.HasText("第一条排队消息") {
 		t.Fatalf("queue popover did not open; texts = %v", tt.Texts())
 	}
-	if err := tt.Click("取消排队"); err != nil {
+	if err := tt.Click("取消第 1 条排队消息"); err != nil {
 		t.Fatalf("cancel queued prompt: %v", err)
 	}
 	tt.Frame()
@@ -283,9 +298,9 @@ func composerInContainer(containerWidth float32, fullWidth bool, capture *float3
 }
 
 // TestComposerFullWidthFillsContainer covers the width policy: FullWidth fills
-// the caller's container up to the reading width (Home's 720 column), while the
-// default caps the card at 92% of the container (the conversation composer's
-// narrow-window margin) and never exceeds the reading width.
+// the caller's container up to the reading width (Home's own column), while the
+// default sits on the transcript's reading frame — 92% of the container, less the
+// frame's 16 DIP inner padding — and never exceeds the reading width.
 func TestComposerFullWidthFillsContainer(t *testing.T) {
 	const container float32 = 500
 	var fullWidthCard float32
@@ -301,9 +316,9 @@ func TestComposerFullWidthFillsContainer(t *testing.T) {
 	var cappedCard float32
 	capped := ui.NewTester(composerInContainer(container, false, &cappedCard), 900, 400)
 	capped.Frame()
-	wantCapped := container * 0.92
+	wantCapped := container*0.92 - 2*design.Space4
 	if diff := cappedCard - wantCapped; diff < -1 || diff > 1 {
-		t.Fatalf("default card = %v, want 92%% of the container %v", cappedCard, wantCapped)
+		t.Fatalf("default card = %v, want the reading frame's text width %v", cappedCard, wantCapped)
 	}
 	if cappedCard >= fullWidthCard {
 		t.Fatalf("default card %v is not narrower than the FullWidth card %v", cappedCard, fullWidthCard)

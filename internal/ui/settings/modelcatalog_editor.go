@@ -611,18 +611,28 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, runtime contracts.U
 	}
 	submit := func() { saveCatalogEdit(c, st, store, models, locale) }
 	ui.Modal(c, &st.editorOpen, func() {
-		design.Apply(ui.Column(c).Width(design.DialogWidthXL).Gap(design.Space2), func(element ui.Element) ui.Element {
-			return element.PaddingX(design.Space5).PaddingY(design.Space2)
-		}).Children(func() {
-			design.Apply(ui.Text(c, localized(locale, "编辑模型", "Edit model")),
-				t.Font(design.TypeL)).FontWeight(600).TextColor(t.LabelPrimary)
-
-			// The form can grow past a short window when the advanced group is
-			// expanded, so the fields scroll in a bounded body (design.
-			// DialogBodyMax) while the title, the connection check and the
-			// footer stay in view.
-			ui.Scroll(c).Height(design.DialogBodyMax).FillWidth().Children(func() {
-				ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
+		// Same dialog shell as the connector form: a fixed header (icon, title,
+		// subtitle, close), ONE scrolling body, a fixed status row and a fixed
+		// action row. The old shape put a bare title above a *fixed-height*
+		// Scroll, so the panel outgrew the window and the title ended up on top of
+		// the scrolled fields (2026-11-18 review); the subtitle names the model
+		// being edited so the context never scrolls away.
+		design.Apply(ui.Column(c).Key("catalog.edit"), t.Panel()).
+			Width(design.DialogWidthXL).Padding(design.Space4).Gap(design.Space3).Children(func() {
+			uikit.DialogHeader(c, uikit.DialogHeaderOptions{
+				Key:      "catalog.edit",
+				Title:    localized(locale, "编辑模型", "Edit model"),
+				Subtitle: catalogEditorSubtitle(locale, draft),
+				OnClose: func() {
+					st.editorOpen = false
+					st.edit = nil
+					c.Invalidate()
+				},
+			})
+			ui.Scroll(c).FillWidth().MaxHeight(design.DialogBodyMax).Children(func() {
+				ui.Column(c).FillWidth().
+					Padding(design.Space0, design.Space0, design.Space4, design.Space0).
+					Gap(design.Space3).Children(func() {
 					ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
 						ui.Column(c).FillWidth().Grow(1).Children(func() {
 							ui.Field(c, localized(locale, "模型名称", "Model name"), func() {
@@ -871,26 +881,27 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, runtime contracts.U
 											AlignItems(ui.Start).PaddingY(design.Space1).Children(func() {
 											ui.Column(row.Context).Width(150).Grow(0).Shrink(0).Children(func() {
 												ui.TextInput(row.Context, &mode.id).
-													Label(localized(locale, "模式 ", "Mode ") + strconv.Itoa(index+1) + " ID").
+													Label(inputLabel(locale, localized(locale, "模式 ", "Mode ")+
+														strconv.Itoa(index+1)+" ID")).
 													Placeholder("thinking-low").FillWidth()
 											})
 											ui.Column(row.Context).Width(150).Grow(0).Shrink(0).Children(func() {
 												ui.TextInput(row.Context, &mode.name).
-													Label(localized(locale, "模式 ", "Mode ") + strconv.Itoa(index+1) +
-														localized(locale, " 名称", " name")).
+													Label(inputLabel(locale, localized(locale, "模式 ", "Mode ")+
+														strconv.Itoa(index+1)+localized(locale, " 名称", " name"))).
 													Placeholder(localized(locale, "低强度", "Low")).FillWidth()
 											})
 											ui.Column(row.Context).FillWidth().Grow(1).Children(func() {
 												ui.TextArea(row.Context, &mode.params).
-													Label(localized(locale, "模式 ", "Mode ") + strconv.Itoa(index+1) +
-														localized(locale, " 参数", " params")).
+													Label(inputLabel(locale, localized(locale, "模式 ", "Mode ")+
+														strconv.Itoa(index+1)+localized(locale, " 参数", " params"))).
 													Placeholder(`{"reasoning_effort": "low"}`).
 													FillWidth().MinHeight(design.Space4 * 2)
 											})
-											if design.Apply(ui.Button(row.Context, localized(locale, "删除", "Remove")),
+											if design.Apply(ui.Button(row.Context, localized(locale, "移除", "Remove")),
 												t.DangerButton()).
-												Label(localized(locale, "删除思考模式 ", "Remove thinking mode ") + strconv.Itoa(index+1)).
-												Tooltip(localized(locale, "删除这个思考模式", "Remove this thinking mode")).
+												Label(localized(locale, "移除思考模式 ", "Remove thinking mode ") + strconv.Itoa(index+1)).
+												Description(localized(locale, "删除这个思考模式", "Remove this thinking mode")).
 												Clicked() {
 												removed = index
 											}
@@ -930,11 +941,18 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, runtime contracts.U
 			if testAPIKey == "" {
 				testAPIKey = fallbackAPIKey
 			}
-			buildCatalogCheckRow(c, t, runtime, &draft.check, testBaseURL, testAPIKey, locale)
-			if draft.err != "" {
-				uikit.ErrorLine(c, draft.err)
-			}
+			// The status row is reserved and lives outside the scrolling body (an
+			// in-body line was sliced at the clip), and the connection test is an
+			// action on the action row, never a second action line.
+			ui.Column(c).FillWidth().MinHeight(design.Space6).Justify(ui.Center).Children(func() {
+				if draft.err != "" {
+					uikit.ErrorLine(c, draft.err)
+					return
+				}
+				buildCatalogCheckStatus(c, t, &draft.check, testBaseURL, locale)
+			})
 			uikit.DialogFooter(c, []uikit.DialogAction{
+				catalogTestAction(c, t, runtime, &draft.check, testBaseURL, testAPIKey, locale),
 				{Label: localized(locale, "取消", "Cancel"), OnClick: func() {
 					st.editorOpen = false
 					st.edit = nil
@@ -951,6 +969,20 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, runtime contracts.U
 		// Escape or a backdrop click dismissed the modal without saving.
 		st.edit = nil
 	}
+}
+
+// catalogEditorSubtitle is the edit dialog's one context line: the model being
+// edited (its display name, or the id when the name is blank). It stays in the
+// fixed header so scrolling the fields never loses "which model is this".
+func catalogEditorSubtitle(locale contracts.LocaleService, draft *catalogEditDraft) string {
+	if draft == nil {
+		return ""
+	}
+	name := textutil.FirstNonEmptyTrimmed(draft.name, draft.id)
+	if name == "" {
+		return localized(locale, "未命名模型", "Untitled model")
+	}
+	return name
 }
 
 // saveCatalogEdit validates the draft and replaces the row in the catalog. The

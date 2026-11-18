@@ -64,9 +64,13 @@ func TestBehaviorPermissionExplanationVisible(t *testing.T) {
 	tester := openBehaviorPage(t, h)
 
 	h.assertTexts(tester,
-		"审批与 OS 沙箱是两层",
-		"沙箱可用时 shell 类工具自动放行",
-		"会话/自动化级「所有权限」只放宽审批",
+		"权限模式",
+		"三档决定哪些工具调用免审批",
+		"只读：仅只读与信息类工具免审批",
+		"工作区修改（默认）：再加上工作区内的文件读写",
+		"所有权限：全部工具调用免审批",
+		"可用时 shell 类工具自动放行",
+		"会话或自动化的「所有权限」只放宽审批",
 	)
 	// The old contradictory claim (shell still asks while the sandbox auto-allows)
 	// must not appear.
@@ -86,5 +90,5 @@ func TestBehaviorPermissionCurrentSessionDisclosure(t *testing.T) {
 	h := newPermHarness(t, chat, newFakeSettings(nil))
 	tester := openBehaviorPage(t, h)
 
-	h.assertTexts(tester, "审批＝所有权限", "会话级覆盖", "OS 沙箱＝工作区修改")
+	h.assertTexts(tester, "审批 所有权限", "本会话覆盖", "系统沙箱 工作区修改", "（全局）")
 }

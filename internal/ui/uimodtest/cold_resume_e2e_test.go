@@ -104,8 +104,16 @@ func TestColdResumeHistoricalTeamMemberE2E(t *testing.T) {
 		t.Fatalf("open team overlay: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	if !tester.HasText("历史 · 可继续") {
-		t.Fatalf("restored member lacks the continuable history marker; texts = %v", tester.Texts())
+	// The team card's sub-line collapsed the old 历史 chip and the run state into
+	// ONE status phrase (visual audit): a restored, resumable member reads
+	// 「已结束 · 可继续」 — not 「历史 · 可继续」, and not two competing state words.
+	if !tester.HasText("已结束 · 可继续") {
+		t.Fatalf("restored member lacks the continuable finished marker; texts = %v", tester.Texts())
+	}
+	for _, gone := range []string{"历史 · 可继续", "已完成 · 可继续"} {
+		if tester.HasText(gone) {
+			t.Fatalf("restored member still shows the superseded marker %q beside its status; texts = %v", gone, tester.Texts())
+		}
 	}
 	continueLabel := "继续此队友 冷恢复队友"
 	if _, ok := tester.Find(continueLabel); !ok {
@@ -115,20 +123,40 @@ func TestColdResumeHistoricalTeamMemberE2E(t *testing.T) {
 		t.Fatalf("open cold-resume child view: %v", err)
 	}
 	tester.Frame()
-	for _, want := range []string{"发送给 冷恢复队友", "发送消息给 冷恢复队友"} {
-		if !tester.HasText(want) {
-			t.Fatalf("cold-resume composer missing %q; texts = %v", want, tester.Texts())
+	// The child view is the conversation's own composer shell now (p2-team-child
+	// audit): the card AND its input carry the unique 发送给 <name> name (the
+	// placeholder 继续该队友… is visual copy only, so a screen reader or a driver
+	// never anchors on a string that changes with the state), and the one action
+	// is the shell's 发送. The old stand-alone 「发送消息给 <name>」 button label is
+	// gone; that sentence survives only as the send control's description.
+	if input, ok := tester.AccessByRole(ui.RoleTextField, "发送给 冷恢复队友"); !ok {
+		t.Fatalf("child composer input is not named 发送给 <name>; texts = %v", tester.Texts())
+	} else if input.Bounds.H <= 0 {
+		t.Fatalf("child composer input has no height: %+v", input)
+	}
+	// The child view's status is ONE phrase: 已结束 · 可继续. The retired
+	// three-word line (已完成 + 已结束记录 + 可继续 as separate items) must not
+	// come back beside it.
+	if !tester.HasText("已结束 · 可继续") {
+		t.Fatalf("child view lacks the continued-record status phrase; texts = %v", tester.Texts())
+	}
+	for _, gone := range []string{"已结束记录", "历史 · 可继续"} {
+		if tester.HasText(gone) {
+			t.Fatalf("child view still shows the superseded status copy %q; texts = %v", gone, tester.Texts())
 		}
 	}
-	input, ok := tester.Find("发送给 冷恢复队友")
+	input, ok := tester.AccessByRole(ui.RoleTextField, "发送给 冷恢复队友")
 	if !ok {
 		t.Fatalf("cold-resume input missing; texts = %v", tester.Texts())
 	}
-	tester.ClickAt(input.X+input.W/2, input.Y+input.H/2)
+	tester.ClickAt(input.Bounds.X+input.Bounds.W/2, input.Bounds.Y+input.Bounds.H/2)
 	tester.Frame()
+	if !tester.Focused("发送给 冷恢复队友") {
+		t.Fatalf("cold-resume input did not take focus; texts = %v", tester.Texts())
+	}
 	tester.Type("继续检查剩余章节")
 	tester.Frame()
-	if err := tester.Click("发送消息给 冷恢复队友"); err != nil {
+	if err := tester.Click("发送"); err != nil {
 		t.Fatalf("send cold-resume message: %v; texts = %v", err, tester.Texts())
 	}
 

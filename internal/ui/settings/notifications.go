@@ -71,7 +71,8 @@ type notificationsState struct {
 func buildNotificationsPage(c *ui.Context, runtime contracts.UIRuntime,
 	store contracts.SettingsService, locale contracts.LocaleService, st *notificationsState,
 	systemSupported bool, search *pageSearch) {
-	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+	t := design.Of(c)
+	ui.Column(c).FillWidth().Gap(design.SpaceScreen).Children(func() {
 		uikit.PageHeader(c, localized(locale, "通知", "Notifications"), "")
 		search.region(c, "notifications.toasts", func(c *ui.Context) {
 			uikit.Section(c, localized(locale, "通知气泡", "Notification toasts"), func(*ui.Context) {
@@ -101,15 +102,34 @@ func buildNotificationsPage(c *ui.Context, runtime contracts.UIRuntime,
 					"任务在后台完成或失败时显示系统通知；点击通知会打开对应会话，没有会话的通知只把窗口带到前台。应用内通知气泡照常显示。",
 					"When work finishes or fails in the background, notify the system too. Clicking a notification opens its conversation; one without a conversation only brings the window to the front. In-app toasts still show.")
 				if !systemSupported {
-					description = localized(locale,
-						"当前平台不支持系统通知；应用内通知气泡仍然可用。",
-						"System notifications are not available on this platform; in-app toasts still work.")
+					// A platform with no OS notification sink gets a read-only state
+					// row, not a switch: mygo's switch keeps its accent fill when
+					// disabled, so a stored "on" painted an available-looking ON
+					// toggle directly above a sentence saying the platform has no
+					// support (2026-11-18 review). The stored value is left as it is.
+					ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+							// Same row anatomy as uikit.SwitchRow (caption at the
+							// section edge, state at the trailing edge, description
+							// below), with a status word where the switch would be.
+							design.Apply(ui.Text(c, localized(locale, "显示系统通知", "Show system notifications")),
+								t.Font(design.TypeXS)).TextColor(t.LabelPrimary).Grow(1)
+							uikit.StatusText(c, t, design.TypeXS, uikit.StatusIdle,
+								localized(locale, "不可用", "Unavailable"))
+						})
+						design.Apply(ui.Text(c, localized(locale,
+							"当前平台不支持系统通知；应用内通知气泡仍然可用。",
+							"System notifications are not available on this platform; in-app toasts still work.")),
+							t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+					})
+					return
 				}
+				// Reached only when the host has an OS notification sink (the
+				// unsupported platform returned above with a read-only row).
 				if uikit.SwitchRow(c, uikit.SwitchRowOptions{
 					Label:       localized(locale, "显示系统通知", "Show system notifications"),
 					Description: description,
 					Value:       &enabled,
-					Disabled:    !systemSupported,
 				}) {
 					if err := store.Set(contracts.SettingSystemNotifications, fmt.Sprintf("%t", enabled)); err != nil {
 						st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
@@ -124,6 +144,6 @@ func buildNotificationsPage(c *ui.Context, runtime contracts.UIRuntime,
 		})
 		// One status line for both sections: the last save result, whether it
 		// came from the toast switch or the system switch.
-		statusBadgesRow(c, design.Of(c), st.status, st.statusErr)
+		statusBadgesRow(c, t, st.status, st.statusErr)
 	})
 }

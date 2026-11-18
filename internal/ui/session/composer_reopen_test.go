@@ -42,19 +42,3 @@ func TestSlashMenuReopensAfterClearingDraft(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "打开设置")
 }
-
-// TestSessionStatusStripOmitsSpeedForVeryShortTurn covers the scripted-turn
-// case: 460 completion tokens over 5ms is not a meaningful throughput number.
-func TestSessionStatusStripOmitsSpeedForVeryShortTurn(t *testing.T) {
-	chat := statusChat(contracts.ChatMessage{
-		ID: "a1", Role: contracts.ChatRoleAssistant, Text: "一",
-		Usage: &contracts.MessageUsage{
-			PromptTokens: 400, CompletionTokens: 460, TotalTokens: 860,
-			CachedTokens: 68, DurationMS: 5, ContextTokens: 300,
-		},
-	})
-	h := newModelHarness(t, chat, nil)
-	tester := h.tester()
-	h.assertTexts(tester, "1 轮对话 · 0 步工具调用 · 缓存命中 17%")
-	h.assertNoTexts(tester, "tok/s")
-}

@@ -82,7 +82,7 @@ func TestBehaviorPageCollapsesLowFrequencySections(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为与限额")
-	h.assertTexts(tester, "OS 沙箱", "更多对话设置",
+	h.assertTexts(tester, "系统沙箱", "更多对话设置",
 		"消息字号：标准", "指令文件：AGENTS.md")
 	h.assertNoTexts(tester, "工作区指令文件", "选择对话文字大小",
 		"排队发送：", "目标续跑：")

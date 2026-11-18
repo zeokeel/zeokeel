@@ -1,10 +1,10 @@
-# 官方组件迁移清单（mygo v0.9.0）
+# 官方组件迁移清单（mygo v0.9.2）
 
 > 目标：把 ZeoKeel 中「官方已有标准件却仍自绘/手搓」的 UI 逐项替换为
-> `mygo v0.9.0` 官方推荐用法，同时保留有明确理由的自绘项（accessibility /
+> `mygo v0.9.2` 官方推荐用法，同时保留有明确理由的自绘项（accessibility /
 > 交互语义无法用官方控件表达时）。
 >
-> 官方源：`go list -m -f '{{.Dir}}' github.com/egoist/mygo` 指向的模块目录（当前 v0.9.0）的 `docs/ui/*.md`。
+> 官方源：`go list -m -f '{{.Dir}}' github.com/egoist/mygo` 指向的模块目录（当前 v0.9.2）的 `docs/ui/*.md`。
 > 规则与组件速查见 [UI-CONFORMANCE.md](UI-CONFORMANCE.md)；已完成的官方化
 > 修复证据见 [UI-FIX-STATUS-v0.8.3.md](UI-FIX-STATUS-v0.8.3.md)。
 
@@ -62,6 +62,7 @@
 | `internal/uiroot/frame.go` 命令面板行按钮 | 单次点击即执行命令，且需要 `RoleButton` a11y 名称（`uiroot/conformance_test.go` 钉住）；List 行角色是 listitem，官方 List 不提供按钮行语义；`command-palette.rows` 登记（symbol=palette 锚点） |
 | `internal/uikit/runstatus.go` 队列计数徽章 | 官方 `ui.Badge` 无点击/键盘语义；ButtonBase 全状态自绘（rest/hover/pressed/focused/selected，H28）；`uikit.run-status-queue-badge` 登记（2026-11 审计 UD-06） |
 | `internal/ui/sidebar` 新对话以外的图标/行按钮（添加工作区、工作区组标题、会话 ⋯、设置行） | 官方 Sidebar/Outline 只提供源列表与大纲语义，行内自定义内容与 ⋯ 菜单仍用 `ButtonBase`（custom-widgets）；品牌「新对话」已改官方 `PrimaryButton`；行内 ⋯ 已迁 IconButton Native（UD-09） |
+| `internal/ui/rightpanel` 文件面包屑根节点（`rightpanel.file-crumb`） | 无按钮外观的文本返回入口：「工作区根目录」是一格可点控件（点击/Enter 回文件树），静息看起来仍是面包屑；官方 `Breadcrumbs` 的末项是当前页不是链接，且它自带链接色/下划线会破坏这一行的元数据表情。2026-11-18 重设计登记 allowlist |
 | `internal/ui/rightpanel` | **ButtonBase 已清零**（2026-11 审计 UD-09/AR-01）：检查器关闭、artifact 标题切换等迁 `uikit.IconButton`（Native 变体）；`rowTint` 自绘状态属官方允许的 base 用法 |
 | composer 动作行（Shell 的 Row：左半 `uikit.ComposerToolbar` + hint + 右侧发送/排队/停止） | `ui.Toolbar` 溢出菜单会吞掉发送按钮，故主操作留在 Toolbar 外；左半控件本身已是官方 `ui.Toolbar`（`uikit.ComposerToolbar`），不再手搓按钮状态 |
 | slash/@ 富行建议面板 | 行内含图标/标题/说明多段富文本，官方 Autocomplete 仅纯文本；已按官方 accessibility suggestions 模式实现 RoleListBox/RoleOption/PositionInSet/ActiveDescendant 与完整键盘 |
@@ -93,6 +94,15 @@
 保留自绘（经文档逐条核对属于合法的官方 headless base 用法或产品 chrome，见审计报告 §5）：
 composer 卡片、slash/@ 富行建议菜单、命令面板按钮行、消息 hover 动作行、无边框图标按钮、
 tabs 下划线、思考/工具行 trigger、toast parts、附件 chip、设置快捷键表等。
+
+## 2.9 已知框架缺口（2026-11-18 重设计复核）
+
+| 缺口 | 处理 |
+|---|---|
+| `editor.DiffState` 无行号列颜色开关（行底/行号列固定 12%/9%） | 预混 `Added/Deleted` 到 55%，Δ≈1.02:1 肉眼不可见；保留 3 DIP 语义左条 |
+| `ui.Table` 无隐藏竖线开关 | 保留官方原生网格；不为去线改用 List 手排 |
+| `ui.OnWindowShortcut` 只在 modal 内注册 | 全局 Esc 兜底用根作用域 `c.OnShortcut`；5 个可聚焦 chrome 控件 NoEscSteal（去 Tooltip、留 Description） |
+| 已建元素无透明度过渡 | hover 显形 = 始终构建 + 底色 80ms 过渡（不做逐帧） |
 
 ## 3. 迁移顺序与验证
 
@@ -136,9 +146,9 @@ tabs 下划线、思考/工具行 trigger、toast parts、附件 chip、设置�
   折叠 `HoldPlace`、`ScrollToEnd` 回到最新、首帧用 `chatListSeen` 防闪烁）；长会话
   只构建可见行，旧的「加载更早」有界窗口被 List 虚拟化取代。
 
-## 4. mygo v0.9.0 增量（2026-11-14）
+## 4. mygo v0.9.2 增量（2026-11-14）
 
-v0.8.3 → v0.9.0 升级时逐项核对（证据见 `.cache/upgrade-review/mygo.md`）。
+v0.8.3 → v0.9.2 升级时逐项核对（证据见 `.cache/upgrade-review/mygo.md`）。
 
 | 项 | 状态 | 说明 |
 |---|---|---|

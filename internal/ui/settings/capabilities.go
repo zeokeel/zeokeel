@@ -242,7 +242,7 @@ func buildCapabilitiesPage(c *ui.Context, store contracts.SettingsService,
 	if !st.loaded {
 		st.load(store)
 	}
-	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+	ui.Column(c).FillWidth().Gap(pageSectionGap).Children(func() {
 		if showHeader {
 			uikit.PageHeader(c, localized(locale, CapabilitiesPageTitle, "Capabilities"),
 				localized(locale, "委派并发与 Shell 命令的运行上限。",
@@ -250,26 +250,29 @@ func buildCapabilitiesPage(c *ui.Context, store contracts.SettingsService,
 		}
 
 		uikit.Section(c, localized(locale, "委派并发", "Delegation concurrency"), func(body *ui.Context) {
-			ui.Field(body, localized(locale, "Subagent 并发", "Subagent concurrency"), func() {
+			ui.Field(body, localized(locale, "子智能体并发", "Subagent concurrency"), func() {
 				ui.NumberInput(body, &st.subagentMax,
 					contracts.CapabilityMinConcurrency, contracts.CapabilityMaxConcurrency, 1).
-					Label(inputLabel(locale, localized(locale, "Subagent 并发", "Subagent concurrency")))
+					Width(numberControlWidth).
+					Label(inputLabel(locale, localized(locale, "子智能体并发", "Subagent concurrency")))
 			}).Description(localized(locale,
-				"一次 Subagent 委派同时运行的最多子代理数（1–8）。每次委派读取，修改后下一次委派生效。",
-				"Live children of one subagent delegation (1–8). Read per delegation; a change applies to the next one."))
-			ui.Field(body, localized(locale, "Team member 并发", "Team member concurrency"), func() {
+				"一次子智能体委派同时运行的最多子智能体数（1–8）。每次委派读取，修改后下次委派生效。",
+				"Most subagents running at once per delegation (1–8). Read per delegation; a change applies to the next one."))
+			ui.Field(body, localized(locale, "团队成员并发", "Team member concurrency"), func() {
 				ui.NumberInput(body, &st.teamMax,
 					contracts.CapabilityMinConcurrency, contracts.CapabilityMaxConcurrency, 1).
-					Label(inputLabel(locale, localized(locale, "Team member 并发", "Team member concurrency")))
+					Width(numberControlWidth).
+					Label(inputLabel(locale, localized(locale, "团队成员并发", "Team member concurrency")))
 			}).Description(localized(locale,
-				"一个 Team member 同时运行的最多子代理数（1–8）。每次启动读取，修改后下一次生效。",
-				"Live subagents of one team member (1–8). Read per start; a change applies to the next one."))
+				"一个团队成员同时运行的最多子智能体数（1–8）。每次启动读取，修改后下次生效。",
+				"Most subagents one team member may run at once (1–8). Read at start; the next run picks up a change."))
 		})
 
 		uikit.Section(c, localized(locale, "Shell 命令", "Shell commands"), func(body *ui.Context) {
 			ui.Field(body, localized(locale, "Shell 命令超时", "Shell command timeout"), func() {
 				ui.NumberInput(body, &st.shellTimeoutSeconds,
 					contracts.CapabilityMinShellTimeoutSeconds, contracts.CapabilityMaxShellTimeoutSeconds, 5).
+					Width(numberControlWidth).
 					Label(inputLabel(locale, localized(locale, "Shell 命令超时", "Shell command timeout")))
 			}).Description(localized(locale,
 				"单条 Shell 命令的最长运行秒数（5–600）。修改后重启应用生效。",
@@ -277,6 +280,7 @@ func buildCapabilitiesPage(c *ui.Context, store contracts.SettingsService,
 			ui.Field(body, localized(locale, "Shell 输出上限", "Shell output cap"), func() {
 				ui.NumberInput(body, &st.shellOutputKiB,
 					contracts.CapabilityShellOutputDefaultKiB, contracts.CapabilityMaxShellOutputKiB, 64).
+					Width(numberControlWidth).
 					Label(inputLabel(locale, localized(locale, "Shell 输出上限", "Shell output cap")))
 			}).Description(localized(locale,
 				"单条命令返回内容的上限（KiB，最大 4096）；0 表示使用工具默认。修改后重启应用生效。",
@@ -287,10 +291,19 @@ func buildCapabilitiesPage(c *ui.Context, store contracts.SettingsService,
 			ui.Field(body, localized(locale, "审批超时", "Approval timeout"), func() {
 				ui.NumberInput(body, &st.approvalTimeout,
 					0, contracts.CapabilityMaxApprovalTimeoutSeconds, 30).
+					Width(numberControlWidth).
 					Label(inputLabel(locale, localized(locale, "审批超时", "Approval timeout")))
 			}).Description(localized(locale,
-				"仅自动化来源的审批等待生效：超过该秒数自动拒绝并记录、通知。0＝关闭（默认），交互审批不受影响。工具循环不受任何运行级预算限制（循环保护已移除）；无人值守自动化若不想无限等待审批，建议设置本超时。修改后下次运行生效。",
-				"Only approvals from automation-origin runs are bounded: after this many seconds they are auto-denied, recorded and notified. 0 = disabled (default); interactive approvals are unaffected. Tool loops have no run-level budget (loop protection was removed); unattended automation that must not wait for an approval forever should set this timeout. A change applies on the next run."))
+				"仅约束自动化来源的审批：超时自动拒绝并记录、通知；0＝关闭（默认）。",
+				"Bounds automation-origin approvals only: they are auto-denied, recorded and notified on timeout; 0 = disabled (default)."))
+			ui.Column(body).FillWidth().Gap(design.SpaceInline).MaxWidth(design.ProseMeasure).Children(func() {
+				uikit.Bullet(body, localized(locale,
+					"交互审批不受影响；工具循环没有运行级预算。",
+					"Interactive approvals are unaffected; tool loops have no run-level budget."))
+				uikit.Bullet(body, localized(locale,
+					"无人值守自动化建议设置本超时；修改后下次运行生效。",
+					"Unattended automation should set a timeout; a change applies on the next run."))
+			})
 		})
 
 		uikit.Section(c, localized(locale, "并行工具上限", "Parallel tool calls"), func(body *ui.Context) {

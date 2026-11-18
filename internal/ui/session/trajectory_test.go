@@ -86,6 +86,8 @@ func TestTrajectoryRowJumpsToTheMessage(t *testing.T) {
 	h.assertNoTexts(tester, "早期回复正文")
 
 	h.click(tester, "轨迹")
+	// The jump back to the message is the row's trailing action, revealed on
+	// hover/focus instead of the old column of always-visible buttons (VD-17).
 	if err := tester.Click("在对话中定位 读取文件"); err != nil {
 		t.Fatalf("trajectory row has no locate action: %v; texts = %v", err, tester.Texts())
 	}

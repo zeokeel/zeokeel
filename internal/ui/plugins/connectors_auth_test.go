@@ -226,7 +226,7 @@ func TestConnectorRevokeAuthorization(t *testing.T) {
 	}, auth)
 	tester := h.tester()
 	h.click(tester, "连接器")
-	h.click(tester, "连接器操作 notion")
+	h.click(tester, "连接器操作：notion")
 	if err := tester.Click("撤销授权"); err != nil {
 		t.Fatalf("open revoke: %v; texts = %v", err, tester.Texts())
 	}
@@ -284,7 +284,7 @@ func TestConnectorEditPreservesOAuthAuthentication(t *testing.T) {
 	}, auth)
 	tester := h.tester()
 	h.click(tester, "连接器")
-	h.click(tester, "连接器操作 notion")
+	h.click(tester, "连接器操作：notion")
 	if err := tester.Click("编辑"); err != nil {
 		t.Fatalf("open edit: %v; texts = %v", err, tester.Texts())
 	}
@@ -350,7 +350,7 @@ func TestConnectorRemoveDropsOAuthToken(t *testing.T) {
 	}, auth)
 	tester := h.tester()
 	h.click(tester, "连接器")
-	h.click(tester, "连接器操作 notion")
+	h.click(tester, "连接器操作：notion")
 	if err := tester.Click("移除"); err != nil {
 		t.Fatalf("open remove: %v; texts = %v", err, tester.Texts())
 	}
@@ -387,7 +387,7 @@ func TestConnectorAuthorizedOAuthHasNoReauthorizeAction(t *testing.T) {
 	}, auth)
 	tester := h.tester()
 	h.click(tester, "连接器")
-	h.click(tester, "连接器操作 notion")
+	h.click(tester, "连接器操作：notion")
 	h.assertTexts(tester, "撤销授权")
 	h.assertNoTexts(tester, "重新授权")
 }
@@ -398,7 +398,7 @@ func TestConnectorBearerRowHasNoOAuthAuthorizeAction(t *testing.T) {
 	}, &fakeMCPAuth{status: contracts.MCPAuthStatus{State: contracts.MCPAuthStateRequired}})
 	tester := h.tester()
 	h.click(tester, "连接器")
-	h.click(tester, "连接器操作 legacy")
+	h.click(tester, "连接器操作：legacy")
 	h.assertTexts(tester, "编辑", "移除")
 	h.assertNoTexts(tester, "授权", "重新授权")
 }
@@ -419,7 +419,7 @@ func TestConnectorHeadersRoundTrip(t *testing.T) {
 	if len(rows) != 1 || rows[0].Headers["X-Api-Key"] != "secret-value" {
 		t.Fatalf("stored headers = %+v", rows)
 	}
-	h.click(tester, "连接器操作 gateway")
+	h.click(tester, "连接器操作：gateway")
 	if err := tester.Click("编辑"); err != nil {
 		t.Fatalf("edit: %v", err)
 	}

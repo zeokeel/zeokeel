@@ -111,7 +111,7 @@ func TestMemoryListSemanticsAndKeyboard(t *testing.T) {
 		t.Fatalf("Enter on a memory row opened an action the pre-migration row did not have")
 	}
 	// The row's ⋯ menu still works.
-	h.click(tester, "记忆操作")
+	h.click(tester, "记忆操作：Alpha 计划")
 	h.click(tester, "删除记忆")
 	h.assertTexts(tester, "删除记忆")
 	h.click(tester, "取消")

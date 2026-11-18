@@ -16,9 +16,14 @@ import (
 )
 
 // sessionMenuPermissionLabels is the full menu the simplification allows: the
-// disabled group header, one separator and the three permission choices in the
-// approved order (workspace-modify / all permissions / read-only).
-var sessionMenuPermissionLabels = []string{"权限模式", "-", "工作区修改", "所有权限", "只读"}
+// disabled group header, one separator, the three permission choices in the
+// approved order (workspace-modify / all permissions / read-only), and the one
+// explanation row at the foot (the permission text has a single wording, and it
+// is a visible row rather than a tooltip so it survives a keyboard popover).
+var sessionMenuPermissionLabels = []string{
+	"权限模式", "-", "工作区修改", "所有权限", "只读", "-",
+	"全局生效：审批与系统沙箱都跟随此模式；沙箱可用时 shell 类工具自动放行。",
+}
 
 // assertSessionMenuOnlyPermissions fails unless the open menu is exactly the
 // permission group: no chat-mode, persona, prompt-preset, behavior-settings or
@@ -150,7 +155,7 @@ func assertModelEntryReachable(t *testing.T, tester *ui.Tester, label string) {
 	if _, ok := tester.Find(label); ok {
 		return
 	}
-	if err := tester.Click("更多"); err != nil {
+	if err := clickToolbarOverflow(tester); err != nil {
 		t.Fatalf("model entry %q is neither on the toolbar nor behind the toolbar overflow: %v; texts = %v",
 			label, err, tester.Texts())
 	}
@@ -160,6 +165,16 @@ func assertModelEntryReachable(t *testing.T, tester *ui.Tester, label string) {
 	}
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
+}
+
+// clickToolbarOverflow opens the official toolbar's overflow menu. Its trigger
+// is mygo's own control, named by mygo's text bundle (More in English, 更多 in
+// Chinese), so both spellings are accepted.
+func clickToolbarOverflow(tester *ui.Tester) error {
+	if err := tester.Click("更多"); err == nil {
+		return nil
+	}
+	return tester.Click("More")
 }
 
 // openNarrowModelMenu opens the model chip's menu at the current width: directly
@@ -175,7 +190,7 @@ func openNarrowModelMenu(t *testing.T, tester *ui.Tester, chipLabel string) {
 		}
 		return
 	}
-	if err := tester.Click("更多"); err != nil {
+	if err := clickToolbarOverflow(tester); err != nil {
 		t.Fatalf("model chip %q is neither on the toolbar nor behind the toolbar overflow: %v; texts = %v",
 			chipLabel, err, tester.Texts())
 	}

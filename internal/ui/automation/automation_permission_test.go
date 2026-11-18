@@ -19,5 +19,5 @@ func TestAutomationPermissionApprovalOnlyDisclosure(t *testing.T) {
 	tester := h.tester()
 	h.click(tester, "新建任务")
 
-	h.assertTexts(tester, "权限", "仅审批", "文件沙箱", "跟随全局")
+	h.assertTexts(tester, "权限", "仅约束审批", "系统沙箱", "跟随全局")
 }

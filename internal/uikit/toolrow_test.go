@@ -305,13 +305,11 @@ func gutterPixel(t *testing.T, tt *ui.Tester) (int, int) {
 	return int(design.Space4), int(name.Y + name.H/2)
 }
 
-// TestToolRowStateGutter covers the state-first edge (DESIGN.md §5.2): the
-// leading 3 DIP gutter is painted only while the call is in flight (Warning),
-// failed (Danger) or stopped by the user (neutral LabelTertiary); success, idle
-// and unknown draw nothing, so a settled call stays quiet. The lane is checked
-// in every row variant: the plain line without a panel body, the disclosure and
-// the activity band's marker-column row.
-func TestToolRowStateGutterDoesNotReflow(t *testing.T) {
+// TestToolRowStateDoesNotReflow pins the 32 DIP row's geometry: a call that goes
+// from running to finished changes its glyph and (for a failure or a stop) its
+// word, but the name and the summary keep their rectangles, so the line the
+// reader is watching never jumps.
+func TestToolRowStateDoesNotReflow(t *testing.T) {
 	running := ui.NewTester(toolRowGutterView(uikit.StatusRunning, true, toolRowGutterVariant{}), 400, 120)
 	running.Frame()
 	settled := ui.NewTester(toolRowGutterView(uikit.StatusSuccess, false, toolRowGutterVariant{}), 400, 120)
@@ -324,49 +322,80 @@ func TestToolRowStateGutterDoesNotReflow(t *testing.T) {
 	if !ok {
 		t.Fatalf("settled row name missing; texts = %v", settled.Texts())
 	}
-	if runName.X != doneName.X || runName.W != doneName.W {
-		t.Fatalf("running name rect = %+v, settled = %+v: the state gutter must only recolor, never reflow",
+	if runName.X != doneName.X || runName.Y != doneName.Y {
+		t.Fatalf("running name rect = %+v, settled = %+v: the state mark must only recolor, never reflow",
 			runName, doneName)
 	}
 }
 
-func TestToolRowStateGutter(t *testing.T) {
-	light := design.Light()
-	variants := []toolRowGutterVariant{
-		{name: "plain"},
-		{name: "disclosure", panel: true},
-		{name: "band", band: true},
-	}
+// TestToolRowStateGlyph covers the row's state-first mark (B-spec-v2 §3.3.1): the
+// leading 16 DIP glyph is the call's state — the accent spinner while it runs, a
+// success check, a danger alert, and a neutral dot for a user stop — and a
+// finished call keeps its own quiet glyph instead of a warning/blank lane.
+func TestToolRowStateGlyph(t *testing.T) {
 	cases := []struct {
 		name    string
 		state   uikit.StatusKind
 		running bool
 		want    ui.Color
+		// tolerance allows for the antialiasing of a thin arc (the spinner) or a
+		// diagonal stroke (the check).
+		tolerance int
 	}{
-		{name: "running", state: uikit.StatusRunning, running: true, want: light.Warning},
-		{name: "in-progress", state: uikit.StatusInProgress, want: light.Warning},
-		{name: "error", state: uikit.StatusError, want: light.Danger},
-		{name: "cancelled", state: uikit.StatusCancelled, want: light.LabelTertiary},
-		{name: "success", state: uikit.StatusSuccess, want: light.BgBase},
-		{name: "idle", state: uikit.StatusIdle, want: light.BgBase},
-		{name: "unknown", state: uikit.StatusUnknown, want: light.BgBase},
-		// Running without a state keeps the running edge for callers that have
-		// not adopted State yet (the zero value is additive).
-		{name: "running-without-state", state: uikit.StatusUnknown, running: true, want: light.Warning},
+		{"running", uikit.StatusRunning, true, design.Light().Accent, 90},
+		{"error", uikit.StatusError, false, design.Light().DangerText, 40},
+		{"success", uikit.StatusSuccess, false, design.Light().SuccessText, 40},
+		{"cancelled", uikit.StatusCancelled, false, design.Light().LabelTertiary, 40},
 	}
-	for _, v := range variants {
-		for _, tc := range cases {
-			t.Run(v.name+"/"+tc.name, func(t *testing.T) {
-				tt := ui.NewTester(toolRowGutterView(tc.state, tc.running, v), 400, 120)
-				tt.Frame()
-				x, y := gutterPixel(t, tt)
-				got := tt.Image().RGBAAt(x, y)
-				want := color.RGBA{R: tc.want.R, G: tc.want.G, B: tc.want.B, A: tc.want.A}
-				if got != want {
-					t.Fatalf("state gutter pixel (%d,%d) = %v, want %v; the state's gutter fill is part of the row contract",
-						x, y, got, want)
-				}
-			})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tt := ui.NewTester(toolRowGutterView(tc.state, tc.running, toolRowGutterVariant{}), 400, 120)
+			tt.Frame()
+			// The glyph owns the row's first 16 DIP after the page padding: sample
+			// the glyph's center row, two DIP in, where a filled marker paints.
+			name, ok := tt.Find("读取文件")
+			if !ok {
+				t.Fatalf("row name missing; texts = %v", tt.Texts())
+			}
+			top := int(name.Y + name.H/2 - design.Space2)
+			want := color.RGBA{R: tc.want.R, G: tc.want.G, B: tc.want.B, A: tc.want.A}
+			if got := dominantInk(tt, int(design.Space4), top, int(design.Space4)); !closeColor(got, want, tc.tolerance) {
+				t.Fatalf("state %q glyph ink = %v, want %v", tc.name, got, want)
+			}
+		})
+	}
+}
+
+// dominantInk returns the darkest pixel of a square glyph slot: its stroke
+// against the page background. A square (not one row) is what a round spinner
+// arc or a diagonal check needs to show its ink.
+func dominantInk(tt *ui.Tester, x, y, size int) color.RGBA {
+	best := color.RGBA{R: 255, G: 255, B: 255, A: 255}
+	for dy := 0; dy < size; dy++ {
+		for dx := 0; dx < size; dx++ {
+			pixel := tt.Image().RGBAAt(x+dx, y+dy)
+			if luminance(pixel) < luminance(best) {
+				best = pixel
+			}
 		}
 	}
+	return best
+}
+
+// luminance is a rough brightness, for picking the darkest pixel of a glyph.
+func luminance(c color.RGBA) int {
+	return int(c.R)*299 + int(c.G)*587 + int(c.B)*114
+}
+
+// closeColor reports whether two inks match within the case's antialiasing
+// margin.
+func closeColor(got, want color.RGBA, tolerance int) bool {
+	delta := func(a, b uint8) int {
+		if a > b {
+			return int(a - b)
+		}
+		return int(b - a)
+	}
+	return delta(got.R, want.R) <= tolerance && delta(got.G, want.G) <= tolerance &&
+		delta(got.B, want.B) <= tolerance
 }

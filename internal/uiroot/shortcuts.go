@@ -3,6 +3,7 @@ package uiroot
 import (
 	"log"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -97,6 +98,28 @@ func parseShortcutChord(raw string) (ui.Modifiers, ui.Key, bool) {
 		}
 	}
 	return mods, key, true
+}
+
+// newSessionClickDebounce is how long a second click on a "new session" control
+// is ignored. A double click is one intent, not two conversations, and the
+// pointer path is the one that can fire twice in one gesture; the keyboard chord
+// stays unguarded, because two deliberate presses are two requests (A4-I-04).
+const newSessionClickDebounce = 600 * time.Millisecond
+
+// newSessionFromClick is the pointer entry of the new-session action (the
+// collapsed rail's button): it debounces a double click, then runs the same
+// action as the chord.
+func (r *Root) newSessionFromClick() {
+	r.mu.Lock()
+	last := r.newSessionClickedAt
+	r.mu.Unlock()
+	if !last.IsZero() && time.Since(last) < newSessionClickDebounce {
+		return
+	}
+	r.mu.Lock()
+	r.newSessionClickedAt = time.Now()
+	r.mu.Unlock()
+	r.newSessionShortcut()
 }
 
 // newSessionShortcut implements Cmd/Ctrl+N: create a fresh session and show the
@@ -325,10 +348,23 @@ func (r *Root) bindChromeShortcuts(c *ui.Context) {
 	c.OnShortcut(ui.Cmd, ui.KeyN, r.newSessionShortcut)
 	c.OnShortcut(ui.Cmd, ui.KeyComma, r.settingsShortcut)
 
-	// Escape keeps the conversation's safe-action promise even when the focus
-	// is outside the conversation (the sidebar footer, a tree row): deny the
-	// oldest approval, else stop the running turn. Open modals and overlays
-	// consume Escape in their own scopes first (R4).
+}
+
+// bindScreenEscape registers the window's Escape fallback: deny the oldest
+// pending approval, else stop the running turn, else let the session module
+// adjudicate through its own stable escape command. view calls it at the frame's
+// root context, so the key reaches the screen's safe action from any chrome
+// control, and an open dialog, menu or popover still consumes it first in its own
+// scope (R4).
+func (r *Root) bindScreenEscape(c *ui.Context) {
+	// The shell's Escape fallback, declared at the frame's root context: mygo
+	// routes the key down the ancestors of the focused element FIRST and only
+	// then to this root-wide handler, so an open dialog, menu or popover still
+	// takes the Escape that closes it (the P0 the interaction QA caught came from
+	// binding the root ROW's subtree, which sits above nothing and below
+	// everything). It is also the only form that registers outside a modal:
+	// Context.OnWindowShortcut keeps a handler only inside a dialog, so an
+	// explicit call here would leave the window with no fallback at all.
 	c.OnShortcut(0, ui.KeyEscape, r.escapeFallback)
 }
 

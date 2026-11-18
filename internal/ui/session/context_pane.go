@@ -450,13 +450,16 @@ func buildContextSections(c *ui.Context, t *design.Tokens, st *state, snapshot c
 			}
 			return contextSectionLabel(st, sections[index])
 		}
+		// Fixed columns: the header's resize grips were the only vertical rules on
+		// the page, and this inspector is read, not resized (p2-context audit: the
+		// header carried ticks the body did not, two languages on one surface).
 		columns := []ui.TableColumn{
-			{Title: st.tr("分段", "Section")},
-			{Title: st.tr("来源", "Source"), Width: contextSourceColWidth},
-			{Title: st.tr("字节", "Bytes"), Width: contextNumColWidth, Align: ui.End},
-			{Title: "Tokens", Width: contextNumColWidth, Align: ui.End},
+			{Title: st.tr("分段", "Section"), Fixed: true},
+			{Title: st.tr("来源", "Source"), Width: contextSourceColWidth, Fixed: true},
+			{Title: st.tr("字节", "Bytes"), Width: contextNumColWidth, Align: ui.End, Fixed: true},
+			{Title: "Tokens", Width: contextNumColWidth, Align: ui.End, Fixed: true},
 		}
-		ui.Table(c, &st.contextSections, columns, count, func(row, col int) {
+		sectionsTable := ui.Table(c, &st.contextSections, columns, count, func(row, col int) {
 			section := sections[row]
 			label := contextSectionLabel(st, section)
 			source := strings.TrimSpace(section.Source)
@@ -483,6 +486,15 @@ func buildContextSections(c *ui.Context, t *design.Tokens, st *state, snapshot c
 				}
 				cell.Tooltip(tip)
 			}
+			// One row language across the pane: a hairline under every row, the
+			// same BorderL1 an adjacent property sheet uses, instead of the table's
+			// own bare grid (p2-context).
+			cell.BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL1)
+		})
+		// The header is metadata, not content: 12 DIP at weight 500 in the
+		// tertiary ink, one step below the 13 DIP cell text (p2-context audit).
+		design.Apply(sectionsTable, t.Font(design.TypeXXS), func(el ui.Element) ui.Element {
+			return el.FontWeight(design.WeightMedium).TextColor(t.LabelTertiary)
 		}).Label(st.tr("系统提示分段列表", "System prompt sections")).
 			MaxWidth(design.TranscriptWidth)
 			// No inner MaxHeight: the table takes its natural height and the page
@@ -572,18 +584,21 @@ func buildContextRequests(c *ui.Context, t *design.Tokens, st *state, data contr
 		}
 		rows := data.Requests
 		count := len(rows)
+		// Fixed columns (no resize grips, so no vertical ticks in the header), one
+		// row hairline below, and the header at the metadata step: the same table
+		// language as the sections table above it (p2-context audit).
 		columns := []ui.TableColumn{
-			{Title: st.tr("轮次", "Iter"), Width: contextIterColWidth, Align: ui.End},
-			{Title: st.tr("模型", "Model"), MinWidth: contextModelMinWidth, MaxWidth: contextModelMaxWidth},
-			{Title: st.tr("提示词", "Prompt"), Width: contextPromptColWidth, Align: ui.End},
-			{Title: st.tr("完成", "Completion"), Width: contextNumColWidth, Align: ui.End},
-			{Title: st.tr("缓存", "Cached"), Width: contextNumColWidth, Align: ui.End},
-			{Title: st.tr("上下文", "Context"), Width: contextNumColWidth, Align: ui.End},
-			{Title: st.tr("时间", "Time"), Width: contextTimeColWidth, Align: ui.End},
+			{Title: st.tr("轮次", "Iter"), Width: contextIterColWidth, Align: ui.End, Fixed: true},
+			{Title: st.tr("模型", "Model"), MinWidth: contextModelMinWidth, MaxWidth: contextModelMaxWidth, Fixed: true},
+			{Title: st.tr("提示词", "Prompt"), Width: contextPromptColWidth, Align: ui.End, Fixed: true},
+			{Title: st.tr("完成", "Completion"), Width: contextNumColWidth, Align: ui.End, Fixed: true},
+			{Title: st.tr("缓存", "Cached"), Width: contextNumColWidth, Align: ui.End, Fixed: true},
+			{Title: st.tr("上下文", "Context"), Width: contextNumColWidth, Align: ui.End, Fixed: true},
+			{Title: st.tr("时间", "Time"), Width: contextTimeColWidth, Align: ui.End, Fixed: true},
 		}
 		if data.CostKnown {
 			columns = append(columns, ui.TableColumn{
-				Title: st.tr("成本", "Cost"), Width: contextNumColWidth, Align: ui.End,
+				Title: st.tr("成本", "Cost"), Width: contextNumColWidth, Align: ui.End, Fixed: true,
 			})
 		}
 		st.contextRequests.Key = func(index int) any {
@@ -603,7 +618,7 @@ func buildContextRequests(c *ui.Context, t *design.Tokens, st *state, data contr
 			request := rows[count-1-index]
 			return fmt.Sprintf(st.tr("第 %d 次调用，%s", "Call %d, %s"), request.Iteration, request.Model)
 		}
-		ui.Table(c, &st.contextRequests, columns, count, func(row, col int) {
+		requestsTable := ui.Table(c, &st.contextRequests, columns, count, func(row, col int) {
 			request := rows[count-1-row]
 			value := ""
 			color := t.LabelSecondary
@@ -634,7 +649,11 @@ func buildContextRequests(c *ui.Context, t *design.Tokens, st *state, data contr
 					color = t.LabelTertiary
 				}
 			}
-			design.Apply(ui.Text(c, value), t.Font(design.TypeXS)).TextColor(color).NoWrap()
+			cell := design.Apply(ui.Text(c, value), t.Font(design.TypeXS)).TextColor(color).NoWrap()
+			cell.BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL1)
+		})
+		design.Apply(requestsTable, t.Font(design.TypeXXS), func(el ui.Element) ui.Element {
+			return el.FontWeight(design.WeightMedium).TextColor(t.LabelTertiary)
 		}).Label(st.tr("模型调用列表", "Model calls")).
 			MaxWidth(design.TranscriptWidth).MaxHeight(design.Space6 * 9)
 	})

@@ -59,7 +59,8 @@ type Config struct {
 	ToolLabel string `json:"toolLabel"`
 	// ArgumentsLabel labels the raw arguments disclosure (default "原始参数").
 	ArgumentsLabel string `json:"argumentsLabel"`
-	// AllowLabel permits this one call (default "允许").
+	// AllowLabel is the primary action while the scope is one call (default
+	// "允许一次").
 	AllowLabel string `json:"allowLabel"`
 	// AllowAlwaysLabel permits this tool for the rest of the session (default
 	// "本会话内始终允许"; the choice can be revoked from the session menu).
@@ -74,7 +75,7 @@ func (c Config) resolved() Config {
 		Title:            textutil.FirstNonEmpty(c.Title, "需要审批"),
 		ToolLabel:        textutil.FirstNonEmpty(c.ToolLabel, "工具"),
 		ArgumentsLabel:   textutil.FirstNonEmpty(c.ArgumentsLabel, "原始参数"),
-		AllowLabel:       textutil.FirstNonEmpty(c.AllowLabel, "允许"),
+		AllowLabel:       textutil.FirstNonEmpty(c.AllowLabel, "允许一次"),
 		AllowAlwaysLabel: textutil.FirstNonEmpty(c.AllowAlwaysLabel, "本会话内始终允许"),
 		DenyLabel:        textutil.FirstNonEmpty(c.DenyLabel, "拒绝"),
 	}
@@ -290,7 +291,7 @@ func (st *state) labels(cfg Config) uikit.ApprovalLabels {
 		Title:            st.localized(cfg.Title, "需要审批", "Approval required"),
 		ToolLabel:        st.localized(cfg.ToolLabel, "工具", "Tool"),
 		ArgumentsLabel:   st.localized(cfg.ArgumentsLabel, "原始参数", "Raw arguments"),
-		AllowLabel:       st.localized(cfg.AllowLabel, "允许", "Allow"),
+		AllowLabel:       st.localized(cfg.AllowLabel, "允许一次", "Allow once"),
 		AllowAlwaysLabel: st.localized(cfg.AllowAlwaysLabel, "本会话内始终允许", "Always allow in this session"),
 		DenyLabel:        st.localized(cfg.DenyLabel, "拒绝", "Deny"),
 	}

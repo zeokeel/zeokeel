@@ -204,38 +204,58 @@ func startModelCheck(runtime contracts.UIRuntime, check *modelCheckState,
 	}()
 }
 
-// buildCatalogCheckRow renders the connection check inside the add/edit model
-// dialogs: it tests the current draft (the Base URL and API key shown in the
-// dialog, with the stored key as the documented "blank keeps it" value), posts
-// the result back through the UI runtime and shows it inline. The dialog's
-// footer owns the save action, so this is a secondary action.
-func buildCatalogCheckRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
-	check *modelCheckState, baseURL, apiKey string, locale contracts.LocaleService) {
+// catalogTestAction is the connection check as a dialog action: the add/edit
+// model dialogs put it on the action row (left of Cancel/Save, the connector
+// form's arrangement) instead of on a row of its own, so one dialog never grows
+// a second action line (2026-11-18 review). It tests the current draft (the Base
+// URL and API key shown in the dialog, with the stored key as the documented
+// "blank keeps it" value) and posts the result back through the UI runtime.
+func catalogTestAction(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+	check *modelCheckState, baseURL, apiKey string, locale contracts.LocaleService) uikit.DialogAction {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-		ui.Spacer(c).Grow(1)
-		label := localized(locale, "测试连接", "Test connection")
-		busyLabel := localized(locale, "测试中…", "Testing…")
-		disabled := baseURL == ""
-		if check.running {
-			label = busyLabel
-			disabled = true
-		}
-		// The busy state is the official spinner with an accessible progress
-		// name; the button keeps its disabled logic.
-		buildBusySpinner(c, check.running, busyLabel)
-		button := design.Apply(ui.Button(c, label), t.SecondaryButton())
-		button.Disabled(disabled)
-		if button.Clicked() && !check.running && !disabled {
+	label := localized(locale, "测试连接", "Test connection")
+	disabled := baseURL == ""
+	if check.running {
+		label = localized(locale, "测试中…", "Testing…")
+		disabled = true
+	}
+	return uikit.DialogAction{
+		Label: label, Disabled: disabled,
+		OnClick: func() {
+			if check.running || baseURL == "" {
+				return
+			}
 			startModelCheck(runtime, check, baseURL, apiKey, locale)
 			c.Invalidate()
-		}
-	})
+		},
+	}
+}
+
+// buildCatalogCheckStatus is the rest of the connection check: the hint when
+// there is no Base URL yet, the failure line, or the result badge with its
+// measured detail. It renders in the dialog's fixed status row above the action
+// row, never inside the scrolling body.
+func buildCatalogCheckStatus(c *ui.Context, t *design.Tokens, check *modelCheckState,
+	baseURL string, locale contracts.LocaleService) {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if check.running {
+		// The busy state keeps the official progress indicator (and its
+		// accessible name) next to the action that started it.
+		busyLabel := localized(locale, "测试中…", "Testing…")
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			ui.Spinner(c).Label(busyLabel).Size(design.Space3, design.Space3).
+				TextColor(t.LabelSecondary)
+			design.Apply(ui.Text(c, busyLabel), t.Font(design.TypeXXS)).
+				TextColor(t.LabelSecondary)
+		})
+		return
+	}
 	if baseURL == "" {
 		design.Apply(ui.Text(c, localized(locale,
 			"填写 Base URL 后可测试连接。",
 			"Enter a Base URL to test the connection.")),
 			t.TextMuted(design.TypeXXS)).MaxLines(2)
+		return
 	}
 	if check.result == "" {
 		return

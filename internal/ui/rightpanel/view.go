@@ -102,7 +102,13 @@ func buildViewTabStrip(c *ui.Context, t *design.Tokens, st *state) ui.Element {
 			strip.Children(func() {
 				viewTabs.List.Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 					for index := 0; index < pageFixedCount; index++ {
-						tab := buildUnderlineTab(c, t, viewTabs, index, st.tabLabel(index), st.tab == index)
+						// The page row is the highest level of navigation, so it
+						// keeps the panel's ONE accent underline even while a
+						// document opened from that page is the active tab
+						// (VD-16: two accent underlines 38 DIP apart competed).
+						active := st.tab == index ||
+							(index == pageFiles && st.documentActive())
+						tab := buildUnderlineTab(c, t, viewTabs, index, st.tabLabel(index), active)
 						if st.tab == index {
 							activeTab = tab
 						}
@@ -164,7 +170,7 @@ func buildDocumentTabStrip(c *ui.Context, t *design.Tokens, st *state) ui.Elemen
 // row does not jump when the choice moves. The underline is an element border,
 // not a hand-drawn line.
 func buildUnderlineTab(c *ui.Context, t *design.Tokens, tabs ui.TabsParts, index int, label string, active bool) ui.Element {
-	tab := tabs.Tab(index).AlignItems(ui.Center).Height(design.Space8).
+	tab := tabs.Tab(index).AlignItems(ui.Center).Height(design.ControlHeight).
 		PaddingX(design.Space3).
 		BorderWidth(0, 0, 2, 0).BorderColor(ui.Transparent)
 	if active {
@@ -189,15 +195,18 @@ func buildDocumentTab(c *ui.Context, t *design.Tokens, st *state, tabs ui.TabsPa
 	path := st.fileTabs[index].path
 	active := st.tab == pageFixedCount+index
 	label := st.tabLabel(pageFixedCount + index)
-	tab := tabs.Tab(index).AlignItems(ui.Center).Height(design.Space8).
-		PaddingX(design.Space2).Gap(design.Space1).
+	tab := tabs.Tab(index).AlignItems(ui.Center).Height(design.ControlHeight).
+		PaddingX(design.Space2).Gap(design.Space1).Radius(design.RadiusSM).
 		// Name the tab by the file alone: without an explicit Label the
 		// accessible name concatenates the close control's label too, which
 		// made the tab untestable by name and noisy for screen readers.
 		Label(label).
-		BorderWidth(0, 0, 2, 0).BorderColor(ui.Transparent)
+		Transition(design.TransitionColors(c))
 	if active {
-		tab = tab.BorderColor(t.Accent)
+		// The chosen document reads as a raised chip — BgSelected fill + primary
+		// ink — instead of a second accent underline under the page row's
+		// (VD-16). The row's own 1 DIP hairline still separates the strip.
+		tab = tab.Background(t.BgSelected)
 		if st.revealTab {
 			tab.ScrollIntoView()
 		}
@@ -208,13 +217,11 @@ func buildDocumentTab(c *ui.Context, t *design.Tokens, st *state, tabs ui.TabsPa
 			ink, weight = t.LabelPrimary, design.WeightSemibold
 		}
 		design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).
-			FontWeight(weight).TextColor(ink).MaxLines(1).Ellipsis("…").NoWrap().
-			Tooltip(path)
+			FontWeight(weight).TextColor(ink).MaxLines(1).Ellipsis("…").NoWrap()
 		closeLabel := st.tr("关闭 ", "Close ") + filepath.Base(path)
 		uikit.IconButton(c, uikit.IconButtonOptions{
 			Key:     "rightpanel.tab.close/" + path,
 			Label:   closeLabel,
-			Tooltip: closeLabel,
 			Icon:    icons.Close(),
 			Size:    design.IconSizeS,
 			OnClick: func() { *closing = index },
@@ -250,7 +257,7 @@ func buildGuidePage(c *ui.Context, t *design.Tokens, st *state) {
 // the action and its chord.
 func buildGuideCard(c *ui.Context, t *design.Tokens, st *state, icon *ui.SVG,
 	title, shortcut string, page int) {
-	card := ui.Button(c, "").Label(title).Tooltip(title).Padding(design.Space3)
+	card := ui.Button(c, "").Label(title).Padding(design.Space3)
 	card.Children(func() {
 		// The card body stacks the glyph, the title and the shortcut: the rail
 		// is 320 DIP wide, so two side-by-side cards cannot hold a horizontal
@@ -258,7 +265,7 @@ func buildGuideCard(c *ui.Context, t *design.Tokens, st *state, icon *ui.SVG,
 		ui.Column(c).FillWidth().AlignItems(ui.Start).Gap(design.Space2).Children(func() {
 			ui.Icon(c, icon).Size(design.IconSizeM, design.IconSizeM).TextColor(t.LabelSecondary)
 			design.Apply(ui.Text(c, title), t.Font(design.TypeS)).
-				TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…").Bold()
+				TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
 			design.Apply(ui.Text(c, shortcut), t.MonoText(design.TypeXXXS)).
 				TextColor(t.LabelTertiary).NoWrap()
 		})
@@ -292,39 +299,63 @@ func buildFileTabPage(c *ui.Context, t *design.Tokens, workspace contracts.Works
 	})
 }
 
-// buildFileTabHeader names the opened file (base name emphasized, parent
-// directory muted) and carries the tab's actions: copy the path, reload the
-// preview from disk and, for a preview this build cannot render inline, open
-// the file with the platform's default application.
+// buildFileTabHeader is the opened file's one remaining header row: a
+// breadcrumb (the file's parent directory, 12 DIP) and the tab's actions, on a
+// 32 DIP line. The file's own name is NOT repeated here — the document tab
+// directly above already names it, and the old second copy was one of the three
+// stacked header layers and the third README.md inside 100 DIP (VD-16). The
+// row's inks are the metadata step, and no control here carries a Tooltip: the
+// panel can be shown as a drawer, and a tooltip is an overlay that takes the
+// first Escape from the surface that owns it (A4-I-01).
 func buildFileTabHeader(c *ui.Context, t *design.Tokens, st *state, path string, preview *filePreview) {
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
-		Padding(design.Space2, design.Space3).Children(func() {
-		ui.Icon(c, icons.File()).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelSecondary)
-		design.Apply(ui.Text(c, filepath.Base(path)), t.Font(design.TypeXS)).
-			TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…").Tooltip(path).Bold()
-		if dir := filepath.Dir(path); dir != "." && dir != "" {
-			design.Apply(ui.Text(c, dir+"/"), t.Font(design.TypeXXXS)).
+		Padding(design.Space1, design.Space3).Height(design.RowCompactHeight).Children(func() {
+		ui.Icon(c, icons.Folder()).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelTertiary)
+		// The crumb is the path back to the tree, never the file's own name: the
+		// document tab one row above already names the file, and repeating it
+		// here was the "same name three times in 100 DIP" the audit measured
+		// (VD-16). At the workspace root the crumb names the root itself, and it
+		// is a control: clicking it (or Enter on it) returns to the file tree
+		// rather than closing the file (A4-I-10).
+		dir, _ := filepath.Split(path)
+		crumb := strings.TrimSuffix(dir, string(filepath.Separator))
+		if crumb == "" || crumb == "." {
+			homeLabel := st.tr("工作区根目录", "Workspace root")
+			back := ui.ButtonBase(c).Shrink(0).Radius(design.RadiusSM).
+				PaddingX(design.Space1).Height(design.IconSizeL).
+				Label(st.tr("返回工作区根目录", "Back to the workspace root")).
+				Transition(design.TransitionColors(c))
+			if back.Hovered() || back.Focused() {
+				back = back.Background(t.BgHover)
+			}
+			back.Children(func() {
+				design.Apply(ui.Text(c, homeLabel), t.Font(design.TypeXXS)).
+					TextColor(t.LabelSecondary).MaxLines(1)
+			})
+			if back.Clicked() {
+				st.showFixedPage(pageFiles)
+			}
+		} else {
+			design.Apply(ui.Text(c, crumb), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 		}
 		ui.Spacer(c).Grow(1)
 		copyLabel := st.tr("复制路径", "Copy path")
 		uikit.IconButton(c, uikit.IconButtonOptions{
-			Key:     "rightpanel.file.copy/" + path,
-			Label:   copyLabel,
-			Tooltip: copyLabel,
-			Icon:    icons.Copy(),
-			Size:    design.IconSizeS,
+			Key:   "rightpanel.file.copy/" + path,
+			Label: copyLabel,
+			Icon:  icons.Copy(),
+			Size:  design.IconSizeS,
 			OnClick: func() {
 				c.WriteClipboard(path)
 			},
 		})
 		reloadLabel := st.tr("重新读取文件", "Reload the file")
 		uikit.IconButton(c, uikit.IconButtonOptions{
-			Key:     "rightpanel.file.reload/" + path,
-			Label:   reloadLabel,
-			Tooltip: reloadLabel,
-			Icon:    icons.Reload(),
-			Size:    design.IconSizeS,
+			Key:   "rightpanel.file.reload/" + path,
+			Label: reloadLabel,
+			Icon:  icons.Reload(),
+			Size:  design.IconSizeS,
 			OnClick: func() {
 				st.reloadFile(path)
 			},
@@ -332,11 +363,10 @@ func buildFileTabHeader(c *ui.Context, t *design.Tokens, st *state, path string,
 		if classifyFilePreview(path, preview) == filePreviewExternal && nativeLauncherAvailable() {
 			openLabel := st.tr("用系统应用打开", "Open natively")
 			uikit.IconButton(c, uikit.IconButtonOptions{
-				Key:     "rightpanel.file.open-native/" + path,
-				Label:   openLabel + " " + filepath.Base(path),
-				Tooltip: openLabel,
-				Icon:    icons.FolderOpen(),
-				Size:    design.IconSizeS,
+				Key:   "rightpanel.file.open-native/" + path,
+				Label: openLabel + " " + filepath.Base(path),
+				Icon:  icons.FolderOpen(),
+				Size:  design.IconSizeS,
 				OnClick: func() {
 					st.openPreviewNatively(path, preview)
 				},
@@ -396,13 +426,22 @@ func buildFilePreviewBody(c *ui.Context, t *design.Tokens, st *state, path strin
 // offering a dead button.
 func buildExternalPreview(c *ui.Context, t *design.Tokens, st *state, path string, preview *filePreview) {
 	if len(preview.data) > 0 {
-		uikit.KeyValueRows(c, []uikit.KeyValue{
-			{Key: st.tr("大小", "Size"), Value: formatFileSize(int64(len(preview.data)))},
-			{Key: st.tr("类型", "Type"), Value: strings.TrimPrefix(filepath.Ext(path), ".")},
+		// The product's one label/value shape (A1 matrix "rightpanel/view.go:399
+		// → PropertySheet"): a fixed label column, a 32 DIP row and a hairline
+		// between rows, so a value never sits at the panel's far edge. Full
+		// width so the sheet's dividers end where the panel's own do.
+		uikit.PropertySheet(c, uikit.PropertySheetOptions{
+			Key:       "rightpanel.preview.properties",
+			Locale:    st.locale,
+			FullWidth: true,
+			Rows: []uikit.PropertyRow{
+				{Label: st.tr("大小", "Size"), Value: formatFileSize(int64(len(preview.data))), Mono: true},
+				{Label: st.tr("类型", "Type"), Value: strings.TrimPrefix(filepath.Ext(path), "."), Mono: true},
+			},
 		})
 	}
 	design.Apply(ui.Text(c, st.tr("暂不支持预览", "Preview is not supported")),
-		t.Font(design.TypeXS)).TextColor(t.LabelPrimary).Bold()
+		t.Font(design.TypeXS)).TextColor(t.LabelPrimary)
 	design.Apply(ui.Text(c, st.tr(
 		"本机没有内嵌 PDF、Office 或 HTML 渲染器，无法在侧边栏显示该文件。",
 		"This build has no embedded PDF, Office or HTML renderer, so the file cannot be shown here.")),
@@ -542,7 +581,61 @@ func buildFilesPage(c *ui.Context, t *design.Tokens, workspace contracts.Workspa
 				uikit.EmptyState(c, st.tr("目录为空", "The directory is empty"))
 			default:
 				buildWorkspaceTree(c, t, workspace, entries, st)
+				buildTreePreview(c, t, workspace, indexOfEntries(entries, st), st)
 			}
+		})
+	})
+}
+
+// indexOfEntries is the path→entry index the tree builders share: the root
+// listing plus every directory already loaded. buildWorkspaceTree builds its own
+// for the row contents; the preview only needs to know whether the current item
+// is a directory.
+func indexOfEntries(entries []contracts.FileEntry, st *state) map[string]contracts.FileEntry {
+	index := make(map[string]contracts.FileEntry, len(entries))
+	for _, entry := range entries {
+		index[treeEntryPath(entry)] = entry
+	}
+	for _, listing := range st.filesDirs {
+		if listing.loaded {
+			for _, entry := range listing.entries {
+				index[treeEntryPath(entry)] = entry
+			}
+		}
+	}
+	return index
+}
+
+// buildTreePreview is the tree's preview area: the current row's content, read
+// as the cursor moves. It is the answer to "the chosen row and the content
+// disagree" (A4-I-11): the arrows move the current row and this area follows in
+// the same frame, without opening a tab. A directory is a place but has no
+// content, so it says 目录 in one line and shows nothing else; with no current
+// row (a fresh panel) the area is empty and takes no height.
+func buildTreePreview(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
+	index map[string]contracts.FileEntry, st *state) {
+	path, ok := st.treeCurrentPath()
+	if !ok {
+		return
+	}
+	entry, known := index[path]
+	if known && entry.Dir {
+		ui.Column(c).FillWidth().Shrink(0).Gap(design.Space1).Children(func() {
+			ui.Divider(c)
+			design.Apply(ui.Text(c, st.tr("目录", "Directory")), t.Font(design.TypeXXS)).
+				TextColor(t.LabelTertiary).MaxLines(1)
+		})
+		return
+	}
+	preview := st.filePreviewFor(workspace, path)
+	ui.Column(c).FillWidth().Shrink(0).Gap(design.Space1).Children(func() {
+		ui.Divider(c)
+		// The area names the file it is showing: the tree row above may have
+		// truncated it, and the preview must never be anonymous.
+		design.Apply(ui.Text(c, filepath.Base(path)), t.Font(design.TypeXXS)).
+			TextColor(t.LabelSecondary).MaxLines(1).Ellipsis("…")
+		ui.Scroll(c).FillWidth().MaxHeight(design.Space8 * 8).Children(func() {
+			buildFilePreviewBody(c, t, st, path, preview)
 		})
 	})
 }
@@ -556,7 +649,17 @@ func buildWorkspaceHeader(c *ui.Context, t *design.Tokens, st *state,
 		design.Apply(ui.Text(c, st.tr("工作区", "Workspace")), t.TextMuted(design.TypeXXXS)).NoWrap()
 		design.Apply(ui.Text(c, textutil.FirstNonEmptyTrimmed(current.Name, filepath.Base(current.Root))),
 			t.Font(design.TypeXS)).TextColor(t.LabelPrimary).
-			Grow(1).MaxLines(1).Ellipsis("…").Tooltip(current.Root).Bold()
+			Grow(0).Shrink(1).MaxLines(1).Ellipsis("…")
+		// The folder was a Tooltip; the panel is a drawer, and a tooltip is an
+		// overlay that takes the first Escape from the drawer that owns it
+		// (A4-I-01). The path is visible copy instead, so nothing is lost.
+		if root := strings.TrimSpace(current.Root); root != "" {
+			design.Apply(ui.Text(c, root), t.Font(design.TypeXXS)).
+				TextColor(t.LabelTertiary).Grow(1).Shrink(1).MinWidth(design.Space0).
+				MaxLines(1).Ellipsis("…")
+		} else {
+			ui.Spacer(c).Grow(1)
+		}
 		if loading {
 			ui.Spinner(c).Label(st.tr("正在读取目录…", "Reading the directory…")).
 				Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
@@ -565,7 +668,6 @@ func buildWorkspaceHeader(c *ui.Context, t *design.Tokens, st *state,
 		uikit.IconButton(c, uikit.IconButtonOptions{
 			Key:      "rightpanel.files.refresh",
 			Label:    reloadLabel,
-			Tooltip:  st.tr("重新读取工作区文件", "Reload the workspace files"),
 			Icon:     icons.Reload(),
 			Size:     design.IconSizeS,
 			Disabled: loading,
@@ -664,10 +766,20 @@ func buildWorkspaceTree(c *ui.Context, t *design.Tokens, workspace contracts.Wor
 		}
 		return ""
 	}
-	outline := ui.Outline(c, &st.filesOutline, roots, children, func(path string) {
-		st.buildTreeRow(c, t, index, path)
-	}).Label(st.tr("工作区文件", "Workspace files")).Grow(1).FillWidth()
+	// The native outline paints its chosen row with the theme's Accent, which in
+	// this product is the brand blue: a full accent block inside a 320 DIP pane,
+	// and exactly the "满蓝选中行" the design forbids. The local theme lowers the
+	// accent to the persistent-selection tint (as the sidebar tree's list does),
+	// so the chosen row is BgSelected + the 2 DIP stripe this file paints, while
+	// the native keyboard, hit testing and Selected state are untouched.
+	var outline ui.Element
+	ui.Themed(c, treeSelectionTheme(t)).Grow(1).Shrink(1).FillWidth().Children(func() {
+		outline = ui.Outline(c, &st.filesOutline, roots, children, func(path string) {
+			st.buildTreeRow(c, t, index, path)
+		}).Label(st.tr("工作区文件", "Workspace files")).Grow(1).FillWidth()
+	})
 	if outline.Submitted() && st.filesRow >= 0 && st.filesRow < st.filesOutline.Rows() {
+		// Enter and a double click open the current row (a directory toggles).
 		st.activateTreeItem(index, st.filesOutline.Item(st.filesRow))
 	}
 }
@@ -693,8 +805,28 @@ func (st *state) buildTreeRow(c *ui.Context, t *design.Tokens, index map[string]
 	}
 	entry := index[path]
 	name := textutil.FirstNonEmptyTrimmed(entry.Name, filepath.Base(path))
+	// The tree's current item is the row `filesRow` names, painted with the
+	// product's persistent selection (BgSelected + a 2 DIP Accent left bar, as
+	// the sidebar's tree does) — not only with the native row tint, so the
+	// current file reads from across the window (A4-I-11).
+	current := st.filesRow >= 0 && st.filesRow < st.filesOutline.Rows() &&
+		st.filesOutline.Item(st.filesRow) == path
 	row := ui.Row(c).FillWidth().Height(design.RowCompactHeight).AlignItems(ui.Center).
-		Gap(design.Space2).PaddingX(design.Space1).Radius(design.RadiusSM)
+		Radius(design.RadiusSM).Transition(design.TransitionColors(c))
+	switch {
+	case current:
+		row = row.Background(t.BgSelected)
+	case row.Hovered():
+		row = row.Background(t.BgHover)
+	}
+	// One leading glyph per row keeps a directory and a file apart at a glance
+	// (B-spec §3.5: 图标 16); the outline's own arrow carries the level indent,
+	// so the tree does not spend a second column on it.
+	glyph := icons.File()
+	glyphColor := t.LabelTertiary
+	if entry.Dir {
+		glyph, glyphColor = icons.Folder(), t.LabelSecondary
+	}
 	if entry.Dir {
 		// A click on the name toggles the disclosure (the outline's arrow does
 		// the same); the listing loads lazily on open via the children callback.
@@ -702,11 +834,19 @@ func (st *state) buildTreeRow(c *ui.Context, t *design.Tokens, index map[string]
 			if ev.Kind != ui.InputPointerUp || ev.Button != 0 {
 				return
 			}
+			// A directory row is also a place: it becomes the current row (the
+			// preview then says 目录) and the click toggles its disclosure.
+			st.selectTreeRow(path)
 			st.toggleTreeDir(path)
 		})
 		row.Children(func() {
-			design.Apply(ui.Text(c, name), t.Font(design.TypeXS)).TextColor(t.LabelPrimary).
-				Grow(1).MaxLines(1).Ellipsis("…")
+			treeRowStripe(c, t, current)
+			ui.Row(c).Grow(1).AlignItems(ui.Center).Gap(design.Space2).
+				PaddingX(design.Space1).Children(func() {
+				ui.Icon(c, glyph).Size(design.IconSizeS, design.IconSizeS).TextColor(glyphColor)
+				design.Apply(ui.Text(c, name), t.Font(design.TypeXS)).TextColor(t.LabelPrimary).
+					Grow(1).MaxLines(1).Ellipsis("…")
+			})
 		})
 		return
 	}
@@ -714,6 +854,9 @@ func (st *state) buildTreeRow(c *ui.Context, t *design.Tokens, index map[string]
 		if ev.Kind != ui.InputPointerUp || ev.Button != 0 {
 			return
 		}
+		// A click both opens the file and makes its row the current item, so
+		// returning to the tree continues from it with the keyboard (A4-I-11).
+		st.selectTreeRow(path)
 		st.openFile(path)
 		st.invalidate()
 	})
@@ -726,9 +869,50 @@ func (st *state) buildTreeRow(c *ui.Context, t *design.Tokens, index map[string]
 		}
 	})
 	row.Children(func() {
-		design.Apply(ui.Text(c, name), t.Font(design.TypeXS)).TextColor(t.LabelPrimary).
-			Grow(1).MaxLines(1).Ellipsis("…")
+		treeRowStripe(c, t, current)
+		ui.Row(c).Grow(1).AlignItems(ui.Center).Gap(design.Space2).
+			PaddingX(design.Space1).Children(func() {
+			ui.Icon(c, glyph).Size(design.IconSizeS, design.IconSizeS).TextColor(glyphColor)
+			design.Apply(ui.Text(c, name), t.Font(design.TypeXS)).TextColor(t.LabelPrimary).
+				Grow(1).MaxLines(1).Ellipsis("…")
+		})
 	})
+}
+
+// treeSelectionTheme is the local theme the workspace tree builds with: mygo
+// paints a chosen row with Theme.Accent and Theme.AccentText, so lowering the
+// accent to the 9% selection tint turns the native chosen fill into the quiet
+// persistent selection instead of a saturated block (DESIGN §3.11, the same
+// technique the sidebar's session list uses).
+func treeSelectionTheme(t *design.Tokens) *ui.Theme {
+	theme := *t.Theme()
+	theme.Accent = t.BgSelected
+	theme.AccentHover = t.BgSelected
+	theme.AccentPressed = t.BgSelected
+	theme.InactiveAccent = t.BgSelected
+	theme.AccentText = t.LabelPrimary
+	return &theme
+}
+
+// treeRowStripe reserves the 2 DIP selection stripe on every tree row, painted
+// only for the current one, so a name never shifts when the cursor moves.
+func treeRowStripe(c *ui.Context, t *design.Tokens, current bool) {
+	bar := ui.Box(c).Width(design.Space1 / 2).Height(design.RowCompactHeight).Shrink(0)
+	if current {
+		bar = bar.Background(t.Accent)
+	}
+}
+
+// treePreviewTitle names the file the tree's preview area is showing.
+func (st *state) treeCurrentPath() (string, bool) {
+	if st.filesRow < 0 || st.filesRow >= st.filesOutline.Rows() {
+		return "", false
+	}
+	item := st.filesOutline.Item(st.filesRow)
+	if strings.Contains(item, "\x00") {
+		return "", false
+	}
+	return item, true
 }
 
 // toggleTreeDir opens or closes one directory item and requests a frame.

@@ -9,7 +9,6 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -63,7 +62,7 @@ func buildScreenHeaderSlot(c *ui.Context, t *design.Tokens, cfg Config, st *stat
 	description := st.localized(cfg.Description,
 		"管理技能与 MCP 连接器，扩展 ZeoKeel 的能力。",
 		"Manage skills and MCP connectors that extend ZeoKeel.")
-	design.Apply(ui.Text(c, title), t.Font(design.TypeM)).FontWeight(design.WeightSemibold).
+	design.Apply(ui.Text(c, title), t.Font(design.TypeM)).
 		TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…").Tooltip(description)
 }
 
@@ -106,8 +105,8 @@ func mcpFailureSummary(st *state, status string) string {
 	case strings.Contains(lower, "initialize"), strings.Contains(lower, "handshake"),
 		strings.Contains(lower, "json-rpc"), strings.Contains(lower, "unmarshal"),
 		strings.Contains(lower, "protocol"), strings.Contains(lower, "握手"):
-		return st.tr("协议握手失败（MCP 初始化未完成）",
-			"Protocol handshake failed (MCP initialization did not complete)")
+		return st.tr("服务器未完成 MCP 初始化",
+			"The server did not finish MCP initialization")
 	case strings.Contains(lower, "refused"), strings.Contains(lower, "no such host"),
 		strings.Contains(lower, "dial tcp"), strings.Contains(lower, "connect:"),
 		strings.Contains(lower, "无法连接"):
@@ -163,26 +162,6 @@ func mcpDetailValue(value string) string {
 		return trimmed
 	}
 	return "—"
-}
-
-// collapsedMCPStatus shortens a status for the collapsed card header: it keeps
-// the part before the first colon (the state) and bounds its length.
-func collapsedMCPStatus(status string) string {
-	trimmed := strings.TrimSpace(status)
-	if cut := strings.IndexAny(trimmed, ":："); cut >= 0 {
-		trimmed = strings.TrimSpace(trimmed[:cut])
-	}
-	runes := []rune(trimmed)
-	if len(runes) > 12 {
-		return string(runes[:12]) + "…"
-	}
-	return trimmed
-}
-
-// pluginStatusLabel is the connection badge label (the service's own status
-// text, or a generic fallback).
-func pluginStatusLabel(st *state, status string) string {
-	return textutil.FirstNonEmptyTrimmed(status, st.tr("未知状态", "Unknown status"))
 }
 
 // pluginStatusKind maps an MCP connection state onto the shared status

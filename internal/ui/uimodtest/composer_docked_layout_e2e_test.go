@@ -27,13 +27,19 @@ import (
 // TextArea label), the send control and the attachment menu.
 var composerControls = []string{"输入消息…", "发送", "附件"}
 
-// requireComposerAtBottom asserts the composer is built, fully inside the
-// window and in its bottom band. A FillHeight content column that failed to
-// take the window height leaves the composer near the top (empty
-// conversation) or below the window (long conversation).
+// requireComposerAtBottom asserts the tiled-dock geometry of B-spec v2: the
+// composer is the window's bottom block, its controls are inside the window,
+// and the send control sits inside the composer at the end of the control row
+// (below the text line it belongs to). The old absolute "y > 60% of the
+// height" threshold pinned a card that floated mid-window; the dock is a
+// layout block now, so the assertions are relations between the controls plus
+// a coarse bottom-band check.
 func requireComposerAtBottom(t *testing.T, tester *ui.Tester, width, height int) {
 	t.Helper()
-	bottomBand := float32(height) * 0.6
+	// The dock owns the bottom quarter: measured at 0.79 of the height at
+	// 1024x720 and 1280x800 and 0.82 at 1534x1140, the text line starts around
+	// 0.8, so anything above 0.75 is not a docked composer.
+	bottomBand := float32(height) * 0.75
 	rects := make(map[string]ui.Rect, len(composerControls))
 	for _, text := range composerControls {
 		rect, ok := tester.Find(text)
@@ -56,9 +62,25 @@ func requireComposerAtBottom(t *testing.T, tester *ui.Tester, width, height int)
 		}
 		rects[text] = rect
 	}
-	if input, send := rects["输入消息…"], rects["发送"]; input.Y >= send.Y {
-		t.Fatalf("%dx%d: composer input (y=%.1f) is not above the send row (y=%.1f)",
-			width, height, input.Y, send.Y)
+	input, send := rects["输入消息…"], rects["发送"]
+	// The send control belongs to the composer: vertically it is the control
+	// row under the text line, horizontally it ends inside the input's own
+	// span. A composer whose send button was pushed into the footer or out to
+	// the window edge fails here even though both rects are "at the bottom".
+	if send.Y < input.Y {
+		t.Fatalf("%dx%d: send control (y=%.1f) is above the composer text line (y=%.1f)",
+			width, height, send.Y, input.Y)
+	}
+	if send.X < input.X || send.X+send.W > input.X+input.W+0.5 {
+		t.Fatalf("%dx%d: send control is outside the composer's span: send {X:%.1f W:%.1f} vs input {X:%.1f W:%.1f}",
+			width, height, send.X, send.W, input.X, input.W)
+	}
+	// The dock ends at the window's bottom edge, not part-way up it: the send
+	// row's bottom stays within 12% of the height from the frame (measured 6% at
+	// 1024x720 and 9% at 1534x1140).
+	if slack := float32(height) - (send.Y + send.H); slack > float32(height)*0.12 {
+		t.Fatalf("%dx%d: composer does not reach the window bottom: %.1f DIP of slack below the send control",
+			width, height, slack)
 	}
 }
 
@@ -218,13 +240,42 @@ func TestDockedInspectorLongTranscriptKeepsComposerAndFollowsEnd(t *testing.T) {
 		}
 		waitIdle(t, product.chat, sessionID, 10*time.Second)
 		tester.Frame()
+		// The transcript follows with the shipped list motion (B-spec §1.5:
+		// MotionList, 200 ms). A headless frame does not advance the clock, so
+		// the follow would be caught mid-flight; let it settle before the next
+		// round measures where the list came to rest.
+		tester.Advance(250 * time.Millisecond)
+		tester.Frame()
 	}
-	tester.Frame()
 
-	// The composer and its usage strip stay at the window bottom.
+	// The composer and the status strip stay at the window bottom. The strip is
+	// the 32 DIP bar under the composer (S8 / B-spec §3.2.6): one zone for the
+	// run state, one for the context gauge and its 详情 popover. This session's
+	// model has no catalogue window, so the gauge is absent and the strip is
+	// just its 详情 control — the old six-item sentence is gone on purpose.
 	requireComposerAtBottom(t, tester, width, height)
-	if !tester.HasText("轮") {
-		t.Fatalf("session usage strip missing under the composer; texts = %v", tester.Texts())
+	if !tester.HasText("详情") {
+		t.Fatalf("session status strip missing under the composer; texts = %v", tester.Texts())
+	}
+	sendRect, ok := tester.Find("发送")
+	if !ok {
+		t.Fatalf("send control missing")
+	}
+	strip, ok := tester.Find("详情")
+	if !ok {
+		t.Fatalf("status strip 详情 control missing")
+	}
+	if strip.Y <= sendRect.Y {
+		t.Fatalf("status strip (y=%.1f) is not below the composer's send control (y=%.1f)",
+			strip.Y, sendRect.Y)
+	}
+	if strip.Y+strip.H > float32(height) {
+		t.Fatalf("status strip (bottom=%.1f) is below the %d DIP window", strip.Y+strip.H, height)
+	}
+	for _, gone := range []string{"轮对话 ·", "tok/s ·", "缓存命中"} {
+		if tester.HasText(gone) {
+			t.Fatalf("status strip still prints the old six-item sentence (%q); texts = %v", gone, tester.Texts())
+		}
 	}
 
 	send, _ := tester.Find("发送")

@@ -261,7 +261,7 @@ func TestWorkspaceTreeRendersWithZeroSessions(t *testing.T) {
 func TestWorkspaceTreeEmptyBackendCopy(t *testing.T) {
 	h := newHarnessWithWorkspace(t, &fakeChat{}, sidebar.Config{}, newFakeWorkspace())
 	tester := h.tester()
-	h.assertTexts(tester, "工作区", "添加工作区", "还没有工作区", "点击 + 添加工作区")
+	h.assertTexts(tester, "工作区", "添加工作区", "还没有工作区", "选择 + 添加工作区")
 	h.assertNoTexts(tester, "还没有会话")
 }
 

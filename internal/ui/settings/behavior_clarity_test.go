@@ -40,5 +40,5 @@ func TestBehaviorLimitsRequireSaveNote(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := openBehaviorPage(t, h)
 
-	h.assertTexts(tester, "运行限额", "需点页脚「保存」")
+	h.assertTexts(tester, "运行限额", "以下限额点「保存」后生效")
 }

@@ -141,15 +141,19 @@ func TestStatusKindFolding(t *testing.T) {
 
 // TestStatusColorUsesTextTokens pins the §5.2 rule: the status foreground is the
 // WCAG-AA *Text token, never the fill color, and every non-failure state is
-// neutral (cancelled, interrupted, idle, pending, unknown).
+// neutral (cancelled, interrupted, idle, pending, unknown). Running and
+// in-progress are deliberately neutral too (LabelSecondary): the accent lives in
+// the spinner or dot beside them, and warning is reserved for states that need
+// the user (StatusNeedsAction).
 func TestStatusColorUsesTextTokens(t *testing.T) {
 	tokens := design.Light()
 	for _, want := range []struct {
 		kind uikit.StatusKind
 		want ui.Color
 	}{
-		{uikit.StatusRunning, tokens.WarningText},
-		{uikit.StatusInProgress, tokens.WarningText},
+		{uikit.StatusRunning, tokens.LabelSecondary},
+		{uikit.StatusInProgress, tokens.LabelSecondary},
+		{uikit.StatusNeedsAction, tokens.WarningText},
 		{uikit.StatusSuccess, tokens.SuccessText},
 		{uikit.StatusError, tokens.DangerText},
 		{uikit.StatusCancelled, tokens.LabelTertiary},

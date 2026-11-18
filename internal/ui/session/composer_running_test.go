@@ -39,7 +39,7 @@ func TestComposerStaysVisibleWhileRunningWithDefaultQueue(t *testing.T) {
 	// The typed draft is queueable: the input was editable and its text reached
 	// the queue instead of chat.Send.
 	h.click(tester, "排队")
-	h.assertTexts(tester, "已排队 1 条")
+	h.assertTexts(tester, "×1")
 	if sends := h.chat.sends(); len(sends) != 0 {
 		t.Fatalf("running composer called Send: %v", sends)
 	}
@@ -63,7 +63,7 @@ func TestComposerStoredOptOutStillQueues(t *testing.T) {
 	tester.Type("仍然排队")
 	tester.Frame()
 	h.click(tester, "排队")
-	h.assertTexts(tester, "已排队 1 条")
+	h.assertTexts(tester, "×1")
 	if sends := h.chat.sends(); len(sends) != 0 {
 		t.Fatalf("Enter/Send ran while running: %v", sends)
 	}

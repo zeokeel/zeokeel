@@ -116,7 +116,7 @@ func buildCapabilityDiagnostics(c *ui.Context, t *design.Tokens, st *state) {
 	ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
 		ui.Divider(c)
 		design.Apply(ui.Text(c, st.tr("诊断与设置", "Diagnostics & settings")),
-			t.Font(design.TypeM)).FontWeight(design.WeightSemibold).TextColor(t.LabelPrimary).
+			t.Font(design.TypeM)).TextColor(t.LabelPrimary).
 			Role(ui.RoleHeading).Level(2)
 		buildModulesSection(c, t, st, modulesLister, hasModules)
 		buildPluginParamsSection(c, t, st, settings, hasSettings)

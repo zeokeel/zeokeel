@@ -253,7 +253,7 @@ type ApprovalDialogOptions struct {
 func ApprovalDialog(c *ui.Context, o ApprovalDialogOptions)
 ```
 
-**布局（固定，V3 强调）**：内联卡（`Border(1, Warning)` + `RadiusLG`）→ 顶部警示横幅（Shield + 加粗「需要审批」+ 工具友好名 + 队列计数 + 「Esc 拒绝」，`Warning.Alpha(0.22)` 底、`WarningText` 前景）→ 中性卡体：**来源行（有 `SessionID` 时：会话标题 + 来源 + 跨会话「打开该会话」）** → 一行影响声明 → 摘要优先（shell/终端类工具标「命令」，其余工具标「摘要」；mono 框）→ 「将改动」（write/edit，`uikit.DiffPreview` 显示 unified diff，块头路径 + `+N −M`；无法生成时诚实回退）→ 「参数」折叠（Scroll 140）→ 会话级允许提示 → `uikit.DialogFooter`：**拒绝 → 本会话内始终允许 → 允许(Primary 最右)**；无 Default、无 AutoFocus。卡片整体用警示色描边/横幅，和 transcript 工具卡、composer 明显区分，不允许被看漏或误认。
+**布局（固定，2026-11-18 视觉语言 v2）**：内联卡 = **中性卡体**（`BgRaised` + 1px `BorderL3` + `RadiusLG(12)`）+ **左缘 2px `Warning` 竖条**（不圆角，全卡唯一语义色块）→ 头部：`uikit.StatusBadge("需要审批")` + 工具友好名 14/500 + 右侧来源行（12 tertiary，跨会话时带「打开该会话」动作）+ 队列计数 → 一行影响声明（12/18 `WarningText`）→ 目标块（shell/终端类标「命令」、write/edit 标「路径」，mono 13/20 + `BgStrong` + `RadiusSM` + 1px `BorderL1`）→ 「将改动」（`uikit.DiffPreview`，块底白、仅增删行染色）→ 「原始参数」折叠（`Collapsible`）→ footer：`范围`（12 tertiary + 菜单：仅此一次 / 本会话内始终允许 `前缀` / 总是允许（写入设置））· **拒绝**（次）· **允许一次**（Primary，同时是全屏唯一 accent 填充）· `⋯`（更多规则）；`Esc`/`⌘↵` 用 `uikit.Kbd`+`FormatShortcut` 画在 footer 左侧；无 Default、无 AutoFocus。**不再有满宽警示横幅与整卡警示描边**（A2 F-01：满宽色带会让审批卡变成第二个主色）。
 
 **交互/键盘**：Tab 循环；Enter 只有在焦点落到某按钮时才触发该按钮；Esc = deny 最早一条（有文本焦点时也由 session 的审批优先路径处理，且不中断本轮）；内联模式没有 backdrop。不设默认焦点。
 
@@ -261,7 +261,7 @@ func ApprovalDialog(c *ui.Context, o ApprovalDialogOptions)
 
 **禁止**：默认焦点落在允许或拒绝（真实事故：发消息后 Enter 误触拒绝）；普通 Button + 中性文案；把审批塞进 `AlertDialog`（末位默认语义）；把队列叠成多层 Modal；审批动作图标化无文字。
 
-**当前实现**：`uikit.ApprovalDialog`（`Inline` 模式为产品默认的 V3 内联卡；`Inline=false` 保留旧 Modal 渲染给 embedder/兼容；「将改动」由 `uikit.DiffPreview` 渲染）；`internal/ui/approval/approval.go` 注册 `session.banner` 槽、维护 FIFO/settle 状态并在非会话屏自动切回会话。测试：`internal/ui/approval/*_test.go`（inline 渲染/队列计数/三种决定/自动切屏）、`internal/uikit/approval_test.go`、`internal/ui/session/chrome_b3_test.go`（Esc 审批优先）。
+**当前实现**：`uikit.ApprovalDialog`（`Inline` 模式为产品默认的内联卡；`Inline=false` 保留 Modal 渲染给 embedder/兼容；「将改动」由 `uikit.DiffPreview` 渲染）；`internal/ui/approval/approval.go` 注册 `session.banner` 槽、维护 FIFO/settle 状态并在非会话屏自动切回会话。测试：`internal/ui/approval/*_test.go`（inline 渲染/队列计数/三种决定/自动切屏）、`internal/uikit/approval_test.go`、`internal/ui/session/chrome_b3_test.go`（Esc 审批优先）。
 
 **迁移步骤**：抽 `uikit.ApprovalDialog`（保留当前行为逐字一致：footer 顺序、无 Default、Esc=deny、影响声明、队列计数）；新增帧测试断言"打开后无焦点按钮/Enter 不产生决定"。
 
@@ -422,7 +422,7 @@ func ComposerShell(c *ui.Context, o ComposerOptions)
 
 ### S8 RunStatus（流式 / 队列 / 停止 / 用量 / 恢复）
 
-**职责**：把 Agent 的运行状态如实、克制地表达出来：正在生成、排队中、可停止、失败可重试、用量可查；不伪造进度、不推动布局。运行中的过程由 S1 的「工作步骤」单行/时间线呈现（默认标准模式一行原地更新，不铺完整时间线）；运行中需要审批时，输入框上方的内联审批卡是唯一阻断点（不弹模态、不遮 transcript）；通知类消息走右上角 toast（B3 顶栏下方，最多 2 条），不遮挡输入与顶栏动作。
+**职责**：把 Agent 的运行状态如实、克制地表达出来：正在生成、排队中、可停止、失败可重试、用量可查；不伪造进度、不推动布局。运行中的过程由 S1 的「工作步骤」单行/时间线呈现（默认标准模式一行原地更新，不铺完整时间线）；运行中需要审批时，输入框上方的内联审批卡是唯一阻断点（不弹模态、不遮 transcript）；通知类消息走**右下角 toast**（内容列右下、避开 composer 与状态条，最多 2 条，其余合并为「＋N 条排队」；错误不自动消失），不遮挡输入、转录与顶栏动作（2026-11-18：右上角会压住阅读列正文）。
 
 **数据模型**：`running`、`queued []string`、`usage`（token 计数）、`lastError`、`retryable`。
 
@@ -433,7 +433,7 @@ func ComposerShell(c *ui.Context, o ComposerOptions)
 | idle | 不显示运行态 |
 | restored-interrupted | 恢复后 `ChatSession.Interrupted`（上次 run 未完成、未重放）：transcript 顶部一条中性提示——`uikit.StatusBadge`「上次运行被中断」+「未重放；请检查工作区状态后继续。」+「继续」+ 忽略图标。继续只聚焦 composer（不自动重放），忽略仅本次隐藏；后端下一次 run 清零后提示自然消失；sidebar 不加徽章（非持久提示不进入导航） |
 | streaming | 最后消息尾部 Spinner + 状态文本；输入区停止按钮；`RoleStatus`/Busy；composer 键位提示为「Enter 排队 · Esc 停止」；**有待审批时改为「Esc 拒绝审批（再按停止）」**，与审批卡的「Esc 拒绝」一致（PM-12） |
-| queued | 队列 Badge（可展开）：排队项来自后端 `contracts.PromptQueue`（按发送顺序 + 本地时间显示），可移除单条/清空；排队只发文字提示。UI 不持有队列、不发送、不 drain |
+| queued | **计数的落点随运行态切换**（2026-11-18 定稿，别把两处当成同一控件）：**运行中**只由 composer 动作行的 `×N` chip 报数（chip 紧贴「排队」控件左侧，点击展开面板，标题「队列中的消息 · N 条」，可移除单条/清空）；**停止后**改由状态条的 `已排队 N 条` 徽章接管（恢复/取消在那枚徽章的面板里）。两处都不在零计数时渲染空壳。排队项来自后端 `contracts.PromptQueue`（按发送顺序 + 本地时间）；UI 不持有队列、不发送、不 drain |
 | stopping | 停止按钮 pressed/disabled，文案「停止中…/Stopping…」；不可重复触发；**settle 后才 toast「已停止」**（UX-06：取消是异步的，running=true 期间不宣布完成） |
 | failed | 错误行 + 重试（带标签按钮，不是图标） |
 | queue-send-failed | 投递失败由后端把该条放回队首（并保留），UI 只渲染 `QueuedPrompts` 供用户移除；无「暂停/恢复/重试」内存语义，不得逐帧自动重发或每帧请求重绘 |
@@ -456,7 +456,7 @@ type RunStatusOptions struct {
 func RunStatus(c *ui.Context, o RunStatusOptions)
 ```
 
-**布局**：状态行在最后消息之后（消息内）或 composer 上方（运行态）；消息用量收进消息元信息行（时间 · 用时 · 紧凑 tokens · ⋯ → 用量明细子菜单，不再单独占 footer 行）；错误行贴近失败内容；toast 只做通知，不替代可操作错误。
+**布局（2026-11-18 v2）**：composer 下方一条 **32 高状态条**，三段：左「运行态」（`Accent` spinner + `LabelSecondary` 状态词 + 队列 `×N`）｜中 空｜右「用量组」（`42K/128K` + 3px 进度 + `详情` popover：轮次/步数/缓存命中/剩余）；数字用 mono 12。消息自身的用量收进消息元信息行（时间 · 用时 · tokens · ⋯，12/18，hover/focus 显形、行高固定 24）。**running ≠ warning**：进行中不用琥珀，warning 只给 needs-action。错误行贴近失败内容；toast 只做通知，不替代可操作错误。
 
 **禁止**：伪造进度条；把"停止"和"发送"并排同权重；运行中每帧重排布局（几何稳定）；用常驻 badge 代替 toast/错误；用 `ui.Toggle` 表达忙碌状态。
 

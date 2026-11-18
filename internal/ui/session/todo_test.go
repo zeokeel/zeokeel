@@ -136,12 +136,24 @@ func TestTodoDockShowsListAndCounts(t *testing.T) {
 	if nearColor(got, color.RGBA{R: light.BgBase.R, G: light.BgBase.G, B: light.BgBase.B, A: light.BgBase.A}, 2) {
 		t.Fatalf("in-progress row fill = %v, want the highlight, not the page base", got)
 	}
-	// It sits above the composer input.
+	// It sits above the composer input. The geometry is read after the frame has
+	// settled: a single pass could measure a layout still in progress on a loaded
+	// runner (this assertion flaked twice in other people's full-package runs).
+	// waitFor pumps frames until both rects resolve, so the check is a property of
+	// the settled frame rather than of the first one.
+	waitFor(t, tester, func() bool {
+		_, rowOK := tester.Find("修复构建")
+		_, inputOK := tester.Find("输入消息…")
+		return rowOK && inputOK
+	}, "the todo row and the composer input")
 	input, ok := tester.Find("输入消息…")
 	if !ok {
 		t.Fatalf("composer input missing; texts = %v", tester.Texts())
 	}
-	row, _ := tester.Find("修复构建")
+	row, ok := tester.Find("修复构建")
+	if !ok {
+		t.Fatalf("todo row missing; texts = %v", tester.Texts())
+	}
 	if row.Y >= input.Y {
 		t.Fatalf("todo dock at Y=%.1f is not above the composer at Y=%.1f", row.Y, input.Y)
 	}

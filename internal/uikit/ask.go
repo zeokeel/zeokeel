@@ -31,6 +31,10 @@ import (
 	"github.com/zeokeel/zeokeel/internal/icons"
 )
 
+// askOtherChoice is the sentinel value of the option list's fixed trailing
+// "其他…" row: choosing it reveals the free-text input instead of answering.
+const askOtherChoice = "\x00other"
+
 // AskDialogOptions is one agent question, rendered as the product's ask-user
 // Modal.
 type AskDialogOptions struct {
@@ -97,9 +101,11 @@ func askDialogKey(question contracts.UserQuestion) string {
 	return "uikit.ask/dialog!" + question.Text
 }
 
-// askDialogBody is the Modal body: title, the question text, either one native
-// full-width option button per choice (equal weight, vertically stacked) or a
-// free-text input with Submit, and the Cancel action on the left of the footer.
+// askDialogBody is the Modal body: the question, one radio row per choice (plus
+// the trailing "其他…" row and its inline input), and a footer whose only accent
+// fill is Submit. The options are the official radio group — one keyboard stop,
+// arrows to choose — so a stray Enter can never answer with a choice the user
+// did not make (S6); selecting is separate from submitting.
 func askDialogBody(c *ui.Context, o AskDialogOptions, open, otherOpen *bool, answer *string) {
 	t := design.Of(c)
 	submitAnswer := func(value string) {
@@ -114,87 +120,119 @@ func askDialogBody(c *ui.Context, o AskDialogOptions, open, otherOpen *bool, ans
 			o.OnCancel()
 		}
 	}
-	design.Apply(ui.Column(c).Width(design.DialogWidthS).Gap(design.Space4), func(el ui.Element) ui.Element {
-		return el.PaddingX(design.Space6).PaddingY(design.Space2)
-	}).Children(func() {
-		DialogHeader(c, DialogHeaderOptions{
-			Key:   "uikit.ask/header",
-			Icon:  icons.Sparkles(),
-			Title: T(o.Locale, "需要你的确认", "Needs your input"),
+	// The same card rhythm as the plan review and the approval card: Space4 of
+	// room inside, Space6 at the sides, Space3 between the blocks and the action
+	// row, so the two "your decision" cards do not read as two different
+	// components (2026-11 per-screen review, p2-ask vs p2-plan).
+	root := design.Apply(ui.Column(c).Width(design.DialogWidthS).Gap(design.Space3),
+		func(el ui.Element) ui.Element {
+			return el.Padding(design.Space4, design.Space6)
 		})
-		design.Apply(ui.Text(c, o.Question.Text), t.Font(design.TypeBody)).TextColor(t.LabelPrimary)
+	// The chosen option is the dialog's own state, keyed by the question: the
+	// next question starts with nothing chosen and Submit disabled.
+	choice := ui.Local(root, "choice", func() string { return "" })
+	root.Children(func() {
+		// The card's first line: the ask glyph and its 14/600 heading. It is not
+		// a dialog title (the Modal has none): the card states what it is, then
+		// the question.
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			ui.Icon(c, icons.Sparkles()).Size(design.Space3, design.Space3).
+				TextColor(t.Accent)
+			design.Apply(ui.Text(c, T(o.Locale, "需要你的确认", "Needs your input")),
+				t.Font(design.TypeS)).TextColor(t.LabelPrimary).
+				Role(ui.RoleHeading).Level(2)
+		})
+		design.Apply(ui.Text(c, o.Question.Text), t.Font(design.TypeBody)).
+			TextColor(t.LabelSecondary)
 
 		if len(o.Question.Options) > 0 {
-			// Options are equal choices: one full-width row each, no primary
-			// hierarchy that would silently rank them. The footer's Cancel
-			// action holds the initial focus instead of the first option, so a
-			// stray Enter cancels rather than answering with an option the user
-			// never chose. Choosing an option is an explicit click or
-			// Tab-then-Enter.
-			ui.Column(c).FillWidth().AlignItems(ui.Stretch).Gap(design.Space2).Children(func() {
+			// Options are equal choices: the official radio group gives one
+			// keyboard stop, the arrows choose, and Space selects. No option is
+			// a primary action, so the card never ranks the agent's suggestions.
+			// The fixed trailing "其他…" is one more row of the same group, so the
+			// choice list has one vocabulary instead of a radio stack with a
+			// button under it.
+			ui.RadioGroup(c, func() {
 				for _, option := range o.Question.Options {
 					option := option
-					button := design.Apply(ui.Button(c, option), t.SecondaryButton()).FillWidth()
-					if button.Clicked() {
-						submitAnswer(option)
-					}
+					ui.Radio(c, choice, option, option).
+						Height(design.ControlHeight).PaddingX(design.Space2).
+						FillWidth()
 				}
-				// The fixed trailing choice makes the agent's options a complete
-				// answer surface: "Other…" expands one inline text input whose
-				// text becomes the answer (Enter submits, Esc collapses back to
-				// the options). The option buttons stay visible so the user can
-				// change their mind without cancelling the question.
-				if !*otherOpen {
-					otherLabel := T(o.Locale, "其他…", "Other…")
-					other := design.Apply(ui.Button(c, otherLabel), t.SecondaryButton()).
-						FillWidth().Label(otherLabel)
-					if other.Clicked() {
-						*otherOpen = true
-						*answer = ""
-						c.Invalidate()
-					}
-				} else {
-					ui.TextInput(c, answer).
-						Label(T(o.Locale, "其他回答", "Other answer")).
-						Placeholder(T(o.Locale, "输入自定义回答", "Type your own answer")).
-						FillWidth().AutoFocus().
-						OnTextKey(func(k ui.TextKey) bool {
-							if k.Mods != 0 {
-								return false
-							}
-							switch k.Key {
-							case ui.KeyEscape:
-								// Collapse, never dismiss the question: the user
-								// is back to the option buttons.
-								*otherOpen = false
-								*answer = ""
-								c.Invalidate()
-								return true
-							case ui.KeyEnter:
-								if custom := strings.TrimSpace(*answer); custom != "" {
-									submitAnswer(custom)
-								}
-								return true
-							}
-							return false
-						})
-				}
-			})
-			ui.Divider(c)
-			DialogFooter(c, []DialogAction{
-				// The input owns the first focus while "Other…" is open; the
-				// options' cancel action owns it otherwise (C-03: a stray Enter
-				// must never answer an option the user did not choose).
-				{Label: T(o.Locale, "取消", "Cancel"), Default: !*otherOpen, OnClick: cancel},
-			})
-			hintText := T(o.Locale,
-				"Esc = 取消 · 用 Tab 选择选项后按 Enter 提交 · 「其他…」可自定义回答",
-				"Esc = cancel · Tab to an option, then Enter to choose · \"Other…\" answers in your own words")
+				ui.Radio(c, choice, askOtherChoice, T(o.Locale, "其他…", "Other…")).
+					Height(design.ControlHeight).PaddingX(design.Space2).FillWidth()
+			}).Label(T(o.Locale, "选项", "Options")).Gap(design.Space1).FillWidth()
+			*otherOpen = *choice == askOtherChoice
+			// Choosing "其他…" expands one inline text input under the rows whose
+			// text becomes the answer (Enter submits, Esc collapses back to the
+			// options). The rows stay visible so the user can change their mind
+			// without cancelling the question.
 			if *otherOpen {
-				hintText = T(o.Locale, "Enter = 提交自定义回答 · Esc = 返回选项",
-					"Enter = submit your answer · Esc = back to the options")
+				ui.TextInput(c, answer).
+					Label(T(o.Locale, "其他回答", "Other answer")).
+					Placeholder(T(o.Locale, "输入自定义回答", "Type your own answer")).
+					FillWidth().AutoFocus().
+					OnTextKey(func(k ui.TextKey) bool {
+						if k.Mods != 0 {
+							return false
+						}
+						switch k.Key {
+						case ui.KeyEscape:
+							// Collapse, never dismiss the question: the user
+							// is back to the option rows.
+							*choice = ""
+							*otherOpen = false
+							*answer = ""
+							c.Invalidate()
+							return true
+						case ui.KeyEnter:
+							if custom := strings.TrimSpace(*answer); custom != "" {
+								submitAnswer(custom)
+							}
+							return true
+						}
+						return false
+					})
 			}
-			design.Apply(ui.Text(c, hintText), t.TextMuted(design.TypeXXS))
+			*choice = strings.TrimSpace(*choice)
+			answerValue := ""
+			switch {
+			case *otherOpen:
+				answerValue = strings.TrimSpace(*answer)
+			default:
+				answerValue = *choice
+			}
+			// The footer states the keys beside the actions, not below them: the
+			// hint shares the action row's baseline (VD-32).
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				approvalKbdHint(c, t, T(o.Locale, "关闭问题", "closes the question"), FormatShortcut("Esc"))
+				ui.Spacer(c).Grow(1)
+				cancelButton := design.Apply(ui.Button(c, T(o.Locale, "取消", "Cancel")),
+					t.SecondaryButton())
+				// The cancel action keeps the Default while no "Other…" input holds
+				// the keyboard, so a stray Enter dismisses the question instead of
+				// answering one of its options (C-03).
+				if !*otherOpen {
+					cancelButton = cancelButton.AutoFocus()
+				}
+				if cancelButton.Clicked() {
+					cancel()
+				}
+				submitLabel := T(o.Locale, "提交", "Submit")
+				var submit ui.Element
+				if answerValue == "" {
+					// A blocked Submit explains itself by its look: a neutral fill
+					// with tertiary text, not a 50% accent wash that still reads as
+					// a live brand button (VD-20).
+					submit = design.Apply(ui.Button(c, submitLabel), t.DisabledPrimary()).
+						Disabled(true)
+				} else {
+					submit = design.Apply(ui.PrimaryButton(c, submitLabel), t.PrimaryButton())
+				}
+				if submit.Clicked() {
+					submitAnswer(answerValue)
+				}
+			})
 			return
 		}
 
@@ -210,11 +248,24 @@ func askDialogBody(c *ui.Context, o AskDialogOptions, open, otherOpen *bool, ans
 			Placeholder(T(o.Locale, "输入你的回答", "Type your answer")).FillWidth().
 			OnTextKey(EnterTo(func() { submit(*answer) }))
 		trimmed := strings.TrimSpace(*answer)
-		ui.Divider(c)
-		DialogFooter(c, []DialogAction{
-			{Label: T(o.Locale, "取消", "Cancel"), OnClick: cancel},
-			{Label: T(o.Locale, "提交", "Submit"), Primary: true, Disabled: trimmed == "",
-				OnClick: func() { submit(*answer) }},
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			approvalKbdHint(c, t, T(o.Locale, "关闭问题", "closes the question"), FormatShortcut("Esc"))
+			ui.Spacer(c).Grow(1)
+			if cancelButton := design.Apply(ui.Button(c, T(o.Locale, "取消", "Cancel")),
+				t.SecondaryButton()); cancelButton.Clicked() {
+				cancel()
+			}
+			submitLabel := T(o.Locale, "提交", "Submit")
+			var button ui.Element
+			if trimmed == "" {
+				button = design.Apply(ui.Button(c, submitLabel), t.DisabledPrimary()).
+					Disabled(true)
+			} else {
+				button = design.Apply(ui.PrimaryButton(c, submitLabel), t.PrimaryButton())
+			}
+			if button.Clicked() {
+				submit(*answer)
+			}
 		})
 	})
 }

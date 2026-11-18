@@ -293,6 +293,9 @@ func (d *drive) chat() contracts.ChatService {
 // run executes every step group in product order. The --only filter (stored on
 // the drive) narrows which steps run.
 func (d *drive) run(string) {
+	// The A4 interaction-QA steps ride the same runner: `--only a4qa-` runs the
+	// audit's core interaction cases beside the surface steps.
+	d.runA4QASteps()
 	d.runShellSteps()
 	d.runSettingsSteps()
 	d.runArchiveSteps()

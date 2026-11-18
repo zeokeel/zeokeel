@@ -155,24 +155,33 @@ func permissionModeLabel(locale contracts.LocaleService, mode string) string {
 	}
 }
 
-// buildPermissionExplanation is the visible permission teaching block (audit
-// US-05): the three states explained accurately, the two-layer model (approval
-// gate × OS sandbox) disclosed, the shell auto-allow fact stated correctly (no
-// "仍会询问" contradiction), and — when an active session carries the wave-A read
-// model — its effective approval mode, OS sandbox mode and permission scope, so
-// a session-level "all permissions" override is visibly approval-only while the
-// OS sandbox follows the global mode.
-func buildPermissionExplanation(c *ui.Context, t *design.Tokens, locale contracts.LocaleService, chat contracts.ChatService) {
-	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-		design.Apply(ui.Text(c, localized(locale,
-			"权限三态只决定「哪些工具调用免审批」：只读＝仅只读/信息类工具；工作区修改（默认）＝再加工作区内文件读写；所有权限＝全部免审批。",
-			"The three permission states only decide which tool calls skip approval: Read-only = read-only/informational tools; Workspace-write (default) = plus file reads/writes inside the workspace; All permissions = everything skips approval.")),
-			t.TextMuted(design.TypeXXS)).MaxLines(3)
-		design.Apply(ui.Text(c, localized(locale,
-			"审批与 OS 沙箱是两层：OS 沙箱始终跟随全局权限，会话/自动化级「所有权限」只放宽审批、不解除沙箱；沙箱可用时 shell 类工具自动放行，不可用时命令失败。",
-			"Approval and the OS sandbox are two layers: the OS sandbox always follows the global permission; a session/automation-level All permissions only relaxes approval, never lifts the sandbox. Shell tools are auto-allowed when the sandbox is available and fail closed when not.")),
-			t.TextMuted(design.TypeXXS)).MaxLines(3)
-		// The active session's effective modes make the distinction concrete.
+// buildPermissionSection is the one place the product explains the three
+// permission presets (A5 §3.1 「权限」: one concept, one wording; the copies in
+// the session composer and the sandbox note were removed so this is the only
+// full statement). The presets are a bullet list under one summary line — a
+// wall of one paragraph could not be scanned (A3 VD-19) — and a session's
+// effective modes close the block in one metadata line, so a session-level
+// "all permissions" override reads as approval-only while the OS sandbox
+// follows the global mode (audit US-05/RG-02).
+func buildPermissionSection(c *ui.Context, t *design.Tokens, locale contracts.LocaleService, chat contracts.ChatService) {
+	uikit.Section(c, localized(locale, "权限模式", "Permission mode"), func(*ui.Context) {
+		ui.Column(c).FillWidth().Gap(design.SpaceRow).MaxWidth(design.ProseMeasure).Children(func() {
+			design.Apply(ui.Text(c, localized(locale,
+				"在输入框的权限按钮里切换。三档决定哪些工具调用免审批：",
+				"Switch in the composer's permission button. The presets decide which tool calls skip approval:")),
+				t.TextMuted(design.TypeXS))
+			ui.Column(c).FillWidth().Gap(design.SpaceInline).Children(func() {
+				uikit.Bullet(c, localized(locale,
+					"只读：仅只读与信息类工具免审批。",
+					"Read-only: only read-only and informational tools skip approval."))
+				uikit.Bullet(c, localized(locale,
+					"工作区修改（默认）：再加上工作区内的文件读写。",
+					"Workspace-write (default): plus file reads and writes inside the workspace."))
+				uikit.Bullet(c, localized(locale,
+					"所有权限：全部工具调用免审批。",
+					"All permissions: every tool call skips approval."))
+			})
+		})
 		if chat == nil {
 			return
 		}
@@ -191,15 +200,15 @@ func buildPermissionExplanation(c *ui.Context, t *design.Tokens, locale contract
 		if !found || info.EffectiveApprovalMode == "" {
 			return
 		}
-		scope := localized(locale, "全局跟随", "follows global")
+		scope := localized(locale, "跟随全局设置", "follows the global setting")
 		if info.PermissionScope == contracts.PermissionScopeSession {
-			scope = localized(locale, "会话级覆盖", "session override")
+			scope = localized(locale, "本会话覆盖", "session override")
 		}
-		design.Apply(ui.Text(c, localized(locale, "当前会话：审批＝", "Current session: approval = ")+
+		design.Apply(ui.Text(c, localized(locale, "本会话：审批 ", "This session: approval ")+
 			permissionModeLabel(locale, info.EffectiveApprovalMode)+"（"+scope+"）"+
-			localized(locale, " · OS 沙箱＝", " · OS sandbox = ")+
+			localized(locale, " · 系统沙箱 ", " · OS sandbox ")+
 			permissionModeLabel(locale, info.EffectiveSandboxMode)+
-			localized(locale, "（跟随全局）", " (follows global)")),
+			localized(locale, "（全局）", " (global)")),
 			t.TextMuted(design.TypeXXS)).MaxLines(2)
 	})
 }
@@ -259,26 +268,17 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 	if search.targetedAt("behavior.message-size") || search.targetedAt("behavior.workspace-instructions") {
 		st.moreOpen = true
 	}
-	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+	ui.Column(c).FillWidth().Gap(design.SpaceScreen).Children(func() {
 		uikit.PageHeader(c, localized(locale, "行为与限额", "Behavior & limits"), "")
-		// Permission is edited from the composer's permission button now; keep
-		// a quiet pointer here so the setting stays discoverable.
-		design.Apply(ui.Text(c, localized(locale,
-			"权限模式已移到输入框工具栏的权限按钮：工作区修改 / 所有权限 / 只读。",
-			"Permission mode lives on the composer toolbar's permission button: Workspace-write / All permissions / Read-only.")),
-			t.TextMuted(design.TypeXXS)).MaxLines(2)
-		// The three states get a visible plain-language explanation here, not a
-		// tooltip buried on a disabled menu header (audit US-05): what each state
-		// auto-allows, the two-layer model (approval gate × OS sandbox), and the
-		// corrected fact that shell tools are auto-allowed when the sandbox is
-		// available. The active session's effective modes + scope make the
-		// session-vs-global distinction concrete.
-		buildPermissionExplanation(c, t, locale, chat)
-		// OS sandbox: the always-on kernel-level file-effect enforcement that
-		// lets the agent gate auto-allow shell tools. It sits next to the
-		// permission mode it mirrors, and its live status says whether this
-		// host can enforce it — mode-aware, since full access passes commands
-		// through unconfined (RG-02).
+		// The permission presets are documented here in one bulleted block; the
+		// control itself lives on the composer's permission button (A5 §3.1,
+		// the meta sentence "已移到输入框工具栏" is gone: it described a layout
+		// that the next redesign invalidates).
+		buildPermissionSection(c, t, locale, chat)
+		// System sandbox: the always-on kernel-level file-effect enforcement
+		// that lets the agent gate auto-allow shell tools. Its live status says
+		// whether this host can enforce it — mode-aware, since full access
+		// passes commands through unconfined (RG-02).
 		buildSandboxSection(c, locale, sandboxService, store)
 		// Work details: how much of a turn's tool-call steps the transcript shows
 		// and when finished steps fold (DSH-aligned). This stays visible next to
@@ -288,10 +288,13 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 			uikit.Section(c, localized(locale, "工作步骤", "Work details"), func(*ui.Context) {
 				modeIndex := workStepsModeIndex(contracts.NormalizeWorkStepsMode(
 					store.Get(contracts.SettingWorkStepsMode, "")))
-				ui.Field(c, localized(locale, "工作步骤展示", "Work details"), func() {
+				// The field label names the choice the control makes; repeating
+				// the section title made a screen reader read the same name twice
+				// (A5 F-22: 分节说范围，字段说取值).
+				ui.Field(c, localized(locale, "展示密度", "Display density"), func() {
 					if uikit.SegmentedControl(c, uikit.SegmentedOptions{
 						Key:      "settings.behavior.workSteps",
-						Label:    localized(locale, "工作步骤展示", "Work details"),
+						Label:    localized(locale, "展示密度", "Display density"),
 						Labels:   workStepsModeLabels(locale),
 						Selected: &modeIndex,
 					}) {
@@ -322,7 +325,7 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 		// summary keeps the collapsed state informative without repeating the
 		// controls.
 		ui.Collapsible(c, localized(locale, "更多对话设置", "More conversation settings"), &st.moreOpen, func() {
-			ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+			ui.Column(c).FillWidth().Gap(design.SpaceScreen).Children(func() {
 				search.region(c, "behavior.message-size", func(c *ui.Context) {
 					uikit.Section(c, localized(locale, "消息字号", "Message text size"), func(*ui.Context) {
 						current := chatFontSizeSetting(store)
@@ -344,7 +347,7 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 							}
 						}).Label(localized(locale, "消息字号：", "Text size: ") +
 							chatFontSizeLabel(locale, current)).
-							Tooltip(localized(locale, "选择对话文字大小", "Choose the conversation text size"))
+							Description(localized(locale, "选择对话文字大小", "Choose the conversation text size"))
 					})
 				})
 				search.region(c, "behavior.workspace-instructions", func(c *ui.Context) {
@@ -355,8 +358,9 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 						}
 						ui.Field(c, localized(locale, "工作区指令文件", "Workspace instructions file"), func() {
 							input := ui.TextInput(c.Key("settings.behavior.agents-file"), &st.agentsFile).
-								Label(localized(locale, "工作区指令文件", "Workspace instructions file")).
-								Placeholder("AGENTS.md").FillWidth()
+								Label(inputLabel(locale,
+									localized(locale, "工作区指令文件", "Workspace instructions file"))).
+								Placeholder("AGENTS.md").Width(controlWidth)
 							if input.Changed() {
 								saveAgentsFile(st, store, locale)
 							}
@@ -384,9 +388,9 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 		// models are not confused (2026-11 audit US-13).
 		uikit.Section(c, localized(locale, "运行限额", "Run limits"), func(body *ui.Context) {
 			design.Apply(ui.Text(body, localized(locale,
-				"以下限额需点页脚「保存」后生效；上方的显示偏好即时生效。",
-				"These limits apply after the footer Save; the display preferences above apply immediately.")),
-				t.TextMuted(design.TypeXXS)).MaxLines(2)
+				"以下限额点「保存」后生效。",
+				"These limits apply after you click Save.")),
+				t.TextMuted(design.TypeXS)).MaxLines(2)
 			buildCapabilitiesPage(body, store, capabilities, locale, false)
 		})
 	})

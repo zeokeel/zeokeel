@@ -47,7 +47,7 @@ func TestConnectorDetailsToolSwitches(t *testing.T) {
 	provide[contracts.MCPToolCatalog](t, h.ctx, contracts.KeyMCPToolCatalog, catalog)
 	tester := h.tester()
 	h.click(tester, "连接器")
-	h.click(tester, "连接器操作 files")
+	h.click(tester, "连接器操作：files")
 	if err := tester.Click("详情"); err != nil {
 		t.Fatalf("open details: %v; texts = %v", err, tester.Texts())
 	}

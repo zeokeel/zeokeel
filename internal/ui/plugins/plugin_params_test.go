@@ -75,7 +75,7 @@ func TestPluginParamsEditPersists(t *testing.T) {
 	h.click(tester, "编辑 搜索端点")
 	h.assertTexts(tester, "编辑参数", "保存", "取消")
 
-	focusParamInput(t, h, tester, "新值：搜索端点")
+	focusParamInput(t, h, tester, "新值：搜索端点 输入")
 	tester.Key(ui.Cmd, ui.KeyA)
 	tester.Type("https://new.example.com/search")
 	tester.Frame()
@@ -96,12 +96,12 @@ func TestPluginParamsSensitiveEditKeepsValuePrivate(t *testing.T) {
 	h.click(tester, "显示参数")
 	h.click(tester, "编辑 API Key")
 	h.assertNoTexts(tester, "sk-old")
-	focusParamInput(t, h, tester, "新值：API Key")
+	focusParamInput(t, h, tester, "新值：API Key 输入")
 	tester.Type("sk-new")
 	tester.Frame()
 	// The sensitive editor uses the official Password mode: the draft is not in
 	// the accessibility tree and cannot be copied out of the input.
-	if info, ok := tester.Access("新值：API Key"); ok && strings.Contains(info.Value, "sk-new") {
+	if info, ok := tester.Access("新值：API Key 输入"); ok && strings.Contains(info.Value, "sk-new") {
 		t.Fatalf("API key editor exposed the draft: %q", info.Value)
 	}
 	tester.Key(ui.Cmd, ui.KeyA)
@@ -123,7 +123,7 @@ func TestPluginParamsEditFailureDanger(t *testing.T) {
 	tester := h.tester()
 	h.click(tester, "显示参数")
 	h.click(tester, "编辑 搜索端点")
-	focusParamInput(t, h, tester, "新值：搜索端点")
+	focusParamInput(t, h, tester, "新值：搜索端点 输入")
 	tester.Type("https://x.example.com/search")
 	tester.Frame()
 	h.click(tester, "保存")

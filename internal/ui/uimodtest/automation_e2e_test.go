@@ -125,20 +125,29 @@ func TestAutomationTasksEndToEnd(t *testing.T) {
 	}
 	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
-	// H11: schedules render human-readable, and cards expose Edit. Delete is a
-	// danger action behind the row's ⋯ menu now (R1 danger budget), not a
-	// standing red button on every card.
-	for _, want := range []string{"自动化", "每日摘要", "工具任务", "每 60 秒", "立即运行", "编辑"} {
+	// H11: schedules render human-readable. Edit and the danger Delete both
+	// live behind the row's ⋯ menu now (B-spec v2: 编辑 joined 删除 there so a
+	// task row is one row of information plus one menu, not a strip of
+	// buttons; the R1 danger budget is unchanged).
+	for _, want := range []string{"自动化", "每日摘要", "工具任务", "每 60 秒", "立即运行", "任务操作"} {
 		if !tester.HasText(want) {
 			t.Fatalf("automation frame missing %q; texts = %v", want, tester.Texts())
 		}
 	}
-	if err := tester.Click("任务操作"); err != nil {
+	// The row no longer carries a standing 编辑 action: the menu's own item
+	// must not be readable before the menu opens, or the row and the menu would
+	// duplicate each other.
+	if tester.HasText("编辑任务") {
+		t.Fatalf("task row shows the menu's 编辑任务 action before the menu opens; texts = %v", tester.Texts())
+	}
+	if err := tester.Click("任务操作：每日摘要"); err != nil {
 		t.Fatalf("open task actions menu: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	if !tester.HasText("删除任务") {
-		t.Fatalf("task actions menu missing the danger delete; texts = %v", tester.Texts())
+	for _, want := range []string{"编辑任务", "删除任务"} {
+		if !tester.HasText(want) {
+			t.Fatalf("task actions menu missing %q; texts = %v", want, tester.Texts())
+		}
 	}
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()

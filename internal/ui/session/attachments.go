@@ -124,8 +124,15 @@ func defaultReadAttachmentFiles(paths []string) []attachmentFileResult {
 
 // applyStagedFiles turns the background read results into pending attachments
 // on the UI thread: IDs, cached previews and the localized first error.
-func applyStagedFiles(st *state, results []attachmentFileResult) {
-	st.attachErr = ""
+// applyStagedFiles turns the background read results into pending attachments
+// on the UI thread: IDs, cached previews and, for the newest staging only, the
+// localized first error. An outdated batch still stages its readable files
+// (nothing the user dropped disappears) but may not set or clear the error line,
+// which describes the latest gesture.
+func applyStagedFiles(st *state, results []attachmentFileResult, newest bool) {
+	if newest {
+		st.attachErr = ""
+	}
 	for _, result := range results {
 		switch {
 		case result.notRegular:
@@ -167,13 +174,20 @@ func stageAttachmentFilesAsync(runtime contracts.UIRuntime, st *state, sessionID
 	if st == nil || len(paths) == 0 {
 		return
 	}
+	// The error line belongs to the newest staging only: two reads can finish in
+	// either order, and the older one's failure must not reappear after a later
+	// drop succeeded (the attachment flake at session_ui_test.go:348). The
+	// sequence is taken here, at launch, so it orders the completions the way the
+	// user's gestures happened.
+	st.stageSeq++
+	seq := st.stageSeq
 	go func() {
 		results := readAttachmentFiles(paths)
 		runtime.Post(func() {
 			staged := 0
 			st.withComposerSession(sessionID, func() {
 				before := len(st.pendingAttachments)
-				applyStagedFiles(st, results)
+				applyStagedFiles(st, results, seq == st.stageSeq)
 				staged = len(st.pendingAttachments) - before
 			})
 			if onApplied != nil {
@@ -254,6 +268,10 @@ func startAttachmentPick(runtime contracts.UIRuntime, st *state) {
 	// conversation switch while it was open cannot stage files into the wrong
 	// chat.
 	sessionID := st.draftSession
+	// The picker is one staging gesture too: its result is the newest, so it owns
+	// the error line (the same sequence the drop path takes).
+	st.stageSeq++
+	seq := st.stageSeq
 	runtime.Invalidate()
 	go func() {
 		paths, err := AttachmentPicker()
@@ -274,7 +292,7 @@ func startAttachmentPick(runtime contracts.UIRuntime, st *state) {
 						st.tr("；请拖入文件或粘贴图片", "; drag files in or paste an image instead")
 					return
 				}
-				applyStagedFiles(st, results)
+				applyStagedFiles(st, results, seq == st.stageSeq)
 			})
 			runtime.Invalidate()
 		})
@@ -464,7 +482,7 @@ func buildAttachmentChip(c *ui.Context, t *design.Tokens, st *state, attachment 
 	}
 	chip := design.Apply(ui.Row(c.Key(key)), t.ControlChip(), func(el ui.Element) ui.Element {
 		return el.Background(t.BgStrong).Border(0, ui.Transparent)
-	}).AlignItems(ui.Center).Shrink(0).Label(name)
+	}).AlignItems(ui.Center).Shrink(0).MaxWidth(design.Space8 * 7).Label(name)
 	chip.Children(func() {
 		buildAttachmentChipContent(c, t, st, attachment, name, th)
 		if onPreview != nil {
@@ -504,8 +522,11 @@ func buildAttachmentChipContent(c *ui.Context, t *design.Tokens, st *state, atta
 		}
 		ui.Icon(c, icon).Size(th.Space(4), th.Space(4)).TextColor(t.LabelSecondary)
 	}
+	// A chip is one line with a ceiling: a long name ellipsizes inside the chip
+	// instead of pushing the chip past the composer card's edge (p2-attachments
+	// audit: a 110-character name ran off the card).
 	design.Apply(ui.Text(c, name), t.Font(design.TypeXXS)).
-		TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
+		TextColor(t.LabelPrimary).Shrink(1).MaxLines(1).Ellipsis("…")
 	if attachment.Size() > 0 {
 		design.Apply(ui.Text(c, formatAttachmentSize(attachment.Size())), t.Font(design.TypeXXS)).
 			TextColor(t.LabelTertiary).NoWrap()

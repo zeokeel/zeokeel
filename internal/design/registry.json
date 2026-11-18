@@ -1,7 +1,7 @@
 {
   "version": 1,
   "source": {
-    "mygo": "v0.9.0",
+    "mygo": "v0.9.2",
     "entries": "internal/uikit",
     "design_doc": "docs/DESIGN.md",
     "lint_doc": "docs/DESIGN-LINT.md"
@@ -691,6 +691,23 @@
         "description_under_control",
         "bare_switch_without_label"
       ]
+    },
+    {
+      "id": "uikit.kbd",
+      "entry": "uikit.Kbd",
+      "package": "internal/uikit",
+      "allowed": [
+        "uikit.Kbd",
+        "uikit.KbdHint"
+      ],
+      "forbidden": [
+        "unicode_glyph_key",
+        "raw_shortcut_string"
+      ],
+      "doc": "docs/DESIGN.md §6.2 (uikit.Kbd)",
+      "rules": [
+        "DS-03"
+      ]
     }
   ],
   "scenarios": [
@@ -1019,6 +1036,34 @@
       "what": "文件/目录选择器与导出保存 seam：纯测试注入点（var 函数，无自绘控件）",
       "owner": "uiroot",
       "reason": "无应用状态，非 UI 自绘（DESIGN.md §7.1）；2026-11 审计 UD-11 由整目录收窄到实际 seam 文件",
+      "until": "2027-06-30"
+    },
+    {
+      "id": "rightpanel.file-crumb",
+      "paths": [
+        "internal/ui/rightpanel/view.go"
+      ],
+      "rules": [
+        "DS-06"
+      ],
+      "symbol": "buildFileTabHeader",
+      "what": "文件面包屑的根节点返回控件（无按钮外观，点击/Enter 回到文件树）",
+      "owner": "rightpanel",
+      "reason": "官方 Breadcrumbs 的末项是当前页（不是链接），而根目录这一格必须是可点的返回入口；无外观文本按钮用 ButtonBase（DESIGN.md §7.1，2026-11-18 重设计登记）",
+      "until": "2027-06-30"
+    },
+    {
+      "id": "uikit.composer-queue-chip",
+      "paths": [
+        "internal/uikit/composer.go"
+      ],
+      "rules": [
+        "DS-06"
+      ],
+      "symbol": "composerQueueChip",
+      "what": "composer 动作行里的队列计数 chip（×N）：ButtonBase 全状态自绘，点击打开队列面板",
+      "owner": "uikit",
+      "reason": "官方 ui.Badge 无点击/键盘语义、ui.Button 覆写背景会丢原生 hover/pressed（AP-02）。与 uikit.run-status-queue-badge 同一词汇：计数就在加队列的控件旁，空计数不画（p2-inbox 审计）",
       "until": "2027-06-30"
     }
   ]

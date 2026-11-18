@@ -377,13 +377,13 @@ func TestConnectorCardsMergeStoredRowsWithLiveState(t *testing.T) {
 	assertConnectorExactTextCount(t, tester, "http://127.0.0.1:9000/mcp", 1)
 
 	// A live-only server has details but no edit/remove: it is not in settings.
-	h.click(tester, "连接器操作 assembly")
+	h.click(tester, "连接器操作：assembly")
 	h.assertTexts(tester, "详情")
 	h.assertNoTexts(tester, "编辑", "移除")
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
 
-	h.click(tester, "连接器操作 files")
+	h.click(tester, "连接器操作：files")
 	h.assertTexts(tester, "详情", "编辑", "移除")
 }
 
@@ -468,7 +468,7 @@ func TestConnectorEditServerInPlace(t *testing.T) {
 	tester := h.tester()
 	h.click(tester, "连接器")
 
-	h.click(tester, "连接器操作 srv")
+	h.click(tester, "连接器操作：srv")
 	h.click(tester, "编辑")
 	h.assertTexts(tester, "编辑连接器", "保存", "取消")
 
@@ -627,7 +627,7 @@ func TestConnectorDetailsModalShowsMaskedConfigAndRawError(t *testing.T) {
 	tester := h.tester()
 	h.click(tester, "连接器")
 
-	h.click(tester, "连接器操作 srv")
+	h.click(tester, "连接器操作：srv")
 	h.click(tester, "详情")
 	// The subtitle is a purpose line; the transport lives once, in the 类型 row.
 	h.assertTexts(tester, "外部 MCP 服务配置与状态")
@@ -638,7 +638,7 @@ func TestConnectorDetailsModalShowsMaskedConfigAndRawError(t *testing.T) {
 	// The localized cause leads (the chain's "initialize" classifies as a
 	// handshake failure); the raw backend chain stays folded until the user
 	// asks for it, and the secret env value is masked.
-	h.assertTexts(tester, "协议握手失败（MCP 初始化未完成）", "原始错误")
+	h.assertTexts(tester, "服务器未完成 MCP 初始化", "原始错误")
 	h.assertNoTexts(tester, "dial tcp 127.0.0.1:9", "TOKEN=abc")
 	h.click(tester, "原始错误")
 	// Expanded: the chain is selectable and the repeated "mcp:" wrappers are
@@ -658,7 +658,7 @@ func TestConnectorRemoveConfirmation(t *testing.T) {
 	tester := h.tester()
 	h.click(tester, "连接器")
 
-	h.click(tester, "连接器操作 files")
+	h.click(tester, "连接器操作：files")
 	h.click(tester, "移除")
 	h.assertTexts(tester, "移除 MCP 连接器", "确认移除「files」？此操作无法撤销。",
 		"移除连接器", "取消")
@@ -672,7 +672,7 @@ func TestConnectorRemoveConfirmation(t *testing.T) {
 	h.assertTexts(tester, "files")
 
 	// Confirming the dialog drops the row and writes the rest back.
-	h.click(tester, "连接器操作 files")
+	h.click(tester, "连接器操作：files")
 	h.click(tester, "移除")
 	h.click(tester, "移除连接器")
 	want := `[{"name":"web","url":"https://mcp.example.com/mcp"}]`
@@ -700,11 +700,13 @@ func TestConnectorWorkspaceOptInWritesSetting(t *testing.T) {
 	if got := store.get(contracts.SettingMCPWorkspaceOptIn); got != "" {
 		t.Fatalf("default opt-in = %q, want unset/off", got)
 	}
-	h.click(tester, "启用工作区 mcp.json")
+	// The option is a settings-style switch row now: the caption names the
+	// switch (uikit.SwitchRow's LabelledBy), so the caption is the click target.
+	h.click(tester, "读取工作区 mcp.json")
 	if got := store.get(contracts.SettingMCPWorkspaceOptIn); got != "true" {
 		t.Fatalf("opt-in after enable = %q, want true", got)
 	}
-	h.click(tester, "启用工作区 mcp.json")
+	h.click(tester, "读取工作区 mcp.json")
 	if got := store.get(contracts.SettingMCPWorkspaceOptIn); got != "false" {
 		t.Fatalf("opt-in after disable = %q, want false", got)
 	}
@@ -741,19 +743,19 @@ func TestConnectorEnglishCopy(t *testing.T) {
 	h.click(tester, "Connectors")
 
 	h.assertTexts(tester, "1 connector", "Add connector", "Reconnect",
-		"Connected", "Enable connector files", "Connector actions files",
+		"Connected", "Enable connector files", "Connector actions: files",
 		"Connector options")
 	h.assertNoTexts(tester, "添加连接器", "已连接", "连接器选项")
 
 	// The form and the remove confirmation are localized too.
-	h.click(tester, "Connector actions files")
+	h.click(tester, "Connector actions: files")
 	h.assertTexts(tester, "Details", "Edit", "Remove")
 	h.click(tester, "Edit")
 	h.assertTexts(tester, "Edit connector", "Name input", "URL input", "Test connection",
 		"Cancel", "Save")
 	h.click(tester, "Cancel")
 
-	h.click(tester, "Connector actions files")
+	h.click(tester, "Connector actions: files")
 	h.click(tester, "Remove")
 	h.assertTexts(tester, "Remove MCP connector", "Remove connector", "Cancel")
 }

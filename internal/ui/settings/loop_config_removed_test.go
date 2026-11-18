@@ -56,7 +56,7 @@ func TestCapabilitiesPageHasNoLoopBudgets(t *testing.T) {
 		requireNoInputNamed(t, tester, label)
 	}
 	// The surviving limits and the approval timeout are untouched.
-	h.assertTexts(tester, "Subagent 并发", "Team member 并发", "Shell 命令超时", "Shell 输出上限", "审批超时")
+	h.assertTexts(tester, "子智能体并发", "团队成员并发", "Shell 命令超时", "Shell 输出上限", "审批超时")
 	if save := saveButton(t, tester); !save.Disabled {
 		t.Fatalf("the footer's Save is enabled on a clean page: %+v", save)
 	}
@@ -80,7 +80,7 @@ func TestCapabilitiesPageIgnoresLegacyLoopRows(t *testing.T) {
 	}
 	// Dirty a surviving limit so the footer Save is enabled, then save: the
 	// edited row persists and the legacy loop rows stay untouched.
-	typeNumberInput(t, h, tester, "Subagent 并发", "5")
+	typeNumberInput(t, h, tester, "子智能体并发", "5")
 	h.click(tester, "保存")
 	h.assertTexts(tester, "已保存")
 	if got := store.get("agent.subagentMaxConcurrent"); got != "5" {

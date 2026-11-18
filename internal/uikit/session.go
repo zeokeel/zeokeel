@@ -114,16 +114,25 @@ func SessionThread(c *ui.Context, o SessionThreadOptions) {
 			return sessionRowLabel(o.Locale, messages[run[0]], run[0])
 		}
 		// Each layout follows the end while the user stays there; scrolling away
-		// stops the follow inside the List, and ScrollToEnd resumes it.
+		// stops the follow inside the List, and ScrollToEnd resumes it. The
+		// follow and row-move animations are the shipped list motion (B-spec
+		// §1.5): a streamed row rises into place instead of popping, and rows
+		// below a fold or a reorder glide rather than jump. design's wrappers
+		// return nil under reduced motion, which leaves the list static.
 		state.FollowEnd = true
+		state.FollowAnimation = design.ListFollowAnimation(c)
+		state.MoveAnimation = design.ListMoveAnimation(c)
 		if o.HoldPlace != nil && *o.HoldPlace {
 			state.HoldPlace()
 			*o.HoldPlace = false
 		}
 		list := ui.List(c, state, len(runs)).
 			Label(T(o.Locale, "对话消息", "Conversation messages")).
-			Gap(design.Space5).
-			PaddingY(design.Space5).
+			// One conversation turn to the next is 24 DIP (B-spec §3.2.2), and
+			// the transcript keeps 16 DIP above the composer dock, so a message
+			// and the status bar under the composer never touch.
+			Gap(design.Space6).
+			PaddingY(design.Space4).
 			FillWidth().Grow(1)
 		if len(runs) == 0 && o.Empty != nil {
 			// The first-run hero sits on the same reading measure as the rows.

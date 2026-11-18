@@ -1,7 +1,7 @@
 package main
 
 // Landing steps (replacing the retired Home navigation): the product now lands
-// on the conversation screen's new-chat hero, and the sidebar's 新对话 action is
+// on the conversation screen's new-chat hero, and the sidebar's 新建会话 action is
 // the way to start a fresh conversation. These steps keep the landing's
 // discoverability and the conversation switch covered after Home left the
 // sidebar.
@@ -11,8 +11,8 @@ import (
 )
 
 func (d *drive) runLandingSteps() {
-	d.step("landing-new-chat", "shell", "落地页：侧栏「新对话」→ hero + composer",
-		"任意屏幕点侧栏「新对话」→ 会话页新对话落地（hero「开始新对话」+ composer）；导航状态 session，侧栏不再有「首页」项", func(c *check) {
+	d.step("landing-new-chat", "shell", "落地页：侧栏「新建会话」→ hero + composer",
+		"任意屏幕点侧栏「新建会话」→ 会话页新会话落地（hero「发第一条消息」+ composer）；导航状态 session，侧栏不再有「首页」项", func(c *check) {
 			d.resetToSession()
 			// Go somewhere else first: the reset below must land through the
 			// sidebar action, not because the session was already on screen.
@@ -21,13 +21,13 @@ func (d *drive) runLandingSteps() {
 				return
 			}
 			d.drain(2)
-			if !c.click("新对话") {
+			if !c.click("新建会话") {
 				return
 			}
 			d.drain(3)
-			c.mustText("开始新对话", "输入消息…")
+			c.mustText("发第一条消息", "输入消息…")
 			c.require(d.uiRoot.Navigator().Current() == "session",
-				"点「新对话」后导航状态=%q，期望 session", d.uiRoot.Navigator().Current())
+				"点「新建会话」后导航状态=%q，期望 session", d.uiRoot.Navigator().Current())
 			c.require(!d.hasExactText("首页"), "侧栏仍显示已移除的「首页」导航项")
 			d.syncSession()
 			c.shot("landing-new-chat")
@@ -35,8 +35,8 @@ func (d *drive) runLandingSteps() {
 
 	d.step("landing-conversation-switch", "shell", "落地页：从侧栏会话列表切回已有会话",
 		"hero 落地页 → 侧栏点已有会话标题 → 进入该会话，transcript 与 composer 出现", func(c *check) {
-			if !d.has("开始新对话") {
-				if !c.click("新对话") {
+			if !d.has("发第一条消息") {
+				if !c.click("新建会话") {
 					return
 				}
 				d.drain(3)
@@ -71,9 +71,9 @@ func (d *drive) runLandingSteps() {
 
 	// Keep the composer keyboard entry covered from the landing screen.
 	d.step("landing-composer-focus", "shell", "落地页：输入框可聚焦并发送",
-		"新对话落地页聚焦 composer 输入 → 输入文字草稿保留在输入框（不发送）", func(c *check) {
-			if !d.has("开始新对话") {
-				if !c.click("新对话") {
+		"新建会话落地页聚焦 composer 输入 → 输入文字草稿保留在输入框（不发送）", func(c *check) {
+			if !d.has("发第一条消息") {
+				if !c.click("新建会话") {
 					return
 				}
 				d.drain(3)

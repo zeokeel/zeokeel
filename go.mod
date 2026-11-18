@@ -3,7 +3,7 @@ module github.com/zeokeel/zeokeel
 go 1.27.3
 
 require (
-	github.com/egoist/mygo v0.9.0
+	github.com/egoist/mygo v0.9.2
 	github.com/zeokeel/zeokeel-kernel v0.1.1
 	github.com/zeokeel/zeokeel-rig v0.19.0
 	golang.org/x/sys v0.49.0

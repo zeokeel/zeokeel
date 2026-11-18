@@ -81,10 +81,11 @@ func contrastRatio(a, b ui.Color) float64 {
 }
 
 // TestSegmentedControlChosenSegmentLook covers the one look in both themes: the
-// chosen segment paints the BgSelected tint with LabelPrimary text and the 2 DIP
-// Accent boundary the track contrast needs (>= 3:1); the track stays readable
-// for the unchosen segment (LabelSecondary >= 4.5:1); assistive technology sees
-// a named radio group of radio buttons with the chosen one checked.
+// track is the sunken BgStrong fill, the chosen segment is a raised block
+// (BgRaised + a 1 DIP BorderL3 outline + LabelPrimary text), and there is no
+// accent rule under it — the earlier 2 DIP Accent underline was clipped by the
+// segment radius and stacked three blues (A3 VD-12). Assistive technology still
+// sees a named radio group of radio buttons with the chosen one checked.
 func TestSegmentedControlChosenSegmentLook(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -120,29 +121,42 @@ func TestSegmentedControlChosenSegmentLook(t *testing.T) {
 
 			img := tester.Image()
 			track := framePixel(t, img, int(group.Bounds.X)+1, int(group.Bounds.Y+group.Bounds.H/2))
-			fill := framePixel(t, img, int(chosen.Bounds.X)+3, int(chosen.Bounds.Y+chosen.Bounds.H/2))
-			underline := framePixel(t, img,
+			fill := framePixel(t, img, int(chosen.Bounds.X)+6, int(chosen.Bounds.Y+chosen.Bounds.H/2))
+			foot := framePixel(t, img,
 				int(chosen.Bounds.X+chosen.Bounds.W/2), int(chosen.Bounds.Y+chosen.Bounds.H-1))
 
-			trackToken := tc.tokens.BgHover.Over(tc.tokens.BgBase)
-			fillToken := tc.tokens.BgSelected.Over(trackToken)
+			trackToken := tc.tokens.BgStrong.Over(tc.tokens.BgBase)
+			fillToken := tc.tokens.BgRaised.Over(trackToken)
 			if !colorNear(track, trackToken, 3) {
-				t.Fatalf("track pixel = %+v, want the BgHover tint %+v", track, trackToken)
+				t.Fatalf("track pixel = %+v, want the BgStrong fill %+v", track, trackToken)
 			}
 			if !colorNear(fill, fillToken, 3) {
-				t.Fatalf("chosen segment fill = %+v, want the BgSelected tint %+v", fill, fillToken)
+				t.Fatalf("chosen segment fill = %+v, want the BgRaised block %+v", fill, fillToken)
 			}
 			if colorNear(fill, track, 3) {
 				t.Fatalf("the chosen segment fill (%+v) is indistinguishable from the track (%+v)", fill, track)
 			}
-			if !colorNear(underline, tc.tokens.Accent, 3) {
-				t.Fatalf("the chosen segment boundary = %+v, want the Accent %+v", underline, tc.tokens.Accent)
+			// No accent rule under the chosen segment: the old 2 DIP underline is
+			// gone, so the segment's own bottom row stays its fill (A3 VD-12).
+			if colorNear(foot, tc.tokens.Accent, 3) {
+				t.Fatalf("the chosen segment still paints an accent band at its bottom edge (%+v)", foot)
 			}
-
-			// The boundary is what separates the chosen segment from the
-			// track; it must clear the design's 3:1.
-			if got := contrastRatio(tc.tokens.Accent, track); got < 3 {
-				t.Fatalf("the chosen segment boundary is %.2f:1 against the track, want >= 3:1", got)
+			// A 1 DIP BorderL3 outline is what separates the block from the track.
+			edgeToken := tc.tokens.BorderL3.Over(fillToken)
+			edge := false
+			for y := int(chosen.Bounds.Y); y < int(chosen.Bounds.Y)+3 && !edge; y++ {
+				for x := int(chosen.Bounds.X) + 2; x < int(chosen.Bounds.X+chosen.Bounds.W)-2; x++ {
+					if colorNear(framePixel(t, img, x, y), edgeToken, 8) {
+						edge = true
+						break
+					}
+				}
+			}
+			if !edge {
+				t.Fatalf("the chosen segment has no BorderL3 outline %+v along its top edge", edgeToken)
+			}
+			if got := contrastRatio(edgeToken, fillToken); got < 1.15 {
+				t.Fatalf("the chosen segment's outline is %.2f:1 against its fill, want a visible edge", got)
 			}
 			// The chosen segment's label is the persistent selection's ink.
 			if got := contrastRatio(tc.tokens.LabelPrimary, fill); got < 4.5 {

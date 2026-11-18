@@ -223,7 +223,7 @@ func TestColdResumeEmptyDraftSendUsesDisabledLook(t *testing.T) {
 	h.click(tester, "继续此队友 上次的研究员")
 	tester.Frame()
 
-	const label = "发送消息给 上次的研究员"
+	const label = "发送"
 	if info, ok := tester.AccessByRole(ui.RoleButton, label); !ok || !info.Disabled {
 		t.Fatalf("the empty-draft send button is not disabled; %+v", info)
 	}

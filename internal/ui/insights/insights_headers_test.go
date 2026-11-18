@@ -16,15 +16,16 @@ func TestInsightsTokenHeadersNotTruncated(t *testing.T) {
 	// The day/model/workspace tables each name the metric once, untruncated.
 	count := 0
 	for _, text := range tester.Texts() {
-		if text == "词元" {
+		if text == "tokens" {
 			count++
 		}
 	}
-	if count != 3 {
-		t.Fatalf("exact 词元 headers = %d, want 3 (day/model/workspace); texts = %v",
+	// Three table headers plus the KPI label above them.
+	if count != 4 {
+		t.Fatalf("exact tokens labels = %d, want 4 (3 headers + the KPI label); texts = %v",
 			count, tester.Texts())
 	}
 	h.assertNoTexts(tester, "tok…")
-	// The KPI label keeps the unit, so the page still teaches it once.
-	h.assertTexts(tester, "词元 tokens")
+	// The unit is the header itself now (A5 §3.1: one name for the unit).
+	h.assertNoTexts(tester, "词元")
 }

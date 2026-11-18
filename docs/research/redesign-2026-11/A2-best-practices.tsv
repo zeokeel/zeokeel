@@ -1,0 +1,53 @@
+表面	业界做法	来源URL	我们的做法	优先级
+会话线程	消息为纵向单流、不套卡片；回合之间靠更大间距分组，而不是靠边框	https://linear.app/now/how-we-redesigned-the-linear-ui	ui.List 虚拟化 + 回合间 Space6=24；消息不套卡片	P1
+会话线程	连续同类调用折叠成一行结果摘要（Called slack 3 times），而不是逐条记录	https://code.claude.com/docs/en/interactive-mode.md	折叠摘要用“结果优先”措辞：已运行 6 条命令 · 2 个文件被修改	P1
+会话线程	长会话提供“回到最新/回到我的上一个 prompt”两个跳转	https://zed.dev/docs/ai/agent-panel	保留 FollowEnd 浮层按钮，并补“跳到上一个提问”	P2
+消息头/元信息	transcript 中每条 assistant 消息显示时间戳与所用模型	https://code.claude.com/docs/en/interactive-mode.md	元信息行加模型名（12px、LabelTertiary、截断 12 字符）	P1
+消息头/元信息	复制/反馈等动作在 hover 出现，回答末尾常显“复制”	https://zed.dev/docs/ai/agent-panel	常显仅“复制”；其余动作收进单一 ⋯，hover 显形不改变 24 高行	P1
+消息头/元信息	消息级可回滚点（checkpoint）可预览并恢复	https://cursor.com/docs/agent/overview	⋯ 菜单增加“从此处回滚”（等后端支持后启用）	P2
+Markdown 正文	每行 50–60 字母；最小 14/600 与 12/400；句首大写	https://learn.microsoft.com/en-us/windows/apps/design/signature-experiences/typography	新增 ProseMeasure=640：中文约 45 字/行、拉丁约 92 字符/行；一屏 ≤4 字号	P1
+Markdown 正文	长文 body-01 14/20、短段 14/18、始终左对齐	https://www.carbondesignsystem.com/building-blocks/foundations/typography/type-sets	行高 1.55→1.6、块间距 0.72→0.80；段落左对齐，不两端对齐	P1
+Markdown 正文	正文层级靠字号/字重，不用颜色；链接只用一个强调色	https://vercel.com/geist/typography	标题 600（H3 降 500）；链接 Accent，下划线仅 hover；表格用 BorderL2	P1
+代码块	代码块有头部：语言标签 + 复制按钮；mono 13 与 14 正文配对	https://vercel.com/geist/typography	28 高头部（mono 12 语言名 + 16 复制图标）、1px BorderL1 分隔、块体 mono 13/20	P1
+代码块	代码块外框 1px + 小圆角，与卡片区分	https://vercel.com/geist/materials	Border(1,BorderL2)+RadiusSM(8)；超 24 行折叠“显示全部（N 行）”	P1
+代码块	长行保持横向滚动而不是自动换行	https://zed.dev/docs/ai/agent-panel	默认横向滚动；复制保留原始换行	P1
+工具调用行	工具调用默认折叠，可展开看调用与输出	https://code.visualstudio.com/docs/agents/run/tools.md	ToolRow 保持折叠 + 展开区；失败默认展开（已有）	P1
+工具调用行	终端类工具给 Show Output / Show Terminal / Continue in Background 三件套	https://code.visualstudio.com/docs/agents/run/tools.md	展开区给“在检查器中打开完整输出”与“复制输出”；后台化沿用 Job 面板	P2
+工具调用行	长输出收进侧栏/终端，消息里只留摘要	https://code.visualstudio.com/docs/agents/run/tools.md	预览 96 rune + 前 8 行，其余进检查器	P1
+推理/思考块	思考默认折叠，展开显示完整时间线；不在视觉上做“AI 魔法”装饰	https://www.carbondesignsystem.com/building-blocks/foundations/carbon-for-ai	禁用紫色/光效；Sparkles 16 + LabelTertiary；摘要行必带用时	P1
+推理/思考块	思考与工具按阶段交错，单行原地更新状态词	https://code.visualstudio.com/docs/agents/run/tools.md	保留分段交错时间线；流式只更新摘要行不追加行	P1
+审批对话框	默认动作是 Allow Once，下拉才扩展到命令前缀/域名/路径，并区分本会话与总是	https://code.visualstudio.com/docs/agents/run/approvals.md	底部动作改“拒绝 · 允许一次(主) · ⋯ 更多(本会话/总是/查看规则)”，范围以小字披露	P0
+审批对话框	选项文案把范围写进句子（Yes, and don’t ask again for: npm test *）	https://code.claude.com/docs/en/permissions.md	主按钮文案随范围变化：允许一次 / 本会话始终允许 npm run *	P0
+审批对话框	footer 给键位：Esc 取消（拒绝）、Tab 修改	https://code.claude.com/docs/en/permissions.md	保留 Esc=拒绝（窗口级）；焦点进入动作区时显示 ↵ 允许 的 kbd 提示	P0
+审批对话框	中性卡体 + 语义标识，不用满宽警示色带	https://code.visualstudio.com/docs/agents/run/approvals.md	去掉 Warning 22% 满宽带；改 2px Warning 左条 + StatusBadge“需要审批”	P0
+审批对话框	URL/外部数据分“请求批准”与“响应入上下文”两步	https://code.visualstudio.com/docs/agents/run/approvals.md	web 工具审批登记两步披露（防提示注入），记入 AGENT-SURFACES S4	P2
+计划审阅	Review Plan 卡：打开完整计划（Markdown 可编辑）+ 反馈 + 实施/仅批准/拒绝	https://code.visualstudio.com/docs/agents/run/planning.md	三键收敛：拒绝 · 仅批准（不改代码） · 开始实施(primary)	P1
+计划审阅	反馈未提交时禁用批准	https://code.visualstudio.com/docs/agents/run/planning.md	计划卡加同一门禁：反馈框有未提交内容时禁用“开始实施”	P1
+计划审阅	计划可落地为文件以便审计与分享	https://cursor.com/docs/agent/plan-mode	提供“在编辑器打开计划”，落到 .zeokeel/plans/<id>.md	P1
+提问卡	选项列表 + 始终存在的 Other 自填项；Esc 可取消	https://code.claude.com/docs/en/interactive-mode.md	问题 16/600；选项行 36；“其他（自填）”永远最后；动作条 跳过/提交	P1
+提问卡	回答后在会话里留一张紧凑回执，不伪装成用户气泡	https://code.claude.com/docs/en/interactive-mode.md	回落一张“已回答：…”回执卡（复用现有回执行）	P1
+Composer	prompt box 与下方一行选择器（环境/目录/权限/模型）两段式	https://code.claude.com/docs/en/desktop.md	两行解剖：输入行 + 控制行；两行之间不画分隔线，只用 Space2	P1
+Composer	建议提示以灰字出现在空输入框，Tab/→ 接受，Enter 不误发	https://code.claude.com/docs/en/desktop.md	空 composer 给灰字示例提示，Tab 接受；Enter 仅在已接受/已输入时发送	P1
+Composer	主/次动作固定键位并在界面里显示	https://developers.raycast.com/api-reference/user-interface/action-panel.md	新增 uikit.Kbd；提示行用 kbd 微标签（↵ 发送 / ⇧↵ 换行 / Esc 停止）	P1
+Composer	拖拽文件有明确投放反馈	https://developer.gnome.org/hig/patterns/containers/utility-panes.html	拖入时整卡 2px Accent 内框 + “松开以添加附件”	P2
+运行状态条	状态栏分区：左侧工作区信息、右侧当前对象信息；进度放状态栏不弹通知	https://code.visualstudio.com/api/ux-guidelines/notifications.md	状态条固定 32 高：左=运行态/队列，右=用量组（42K/128K + 3px 条）	P1
+运行状态条	用量与压缩事件作为可查看条目，而不是常驻多段文本	https://zed.dev/docs/ai/agent-panel	6 段信息收成“用量组 + 详情 popover”，数字用 mono/tabular	P1
+运行状态条	PR/分支状态用带语义色的下划线链接	https://code.claude.com/docs/en/interactive-mode.md	若接入 PR，使用“链接 + 3px 彩色下划线”（绿/黄/红/灰）	P2
+右栏检查器	从属于主视图的面板放右侧；窄窗覆盖而不是挤压；F9 切换	https://developer.gnome.org/hig/patterns/containers/utility-panes.html	保持 320/260 + 窄窗 rail 规则；新增 F9 作为切换键	P2
+右栏检查器	有详情视图时不要在列表行重复同一信息	https://developers.raycast.com/api-reference/user-interface/list.md	检查器内容不与 transcript 元信息重复；只放文件/上下文/轨迹详情	P1
+右栏检查器	面板标题 36 高 + 标签行 32 + 选中用下边线	https://code.visualstudio.com/api/ux-guidelines/overview	头部 36（14/500 + ⋯ + 关闭）；tab 选中用 2px Accent 下边线；不套卡片	P1
+全局视觉	容器圆角 6–12、大浮层 16；不用 ≥20 的胶囊	https://vercel.com/geist/materials	RadiusLG 16→12（卡片/对话框/菜单）、RadiusXL 20→16（仅 composer）	P1
+全局视觉	每边框只画一次，不叠加两层 alpha 边	https://vercel.com/geist/colors	新增 BorderL1（内部细分隔）；相邻容器只一侧画边（composer 内部工具条不再画上边）	P1
+全局视觉	边框三档：默认/悬停/激活	https://vercel.com/geist/colors	BorderL1 内部 · BorderL2 结构 · BorderL3 可交互边界；2px 仅用于选中条/焦点环/审批语义条	P1
+全局视觉	焦点环 2px + offset，且不只靠阴影表达层级	https://vercel.com/geist/materials	新增 FocusRingWidth=2 / FocusRingOffset=2；键盘态才画；自绘富行内嵌环	P1
+全局视觉	状态至少三通道（符号/形状/颜色/文字）	https://www.carbondesignsystem.com/building-blocks/core/patterns/status-indicators	状态 = 颜色 + 文字两通道；每屏状态指示器 ≤6；cancelled 保持中性	P1
+全局视觉	running 不用 warning 语义（warning 留给需要立即注意）	https://www.carbondesignsystem.com/building-blocks/core/patterns/status-indicators	running 改 LabelSecondary 文字 + Accent spinner（需 Lead 裁决，与 DESIGN.md §5.2 冲突）	P0
+全局视觉	状态指标过多会过载，合并时取最高注意力色	https://www.carbondesignsystem.com/building-blocks/core/patterns/status-indicators	侧栏分组行只显示子状态汇总（已有）；超出 6 个指示器时合并	P2
+全局视觉	字体用系统默认栈、减少字号与字重种类、不用 italic	https://developer.gnome.org/hig/guidelines/typography.html	保持 brand.SystemFont 与 8 档字号；字重烘焙进 type role，call site 不再传 FontWeight	P1
+全局视觉	标题 semibold、正文 regular；14px 及以下不用 semibold	https://learn.microsoft.com/en-us/windows/apps/design/signature-experiences/typography	XL/L/M=600、S=500、XXXS=500；14px 正文与按钮不用 600	P1
+全局视觉	低风险可逆操作给撤销而不是确认	https://code.visualstudio.com/docs/agents/run/sessions/organize-sessions.md	归档会话/移动消息用 10s Undo toast；不可逆动作仍走 ConfirmDanger	P2
+全局视觉	动效短、退出比进入快、遵循 reduced motion	https://zed.dev/docs/development/ui-checklist	hover 80ms、展开 120ms、浮层进 160ms/出 120ms；主题切换 0ms；流式不做淡入	P2
+外壳/导航	官方 Sidebar 聚焦选中是灰阶 tint、非聚焦再看不同色；不用实色填充	https://linear.app/now/how-we-redesigned-the-linear-ui	用官方局部主题把侧栏 Accent 换成 BgSelected 合成色，使聚焦/非聚焦选中都读作 tint	P0
+外壳/导航	导航项 3–5 个上限；新的目的地优先做成命令，不塞侧栏	https://code.visualstudio.com/api/ux-guidelines/sidebars.md	侧栏只保留 3 个模块屏 + 工作区树 + footer；新增目的地走命令面板/抽屉	P1
+外壳/导航	分组只在需要时出现；会话按“需要处理”信号分类而不是人为分类	https://code.visualstudio.com/docs/agents/run/sessions/organize-sessions.md	工作区 ≥3 个才分组；用真实的 待审批/等待回复/未读 三信号，不新增持久分类	P2
+外壳/导航	导航与会话行共享同一左缘网格	https://linear.app/now/how-we-redesigned-the-linear-ui	导航与会话行左缘统一 12+16+12；hover 统一 BgHover	P1

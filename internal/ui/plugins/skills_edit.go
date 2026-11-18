@@ -211,25 +211,37 @@ func buildSkillCreateDialog(c *ui.Context, t *design.Tokens, p *skillsState, st 
 				},
 			})
 			submit := func() { createSkillFromDraft(c, editor, p, st) }
-			ui.Field(c, st.tr("名称", "Name"), func() {
-				ui.TextInput(c, &p.draftName).
-					Label(skillInputLabel(st, st.tr("名称", "Name"))).
-					FillWidth().AutoFocus().OnTextKey(uikit.EnterTo(submit))
+			// Same shell as the connector and model dialogs: the header and the
+			// action row stay fixed, the fields scroll in a bounded body.
+			ui.Scroll(c).FillWidth().MaxHeight(design.DialogBodyMax).Children(func() {
+				ui.Column(c).FillWidth().
+					Padding(design.Space0, design.Space0, design.Space4, design.Space0).
+					Gap(design.Space3).Children(func() {
+					ui.Field(c, st.tr("名称", "Name"), func() {
+						ui.TextInput(c, &p.draftName).
+							Label(skillInputLabel(st, st.tr("名称", "Name"))).
+							FillWidth().AutoFocus().OnTextKey(uikit.EnterTo(submit))
+					})
+					ui.Field(c, st.tr("描述", "Description"), func() {
+						ui.TextInput(c, &p.draftDescription).
+							Label(skillInputLabel(st, st.tr("描述", "Description"))).
+							FillWidth().OnTextKey(uikit.EnterTo(submit))
+					})
+					ui.Field(c, st.tr("内容", "Body"), func() {
+						ui.TextArea(c, &p.draftBody).
+							Label(skillInputLabel(st, st.tr("内容", "Body"))).
+							FillWidth().MinHeight(design.Space6 * 5)
+					})
+					buildSkillBodyPreview(c, t, p, st, &p.draftBody)
+				})
 			})
-			ui.Field(c, st.tr("描述", "Description"), func() {
-				ui.TextInput(c, &p.draftDescription).
-					Label(skillInputLabel(st, st.tr("描述", "Description"))).
-					FillWidth().OnTextKey(uikit.EnterTo(submit))
+			// Reserved status row above the action row (empty when the draft is
+			// valid), so an error never pushes the body or clips at the fold.
+			ui.Column(c).FillWidth().MinHeight(design.Space6).Justify(ui.Center).Children(func() {
+				if p.editErr != "" {
+					uikit.ErrorLine(c, p.editErr)
+				}
 			})
-			ui.Field(c, st.tr("内容", "Body"), func() {
-				ui.TextArea(c, &p.draftBody).
-					Label(skillInputLabel(st, st.tr("内容", "Body"))).
-					FillWidth().MinHeight(design.Space6 * 5)
-			})
-			buildSkillBodyPreview(c, t, p, st, &p.draftBody)
-			if p.editErr != "" {
-				uikit.ErrorLine(c, p.editErr)
-			}
 			uikit.DialogFooter(c, []uikit.DialogAction{
 				{Label: st.tr("取消", "Cancel"), OnClick: func() {
 					p.creating = false
@@ -267,20 +279,28 @@ func buildSkillEditDialog(c *ui.Context, t *design.Tokens, p *skillsState, st *s
 			design.Apply(ui.Text(c, st.tr("名称不可修改。", "The name cannot be changed.")),
 				t.TextMuted(design.TypeXXS)).MaxLines(2)
 			submit := func() { updateSkillFromDraft(c, editor, p, st) }
-			ui.Field(c, st.tr("描述", "Description"), func() {
-				ui.TextInput(c, &p.editDescription).
-					Label(skillInputLabel(st, st.tr("描述", "Description"))).
-					FillWidth().AutoFocus().OnTextKey(uikit.EnterTo(submit))
+			ui.Scroll(c).FillWidth().MaxHeight(design.DialogBodyMax).Children(func() {
+				ui.Column(c).FillWidth().
+					Padding(design.Space0, design.Space0, design.Space4, design.Space0).
+					Gap(design.Space3).Children(func() {
+					ui.Field(c, st.tr("描述", "Description"), func() {
+						ui.TextInput(c, &p.editDescription).
+							Label(skillInputLabel(st, st.tr("描述", "Description"))).
+							FillWidth().AutoFocus().OnTextKey(uikit.EnterTo(submit))
+					})
+					ui.Field(c, st.tr("内容", "Body"), func() {
+						ui.TextArea(c, &p.editBody).
+							Label(skillInputLabel(st, st.tr("内容", "Body"))).
+							FillWidth().MinHeight(design.Space6 * 5)
+					})
+					buildSkillBodyPreview(c, t, p, st, &p.editBody)
+				})
 			})
-			ui.Field(c, st.tr("内容", "Body"), func() {
-				ui.TextArea(c, &p.editBody).
-					Label(skillInputLabel(st, st.tr("内容", "Body"))).
-					FillWidth().MinHeight(design.Space6 * 5)
+			ui.Column(c).FillWidth().MinHeight(design.Space6).Justify(ui.Center).Children(func() {
+				if p.editErr != "" {
+					uikit.ErrorLine(c, p.editErr)
+				}
 			})
-			buildSkillBodyPreview(c, t, p, st, &p.editBody)
-			if p.editErr != "" {
-				uikit.ErrorLine(c, p.editErr)
-			}
 			uikit.DialogFooter(c, []uikit.DialogAction{
 				{Label: st.tr("取消", "Cancel"), OnClick: func() {
 					p.editing = false
@@ -349,7 +369,7 @@ func buildSkillCardMenu(c *ui.Context, t *design.Tokens, p *skillsState, st *sta
 		return
 	}
 	name := textutil.FirstNonEmptyTrimmed(skill.Name, st.tr("(未命名技能)", "(Unnamed skill)"))
-	label := st.tr("技能操作", "Skill actions") + " " + name
+	label := rowActionLabel(st, st.tr("技能操作", "Skill actions"), name)
 	menu := uikit.IconButton(c, uikit.IconButtonOptions{
 		Key: "skills.menu/" + skillKey(skill), Label: label, Tooltip: st.tr("技能操作", "Skill actions"),
 		Icon: icons.More(), Size: design.IconSizeS,

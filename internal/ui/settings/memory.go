@@ -129,7 +129,7 @@ func memoryTimestamp(locale contracts.LocaleService, created time.Time) string {
 // whether they apply at once.
 func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 	st *memoryPageState, settingsStore contracts.SettingsService, locale contracts.LocaleService) {
-	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+	ui.Column(c).FillWidth().Gap(design.SpaceScreen).Children(func() {
 		uikit.PageHeader(c, localized(locale, "记忆", "Memory"), "")
 		store, hasStore := kctx.Get(contracts.KeyMemory)
 		if !hasStore || store == nil {
@@ -185,6 +185,8 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				// "整理记忆" was not understandable (B17): the action removes
 				// duplicate entries and keeps the earliest one; the tooltip says
 				// exactly that and that other memories are untouched.
+				// first Escape); the Description carries the same explanation to
+				// assistive technology.
 				if design.Apply(ui.Button(c, localized(locale, "去重并合并", "Merge duplicates")),
 					t.SecondaryButton()).Tooltip(localized(locale,
 					"删除重复的记忆，保留最早的一条；不重复的记忆不受影响",
@@ -227,9 +229,11 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 					}
 					return memoryRowLabel(locale, memories[index])
 				})
+				// One hairline between entries, no trailing rule (A3 VD-15).
 				ui.List(c, &st.list, len(memories)).
 					Label(localized(locale, "记忆列表", "Memories")).
-					Gap(design.Space1).
+					Gap(design.Space0).
+					Dividers(1, t.BorderL2).
 					Rows(func(row ui.ListRow) {
 						buildMemoryPageEntry(row.Context, t, store, updater, st,
 							memories[row.Index], locale, row.Selected())
@@ -285,8 +289,8 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			uikit.ConfirmDanger(c, &st.confirmClear, uikit.ConfirmDangerOptions{
 				Key:   "memory.clear-all",
 				Title: localized(locale, "清空全部记忆", "Clear all memories"),
-				Message: localized(locale, "确认删除全部记忆？此操作无法撤销。",
-					"Delete all memories? This cannot be undone."),
+				Message: localized(locale, "将删除全部记忆，无法撤销。",
+					"All memories will be deleted. This cannot be undone."),
 				Confirm: localized(locale, "清空", "Clear"),
 				Cancel:  localized(locale, "取消", "Cancel"),
 				OnConfirm: func() {
@@ -303,9 +307,9 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			uikit.ConfirmDanger(c, &st.deleteOpen, uikit.ConfirmDangerOptions{
 				Key:   "memory.delete",
 				Title: localized(locale, "删除记忆", "Delete memory"),
-				Message: localized(locale, "确认删除这条记忆？此操作无法撤销。",
+				Message: localized(locale, "删除这条记忆？无法撤销。",
 					"Delete this memory? This cannot be undone."),
-				Confirm: localized(locale, "确认删除", "Confirm delete"),
+				Confirm: localized(locale, "删除", "Delete"),
 				Cancel:  localized(locale, "取消", "Cancel"),
 				OnConfirm: func() {
 					if store.Remove(context.Background(), target) {
@@ -443,7 +447,7 @@ func buildMemoryConsolidationPanel(c *ui.Context, t *design.Tokens, store contra
 	// consolidation on a save that does not run one.
 	uikit.SectionAction(c, localized(locale, "整理策略", "Consolidation policy"), func(c *ui.Context) {
 		if design.Apply(ui.Button(c, localized(locale, "按策略整理", "Consolidate")), t.SecondaryButton()).
-			Tooltip(localized(locale, "保存当前策略并立即整理一次",
+			Description(localized(locale, "保存当前策略并立即整理一次",
 				"Save the current policy and consolidate once now")).Clicked() {
 			applyMemoryPolicy(c, consolidator, settingsStore, st, locale)
 		}
@@ -460,6 +464,7 @@ func buildMemoryConsolidationPanel(c *ui.Context, t *design.Tokens, store contra
 					// (mygo number-input.md); 0 still means unlimited.
 					entries := ui.NumberInput(c.Key("memory.maxEntries"), &st.maxEntriesNum,
 						0, 100000, 10).
+						Width(numberControlWidth).
 						Label(inputLabel(locale, localized(locale, "最大条目数", "Max entries")))
 					if entries.Changed() {
 						st.maxEntries = strconv.Itoa(int(st.maxEntriesNum))
@@ -471,6 +476,7 @@ func buildMemoryConsolidationPanel(c *ui.Context, t *design.Tokens, store contra
 				ui.Field(c, localized(locale, "保留天数", "Max age (days)"), func() {
 					days := ui.NumberInput(c.Key("memory.maxAgeDays"), &st.maxAgeDaysNum,
 						0, 3650, 1).
+						Width(numberControlWidth).
 						Label(inputLabel(locale, localized(locale, "保留天数", "Max age (days)")))
 					if days.Changed() {
 						st.maxAgeDays = strconv.Itoa(int(st.maxAgeDaysNum))
@@ -802,20 +808,19 @@ func buildMemoryPageEntry(c *ui.Context, t *design.Tokens, store contracts.Memor
 	updater contracts.MemoryUpdater, st *memoryPageState, memory contracts.Memory,
 	locale contracts.LocaleService, selected bool) {
 	textColor, metaColor, _ := listRowTextColors(t, selected)
-	ui.Column(c).FillWidth().Padding(design.Space1, design.Space2).Children(func() {
+	ui.Column(c).FillWidth().Padding(design.Space3, design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(design.Space2).Children(func() {
 			design.Apply(ui.Text(c, memory.Text), t.Font(design.TypeXS)).
 				TextColor(textColor).Grow(1).MaxLines(3)
 			// One trailing ⋯ menu owns both row actions; the destructive delete is
 			// its danger item, so a page of memories never paints a red button per
 			// row (DESIGN.md §5.2 danger budget).
-			label := localized(locale, "记忆操作", "Memory actions")
+			label := rowActionLabel(locale, localized(locale, "记忆操作", "Memory actions"), memory.Text)
 			menu := uikit.IconButton(c, uikit.IconButtonOptions{
-				Key:     "memory-actions/" + memory.ID,
-				Label:   label,
-				Tooltip: label,
-				Icon:    icons.More(),
-				Size:    design.IconSizeS,
+				Key:   "memory-actions/" + memory.ID,
+				Label: label,
+				Icon:  icons.More(),
+				Size:  design.IconSizeS,
 			})
 			menu.PopoverMenuButton(func(m *ui.Menu) {
 				if updater != nil {

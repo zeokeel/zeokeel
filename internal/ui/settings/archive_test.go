@@ -114,7 +114,7 @@ func TestArchivePageDeleteConfirmation(t *testing.T) {
 
 	h.click(tester, "归档会话操作")
 	h.click(tester, "删除会话")
-	h.click(tester, "确认删除")
+	h.click(tester, "删除")
 	if got := chat.deletions(); len(got) != 1 || got[0] != "arch-1" {
 		t.Fatalf("DeleteSession calls = %v, want [arch-1]", got)
 	}

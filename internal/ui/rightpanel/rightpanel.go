@@ -226,6 +226,14 @@ func (st *state) clampTab() int {
 	return st.tab
 }
 
+// documentActive reports whether the active tab shows an opened file, in which
+// case the document tab row is the panel's one active level and the view-page
+// row above it must not carry a second accent underline (VD-16).
+func (st *state) documentActive() bool {
+	_, ok := st.activeFileIndex()
+	return ok
+}
+
 // activeFileIndex reports the opened file the active tab shows.
 func (st *state) activeFileIndex() (int, bool) {
 	index := st.tab - pageFixedCount
@@ -263,6 +271,19 @@ func (st *state) tabLabel(index int) string {
 		}
 	}
 	return base
+}
+
+// selectTreeRow makes one item the tree's current row, so a pointer click and
+// the keyboard continue from the same place (A4-I-11). It also lets a directory
+// be current: the row is a place, not an open.
+func (st *state) selectTreeRow(path string) {
+	path = strings.TrimSpace(path)
+	for row := 0; row < st.filesOutline.Rows(); row++ {
+		if st.filesOutline.Item(row) == path {
+			st.filesRow = row
+			return
+		}
+	}
 }
 
 // showFixedPage opens one of the fixed pages, asks the host to open the panel

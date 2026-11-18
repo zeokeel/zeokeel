@@ -105,9 +105,24 @@ func (h *harness) click(tester *ui.Tester, label string) {
 	if !pumpFrames(tester, func() bool { _, ok := tester.Find(label); return ok }, 3*time.Second) {
 		h.t.Fatalf("click target %q not found; texts = %v", label, tester.Texts())
 	}
+	h.hover(tester, label)
 	if err := tester.Click(label); err != nil {
 		h.t.Fatalf("click %q: %v; texts = %v", label, err, tester.Texts())
 	}
+	tester.Frame()
+}
+
+// hover rests the pointer on a label before it is clicked. The panel's row
+// actions (a deliverable's 预览/下载) are revealed on hover or focus, as a
+// pointer user reaches them, so a synthetic click has to do what that user does
+// first — the reveal itself is then part of what these tests cover.
+func (h *harness) hover(tester *ui.Tester, label string) {
+	h.t.Helper()
+	rect, ok := tester.Find(label)
+	if !ok {
+		return
+	}
+	tester.Move(rect.X+rect.W/2, rect.Y+rect.H/2)
 	tester.Frame()
 }
 

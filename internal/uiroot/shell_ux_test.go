@@ -285,8 +285,8 @@ func TestInspectorCloseFocusReturnKeepsScroll(t *testing.T) {
 	if r.RightPanelOpen() {
 		t.Fatal("Escape did not close the inspector drawer")
 	}
-	if info, ok := tt.AccessByRole(ui.RoleButton, "打开右侧栏"); !ok || !info.Focused {
-		t.Fatalf("focus after close = %+v (present=%v), want the inspector toggle", info, ok)
+	if info, ok := tt.AccessByRole(ui.RoleToggleButton, "更多操作"); !ok || !info.Focused {
+		t.Fatalf("focus after close = %+v (present=%v), want the band's overflow control", info, ok)
 	}
 	after, ok := tt.Find("filler-10")
 	if !ok {

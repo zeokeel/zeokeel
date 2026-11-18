@@ -103,27 +103,27 @@ func TestNotificationsPageSystemSwitchDefaultsOn(t *testing.T) {
 	}
 }
 
-// TestNotificationsPageSystemSwitchDisabledWhenUnsupported covers the platform
-// fallback: without a host system-notification sink the switch is disabled with
-// an explanation, and clicking it writes nothing.
-func TestNotificationsPageSystemSwitchDisabledWhenUnsupported(t *testing.T) {
-	store := newFakeSettings(nil)
+// TestNotificationsPageSystemUnavailableIsReadOnly covers the platform
+// fallback: without a host system-notification sink the section renders a
+// read-only state row ("不可用" + the reason), never a switch. A disabled native
+// switch keeps its accent fill, so a stored "on" painted an available-looking ON
+// toggle right above the sentence saying the platform has no support
+// (2026-11-18 review). The stored row is left exactly as it was.
+func TestNotificationsPageSystemUnavailableIsReadOnly(t *testing.T) {
+	store := newFakeSettings(map[string]string{contracts.SettingSystemNotifications: "true"})
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "通知")
-	h.assertTexts(tester, "系统通知", "显示系统通知",
+	h.assertTexts(tester, "系统通知", "显示系统通知", "不可用",
 		"当前平台不支持系统通知；应用内通知气泡仍然可用。")
-	access, ok := tester.AccessByRole(ui.RoleSwitch, "显示系统通知")
-	if !ok {
-		t.Fatal("the system-notification switch is not in the accessibility tree")
+	if _, ok := tester.AccessByRole(ui.RoleSwitch, "显示系统通知"); ok {
+		t.Fatal("an unsupported platform still renders a switch for system notifications")
 	}
-	if !access.Disabled {
-		t.Fatal("the system-notification switch is enabled on an unsupported platform")
-	}
+	// The caption is not a control either: clicking it writes nothing.
 	h.click(tester, "显示系统通知")
-	if raw := store.get(contracts.SettingSystemNotifications); raw != "" {
-		t.Fatalf("clicking the disabled switch wrote %q", raw)
+	if raw := store.get(contracts.SettingSystemNotifications); raw != "true" {
+		t.Fatalf("the read-only row wrote %q, want the stored value kept", raw)
 	}
 }
 

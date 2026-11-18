@@ -114,22 +114,20 @@ func TestFirstRunChecklistEnglish(t *testing.T) {
 		"No API key yet", "Configure API key", "No workspace open", "Add workspace")
 }
 
-// TestHeroStartTypingFocusesComposerInsteadOfDuplicating covers FR-30: on an
-// already-empty conversation the hero's 开始输入 button focuses the composer
-// instead of creating a second empty session.
-func TestHeroStartTypingFocusesComposerInsteadOfDuplicating(t *testing.T) {
+// TestHeroHasNoFocusOnlyAction covers FR-30 after the copy audit (A5 F-13): an
+// empty conversation already on screen has the composer right under the hero, so
+// the hero has no button that would only move the caret there. The screen's one
+// action is the composer's send.
+func TestHeroHasNoFocusOnlyAction(t *testing.T) {
 	chat := newFakeChat()
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "空会话"}, true)
 	h := newHarness(t, chat)
 	tester := h.tester()
 
-	before := len(chat.newSessionIDs())
-	h.click(tester, "开始输入")
-	if got := len(chat.newSessionIDs()); got != before {
-		t.Fatalf("NewSession calls after clicking the hero button = %d, want %d (no duplicate empty session)", got, before)
-	}
-	if !tester.Focused("输入消息…") && !tester.Focused("Ask ZeoKeel…") {
-		t.Fatalf("the hero button did not focus the composer; texts = %v", tester.Texts())
+	h.assertTexts(tester, "发第一条消息", "检查当前工作区并给出摘要")
+	h.assertNoTexts(tester, "开始输入", "开始新对话", "新建会话")
+	if got := len(chat.newSessionIDs()); got != 0 {
+		t.Fatalf("NewSession calls on an empty conversation = %d, want 0", got)
 	}
 }
 
@@ -159,7 +157,7 @@ func TestHeroNewChatCreatesUntitledSession(t *testing.T) {
 	h := newHarness(t, chat)
 	tester := h.tester()
 
-	h.click(tester, "新对话")
+	h.click(tester, "新建会话")
 	ids := chat.newSessionIDs()
 	if len(ids) != 1 {
 		t.Fatalf("NewSession calls = %v, want 1", ids)
@@ -174,8 +172,9 @@ func TestHeroNewChatCreatesUntitledSession(t *testing.T) {
 }
 
 // TestSendDisabledWithoutModelShowsReasonAndRecovery covers FR-31: without a
-// model the send control is disabled, says why and links to the model page;
-// Enter must not send either.
+// model the send control is disabled, the action row says why in the note left
+// of it ("先配置模型") and that note is the way to the model page; Enter must not
+// send either.
 func TestSendDisabledWithoutModelShowsReasonAndRecovery(t *testing.T) {
 	chat := newFakeChat()
 	chat.config = contracts.ChatConfig{} // no model
@@ -189,7 +188,9 @@ func TestSendDisabledWithoutModelShowsReasonAndRecovery(t *testing.T) {
 	focusComposer(t, tester)
 	tester.Type("你好")
 	tester.Frame()
-	h.assertTexts(tester, "尚未配置模型：发送已禁用", "打开模型设置")
+	// The explanation is the send's own one-line note, immediately left of the
+	// control it explains, and the note is the fix's one-click entry.
+	h.assertTexts(tester, "先配置模型")
 	if info, ok := tester.AccessByRole(ui.RoleButton, "发送"); !ok || !info.Disabled {
 		t.Fatalf("send control is not disabled without a model: %+v found %v", info, ok)
 	}
@@ -198,19 +199,25 @@ func TestSendDisabledWithoutModelShowsReasonAndRecovery(t *testing.T) {
 	if sends := chat.sends(); len(sends) != 0 {
 		t.Fatalf("Enter sent the draft without a model: %v", sends)
 	}
-	h.clickExact(tester, "打开模型设置")
+	h.clickExact(tester, "先配置模型")
 	if !h.ui.Navigator().SettingsOpen() {
-		t.Fatal("打开模型设置 did not open the settings surface")
+		t.Fatal("先配置模型 did not open the settings surface")
 	}
 	h.ui.Navigator().CloseSettings()
 	tester.Frame()
 
-	// The warning row must survive the product's narrow composer: its text and
-	// action stay visible at the 704-wide window (model chip folded away).
+	// The note must survive the product's narrow composer: at the 704-wide
+	// window (where the toolbar folds its chip) it is still there, still left of
+	// the send control.
 	tester.SetSize(704, 720)
 	tester.Frame()
 	tester.Frame()
-	h.assertTexts(tester, "尚未配置模型：发送已禁用", "打开模型设置")
+	h.assertTexts(tester, "先配置模型")
+	note, okNote := tester.Find("先配置模型")
+	send, okSend := tester.Find("发送")
+	if !okNote || !okSend || note.X >= send.X {
+		t.Fatalf("send note at %.1f is not left of the send control at %.1f", note.X, send.X)
+	}
 }
 
 // TestSendFailureMapsNoModelToLocalizedRecovery covers FR-31's error mapping: a

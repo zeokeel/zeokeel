@@ -2,7 +2,7 @@
 
 > **给 AI coding agent 与 reviewer 的可执行设计契约。** 本文件不是设计原则散文，而是「写 UI 前必须查表、写完后必须能被检查」的硬约束集合。
 >
-> **版本锚定**：`github.com/egoist/mygo v0.9.0`（见 [../go.mod](../go.mod)）。本文的组件目录、API 签名与规则都以该版本源码 + `docs/ui/*.md` 实测为准；升级 mygo 时按 §8.4 重核。
+> **版本锚定**：`github.com/egoist/mygo v0.9.2`（见 [../go.mod](../go.mod)）。本文的组件目录、API 签名与规则都以该版本源码 + `docs/ui/*.md` 实测为准；升级 mygo 时按 §8.4 重核。
 >
 > **文件分工**：
 > - 本文 = 唯一契约入口（组件目录 / 场景映射 / 反模式 / 最小示例 / token / 入口组件 / 白名单 / 维护）。
@@ -46,8 +46,8 @@
 
 ### 0.4 版本锚定
 
-- 官方事实来源：`go list -m -f '{{.Dir}}' github.com/egoist/mygo` 指向的模块目录（当前 v0.9.0）里的 `docs/ui/*.md`（88 篇 = v0.8.3 的 87 篇 + 新增 `split-button.md`）与 `ui/` 源码。
-- 文档与源码冲突时**以 v0.9.0 源码为准**；`docs/ui` 中的能力缺口见 §7.4。
+- 官方事实来源：`go list -m -f '{{.Dir}}' github.com/egoist/mygo` 指向的模块目录（当前 v0.9.2）里的 `docs/ui/*.md`（88 篇 = v0.8.3 的 87 篇 + 新增 `split-button.md`）与 `ui/` 源码。
+- 文档与源码冲突时**以 v0.9.2 源码为准**；`docs/ui` 中的能力缺口见 §7.4。
 - 本仓库当前依赖的是 mygo 的通用 `ui` 包。若未来依赖升级、引入更细的组件分类（例如 agent 客户端专用组件族），只需替换 §1.2、附录 A 的 `source` 与组件行，**三层约束结构不变**。
 
 ### 0.5 术语
@@ -55,7 +55,7 @@
 | 术语 | 含义 |
 |---|---|
 | 官方件 | `github.com/egoist/mygo/ui` 包及其子包（`ui/markdown`、`ui/editor`、`ui/richtext`、`ui/chart`）提供的组件 |
-| 最短调用（本项目版 ZeroOptions） | 只传必需参数、不做额外 fluent 配置的构造调用。v0.9.0 的 widget 默认取主题外观，**最短调用即设计默认** |
+| 最短调用（本项目版 ZeroOptions） | 只传必需参数、不做额外 fluent 配置的构造调用。v0.9.2 的 widget 默认取主题外观，**最短调用即设计默认** |
 | token | `internal/design` 的语义颜色/字号/间距/圆角/阴影/布局度量；唯一 hex 来源是 `internal/brand` |
 | 预设 | `internal/design/components.go` 的组件样式（PrimaryButton/SecondaryButton/DangerButton/Panel/Composer/Badge/…） |
 | 入口组件 | 对官方件的薄组合，锁定某类 Agent surface 的语义/状态/骨架；见 §6.3 与 [AGENT-SURFACES.md](AGENT-SURFACES.md) |
@@ -76,7 +76,7 @@
 | 官方控件层 | `github.com/egoist/mygo/ui`（+子包） | 62 个组件的交互/焦点/键盘/a11y 语义 | 有官方件就**不许重造**；只设度量、不覆写原生状态色 |
 | 入口层 | `internal/uikit`（目标新增） | Agent surface 入口组件（§6.3） | 场景内**只能从入口进入**；入口内部组合官方件 + token |
 
-### 1.2 官方组件目录（按用途；API 以 v0.9.0 源码为准）
+### 1.2 官方组件目录（按用途；API 以 v0.9.2 源码为准）
 
 > 官方文档路径均在 mygo 模块的 `docs/ui/<name>.md`。表中「本项目规则」是硬约束，不是建议。
 
@@ -188,7 +188,7 @@
 10. **危险确认与 Esc 安全默认**：不可逆动作必须 `uikit.ConfirmDanger`（安全动作 Default）；审批无 Default；「Esc 拒绝」等承诺必须在窗口级成立，不能因焦点在侧栏而失效（AP-24）。
 11. **强调色预算**：每屏 ≤2 Accent 填充、≤1 primary、≤2 红色元素；状态徽章只用 `uikit.StatusBadge`（AP-20/AP-21）。
 12. **字号与度量纪律**：11px 禁成句；控件高度只用 32/36/40/44（禁 38）；圆角语义见 §5.4；表面 ramp 见 §5.1（AP-22/AP-23）。
-13. **Focus 会滚入视野**：程序化 `Focus()`/`AutoFocus()` 会把元素滚入最近的滚动容器（mygo v0.9.0）；「焦点换位但滚动不该动」的场景用 `Focus(ui.FocusOptions{PreventScroll: true})`，并补帧测试（要有反证：去掉选项时测试失败）。
+13. **Focus 会滚入视野**：程序化 `Focus()`/`AutoFocus()` 会把元素滚入最近的滚动容器（mygo v0.9.2）；「焦点换位但滚动不该动」的场景用 `Focus(ui.FocusOptions{PreventScroll: true})`，并补帧测试（要有反证：去掉选项时测试失败）。
 
 ### 1.4 选用决策顺序
 
@@ -304,7 +304,7 @@
 | 裸 `FontSize` | **0**（Phase 1b 已清零） | 7 处 mono 小字已改 `t.MonoText(role)` | 保持零（DS-03 阻断） |
 | 裸数值度量调用 | **21**（grep 行口径，2026-11 审计修复后） | 全模块（UI 层已无宽度/字号字面量） | 逐模块 token 化，baseline 只降不升 |
 | 裸 `FontWeight` | 32 处字面量 warn + 间接字重 warn 规则（UD-10：非字面量实参必须可追溯到 `design.Weight*`） | 多为标题 600 | heading type role 后收敛 |
-| 手绘 `ButtonBase` | **11**（2026-11 审计修复后） | 命令面板行 / rail 会话富行 / slash@ 富行 / 侧栏富行与行内 ⋯ / RunStatus 队列徽章 / `uikit.IconButton` 内核 | 富行、徽章与图标按钮内核登记 allowlist；图标按钮已全部收敛 |
+| 手绘 `ButtonBase` | **12**（2026-11-18 重设计后） | 命令面板行 / rail 会话富行 / slash@ 富行 / 侧栏富行与行内 ⋯ / 文件面包屑根节点 / RunStatus 队列徽章 / `uikit.IconButton` 内核 | 富行、徽章、面包屑返回控件与图标按钮内核登记 allowlist；图标按钮已全部收敛 |
 | 重复状态→(文案,颜色) 函数 | **0**（Phase 2b 收敛） | uikit.Status* 唯一出口 | 保持零（design-check DS-09 阈值 0） |
 | 对话框宽度绕 token | **0**（Phase 1b 已清零） | 8 处已换 `DialogWidth*`/`OverlayWidthS` | 保持零 |
 | 工具卡渲染路径 | **2**（Phase 2c） | `uikit.ToolRow`（紧凑行）+ `uikit.ToolCallCard`（完整卡：决策/轨迹/plan/demo） | 保持 2；新增工具只注册渲染器 |
@@ -318,7 +318,7 @@
 
 ### 4.1 原则
 
-1. **最短调用即设计默认**：v0.9.0 的 widget 构造后即取主题外观；`*Base` 才是"无外观、只保留交互"。
+1. **最短调用即设计默认**：v0.9.2 的 widget 构造后即取主题外观；`*Base` 才是"无外观、只保留交互"。
 2. **带 options/state 的组件零值即默认**：`editor.State`、`markdown.Options`、`richtext.EditorOptions` 不要堆配置。
 3. **本项目只加"度量封装"**：`design.Apply(el, t.PrimaryButton())` 这类只改尺寸/圆角/字重的预设可以加；**改颜色/背景的覆写不可以**。
 4. **先默认，确有需求再升级**：需要非默认外观时，先查 §6 预设与入口组件，最后才走 §7 自绘流程。
@@ -487,13 +487,14 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | `BgBase` | 页面背景 | 主内容区、滚动区底 | 当卡片/浮层底 |
 | `BgSidebar` | 侧栏/检查器底 | 侧栏、右栏 | 主内容区 |
 | `BgRaised` | 抬升表面 | 卡片、composer、面板 | 页面大背景 |
-| `BgStrong` | 强化中性面 | 填充式中性控件 | 主操作（用 Accent） |
-| `BgHover` / `BgSelected` | 悬停 / 选中（BgSelected 亮 12% royal / 暗 18% cyan，brand.RowSelected） | 行、菜单项、tab | 两者混用（选中必须可区分） |
-| `LabelPrimary/Secondary/Tertiary` | 主/次/弱文字 | 正文/说明/元数据 | 用状态色当正文 |
-| `BorderL2/BorderL3` | 常规/强化分隔 | 分隔线、卡片边、聚焦前 | 给每块加边框 |
+| `BgOverlay` | 浮层底（S4） | 对话框、菜单、命令面板、toast | 当页面/卡片底 |
+| `BgStrong` | 强化中性面 | 填充式中性控件、行内 code、代码块 | 主操作（用 Accent） |
+| `BgHover` / `BgSelected` | 悬停（中性 ink 4.5%）/ 选中（亮 9% royal、暗 13% cyan，brand.RowSelected） | 行、菜单项、tab | 两者混用（选中必须可区分：悬浮是中性、选中是品牌色） |
+| `LabelPrimary/Secondary/Tertiary` | 主/次/弱文字（12px 元数据最低档仍满足 AA，含选中 tint） | 正文/说明/元数据 | 用状态色当正文 |
+| `BorderL1/BorderL2/BorderL3` | 卡内细分隔 6% / 结构线 9% / 可交互边界 15%（暗色 7/10/16%） | 卡内表头、侧栏接缝、输入框与卡片静息边 | 给每块加边框；同一元素叠两层边 |
 | `Accent*` / `OnPrimary` | 品牌强调/主操作前景 | 主按钮、选中、链接 | 大面积装饰 |
 | `Success/SuccessText` | 成功（fill/AA 文本） | 状态点、Badge、成功文本 | fill 色当小字 |
-| `Warning/WarningText` | 警告/进行中（fill/AA 文本） | running 状态、警告文本 | 用 warning 表达失败 |
+| `Warning/WarningText` | 需要用户注意（fill/AA 文本） | needs-action（等待审批/授权失效/警告文本） | 表达"进行中"（进行中用 Accent+中性词）；表达失败（用 Danger） |
 | `Danger/DangerText` | 危险/失败（fill/AA 文本） | 错误、危险动作、失败状态 | 降级为普通文本 |
 | `Scrim()` | 模态遮罩 | Modal 背景 | 自定义半透明色 |
 
@@ -504,10 +505,12 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 语义 | token | 浅色 | 暗色 | 用途 | 边框/阴影 |
 |---|---|---|---|---|---|
 | S0 page | `BgBase` | `#FFFFFF` | `#111118` | 主内容、transcript、设置 body | 无 |
-| S1 sunken | `BgSidebar` | `#F9FAFB` | `#0B0B10` | 侧栏、窗口顶带、设置导航 | 右侧 1px `BorderL2` |
-| S2 raised | `BgRaised` | `#FFFFFF` | `#1B1B26` | composer、工具卡、审批卡、对话框 | 1px 边框；composer 额外 `ShadowComposer`；浮层 `ShadowOverlay` |
-| S3 raised-soft | `BgBase`+`BorderL2`+`RadiusMD` | 白 + 10% ink 边 | `#111118` + 12% 白边 | 团队/任务/子代理行、产物/文件条目 | 只描边，无阴影 |
-| S4 overlay | `BgRaised`+`BorderL2`+`RadiusLG` | 白 | `#1B1B26` | modal/palette/菜单/toast/抽屉 | `ShadowOverlay` + scrim |
+| S1 sunken | `BgSidebar` | `#F7F8FA` | `#0B0B10` | 侧栏、窗口顶带、设置导航 | 一条 1px `BorderL2` |
+| S2 raised | `BgRaised` | `#FFFFFF` | `#1B1B26` | composer、工具卡、审批卡、对话框 | 1px `BorderL3`；**无阴影**（composer 也是平的） |
+| S3 raised-soft | `BgBase`+`BorderL3`+`RadiusMD` | 白 + 15% ink 边 | `#111118` + 16% 白边 | 团队/任务/子智能体行、产物/文件条目 | 只描边，无阴影 |
+| S4 overlay | `BgOverlay`+`BorderL3`+`RadiusLG` | `#FFFFFF` | `#23232F` | modal/palette/菜单/toast/抽屉 | `ShadowOverlay` + scrim |
+
+`SurfaceSunken()`（`design.Tokens`）是**浮层内**的下沉面：浅色取 S1（`#F7F8FA`），暗色取 S2（`#1B1B26`）。暗色窗口侧栏（S1）比页面更深，直接放进浮层会像"挖了个洞"，所以设置对话框的导航用这个方法而不是裸 `BgSidebar`。
 
 **规则**：S2 内最多再嵌一层 S3，禁止卡中卡套弹窗；抽屉/浮层必须有 elevation（无阴影的“假浮层”= AP-24）；暗色导航比页面浅 = AP-24。
 
@@ -516,8 +519,8 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 状态 | 文本色 | 填充/边框/图标 | 语义 |
 |---|---|---|---|
 | success | `SuccessText` | `Success` | 操作/工具成功 |
-| warning / running | `WarningText` | `Warning` | 进行中、需注意（**不表示失败**） |
-| needs action | `WarningText` | `Warning` | 等待用户操作（OAuth 需要授权/授权失效；**不表示连接失败**） |
+| running / in progress | `LabelSecondary` | `Accent`（spinner/点） | 正在进行（**不是警告**：工作按预期推进；warning 只留给需要用户的状态） |
+| needs action | `WarningText` | `Warning` | 等待用户操作（审批、OAuth 需要授权/授权失效；**不表示连接失败**） |
 | danger / error | `DangerText` | `Danger` | 失败、不可逆、审批拒绝 |
 | cancelled | `LabelTertiary` | `LabelTertiary` | 用户取消（中性，不画成失败） |
 | unknown | `LabelTertiary` | `LabelTertiary` | 未知/旧后端回退 |
@@ -543,14 +546,14 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 
 | Role | size/line/weight | 用途 |
 |---|---|---|
-| `TypeXL` | 24/32/400 | 欢迎页/极少用 |
-| `TypeL` | 20/28/500 | 页面标题、对话框标题（配合 600 权重） |
-| `TypeM` | 16/24/400 | 小节标题；Insights KPI 值（600 权重，页面 4 档收敛） |
-| `TypeBody` | 14/22/400 | 正文、消息；Markdown 阅读列行高 1.55 比例（`uikit.ChatMarkdown`，14→21.7） |
-| `TypeS` | 14/24/400 | 行内 label |
-| `TypeXS` | 13/20/400 | 说明、列表次文本 |
-| `TypeXXS` | 12/18/400 | 元数据 |
-| `TypeXXXS` | 11/14/400 | **仅**微标签：分组小标签、kbd 提示、终端 gutter；**禁止成句文本** |
+| `TypeXL` | 24/32/**600** | 欢迎页 hero（一屏 1 处） |
+| `TypeL` | 20/28/**600** | 页面标题、设置页/对话框 H1 |
+| `TypeM` | 16/24/**600** | 分节标题、窗口顶带屏幕标题 |
+| `TypeBody` | 14/22/400 | 正文、消息；Markdown 阅读列行高 1.55（`uikit.ChatMarkdown`） |
+| `TypeS` | 14/22/**500** | 列表行标题、菜单项、按钮标签、工具名 |
+| `TypeXS` | 13/20/400 | 次要正文、表单标签、检查器正文 |
+| `TypeXXS` | 12/18/400 | 元数据、状态词、hint、消息时间/用量 |
+| `TypeXXXS` | 11/14/**500** | **仅** kbd、gutter、分组微标签；**禁止成句文本与元数据句** |
 
 **字号使用规则（v2）**：
 
@@ -560,12 +563,12 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | `TypeL 20/600` | 设置页/对话框 H1 | 列表行、卡头 |
 | `TypeM 16/600` | 分节标题、窗口顶带屏幕标题 | 正文 |
 | `TypeBody 14` | 会话正文、问题正文、表单成句说明 | 元数据、按钮 |
-| `TypeS 14/24` | 列表行标题、菜单项、按钮标签、工具名 | 长段正文 |
+| `TypeS 14/22/500` | 列表行标题、菜单项、按钮标签、工具名 | 长段正文 |
 | `TypeXS 13` | 次要正文、表单标签、属性值、检查器正文 | 时间/计数（用 XXS） |
 | `TypeXXS 12` | 元数据行、hint、状态徽章文字、≤2 行的活动/回执摘要 | 长段正文 |
 | `TypeXXXS 11` | 微标签/kbd/gutter | 成句文本、按钮文字、诊断值 |
 
-**规则**：字号只走 `t.Font(role)`，它会同时设置字体栈、行高、字重并随 `TextScale` 缩放；裸 `FontSize` = AP-03。Mono 文本用 `t.MonoText(role)`。**一屏最多 4 种字号**；权重只用 `design.WeightRegular/Medium/Semibold`（400/500/600），禁止裸 `FontWeight(600)`（DS-03）；**间接字重同样受检（UD-10）**：`FontWeight` 实参为非字面量（本地变量/常量/选择器）时，必须能追溯到 `design.Weight*` token（直接 selector，或每次赋值都来自 token 的本地别名），否则 designlint warn；元数据永不用 accent。
+**规则**：字号只走 `t.Font(role)`，它会同时设置字体栈、行高、字重并随 `TextScale` 缩放；裸 `FontSize` = AP-03；role 已带字重，强调时只能传 `design.Weight*` token（登记例外：侧栏行标题 `TypeXS` + `WeightMedium`、未读 `WeightSemibold`）。Mono 文本用 `t.MonoText(role)`。**一屏最多 4 种字号**；权重只用 `design.WeightRegular/Medium/Semibold`（400/500/600），禁止裸 `FontWeight(600)`（DS-03）；**间接字重同样受检（UD-10）**：`FontWeight` 实参为非字面量（本地变量/常量/选择器）时，必须能追溯到 `design.Weight*` token（直接 selector，或每次赋值都来自 token 的本地别名），否则 designlint warn；元数据永不用 accent。
 
 ### 5.4 间距 / 圆角 / 阴影 / 布局度量
 
@@ -573,9 +576,10 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 |---|---|---|
 | 间距 | `Space0/1/2/3/4/5/6/8` = 0/4/8/12/16/20/24/32（**无 Space7**：24→32 是刻意的档位跳跃，需要 28 时先加 token） | 只用这些；容器间距用 `Gap(design.SpaceN)`，内外边距同理；显式零用 `Space0`，禁止裸 0（DS-03） |
 | 控件高度 | `RowCompactHeight 32` / `ControlHeight 36` / `PageActionHeight 40` / `RowDoubleHeight 44`；紧凑 chip 用 `ControlCompactHeight 28` | 全部 4 的倍数；**禁止 38**；页面唯一 primary 用 40，其余控件 36，列表行 36/44，树/菜单 32 |
-| 圆角 | `RadiusXS 4` / `SM 8` / `MD 10` / `LG 16` / `XL 20` / `Max 999` | XS 仅内嵌小方块；SM 行/控制 chip/palette；MD 原生控件/S3/菜单；LG S2 卡/对话框/toast/团队浮层；**XL 仅 composer**；Max 状态药丸。子圆角 ≤ 父圆角；同屏最多 3 档；禁止 chip 用 LG |
-| 阴影 | `ShadowComposer`（composer）、`ShadowOverlay`（浮层/抽屉/toast，深色更重） | 卡片默认无阴影；浮层才用 elevation；禁止手写 `ui.RGBA` |
-| 布局 | `SidebarWidth 280` / `SidebarRailWidth 64` / `InspectorWidth 320` / `InspectorMinWidth 260` / `ContentMinWidth 520` / `SettingsWidth 820` / `SettingsHeight 760` / `TranscriptWidth 960` / `DialogWidthXS 360` / `DialogWidthS 460` / `DialogWidthCompact 520` / `DialogWidthM 560` / `DialogWidthL 620` / `DialogWidthXL 680` / `DialogBodyMax 480` / `OverlayWidthS 380` | 壳层/对话框/浮层/阅读列尺寸只能引这些 token（Phase 1b 已补齐并替换存量）。**窄窗规则（2026-11-15）**：检查器打开且窗口放不下 侧栏+ContentMinWidth+检查器 时，侧栏按本帧临时渲染为 `SidebarRailWidth`（不写用户折叠偏好），检查器按可用宽度收缩到 ≥InspectorMinWidth 并保持 docked；窗口变宽/关闭检查器自动恢复。 |
+| 圆角 | `RadiusXS 4` / `SM 6` / `MD 8` / `LG 12` / `XL 16` / `Max 999` | XS 内嵌小方块/kbd/状态标签；SM chip/代码块/行高亮；MD 原生控件/菜单；LG 卡/工具卡/对话框/toast；**XL 仅 composer**；Max 只给头像（状态标签不是药丸）。子圆角 ≤ 父圆角；同屏最多 3 档；禁止 chip 用 LG/XL |
+| 阴影 | `ShadowOverlay`（浮层/抽屉/toast，深色更重）；`ShadowComposer` 保留但 composer 默认不用 | 卡片与 composer 默认无阴影（靠 1px `BorderL3` 与表面台阶）；只有浮层用 elevation；禁止手写 `ui.RGBA` |
+| 动效 | `MotionFast 80ms`（hover/focus 颜色）、`MotionBase 120ms`（展开/浮层退出）、`MotionEnter 160ms`（浮层进入）、`MotionList 200ms`（流式跟随/重排） | 统一走 `design.TransitionColors/TransitionHeight/TransitionOverlay/TransitionSize` 与 `ListFollowAnimation/ListMoveAnimation`；`ReduceMotion` 全为 0；禁止 >240ms 的 chrome 动画与逐字淡入 |
+| 布局 | `SidebarWidth 280` / `SidebarRailWidth 64` / `BandHeight 48` / `BrandRowHeight 56` / `InspectorWidth 320` / `InspectorMinWidth 260` / `ContentMinWidth 520` / `SettingsWidth 880` / `SettingsHeight 760` / `FooterHeight 56` / `PaletteWidth 640` / `ToastWidth 320`/`ToastMinWidth 240` / `TranscriptWidth 960` / `ProseMeasure 640` / `DialogWidthXS 360` / `DialogWidthS 460` / `DialogWidthCompact 520` / `DialogWidthM 560` / `DialogWidthL 620` / `DialogWidthXL 680` / `DialogBodyMax 480` / `OverlayWidthS 380` | 壳层/对话框/浮层/阅读列尺寸只能引这些 token（Phase 1b 已补齐并替换存量）。**窄窗规则（2026-11-15）**：检查器打开且窗口放不下 侧栏+ContentMinWidth+检查器 时，侧栏按本帧临时渲染为 `SidebarRailWidth`（不写用户折叠偏好），检查器按可用宽度收缩到 ≥InspectorMinWidth 并保持 docked；窗口变宽/关闭检查器自动恢复。 |
 | 图标尺寸 | `IconSizeS/M/L = 16/20/24`（已落地） | 图标按钮统一走 `uikit.IconButton`（Phase 2）；其他图标尺寸优先用 token，禁止 12–40 裸值继续新增 |
 
 ### 5.5 使用规则与检查
@@ -583,7 +587,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 1. 颜色只从 `internal/brand`（唯一 hex）→ `design.Tokens` → 屏幕。
 2. 所有文字走 `design.Of(c)` 的 `Font/Text/TextMuted`；`TextScale` 必须生效（设计层已有测试，屏幕不许绕过）。
 3. 间距/圆角/尺寸只用上表 token；新增尺寸先加 token 再使用。
-4. 阴影只用两个预设；浮层/菜单/抽屉用 `ShadowOverlay`。
+4. 阴影只从预设取；浮层/菜单/抽屉用 `ShadowOverlay`；卡片与 composer 不加阴影。
 5. **强调色预算**：每屏 ≤2 个 Accent 填充块、≤1 个 primary 按钮、≤2 个红色元素；页面主操作只有两个落点（页头右 / 固定页脚右下），分节动作走 `SectionAction`。
 6. **状态徽章**：只用 `uikit.StatusBadge`（success 8%/warning/danger 12% tint + `*Text` AA 文字 + 必填标签）；禁止 `t.Badge()+TextColor(t.DangerText)` 这类中性底 + 状态字拼法（AP-21）。
 7. 对应检查：DS-01/DS-02/DS-03/DS-11..DS-16（见 [DESIGN-LINT.md](DESIGN-LINT.md)）。
@@ -606,6 +610,8 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | `DangerButton()` | danger 文字，套 `ui.Button` | 删除/拒绝/停止 | 默认/Enter 焦点 |
 | `SelectedRow()` | BgSelected（亮 12% / 暗 18%）+ RadiusSM | 持久导航当前项（自绘富行配合 2px Accent 左条） | 瞬态选择/满蓝填充 |
 | `Badge()` | 胶囊 + BgHover + LabelSecondary | 状态/类型/计数（非语义状态） | 普通元数据、全宽胶囊、状态语义 |
+| 文本字段的可访问名 | `ui.Field` 标题 + 控件 `Label` = 标题 + 「输入」后缀（`settings.inputLabel` / `plugins.inputLabel`、`skillInputLabel`） | 设置页与能力/连接器/技能弹窗的每个 `TextInput`/`TextArea`/`NumberInput`（读屏读「代理地址 输入」「URL 输入」，与可见标题同源但可辨） | 裸标题当控件名（各处不一致是关键盘/读屏定位变慢的根因）；给 `Switch`/`Select`/`SearchField` 加后缀 |
+| composer 输入框的名字 | **会话 composer 用 placeholder**（`输入消息…`，也是 mygo 默认：未设 `Label` 时 placeholder 即名字）；**子会话 composer 用固定名**（`uikit.ComposerShellOptions.InputLabel = "发送给 <名>"`），placeholder 只做视觉提示 | 会话屏只有这一个 composer，名字唯一；子会话可能并存多个，placeholder 会重复且随状态变（`继续该队友…` / `继续该子代理…`） | 把会话 composer 也改成固定名：需迁移四个包共 84 处定位（`Find` 也失效——mygo 的 placeholder 不注册成可查 label），零视觉收益，**不做**；子会话若去掉 `InputLabel` 会重新引入定位歧义 |
 | `ShadowOverlay()` | 浮层阴影（深色 alpha 0.32） | 菜单/浮层/palette/toast/抽屉 | 卡片 |
 
 ### 6.2 uikit 共享组合（`internal/uikit`）
@@ -617,9 +623,10 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 静态披露 | `uikit.WarningLine` | 静态风险/信任披露：`AlertTriangle` + `WarningText` + RoleAlert，**绝不用 danger ink**（红只留真错误与危险动作，§5.2；2026-11-17 审查：LSP 风险与 stdio 披露曾误用 ErrorLine 红） |
 | 设置表单行 | `uikit.SwitchRow` | 布尔设置行统一解剖：标签在节左缘、开关在行尾、描述对齐节左缘（替代 macOS 式右对齐标签列，跨页开关 x 一致） |
 | 设置页脚 | `uikit.PageFooter` | 设置页固定动作条：顶 Divider + 右对齐（危险/次要在前、唯一 primary 最右），禁用 primary 走 `t.DisabledPrimary()`+`Disabled(true)`（与 composer 禁用发送同令牌；rule 14 提交型页面主操作落点） |
-| 只读展示 | `uikit.PropertySheet`（首选）/ `KeyValueRows`（Deprecated）/ `Bullet` | 属性表：160 DIP 标签列 + 值左对齐 + 32 行 + Divider + 值可选中；`KeyValueRows` 旧的右对齐形态只留给未迁移调用点；`PropertySheetOptions.FullWidth` 让分隔线与父容器（分节）同宽——仅上下文页这类「kv 与分节混排」的页面启用，settings/plugins 保持 bounded 默认（2026-11-17 审查：行线右缘不齐） |
+| 键位提示 | `uikit.Kbd` / `uikit.KbdHint` / `uikit.FormatShortcut` | 键位一律画成 chip（11/500、`BgStrong`、`BorderL2`、`RadiusXS`），组合键文本统一走 `FormatShortcut`（macOS `Cmd`、其它平台 `Ctrl`），菜单行/命令面板/提示/composer 共用；**禁止把 `⌘⇧` 符号写死或把快捷键写成括号文字** |
+| 只读展示 | `uikit.PropertySheet`（首选）/ `KeyValueRows`（Deprecated）/ `Bullet` | 属性表：120 DIP 标签列 + 值左对齐 + 32 行 + `Dividers`（只在行间，首末无线）+ 值可选中；`KeyValueRows` 旧的右对齐形态只留给未迁移调用点；`PropertySheetOptions.FullWidth` 让分隔线与父容器（分节）同宽——仅上下文页这类「kv 与分节混排」的页面启用，settings/plugins 保持 bounded 默认（2026-11-17 审查：行线右缘不齐） |
 | 阅读列 | `uikit.ReadingColumn` | 960 居中、`MaxWidthPercent(92)`、无 `Grow`、PaddingX 16 / Gap 20；SessionThread / Context / Goal dock / 子会话 banner 共用 |
-| 分段控件 | `uikit.SegmentedControl` | 包官方 `ui.SegmentedBase`；选中段 `BgSelected` + `LabelPrimary` + 600 + 2 DIP Accent 下划线；设置页 / Insights 唯一入口 |
+| 分段控件 | `uikit.SegmentedControl` | 包官方 `ui.SegmentedBase`；**轨 `BgStrong`、选中段是抬升块：`BgRaised` + 1px `BorderL3` + `LabelPrimary`（`TypeS` 自带 500）**，选中态在 80ms 内渐变（`design.TransitionColors`）；不画 accent 下划线（圆角会切断它、且与轨/选中/蓝三层叠色，A3 VD-12）；设置页 / Insights 唯一入口 |
 | 差异预览 | `DiffPreview` | 官方 `editor.NewBuffer` + `DiffState` + `DiffView`；块头路径 + `+N −M`、高度上限、二进制/超大回退；审批「将改动」与后续工具卡共用；`DiffPreviewOptions.MinHeight` 给高度预算内的父容器保底可读带（审批卡 128 DIP；2026-11-17 审查 P1：diff 不得被裁半行） |
 | 输入框工具栏 | `ComposerToolbar` / `ComposerAttachButton` | 官方 `ui.Toolbar` 封装（单 Tab stop、左右键、溢出菜单、原生 hover/pressed/focus）；附件按钮直连原生文件选择器（拖入/粘贴保留，无手动路径） |
 | 列表行强调 | `OnAccentBadge` | List 选中 accent 行上的可读徽章（AccentText 填充 + accent 文字；status label 语义保留） |
@@ -689,9 +696,11 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 命令面板行 / rail 会话富行 / slash@ 富行 / 侧栏富行与行内 ⋯（**8 处富行站点**，按区域+符号登记 registry allowlist） | 富行按钮、on-accent 行内动作 | 图标按钮已在 Phase 2a 收敛到 `uikit.IconButton`；上述站点受官方 List 行语义 / 行状态前景限制，保留自绘并登记 registry allowlist（DESIGN.md §7.1）；2026-11 审计 UD-11 后 allowlist 支持 symbol/text 站点级锚点，富行条目不再以文件前缀误豁免其他站点 |
 | rail 会话富行（`uiroot.railSessionRow`，`uiroot.rail-session-rows`） | 标题 + 运行（warning）/未读（accent）点，整行点击打开会话并关闭浮层，RoleButton | 官方 List 行语义是 listitem，不提供按钮行；2026-11 审计 UD-11 补登记（此前被 command-palette.rows 文件前缀误归属） |
 | RunStatus 队列计数徽章（`uikit.run-status-queue-badge`） | ButtonBase 全状态自绘（rest/hover/pressed/focused/selected），H28 | 官方 `ui.Badge` 无点击/键盘语义；`ui.Button` 覆写背景会丢原生 hover/pressed（AP-02）；ButtonBase 保留键盘/焦点/焦点环（2026-11 审计 UD-06） |
+| composer 队列计数 chip（`uikit.composer-queue-chip`） | 与上一行同一词汇：`×N` 贴着加队列的控件（`排队`/发送），空计数不画，点击打开队列面板 | 同上（官方 `ui.Badge` 无点击/键盘语义）；计数必须贴在加队列的控件旁，状态条只报运行态（p2-inbox 审计） |
 | composer 动作行 | Shell 的 Row 承载 Toolbar + hint + 发送/排队/停止 | `ui.Toolbar` 溢出菜单会吞掉发送键，故主操作放在 Toolbar 外；Toolbar 内部仍是官方控件（`uikit.ComposerToolbar`），不新增按钮状态机 |
 | slash/@ 建议菜单 | 富行建议面板（图标/标题/说明） | 官方 Autocomplete 仅纯文本；已按官方 suggestions a11y 模式实现 |
 | 命令面板行按钮 | 单次点击执行 + RoleButton 行 | 官方 List 行语义是 listitem，不提供按钮行 |
+| 文件面包屑根节点（`rightpanel.file-crumb`） | 无按钮外观的文本返回入口（点击/Enter 回到文件树） | 官方 `Breadcrumbs` 的末项是当前页、不是链接；根目录这一格必须是可点入口（2026-11-18 登记） |
 | 消息元信息行（时间 · 紧凑用量 · ⋯） | 消息级元信息 + 单一动作菜单 | 官方列表行不提供行内元信息区；只用官方 Text/Button/Menu 组合（不新增自绘控件），时间与用量常显、动作收进一个 ⋯ |
 | 会话「回到最新」浮层 | List 之外的 affordance | 行为用官方 `ScrollToEnd`；浮层必要 |
 | toast 品牌外观 | `ToastViewportBase` parts 上设色/圆角/阴影 | 框架 toast 的换肤方式；状态/计时/读屏仍归框架 |
@@ -701,7 +710,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 
 ### 7.2 新增自绘/新组件的偏离流程
 
-1. **先查**：官方 v0.9.0 是否有组件/`*Base`？本项目是否有预设/入口？→ 有则禁止自绘。
+1. **先查**：官方 v0.9.2 是否有组件/`*Base`？本项目是否有预设/入口？→ 有则禁止自绘。
 2. **写理由**：在代码注释里写清「官方为什么不够」（可访问性/交互语义/布局约束），引用官方文档路径。
 3. **登记**：同 PR 更新本文 §7.1、[UI-COMPONENT-MIGRATION.md](UI-COMPONENT-MIGRATION.md) §3 与 [DESIGN-LINT.md](DESIGN-LINT.md) 的 `design-allowlist`（lint 白名单）。
 4. **补测试**：帧测试覆盖键盘/焦点/状态/role；新视觉有快照。
@@ -715,9 +724,26 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 // What official semantics are preserved: <键盘/焦点/a11y/状态；或说明替代>
 ```
 
+### 7.4.1 已知框架缺口（2026-11-18 重设计复核，不是我们要造的轮子）
+
+> 暗色 toast 浅卡：owner = 当前 shell 维护者；复审触发 = mygo 升级到暴露宿主 appearance 的版本，或产品决定自绘 toast 表面（需先登记 §7.1 白名单）。
+>
+> toast 压住 hero 设置卡（唯一残留实例）：1024 宽 + 会话 hero（空 transcript）+ 有 setup 卡时，底右锚点仍会盖住「配置 API Key」按钮上半 25px；栈已对 home 屏与 pending 审批做让位，但空会话的 hero 由 session 模块渲染，壳层读不到它的高度。toast 瞬时（自动消失）且可关闭，判 P2；根治需 session 上报 hero 顶部（同 `ReportDockTop` 通道）。
+
+| 缺口 | 影响 | 我们的处理 |
+|---|---|---|
+| `editor.DiffState` 无"行号列颜色"开关：行底与行号列用同一 `Added/Deleted` 的两个固定比例（12% / 9%） | 行号列与代码列无法做到像素同底（实测 Δ≈1.02:1） | 把 `Added/Deleted` 预混到 55% 强度，Δ 压到肉眼阈值以下；保留 3 DIP 语义左条与 `+N −M` |
+| `ui.Table` 无隐藏竖线/网格的开关（只有 `CellsStyle`/`RoundRows`/`RowHeight`） | 表头会画出竖列线，与"行线为主"的表格语言不一致 | 接受框架原生样式；要"无竖线表格"改用 `ui.List` 富行反而更偏离，不做 |
+| `ui.OnWindowShortcut` 只在 modal 内注册（`ui/actions.go`） | 不能作为全局 Esc 兜底 | 全局兜底用根作用域 `c.OnShortcut`（排在 overlay 之后）；只对 5 个可聚焦 chrome 控件做 NoEscSteal |
+| `Element` 的已建元素无透明度过渡（只有 Enter/Exit 的 `Motion` 支持 opacity） | hover 显形只能硬切（如行内 `⋯`） | 用"始终构建 + 透明度属性 + 底色 80ms 过渡"近似；不做逐帧动画 |
+| `ui.ToastViewportBase` 的卡片按**框架反转主题**绘制，且卡体 `flagHover` 会接住指针（悬停暂停计时） | 1) 暗色窗口里 toast 是**浅卡**（#FFFFFF）；2) 卡片覆盖的区域**不能点击穿透** | 1) 登记为已知偏离：暗色 toast 保持反转浅卡（可读、瞬时、自动消失），dark owner 见 §7.4.1 备注，复审触发=mygo 暴露宿主 appearance 或 `ToastViewportBase` 支持自定义表面；2) 由此把"锚点绝不压可操作控件"当硬约束：会话**和**落地页都预留 composer dock 高度，有 pending 审批时整栈让到顶带下方（`internal/uiroot/toastanchor.go`） |
+| 宽度/身份不变的 `Scroll` 子树跨帧复用已绘制层，主题变化时不会自动重绘 | 亮→暗切换后 composer/能力卡/toast 保留亮色像素（白底白字） | 壳层在**外观或字号变化时给根内容换一次 key**（`Root.themeGen`），整树重绘一次；这是 mygo 的缓存语义，不是 token 问题 |
+
+**决策闸门家族（无 ✕）**：审批卡、计划审阅、提问卡属于「决策闸门」——它们的出口是**显式动词**（`拒绝/允许一次`、`批准/取消计划/继续规划`、`提交/取消`），**刻意没有右上 ✕**。理由：✕ 在语义上只能是「仅关闭」，而这三类卡关闭后 agent 仍在等决策（会被重新入队弹回），若把 ✕ 做成「取消」则一次误点即不可逆（§3.9 禁止）。表单/信息类模态（设置、连接器、技能、详情）**必须有 ✕**。评审时按此二分，不要按「全站统一」要求决策闸门加 ✕。
+
 ### 7.4 官方不存在的 API（禁止发明）
 
-| 容易误用 | v0.9.0 事实 | 正确做法 |
+| 容易误用 | v0.9.2 事实 | 正确做法 |
 |---|---|---|
 | `ui.DialogFooter` | 不存在（本仓库 `uikit.DialogFooter` 是应用层封装） | 用 `uikit.DialogFooter`；官方 footer 写法是 `Row + Justify(End)` |
 | `Button.Default` / `Element.Default` | 不存在 | Modal 里用 `uikit.DialogFooter` 的 `Default`（仅无输入）或 `EnterTo`/`OnTextKey`/`OverlayShortcut` |
@@ -829,7 +855,7 @@ go run ./internal/devtools/ui-snapshot .cache/ui-conformance   # 生成 PNG 并�
 ```json
 {
   "version": 1,
-  "source": { "mygo": "v0.9.0", "entries": "internal/uikit", "design_doc": "docs/DESIGN.md", "lint_doc": "docs/DESIGN-LINT.md" },
+  "source": { "mygo": "v0.9.2", "entries": "internal/uikit", "design_doc": "docs/DESIGN.md", "lint_doc": "docs/DESIGN-LINT.md" },
   "components": [
     { "id": "agent.tool-row", "entry": "uikit.ToolRow", "package": "internal/uikit",
       "states": ["running", "success", "error", "cancelled", "unknown"],
@@ -859,7 +885,7 @@ go run ./internal/devtools/ui-snapshot .cache/ui-conformance   # 生成 PNG 并�
 
 **同步规则**：`go test ./internal/design/...` 的 conformance 测试校验 registry schema、allowlist 有效性（owner/reason/until）、虚构 API；registry ↔ 本文表格的逐行镜像比对仍待 Phase 3（DS-08）。**新增/迁移入口组件时必须同 PR 更新 registry 与本文 §6.3。**
 
-## 附录 B：官方组件文档索引（mygo v0.9.0）
+## 附录 B：官方组件文档索引（mygo v0.9.2）
 
 按 §1.2 类别可直接打开：`accessibility` `accordion` `alert-dialog` `autocomplete` `avatar` `badge` `breadcrumbs` `button` `calendar` `chart` `checkbox` `code-editor` `collapsible` `color-picker` `combobox` `context-menu` `custom-widgets` `date-input` `decimal-input` `dialog` `diff-viewer` `drag-and-drop` `drawing` `editable-text` `find-bar` `form` `grid` `grid-view` `history-buttons` `icon` `image` `input` `inspector` `layout` `link` `list` `markdown` `menu-button` `meter` `number-input` `outline` `overlays` `popover` `progress` `radio` `range-slider` `rating` `rich-text-editor` `right-to-left` `scroll` `search-field` `segmented` `select` `shaders` `sidebar` `slider` `spinner` `split` `split-button` `stepper` `styling` `switch` `table` `tabs` `testing` `text` `text-input` `time-input` `toast` `toggle` `token-field` `toolbar` `tooltip` `transitions` `tree` `video` `views` `web-view` `windows`。
 
@@ -890,4 +916,7 @@ go run ./internal/devtools/ui-snapshot .cache/ui-conformance   # 生成 PNG 并�
 | D4 | 存量治理用 baseline + 时间盒清零；新代码零容忍 | 106+ 处存量一次清零不现实；baseline 只降不升 | 豁免需 owner + 到期日 |
 | D5 | 非危险简单确认用 `ui.AlertDialog`；危险/结构化用 `ui.Modal`+`uikit.DialogFooter`（危险动作不得 Default，安全取消可 Default）；审批用 `ui.Modal`+footer 且无 Default | 保留原生 AlertDialog 的 Enter 语义；审批两边都可敏感，必须显式选择；单一危险确认让安全动作承接 Enter | 两类对话框并存，必须按内容复杂度/敏感度选择 |
 | D6 | 新增 token 优先于字面量：`IconSize*`、mono type role、控件高度/对话框宽度逐步收口 | 现状 106 处裸度量是最大存量；token 化后才能 lint | 先加 token 再做 lint 规则 |
+| D8 | **视觉语言 v2「精确中性（Precision Neutral）」**：主语言 Linear 精确中性 + 辅助 Primer 企业清晰；中性灰阶 + 单一 accent，层级靠字号/字重/间距，hairline 只做结构，容器圆角 4/6/8/12/16，卡片与 composer 无阴影，动效 80/120/160/200ms | 业界评审（C1 4.60 / C6 4.50，见 `docs/research/redesign-2026-11/A2-industry-design-languages.md`）：与 mygo 原生控件可实现性最高、能吃掉品牌蓝而不被品牌蓝吃掉、与现有 token 体系同构；Geist 黑白极限对比会吃掉品牌蓝、Claude 暖纸与"企业级工具"相反、Carbon 字体/体量不可维护 | 已落地 token（palette/tokens/components/motion）；13 个 UI 模块按 B-spec-v2 逐面收紧；`RadiusMD` 8、`RadiusLG` 12、`RadiusXL` 16 |
+| D9 | **running ≠ warning**：进行中 = `Accent` spinner/点 + `LabelSecondary` 词；`Warning` 只给 needs-action（等待审批/授权失效） | Carbon/VS Code/Linear 都把"进行中"当中低注意力；把 running 画成琥珀会让正常推进的界面读成告警 | `uikit.StatusColor/statusFill` 已改；侧栏/状态条/工具行/审批头统一按此 |
+| D10 | **Esc 拥有者表面内不挂 Tooltip**；快捷键只进可见提示行/`uikit.Kbd`；禁用态解释只用旁注 | mygo tooltip 是 overlay 且抢 Esc（`ui/tooltip.go:91`），提示里写 Esc 会让用户按提示反被吞键；禁用控件不接收指针事件，Tooltip 永不显示（A4-I-01/02 复现） | 各面清理 tooltip；`uikit.Kbd`/`FormatShortcut` 为唯一键位呈现 |
 | D7 | `uikit.ToolRow` 定为工具调用唯一入口 | 现有 4 条渲染路径导致解剖/状态漂移 | 决策类工具卡归 `ToolCallCard`，由 ToolRow 组合 |

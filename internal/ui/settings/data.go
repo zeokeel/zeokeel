@@ -116,7 +116,7 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 	dataDir = strings.TrimSpace(dataDir)
 	sessions, hasSessionList := dataSessionList(chat)
 
-	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+	ui.Column(c).FillWidth().Gap(design.SpaceScreen).Children(func() {
 		uikit.PageHeader(c, localized(locale, DataPrivacyPageTitle, "Data & privacy"), "")
 
 		if st.notice != "" {
@@ -137,7 +137,7 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 		uikit.SectionAction(c, localized(locale, "数据目录", "Data directory"), func(c *ui.Context) {
 			openButton := design.Apply(ui.Button(c, localized(locale,
 				"打开数据目录", "Open data directory")), t.SecondaryButton()).
-				Tooltip(localized(locale, "在文件管理器中打开数据目录",
+				Description(localized(locale, "在文件管理器中打开数据目录",
 					"Open the data directory in the file manager"))
 			openButton.Disabled(dataDir == "")
 			if openButton.Clicked() && dataDir != "" {
@@ -160,7 +160,7 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 					TextColor(t.LabelPrimary).Grow(1).MaxLines(2)
 				copyButton := design.Apply(ui.Button(c, localized(locale, "复制", "Copy")),
 					t.SecondaryButton()).
-					Tooltip(localized(locale, "复制数据目录路径", "Copy the data directory path"))
+					Description(localized(locale, "复制数据目录路径", "Copy the data directory path"))
 				copyButton.Disabled(dataDir == "")
 				if copyButton.Clicked() && dataDir != "" {
 					c.WriteClipboard(dataDir)

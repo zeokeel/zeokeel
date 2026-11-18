@@ -219,13 +219,12 @@ func buildLSPServerRow(c *ui.Context, t *design.Tokens, store contracts.Settings
 			}
 		}
 		// The destructive remove is the row's ⋯ danger item.
-		label := localized(locale, "服务器操作", "Server actions")
+		label := rowActionLabel(locale, localized(locale, "服务器操作", "Server actions"), server.Name)
 		menu := uikit.IconButton(c, uikit.IconButtonOptions{
-			Key:     "lsp-actions/" + server.Name,
-			Label:   label,
-			Tooltip: label,
-			Icon:    icons.More(),
-			Size:    design.IconSizeS,
+			Key:   "lsp-actions/" + server.Name,
+			Label: label,
+			Icon:  icons.More(),
+			Size:  design.IconSizeS,
 		})
 		menu.PopoverMenuButton(func(m *ui.Menu) {
 			remove := m.Item(localized(locale, "移除", "Remove"))
@@ -352,14 +351,14 @@ func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, 
 					ui.Field(c, localized(locale, "名称", "Name"), func() {
 						ui.TextInput(c, &st.name).
 							Label(inputLabel(locale, localized(locale, "名称", "Name"))).
-							Placeholder(localized(locale, "例如 go", "e.g. go")).FillWidth()
+							Placeholder(localized(locale, "例如：go", "e.g. go")).FillWidth()
 					})
 				})
 				ui.Column(c).FillWidth().Grow(1).Children(func() {
 					ui.Field(c, localized(locale, "命令", "Command"), func() {
 						ui.TextInput(c, &st.command).
 							Label(inputLabel(locale, localized(locale, "命令", "Command"))).
-							Placeholder(localized(locale, "例如 gopls", "e.g. gopls")).FillWidth()
+							Placeholder(localized(locale, "例如：gopls", "e.g. gopls")).FillWidth()
 					})
 				})
 			})
@@ -368,7 +367,7 @@ func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, 
 					ui.Field(c, localized(locale, "参数", "Arguments"), func() {
 						ui.TextInput(c, &st.args).
 							Label(inputLabel(locale, localized(locale, "参数", "Arguments"))).
-							Placeholder(localized(locale, "空格分隔，例如 serve -rpc.trace",
+							Placeholder(localized(locale, "空格分隔，例如：serve -rpc.trace",
 								"Space-separated, e.g. serve -rpc.trace")).FillWidth()
 					}).Description(localized(locale, "空格分隔。",
 						"Space-separated."))
@@ -385,7 +384,7 @@ func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, 
 			ui.Field(c, localized(locale, "语言 ID", "Language ID"), func() {
 				ui.TextInput(c, &st.languageID).
 					Label(inputLabel(locale, localized(locale, "语言 ID", "Language ID"))).
-					Placeholder(localized(locale, "例如 go、python", "e.g. go, python")).FillWidth()
+					Placeholder(localized(locale, "例如：go、python", "e.g. go, python")).FillWidth()
 			}).Description(localized(locale,
 				"重启后生效。",
 				"Applies after a restart."))

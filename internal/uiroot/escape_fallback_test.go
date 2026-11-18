@@ -121,10 +121,10 @@ func newEscHarness(t *testing.T, withApproval bool) *escHarness {
 	r.SetKernelContext(kernel)
 	tt := newTestTester(t, r, 1200, 800)
 	tt.Frame()
-	// Move the focus onto the chrome (the sidebar collapse control), outside
-	// the conversation screen's shortcut scope, as closing settings onto the
-	// sidebar footer does. The stub screen registers no Escape handler, so the
-	// key falls through to the window-level fallback.
+	// Move the focus onto the chrome (the sidebar collapse control), outside the
+	// conversation screen's shortcut scope, as closing settings onto the sidebar
+	// footer does. The stub screen registers no Escape handler, so the key falls
+	// through to the window-level fallback.
 	if err := tt.Click("折叠侧边栏"); err != nil {
 		t.Fatalf("focus the chrome collapse control: %v; texts = %v", err, tt.Texts())
 	}

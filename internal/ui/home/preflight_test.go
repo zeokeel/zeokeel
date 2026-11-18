@@ -48,8 +48,8 @@ func TestHomeEmptyStateShowsMissingAPIKey(t *testing.T) {
 	activate(t, h, home.Module(), home.Config{})
 	tester := ui.NewTester(h.ui.View, 1200, 800)
 	tester.Frame()
-	h.assertTexts(tester, "还缺少：API Key", "配置 API Key")
-	h.assertNoTexts(tester, "还缺少：模型")
+	h.assertTexts(tester, "还没有会话", "尚未配置 API Key。使用本地模型服务时可忽略。", "配置 API Key")
+	h.assertNoTexts(tester, "尚未配置模型。添加服务商与密钥后才能发送消息。")
 }
 
 func TestHomeComposerWarnsAboutMissingAPIKey(t *testing.T) {
@@ -71,7 +71,10 @@ func TestHomeComposerWarnsAboutMissingAPIKey(t *testing.T) {
 }
 
 func TestHomeConfigureActionDeepLinksToModelPage(t *testing.T) {
-	h := newHarness(t, &fakeChat{config: contracts.ChatConfig{Model: "test-model"}})
+	// No model is the blocking gap, so the empty state's one action is
+	// 「配置模型」 (a missing key alone is not blocking: local model servers
+	// need none, so that state keeps 新建会话 as its action).
+	h := newHarness(t, &fakeChat{})
 	activate(t, h, home.Module(), home.Config{})
 	stubSettingsPage(t, h, "model", "常用", "模型", "模型页桩")
 	stubSettingsPage(t, h, "archive", "高级", "归档", "归档页桩")
@@ -92,7 +95,7 @@ func TestHomeConfigureActionDeepLinksToModelPage(t *testing.T) {
 		t.Fatalf("close settings: %v", err)
 	}
 	tester.Frame()
-	if err := tester.Click("配置 API Key"); err != nil {
+	if err := tester.Click("配置模型"); err != nil {
 		t.Fatalf("click configure: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()

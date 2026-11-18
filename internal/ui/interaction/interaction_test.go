@@ -338,9 +338,16 @@ func TestOptionQuestionAnswers(t *testing.T) {
 		ID: "q1", Text: "部署到哪个环境？", Options: []string{"staging", "prod"},
 	})
 	tester.Frame()
-	h.assertTexts(tester, "需要你的确认", "部署到哪个环境？", "staging", "prod", "取消")
+	h.assertTexts(tester, "需要你的确认", "部署到哪个环境？", "staging", "prod", "取消", "提交")
 
+	// Selecting an option is not answering it: the Submit action sends the
+	// choice (B-spec-v2 §3.3.3 — radio rows plus one primary action).
 	h.click(tester, "prod")
+	tester.Frame()
+	if answers := h.interaction.answered(); len(answers) != 0 {
+		t.Fatalf("selecting an option answered %+v; want nothing", answers)
+	}
+	h.click(tester, "提交")
 	answers := h.interaction.answered()
 	if len(answers) != 1 || answers[0].id != "q1" || answers[0].answer != "prod" {
 		t.Fatalf("answers = %+v, want q1/prod", answers)
@@ -428,8 +435,14 @@ func TestOptionQuestionExplicitTabEnterAnswers(t *testing.T) {
 	if !tester.Focused("生产环境") {
 		t.Fatalf("Tab did not reach the first option; texts = %v", tester.Texts())
 	}
-	tester.Key(0, ui.KeyEnter)
+	// The option is a radio: Space chooses it, and the Submit action (the card's
+	// one accent action) sends the choice.
+	tester.Key(0, ui.KeySpace)
 	tester.Frame()
+	if answers := h.interaction.answered(); len(answers) != 0 {
+		t.Fatalf("Space answered %+v; want nothing", answers)
+	}
+	h.click(tester, "提交")
 	answers := h.interaction.answered()
 	if len(answers) != 1 || answers[0].id != "q-tab" || answers[0].answer != "生产环境" {
 		t.Fatalf("answers = %+v, want q-tab/生产环境", answers)
@@ -456,7 +469,7 @@ func TestOptionQuestionOtherAnswer(t *testing.T) {
 		t.Fatalf("the Other input did not take the keyboard; texts = %v", tester.Texts())
 	}
 	// The option buttons stay visible: entering Other is not a commitment.
-	h.assertTexts(tester, "staging", "prod", "Enter = 提交自定义回答")
+	h.assertTexts(tester, "staging", "prod", "关闭问题")
 	tester.Type("预发布环境")
 	tester.Frame()
 	tester.Key(0, ui.KeyEnter)
@@ -487,10 +500,12 @@ func TestOptionQuestionOtherEscapeCollapses(t *testing.T) {
 	if answers, cancels := h.interaction.answered(), h.interaction.cancelled(); len(answers) != 0 || len(cancels) != 0 {
 		t.Fatalf("Escape submitted/cancelled: answers=%+v cancels=%v", answers, cancels)
 	}
-	h.assertTexts(tester, "部署到哪个环境？", "其他…", "Esc = 取消")
+	h.assertTexts(tester, "部署到哪个环境？", "其他…", "关闭问题")
 	h.assertNoTexts(tester, "输入自定义回答")
 	// The options still decide; picking one answers the question.
 	h.click(tester, "staging")
+	tester.Frame()
+	h.click(tester, "提交")
 	if answers := h.interaction.answered(); len(answers) != 1 || answers[0].answer != "staging" {
 		t.Fatalf("answers = %+v, want staging", answers)
 	}
@@ -529,11 +544,15 @@ func TestQuestionQueueIsFIFO(t *testing.T) {
 	h.assertTexts(tester, "第一个问题？")
 	h.assertNoTexts(tester, "第二个问题？")
 	h.click(tester, "A")
+	tester.Frame()
+	h.click(tester, "提交")
 
 	tester.Frame()
 	h.assertTexts(tester, "第二个问题？")
 	h.assertNoTexts(tester, "第一个问题？")
 	h.click(tester, "B")
+	tester.Frame()
+	h.click(tester, "提交")
 
 	if answers := h.interaction.answered(); len(answers) != 2 ||
 		answers[0].id != "a" || answers[1].id != "b" {
@@ -693,7 +712,7 @@ func TestPlanReviewCancelAndEscape(t *testing.T) {
 	// explicit footer action decides. The footer says so.
 	h.plan.trigger(contracts.PlanReview{Content: "第二份计划", State: "reviewing"})
 	tester.Frame()
-	h.assertTexts(tester, "计划待审阅", "Esc 不会取消计划")
+	h.assertTexts(tester, "计划待审阅", "不取消计划")
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
 	if exits := h.plan.exitCalls(); len(exits) != 1 {
@@ -737,6 +756,8 @@ func TestAskAndArtifactShareOneQueue(t *testing.T) {
 
 	h.click(tester, "好")
 	tester.Frame()
+	h.click(tester, "提交")
+	tester.Frame()
 	h.assertTexts(tester, "后显示的工件")
 	h.click(tester, "关闭")
 	tester.Frame()
@@ -773,6 +794,8 @@ func TestDegradesWithoutOptionalBridges(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "需要你的确认", "还能提问吗？")
 	h.click(tester, "能")
+	tester.Frame()
+	h.click(tester, "提交")
 	if answers := h.interaction.answered(); len(answers) != 1 || answers[0].answer != "能" {
 		t.Fatalf("answers = %+v, want q1/能", answers)
 	}
@@ -816,9 +839,9 @@ func TestQuestionOptionsStackedAndCancelInFooter(t *testing.T) {
 	if !ok {
 		t.Fatalf("second option missing; texts = %v", tester.Texts())
 	}
-	if first.X+first.W/2 != second.X+second.W/2 {
-		t.Fatalf("options are not stacked in one column: centers = %.1f and %.1f",
-			first.X+first.W/2, second.X+second.W/2)
+	if first.X != second.X {
+		t.Fatalf("options are not left-aligned in one column: x = %.1f and %.1f",
+			first.X, second.X)
 	}
 	if second.Y <= first.Y {
 		t.Fatalf("options are not vertical: y = %.1f then %.1f", first.Y, second.Y)
@@ -833,6 +856,8 @@ func TestQuestionOptionsStackedAndCancelInFooter(t *testing.T) {
 	}
 
 	h.click(tester, "staging")
+	tester.Frame()
+	h.click(tester, "提交")
 	if answers := h.interaction.answered(); len(answers) != 1 || answers[0].answer != "staging" {
 		t.Fatalf("answers = %+v, want staging", answers)
 	}
@@ -847,7 +872,7 @@ func TestPlanReviewEnterKeepsPlanning(t *testing.T) {
 	tester := h.tester()
 	h.plan.trigger(contracts.PlanReview{Content: "计划内容", State: "reviewing"})
 	tester.Frame()
-	h.assertTexts(tester, "继续规划反馈", "输入反馈后按 Enter = 继续规划")
+	h.assertTexts(tester, "继续规划反馈", "无反馈时不生效")
 
 	// Empty feedback: Enter leaves the review open and approves nothing.
 	tester.Key(0, ui.KeyEnter)
@@ -864,7 +889,7 @@ func TestPlanReviewEnterKeepsPlanning(t *testing.T) {
 	tester.Frame()
 	tester.Type("先补回归测试")
 	tester.Frame()
-	h.assertTexts(tester, "Enter = 继续规划（发送反馈给 agent）")
+	h.assertTexts(tester, "发送反馈继续规划")
 	tester.Key(0, ui.KeyEnter)
 	tester.Frame()
 	exits := h.plan.exitCalls()
@@ -887,4 +912,53 @@ func TestPlanReviewEnterKeepsPlanning(t *testing.T) {
 	if exits := h2.plan.exitCalls(); len(exits) != 1 || exits[0] != "approve" {
 		t.Fatalf("Exit calls after clicking Approve = %v, want [approve]", exits)
 	}
+}
+
+// TestArtifactPreviewCloses covers the present-tool preview: the oldest overlay
+// is the artifact, its close action is a visible 关闭 (in the header and in the
+// footer), and it dismisses the overlay both by the button and by Escape.
+func TestArtifactPreviewCloses(t *testing.T) {
+	h := newHarness(t)
+	tester := h.tester()
+	h.artifacts.trigger(contracts.Artifact{
+		ID: "a-art", Title: "检查报告", Body: "# 构建结果\n\n- 30 个包通过",
+	})
+	tester.Frame()
+	h.assertTexts(tester, "检查报告", "关闭")
+	if err := tester.Click("关闭"); err != nil {
+		t.Fatalf("the preview's close action is not clickable: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	h.assertNoTexts(tester, "检查报告")
+
+	// Escape closes the next one, as the overlay's own dismissal.
+	h.artifacts.trigger(contracts.Artifact{ID: "a-esc", Title: "第二份报告", Body: "正文"})
+	tester.Frame()
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	h.assertNoTexts(tester, "第二份报告")
+}
+
+// TestArtifactBehindAQuestionOpensAfterTheAnswer covers the queue: a present
+// call that arrives while a question waits opens once the question is answered,
+// and its close action is then clickable (the snapshot's failure: the preview
+// never became the current overlay).
+func TestArtifactBehindAQuestionOpensAfterTheAnswer(t *testing.T) {
+	h := newHarness(t)
+	tester := h.tester()
+	h.interaction.trigger(contracts.UserQuestion{ID: "q1", Text: "先回答问题？", Options: []string{"好"}})
+	h.artifacts.trigger(contracts.Artifact{ID: "a1", Title: "后显示的工件", Body: "工件正文"})
+	tester.Frame()
+	h.assertTexts(tester, "先回答问题？")
+	h.assertNoTexts(tester, "后显示的工件")
+
+	h.click(tester, "好")
+	h.click(tester, "提交")
+	tester.Frame()
+	h.assertTexts(tester, "后显示的工件", "关闭")
+	if err := tester.Click("关闭"); err != nil {
+		t.Fatalf("the preview behind the question is not clickable: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	h.assertNoTexts(tester, "后显示的工件")
 }

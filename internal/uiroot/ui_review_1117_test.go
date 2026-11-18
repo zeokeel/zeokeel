@@ -189,9 +189,11 @@ func TestPaletteShortcutColumnIsFixed(t *testing.T) {
 	if !ok {
 		t.Fatalf("long chord %q missing; texts = %v", longChord, tt.Texts())
 	}
-	if short.X != long.X {
-		t.Fatalf("shortcut column start drifts with the chord length: %q x=%v, %q x=%v",
-			shortChord, short.X, longChord, long.X)
+	// The chords are key caps in one reserved column, right-aligned inside it (the
+	// desktop key-reference convention: the caps' trailing edges line up).
+	if right := short.X + short.W; right != long.X+long.W {
+		t.Fatalf("shortcut column edge drifts with the chord length: %q right=%v, %q right=%v",
+			shortChord, right, longChord, long.X+long.W)
 	}
 
 	// The hint of the chord-less row ends at the same edge as the chord row's
@@ -255,13 +257,13 @@ func TestSettingsNavKeepsDarkRampBelowPanel(t *testing.T) {
 }
 
 // TestToastAnchorFollowsChromeState covers the host half of the toast placement
-// contract: below the header band at the main column's right edge by default,
-// before the docked inspector pane, and yielded to the window's bottom-right
-// while the settings modal or a module-reported overlay is open.
+// contract (audit VD-02): the window's bottom-right corner, growing upward,
+// clear of what the conversation screen docks at the bottom (the composer and
+// the status strip), and clear of a docked inspector.
 func TestToastAnchorFollowsChromeState(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, contracts.ScreenSpec{
-		ID: "session", Title: "对话", Order: 10,
+		ID: "session", Title: "会话", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "body-session") },
 	})
 	mustSlot(t, r, textSlotItem(contracts.SlotScreenHeader, "session.header", "screen-title", 10))
@@ -270,75 +272,74 @@ func TestToastAnchorFollowsChromeState(t *testing.T) {
 	tt := newTestTester(t, r, 1200, 800)
 	tt.Frame()
 
-	// Default: below the two-row band (40 + 32) plus the Space3 gap, at the
-	// window's right edge less the stack's Space4 gap.
+	// Default on the conversation screen: the bottom-right corner, above the
+	// composer dock, the status strip and the transcript's trailing meta line (a
+	// stack that stopped at the dock's edge covered that row's tail and it read as
+	// the app truncating its own status).
 	anchor := r.Anchor()
-	if anchor.FromBottom {
-		t.Fatalf("default anchor yields to the bottom: %+v", anchor)
+	if !anchor.FromBottom {
+		t.Fatalf("default anchor = %+v, want the bottom-right corner", anchor)
 	}
-	if want := design.Space8 + design.Space2 + design.Space8 + design.Space3; anchor.Top != want {
-		t.Fatalf("default anchor top = %v, want %v (below the header band)", anchor.Top, want)
+	if want := design.Space4 + toastComposerDockHeight + transcriptMetaRowHeight; anchor.Bottom != want {
+		t.Fatalf("default anchor bottom = %v, want %v (above the composer dock and the meta line)", anchor.Bottom, want)
 	}
 	if anchor.Right != design.Space4 {
 		t.Fatalf("default anchor right = %v, want %v", anchor.Right, design.Space4)
 	}
 
-	// Docked inspector: the stack stops before the pane (and the split divider).
-	// At 1200 DIP the expanded sidebar + content minimum + inspector all fit,
-	// so the inspector docks (a drawer would yield to the bottom instead).
+	// Docked inspector: the stack stops before the pane (and the split seam).
 	r.SetRightPanelOpen(true)
 	tt.Frame()
 	anchor = r.Anchor()
 	if want := design.Space4 + design.InspectorWidth + design.Space1; anchor.Right != want {
 		t.Fatalf("docked anchor right = %v, want %v (main column right edge)", anchor.Right, want)
 	}
-	if anchor.FromBottom {
-		t.Fatalf("docked inspector alone must not yield the stack: %+v", anchor)
+	if !anchor.FromBottom {
+		t.Fatalf("the docked inspector must not move the stack off the bottom: %+v", anchor)
 	}
 	r.SetRightPanelOpen(false)
 	tt.Frame()
 
-	// Settings modal: bottom-right yield.
+	// Settings modal: the plain corner, clear of the centred panel.
 	r.Navigator().ToggleSettings()
 	tt.Frame()
 	anchor = r.Anchor()
 	if !anchor.FromBottom || anchor.Right != design.Space4 || anchor.Bottom != design.Space4 {
-		t.Fatalf("settings modal anchor = %+v, want the bottom-right yield", anchor)
+		t.Fatalf("settings modal anchor = %+v, want the window corner", anchor)
 	}
 	r.Navigator().CloseSettings()
 	tt.Frame()
-	if r.Anchor().FromBottom {
-		t.Fatal("closing the settings modal did not restore the header anchor")
+	if got := r.Anchor(); got.Bottom != design.Space4+toastComposerDockHeight+transcriptMetaRowHeight {
+		t.Fatalf("closing the settings modal did not restore the composer inset: %+v", got)
 	}
 
-	// A module-reported overlay yields the stack too, and its close restores it.
+	// A module-reported popover does NOT move the stack: a popover opens beside
+	// its trigger and leaves the composer and the status strip live, so the
+	// stack keeps its dock inset and covers neither.
 	r.ReportOverlay(true)
 	tt.Frame()
-	if !r.Anchor().FromBottom {
-		t.Fatal("ReportOverlay(true) did not yield the stack")
+	if got := r.Anchor(); got.Bottom != design.Space4+toastComposerDockHeight+transcriptMetaRowHeight {
+		t.Fatalf("a reported popover moved the stack off its dock inset: %+v", got)
 	}
+	// The count still floors at zero: an unpaired close leaves it armed.
+	r.ReportOverlay(false)
 	r.ReportOverlay(false)
 	tt.Frame()
-	if r.Anchor().FromBottom {
-		t.Fatal("ReportOverlay(false) did not restore the header anchor")
-	}
-	// A stray close never disables the yield.
-	r.ReportOverlay(false)
-	r.ReportOverlay(true)
-	tt.Frame()
-	if !r.Anchor().FromBottom {
-		t.Fatal("an unpaired close disabled the overlay yield")
+	if got := r.Anchor(); got.Bottom != design.Space4+toastComposerDockHeight+transcriptMetaRowHeight {
+		t.Fatalf("an unpaired close changed the stack's place: %+v", got)
 	}
 }
 
-// TestToastAnchorWithoutBand keeps a plain top inset on a screen that
-// contributes no header band at all.
+// TestToastAnchorWithoutComposer keeps the plain corner inset on a screen that
+// docks no composer. The landing screen is NOT one of them: it holds a composer
+// and its action row sits where the stack would land, so it keeps the dock
+// inset like a conversation.
 func TestToastAnchorWithoutBand(t *testing.T) {
 	r := newTestRoot(t)
-	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	mustScreen(t, r, textScreen("insights", "洞察", "body-insights", 10))
 	tt := newTestTester(t, r, 1200, 800)
 	tt.Frame()
-	if anchor := r.Anchor(); anchor.FromBottom || anchor.Top != design.Space4 {
-		t.Fatalf("band-less anchor = %+v, want a plain Space4 top inset", anchor)
+	if anchor := r.Anchor(); !anchor.FromBottom || anchor.Bottom != design.Space4 {
+		t.Fatalf("band-less anchor = %+v, want the plain Space4 corner inset", anchor)
 	}
 }

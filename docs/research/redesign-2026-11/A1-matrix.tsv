@@ -1,0 +1,195 @@
+# A1 机读矩阵：位置	现状	官方替代	结论	理由/代价
+# 结论取值：迁移（现在就该改）| 可迁移（顺手改/低优先）| 保留（有理由）
+# 官方替代 "-" 表示官方无对应件或不适用。证据基线：mygo v0.9.2 = /data/mygo/.cache/gopath/pkg/mod/github.com/egoist/mygo@v0.9.2
+# --- A. 自绘点与明确动作项 ---
+internal/uikit/iconbutton.go:133	IconButtonGhost/Subtle/Danger 用 ui.ButtonBase 自绘 rest/hover/pressed/selected 五态（H24–32，无过渡）	官方无图标按钮；过渡用 Element.Transition(ElementTransition{Colors:true,Duration:120ms})	保留	官方无对应件（DESIGN §7.4）；ButtonBase 保住键盘/焦点环/Disabled；代价：需给三态切换补 Transition 才有渐变
+internal/uikit/iconbutton.go:158	背景在 BgHover/BgSelected 间硬切，无 120ms 过渡	design.TransitionColors(c)	迁移	一行式官方 recipe（docs/ui/transitions.md「Colors: its background and border colors, as a hover fades in and out」）；39 处手动状态读点里触达面最广的一处
+internal/uikit/iconbutton.go:196	IconButtonNative 走官方 ui.Button（正确）	—	保留	官方件只设度量不覆写状态色，符合 AGENTS §3.4
+internal/uikit/runstatus.go:357	队列计数徽章 ButtonBase 全状态自绘（rest/hover/pressed/焦点/开合），H28	官方 ui.Badge 无点击语义	保留	已登记 uikit.run-status-queue-badge；建议仅补 Transition(Colors) 与 Ellipsis
+internal/uikit/runstatus.go:388	runStatusQueuedSummary 用 runes[:80]+"…" 截断排队提示	MaxLines(1).Ellipsis("…") 或 TruncateMiddle	迁移	数据层截断丢失全文（tooltip/a11y/复制都拿不到原句）；官方在绘制期截断并自适应宽度
+internal/uiroot/frame.go:426	rail 会话富行 ButtonBase（标题+运行/未读点+整行点击）	官方 List 行语义是 listitem	保留	已登记 uiroot.rail-session-rows（UD-11）；建议补 Transition(Colors) 让 hover 渐进
+internal/uiroot/frame.go:1158	命令面板行 ButtonBase（单击即执行 + RoleButton）	官方 List 行不提供按钮行语义	保留	已登记 command-palette.rows；建议补 Transition(Colors)
+internal/ui/session/view.go:4745	slash 命令富行 ButtonBase（图标+标题+说明）	官方 Autocomplete 仅纯文本	保留	已登记；建议补 Transition(Colors)
+internal/ui/session/view.go:5222	@ 提及富行 ButtonBase	同上	保留	已登记；建议补 Transition(Colors)
+internal/ui/sidebar/sidebar.go:1442	工作区树行 ButtonBase（前缀槽+行尾动作）	官方 Outline 行不提供行内自定义内容	保留	已登记；⚠ 1538 行 BeginOutline 附近需复核 FocusWithin 语义
+internal/ui/sidebar/sidebar.go:1609	会话行 ⋯ 菜单触发器 ButtonBase	uikit.IconButtonNative	迁移	目标是收敛到 uikit.IconButton（Ghost/Native），去掉第 4 份手写状态机
+internal/ui/sidebar/sidebar.go:2205	工作区组标题 ⋯ ButtonBase	uikit.IconButtonNative	迁移	同上；单点替换，帧测试覆盖
+internal/ui/sidebar/sidebar.go:2380	设置行 ButtonBase（整行点击+图标+标签+chevron）	官方 Sidebar/SidebarItem 或 List 行	可迁移	官方 Sidebar 只给源列表语义；若设置导航迁 Sidebar 可整体收敛，代价是导航模型改动，先保留
+internal/ui/sidebar/sidebar.go:1555	行内加号 Opacity(0)+IgnoreInput，hover 才显形（无淡入）	design.TransitionColors(c)	迁移	瞬显会造成"闪烁感"；官方 Transition 支持颜色/位置过渡，仅多一行
+internal/ui/sidebar/sidebar.go:1615	会话行 ⋯ 同款 hover 显形	同上	迁移	同上
+internal/ui/sidebar/sidebar.go:2212	工作区组 ⋯ 同款 hover 显形	同上	迁移	同上
+internal/ui/session/view.go:896	Chat/轨迹/记忆/上下文 标签条：TabsBase + 手绘 accent 下划线 ui.Box(Height 0.5)	官方 ui.Tabs（内置同款下划线：inset Space(1.5)、高 Space(0.5)、accent；hover 文字提亮；FocusVisible 焦点环）	迁移	官方 tabs.go:26-52 与手绘完全等价 → 整段替换，删 20 行手绘 Box 与两处 Margin 微调；代价：字号需在 List 上设 TypeXS
+internal/uikit/propertysheet.go:107	循环内 if index>0 { ui.Divider(c) } 画行间分隔	Element.Dividers(1, t.Border)	迁移	官方「一次声明、按子项分隔」，行高/间距不变；删 3 行样板
+internal/ui/settings/settings.go:227	设置页分组循环内 Divider	Element.Dividers(1, t.Border)	迁移	同上
+internal/ui/settings/settings.go:601	设置页第二处循环内 Divider	Element.Dividers(1, t.Border)	迁移	同上
+internal/uikit/session.go:118	transcript ListState{Key,Label,FollowEnd,HoldPlace} 已官方	Plus: FollowAnimation / MoveAnimation	可迁移	已是官方用法；只是缺"流式滑动"和"行位移"两条动画，加字段即可
+internal/ui/session/session.go	transcript ListState 配置处	见 uikit/session.go	可迁移	同上
+internal/uikit/uikit.go:109	Deprecated KeyValueRows，仍有 2 个调用方	PropertySheet	迁移	文档已标弃用却仍在用 → 契约自相矛盾，应收口
+internal/ui/rightpanel/view.go:399	uikit.KeyValueRows 右对齐 label/value	PropertySheet（固定 160 label 列 + 行分隔 + 可选中）	迁移	右对齐会把值甩到 1050 DIP 外（文件内注释自述），PropertySheet 是产品唯一形态
+internal/ui/plugins/mcp_config.go:100	uikit.KeyValueRows	PropertySheet	迁移	同上
+internal/ui/session/view.go:3979	truncateRunes：模型 chip 标签按 runes 截断 + "…"	MaxLines(1).Ellipsis("…").TruncateStart()	迁移	长模型名/长标题按数据截断，宽度变化不自适应，a11y 与 tooltip 都拿不到全文
+internal/ui/home/composer.go:355	homeChipLabel：18 runes 截断上下文 chip	MaxLines(1).Ellipsis("…")	迁移	同上；chip 宽度由 layout 决定，官方截断更稳
+internal/ui/settings/model_check.go:139	truncateModelName：24 runes 截断模型 id	MaxLines(1).Ellipsis("…").TruncateStart()	迁移	模型 id 差异在尾部（:free / @date），应 TruncateStart 保尾
+internal/ui/plugins/view.go:177	collapsedMCPStatus：12 runes 截断状态徽章文案	MaxLines(1).Ellipsis("…") 或缩短文案	迁移	12 runes 会把中文状态截成 3 字，语义丢失；改为官方截断 + Tooltip 全文
+internal/uikit/approval.go:849	审批摘要 runes 截断	MaxLines(1).Ellipsis("…")	迁移	审批动词/命令全文必须可读，数据截断破坏可追溯性
+internal/uikit/toolrow.go:456	工具行摘要 runes 截断	MaxLines(1).Ellipsis("…")	迁移	同上；工具行已有 Tooltip 全文，截断需求应由绘制层承担
+internal/ui/automation/view.go:442	运行摘要 runes 截断	MaxLines(1).Ellipsis("…")	迁移	同上
+internal/uikit/previewprose.go:55	散文预览 runes 截断（数据侧）	MaxLines(n) + Ellipsis	保留	预览是数据侧有界载荷（生成 tooltip/摘要），不必依赖绘制期；保留
+internal/ui/plugins/connectors_auth.go:143	错误消息 200 runes 截断	—	保留	错误载荷保界（防止 3KB 栈信息进 UI），语义正确
+internal/ui/plugins/connectors_edit.go:876	错误消息 160 runes 截断	—	保留	同上
+internal/ui/rightpanel/artifacts_download.go:42	文件名 slug 60 runes	—	保留	文件名生成，非 UI 文本
+internal/ui/toasts/toasts.go:487	toast 操作按钮手写 pressed/hover 背景切色	design.TransitionColors(c) + ToastParts	可迁移	ToastParts 是官方 base，换肤合法；缺 120ms 过渡
+internal/ui/toasts/toasts.go:502	toast 关闭按钮同款	IconButton 语义 + Transition	可迁移	同上
+internal/ui/session/goal.go:372	目标组 hover 切背景	design.TransitionColors(c)	可迁移	小改，视觉一致性收益
+internal/ui/session/todo.go:86	折叠触发器 hover/focus 提亮	design.TransitionColors(c)	可迁移	同上
+internal/uikit/toolrow.go:304	工具行触发器 hover/focus 提亮	design.TransitionColors(c)	可迁移	长列表内高频 hover，最值得做过渡的一处
+internal/uikit/reasoning.go:102	推理折叠触发器同款	design.TransitionColors(c)	可迁移	同上
+internal/ui/session/view.go:1553	回到最新浮层触发器 hover/focus	design.TransitionColors(c)	可迁移	同上
+internal/ui/session/view.go:4483	消息重试/恢复触发器同款	design.TransitionColors(c)	可迁移	同上
+internal/uiroot/frame.go:53	c.SetMenuPresentation(ui.PopoverMenus) 窗口级统一菜单外观	PopoverMenuOptions{Panel,Item} 逐菜单换肤	保留	窗口级一致外观是本产品刻意选择；逐菜单选项仅在需要差异化时用（例如右栏 ⋯ 更紧凑）
+internal/ui/settings/listhelper.go:45	明确不伪造进度（不用 ui.Progress）	ui.Progress（有真实进度时）	保留	无真实进度不得伪造（AGENTS §3.7）；只有确定百分比的场景才补
+# --- B. 官方能力缺口（位置=建议首落点） ---
+全仓	internal/design/motion.go 已定义 4 个时长 token + 7 个动效 helper，但 helper 调用点 = 0	design.TransitionColors/TransitionHeight/TransitionOverlay/TransitionSize/ListFollowAnimation/ListMoveAnimation	迁移	P0：token 与 helper 都已就位，只差接线；实现者不要自己发明时长（AGENTS §3.3）
+全仓	0 处 Element.Transition / AnimateColor / AnimatePose / ContentTransition / Match(Fly)	ui.ElementTransition + ui.Motion（docs/ui/transitions.md）	迁移	P0：所有 hover/pressed/浮层出现/列表位移都是硬切，是"企业级审美"的最大单点差距
+internal/uikit/session.go	流式追加无滑动	design.ListFollowAnimation(c)（wrapper: MotionList 200ms + ReduceMotion→nil）	迁移	P0：流式输出时新行从下方滑入（ChatGPT/Messages 观感），官方 one-liner
+internal/uikit/session.go	行位移/折叠无滑移	design.ListMoveAnimation(c)（wrapper: ui.ListState.MoveAnimation，v0.9.1 list_move.go）	迁移	P1：折叠/展开/重排时行不跳；需 Key（已有）
+全仓	长列表无分页能力	ui.ListState.EndReached + NearEnd	可迁移	P2：长会话/日志/产物历史按需加载；当前一次全量（内存与首帧代价）
+全仓	0 处 TruncateStart / TruncateMiddle	Element.TruncateStart / TruncateMiddle	迁移	P1：长路径、模型 id、会话标题保尾/保中；docs/ui/text.md 未记录（以源码为准）
+internal/ui/rightpanel/files.go	文件树/预览无 Sticky	Element.Sticky()	可迁移	P2：小节标题吸顶（设置页/检查器长面板）
+全仓	滚动条外观只能由 Theme 全局定	Element.ScrollbarStyle（Scroll/List/Table 均可，Square/Flush/Thumb 色）	可迁移	P2：统一 8–10 DIP 方角拇指、hover 加深；比改 Theme 精确
+全仓	0 处 Element.Dividers	Dividers(1, t.Border)	迁移	P1：替代 3 处循环 Divider 样板
+internal/uiroot/frame.go	浮层/对话框出现无 enter 动画	design.TransitionOverlay(c)（MotionEnter 进 / MotionBase 出）	迁移	P1：对话框、命令面板、设置面需要 150ms 淡入上移
+全仓	0 处 ui.Pose / AnimatePose	Pose{Y:-1,Scale:1.02} + ui.Snappy	可迁移	P2：卡片 hover 抬起（能力页卡片、产物卡）
+全仓	AccessChildren / Access 对外不可调用	—（回调参数是 mygo internal/platform 类型）	保留	实测 `use of internal package ... not allowed`（探针 probe2）；❌ 不要写进设计契约
+全仓	Context.TextSystem() 返回 internal/text.System	—	保留	外部无法命名或存字段，且无公开 API 接受该值 → 不可用
+全仓	0 处 Recorder	ui.NewRecorder（v0.9.2）	保留	截图已有 ui-snapshot（Tester.Image + SetScale + Advance）覆盖；Recorder 只在脱离 Tester 输入模型时才有边际价值
+全仓	0 处 Touch/Touches	Element.Touches()	保留	macOS 无触屏、trackpad 不报触点；仅 Windows 触屏平板有意义 → 非本轮目标
+全仓	0 处 Handle.SelectAll	handle.SelectAll(window)	可迁移	P3：改名为空/聚焦即全选等场景；编辑菜单的 Cmd+A 已由框架处理
+全仓	0 处 SVG.WithDark / Unsupported	SVG.WithDark(bool) / Unsupported() []string	可迁移	P2：第三方 SVG（markdown 图片、连接器图标）无法绘制时给出说明而不是空白；WithDark 让品牌图随应用主题而非系统
+全仓	0 处 PopoverMenuOptions	PopoverMenuOptions{Panel,Item}	可迁移	P2：逐菜单换肤的唯一官方途径（0.9.2 新增）
+全仓	0 处 Sticky	Element.Sticky()	可迁移	P2
+全仓	0 处 FocusGroup / TabStop	FocusGroup()	保留	当前焦点顺序靠结构即正确；引入 FocusGroup 反而制造两组焦点语义
+全仓	0 处 InView / Cache	Element.InView / Cache	保留	虚拟化已由 List 承担，无需再手工可见性
+全仓	0 处 DragDrop/Drag/Drop	Drag/Drop/DragOver	可迁移	P2：附件拖入 composer、文件树拖拽；DESIGN §1.2-D 已列为规范，当前未实现
+docs/UI-COMPONENT-MIGRATION.md:60	声称「代理预设工具 allowlist ✅ 已完成（官方 ui.TokenField）」	—	迁移	实测全仓 ui.TokenField 0 处 → 文档漂移，需更正或补实现（AGENTS §6 文档同步义务）
+docs/DESIGN.md §1.2 F 行	写 AlertDialog 用于非危险确认	—	保留	实测 ui.AlertDialog 0 处真实调用（仅注释），产品统一走 uikit.ConfirmDanger → 契约应改为"当前一律 ConfirmDanger"# --- C. 逐文件结论（internal/ui 13 模块 + internal/uiroot + internal/uikit，非测试 .go 共 119 个） ---
+# 现状列：行数 + 该文件已用的官方件（来自 AST/文本扫描 .cache/inventory/metrics.tsv）
+internal/ui/approval/approval.go	310 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/automation/automation.go	248 行；官方件：List	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/automation/view.go	1292 行；官方件：Button Collapsible Divider Field Form List PopoverMenuButton PrimaryButton Row SearchField Spacer Switch Text TextArea TextInput	Ellipsis	迁移	运行摘要数据截断
+internal/ui/home/composer.go	851 行；官方件：Button Icon PopoverMenuButton Row Spinner Text	Ellipsis	迁移	上下文 chip 数据截断
+internal/ui/home/home.go	533 行；官方件：Button Icon Image List Row Scroll Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/insights/insights.go	318 行；官方件：List Table	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/insights/view.go	734 行；官方件：Button List Row Scroll SearchField Spacer Spinner Table Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/interaction/interaction.go	526 行；官方件：Divider Modal Scroll Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uikit/approval.go	860 行；官方件：Badge Button Collapsible Divider Icon Modal Row Scroll Spacer Text	MaxLines(1).Ellipsis	迁移	审批摘要 runes 截断
+internal/uikit/ask.go	220 行；官方件：Button Divider Modal Text TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uikit/composer.go	414 行；官方件：Button Icon List PrimaryButton Row Spacer Text TextArea	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uikit/diffpreview.go	353 行；官方件：Row Scroll Spacer Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uikit/format.go	166 行；官方件：0	-	保留	纯数据/映射层，不绘制
+internal/uikit/iconbutton.go	237 行；官方件：Button Icon	ElementTransition{Colors:true}	可迁移	入口组件正确（官方无图标按钮）；补 120ms 颜色过渡即可
+internal/uikit/locale.go	55 行；官方件：0	-	保留	纯数据/映射层，不绘制
+internal/uikit/markdown_code.go	93 行；官方件：Row Spacer Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uikit/markdown.go	100 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uikit/markdown_image.go	107 行；官方件：Icon Row Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uikit/memoryedit.go	96 行；官方件：Divider Field Modal Text TextArea TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uikit/onaccent.go	27 行；官方件：Badge	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uikit/planreview.go	205 行；官方件：Divider Modal Scroll Text TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uikit/previewprose.go	56 行；官方件：0	-	保留	数据侧有界载荷，非 UI 文本
+internal/uikit/propertysheet.go	158 行；官方件：Divider Row Text	Element.Dividers(1,t.Border)	迁移	循环内手绘 Divider 分隔
+internal/uikit/readingcolumn.go	38 行；官方件：Row	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uikit/reasoning.go	264 行；官方件：Collapsible Icon Row Spacer Spinner Text	design.TransitionColors(c)	可迁移	折叠触发器 hover 硬切
+internal/uikit/runstatus.go	448 行；官方件：Badge Button Collapsible Divider Icon List PopoverBase Row Spacer Spinner Text	Ellipsis/TruncateStart + Transition(Colors)	迁移	队列摘要数据截断 + 徽章状态硬切
+internal/uikit/screennav.go	56 行；官方件：0	-	保留	纯数据/映射层，不绘制
+internal/uikit/segmented.go	94 行；官方件：Segmented Text	-	保留	官方 SegmentedBase 换肤（合法偏离，已在注释说明对比度理由）
+internal/uikit/session.go	356 行；官方件：Badge Button Icon List Row Spinner Text	ListState.FollowAnimation/MoveAnimation	迁移	transcript 已官方化，缺两条动画
+internal/uikit/settingsform.go	152 行；官方件：Button Divider Form Icon PrimaryButton Row Switch Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uikit/status.go	333 行；官方件：Badge Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uikit/toolbar.go	119 行；官方件：Button Icon Row Text Toolbar	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uikit/toolcall.go	199 行；官方件：Collapsible Row Spacer Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uikit/toolnames.go	93 行；官方件：0	-	保留	纯数据/映射层，不绘制
+internal/uikit/toolpreview.go	424 行；官方件：0	-	保留	纯文案函数（数据侧截断）
+internal/uikit/toolrow.go	457 行；官方件：Collapsible Icon Row Scroll Spacer Spinner Text	Transition(Colors)+Ellipsis	迁移	高频 hover 无过渡；摘要数据截断
+internal/uikit/uikit.go	414 行；官方件：AlertDialog Button Divider Field Icon Modal PrimaryButton Row Spacer Text	Dividers / 下线 KeyValueRows	迁移	弃用件仍有调用方；Section 分隔可一行化
+internal/ui/plugins/capability_shell.go	133 行；官方件：Divider Scroll Tabs Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/plugins/connectors_auth.go	285 行；官方件：Button Modal Row Spinner Text	-	保留	错误载荷保界（数据侧），非标签截断
+internal/ui/plugins/connectors_edit.go	1224 行；官方件：Checkbox Collapsible Divider Field Fieldset Modal Row Scroll SearchField Select Spinner Text TextArea TextInput	-	保留	错误载荷保界（数据侧），非标签截断
+internal/ui/plugins/connectors_reload.go	68 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/plugins/connectors_section.go	890 行；官方件：Badge Button Collapsible Field Grid GridView Icon Row Spacer Spinner Switch Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/plugins/mcp_config.go	101 行；官方件：Text	PropertySheet	迁移	KeyValueRows 弃用件调用方
+internal/ui/plugins/mcp_server_switches.go	222 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/plugins/modules_section.go	74 行；官方件：Collapsible List Row Spacer Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/plugins/plugin_params.go	258 行；官方件：Badge Button Collapsible Divider List Modal Row Spacer Text TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/plugins/plugins.go	204 行；官方件：List	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/plugins/skills_edit.go	484 行；官方件：Collapsible Field Modal Scroll Text TextArea TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/plugins/skills_section.go	661 行；官方件：Badge Button Collapsible Field Grid GridView Icon Modal Row Scroll SearchField Spacer Text TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/plugins/view.go	206 行；官方件：GridView Text	Ellipsis + Tooltip	迁移	状态文案 12 runes 截断
+internal/ui/rightpanel/artifacts_download.go	82 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/rightpanel/changes.go	295 行；官方件：Collapsible Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/rightpanel/files.go	652 行；官方件：Button Icon List PrimaryButton Row Scroll Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/rightpanel/rightpanel.go	656 行；官方件：List Outline Tree	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/rightpanel/view.go	771 行；官方件：Button Grid Icon Image Outline PrimaryButton Row Scroll ScrollHorizontal Spacer Spinner Tabs TabsBase Text Tree	PropertySheet	迁移	KeyValueRows 弃用件调用方
+internal/uiroot/artifacts.go	120 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uiroot/filedrop.go	36 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uiroot/foreground.go	67 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uiroot/frame.go	2139 行；官方件：Badge Button Divider Icon Image List Modal Overlay Popover Row Scroll SearchField Sidebar SidebarItem SidebarSection Spacer Split Text TextInput	Transition(Colors)/MoveAnimation	可迁移	rail 与 palette 富行合法自绘；缺过渡与列表动画
+internal/uiroot/interaction.go	145 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uiroot/locale.go	99 行；官方件：0	-	保留	壳层状态/服务/runtime，绘制在 frame.go
+internal/uiroot/navigator.go	213 行；官方件：0	-	保留	壳层状态/服务/runtime，绘制在 frame.go
+internal/uiroot/notifier.go	364 行；官方件：0	-	保留	壳层状态/服务/runtime，绘制在 frame.go
+internal/uiroot/plan.go	114 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uiroot/running.go	124 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uiroot/runtime.go	401 行；官方件：0	-	保留	壳层状态/服务/runtime，绘制在 frame.go
+internal/uiroot/shortcuts.go	356 行；官方件：0	-	保留	壳层状态/服务/runtime，绘制在 frame.go
+internal/uiroot/theme.go	72 行；官方件：0	-	保留	壳层状态/服务/runtime，绘制在 frame.go
+internal/uiroot/toastanchor.go	138 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/uiroot/uiroot.go	577 行；官方件：List Modal Sidebar Split Tabs	-	保留	壳层状态/服务/runtime，绘制在 frame.go
+internal/ui/session/agentsurface.go	3129 行；官方件：Badge Breadcrumbs Button Divider Icon List Modal PopoverBase PrimaryButton Row Scroll ScrollBoth Spacer Spinner Text TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/session/attachments.go	797 行；官方件：Button Icon Image Modal Overlay Row Spinner Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/session/command_dialogs.go	301 行；官方件：Divider Modal Text TextArea TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/session/commands_help.go	137 行；官方件：Divider List Modal Row Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/session/commands_locale.go	79 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/session/compact_command.go	108 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/session/context_pane.go	1249 行；官方件：Badge Button List Modal Row Scroll Spinner Table Text	-	保留	List/Table 已是官方件
+internal/ui/session/export.go	236 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/session/goal.go	525 行；官方件：Badge Button Icon Row Text	design.TransitionColors(c)	可迁移	hover 硬切
+internal/ui/session/interrupted.go	83 行；官方件：Button Row Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/session/memory_tools.go	369 行；官方件：Button Divider Row Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/session/session.go	1459 行；官方件：FindBar List Scroll	FollowAnimation	可迁移	transcript 状态宿主
+internal/ui/session/session_reminders.go	510 行；官方件：Button Field List Modal PrimaryButton Row Scroll Spacer Switch Text TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/session/todo.go	214 行；官方件：Collapsible Icon List Row Text	design.TransitionColors(c)	可迁移	hover 硬切
+internal/ui/session/view.go	5451 行；官方件：Badge Button Collapsible Divider FindBar Icon List PopoverBase PopoverMenuButton PrimaryButton Row Scroll SearchField Spacer Spinner Tabs TabsBase Text TextInput Toolbar	ui.Tabs / TruncateStart	迁移	手绘 tabs 下划线可整体换官方 Tabs；模型 chip 数据截断
+internal/ui/session/worksteps.go	188 行；官方件：Icon Row Spacer Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/about.go	109 行；官方件：Collapsible	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/archive.go	276 行；官方件：Button List Row Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/behavior.go	481 行；官方件：Collapsible Field PopoverMenuButton Text TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/capabilities.go	318 行；官方件：Field NumberInput Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/data.go	399 行；官方件：Badge Button Row Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/denied_globs.go	138 行；官方件：Field TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/diagnostics_modules.go	96 行；官方件：Collapsible List Row Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/hotkey_settings.go	427 行；官方件：Button Field Icon Row Text TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/import.go	313 行；官方件：Badge Button Field PrimaryButton Row Spacer Text TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/listhelper.go	86 行；官方件：List PrimaryButton Progress Row Spinner	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/lsp_settings.go	417 行；官方件：Button Field List Row Text TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/memory.go	910 行；官方件：Button Field List NumberInput Row SearchField Spacer Text TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/modelcatalog_editor.go	1064 行；官方件：Button Checkbox Collapsible Divider Field List Modal NumberInput Row Scroll Select Text TextArea TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/modelcatalog.go	815 行；官方件：Badge Button Checkbox Field List Modal NumberInput Row Select Text TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/model_check.go	256 行；官方件：Button Row Spacer Text	TruncateStart + Ellipsis	迁移	模型 id 数据截断（差异在尾部）
+internal/ui/settings/network.go	162 行；官方件：Field Text TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/notifications.go	129 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/page_search.go	226 行；官方件：Scroll	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/redact.go	156 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/reentry.go	67 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/sandbox.go	100 行；官方件：Row Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/search.go	171 行；官方件：Field Row TextInput	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/settings.go	1682 行；官方件：Badge Button Collapsible Divider Field Form Icon List PrimaryButton Row Select Switch Text TextArea TextInput Toggle	Element.Dividers	迁移	2 处循环内手绘 Divider
+internal/ui/settings/theme_mode.go	79 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/tray_settings.go	19 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/settings/update.go	655 行；官方件：Badge Button Row Scroll Spacer Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/sidebar/archive_notice.go	39 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/sidebar/danger_confirm.go	77 行；官方件：AlertDialog Modal Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/sidebar/sidebar.go	2557 行；官方件：Badge Button Divider Icon List Modal Outline PopoverMenuButton PrimaryButton RichText Row SearchField Select SidebarItem Spacer Spinner Text TextInput	IconButton + Transition	迁移	3 处 ⋯ 触发器可收敛到 uikit.IconButton；3 处 hover 显形需过渡
+internal/ui/sidebar/workspace_add.go	179 行；官方件：0	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/toasts/toasts.go	652 行；官方件：Icon Row Text ToastBase	design.TransitionColors(c)	可迁移	官方 ToastBase 换肤合法；按钮状态硬切
+internal/ui/toolcards/toolcards.go	459 行；官方件：Collapsible Spinner Text	-	保留	官方件为主，无自绘；无更优官方替代
+internal/ui/welcome/welcome.go	109 行；官方件：Text	-	保留	官方件为主，无自绘；无更优官方替代

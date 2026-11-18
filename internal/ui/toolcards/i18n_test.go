@@ -21,21 +21,22 @@ func TestToolCardsEnglishCopyAndLanguageSwitch(t *testing.T) {
 	}, nil, nil)
 	tester := h.tester()
 
-	// Default Chinese copy: the friendly tool names and the status labels.
-	h.assertTexts(tester, "运行中", "完成", "失败", "运行命令", "读取文件", "启动子代理")
+	// Default Chinese copy: the friendly tool names and the status labels of the
+	// states that state themselves in words (a finished call stays quiet).
+	h.assertTexts(tester, "运行中", "失败", "运行命令", "读取文件", "启动子代理")
 	h.assertNoTexts(tester, "Details", "Run command")
 
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Running", "Completed", "Failed",
+	h.assertTexts(tester, "Running", "Failed",
 		"Run command", "Read file", "Start subagent")
-	h.assertNoTexts(tester, "运行中", "完成", "失败", "运行命令", "读取文件", "启动子代理")
+	h.assertNoTexts(tester, "运行中", "失败", "运行命令", "读取文件", "启动子代理")
 
 	// Switching back restores the Chinese copy on the next frame.
 	h.ui.Locale().SetLanguage("zh")
 	tester.Frame()
-	h.assertTexts(tester, "运行中", "完成", "失败", "运行命令", "读取文件", "启动子代理")
-	h.assertNoTexts(tester, "Running", "Completed", "Failed", "Run command", "Read file", "Start subagent")
+	h.assertTexts(tester, "运行中", "失败", "运行命令", "读取文件", "启动子代理")
+	h.assertNoTexts(tester, "Running", "Failed", "Run command", "Read file", "Start subagent")
 }
 
 func TestToolCardsDemoCardStaysRaw(t *testing.T) {

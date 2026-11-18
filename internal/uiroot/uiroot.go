@@ -80,6 +80,21 @@ type Config struct {
 type Root struct {
 	appName string
 
+	// themeGen changes whenever the appearance or the text size changes, and
+	// the root content is keyed with it. mygo reuses a scrolled subtree's
+	// painted layer across frames when the subtree keeps its identity, so a
+	// theme switch inside a Scroll (the composer dock, the inspector's panes)
+	// kept its light pixels under a dark theme. A new identity on the theme
+	// change makes the whole tree repaint once; the switch is rare, and nothing
+	// in the model resets because the state lives in the services, not in the
+	// elements.
+	// dockTop is the conversation screen's reported bottom-dock top (see
+	// ReportDockTop), 0 when the screen reported none.
+	dockTop       float32
+	themeGen      int
+	themeGenDark  bool
+	themeGenScale float32
+
 	rt              *runtime
 	nav             *navigator
 	theme           *themeService
@@ -174,6 +189,17 @@ type Root struct {
 	// close from the modal drawer must return the focus, while closing a docked
 	// pane with the keyboard chord keeps whatever the user was focused on.
 	inspectorDrawerShown bool
+	// bandOverflowToggle is the folded band's overflow control: a close that
+	// removed a folded entry returns the keyboard there (chromeFocusReturn).
+	bandOverflowToggle ui.Handle
+	// bandOverflowOpen is the top band's folded chrome popover (audit VD-01):
+	// the screen's action chips, the command palette and the inspector,
+	// collected behind one ⋯ while the band's pane cannot hold them. UI thread
+	// only.
+	bandOverflowOpen bool
+	// newSessionClickedAt debounces the pointer entry of the new-session action:
+	// a double click is one conversation, not two (A4-I-04).
+	newSessionClickedAt time.Time
 	// paneHintShown limits the "inspector is closed" toast to once per closed
 	// episode, so a held pane-cycle shortcut does not repeat it.
 	paneHintShown bool

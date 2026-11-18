@@ -41,7 +41,7 @@ func liveWorkStepActivity(message contracts.ChatMessage) workStepActivity {
 func latestRunningTool(message contracts.ChatMessage) (contracts.ToolCall, bool) {
 	for index := len(message.Tools) - 1; index >= 0; index-- {
 		tool := message.Tools[index]
-		if uikit.ParseToolStatus(tool.Status).Kind() == uikit.StatusRunning {
+		if uikit.ToolCallStatusKind(tool) == uikit.StatusRunning {
 			return tool, true
 		}
 	}

@@ -326,12 +326,12 @@ func TestSidebarRendersSessionsAndActions(t *testing.T) {
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
 
-	h.assertTexts(tester, "新对话", "会话", "项目讨论", "另一个会话", "设置")
+	h.assertTexts(tester, "新建会话", "会话", "项目讨论", "另一个会话", "设置")
 	h.assertNoTexts(tester, "还没有会话")
 
 	// The primary action creates a session (which NewSession marks active) and
 	// navigates to the session screen.
-	h.click(tester, "新对话")
+	h.click(tester, "新建会话")
 	if got := chat.createdSessions(); len(got) != 1 {
 		t.Fatalf("NewSession calls = %v, want one", got)
 	}
@@ -364,7 +364,7 @@ func TestSidebarEmptyStateAndSettingsButton(t *testing.T) {
 	chat := &fakeChat{}
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
-	h.assertTexts(tester, "还没有会话", "新对话", "设置")
+	h.assertTexts(tester, "还没有会话", "新建会话", "设置")
 
 	h.click(tester, "设置")
 	if !h.uiRoot.Navigator().SettingsOpen() {
@@ -409,13 +409,13 @@ func TestSidebarDisposeRemovesContributions(t *testing.T) {
 	chat := &fakeChat{}
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
-	h.assertTexts(tester, "新对话", "设置")
+	h.assertTexts(tester, "新建会话", "设置")
 
 	if err := h.fiber.Dispose(); err != nil {
 		t.Fatalf("dispose sidebar module: %v", err)
 	}
 	tester.Frame()
-	h.assertNoTexts(tester, "新对话", "还没有会话")
+	h.assertNoTexts(tester, "新建会话", "还没有会话")
 	if !chat.isUnsubscribed() {
 		t.Fatal("chat subscription was not unwound on disposal")
 	}
@@ -780,7 +780,7 @@ func TestSidebarHasNoHomeDestination(t *testing.T) {
 	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{{ID: "s1", Title: "会话一"}}}
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
-	h.assertTexts(tester, "会话", "新对话", "会话一")
+	h.assertTexts(tester, "会话", "新建会话", "会话一")
 	h.assertNoTexts(tester, "首页", "Home")
 
 	// The sidebar's own destination still works: opening a session row goes to
@@ -792,9 +792,9 @@ func TestSidebarHasNoHomeDestination(t *testing.T) {
 	h.assertNoTexts(tester, "首页")
 
 	// The new-chat action remains the visible landing action of the sidebar.
-	h.click(tester, "新对话")
+	h.click(tester, "新建会话")
 	if current := h.uiRoot.Navigator().Current(); current != "session" {
-		t.Fatalf("current screen after 新对话 = %q, want session", current)
+		t.Fatalf("current screen after 新建会话 = %q, want session", current)
 	}
 }
 

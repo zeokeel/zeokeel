@@ -66,6 +66,9 @@ func newHarness(t *testing.T) *harness {
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
+	// The desktop host binds the kernel root to the shell, so the shell can read
+	// kernel services itself (the toast anchor yields to a pending approval).
+	uiRoot.SetKernelContext(ctx)
 
 	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())

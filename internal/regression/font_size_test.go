@@ -51,8 +51,9 @@ func TestChatFontSizeSelectorMapping(t *testing.T) {
 	}
 
 	// Explicit standard writes; a malformed stored value displays standard and
-	// is not overwritten by rendering.
-	harness.click(t, "小")
+	// is not overwritten by rendering. Choosing an item closes the popover, so
+	// the trigger reopens it before the next choice.
+	clickScrolledSettings(t, harness.tester, "消息字号：小")
 	clickSettingsMenuItem(t, harness.tester, "标准")
 	if got := harness.h.settings.Get(contracts.SettingChatFontSize, ""); got != "standard" {
 		t.Fatalf("font-size after 标准 = %q, want standard", got)

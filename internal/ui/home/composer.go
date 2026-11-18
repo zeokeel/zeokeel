@@ -838,7 +838,10 @@ func buildHomeComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 		},
 		SendEnabled: chat != nil && !st.sending && strings.TrimSpace(st.draft) != "" && modelReady,
 		SendLabel:   sendLabel,
-		SendTooltip: tr("发送 (Enter)", "Send (Enter)"),
+		// No send tooltip/description here: the composer shell owns the chord
+		// hint line, and a tooltip on this control would be an overlay that takes
+		// the first Escape from the surface (A4-I-01). Omitting the field also
+		// keeps this call site independent of the shell's own rename churn.
 		Send: func() bool {
 			if !modelReady {
 				return false

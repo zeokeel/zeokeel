@@ -58,7 +58,7 @@ func TestBehaviorPageWorkStepsDefaults(t *testing.T) {
 	tester := openBehaviorPage(t, h)
 
 	h.assertTexts(tester,
-		"工作步骤", "工作步骤展示", "工作步骤收起时机",
+		"工作步骤", "展示密度", "工作步骤收起时机",
 		"简洁", "标准", "详细", "完全展开",
 		"回答结束后", "下次有新消息时",
 	)
@@ -71,7 +71,7 @@ func TestBehaviorPageWorkStepsDefaults(t *testing.T) {
 
 	// The section sits between the OS sandbox status and the collapsed
 	// low-frequency settings.
-	sandbox, ok := tester.Find("OS 沙箱")
+	sandbox, ok := tester.Find("系统沙箱")
 	if !ok {
 		t.Fatalf("sandbox section missing; texts = %v", tester.Texts())
 	}

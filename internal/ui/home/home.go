@@ -344,7 +344,7 @@ func buildRecentSessions(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 		return title
 	}
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-		design.Apply(ui.Text(c, tr("最近会话", "Recent chats")), t.SectionLabel()).NoWrap().MaxLines(1)
+		design.Apply(ui.Text(c, tr("最近会话", "Recent sessions")), t.SectionLabel()).NoWrap().MaxLines(1)
 		if st.row >= len(visible) {
 			st.row = -1
 		}
@@ -387,7 +387,7 @@ func buildRecentSessions(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 						workspaceName = tr("未分组", "Ungrouped")
 					}
 					wsLabel := design.Apply(ui.Text(row.Context, workspaceName),
-						t.TextMuted(design.TypeXXXS)).NoWrap().MaxLines(1).
+						t.TextMuted(design.TypeXXS)).NoWrap().MaxLines(1).
 						MaxWidth(140).Ellipsis("…")
 					if root := workspaceRoots[session.WorkspaceID]; root != "" {
 						wsLabel = wsLabel.Tooltip(root)
@@ -395,7 +395,7 @@ func buildRecentSessions(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 				}
 				if !session.UpdatedAt.IsZero() {
 					design.Apply(ui.Text(row.Context, uikit.FormatDateTime(locale, session.UpdatedAt)),
-						t.TextMuted(design.TypeXXXS)).NoWrap()
+						t.TextMuted(design.TypeXXS)).NoWrap()
 				}
 			})
 		})
@@ -427,77 +427,86 @@ func buildNextSteps(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 		}
 	}
 
-	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-		design.Apply(ui.Text(c, tr(
-			"还没有会话。开始第一次对话，或先完成下面的准备：",
-			"No conversations yet. Start the first one, or get these ready first:")),
-			t.TextMuted(design.TypeXXS)).MaxLines(2)
-		// The assembly already supplies a default model id, so a missing API key
-		// used to be invisible here until the first send failed. Surface the
-		// concrete gap instead of only the model.
-		if missingModel || missingKey {
-			gap := tr("还缺少：模型", "Still missing: model")
-			if !missingModel {
-				gap = tr("还缺少：API Key", "Still missing: API key")
+	// The landing empty state is the product's one empty-state anatomy
+	// (B-spec §4.10): a 24 DIP glyph, one statement of the situation, one line
+	// that names the next action, and at most ONE action button. The block used
+	// to run three inline buttons and two muted sentences that repeated each
+	// other ("还没有会话。开始第一次对话…" beside a 新对话 button), so the
+	// reader had to choose between three equally loud calls to action.
+	//
+	// The single action is the one thing that unblocks this user: configuring a
+	// missing model or key when there is a gap, starting a conversation
+	// otherwise. Adding a workspace stays one click away in the sidebar's
+	// workspace section header.
+	// A missing model is blocking: there is nothing to send to, so the one
+	// action fixes that. A missing API key is not (local model servers need
+	// none), so the conversation stays the primary path and the hint carries
+	// the caveat — an empty state must never take away the way forward.
+	if missingModel {
+		hint := tr("尚未配置模型。添加服务商与密钥后才能发送消息。",
+			"No model configured yet. Add a provider and API key before sending.")
+		uikit.EmptyStateHero(c, icons.NewChat(), tr("还没有会话", "No sessions yet"), hint, func() {
+			// Deep link to the page that fixes the gap (the settings surface
+			// otherwise reopens on the last page).
+			if design.Apply(ui.Button(c, tr("配置模型", "Configure model")), t.SecondaryButton()).Clicked() {
+				openHomeSettingsPage(nav, "model")
 			}
-			design.Apply(ui.Text(c, gap), t.Font(design.TypeXXS)).TextColor(t.WarningText).MaxLines(1)
+		})
+	} else {
+		hint := tr("发送第一条消息开始。", "Send the first message to get started.")
+		if missingKey {
+			hint = tr("尚未配置 API Key。使用本地模型服务时可忽略。",
+				"No API key yet. Ignore this for local model servers.")
+		} else if workspaceService != nil && !workspaceOpen {
+			hint = tr("先添加工作区，或直接发送第一条消息。",
+				"Add a workspace, or just send the first message.")
 		}
-		ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			if missingModel || missingKey {
-				label := tr("配置模型", "Configure model")
-				if !missingModel {
-					label = tr("配置 API Key", "Configure API key")
-				}
-				configure := design.Apply(ui.Button(c, label), t.SecondaryButton())
-				if configure.Clicked() {
-					// Deep link to the page that fixes the gap (the settings
-					// surface otherwise reopens on the last page).
-					openHomeSettingsPage(nav, "model")
-				}
-			}
-			if workspaceService != nil && !workspaceOpen {
-				addWorkspace := design.Apply(ui.Button(c, tr("添加工作区", "Add workspace")), t.SecondaryButton())
-				if addWorkspace.Clicked() {
-					addHomeWorkspace(workspaceService, st, tr)
-					runtime.Invalidate()
-				}
-			}
-			// The sidebar's 新对话 is the screen's one accent primary on the
-			// landing state; Home's empty-state action drops to the neutral
-			// outlined secondary so first launch does not paint two competing
-			// filled primaries of the same name (DESIGN.md ≤1 primary budget,
-			// 2026-11 audit UD-01).
-			start := design.Apply(ui.Button(c, tr("新对话", "New chat")), t.SecondaryButton())
+		uikit.EmptyStateHero(c, icons.NewChat(), tr("还没有会话", "No sessions yet"), hint, func() {
+			// The sidebar's primary is the screen's one accent fill on the
+			// landing state; Home's action stays the neutral outlined secondary
+			// so first launch does not paint two competing filled primaries of
+			// the same name (DESIGN.md ≤1 primary budget, audit UD-01).
+			start := design.Apply(ui.Button(c, tr("新建会话", "New session")), t.SecondaryButton())
 			if start.Clicked() {
 				if _, err := chat.NewSession(""); err == nil {
 					_ = nav.Push("session")
 					runtime.Invalidate()
 				}
 			}
+			if workspaceService != nil && !workspaceOpen {
+				if design.Apply(ui.Button(c, tr("添加工作区", "Add workspace")), t.SecondaryButton()).Clicked() {
+					addHomeWorkspace(workspaceService, st, tr)
+					runtime.Invalidate()
+				}
+			}
 		})
-		if st.nextStepErr != "" {
-			uikit.ErrorLine(c, st.nextStepErr)
-		}
-	})
+	}
+	if st.nextStepErr != "" {
+		uikit.ErrorLine(c, st.nextStepErr)
+	}
 }
 
 // buildHero is the default Home hero: the brand mark and wordmark over one
 // user-facing value line. Build metadata (version, Go version) belongs to About,
 // not to the product's front page.
+//
+// The hero is the product's one TypeXL line (24/600 is baked into the role), so
+// it names the product and stops there: this block used to end with an
+// implementation note ("这是 home 的默认 Hero 空态。") that shipped to users in a
+// chat-less assembly (2026-11 copy audit F-05).
 func buildHero(c *ui.Context, t *design.Tokens, greeting string, showFallbackHint bool,
 	tr func(zh, en string) string) {
 	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(design.Space3).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(design.Space3).Children(func() {
 			ui.Image(c, brand.Mark(t.Dark)).Size(48, 48)
-			design.Apply(ui.Text(c, heroTitle), t.Text(design.TypeXL)).FontWeight(600)
+			design.Apply(ui.Text(c, heroTitle), t.Text(design.TypeXL))
 		})
 		design.Apply(ui.Text(c, greeting), t.TextMuted(design.TypeM))
-		// Default hero hint; replaced when another module contributes home.hero
-		// (see region). With a chat backend the product Home is not an empty
-		// state, so the hint is only shown in chat-less assemblies.
+		// A chat-less assembly still gets one honest line: what the window is,
+		// not which module drew it.
 		if showFallbackHint {
-			design.Apply(ui.Text(c, tr("这是 home 的默认 Hero 空态。",
-				"This is Home's default hero empty state.")), t.TextMuted(design.TypeXS))
+			design.Apply(ui.Text(c, tr("选择一项开始，或打开工作区。",
+				"Pick something to start, or open a workspace.")), t.TextMuted(design.TypeXS))
 		}
 	})
 }

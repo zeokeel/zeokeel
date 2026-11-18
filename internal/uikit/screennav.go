@@ -25,7 +25,7 @@ func ScreenNavSpec(id string) (icon *ui.SVG, zh, en string) {
 	case "home":
 		return icons.Home(), "首页", "Home"
 	case "session":
-		return icons.Message(), "对话", "Chat"
+		return icons.Message(), "会话", "Session"
 	case "automation":
 		return icons.Clock(), "自动化", "Automation"
 	case "insights":

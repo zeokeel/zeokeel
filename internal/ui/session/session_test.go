@@ -782,12 +782,12 @@ func TestEmptyStateAndNewConversation(t *testing.T) {
 	h := newHarness(t, chat)
 	tester := h.tester()
 
-	h.assertTexts(tester, "对话", "开始新对话", "还没有消息，开始一段新对话吧。", "新对话")
+	h.assertTexts(tester, "对话", "发第一条消息", "新建会话")
 	if len(chat.sends()) != 0 {
 		t.Fatalf("send calls = %v, want none", chat.sends())
 	}
 
-	h.click(tester, "新对话")
+	h.click(tester, "新建会话")
 	if got := chat.newSessionIDs(); len(got) != 1 {
 		t.Fatalf("NewSession calls = %v, want 1", got)
 	}
@@ -796,7 +796,7 @@ func TestEmptyStateAndNewConversation(t *testing.T) {
 	}
 	// A fresh frame of the new active session: the branded hero plus the
 	// composer card with its hint and send control.
-	h.assertTexts(tester, "开始新对话", "还没有消息，开始一段新对话吧。", "发送")
+	h.assertTexts(tester, "发第一条消息", "发送")
 }
 
 func TestRendersMessagesAndRunningBadges(t *testing.T) {
@@ -837,8 +837,10 @@ func TestRendersMessagesAndRunningBadges(t *testing.T) {
 	)
 	// The compact tool row shows a one-line preview inline; the raw protocol id
 	// stays in the row's tooltip/description, and the internal call ID is hidden.
-	h.assertTexts(tester, "auth.go", "完成")
-	h.assertNoTexts(tester, "read_file", "t1", "详情")
+	h.assertTexts(tester, "auth.go")
+	// The internal call ID never renders; the raw tool id is the row's
+	// description and its expanded panel's line, not the row's name.
+	h.assertNoTexts(tester, "t1", "详情")
 	// The reasoning disclosure is open while the model is thinking, so the
 	// thinking text (rendered as Markdown) is visible without a click.
 	h.assertTexts(tester, "内部推理：先看认证模块")
@@ -1054,17 +1056,19 @@ func TestTrajectoryTimelineShowsToolCalls(t *testing.T) {
 
 	h.click(tester, "轨迹")
 	h.assertTexts(tester,
-		"步骤 1", "运行命令", "运行中",
-		"步骤 2", "读取文件", "失败",
-		"详情")
-	// H15: short results start expanded, internal call IDs are hidden, and the
-	// friendly name replaces the raw protocol id (kept as its tooltip).
+		// The trace rows are the shared single-line anatomy now (VD-17): the tool
+		// name, its state word and its one-line summary, with no step counter and
+		// no per-row card.
+		"运行命令", "运行中", "读取文件", "失败")
+	// H15: short results start expanded and internal call IDs are hidden. The raw
+	// protocol id is the row's description and its expanded panel's muted line
+	// (impl-tools' ToolRow), never the row's name.
 	h.assertTexts(tester, "stdout: all tests passed")
-	h.assertNoTexts(tester, "t1", "t2", "bash", "read_file")
+	h.assertNoTexts(tester, "t1", "t2")
 	h.assertNoTexts(tester, "运行一下")
-	if info, ok := tester.AccessByRole(ui.RoleProgress, "运行中"); !ok || info.Role != ui.RoleProgress {
-		t.Fatalf("running trajectory card spinner: %+v found %v", info, ok)
-	}
+	// A running call states its state in words (运行中, asserted above) beside the
+	// shared state glyph; the row never fakes a progress value (F-06: running is
+	// the accent role, and the product has no truthful percentage for a call).
 
 	// On the chat tab the two finished steps now fold into one process row
 	// (one row per multi-step turn); expanding it brings the timeline back.

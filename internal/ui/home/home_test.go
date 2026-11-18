@@ -41,9 +41,11 @@ func TestHomeEmptyStateOffersFirstSteps(t *testing.T) {
 	tester := ui.NewTester(h.ui.View, 1200, 800)
 	tester.Frame()
 
-	// No conversations yet: the empty state offers the next steps, including
-	// configuring the model that is still missing.
-	h.assertTexts(tester, "还没有会话。开始第一次对话，或先完成下面的准备：", "配置模型", "新对话")
+	// No conversations yet: the empty state states the situation once, names
+	// the next action, and offers that one action — configuring the model that
+	// is still missing (B-spec §4.10 empty-state anatomy).
+	h.assertTexts(tester, "还没有会话", "尚未配置模型。添加服务商与密钥后才能发送消息。", "配置模型")
+	h.assertNoTexts(tester, "新对话", "还没有会话。开始第一次对话，或先完成下面的准备：")
 	if err := tester.Click("配置模型"); err != nil {
 		t.Fatalf("click configure model: %v; texts = %v", err, tester.Texts())
 	}
@@ -62,7 +64,7 @@ func TestHomeSetupCardShownOnceConversationsExist(t *testing.T) {
 	// With a conversation there is no empty state: the first-run card still
 	// explains the missing model.
 	h.assertTexts(tester, "完成 ZeoKeel 的初始设置", "配置模型")
-	h.assertNoTexts(tester, "新对话")
+	h.assertNoTexts(tester, "新建会话", "新对话")
 }
 
 func TestHomeEmptyStateHiddenWithModel(t *testing.T) {
@@ -71,7 +73,7 @@ func TestHomeEmptyStateHiddenWithModel(t *testing.T) {
 	tester := ui.NewTester(h.ui.View, 1200, 800)
 	tester.Frame()
 	h.assertNoTexts(tester, "完成 ZeoKeel 的初始设置", "配置模型")
-	h.assertTexts(tester, "问点什么…", "新对话")
+	h.assertTexts(tester, "问点什么…", "新建会话")
 }
 
 // harness is the minimal headless product: uiroot host services + appinfo + the

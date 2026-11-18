@@ -1,12 +1,16 @@
 package session_test
 
-// Tests for the DSH-style session status strip under the composer: rounds,
-// tool steps, average output speed, context-tokens-over-window, cache hit and
-// remaining context. The strip renders only accurate values from the session
-// read model and hides whole items (and itself) when the data is unknown.
+// Tests for the status bar under the composer (S8, B-spec §3.2.6): one 32 DIP
+// row in three zones — the run state with the queue on the left, the context
+// gauge with its 详情 popover on the right. The bar reports only accurate values
+// from the session read model and hides whole items (and itself) when the data
+// is unknown; every figure a user reads is at least 12 DIP, the numbers are mono,
+// and the details that would turn the bar into a paragraph live in the popover.
 
 import (
 	"testing"
+
+	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -31,7 +35,7 @@ func statusCatalog() *fakeCatalog {
 }
 
 // statusUsageMessages is the scripted conversation of the main test: two rounds,
-// three tool calls, 7,400 generated output tokens over 90s (82 tok/s averaged
+// three tool calls, 7,400 generated output tokens over 90s (82 tokens/s averaged
 // over the turn wall time, tool time included), the newest model request saw a
 // 120,000-token context of the 128,000 window (6% left) and the cache hit is
 // 95% of the prompt tokens. The session's billing prompt totals (220,000) are
@@ -57,34 +61,55 @@ func statusUsageMessages() []contracts.ChatMessage {
 	}
 }
 
-// TestSessionStatusStripRendersUsage covers the full line: rounds, steps,
-// average output speed, newest ContextTokens over the catalogue window, cache
-// hit and remaining context, with the muted single line below the composer.
+// TestSessionStatusStripRendersUsage covers the bar's right zone: the newest
+// request's context over the catalogue window in one compact figure, the gauge
+// under it, and the 详情 control that opens the exact figures. The bar carries no
+// sentence — that is what the popover is for.
 func TestSessionStatusStripRendersUsage(t *testing.T) {
 	chat := statusChat(statusUsageMessages()...)
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
 
-	const line = "2 轮对话 · 3 步工具调用 · 82 tok/s · 120K/128K tok · 缓存命中 95% · 上下文剩余 6%"
-	h.assertTexts(tester, line)
+	h.assertTexts(tester, "120K/128K", "详情")
+	// The six-item sentence the old strip printed is gone (VD-10).
+	h.assertNoTexts(tester, "轮对话 ·", "tok/s ·", "缓存命中 95% ·")
 	// Cumulative billing prompt tokens never reach the context ratio.
 	h.assertNoTexts(tester, "220K/128K", "100K/128K")
 
-	// The strip is one quiet line directly under the composer card.
-	strip, ok := tester.Find(line)
+	// The bar sits directly under the composer card, below the send control.
+	strip, ok := tester.Find("120K/128K")
 	if !ok {
-		t.Fatalf("status strip missing; texts = %v", tester.Texts())
+		t.Fatalf("status bar missing; texts = %v", tester.Texts())
 	}
 	send, ok := tester.Find("发送")
 	if !ok {
 		t.Fatalf("send control missing; texts = %v", tester.Texts())
 	}
 	if strip.Y <= send.Y {
-		t.Fatalf("status strip y=%.1f is not below the composer send control y=%.1f", strip.Y, send.Y)
+		t.Fatalf("status bar y=%.1f is not below the composer send control y=%.1f", strip.Y, send.Y)
 	}
+
+	// The gauge is a real ratio exposed as a progress indicator, never a made-up
+	// value.
+	progress, ok := tester.AccessByRole(ui.RoleProgress, "")
+	if !ok {
+		t.Fatalf("status bar has no context gauge; texts = %v", tester.Texts())
+	}
+	if progress.Now < 0.93 || progress.Now > 0.95 {
+		t.Fatalf("context gauge = %v, want 120000/128000", progress.Now)
+	}
+
+	// 详情 opens the exact figures: rounds, tool calls, average speed, cache hit,
+	// the remaining context and the window itself.
+	if err := tester.Click("详情"); err != nil {
+		t.Fatalf("open usage details: %v", err)
+	}
+	tester.Frame()
+	h.assertTexts(tester, "轮次", "工具调用", "平均速度", "82 tokens/s",
+		"缓存命中", "95%", "上下文剩余", "6%", "上下文窗口", "128K tokens")
 }
 
-// TestSessionStatusStripEnglishCopy covers the English wording and plurals.
+// TestSessionStatusStripEnglishCopy covers the English wording.
 func TestSessionStatusStripEnglishCopy(t *testing.T) {
 	chat := statusChat(statusUsageMessages()...)
 	h := newModelHarness(t, chat, statusCatalog())
@@ -92,11 +117,17 @@ func TestSessionStatusStripEnglishCopy(t *testing.T) {
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
 
-	h.assertTexts(tester, "2 turns · 3 tool steps · 82 tok/s · 120K/128K tok · Cache hit 95% · context 6% left")
+	h.assertTexts(tester, "120K/128K", "Details")
+	if err := tester.Click("Details"); err != nil {
+		t.Fatalf("open usage details: %v", err)
+	}
+	tester.Frame()
+	h.assertTexts(tester, "Turns", "Tool calls", "Average speed", "Cache hit",
+		"Context left", "Context window")
 }
 
 // TestSessionStatusStripHiddenWithoutUsage covers the empty/failed conversations
-// with no token accounting: nothing is reported rather than a row of zeros.
+// with no token accounting: the bar shows no gauge and no zeroed figures.
 func TestSessionStatusStripHiddenWithoutUsage(t *testing.T) {
 	chat := statusChat(contracts.ChatMessage{
 		ID: "a1", Role: contracts.ChatRoleAssistant, Text: "回答",
@@ -105,19 +136,19 @@ func TestSessionStatusStripHiddenWithoutUsage(t *testing.T) {
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
 	h.assertTexts(tester, "回答", "发送")
-	h.assertNoTexts(tester, "tok/s", "缓存命中", " 轮对话 · ")
+	h.assertNoTexts(tester, "详情", "/128K", "上下文用量")
 
 	// A conversation with no messages at all hides it too.
 	empty := newModelChat()
 	empty.addSession(contracts.ChatSession{ID: "sess-2", Title: "空"}, true)
 	h = newModelHarness(t, empty, nil)
 	tester = h.tester()
-	h.assertNoTexts(tester, "tok/s", "缓存命中")
+	h.assertNoTexts(tester, "详情", "上下文用量")
 }
 
 // TestSessionStatusStripWithoutCatalog covers the unknown-window case: without a
-// model catalogue there is no context window, so the context ratio and the
-// remaining item are hidden entirely; speed and cache still show.
+// model catalogue there is no context window, so the gauge and the context rows
+// are hidden entirely; the other figures stay in the popover.
 func TestSessionStatusStripWithoutCatalog(t *testing.T) {
 	chat := statusChat(contracts.ChatMessage{
 		ID: "a1", Role: contracts.ChatRoleAssistant, Text: "一",
@@ -128,8 +159,14 @@ func TestSessionStatusStripWithoutCatalog(t *testing.T) {
 	})
 	h := newModelHarness(t, chat, nil)
 	tester := h.tester()
-	h.assertTexts(tester, "1 轮对话 · 0 步工具调用 · 333 tok/s · 缓存命中 50%")
-	h.assertNoTexts(tester, "剩余", "/128K tok", "900/")
+	h.assertNoTexts(tester, "/128K", "900/", "上下文用量")
+	h.assertTexts(tester, "详情")
+	if err := tester.Click("详情"); err != nil {
+		t.Fatalf("open usage details: %v", err)
+	}
+	tester.Frame()
+	h.assertTexts(tester, "缓存命中", "50%")
+	h.assertNoTexts(tester, "上下文剩余", "上下文窗口")
 }
 
 // TestSessionStatusStripOmitsContextWithUnknownModel covers the catalogue that
@@ -146,13 +183,12 @@ func TestSessionStatusStripOmitsContextWithUnknownModel(t *testing.T) {
 	chat.config = contracts.ChatConfig{Model: "custom-model", ContextBudget: 64000}
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
-	h.assertTexts(tester, "1 轮对话 · 0 步工具调用 · 333 tok/s · 缓存命中 50%")
-	h.assertNoTexts(tester, "剩余", "/64K tok", "/128K tok")
+	h.assertNoTexts(tester, "剩余", "/64K", "/128K", "上下文用量")
 }
 
 // TestSessionStatusStripOmitsContextWithoutContextTokens covers a provider that
 // reports usage but no per-request context size: the window is known, yet the
-// context ratio and remaining items stay hidden instead of guessing.
+// gauge and the context rows stay hidden instead of guessing.
 func TestSessionStatusStripOmitsContextWithoutContextTokens(t *testing.T) {
 	chat := statusChat(contracts.ChatMessage{
 		ID: "a1", Role: contracts.ChatRoleAssistant, Text: "一",
@@ -163,12 +199,12 @@ func TestSessionStatusStripOmitsContextWithoutContextTokens(t *testing.T) {
 	})
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
-	h.assertTexts(tester, "1 轮对话 · 0 步工具调用 · 333 tok/s · 缓存命中 50%")
-	h.assertNoTexts(tester, "剩余", "/128K tok", "0/128K")
+	h.assertNoTexts(tester, "剩余", "/128K", "0/128K", "上下文用量")
+	h.assertTexts(tester, "详情")
 }
 
 // TestSessionStatusStripHidesUnknownSpeed covers a usage row without wall time
-// or output tokens: the tok/s item is hidden, the context/cache items remain.
+// or output tokens: the speed row is hidden, the other figures remain.
 func TestSessionStatusStripHidesUnknownSpeed(t *testing.T) {
 	chat := statusChat(contracts.ChatMessage{
 		ID: "a1", Role: contracts.ChatRoleAssistant, Text: "一",
@@ -179,7 +215,37 @@ func TestSessionStatusStripHidesUnknownSpeed(t *testing.T) {
 	})
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
-	const line = "1 轮对话 · 0 步工具调用 · 120K/128K tok · 缓存命中 50% · 上下文剩余 6%"
-	h.assertTexts(tester, line)
-	h.assertNoTexts(tester, "tok/s")
+	h.assertTexts(tester, "120K/128K")
+	if err := tester.Click("详情"); err != nil {
+		t.Fatalf("open usage details: %v", err)
+	}
+	tester.Frame()
+	h.assertTexts(tester, "缓存命中", "50%")
+	h.assertNoTexts(tester, "tokens/s")
+}
+
+// TestSessionStatusStripNamesTheRun covers the left zone: a running turn shows
+// the accent spinner and the neutral run word (running is not a warning), and the
+// bar names the run once — the transcript's own live line keeps 生成中.
+func TestSessionStatusStripNamesTheRun(t *testing.T) {
+	chat := statusChat(statusUsageMessages()...)
+	session, _ := chat.Session("sess-1")
+	session.Running = true
+	chat.updateSession(session)
+	h := newModelHarness(t, chat, statusCatalog())
+	tester := h.tester()
+
+	h.assertTexts(tester, "运行中", "120K/128K")
+	// The bar's own state line is a status region named by the run word (the
+	// neutral running role: running is not a warning), and it sits under the
+	// composer's stop control, not in the top band.
+	run, ok := tester.AccessByRole(ui.RoleStatus, "运行中")
+	if !ok {
+		t.Fatalf("running state is not a status region; texts = %v", tester.Texts())
+	}
+	stop, ok := tester.Find("停止")
+	if !ok || run.Bounds.Y <= stop.Y {
+		t.Fatalf("run status at y=%.1f is not under the composer stop control (y=%.1f)",
+			run.Bounds.Y, stop.Y)
+	}
 }

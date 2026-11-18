@@ -267,13 +267,13 @@ func TestHomeComposerRendersAndChips(t *testing.T) {
 	// the model/mode pickers; the old top context row, the Enter hint and the
 	// standalone 路径 button stay gone.
 	assertHomeBottomRow(t, tester)
-	h.assertNoTexts(tester, "Enter 发送", "Shift+Enter", "路径", "开始新对话")
+	h.assertNoTexts(tester, "Enter 发送", "Shift+Enter", "路径", "开始新对话", "新对话")
 	// The removed attach menu and manual path dialog never render: the attach
 	// control opens the picker directly.
 	h.assertNoTexts(tester, "选择文件…", "手动输入路径…", "手动添加附件", "文件路径")
 	// With a model configured and no conversations, the empty state offers the
 	// first conversation.
-	h.assertTexts(tester, "新对话")
+	h.assertTexts(tester, "新建会话")
 }
 
 func TestHomeComposerEmptyDraftDoesNotSend(t *testing.T) {

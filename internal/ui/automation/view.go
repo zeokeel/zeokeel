@@ -104,7 +104,8 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, navigator contracts
 			}
 			ui.List(c, &st.taskList, len(filtered)).
 				Label(st.tr("自动化任务", "Automation tasks")).
-				Gap(design.Space0).
+				// The screen rhythm between cards, not a rule after each one.
+				Gap(design.SpaceRow).
 				Grow(1).
 				Rows(func(row ui.ListRow) {
 					buildTaskCard(row.Context, t, service, runtime, st, filtered[row.Index])
@@ -124,7 +125,7 @@ func buildScreenHeaderSlot(c *ui.Context, t *design.Tokens, cfg Config, st *stat
 	description := st.tr(
 		"按计划自动运行会话任务；可以启停、立即运行、编辑或删除。",
 		"Runs session tasks on a schedule; start, stop, run now, edit or delete.")
-	design.Apply(ui.Text(c, title), t.Font(design.TypeM)).FontWeight(design.WeightSemibold).
+	design.Apply(ui.Text(c, title), t.Font(design.TypeM)).
 		TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…").Tooltip(description)
 }
 
@@ -232,21 +233,31 @@ func buildTaskToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIRunti
 func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.AutomationService, runtime contracts.UIRuntime, st *state, task contracts.AutomationTask) {
 	c.Key("automation/" + task.ID)
 	running := st.taskRunning(task)
-	ui.Column(c).FillWidth().Gap(design.Space2).PaddingY(design.Space3).Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+	// One task is one card: raised fill + 1px L3 + RadiusLG (B-spec §2 S2), so
+	// the list separates its tasks by the surface instead of a rule after every
+	// row (A3 VD-14/VD-18 read "sometimes a line, sometimes not" as drift).
+	// The fill stays transparent so the List's own row hover (a neutral tint)
+	// shows through the card instead of being painted over; the card is its
+	// outline, as S3 defines it (B-spec §2).
+	ui.Column(c).FillWidth().Gap(design.Space2).Padding(design.SpaceGroup).
+		Radius(design.RadiusLG).Border(1, t.BorderL3).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space3).Children(func() {
 			ui.Column(c).Grow(1).Shrink(1).MinWidthPercent(0).Gap(design.Space1).Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					design.Apply(ui.Text(c, textutil.FirstNonEmptyTrimmed(task.Name, st.tr("(未命名任务)", "(Untitled task)"))),
-						t.Font(design.TypeS)).FontWeight(design.WeightSemibold).TextColor(t.LabelPrimary).
-						Grow(1).Shrink(1).MinWidth(design.Space0).MaxLines(1).Ellipsis("…")
-					// A task that was switched off (or whose run is in flight) says
-					// so on the row's first line, in the shared status anatomy.
+					// A stopped or running task states its state as one word at the
+					// line's start, not as a badge competing with the title
+					// (A3 VD-18). Running stays the accent/neutral running word, never
+					// the warning semantic (AGENTS §3.7: running ≠ warning).
 					if !task.Enabled {
-						uikit.StatusBadge(c, t, uikit.StatusIdle, st.tr("已停用", "Off"))
+						uikit.StatusText(c, t, design.TypeXXS, uikit.StatusIdle, st.tr("已停用", "Off"))
 					}
 					if running {
-						uikit.StatusBadge(c, t, uikit.StatusRunning, st.tr("运行中", "Running"))
+						uikit.StatusText(c, t, design.TypeXXS, uikit.StatusRunning, st.tr("运行中", "Running"))
 					}
+					// TypeS already carries the 500 row-title weight (B-spec §1.3).
+					design.Apply(ui.Text(c, textutil.FirstNonEmptyTrimmed(task.Name, st.tr("(未命名任务)", "(Untitled task)"))),
+						t.Font(design.TypeS)).TextColor(t.LabelPrimary).
+						Grow(1).Shrink(1).MinWidth(design.Space0).MaxLines(1).Ellipsis("…")
 				})
 				buildTaskScheduleLine(c, t, st, runtime, task)
 				// Metadata is background information: one muted line, not three
@@ -274,11 +285,13 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 					" · "+st.tr("上次运行：", "Last run: ")+formatTaskTime(st, task.LastRun)),
 					t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 			})
-			// The enable control is a bare native switch with its short caption:
-			// a ui.Field belongs to a vertical form, not to this horizontal row.
+			// The row's controls, centred on one baseline (A3 VD-18): the enable
+			// switch (state), one action (Run now) and the ⋯ menu that holds Edit
+			// and Delete. The standalone Edit button was the third action and is
+			// gone — the menu already carries it.
 			enabled := task.Enabled
-			ui.Row(c).AlignItems(ui.Center).Gap(design.Space1).Children(func() {
-				design.Apply(ui.Text(c, st.tr("启用", "Enabled")), t.TextMuted(design.TypeXXS))
+			ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				design.Apply(ui.Text(c, st.tr("启用", "Enabled")), t.TextMuted(design.TypeXXS)).Shrink(0)
 				sw := ui.Switch(c, &enabled).Label(st.tr("启用任务", "Enable task"))
 				if !sw.Changed() {
 					return
@@ -306,12 +319,6 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 				}
 				runtime.Invalidate()
 			}
-			edit := ui.Button(c, st.tr("编辑", "Edit")).
-				Tooltip(st.tr("修改名称、提示词或运行计划", "Change the name, prompt or schedule"))
-			if edit.Clicked() {
-				openEditForm(st, task)
-				runtime.Invalidate()
-			}
 			buildTaskRowMenu(c, t, runtime, st, task)
 		})
 		if strings.TrimSpace(task.LastError) != "" {
@@ -319,7 +326,6 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 		}
 		buildTaskHistory(c, t, st, task)
 	})
-	ui.Divider(c)
 }
 
 // buildTaskScheduleLine renders the row's schedule line: the human-readable
@@ -338,23 +344,37 @@ func buildTaskScheduleLine(c *ui.Context, t *design.Tokens, st *state, runtime c
 	}
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 		uikit.StatusBadge(c, t, uikit.StatusInProgress, st.tr("未知计划", "Unknown schedule")).
-			Tooltip(st.tr("无法解析的运行计划，原始值：", "The stored schedule does not parse; raw value: ") + task.Schedule)
+			Tooltip(st.tr("无法解析的运行计划：", "Could not parse the schedule: ") + task.Schedule)
 		design.Apply(ui.Text(c, task.Schedule), t.MonoText(design.TypeXXS)).
 			TextColor(t.LabelTertiary).Grow(1).Shrink(1).MinWidth(design.Space0).MaxLines(1).Ellipsis("…").
 			Tooltip(st.tr("无法解析的运行计划，原始值：", "The stored schedule does not parse; raw value: ") + task.Schedule)
-		if fix := design.Apply(ui.Button(c, st.tr("修复", "Fix")), t.SecondaryButton()).
-			Tooltip(st.tr("打开编辑，修正这条任务的运行计划", "Edit the task and fix its schedule")); fix.Clicked() {
-			openEditForm(st, task)
-			runtime.Invalidate()
-		}
+		// The repair is not a fourth button on the card: it lives in the row's ⋯
+		// menu (density rule: at most three visible targets per row, 2026-11-18
+		// review). The line itself still says what is wrong and shows the raw value.
+		ui.Spacer(c).Grow(1)
 	})
+}
+
+// automationRowActionLabel names one task row's ⋯ action for assistive
+// technology ("任务操作：<任务名>" / "Task actions: <task>"), so a page of
+// identical menus is addressable row by row. The visible glyph is unchanged.
+func automationRowActionLabel(st *state, action, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return action
+	}
+	separator := ": "
+	if st.tr("：", ":") == "：" {
+		separator = "："
+	}
+	return action + separator + name
 }
 
 // buildTaskRowMenu is the row's trailing ⋯ entry: the task's management menu.
 // The delete action is the menu's danger item, so a row never paints a red
 // button of its own.
 func buildTaskRowMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, task contracts.AutomationTask) {
-	label := st.tr("任务操作", "Task actions")
+	label := automationRowActionLabel(st, st.tr("任务操作", "Task actions"), task.Name)
 	button := uikit.IconButton(c, uikit.IconButtonOptions{
 		Key:     "automation/" + task.ID + "/menu",
 		Label:   label,
@@ -366,6 +386,24 @@ func buildTaskRowMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRunti
 		if m.Item(st.tr("编辑任务", "Edit task")).Chosen() {
 			openEditForm(st, task)
 			runtime.Invalidate()
+		}
+		// Only a stored schedule that does not parse needs the repair entry; the
+		// editor is where the fix happens either way.
+		if humanSchedule(st, task.Schedule) == "" {
+			if m.Item(st.tr("修正运行计划", "Fix the schedule")).Chosen() {
+				openEditForm(st, task)
+				runtime.Invalidate()
+			}
+		}
+		// The latest run's conversation is one menu entry away instead of a
+		// standing button on the history line.
+		if len(task.RunHistory) > 0 {
+			if sessionID := automationRunSessionID(task.RunHistory[0]); sessionID != "" {
+				if m.Item(st.tr("打开最近运行的会话", "Open the latest run's session")).Chosen() {
+					openAutomationSession(st, sessionID)
+					runtime.Invalidate()
+				}
+			}
 		}
 		remove := m.Item(st.tr("删除任务", "Delete task"))
 		remove.Danger()
@@ -386,7 +424,7 @@ func buildTaskRowMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRunti
 func runStatusLabel(st *state, status string) string {
 	switch status {
 	case contracts.AutomationRunDelivered:
-		return st.tr("已投递", "Delivered")
+		return st.tr("已启动", "Started")
 	case contracts.AutomationRunSuccess:
 		return st.tr("已完成", "Completed")
 	case contracts.AutomationRunFailure:
@@ -513,9 +551,9 @@ func buildTaskHistory(c *ui.Context, t *design.Tokens, st *state, task contracts
 				design.Apply(ui.Text(c, automationRunOutcomeHint(st)), t.Font(design.TypeXXS)).
 					TextColor(t.LabelTertiary).NoWrap()
 			}
-			if sessionID := automationRunSessionID(latest); sessionID != "" {
-				st.buildOpenSessionButton(c, t, sessionID)
-			}
+			// No standing 打开会话 button here: the latest run's session is in the
+			// row's ⋯ menu, keeping the card at three visible targets. The expanded
+			// run records below keep their own link (one per row).
 		} else {
 			ui.Spacer(c).Grow(1)
 		}
@@ -585,7 +623,7 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 		ui.Form(c, func() {
 			ui.Field(c, st.tr("任务名称", "Task name"), func() {
 				ui.TextInput(c, &st.formName).
-					Placeholder(st.tr("例如：每日依赖巡检", "For example: daily dependency check")).FillWidth().
+					Placeholder(st.tr("例如：每日依赖巡检", "e.g. daily dependency check")).FillWidth().
 					Bind(&st.formNameInput)
 				if st.formFocusPending {
 					// Opening the form moves the keyboard into it: the user can
@@ -597,7 +635,7 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 			})
 			ui.Field(c, st.tr("任务提示词", "Task prompt"), func() {
 				ui.TextArea(c, &st.formPrompt).
-					Placeholder(st.tr("任务触发时发给 agent 的提示词", "Prompt sent to the agent when the task runs")).
+					Placeholder(st.tr("任务运行时发给智能体的提示", "The prompt sent to the agent when the task runs")).
 					FillWidth().MinHeight(design.Space6 * 4)
 			})
 			ui.Field(c, st.tr("运行计划", "Schedule"), func() {
@@ -629,7 +667,7 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 			ui.Field(c, st.tr("权限", "Permission"), func() {
 				buildPermissionSelector(c, st)
 			}).Description(st.tr(
-				"默认全局跟随当前权限；选「所有权限」即无人值守（不会等待审批）。只读/工作区可写在需要审批的工具上可能停下来等人。此处权限仅审批：OS 文件沙箱始终跟随全局权限，「所有权限」不解除沙箱。",
+				"默认跟随全局权限；选「所有权限」即无人值守（不会等待审批）。只读/工作区修改在需要审批的工具上可能停下来等人。此处权限仅约束审批：系统沙箱始终跟随全局权限，「所有权限」不解除沙箱。",
 				"Global default follows the current permission; All permissions means unattended (no approval wait). Read-only/workspace-write may wait for approval on tools that need it. This permission is approval-only: the OS file sandbox always follows the global permission, so All permissions here does not lift the sandbox."))
 			ui.Field(c, st.tr("运行会话", "Run session"), func() {
 				ui.Switch(c, &st.formNewSessionPerRun).Label(st.tr("每次新建会话", "New session each run"))
@@ -1042,7 +1080,18 @@ func (st *state) taskRunning(task contracts.AutomationTask) bool {
 	return true
 }
 
-// buildOpenSessionButton renders the history row's link into the session the run
+// openAutomationSession switches to the session an automation run created and
+// shows it: one path for the run-record link and the row menu's entry.
+func openAutomationSession(st *state, sessionID string) {
+	if chat, ok := st.ctx.Get(contracts.KeyChat); ok && chat != nil {
+		_ = chat.SetActiveSession(sessionID)
+	}
+	if st.navigator != nil {
+		_ = st.navigator.Push("session")
+	}
+}
+
+// buildOpenSessionButton renders one run record's link into the session the run
 // created, so a failed agent turn can be inspected where it happened.
 func (st *state) buildOpenSessionButton(c *ui.Context, t *design.Tokens, sessionID string) {
 	open := design.Apply(ui.Button(c, st.tr("打开会话", "Open session")), t.SecondaryButton()).
@@ -1050,12 +1099,7 @@ func (st *state) buildOpenSessionButton(c *ui.Context, t *design.Tokens, session
 	if !open.Clicked() {
 		return
 	}
-	if chat, ok := st.ctx.Get(contracts.KeyChat); ok && chat != nil {
-		_ = chat.SetActiveSession(sessionID)
-	}
-	if st.navigator != nil {
-		_ = st.navigator.Push("session")
-	}
+	openAutomationSession(st, sessionID)
 }
 
 // automationErrorText localizes a backend failure: the automation module's
@@ -1095,7 +1139,7 @@ type automationPermissionChoice struct {
 
 var automationPermissions = []automationPermissionChoice{
 	{value: contracts.PermissionReadOnly, zh: "只读", en: "Read-only"},
-	{value: contracts.PermissionWorkspace, zh: "工作区可写", en: "Workspace-write"},
+	{value: contracts.PermissionWorkspace, zh: "工作区修改", en: "Workspace-write"},
 	{value: contracts.PermissionFull, zh: "所有权限", en: "All permissions"},
 }
 
@@ -1160,6 +1204,9 @@ func buildWorkspaceSelector(c *ui.Context, st *state) {
 		}
 	}).Tooltip(st.tr("选择任务运行的工作区", "Choose the workspace the task runs in"))
 }
+
+// The task form's selectors carry their explanation as an accessible
+// Description, not a Tooltip: the form is a modal, and the framework's tooltip
 
 // buildPermissionSelector renders the optional per-task permission override;
 // an empty selection keeps the global approval setting.

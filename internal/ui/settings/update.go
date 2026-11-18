@@ -273,7 +273,7 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 		if canInstall {
 			if st.installErr != "" {
 				uikit.ErrorLine(c, localized(locale,
-					"安装计划失败：", "Failed to schedule install: ")+st.installErr)
+					"准备安装失败：", "Could not prepare the install: ")+st.installErr)
 			}
 			if st.installRunErr != "" && st.pending == nil {
 				uikit.ErrorLine(c, localized(locale,
@@ -326,7 +326,7 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			copyLink := design.Apply(ui.Button(c,
 				localized(locale, "复制下载链接", "Copy download link")), t.SecondaryButton()).
-				Tooltip(textutil.FirstNonEmpty(st.info.URL,
+				Description(textutil.FirstNonEmpty(st.info.URL,
 					localized(locale, "没有可下载的链接", "No download link")))
 			copyLink.Disabled(!hasURL)
 			if copyLink.Clicked() && hasURL {

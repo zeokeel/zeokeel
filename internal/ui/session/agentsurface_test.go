@@ -400,22 +400,18 @@ func TestHeaderChipsCompactAtNarrowWidth(t *testing.T) {
 	tester.Frame()
 	tester.Frame()
 	tester.Frame()
-	// Compact entries keep the icon and the count only: their click targets are
-	// narrow (no words), while the full-form target is wider than this bound.
-	for _, entry := range []struct {
-		label string
-		maxW  float32
-	}{
-		{"智能体团队", 80},
-		{"子智能体 1", 80},
-		{"1 个后台任务", 80},
-	} {
-		rect, ok := tester.Find(entry.label)
+	// A narrow band keeps the words (VD-21 / AGENTS §3.17: an entry that loses its
+	// name stops saying which feature it opens); the entry shrinks its padding and
+	// ellipsizes, so the label stays a label rather than an icon alone.
+	for _, entry := range []string{"智能体团队", "子智能体 1", "1 个后台任务"} {
+		rect, ok := tester.Find(entry)
 		if !ok {
-			t.Fatalf("narrow header lost the %q entry; texts = %v", entry.label, tester.Texts())
+			t.Fatalf("narrow header lost the %q entry; texts = %v", entry, tester.Texts())
 		}
-		if rect.W > entry.maxW {
-			t.Fatalf("narrow header entry %q is %.1f wide, want the compact form (<= %.0f)", entry.label, rect.W, entry.maxW)
+		// The entry is icon + words + count: about 100 DIP for a five-character
+		// name at 12 DIP, and bounded so three of them plus the title still fit.
+		if rect.W > 130 {
+			t.Fatalf("narrow header entry %q is %.1f wide, want a bounded entry (<= 130)", entry, rect.W)
 		}
 	}
 	// The title keeps a readable measure beside the compact entries.
@@ -575,7 +571,8 @@ func TestChildViewContinuableSend(t *testing.T) {
 	h.click(tester, "进入子智能体会话 文档审查员")
 	h.assertTexts(tester, "文档审查员", "任务", "核对文档", "输出", "文档无误", "活动", "收到任务")
 
-	// Type into the child message input and send it.
+	// Type into the child message input (the shell's text area, named by its
+	// placeholder) and send it with the shell's send control.
 	input, ok := tester.Find("发送给 文档审查员")
 	if !ok {
 		t.Fatalf("child message input missing; texts = %v", tester.Texts())
@@ -584,7 +581,7 @@ func TestChildViewContinuableSend(t *testing.T) {
 	tester.Frame()
 	tester.Type("继续检查文档")
 	tester.Frame()
-	h.click(tester, "发送消息给 文档审查员")
+	clickRoleButton(t, tester, "发送")
 
 	waitFor(t, tester, func() bool { return len(children.sent()) == 1 }, "SendChildAgent call")
 	sent := children.sent()[0]
@@ -979,7 +976,7 @@ func TestHistoricalChildViewIsReadOnly(t *testing.T) {
 	h.assertTexts(tester, "子智能体会话", "上次的研究员", "历史")
 	h.click(tester, "进入子智能体会话 上次的研究员")
 	h.assertTexts(tester,
-		"上次的研究员", "队友 · 已结束记录", "研究发布说明", "上次的答案",
+		"上次的研究员", "队友", "已结束 · 只读", "研究发布说明", "上次的答案",
 		"已结束的记录（应用重启后仍保留）：只读，不能再继续对话。")
 	h.assertNoTexts(tester, "输入消息…", "发送后等待该队友的回复。")
 }
@@ -998,7 +995,7 @@ func TestChildSwitcherMarksRestoredHistory(t *testing.T) {
 	tester.Frame()
 
 	h.click(tester, "子智能体 1")
-	h.assertTexts(tester, "子智能体会话", "上次的子代理", "历史", "子智能体 · 已结束记录")
+	h.assertTexts(tester, "子智能体会话", "上次的子代理", "历史", "子智能体", "已结束 · 只读")
 	if _, ok := tester.Find("进入子智能体会话 上次的子代理"); !ok {
 		t.Fatalf("restored child has no 进入 action; texts = %v", tester.Texts())
 	}
@@ -1559,4 +1556,17 @@ func TestExecutionHistoryLoadIsOffTheUiThreadAndScopedToSession(t *testing.T) {
 	}, "history read for sess-2")
 	tester.Frame()
 	h.assertNoTexts(tester, "后台任务", "go test ./...")
+}
+
+// clickRoleButton clicks the centre of the button with this accessible name. The
+// child view also lists activity entries whose kind word is 发送, so the button is
+// resolved by role and not by the first label that matches the text.
+func clickRoleButton(t *testing.T, tester *ui.Tester, label string) {
+	t.Helper()
+	info, ok := tester.AccessByRole(ui.RoleButton, label)
+	if !ok {
+		t.Fatalf("no button %q; texts = %v", label, tester.Texts())
+	}
+	tester.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+	tester.Frame()
 }

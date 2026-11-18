@@ -67,9 +67,13 @@ func PageFooter(c *ui.Context, opts PageFooterOptions) {
 	if opts.Key != "" {
 		c.Key(opts.Key)
 	}
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		ui.Divider(c)
-		ui.Row(c).FillWidth().Justify(ui.End).AlignItems(ui.Center).
+	// The bar is 56 DIP tall with its own hairline on top: the settings body
+	// scrolls under it, so the footer needs an edge of its own (the one border
+	// its surface draws), and the extra height gives the buttons room without
+	// padding hacks.
+	ui.Column(c).FillWidth().Gap(design.Space2).Height(design.FooterHeight).
+		BorderWidth(1, 0, 0, 0).BorderColor(t.BorderL2).Padding(design.Space2, design.Space0).Children(func() {
+		ui.Row(c).FillWidth().Justify(ui.End).AlignItems(ui.Center).Grow(1).
 			Gap(design.Space2).Children(func() {
 			for _, action := range ordered {
 				action := action

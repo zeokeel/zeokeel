@@ -29,8 +29,30 @@ import (
 
 // inputLabel is the accessible label of one form input: the visible field label
 // plus the localized "input" suffix the product's forms use.
+//
+// Convention: every text field and text area in the plugins dialogs names itself
+// through this helper (skillInputLabel is the same rule for the skill editor), so
+// the accessible name matches the settings pages' "X 输入" form. The ui.Field
+// caption stays the human label; the suffix marks the control a screen reader
+// announces on focus. Switches, selects and search fields keep their bare name.
 func inputLabel(st *state, label string) string {
 	return label + " " + st.tr("输入", "input")
+}
+
+// rowActionLabel names one row's inline action for assistive technology
+// ("技能操作：<技能名>" / "Skill actions: <skill>"), so identical ⋯ buttons on a
+// page are individually addressable instead of "the nearest same-named control"
+// (2026-11-18 review). The visible glyph does not change.
+func rowActionLabel(st *state, action, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return action
+	}
+	separator := ": "
+	if st.tr("：", ":") == "：" {
+		separator = "："
+	}
+	return action + separator + name
 }
 
 // transportDisplay maps the stored transport to the selector's display text.
@@ -200,7 +222,11 @@ func (p *connectorsState) buildFormModal(c *ui.Context, t *design.Tokens, st *st
 				// The scroll bar overlays the viewport's right edge; the end
 				// padding reserves a gutter so it never presses on the fields'
 				// right edge (the STDIO form's inputs are FillWidth).
-				ui.Column(c).FillWidth().PaddingEnd(design.Space2).Gap(design.Space3).Children(func() {
+				// The bottom padding is the last field's breathing room: without it
+				// the 超时 field sat flush against the viewport clip and was sliced in
+				// half (2026-11-18 review).
+				ui.Column(c).FillWidth().PaddingEnd(design.Space2).
+					Padding(design.Space0, design.Space0, design.Space4, design.Space0).Gap(design.Space3).Children(func() {
 					ui.Field(c, st.tr("传输", "Transport"), func() {
 						choice := transportDisplay(p.transport)
 						selector := ui.Select(c, &choice, []string{"HTTP", "STDIO"}).
@@ -211,11 +237,14 @@ func (p *connectorsState) buildFormModal(c *ui.Context, t *design.Tokens, st *st
 						}
 					})
 					ui.Field(c, st.tr("名称", "Name"), func() {
-						ui.TextInput(c, &p.name).
+						input := ui.TextInput(c, &p.name).
 							Label(inputLabel(st, st.tr("名称", "Name"))).
-							Placeholder(st.tr("例如：files", "For example: files")).
+							Placeholder(st.tr("例如：files", "e.g. files")).
 							FillWidth().AutoFocus()
-					})
+						if input.Changed() {
+							p.nameErr = ""
+						}
+					}).Error(p.nameErr)
 					if stdio {
 						ui.Fieldset(c, st.tr("STDIO 进程", "STDIO process"), func() {
 							ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
@@ -223,7 +252,7 @@ func (p *connectorsState) buildFormModal(c *ui.Context, t *design.Tokens, st *st
 									ui.Field(c, st.tr("命令", "Command"), func() {
 										ui.TextInput(c, &p.command).
 											Label(inputLabel(st, st.tr("命令", "Command"))).
-											Placeholder(st.tr("例如：npx", "For example: npx")).FillWidth()
+											Placeholder(st.tr("例如：npx", "e.g. npx")).FillWidth()
 									})
 								})
 								ui.Column(c).FillWidth().Grow(2).Children(func() {
@@ -341,26 +370,33 @@ func (p *connectorsState) buildFormModal(c *ui.Context, t *design.Tokens, st *st
 							Placeholder(st.tr("例如：30000", "e.g. 30000")).FillWidth()
 					}).Description(st.tr("毫秒；0 或留空使用默认 30 秒。",
 						"Milliseconds; 0 or blank uses the default 30s."))
-					if p.formErr != "" {
-						uikit.ErrorLine(c, p.formErr)
-					}
-					if p.testStatus != "" {
-						if p.testErr {
-							uikit.ErrorLine(c, p.testStatus)
-						} else {
-							design.Apply(ui.Text(c, p.testStatus), t.Font(design.TypeXS)).
-								TextColor(t.SuccessText).MaxLines(2)
-						}
-					}
-					if p.testing {
-						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-							ui.Spinner(c).Label(st.tr("正在测试…", "Testing…")).
-								Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
-							design.Apply(ui.Text(c, st.tr("正在测试…", "Testing…")),
-								t.Font(design.TypeXXS)).TextColor(t.LabelSecondary)
-						})
-					}
 				})
+			})
+			// The form's status row: reserved (a MinHeight of one line) and placed
+			// OUTSIDE the scrolling body, so the first message neither jumps the
+			// layout nor gets sliced by the viewport clip — an in-body error at the
+			// end of a 480 DIP body showed only its top half at the fold
+			// (2026-11-18 review). One line is reserved; a message that wraps takes
+			// a second line instead of being cut.
+			ui.Column(c).FillWidth().MinHeight(design.Space6).Justify(ui.Center).Children(func() {
+				switch {
+				case p.formErr != "":
+					uikit.ErrorLine(c, p.formErr)
+				case p.testErr && p.testStatus != "":
+					uikit.ErrorLine(c, p.testStatus)
+				case p.testStatus != "":
+					// A successful test is a status, not an error: the shared
+					// status anatomy keeps the semantic ink and the two channels
+					// (color + word).
+					uikit.StatusText(c, t, design.TypeXS, uikit.StatusSuccess, p.testStatus).MaxLines(2)
+				case p.testing:
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+						ui.Spinner(c).Label(st.tr("正在测试…", "Testing…")).
+							Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+						design.Apply(ui.Text(c, st.tr("正在测试…", "Testing…")),
+							t.Font(design.TypeXXS)).TextColor(t.LabelSecondary)
+					})
+				}
 			})
 			uikit.DialogFooter(c, []uikit.DialogAction{
 				{Label: testLabel, Disabled: p.testing, OnClick: func() {
@@ -446,9 +482,10 @@ func oauthRecordMustBeDropped(previous, next contracts.MCPServerConfig) bool {
 // the draft may not be submitted or tested.
 func (p *connectorsState) connectorDraft(st *state, checkDuplicates bool) (contracts.MCPServerConfig, bool) {
 	p.formErr = ""
+	p.nameErr = ""
 	name := strings.TrimSpace(p.name)
 	if name == "" {
-		p.formErr = st.tr("名称不能为空", "The name is required")
+		p.nameErr = st.tr("名称不能为空", "The name is required")
 		return contracts.MCPServerConfig{}, false
 	}
 	timeoutMs, timeoutErr := parseConnectorTimeout(st, p.timeoutMs)
@@ -485,7 +522,7 @@ func (p *connectorsState) connectorDraft(st *state, checkDuplicates bool) (contr
 				}
 			}
 			if p.duplicateName(name) {
-				p.formErr = st.tr("该名称已存在", "That name already exists")
+				p.nameErr = st.tr("该名称已存在", "That name already exists")
 				return contracts.MCPServerConfig{}, false
 			}
 		}
@@ -524,7 +561,7 @@ func (p *connectorsState) connectorDraft(st *state, checkDuplicates bool) (contr
 			}
 		}
 		if p.duplicateName(name) {
-			p.formErr = st.tr("该名称已存在", "That name already exists")
+			p.nameErr = st.tr("该名称已存在", "That name already exists")
 			return contracts.MCPServerConfig{}, false
 		}
 	}
@@ -922,8 +959,9 @@ func (p *connectorsState) buildDetailModal(c *ui.Context, t *design.Tokens, st *
 				status := design.Apply(ui.Text(c, card.StatusLabel), t.Font(design.TypeXS)).
 					TextColor(connectorStatusTextColor(t, card.StatusKind)).
 					Grow(1).Shrink(1).MaxLines(1).Ellipsis("…")
-				if tooltip := strings.TrimSpace(card.StatusTooltip); tooltip != "" {
-					status = status.Tooltip(tooltip)
+				// the first Escape; the Description carries the detail instead.
+				if detail := strings.TrimSpace(card.StatusTooltip); detail != "" {
+					status = status.Description(detail)
 				}
 			})
 			// The authorization state reads the same semantic vocabulary as the
@@ -1182,6 +1220,7 @@ func buildConnectorToolList(c *ui.Context, t *design.Tokens, st *state, p *conne
 				for _, tool := range filtered {
 					enabled := tool.Enabled
 					box := ui.Checkbox(c, &enabled, tool.Name).Disabled(p.toolBusy)
+					// The tool's own description is its accessible description, not
 					if description := strings.TrimSpace(tool.Description); description != "" {
 						box.Tooltip(description)
 					}

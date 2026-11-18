@@ -42,7 +42,7 @@ func buildDeniedGlobsSection(c *ui.Context, t *design.Tokens, store contracts.Se
 		ui.Field(c, localized(locale, "隐藏的文件（glob）", "Hidden files (globs)"), func() {
 			ui.TextInput(c, &st.globsDraft).
 				Label(inputLabel(locale, localized(locale, "隐藏的文件", "Hidden files"))).
-				Placeholder("**/.env, **/*.pem, **/*.key").FillWidth()
+				Placeholder("**/.env, **/*.pem, **/*.key").Width(controlWidth)
 		}).Description(localized(locale,
 			"逗号分隔的 glob，匹配的文件对文件类工具（read_file/glob/grep/编辑/图片/LSP）隐藏。默认留空＝不隐藏任何文件；shell 旁路仍在（bash/pwsh 仍可读取这些文件），这不是安全边界。修改后重启应用生效。",
 			"Comma-separated globs; matching files are hidden from the file tools (read_file/glob/grep/editor/image/LSP). Empty (the default) hides nothing; the shell bypass remains (bash/pwsh can still read these files), so this is not a security boundary. A change applies after restarting the app."))

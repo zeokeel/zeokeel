@@ -46,34 +46,72 @@ const SlotID = "toasts.notifications"
 // time, not the wall-clock time.
 const toastTimeout = 4 * time.Second
 
+// toastStickyTimeout keeps an error on screen until the user closes it (mygo
+// ui.Toast.Timeout: a negative value shows until closed). A notice the user
+// missed leaves no trace, and a failure that vanishes is a failure the user
+// repeats (B-spec §3.1.5).
+const toastStickyTimeout = -1
+
 // maxPending bounds the queue while the window renders no frames; the oldest
 // queued notifications are dropped, as the too-old ones would not be useful.
 const maxPending = 32
 
 // toastMaxVisible bounds how many toasts show at once (H14): further
 // notifications wait in the module's queue and appear as earlier ones close.
+// Two is the depth the corner affords at any window size — one card plus its
+// merged count already cover a row of the reading column, and a burst must not
+// stack a wall over it (audit VD-02: three cards covered the inspector and the
+// composer at 1024).
 const toastMaxVisible = 2
 
-// Toast placement: a top-right popup under the app's top header, stacking down.
-// The header is the window's first two rows (40 DIP title row + 32 DIP tab row
-// = 72 DIP); the stack starts one Space3 (12 DIP) gap below it, so it clears the
-// tab row and the header's right-side actions and leaves the transcript's top
-// edge as much room as the toast height allows (R16/V24). The measures are
-// multiples of the design system's tokens instead of bare numbers, keeping the
-// stack on the same grid as the rest of the shell.
+// toastNarrowWidth is the window width at which the stack keeps one card: the
+// product's narrow layout (a 1024 DIP window is the case the audit measured)
+// with one step of room above it. It is the window width, not the pane width:
+// the module paints a window-level viewport.
+const toastNarrowWidth = design.SidebarWidth*4 - design.Space8 // 1088
+
+// stackDepth is how many cards this window shows at once, recomputed every
+// frame so a window that shrank (or an inspector that opened over the column)
+// gives the reading column its room back.
+func stackDepth(c *ui.Context) int {
+	if width, _ := c.Size(); width > 0 && width < toastNarrowWidth {
+		return 1
+	}
+	return toastMaxVisible
+}
+
+// toastWidthFor is the widest card this window can hold where the host anchored
+// the stack: the room from the window's right edge to the anchor, less the
+// stack's own gap. A docked inspector takes 320 DIP of that room, so a narrow
+// window's stack drops to the minimum card width instead of reaching over the
+// pane (B-spec §3.1.5: 320 at most, 240 at least).
+func toastWidthFor(c *ui.Context, st *state) float32 {
+	width, _ := c.Size()
+	room := width - design.Space4
+	if anchor, ok := st.toastAnchor(); ok {
+		room -= anchor.Right
+	}
+	if room < design.ToastWidth {
+		return design.ToastMinWidth
+	}
+	return design.ToastWidth
+}
+
+// Toast placement: the window's bottom-right corner, growing upward, so a notice
+// never sits on the reading column it just interrupted. The top-right popup it
+// used to be covered the user's own message, the approval card and a settings
+// footer's primary button (audit VD-02): a toast may only appear where the
+// current task cannot be clicked. The host anchors the stack through
+// contracts.ToastAnchorService (the shell knows the composer dock, the status
+// strip and the open overlays); this default keeps the same corner for a host
+// that provides no service.
 const (
-	// toastHeaderHeight is the window top band's two rows: the screen header row
-	// (Space8 + Space2) and the tab row (Space8).
-	toastHeaderHeight float32 = design.Space8 + design.Space2 + design.Space8 // 72
-	// toastTopInset clears the top band plus one Space3 (12 DIP) gap.
-	toastTopInset float32 = toastHeaderHeight + design.Space3 // 84
-	// toastMinWidth is the narrowest toast: the navigation column's measure,
-	// so even a two-word notification keeps the same card width (V24's unified
-	// toast skeleton).
-	toastMinWidth float32 = design.SidebarWidth // 280
-	// toastMaxWidth bounds a long notification so the card stays a toast, not a
-	// panel.
-	toastMaxWidth float32 = design.Space8*11 + design.Space2 // 360
+	// toastMinWidth bounds a card below: 240 DIP, a two-line notice and never a
+	// banner across the column (B-spec §3.1.5, design.ToastWidth).
+	toastMinWidth float32 = design.ToastMinWidth
+	// toastInset is the gap the stack keeps from the window's right edge and
+	// from whatever occupies the bottom edge.
+	toastInset float32 = design.Space4
 	// The close control's hit area is a full 24 DIP target (mygo/DESIGN
 	// accessibility AP-17: an icon action's target is at least 24): a 20 DIP
 	// button next to the toast's action button was easy to miss on a desktop
@@ -105,6 +143,11 @@ type state struct {
 	// until it lands (nil keeps the module's default placement).
 	kernel cordis.Context
 	anchor contracts.ToastAnchorService
+	// theme resolves the window's real appearance: the toast layer builds with
+	// the theme turned over, so design.Of(c) would read the inverse and paint a
+	// light card in a dark window (the dark snapshot caught it). The service is
+	// looked up lazily like the anchor, because a host may bind it late.
+	theme contracts.ThemeService
 
 	pending []contracts.Notification
 	// queue holds accepted notifications waiting for a free slot; at most
@@ -113,6 +156,24 @@ type state struct {
 	// showing holds the ids of the native toasts currently on screen, so the
 	// master ui.notifications switch can close them when it turns off.
 	showing map[string]string
+	// order is the showing ids in the order they appeared, oldest first: a
+	// window that shrinks closes the oldest cards to keep the stack inside the
+	// room it now has (VD-02).
+	order []string
+	// shown keeps the notification each showing toast stands for, so a placement
+	// change can requeue it and it appears again at the new geometry instead of
+	// vanishing.
+	shown map[string]contracts.Notification
+	// dropping marks the toasts a resize closed: their panels still animate out
+	// at the coordinates of the old window, so they are not painted at all (a
+	// ghost of the old geometry over the new one is worse than no fade).
+	dropping map[string]bool
+	// placeKey is the window size the showing cards were added at. A toast's panel
+	// is laid out where the viewport was when it appeared, so a window that
+	// changed size leaves the stack hanging over the new geometry (a narrowed
+	// window that opened the inspector had its cards over the pane). A resize
+	// closes them; they are transient, and the queue re-shows at the new place.
+	placeKey string
 	// merged holds one showing toast's dedupe bookkeeping by native toast id:
 	// how many identical level+text notifications it represents and the ids
 	// the notifier bookkeeping must forget when it closes.
@@ -183,6 +244,9 @@ func Module() *module.Descriptor[Config] {
 				st.pending = nil
 				st.queue = nil
 				st.showing = nil
+				st.order = nil
+				st.dropping = nil
+				st.shown = nil
 				st.merged = nil
 			}, nil
 		}); err != nil {
@@ -265,6 +329,43 @@ func buildOverlay(c *ui.Context, st *state) {
 			c.CloseToast(id)
 		}
 	}
+	// A resize — or a right edge that moved because the inspector opened, or a
+	// stack that moved from the bottom corner to the top because the screen
+	// entered its hero or asked for a decision — drops the showing cards (see
+	// placeKey): mygo lays a toast's panel out where the viewport was when it
+	// appeared, so the card would keep the old coordinates. The bottom inset is
+	// deliberately not part of the key: a modal moving the stack upward by a few
+	// DIP must not close the notices it is about to sit behind; the side it hangs
+	// from is, because that is a different corner.
+	width, height := c.Size()
+	right, fromBottom := design.Space4, true
+	if anchor, ok := st.toastAnchor(); ok {
+		right, fromBottom = anchor.Right, anchor.FromBottom
+	}
+	if width > 0 && height > 0 {
+		key := strconv.Itoa(int(width)) + "x" + strconv.Itoa(int(height)) +
+			"r" + strconv.Itoa(int(right)) + "b" + strconv.FormatBool(fromBottom)
+		if st.placeKey != "" && st.placeKey != key {
+			// The cards on screen were laid out for the old geometry, and mygo
+			// keeps a toast's node — so they are closed rather than moved. They
+			// are not requeued either: a toast is a transient notice the user has
+			// already read, and a re-added one would come back with the same id as
+			// a later delivery (two cards for one message). The queue is untouched,
+			// so anything still waiting shows at the new place.
+			for _, id := range st.order {
+				delete(st.showing, id)
+				delete(st.merged, id)
+				delete(st.shown, id)
+				if st.dropping == nil {
+					st.dropping = make(map[string]bool)
+				}
+				st.dropping[id] = true
+				c.CloseToast(id)
+			}
+			st.order = nil
+		}
+		st.placeKey = key
+	}
 	pending := st.pending
 	st.pending = nil
 	if !enabled {
@@ -280,11 +381,26 @@ func buildOverlay(c *ui.Context, st *state) {
 		// At most toastMaxVisible toasts render at once; the rest wait in the
 		// FIFO queue and take a slot as earlier toasts close (H14: a burst must
 		// not stack a wall of notifications over the transcript).
-		for len(st.showing) < toastMaxVisible && len(st.queue) > 0 {
+		// The stack's depth is per frame: a card that no longer fits closes
+		// (oldest first) and its notification was already seen, so the queue
+		// count is what tells the user more arrived while they read.
+		depth := stackDepth(c)
+		for len(st.order) > depth {
+			oldest := st.order[0]
+			st.order = st.order[1:]
+			delete(st.showing, oldest)
+			delete(st.merged, oldest)
+			c.CloseToast(oldest)
+		}
+		for len(st.showing) < depth && len(st.queue) > 0 {
 			notification := st.queue[0]
 			st.queue = st.queue[1:]
 			level := notificationLevel(notification.Level)
 			text := strings.TrimSpace(notification.Text)
+			// One id per level+text, whatever the placement: the id is the dedupe
+			// key, so two identical notifications merge into one card with its
+			// ×N count (audit VD-02's team overlay had the same "审批等待" notice
+			// twice because a placement change had split the id).
 			toastID := dedupeToastID(level, text)
 			// Identical level+text within the toast's life merges: the same
 			// native id means AddToast updates the showing toast (time reset)
@@ -311,11 +427,18 @@ func buildOverlay(c *ui.Context, st *state) {
 			// action, so its Undo applies to the most recent duplicate.
 			action := notification.Action
 			actionLabel := strings.TrimSpace(notification.ActionLabel)
+			// An error stays until the user closes it: a failure the user was
+			// told about for four seconds is a failure they will re-trigger
+			// (B-spec §3.1.5, VD-02).
+			timeout := toastTimeout
+			if level == contracts.NotifyError {
+				timeout = toastStickyTimeout
+			}
 			c.AddToast(ui.Toast{
 				ID:      toastID,
 				Title:   text,
 				Type:    notificationType(level),
-				Timeout: toastTimeout,
+				Timeout: timeout,
 				Action:  actionLabel,
 				Data:    count,
 				OnAction: func() {
@@ -331,6 +454,8 @@ func buildOverlay(c *ui.Context, st *state) {
 				},
 				OnClose: func() {
 					delete(st.showing, toastID)
+					delete(st.shown, toastID)
+					st.order = slicesDelete(st.order, toastID)
 					merged := st.merged[toastID]
 					delete(st.merged, toastID)
 					if notifier != nil && merged != nil {
@@ -346,14 +471,54 @@ func buildOverlay(c *ui.Context, st *state) {
 				},
 			})
 			st.showing[toastID] = level
+			if st.shown == nil {
+				st.shown = make(map[string]contracts.Notification)
+			}
+			st.shown[toastID] = notification
+			// A requeued card reuses its id: it is not a ghost of the old
+			// geometry any more, it is the live card at the new one.
+			delete(st.dropping, toastID)
+			if !slicesContains(st.order, toastID) {
+				st.order = append(st.order, toastID)
+			}
 		}
 	}
 	// The viewport is built every frame: the framework removes expired toasts,
 	// runs their OnClose and keeps the exit transition when the last one goes,
-	// and our look decides where and how they show.
+	// and our look decides where and how they show. The product's tokens are read
+	// HERE, from the window's own theme: the framework builds the toast look with
+	// the theme turned over (its own cards are dark on a light desktop and light
+	// on a dark one), and design.Of inside that callback would resolve the wrong
+	// appearance — a white card in a dark window, which is what the dark snapshot
+	// caught.
+	t := design.Of(c)
+	if appearance, ok := st.toastTheme(); ok {
+		// The appearance comes from the host, not from this layer's inverted
+		// context; the text scale still comes from the frame's preferences.
+		base := design.Light()
+		if appearance {
+			base = design.Dark()
+		}
+		if t.TextScale > 0 {
+			base.TextScale = t.TextScale
+		}
+		t = base
+	}
 	ui.ToastViewportBase(c, func(viewport ui.Element, toasts []ui.Toast) {
-		buildToastViewport(c, st, viewport, toasts)
+		buildToastViewport(c, st, t, viewport, toasts)
 	})
+}
+
+// toastTheme resolves the window's appearance from the host, retrying the
+// lookup per frame until a late-bound service lands.
+func (st *state) toastTheme() (bool, bool) {
+	if st.theme == nil && st.kernel != (cordis.Context{}) {
+		st.theme, _ = st.kernel.Get(contracts.KeyTheme)
+	}
+	if st.theme == nil {
+		return false, false
+	}
+	return st.theme.Dark(), true
 }
 
 // toastAnchor resolves the optional host placement service, retrying the
@@ -370,35 +535,57 @@ func (st *state) toastAnchor() (contracts.ToastAnchor, bool) {
 }
 
 // buildToastViewport places the toast stack where the host anchors it
-// (contracts.ToastAnchorService): below the screen header band at the main
-// content column's right edge, or — while a modal or overlay is open — grown
-// upward from the window's bottom-right corner, clear of the dialog and the
-// composer the scrim disables. Without the service the stack keeps its default
-// top-right place below the app header. The queue count rides the same anchor.
-// The framework keeps the pointer pass-through, hover pause and screen-reader
-// roles.
-func buildToastViewport(c *ui.Context, st *state, viewport ui.Element, toasts []ui.Toast) {
-	viewport.FillWidth().AlignItems(ui.End).Gap(design.Space2)
+// (contracts.ToastAnchorService): the window's bottom-right corner, above
+// whatever the frame's bottom edge holds (the composer dock on the conversation
+// screen), so the stack never covers the reading column, an approval card, a
+// footer's primary button or the send control (audit VD-02). Without the service
+// the stack keeps the same corner with the plain inset. The queue count rides
+// the same anchor. The framework keeps the pointer pass-through, hover pause and
+// screen-reader roles.
+func buildToastViewport(c *ui.Context, st *state, t *design.Tokens, viewport ui.Element, toasts []ui.Toast) {
+	// The stack keeps the window's bottom-right corner and grows upward, with the
+	// host's insets: the right one keeps it out of the docked inspector's column
+	// and the bottom one above the composer dock and the status strip.
+	// The stack hangs from the edge the host names: the bottom right corner in
+	// the ordinary case, the top right when the bottom edge is taken by a card
+	// the user must press (the hero's setup card, an approval card). Justify
+	// follows FromBottom — with a top anchor the row must start at the top, or
+	// the padding is simply a larger gap above a bottom-aligned stack (the
+	// landing/toast frames had cards on the composer's send button that way).
+	justify := ui.End
 	if anchor, ok := st.toastAnchor(); ok {
 		viewport.Padding(anchor.Top, anchor.Right, anchor.Bottom, design.Space4)
-		if anchor.FromBottom {
-			viewport.Justify(ui.End)
-		} else {
-			viewport.Justify(ui.Start)
+		if !anchor.FromBottom {
+			justify = ui.Start
 		}
 	} else {
-		viewport.Padding(toastTopInset, design.Space4, design.Space3, design.Space4).
-			Justify(ui.Start)
+		viewport.Padding(design.Space0, design.Space4, toastInset+design.Space8*5, design.Space4)
 	}
+	viewport.FillWidth().AlignItems(ui.End).Justify(justify).Gap(design.Space2)
 	for _, toast := range toasts {
-		buildToast(c, st, toast)
+		if st.dropping[toast.ID] {
+			continue
+		}
+		buildToast(c, st, t, toast)
 	}
 	if queued := len(st.queue); queued > 0 {
-		// A sentence, not a kbd or micro label: the metadata step (TypeXXS),
-		// never TypeXXXS's 11 DIP line (DESIGN.md §5.3).
+		// A sentence, not a kbd or micro label: the metadata step (TypeXXS), never
+		// TypeXXXS's 11 DIP line (DESIGN.md §5.3).
 		design.Apply(ui.Text(c, st.tr(
 			"+ "+strconv.Itoa(queued)+" 条通知排队", "+ "+strconv.Itoa(queued)+" more queued")),
-			design.Of(c).Font(design.TypeXXS)).TextColor(design.Of(c).LabelTertiary).NoWrap()
+			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).NoWrap()
+	}
+	// A closed toast leaves the framework's list once its exit is over: forget it.
+	if len(st.dropping) > 0 {
+		live := make(map[string]bool, len(toasts))
+		for _, toast := range toasts {
+			live[toast.ID] = true
+		}
+		for id := range st.dropping {
+			if !live[id] {
+				delete(st.dropping, id)
+			}
+		}
 	}
 }
 
@@ -434,8 +621,7 @@ func (st *state) toastLevelFor(t *design.Tokens, toastType string) toastLevel {
 // 16 DIP close glyph. All cards share the min/max width, the MD radius, the
 // regular border and the overlay elevation, so a stack reads as one surface.
 // Timing, hover pause and announcements stay with ToastBase.
-func buildToast(c *ui.Context, st *state, toast ui.Toast) {
-	t := design.Of(c)
+func buildToast(c *ui.Context, st *state, t *design.Tokens, toast ui.Toast) {
 	p := ui.ToastBase(c, toast)
 	level := st.toastLevelFor(t, toast.Type)
 	// The body and the action label localize at render time, like the level
@@ -444,9 +630,13 @@ func buildToast(c *ui.Context, st *state, toast ui.Toast) {
 	body := localizeToastText(st.locale, toast.Title)
 	actionLabel := localizeToastText(st.locale, toast.Action)
 	box := p.Root.Row().AlignItems(ui.Start).Gap(design.Space2).
-		MinWidth(toastMinWidth).MaxWidth(toastMaxWidth).
+		MinWidth(toastMinWidth).MaxWidth(toastWidthFor(c, st)).
 		Padding(design.Space2, design.Space3).
-		Radius(design.RadiusMD).Background(t.BgRaised).Border(1, t.BorderL2)
+		Radius(design.RadiusLG).Background(t.BgOverlay).Border(1, t.BorderL2).
+		// It arrives from 8 DIP below, fading in over MotionBase, and leaves
+		// over MotionFast: the toast's own timing (B-spec §1.5: entering 120,
+		// leaving 80), not the slower dialog entrance.
+		Transition(toastTransition(c))
 	// The elevation is the shared floating-surface token (stronger in the dark
 	// theme), not a bare shadow value of this module.
 	box = design.Apply(box, t.ShadowOverlay())
@@ -461,8 +651,12 @@ func buildToast(c *ui.Context, st *state, toast ui.Toast) {
 			})
 		ui.Column(c).Grow(1).Gap(design.Space1).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				// 13/600: the spec's toast title. The weight comes from the token
+				// scale rather than a literal, so the 13 DIP step keeps its
+				// heading weight without a raw 600 at the call site.
 				design.Apply(ui.Text(c, level.label), t.Font(design.TypeXS)).
-					FontWeight(600).TextColor(level.color).Grow(1).MaxLines(1).Ellipsis("…")
+					FontWeight(design.WeightSemibold).TextColor(level.color).
+					Grow(1).MaxLines(1).Ellipsis("…")
 				if count, ok := toast.Data.(int); ok && count > 1 {
 					// One toast standing for N identical notifications: a quiet
 					// count, not another badge row.
@@ -480,7 +674,8 @@ func buildToast(c *ui.Context, st *state, toast ui.Toast) {
 			}
 			if actionLabel != "" {
 				action := p.ActionButton().Padding(design.Space1, design.Space2).
-					Radius(design.RadiusSM).Label(actionLabel)
+					Radius(design.RadiusSM).Label(actionLabel).
+					Transition(design.TransitionColors(c))
 				switch {
 				case action.Pressed():
 					action = action.Background(t.BgSelected)
@@ -489,13 +684,16 @@ func buildToast(c *ui.Context, st *state, toast ui.Toast) {
 				}
 				action.Children(func() {
 					design.Apply(ui.Text(c, actionLabel), t.Font(design.TypeXS)).
-						FontWeight(600).TextColor(t.Accent)
+						FontWeight(design.WeightSemibold).TextColor(t.Accent)
 				})
 			}
 		})
+		// No Tooltip: a tooltip is an overlay with its own Escape handler, and this
+		// control lives on a surface Escape dismisses (A4-I-01).
 		closeLabel := st.tr("关闭通知", "Close notification")
 		close := p.CloseButton().Size(toastCloseButtonSize, toastCloseButtonSize).
-			Center().Radius(design.RadiusSM).Label(closeLabel).Tooltip(closeLabel)
+			Center().Radius(design.RadiusSM).Label(closeLabel).
+			Transition(design.TransitionColors(c))
 		switch {
 		case close.Pressed():
 			close = close.Background(t.BgSelected)
@@ -506,6 +704,42 @@ func buildToast(c *ui.Context, st *state, toast ui.Toast) {
 			ui.Icon(c, icons.Close()).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelTertiary)
 		})
 	})
+}
+
+// toastTransition is the toast card's entrance and exit: up from 8 DIP while it
+// fades in over MotionBase, out over MotionFast. A reduced-motion desktop shows
+// both at once.
+func toastTransition(c *ui.Context) ui.ElementTransition {
+	if design.ReduceMotion(c) {
+		return ui.ElementTransition{Duration: -1}
+	}
+	return ui.ElementTransition{
+		Duration:     design.MotionBase,
+		ExitDuration: design.MotionFast,
+		Ease:         ui.EaseOut,
+		Enter:        &ui.Motion{Opacity: 0, Y: design.Space2},
+		Exit:         &ui.Motion{Opacity: 0},
+	}
+}
+
+// slicesContains reports whether id is in ids.
+func slicesContains(ids []string, id string) bool {
+	for _, candidate := range ids {
+		if candidate == id {
+			return true
+		}
+	}
+	return false
+}
+
+// slicesDelete returns ids without id, keeping the order of the rest.
+func slicesDelete(ids []string, id string) []string {
+	for index, candidate := range ids {
+		if candidate == id {
+			return append(ids[:index:index], ids[index+1:]...)
+		}
+	}
+	return ids
 }
 
 // tr localizes the toast chrome for the current frame.

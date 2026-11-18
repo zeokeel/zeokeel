@@ -83,7 +83,7 @@ func TestTeamNoRunningTeammateSentenceStep(t *testing.T) {
 
 	assertSentenceStep(t, tester, "还没有队友")
 	// The restored record's status word stays a micro-label.
-	assertMicroStep(t, tester, "历史 · 只读")
+	assertMicroStep(t, tester, "已结束 · 只读")
 }
 
 // TestTaskBoardDisabledSentenceStep covers the no-board overlay: "task board

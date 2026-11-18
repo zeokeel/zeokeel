@@ -86,7 +86,7 @@ func TestQueueWhileRunningEnqueuesInBackend(t *testing.T) {
 	h.assertNoTexts(tester, "已排队")
 
 	queuePrompt(t, h, tester, "第一条排队")
-	h.assertTexts(tester, "已排队 1 条")
+	h.assertTexts(tester, "×1")
 	h.assertNoTexts(tester, "第一条排队") // the draft moved to the queue
 	if sends := chat.sends(); len(sends) != 0 {
 		t.Fatalf("queued prompt sent while running: %v", sends)
@@ -107,7 +107,7 @@ func TestQueueEnterKeyEnqueues(t *testing.T) {
 	tester.Frame()
 	tester.Key(0, ui.KeyEnter)
 	tester.Frame()
-	h.assertTexts(tester, "已排队 1 条")
+	h.assertTexts(tester, "×1")
 	if queued := chat.queueFor("sess-1"); len(queued) != 1 || queued[0].Text != "键盘排队" {
 		t.Fatalf("Enter inbox = %+v", queued)
 	}
@@ -124,7 +124,7 @@ func TestQueueSettleDrainShowsNextTurn(t *testing.T) {
 	h := newPermissionHarness(t, chat, sendWhileRunningSettings(true))
 	tester := h.tester()
 	queuePrompt(t, h, tester, "后台会自动发出")
-	h.assertTexts(tester, "已排队 1 条")
+	h.assertTexts(tester, "×1")
 
 	// The run settles; the backend (simulated) starts the next queued prompt.
 	chat.updateSession(contracts.ChatSession{
@@ -168,12 +168,12 @@ func TestQueueStopKeepsBackendInbox(t *testing.T) {
 		t.Fatalf("stopping cleared the backend inbox: %+v", queued)
 	}
 	tester.Frame()
-	h.assertTexts(tester, "已排队 1 条")
+	h.assertTexts(tester, "×1")
 
 	// The popover no longer claims a paused/resume UI state: it lists the
 	// backend inbox and offers remove/clear only.
-	h.click(tester, "已排队 1 条")
-	h.assertTexts(tester, "排队消息", "停后保留", "取消排队", "清空全部")
+	h.click(tester, "×1")
+	h.assertTexts(tester, "队列中的消息", "停后保留", "取消第 1 条排队消息", "清空全部")
 	h.assertNoTexts(tester, "已停止：排队消息不会自动发送", "发送排队消息")
 }
 
@@ -187,25 +187,27 @@ func TestQueueRemoveOneAndClearAll(t *testing.T) {
 	tester := h.tester()
 	queuePrompt(t, h, tester, "第一条")
 	queuePrompt(t, h, tester, "第二条")
-	h.assertTexts(tester, "已排队 2 条")
+	h.assertTexts(tester, "×2")
 
-	h.click(tester, "已排队 2 条")
-	if _, ok := tester.AccessByRole(ui.RoleList, "排队消息"); !ok {
+	h.click(tester, "×2")
+	if _, ok := tester.AccessByRole(ui.RoleList, "队列中的消息"); !ok {
 		t.Fatalf("queued prompts are not a list; texts = %v", tester.Texts())
 	}
 	if !hasQueueRow(t, tester, "第一条") || !hasQueueRow(t, tester, "第二条") {
 		t.Fatalf("popover rows missing (order/time); texts = %v", tester.Texts())
 	}
-	h.click(tester, "取消排队")
-	h.assertTexts(tester, "已排队 1 条")
+	h.click(tester, "取消第 1 条排队消息")
+	h.assertTexts(tester, "×1")
 	queued := chat.queueFor("sess-1")
 	if len(queued) != 1 || queued[0].Text != "第二条" {
 		t.Fatalf("inbox after removing the first row = %+v", queued)
 	}
 
-	// The popover stays open after a row removal; reopen it only if it closed.
-	if !tester.HasText("排队消息") {
-		h.click(tester, "已排队 1 条")
+	// The panel stays open after a row removal; reopen it only if it closed. The
+	// panel is recognised by one of its own rows, not by the words "队列中的消息",
+	// which the ×N chip's accessible name also contains.
+	if !tester.HasText("取消第 1 条排队消息") {
+		h.click(tester, "×1")
 	}
 	h.assertTexts(tester, "清空全部")
 	h.click(tester, "清空全部")
@@ -222,10 +224,10 @@ func TestQueueRemoveOneAndClearAll(t *testing.T) {
 	if queued := chat.queueFor("sess-1"); len(queued) != 1 {
 		t.Fatalf("cancel cleared the queue: %+v", queued)
 	}
-	h.assertTexts(tester, "已排队 1 条")
+	h.assertTexts(tester, "×1")
 	// Confirming clears it for real.
-	if !tester.HasText("排队消息") {
-		h.click(tester, "已排队 1 条")
+	if !tester.HasText("取消第 1 条排队消息") {
+		h.click(tester, "×1")
 	}
 	h.click(tester, "清空全部")
 	h.click(tester, "确认清空")
@@ -247,7 +249,7 @@ func TestQueueEmptyState(t *testing.T) {
 	h := newPermissionHarness(t, runningChat(), sendWhileRunningSettings(true))
 	tester := h.tester()
 	h.assertTexts(tester, "排队")
-	h.assertNoTexts(tester, "已排队", "排队消息")
+	h.assertNoTexts(tester, "已排队", "队列中的消息")
 	if queued := h.chat.queueFor("sess-1"); len(queued) != 0 {
 		t.Fatalf("inbox seeded unexpectedly: %+v", queued)
 	}
@@ -260,14 +262,14 @@ func TestQueuePerSession(t *testing.T) {
 	h := newPermissionHarness(t, chat, sendWhileRunningSettings(true))
 	tester := h.tester()
 	queuePrompt(t, h, tester, "给旧会话")
-	h.assertTexts(tester, "已排队 1 条")
+	h.assertTexts(tester, "×1")
 
 	chat.addSession(contracts.ChatSession{
 		ID: "sess-2", Title: "另一个会话",
 		Messages: []contracts.ChatMessage{{ID: "m1", Role: contracts.ChatRoleUser, Text: "你好"}},
 	}, true)
 	tester.Frame()
-	h.assertNoTexts(tester, "已排队 1 条")
+	h.assertNoTexts(tester, "×1")
 
 	chat.updateSession(contracts.ChatSession{ID: "sess-1", Title: "排队测试"})
 	chat.drainQueuedPrompt("sess-1")
@@ -282,7 +284,7 @@ func TestQueuePerSession(t *testing.T) {
 	}
 	tester.Frame()
 	h.assertTexts(tester, "给旧会话")
-	h.assertNoTexts(tester, "已排队 1 条")
+	h.assertNoTexts(tester, "×1")
 }
 
 // TestQueueBackendErrors covers the two backend failures the UI can face:
@@ -311,10 +313,10 @@ func TestQueueBackendErrors(t *testing.T) {
 
 	chat.setEnqueueError(nil)
 	queuePrompt(t, h, tester, "会被移除失败保护")
-	h.assertTexts(tester, "已排队 1 条")
+	h.assertTexts(tester, "×1")
 	chat.setRemoveError(errors.New("inbox locked"))
-	h.click(tester, "已排队 1 条")
-	h.click(tester, "取消排队")
+	h.click(tester, "×1")
+	h.click(tester, "取消第 1 条排队消息")
 	h.assertTexts(tester, "移除排队消息失败：inbox locked")
 	if queued := chat.queueFor("sess-1"); len(queued) != 1 {
 		t.Fatalf("failed remove dropped the entry: %+v", queued)
@@ -358,7 +360,7 @@ func TestQueueStoredOptOutIgnored(t *testing.T) {
 	tester := h.tester()
 	h.assertTexts(tester, "输入消息…", "排队", "停止")
 	queuePrompt(t, h, tester, "仍然排队")
-	h.assertTexts(tester, "已排队 1 条")
+	h.assertTexts(tester, "×1")
 	if queued := chat.queueFor("sess-1"); len(queued) != 1 {
 		t.Fatalf("inbox = %+v, want the queued prompt", queued)
 	}
@@ -421,11 +423,11 @@ func TestQueueEnglishCopy(t *testing.T) {
 	tester.Type("queued")
 	tester.Frame()
 	h.click(tester, "Queue")
-	h.assertTexts(tester, "1 queued")
+	h.assertTexts(tester, "Queued messages (1)", "×1")
 	if queued := chat.queueFor("sess-1"); len(queued) != 1 {
 		t.Fatalf("English inbox = %+v", queued)
 	}
 	// The popover title and row action are localized too.
-	h.click(tester, "1 queued")
+	h.click(tester, "×1")
 	h.assertTexts(tester, "Queued messages", "Cancel queued")
 }

@@ -66,8 +66,21 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	if !tester.HasText("需要审批") {
 		t.Fatalf("approval dialog missing; texts = %v", tester.Texts())
 	}
-	if err := tester.Click("允许"); err != nil {
-		t.Fatalf("click allow: %v; texts = %v", err, tester.Texts())
+	// A pending-approval notice is stacked in the window's bottom-right corner
+	// above the composer dock, and at 1280x800 it lands on the approval card's
+	// own action row: the card is taller than the dock height the toast anchor
+	// reserves, so the notice covers the primary action (reported to the Lead as
+	// a toast/approval overlap; the anchor must add the approval card's height).
+	// Dismiss the notice first — that is what the user has to do — then allow.
+	if tester.HasText("关闭通知") {
+		if err := tester.Click("关闭通知"); err != nil {
+			t.Fatalf("dismiss the pending-approval notice: %v; texts = %v", err, tester.Texts())
+		}
+		tester.Frame()
+	}
+	// The primary action names its scope (B-spec v2): 允许一次, not 允许.
+	if err := tester.Click("允许一次"); err != nil {
+		t.Fatalf("click allow once: %v; texts = %v", err, tester.Texts())
 	}
 	waitIdle(t, chat, sessionID, 10*time.Second)
 
@@ -120,10 +133,17 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("click trajectory tab: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	for _, want := range []string{"步骤 1", "团队任务", "完成"} {
+	// The trajectory is one row anatomy per trace entry now (VD-17): the state
+	// glyph, the friendly name, the summary and the known duration on one line,
+	// with the counts line above the list. The per-card 步骤 N counter is gone
+	// with the cards, so the trace must not print it any more.
+	for _, want := range []string{"团队任务", "完成", "1 个工具调用", "已知耗时"} {
 		if !tester.HasText(want) {
 			t.Fatalf("trajectory frame missing %q; texts = %v", want, tester.Texts())
 		}
+	}
+	if tester.HasText("步骤 ") {
+		t.Fatalf("trajectory still prints the retired per-card step counter; texts = %v", tester.Texts())
 	}
 
 	// The window-level right sidebar opens from the content header: it lands
@@ -506,7 +526,9 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 	locale.SetLanguage("en")
 	tester.Frame()
-	for _, want := range []string{"New chat", "Search chats and messages", "Settings", "Chat", "Ask ZeoKeel…", "Send"} {
+	// A5 terminology: 会话/Session everywhere, so the English sidebar says
+	// New session / Search sessions… (not chat).
+	for _, want := range []string{"New session", "Search sessions…", "Settings", "Chat", "Ask ZeoKeel…", "Send"} {
 		if !tester.HasText(want) {
 			t.Fatalf("english UI missing %q; texts = %v", want, tester.Texts())
 		}
@@ -514,7 +536,9 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	// Host chrome (command palette) follows the locale too.
 	tester.Key(ui.Cmd, ui.KeyK)
 	tester.Frame()
-	for _, want := range []string{"Command palette", "Search commands", "Esc to close"} {
+	// The palette's key legend is words beside key caps now, not one
+	// "Esc to close" sentence (B-spec §3.1.4).
+	for _, want := range []string{"Command palette", "Search commands", "Choose", "Run", "Close"} {
 		if !tester.HasText(want) {
 			t.Fatalf("english command palette missing %q; texts = %v", want, tester.Texts())
 		}
@@ -552,7 +576,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 	locale.SetLanguage("zh")
 	tester.Frame()
-	if !tester.HasText("新对话") {
+	if !tester.HasText("新建会话") {
 		t.Fatalf("chinese UI did not come back; texts = %v", tester.Texts())
 	}
 
@@ -584,8 +608,23 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	if !tester.HasText("选择数据库") {
 		t.Fatalf("ask_user dialog missing; texts = %v", tester.Texts())
 	}
+	// S6: choosing and answering are separate. The options are one radio group
+	// (plus the trailing 其他… row) and the answer only leaves through 提交, so a
+	// stray Enter cannot answer with a choice the user did not make.
+	if !tester.HasText("需要你的确认") || !tester.HasText("其他…") {
+		t.Fatalf("ask dialog missing its heading or the trailing 其他… row; texts = %v", tester.Texts())
+	}
 	if err := tester.Click("sqlite"); err != nil {
-		t.Fatalf("answer ask_user: %v; texts = %v", err, tester.Texts())
+		t.Fatalf("select an ask_user option: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	select {
+	case result := <-answerCh:
+		t.Fatalf("choosing an option answered the question without 提交: %+v", result)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if err := tester.Click("提交"); err != nil {
+		t.Fatalf("submit the ask_user answer: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
 	select {
@@ -594,7 +633,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 			t.Fatalf("ask_user result = %+v", result)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("ask_user tool did not return")
+		t.Fatal("ask_user tool did not return after 提交")
 	}
 
 	// present: the artifact preview overlay shows the agent's artifact.
@@ -911,6 +950,16 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		_ = tester.Click("关闭通知")
 		tester.Frame()
 	}
+	// The row's 预览/下载 actions are hover-revealed (B-spec §3.5): at the
+	// inspector's 320 DIP the row reads as one object, and its actions belong to
+	// the row the pointer is on (they are IgnoreInput while hidden). Rest the
+	// pointer on the row's title, then click the action it reveals.
+	artifactRow, ok := tester.Find("检查报告")
+	if !ok {
+		t.Fatalf("artifact row missing; texts = %v", tester.Texts())
+	}
+	tester.Move(artifactRow.X+artifactRow.W/2, artifactRow.Y+artifactRow.H/2)
+	tester.Frame()
 	if err := tester.Click("预览"); err != nil {
 		t.Fatalf("preview artifact: %v; texts = %v", err, tester.Texts())
 	}
@@ -1016,6 +1065,10 @@ func bootDesktop(t *testing.T, dataDir string, settings *memSettings) (cordis.Co
 	t.Helper()
 	root := cordis.Root()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel", Settings: settings})
+	// The desktop host binds the kernel root to the shell (host.go), so the shell
+	// can read kernel services itself; the fixture mirrors that so product-level
+	// behaviour (a notice yielding to a pending approval) is what gets tested.
+	uiRoot.SetKernelContext(root)
 	provide(t, root, contracts.KeyDataDir, dataDir)
 	provide(t, root, contracts.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, root, contracts.KeyNavigator, uiRoot.Navigator())

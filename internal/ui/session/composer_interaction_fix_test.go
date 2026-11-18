@@ -98,7 +98,7 @@ func TestRunningComposerKeepsAttachMenu(t *testing.T) {
 	h.assertTexts(tester, "附件", "排队", "停止")
 	h.attachFiles(tester)
 	h.waitFor(tester, "next-message.txt")
-	h.assertTexts(tester, "本轮只发送文字；附件会保留在输入框，随下一条消息发送")
+	h.assertTexts(tester, "本轮只发送文字，附件留在输入框。")
 
 	// Queue a text prompt: the queue carries text, the staged file must stay
 	// staged in the composer for after the turn (not silently dropped).
@@ -107,7 +107,7 @@ func TestRunningComposerKeepsAttachMenu(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "排队")
 	tester.Frame()
-	h.assertTexts(tester, "已排队 1 条", "next-message.txt")
+	h.assertTexts(tester, "×1", "next-message.txt")
 	h.assertNoTexts(tester, "queued prompt") // the draft moved to the queue
 
 	// A second readback: the attachment chip is still removable/staged.

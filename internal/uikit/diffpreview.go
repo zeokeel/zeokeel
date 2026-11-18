@@ -121,6 +121,9 @@ const (
 type diffPreviewState struct {
 	old, new string
 	view     editor.DiffState
+	// theme is the viewer's change palette, derived from the block's tokens the
+	// first time the body is resolved (never per frame).
+	theme *editor.Theme
 }
 
 // diffPreviewPlan is one frame's resolved body: the mode, the official viewer
@@ -151,17 +154,20 @@ func DiffPreview(c *ui.Context, o DiffPreviewOptions) ui.Element {
 	if key == "" {
 		key = "uikit.diffpreview"
 	}
-	// The block frame: the same quiet code-block surface the approval summary
-	// uses, so a diff reads as content to judge rather than as chrome.
-	root := design.Apply(ui.Column(c.Key(key)).FillWidth().Gap(design.Space1),
+	// The block frame: one 1 DIP BorderL2 frame at the control radius on the page
+	// surface, with the change's color living only on the changed lines. The
+	// block itself is never tinted: a success wash behind the whole diff plus a
+	// tinted line plus a bar plus a colored frame was four greens for one change
+	// (VD-09).
+	root := design.Apply(ui.Column(c.Key(key)).FillWidth().Gap(design.Space0),
 		func(el ui.Element) ui.Element {
 			return el.Background(t.BgBase).Border(1, t.BorderL2).
-				Radius(design.RadiusSM).Padding(design.Space2)
+				Radius(design.RadiusMD).Clip()
 		})
 	// Resolve the body before building the header and children: the header's
 	// +N −M counts come from the official diff, which is computed (and cached)
 	// here.
-	plan := diffPreviewPlanFor(root, o)
+	plan := diffPreviewPlanFor(root, o, t)
 	root.Children(func() {
 		diffPreviewHeader(c, t, strings.TrimSpace(o.Path), plan)
 		diffPreviewBody(c, t, plan, o, maxHeight)
@@ -172,7 +178,7 @@ func DiffPreview(c *ui.Context, o DiffPreviewOptions) ui.Element {
 // diffPreviewPlanFor resolves one frame's body: the caller's fallback first, the
 // size and binary guards, the empty state, and finally the official viewer with
 // its cached state.
-func diffPreviewPlanFor(root ui.Element, o DiffPreviewOptions) diffPreviewPlan {
+func diffPreviewPlanFor(root ui.Element, o DiffPreviewOptions, t *design.Tokens) diffPreviewPlan {
 	fallbackText := strings.TrimSpace(o.FallbackText)
 	fallbackNote := strings.TrimSpace(o.FallbackNote)
 	if fallbackText != "" || fallbackNote != "" {
@@ -229,6 +235,13 @@ func diffPreviewPlanFor(root ui.Element, o DiffPreviewOptions) diffPreviewPlan {
 	}
 	st.view.Layout = editor.DiffUnified
 	st.view.Editable = false
+
+	if st.theme == nil {
+		// Derived once per block, not per frame: the viewer re-reads the palette
+		// whenever it paints a changed line.
+		st.theme = diffPreviewTheme(t)
+	}
+	st.view.Theme = st.theme
 	// A short diff takes its natural height (no empty viewer-sized hole); a
 	// long one is bounded below, so FitContent stays on only for the short
 	// ones unless the caller takes the height budget.
@@ -244,6 +257,33 @@ func diffPreviewPlanFor(root ui.Element, o DiffPreviewOptions) diffPreviewPlan {
 	}
 }
 
+// diffPreviewTheme is the viewer's change palette, derived from the brand
+// tokens: the official diff mixes its line tints from one color per side at a
+// fixed ratio (12% light / 20% dark), and it mixes the cell background at a
+// different ratio from the gutter — two tints of one change, which drew a light
+// stripe down the line numbers (VD-09). Feeding it a pre-lightened color keeps
+// the tint at the product's 6–8% and brings the two mixes close enough to read as
+// one band, while the bars and numbers stay the semantic color.
+func diffPreviewTheme(t *design.Tokens) *editor.Theme {
+	theme := editor.DefaultTheme(t.Theme())
+	theme.Background = t.BgBase
+	if t.Dark {
+		// The dark surfaces absorb the official 20% mix; a lighter source brings
+		// it back to the same perceived weight as the light theme's.
+		theme.Added = t.Success.Mix(t.BgRaised, 0.45)
+		theme.Deleted = t.Danger.Mix(t.BgRaised, 0.45)
+		theme.Modified = t.Accent.Mix(t.BgRaised, 0.45)
+		return theme
+	}
+	// 55% of the semantic color keeps the viewer's 12% line mix at ~6.5% on the
+	// page and its 9% gutter mix at ~5%, so the line and its numbers read as one
+	// band instead of a stripe (the two ratios are the widget's, not ours).
+	theme.Added = t.Success.Mix(t.BgBase, 0.45)
+	theme.Deleted = t.Danger.Mix(t.BgBase, 0.45)
+	theme.Modified = t.Accent.Mix(t.BgBase, 0.45)
+	return theme
+}
+
 // diffPreviewHeader is the block's one header row: the file path (ellipsized in
 // a narrow card) and the +N −M line counts of the official diff.
 func diffPreviewHeader(c *ui.Context, t *design.Tokens, path string, plan diffPreviewPlan) {
@@ -251,7 +291,14 @@ func diffPreviewHeader(c *ui.Context, t *design.Tokens, path string, plan diffPr
 	if path == "" && !showStats {
 		return
 	}
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+	design.Apply(ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+		Height(design.RowCompactHeight).PaddingX(design.Space3),
+		func(el ui.Element) ui.Element {
+			// The file header is one 32 DIP line of mono 12 over a single hairline:
+			// the block's only internal rule.
+			return el.BorderWidth(design.Space0, design.Space0, 1, design.Space0).
+				BorderColor(t.BorderL1)
+		}).Children(func() {
 		if path != "" {
 			design.Apply(ui.Text(c, path), t.Font(design.TypeXXS), t.MonoFamily()).
 				TextColor(t.LabelSecondary).Grow(1).MaxLines(1).Ellipsis("…")
@@ -316,6 +363,10 @@ func diffPreviewBody(c *ui.Context, t *design.Tokens, plan diffPreviewPlan,
 			// stretching the card that contains it.
 			viewer.Height(maxHeight)
 		}
+		// The changed lines keep the row's own padding: the block's frame holds the
+		// content edge to edge, so the line tints and their 4 DIP semantic bars
+		// reach the frame the way a diff viewer's do.
+		viewer.Padding(design.Space1, design.Space0)
 		if minHeight > 0 {
 			// A height-budgeted parent must not squeeze the diff into a
 			// half-line: the first hunk keeps a readable band.

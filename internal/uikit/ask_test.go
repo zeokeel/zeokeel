@@ -74,55 +74,59 @@ func TestAskDialogOptionsAreEqualWeightAndStacked(t *testing.T) {
 			t.Fatalf("frame does not show %q; texts = %v", want, tester.Texts())
 		}
 	}
-	first, ok := tester.Find("staging")
-	if !ok {
+	if _, ok := tester.Find("staging"); !ok {
 		t.Fatalf("first option missing; texts = %v", tester.Texts())
 	}
-	second, ok := tester.Find("prod")
-	if !ok {
+	if _, ok := tester.Find("prod"); !ok {
 		t.Fatalf("second option missing; texts = %v", tester.Texts())
 	}
 	other, ok := tester.Find("其他…")
 	if !ok {
 		t.Fatalf("Other choice missing; texts = %v", tester.Texts())
 	}
-	// Find returns the label's text box; the button boxes come from the access
-	// tree and are the full-width equal choices.
-	firstButton, ok := tester.AccessByRole(ui.RoleButton, "staging")
+	// The choices are the official radio group: one radio per option, all in one
+	// column, all starting on the same x, none of them styled as the primary
+	// action (no option outranks another).
+	firstRadio, ok := tester.AccessByRole(ui.RoleRadio, "staging")
 	if !ok {
-		t.Fatalf("first option button missing from the access tree; texts = %v", tester.Texts())
+		t.Fatalf("first option radio missing from the access tree; texts = %v", tester.Texts())
 	}
-	secondButton, ok := tester.AccessByRole(ui.RoleButton, "prod")
+	secondRadio, ok := tester.AccessByRole(ui.RoleRadio, "prod")
 	if !ok {
-		t.Fatalf("second option button missing from the access tree; texts = %v", tester.Texts())
+		t.Fatalf("second option radio missing from the access tree; texts = %v", tester.Texts())
 	}
-	otherButton, ok := tester.AccessByRole(ui.RoleButton, "其他…")
-	if !ok {
-		t.Fatalf("Other button missing from the access tree; texts = %v", tester.Texts())
+	if firstRadio.Bounds.X != secondRadio.Bounds.X {
+		t.Fatalf("the options do not share one left edge: %.1f, %.1f",
+			firstRadio.Bounds.X, secondRadio.Bounds.X)
 	}
-	for _, button := range []ui.AccessInfo{firstButton, secondButton, otherButton} {
-		if button.Bounds.W != firstButton.Bounds.W {
-			t.Fatalf("the choices are not equal-width: %.1f, %.1f, %.1f",
-				firstButton.Bounds.W, secondButton.Bounds.W, otherButton.Bounds.W)
-		}
+	if !(firstRadio.Bounds.Y < secondRadio.Bounds.Y && secondRadio.Bounds.Y < other.Y) {
+		t.Fatalf("the options are not vertical: y = %.1f, %.1f, %.1f",
+			firstRadio.Bounds.Y, secondRadio.Bounds.Y, other.Y)
 	}
-	if first.X+first.W/2 != second.X+second.W/2 || second.X+second.W/2 != other.X+other.W/2 {
-		t.Fatalf("the choices are not stacked in one column: centers %.1f, %.1f, %.1f",
-			first.X+first.W/2, second.X+second.W/2, other.X+other.W/2)
-	}
-	if !(first.Y < second.Y && second.Y < other.Y) {
-		t.Fatalf("the choices are not vertical: y = %.1f, %.1f, %.1f", first.Y, second.Y, other.Y)
+	// Exactly one accent action: the Submit button, which stays disabled until a
+	// choice is made.
+	if _, ok := tester.AccessByRole(ui.RoleButton, "提交"); !ok {
+		t.Fatalf("the Submit action is missing; texts = %v", tester.Texts())
 	}
 }
 
-// TestAskDialogOptionAnswers covers the explicit choice: a click answers the
-// question with that option.
+// TestAskDialogOptionAnswers covers the explicit choice: clicking an option
+// selects it, and the Submit action (the dialog's one accent fill) answers the
+// question with it. Selecting is not answering, so a click can never send a
+// half-made decision.
 func TestAskDialogOptionAnswers(t *testing.T) {
 	state, tester := askDialogHarness(t, contracts.UserQuestion{
 		ID: "q1", Text: "部署到哪个环境？", Options: []string{"staging", "prod"},
 	})
 	if err := tester.Click("prod"); err != nil {
 		t.Fatalf("click option: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if len(state.answers) != 0 {
+		t.Fatalf("selecting an option answered the question: %v", state.answers)
+	}
+	if err := tester.Click("提交"); err != nil {
+		t.Fatalf("click Submit: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
 	if len(state.answers) != 1 || state.answers[0] != "prod" {
@@ -193,7 +197,7 @@ func TestAskDialogOtherAnswer(t *testing.T) {
 		t.Fatalf("the Other input did not take the keyboard; texts = %v", tester.Texts())
 	}
 	// The option buttons stay visible: entering Other is not a commitment.
-	for _, want := range []string{"staging", "prod", "Enter = 提交自定义回答 · Esc = 返回选项"} {
+	for _, want := range []string{"staging", "prod", "提交"} {
 		if !tester.HasText(want) {
 			t.Fatalf("frame does not show %q; texts = %v", want, tester.Texts())
 		}
@@ -236,9 +240,13 @@ func TestAskDialogOtherEscapeCollapses(t *testing.T) {
 	if !tester.HasText("其他…") || tester.HasText("输入自定义回答") {
 		t.Fatalf("Escape did not return to the options; texts = %v", tester.Texts())
 	}
-	// The options still decide; picking one answers the question.
+	// The options still decide; selecting one and submitting answers the question.
 	if err := tester.Click("staging"); err != nil {
 		t.Fatalf("click option after collapse: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if err := tester.Click("提交"); err != nil {
+		t.Fatalf("click Submit after collapse: %v; texts = %v", err, tester.Texts())
 	}
 	if len(state.answers) != 1 || state.answers[0] != "staging" {
 		t.Fatalf("answers = %v, want [staging]", state.answers)

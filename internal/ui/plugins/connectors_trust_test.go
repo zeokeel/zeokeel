@@ -83,8 +83,8 @@ func TestConnectorEditStdioShowsTrustDisclosure(t *testing.T) {
 	})
 	tester := h.tester()
 	h.click(tester, "连接器")
-	scrollConnectorTo(t, tester, "连接器操作 srv")
-	h.click(tester, "连接器操作 srv")
+	scrollConnectorTo(t, tester, "连接器操作：srv")
+	h.click(tester, "连接器操作：srv")
 	h.click(tester, "编辑")
 
 	h.assertTexts(tester, "编辑连接器", stdioTrustZh)

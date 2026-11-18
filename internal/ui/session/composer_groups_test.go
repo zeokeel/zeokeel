@@ -210,7 +210,9 @@ func TestNarrowHeaderAndToolbarWithInspectorDrawer(t *testing.T) {
 	}
 	// The model entry must stay reachable at this width without the session menu:
 	// either the toolbar kept the chip or the toolbar overflow carries it.
-	assertModelEntryReachable(t, tester, "snapshot…")
+	// The chip's label is the whole model id now (the ellipsis happens at paint
+	// time, so the accessible name and the tooltip keep the full id).
+	assertModelEntryReachable(t, tester, "snapshot-model")
 	// The permission menu may itself be folded into the toolbar's overflow at
 	// this width; the harness opener goes through it.
 	h.openSessionMenu(tester)

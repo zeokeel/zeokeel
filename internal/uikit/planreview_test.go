@@ -81,7 +81,7 @@ func TestPlanReviewDialogRendersPlanAndSafeFooter(t *testing.T) {
 	for _, want := range []string{
 		"计划待审阅", "实施计划", "第一步", "继续规划反馈",
 		"取消计划", "继续规划", "批准",
-		"输入反馈后按 Enter = 继续规划 · 点击「批准」批准计划 · Esc 不会取消计划",
+		"不取消计划", "无反馈时不生效",
 	} {
 		if !tester.HasText(want) {
 			t.Fatalf("frame does not show %q; texts = %v", want, tester.Texts())
@@ -161,8 +161,16 @@ func TestPlanReviewDialogKeepPlanning(t *testing.T) {
 		planReviewFocus(t, tester, "继续规划反馈")
 		tester.Type("请补充回滚步骤")
 		tester.Frame()
-		if !tester.HasText("Enter = 继续规划（发送反馈给 agent）") {
+		if !tester.HasText("发送反馈继续规划") {
 			t.Fatalf("the hint did not follow the typed feedback; texts = %v", tester.Texts())
+		}
+		// VS Code's gate: a typed-but-unsubmitted feedback blocks Approve, and the
+		// reason is a visible note, not a tooltip (a disabled control shows none).
+		if info, ok := tester.AccessByRole(ui.RoleButton, "批准"); !ok || !info.Disabled {
+			t.Fatalf("Approve is not disabled while feedback is pending; info = %+v ok=%v", info, ok)
+		}
+		if !tester.HasText("有未提交的反馈") {
+			t.Fatalf("the disabled Approve does not explain itself; texts = %v", tester.Texts())
 		}
 		// The action becomes available with the typed feedback.
 		keepInfo, ok := tester.AccessByRole(ui.RoleButton, "继续规划")
@@ -256,7 +264,7 @@ func TestPlanReviewDialogErrorClosesOnEscape(t *testing.T) {
 	if _, ok := tester.AccessByRole(ui.RoleAlert, ""); !ok {
 		t.Fatalf("the error line is not a RoleAlert; texts = %v", tester.Texts())
 	}
-	if !tester.HasText("Esc = 关闭审阅（计划未批准）") {
+	if !tester.HasText("关闭审阅（计划未批准）") {
 		t.Fatalf("the error-state Escape hint is missing; texts = %v", tester.Texts())
 	}
 
@@ -284,7 +292,7 @@ func TestPlanReviewDialogWithoutChatHidesKeepPlanning(t *testing.T) {
 	if !tester.HasText("批准") || !tester.HasText("取消计划") {
 		t.Fatalf("approve/cancel missing; texts = %v", tester.Texts())
 	}
-	if !tester.HasText("点击「批准」批准计划 · Esc 不会取消计划") {
+	if !tester.HasText("不取消计划") {
 		t.Fatalf("the no-feedback hint is missing; texts = %v", tester.Texts())
 	}
 }

@@ -9,7 +9,7 @@
 
 ## 1. 项目概览
 
-**ZeoKeel**：Go 桌面 AI Agent 客户端，UI 由 `github.com/egoist/mygo v0.9.0` 的**原生控件**绘制（无 HTML/CSS/JS/webview）。当前依赖见 [go.mod](go.mod)。
+**ZeoKeel**：Go 桌面 AI Agent 客户端，UI 由 `github.com/egoist/mygo v0.9.2` 的**原生控件**绘制（无 HTML/CSS/JS/webview）。当前依赖见 [go.mod](go.mod)。
 
 ```
 cmd/zeokeel             入口（desktop / headless / acp 产品）
@@ -50,13 +50,13 @@ internal/modules/*      后端能力模块
 4. **官方件只设度量、不覆写状态色**：覆写背景会关掉 mygo 原生 hover/pressed/disabled（`t.PrimaryButton()` 只加度量）。
 5. **默认即正确**：最短调用；`editor.State`/`markdown.Options` 零值即默认；加 options/覆写必须有理由。
 6. **有官方标准件就不许手搓**：集合用 `ui.List/Table/Outline/GridView`（禁止 `Scroll`+循环）；浮层用 `Modal/Overlay/Popover/AlertDialog`；菜单/搜索/表单/输入同理。
-7. **状态语义不可降级**：error 用 `semantic.error`/`*Text` 变体；审批动词不中性化；`cancelled` 中性；`active` ≠ running。
+7. **状态语义不可降级**：error 用 `semantic.error`/`*Text` 变体；审批动词不中性化；`cancelled` 中性；`active` ≠ running；**running ≠ warning**（进行中 = `Accent` spinner/点 + `LabelSecondary` 词；warning 只给 needs-action：等待审批/授权失效）。
 8. **图标只从 `internal/icons` + `ui.Icon` 取**：禁 emoji/Unicode/手写 SVG；图标按钮必须 `Label`（Tooltip 按需，与 Esc 冲突时可不加并注释）；纯图标按钮统一用 `uikit.IconButton`，禁止新增 `ButtonBase` 图标按钮。
 9. **危险确认安全默认**：删除/清空/恢复类确认必须用 `uikit.ConfirmDanger`（`ui.Modal` + `DialogFooter`，取消为 Default、危险动作非 Default 且为 danger 按钮）；`ui.AlertDialog` 只用于**非危险、非不可逆**的简单确认。审批无 Default、Esc=拒绝，且 Esc 必须在窗口级生效（不依赖焦点位置）。
 10. **强调色预算**：一屏 ≤2 个 Accent 填充块、≤1 个 primary 按钮；状态只能用 `uikit.StatusBadge`（语义 tint + AA 文字 + 必填标签），禁止中性底 + 状态字拼徽章；一屏红色元素 ≤2。
-11. **选择态两级**：持久导航/树/列表当前项 = `BgSelected`（亮 12% / 暗 18%） + 2px `Accent` 左条 + `LabelPrimary`（2px 左条要求仅针对**自绘富行**；官方 `Sidebar`/`Tabs` 的原生 tint 选中视为合规，不强加左条）；浮层内的瞬态选择（命令面板/菜单/下拉/slash/@ 建议）可用 Accent 填充 + `OnPrimary`，也可用 `BgSelected` tint（两者均为瞬态许可词汇）。禁止满蓝导航选中行。
-12. **字号纪律**：`TypeXXXS`(11) 只用于微标签/kbd/终端 gutter，**禁止成句文本**；成句元数据最低 `TypeXXS`(12)，正文 `TypeBody`(14)；顶级屏标题 `TypeM/600`（顶带），设置页/对话框 `TypeL/600`。
-13. **度量档位**：控件高度只用 32/36/40/44（`design.RowCompactHeight/ControlHeight/PageActionHeight/RowDoubleHeight`），禁止 38；圆角只用 `RadiusXS/SM/MD/LG/XL/Max`（XL 仅 composer）；表面遵循 S0–S4 ramp（暗色导航必须比页面深）。
+11. **选择态两级**：持久导航/树/列表当前项 = `BgSelected`（亮 9% royal / 暗 13% cyan） + 2px `Accent` 左条 + `LabelPrimary`（2px 左条要求仅针对**自绘富行**；官方 `Sidebar`/`Tabs` 的原生 tint 选中视为合规，不强加左条）；浮层内的瞬态选择（命令面板/菜单/下拉/slash/@ 建议）可用 Accent 填充 + `OnPrimary`，也可用 `BgSelected` tint（两者均为瞬态许可词汇）。禁止满蓝导航选中行。
+12. **字号纪律**：`TypeXXXS`(11) 只用于 kbd/终端 gutter/分组微标签，**禁止成句文本与元数据句**；元数据最低 `TypeXXS`(12)，正文 `TypeBody`(14)；顶级屏标题 `TypeM/600`（顶带），设置页/对话框 `TypeL/600`。字重已烘焙进 role（XL/L/M=600、S=500、XXXS=500），call site 不再传字面量字重；需要强调时只能传 `design.Weight*` token（如侧栏行标题 `TypeXS` + `WeightMedium`）。
+13. **度量档位**：控件高度只用 28/32/36/40/44（`design.ControlCompactHeight/RowCompactHeight/ControlHeight/PageActionHeight/RowDoubleHeight`），禁止 38；圆角只用 `RadiusXS 4/SM 6/MD 8/LG 12/XL 16/Max`（XL 仅 composer，Max 只给头像）；表面遵循 S0–S4 ramp（暗色导航必须比页面深）。
 14. **页面主操作两落点**：页面级即时动作放页头右，需要提交的表单放固定页脚右下的唯一 primary；分节动作放 `SectionAction`；禁止页中悬浮 primary。
 15. **新增自绘/组件必须登记**：DESIGN.md §7 + MIGRATION + lint 白名单 + 测试，否则检查失败。
 16. **改完 UI 必须验证**：`go test`（帧测试）+ 快照 + `designlint`/`scripts/design-check.sh`；没有证据不算完成。
@@ -130,7 +130,7 @@ make ci                                   # build+vet+test；全量用 make veri
 - **线程**：UI 构建/绘制/输入/回调都在主线程；`*ui.Context` 不出 build；后台结果回 UI 用 `UIRuntime.Post`；`Invalidate` 只请求重绘。
 - **模块边界**：不 import 其他模块实现/uiroot/host；跨模块用 contracts 服务或稳定命令 ID（如 `rightpanel.files.open`）。
 - **不自造标准件**：官方有 `List/Modal/AlertDialog/Overlay/Popover/Menu/SearchField/Form/Field/Switch/Checkbox/Radio/Select/Tabs/Collapsible/Toast/Scroll/Split/Sidebar/Table/Outline/GridView/editor/markdown` 等，必须用。
-- **不虚构 API**：v0.9.0 没有 `ui.DialogFooter`、`Button.Default`、`ui.Markdown`、`ui.DatePicker`、`ui.CommandPalette`（见 DESIGN.md §7.4）。
+- **不虚构 API**：v0.9.2 没有 `ui.DialogFooter`、`Button.Default`、`ui.Markdown`、`ui.DatePicker`、`ui.CommandPalette`（见 DESIGN.md §7.4）。
 - **不加依赖**：新增第三方 UI/图标/样式库前必须说明理由并获得确认；不引入第二套设计系统。
 - **不做未请求的功能**：不加导航/统计/装饰性面板来"让界面看起来完整"。
 
@@ -149,7 +149,7 @@ make ci                                   # build+vet+test；全量用 make veri
 
 | 需求 | 去哪 |
 |---|---|
-| 官方组件是否存在/怎么用 | mygo 源码内 `docs/ui/<name>.md`（v0.9.0，用 `go list -m -f '{{.Dir}}' github.com/egoist/mygo` 定位）+ [docs/UI-CONFORMANCE.md](docs/UI-CONFORMANCE.md) §1 |
+| 官方组件是否存在/怎么用 | mygo 源码内 `docs/ui/<name>.md`（v0.9.2，用 `go list -m -f '{{.Dir}}' github.com/egoist/mygo` 定位）+ [docs/UI-CONFORMANCE.md](docs/UI-CONFORMANCE.md) §1 |
 | 某场景该用哪个组件 | [docs/DESIGN.md](docs/DESIGN.md) §2 |
 | 写错了会怎样 | [docs/DESIGN.md](docs/DESIGN.md) §3 反模式 + [docs/DESIGN-LINT.md](docs/DESIGN-LINT.md) §2 |
 | token 取值 | `internal/design/tokens.go` / `components.go` |

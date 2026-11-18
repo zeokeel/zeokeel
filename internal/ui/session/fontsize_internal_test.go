@@ -3,6 +3,7 @@ package session
 // Internal tests for the conversation font-size setting and its Markdown cache.
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -56,8 +57,15 @@ func TestMarkdownOptionsFollowChatFontSize(t *testing.T) {
 		if options.Theme.FontSize != want {
 			t.Fatalf("font size for %q = %v, want %v", value, options.Theme.FontSize, want)
 		}
-		if options.Theme.LineHeight != 1.55 {
-			t.Fatalf("line-height multiplier for %q = %v, want 1.55", value, options.Theme.LineHeight)
+		// The line height is the design body role's own ratio (14/22) expressed
+		// as the Markdown theme's multiplier, so a chat-font-size change keeps the
+		// same leading relationship instead of a frozen constant (B-spec §1.5:
+		// 正文 14/22); the multiplier scales with the size, the ratio does not.
+		wantSize, wantLine, _ := design.Light().Metrics(design.TypeBody)
+		wantRatio := float64(wantLine / wantSize)
+		if got := float64(options.Theme.LineHeight); math.Abs(got-wantRatio) > 0.02 {
+			t.Fatalf("line-height ratio for %q = %.3f, want %.3f (%.0f/%.0f from the body role)",
+				value, got, wantRatio, wantLine, wantSize)
 		}
 	}
 }

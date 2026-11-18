@@ -341,36 +341,50 @@ func buildSkillCard(c *ui.Context, t *design.Tokens, p *skillsState, st *state,
 	key := skillKey(skill)
 	name := textutil.FirstNonEmptyTrimmed(skill.Name, st.tr("(未命名技能)", "(Unnamed skill)"))
 	source, relative := skillDisplayPath(skill.Path, dataDir, workspaceRoot, p.roots)
-	design.Apply(ui.Column(c.Key("skills.card/"+key)), t.Panel()).
-		FillWidth().FillHeight().Padding(design.Space3).Gap(design.Space2).Children(func() {
+	// The same capability card as the connector tab (B-spec §3.4.6): RadiusLG 12
+	// panel, 16 DIP of padding, 14/600 title, a two-line 12/18 description and a
+	// hover that only brightens the fill.
+	cardBody := design.Apply(ui.Column(c.Key("skills.card/"+key)), t.Panel()).
+		FillWidth().FillHeight().Padding(design.SpaceSection).Gap(design.Space2)
+	if cardBody.Hovered() {
+		cardBody = cardBody.Background(t.BgHover)
+	}
+	cardBody.Transition(design.TransitionColors(c)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			// One accent per card at most: the glyph is quiet, the name carries
 			// the hierarchy.
 			ui.Icon(c, icons.Sparkles()).Size(design.IconSizeS, design.IconSizeS).
 				TextColor(t.LabelSecondary)
-			design.Apply(ui.Text(c, name), t.Font(design.TypeS)).
+			design.Apply(ui.Text(c, name), t.Font(design.TypeBody)).
 				FontWeight(design.WeightSemibold).TextColor(t.LabelPrimary).
 				Grow(1).Shrink(1).MinWidth(design.Space0).MaxLines(1).Ellipsis("…")
 			buildSkillCardMenu(c, t, p, st, skills, skill, editor, dataDir)
 		})
 		description := strings.TrimSpace(skill.Description)
 		if description == "" {
-			design.Apply(ui.Text(c, st.tr("无描述", "No description")), t.Font(design.TypeXS)).
+			design.Apply(ui.Text(c, st.tr("无描述", "No description")), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).MaxLines(2).Ellipsis("…")
 		} else {
-			design.Apply(ui.Text(c, description), t.Font(design.TypeXS)).
+			// 12/18, two lines (B-spec §3.4.6).
+			design.Apply(ui.Text(c, description), t.Font(design.TypeXXS)).
 				TextColor(t.LabelSecondary).MaxLines(2).Ellipsis("…")
 		}
 		ui.Spacer(c).Grow(1)
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			sourceBadge := design.Apply(ui.Badge(c, skillSourceLabel(st, source)), t.Badge())
-			if source == "workspace" {
-				sourceBadge.Tooltip(st.tr("仓库内容，模型按不可信数据处理；只读",
-					"Repository content treated as untrusted data; read-only"))
-			} else {
-				sourceBadge.Tooltip(st.tr("全局技能目录；只有 dataDir 下的目录形态技能可编辑",
-					"Global skill directory; only directory-form skills below dataDir are editable"))
-			}
+			// The scope chip sits in a fixed-width column: 工作区 and 全局 (and
+			// Workspace/Global) are different widths, which started each card's
+			// path text at a different x (2026-11-18 review). The badge keeps its
+			// natural size inside the reserved column.
+			ui.Row(c).Shrink(0).Width(skillScopeChipWidth).Children(func() {
+				sourceBadge := design.Apply(ui.Badge(c, skillSourceLabel(st, source)), t.Badge())
+				if source == "workspace" {
+					sourceBadge.Tooltip(st.tr("仓库内容，模型按不可信数据处理；只读",
+						"Repository content treated as untrusted data; read-only"))
+				} else {
+					sourceBadge.Tooltip(st.tr("全局技能目录；只有 dataDir 下的目录形态技能可编辑",
+						"Global skill directory; only directory-form skills below dataDir are editable"))
+				}
+			})
 			if path := strings.TrimSpace(skill.Path); path != "" {
 				design.Apply(ui.Text(c, relative), t.MonoText(design.TypeXXS)).
 					TextColor(t.LabelTertiary).Grow(1).Shrink(1).MinWidth(design.Space0).
@@ -397,6 +411,11 @@ func buildSkillCard(c *ui.Context, t *design.Tokens, p *skillsState, st *state,
 		})
 	})
 }
+
+// skillScopeChipWidth is the fixed column the card's scope chip occupies: wide
+// enough for the widest label in either language (Workspace / 工作区) plus the
+// badge's own padding, so every card's path text starts at the same x.
+const skillScopeChipWidth float32 = design.Space8*2 + design.Space4
 
 // skillSourceLabel localizes a skill's source scope: the current workspace's
 // roots are the project's, every other scanned root (configured, data dir) is
@@ -458,7 +477,7 @@ func buildSkillsExtraDirs(c *ui.Context, t *design.Tokens, p *skillsState, st *s
 	ui.Field(c, label, func() {
 		ui.TextInput(c, &p.extraDirs).
 			Label(skillInputLabel(st, label)).
-			Placeholder(st.tr("例如 ~/.zeokeel/skills", "e.g. ~/.zeokeel/skills")).
+			Placeholder(st.tr("例如：~/.zeokeel/skills", "e.g. ~/.zeokeel/skills")).
 			FillWidth()
 	}).Description(st.tr(
 		"用路径分隔符（Windows 为 ;，其它为 :）或换行分隔；相对路径按数据目录解析。留空表示不额外扫描。",

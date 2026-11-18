@@ -20,6 +20,7 @@ import (
 	approvalui "github.com/zeokeel/zeokeel/internal/ui/approval"
 	sessionui "github.com/zeokeel/zeokeel/internal/ui/session"
 	toastsui "github.com/zeokeel/zeokeel/internal/ui/toasts"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // geoTodo is a scripted contracts.TodoService (three steps, mixed statuses).
@@ -117,8 +118,11 @@ func TestApprovalGeometryDefaultWindowFullDock(t *testing.T) {
 	assertGeoBudget(t, tester, 1512, 944)
 }
 
-// assertGeoBudget checks the composer input/stop and the approval footer 允许
-// stay inside the window and the transcript list keeps a positive height.
+// assertGeoBudget checks the composer input/stop and the approval card's whole
+// decision bar stay inside the window and the transcript list keeps a positive
+// height. The decision bar is the B-spec-v2 §3.3.2 one: the scope sentence, Deny,
+// the single accent Allow-once action and the scope menu, with the Esc and
+// CmdOrCtrl+Enter key caps stated beside them.
 func assertGeoBudget(t *testing.T, tester *ui.Tester, width, height int) {
 	t.Helper()
 	list, ok := tester.AccessByRole(ui.RoleList, "对话消息")
@@ -128,7 +132,13 @@ func assertGeoBudget(t *testing.T, tester *ui.Tester, width, height int) {
 	if list.Bounds.H <= 0 {
 		t.Fatalf("%dx%d: transcript squeezed to zero height (%.1f)", width, height, list.Bounds.H)
 	}
-	for _, label := range []string{"输入消息…", "停止", "允许"} {
+	// The chord is drawn from the platform's notation (Cmd+Enter on macOS,
+	// Ctrl+Enter elsewhere), so the expectation is formatted, not spelled.
+	for _, label := range []string{
+		"输入消息…", "停止",
+		"范围：仅此一次", "拒绝", "允许一次", "更多",
+		uikit.FormatShortcut("Esc"), uikit.FormatShortcut("CmdOrCtrl+Enter"),
+	} {
 		rect, found := tester.Find(label)
 		if !found {
 			t.Fatalf("%dx%d: %q missing from the frame; texts = %v", width, height, label, tester.Texts())
@@ -136,5 +146,52 @@ func assertGeoBudget(t *testing.T, tester *ui.Tester, width, height int) {
 		if !geoRectFits(height, rect) {
 			t.Fatalf("%dx%d: %q outside the window: %+v (bottom=%.1f)", width, height, label, rect, rect.Y+rect.H)
 		}
+	}
+	// The scope menu is the session-scoped allow's way in, so it must be on
+	// screen too: the widest permission is never hidden behind an off-screen
+	// control.
+	if _, found := tester.Find("更多"); !found {
+		t.Fatalf("%dx%d: the scope menu is missing; texts = %v", width, height, tester.Texts())
+	}
+}
+
+// TestApprovalGeometryKeepsTheDecisionContract pins the safety semantics beside
+// the geometry: the card has no Default action (a stray Enter decides nothing),
+// exactly one accent primary, and Escape still resolves the oldest request as a
+// deny (the window-level fallback the session screen owns).
+func TestApprovalGeometryKeepsTheDecisionContract(t *testing.T) {
+	h, approvals := newGeoHarness(t)
+	tester := h.tester(900, 600)
+	tester.Frame()
+	tester.Frame()
+	if !tester.HasText("需要审批") {
+		t.Fatalf("the approval card did not render; texts = %v", tester.Texts())
+	}
+	// No action carries the keyboard: nothing is auto-focused, so Enter cannot
+	// allow or deny.
+	for _, label := range []string{"拒绝", "允许一次", "更多"} {
+		if tester.Focused(label) {
+			t.Fatalf("%q holds the initial focus; the card must not autofocus an action", label)
+		}
+	}
+	// A stray Enter decides nothing: the request is still pending and nothing was
+	// denied.
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if got := approvals.deniedCalls(); len(got) != 0 {
+		t.Fatalf("a stray Enter denied %v; want no decision", got)
+	}
+	if pending := approvals.Pending(); len(pending) != 1 || pending[0].ID != "ap-long" {
+		t.Fatalf("a stray Enter resolved the request (pending = %v); want it waiting", pending)
+	}
+	if !tester.HasText("需要审批") {
+		t.Fatalf("a stray Enter dismissed the card; texts = %v", tester.Texts())
+	}
+	// Escape denies the oldest pending request, wherever the focus sits.
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	tester.Frame()
+	if got := approvals.deniedCalls(); len(got) != 1 || got[0] != "ap-long" {
+		t.Fatalf("Escape denied %v, want [ap-long]", got)
 	}
 }

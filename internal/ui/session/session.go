@@ -72,8 +72,9 @@ type Config struct {
 // copy resolves the configured strings with their defaults.
 func (c Config) resolved() Config {
 	return Config{
-		Title:               textutil.FirstNonEmptyTrimmed(c.Title, "对话"),
-		EmptyText:           textutil.FirstNonEmptyTrimmed(c.EmptyText, "还没有消息，开始一段新对话吧。"),
+		Title: textutil.FirstNonEmptyTrimmed(c.Title, "对话"),
+		EmptyText: textutil.FirstNonEmptyTrimmed(c.EmptyText,
+			"描述你想完成的事，ZeoKeel 会读代码、改文件并验证结果。"),
 		ComposerPlaceholder: textutil.FirstNonEmptyTrimmed(c.ComposerPlaceholder, "输入消息…"),
 		SendLabel:           textutil.FirstNonEmptyTrimmed(c.SendLabel, "发送"),
 		StopLabel:           textutil.FirstNonEmptyTrimmed(c.StopLabel, "停止"),
@@ -170,6 +171,19 @@ type state struct {
 	// fold opened in a message (list.md HoldPlace): the clicked line stays under
 	// the pointer instead of being pushed by the growing row.
 	chatHoldPlace bool
+	// metaStreamed remembers which messages were streaming in an earlier frame;
+	// when one settles, metaRevealAt starts its two-second meta reveal (the row
+	// shows the time and usage once without waiting for the pointer). Both are
+	// keyed by message ID and pruned with the conversation.
+	metaStreamed map[string]bool
+	metaRevealAt map[string]time.Time
+	// statusDetailOpen is the usage-details popover's fold state in the status
+	// bar under the composer (B-spec §3.2.6).
+	statusDetailOpen bool
+	// createAt is when this module last created a conversation: a repetition
+	// inside createDebounce (a double click) is ignored, so one gesture cannot
+	// leave two empty conversations behind (A4-I-04).
+	createAt time.Time
 	// dockScroll keeps the composer dock's scroll offset (UX-02): the dock is
 	// height-budgeted, so a long todo list + goal + approval card scroll inside
 	// it instead of pushing the composer out of the window. childBannerScroll
@@ -195,6 +209,9 @@ type state struct {
 	// the conversation row that made the call.
 	trajList     ui.ListState
 	trajSelected int
+	// trajHoldPlace is the trajectory list's one-shot fold flag: opening a row's
+	// detail asks the List to keep its place for the next layout.
+	trajHoldPlace bool
 
 	// Find-in-conversation state (Cmd/Ctrl+F): the official ui.FindBar's open
 	// flag, the query kept after closing, the matches of the merged transcript
@@ -290,7 +307,16 @@ type state struct {
 	pendingAttachments []contracts.Attachment
 	attachErr          string
 	attachSeq          int
-	thumbnails         map[string]*ui.Bitmap
+	// dockTop is the top of the bottom-most interactive dock on the current
+	// frame (the smallest top any pane reported): the host places the toast stack
+	// above it, so a notice never covers a control the user must reach. Zero
+	// means this frame reported none.
+	dockTop float32
+	// stageSeq orders staging gestures (a drop, a paste, a picker selection): only
+	// the newest one owns the error line, so an older read that finishes last
+	// cannot restore a failure the user already fixed (attachment flake).
+	stageSeq   int
+	thumbnails map[string]*ui.Bitmap
 	// attachBusy is true while the native picker runs off the UI thread: the
 	// attach actions show 选择中…/Choosing… and stay disabled until the result
 	// is posted back, because mygo's dialog blocks its caller.
@@ -1129,8 +1155,13 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 			// The stable Esc arbitration (UX-03): the window-level fallback
 			// calls this command instead of duplicating the screen's Esc order
 			// (find bar → child view → deny approval → dialogs → menu → stop).
-			ID:    "session.escape",
-			Title: st.tr("Esc：关闭 / 拒绝 / 停止", "Esc: close / deny / stop"),
+			ID: "session.escape",
+			// The title is the command's name, not a sentence with its chord: the
+			// chord lives in Shortcut and the palette draws it once, in the kbd
+			// column (visual audit: "Esc: 关闭 / 拒绝 / 停止" read as a sentence and
+			// the shell already avoids repeating the kbd).
+			Title:    st.tr("关闭 / 拒绝 / 停止", "Close / deny / stop"),
+			Shortcut: "Esc",
 			Hint: st.tr("按当前上下文关闭查找、返回父会话、拒绝审批、关闭菜单或停止回复",
 				"Close find, return to the parent, deny an approval, dismiss a menu or stop the reply, by context"),
 			Order: 43,

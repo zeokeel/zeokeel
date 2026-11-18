@@ -155,12 +155,15 @@ func TestArchivedSessionsPageEndToEnd(t *testing.T) {
 	}
 	tester.Frame()
 	tester.Frame()
-	for _, want := range []string{"删除归档会话", "确认删除"} {
+	// uikit.ConfirmDanger's default labels: 取消 (the Default action, safe) and
+	// 删除 (the danger action, never Default). The dialog title carries the
+	// object being deleted, so the confirm button does not repeat it.
+	for _, want := range []string{"删除归档会话", "取消", "删除"} {
 		if !tester.HasText(want) {
 			t.Fatalf("delete confirmation missing %q; texts = %v", want, tester.Texts())
 		}
 	}
-	if err := tester.Click("确认删除"); err != nil {
+	if err := tester.Click("删除"); err != nil {
 		t.Fatalf("confirm delete: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()

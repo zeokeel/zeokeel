@@ -70,7 +70,7 @@ func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 			ui.Field(c, localized(locale, "DSH 数据目录", "DSH data directory"), func() {
 				dirInput := ui.TextInput(c, &st.dir).
 					Label(inputLabel(locale, localized(locale, "DSH 数据目录", "DSH data directory"))).
-					Placeholder("~/.dsh").FillWidth()
+					Placeholder("~/.dsh").Width(controlWidth)
 				if dirInput.Changed() {
 					// Editing the path invalidates the previous scan: never show a
 					// preview (or an import action) for another directory.
@@ -82,6 +82,7 @@ func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 				}
 			})
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				// Description says the same thing to assistive technology.
 				if design.Apply(ui.Button(c, localized(locale, "浏览…", "Browse…")),
 					t.SecondaryButton()).Tooltip(localized(locale,
 					"选择 DSH 数据目录", "Choose the DSH data directory")).Clicked() {
@@ -123,7 +124,7 @@ func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 					scanStyle = t.SecondaryButton()
 				}
 				scan := design.Apply(scanButton, scanStyle).
-					Tooltip(localized(locale,
+					Description(localized(locale,
 						"只读扫描该目录，不写入任何数据",
 						"Scan the directory read-only; nothing is written"))
 				scan.Disabled(st.scanning || st.importing || strings.TrimSpace(st.dir) == "")

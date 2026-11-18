@@ -66,10 +66,10 @@ func TestCapabilitiesPageShowsDefaultsAndCleanSave(t *testing.T) {
 	openCapabilities(t, h, tester)
 
 	h.assertTexts(tester, "行为与限额",
-		"Subagent 并发", "Team member 并发", "Shell 命令超时", "Shell 输出上限")
+		"子智能体并发", "团队成员并发", "Shell 命令超时", "Shell 输出上限")
 	// Product defaults: subagent 2, team 4, shell 30s, output 0 (tool default).
-	requireNumberValue(t, tester, "Subagent 并发", "2")
-	requireNumberValue(t, tester, "Team member 并发", "4")
+	requireNumberValue(t, tester, "子智能体并发", "2")
+	requireNumberValue(t, tester, "团队成员并发", "4")
 	requireNumberValue(t, tester, "Shell 命令超时", "30")
 	requireNumberValue(t, tester, "Shell 输出上限", "0")
 	// Clean drafts: the primary Save in the footer is disabled.
@@ -91,8 +91,8 @@ func TestCapabilitiesPageSavesDraftRows(t *testing.T) {
 	tester.Frame()
 	openCapabilities(t, h, tester)
 
-	typeNumberInput(t, h, tester, "Subagent 并发", "5")
-	typeNumberInput(t, h, tester, "Team member 并发", "1")
+	typeNumberInput(t, h, tester, "子智能体并发", "5")
+	typeNumberInput(t, h, tester, "团队成员并发", "1")
 	typeNumberInput(t, h, tester, "Shell 命令超时", "90")
 	typeNumberInput(t, h, tester, "Shell 输出上限", "256")
 	h.assertTexts(tester, "未保存")
@@ -133,13 +133,13 @@ func TestCapabilitiesPageCleansDefaultRows(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	openCapabilities(t, h, tester)
-	requireNumberValue(t, tester, "Subagent 并发", "6")
+	requireNumberValue(t, tester, "子智能体并发", "6")
 	requireNumberValue(t, tester, "Shell 命令超时", "120")
 
-	h.click(tester, "恢复限额默认")
+	h.click(tester, "恢复默认值")
 	h.assertTexts(tester, "已恢复默认（未保存）")
-	requireNumberValue(t, tester, "Subagent 并发", "2")
-	requireNumberValue(t, tester, "Team member 并发", "4")
+	requireNumberValue(t, tester, "子智能体并发", "2")
+	requireNumberValue(t, tester, "团队成员并发", "4")
 	requireNumberValue(t, tester, "Shell 命令超时", "30")
 	requireNumberValue(t, tester, "Shell 输出上限", "0")
 
@@ -172,8 +172,8 @@ func TestCapabilitiesPageNormalizesInvalidRows(t *testing.T) {
 	tester.Frame()
 	openCapabilities(t, h, tester)
 
-	requireNumberValue(t, tester, "Subagent 并发", "2")
-	requireNumberValue(t, tester, "Team member 并发", "4")
+	requireNumberValue(t, tester, "子智能体并发", "2")
+	requireNumberValue(t, tester, "团队成员并发", "4")
 	requireNumberValue(t, tester, "Shell 命令超时", "30")
 	requireNumberValue(t, tester, "Shell 输出上限", "0")
 	if save := saveButton(t, tester); !save.Disabled {
@@ -192,9 +192,9 @@ func TestCapabilitiesPageDiscardKeepsSavedRows(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	openCapabilities(t, h, tester)
-	requireNumberValue(t, tester, "Subagent 并发", "5")
+	requireNumberValue(t, tester, "子智能体并发", "5")
 
-	typeNumberInput(t, h, tester, "Subagent 并发", "3")
+	typeNumberInput(t, h, tester, "子智能体并发", "3")
 	h.assertTexts(tester, "未保存")
 	closeSettings(h, tester)
 	h.assertTexts(tester, "有未保存的修改")
@@ -205,7 +205,7 @@ func TestCapabilitiesPageDiscardKeepsSavedRows(t *testing.T) {
 
 	reopenSettings(h, tester)
 	openCapabilities(t, h, tester)
-	requireNumberValue(t, tester, "Subagent 并发", "5")
+	requireNumberValue(t, tester, "子智能体并发", "5")
 	if save := saveButton(t, tester); !save.Disabled {
 		t.Fatalf("the discarded draft left the page dirty: %+v", save)
 	}

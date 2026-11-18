@@ -60,7 +60,7 @@ func buildAboutHubPage(c *ui.Context, kctx cordis.Context, info contracts.AppInf
 		heading += " " + name
 	}
 	buildRows := buildFactRows(info, update.info.CurrentVersion, locale)
-	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+	ui.Column(c).FillWidth().Gap(design.SpaceScreen).Children(func() {
 		uikit.PageHeader(c, heading, "")
 
 		uikit.Section(c, localized(locale, "构建信息", "Build information"), func(c *ui.Context) {

@@ -53,6 +53,10 @@ func buildScreen(
 	// A new visit of the conversation screen starts with no transient agent
 	// overlay open (the host builds only the current screen each frame).
 	st.noteScreenVisit()
+	// The frame's bottom dock starts unclaimed; the panes report the tops of the
+	// controls they place at the bottom and the anchor is set once the body is
+	// built (see reportDockTop).
+	st.dockTop = 0
 	// Keep the slash commands' registry titles in the host language (the
 	// command palette reads them directly). Only an actual language change
 	// rebuilds the registry; a stable frame never does.
@@ -201,6 +205,11 @@ func buildScreen(
 				buildComposer(c, t, runtime, navigator, chat, cfg, st, activeID, chatSession)
 			}
 		}
+		// One report per frame with the smallest top any pane claimed, so the host
+		// anchors the toast stack above every bottom control at once.
+		if service := st.toastAnchorService(); service != nil {
+			service.ReportDockTop(st.dockTop)
+		}
 		// The draft-overwrite confirmation (UX-05): a native ConfirmDanger above
 		// the screen, like the command dialogs.
 		buildDraftOverwriteConfirm(c, st, runtime)
@@ -262,7 +271,26 @@ func pruneMessageState(st *state, messages []contracts.ChatMessage) {
 	prune(st.thinkOpen)
 	prune(st.toolOpen)
 	prune(st.processOpen)
+	// The meta reveal of a message that left the conversation is gone too: a
+	// reveal deadline for a message nobody shows would keep a frame scheduled.
+	for key := range st.metaRevealAt {
+		if !keep[key] {
+			delete(st.metaRevealAt, key)
+		}
+	}
+	for key := range st.metaStreamed {
+		if !keep[key] {
+			delete(st.metaStreamed, key)
+		}
+	}
 }
+
+// createDebounce is the window in which a second new-conversation request is the
+// same gesture: a double click, or a click and the keyboard chord (A4-I-04). It
+// is short enough that two deliberate clicks still make two conversations, and
+// the same value as the shell's own new-session debounce, so a click on the
+// sidebar and one in the hero cannot both create a conversation in one gesture.
+const createDebounce = 600 * time.Millisecond
 
 // --- session-scoped state helpers -------------------------------------------
 
@@ -454,13 +482,24 @@ func registerSessionEscape(c *ui.Context, chat contracts.ChatService, st *state,
 	}
 	session, ok := chat.Session(activeID)
 	running := ok && session.Running
-	if running || st.findOpen || strings.TrimSpace(st.agents.childID) != "" ||
-		st.pendingApprovalCount() > 0 || suggestionMenuOpen(st) {
+	// The conversation's Esc handler is registered on the screen's own scope, and
+	// only while no floating layer of this screen is open: a shortcut takes the
+	// key before an overlay's own handler in some orders, and an open popover
+	// (the team/subagent/jobs panels, the model and permission menus, the queue
+	// and usage popovers, the suggestion menus) owns its Escape.
+	//
+	// Reaching the key while the focus is elsewhere in the window (the sidebar,
+	// the top band) is the shell's job: uiroot's window-level fallback calls the
+	// stable session.escape command, so the promise holds without a second
+	// window-wide registration here (A4: K7/K8).
+	overlayOpen := st.anyOverlayOpen()
+	if !overlayOpen && (running || st.findOpen || strings.TrimSpace(st.agents.childID) != "" ||
+		st.pendingApprovalCount() > 0 || suggestionMenuOpen(st)) {
 		c.OnShortcut(0, ui.KeyEscape, func() {
 			sessionEscape(chat, st, runtime, activeID)
 		})
 	}
-	if running {
+	if running && !overlayOpen {
 		c.OnShortcut(ui.Cmd, ui.KeyPeriod, func() {
 			if sessionDialogOpen(st) {
 				return
@@ -511,7 +550,10 @@ func backTargetLabel(st *state, screenID string) string {
 	case "automation":
 		return st.tr("自动化", "Automation")
 	case "plugins":
-		return st.tr("插件", "Plugins")
+		// The back target names the screen with the word the sidebar and its
+		// page title use: 能力/Capabilities. The header used to say 插件/Plugins,
+		// so one destination had two names on one screen (A5 F-01).
+		return st.tr("能力", "Capabilities")
 	default:
 		return st.tr("返回", "Back")
 	}
@@ -747,6 +789,20 @@ func composerDockBudget(c *ui.Context) float32 {
 	return budget
 }
 
+// reportDockTop records the top of a bottom dock for this frame's toast anchor
+// (contracts.ToastAnchorService.ReportDockTop). Several panes can own the bottom
+// of the screen — the composer dock always, the Memory tab's add row too — so the
+// frame keeps the highest control (the smallest top): a notice must clear every
+// one of them, not just the composer.
+func (st *state) reportDockTop(top float32) {
+	if st == nil || top <= 0 {
+		return
+	}
+	if st.dockTop == 0 || top < st.dockTop {
+		st.dockTop = top
+	}
+}
+
 // buildComposerDock is the strip above the composer on the transcript's reading
 // measure: the todo plan, the active goal and the host slot the approval module
 // draws its inline card into, inside one height-budgeted scroll (UX-02). A
@@ -757,7 +813,7 @@ func buildComposerDock(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 	// transcript and the composer card instead of a hand-rolled 960 frame
 	// (uikit.ReadingColumn owns the 92% cap and the horizontal padding).
 	uikit.ReadingColumn(c, func(c *ui.Context) {
-		ui.Scroll(c.Key("session.dock")).FillWidth().
+		dock := ui.Scroll(c.Key("session.dock")).FillWidth().
 			MaxHeight(composerDockBudget(c)).TrackScroll(&st.dockScroll).Children(func() {
 			ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 				if st.pendingApprovalCount() > 0 {
@@ -775,6 +831,12 @@ func buildComposerDock(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 				runtime.RenderSlot(c, contracts.SlotSessionBanner)
 			})
 		})
+		// Report the dock's top so the host's toast stack clears an approval
+		// card docked above the composer: the card's decision buttons are the
+		// one control a notice must never cover (contracts.ReportDockTop).
+		if rect := dock.Bounds(); rect.H > 0 {
+			st.reportDockTop(rect.Y)
+		}
 	})
 }
 
@@ -879,7 +941,6 @@ func transcriptText(chatSession contracts.ChatSession, english bool) string {
 // (TabsBase) for selection and keyboard navigation, painted as the brand's
 // quiet label + accent underline.
 func buildTabs(c *ui.Context, t *design.Tokens, cfg Config, st *state) {
-	th := t.Theme()
 	labels := []string{
 		st.localized(cfg.TabChat, "对话", "Chat"),
 		st.localized(cfg.TabTrajectory, "轨迹", "Trajectory"),
@@ -893,30 +954,18 @@ func buildTabs(c *ui.Context, t *design.Tokens, cfg Config, st *state) {
 	if st.tab >= len(labels) {
 		st.tab = tabChat
 	}
-	tabs := ui.TabsBase(c, &st.tab, len(labels))
-	tabs.List.FillWidth().Height(design.Space8).Margin(0).
-		Gap(design.Space4).AlignItems(ui.Stretch).Children(func() {
-		for index, label := range labels {
-			index, label := index, label
-			active := st.tab == index
-			tab := tabs.Tab(index).Height(design.Space8).PaddingX(design.Space1).
-				Gap(0).Label(label)
-			tab.Children(func() {
-				ui.Column(c).Height(design.Space8).Justify(ui.SpaceBetween).Children(func() {
-					color, weight := t.LabelSecondary, design.WeightMedium
-					if active {
-						color, weight = t.LabelPrimary, design.WeightSemibold
-					}
-					design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).
-						FontWeight(weight).NoWrap().TextColor(color).
-						Margin(design.Space2, 0, 0, 0)
-					underline := ui.Box(c).Height(th.Space(0.5)).Radius(th.Space(0.25))
-					if active {
-						underline.Background(t.Accent)
-					}
-				})
-			})
-		}
+	// The official tab row (mygo tabs.go): one Tab stop, the arrows/Home/End walk
+	// the choice, hover lifts the ink of the tab under the pointer, and the chosen
+	// tab carries the 2 DIP accent underline inset under its own label. The
+	// hand-drawn TabsBase + Box underline this replaces produced the same picture
+	// with twenty lines of boxes and two margin fudges (A1-matrix: 迁移), so the
+	// official row owns the look now. The type step rides on the list so every tab
+	// text inherits 13 DIP; the chosen tab keeps mygo's 600 against the row's 500
+	// (B-spec §3.1.2).
+	tabs := ui.Tabs(c, &st.tab, labels...)
+	tabs.Margin(0)
+	design.Apply(tabs, t.Font(design.TypeXS), func(el ui.Element) ui.Element {
+		return el.FontWeight(design.WeightMedium)
 	})
 }
 
@@ -1200,38 +1249,37 @@ func buildHero(c *ui.Context, t *design.Tokens, cfg Config, runtime contracts.UI
 		PaddingY(design.Space8).Children(func() {
 		ui.Icon(c, icons.NewChat()).Size(th.Space(6), th.Space(6)).
 			TextColor(t.LabelTertiary)
-		design.Apply(ui.Text(c, st.tr("开始新对话", "Start a new conversation")),
-			t.Font(design.TypeM)).FontWeight(600).TextColor(t.LabelPrimary)
+		// The title says what this screen is for and the line under it says what
+		// the product does; the old pair repeated "start a new conversation"
+		// twice and described nothing (A5 F-11/F-12).
+		design.Apply(ui.Text(c, st.tr("发第一条消息", "Send your first message")),
+			t.Font(design.TypeM)).TextColor(t.LabelPrimary)
 		design.Apply(ui.Text(c, st.localized(cfg.EmptyText,
-			"还没有消息，开始一段新对话吧。",
-			"No messages yet. Start a new conversation.")),
+			"描述你想完成的事，ZeoKeel 会读代码、改文件并验证结果。",
+			"Describe what you want done — ZeoKeel reads the code, edits files and verifies the result.")),
 			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
-		buttonLabel := st.tr("新对话", "New conversation")
-		if hasSession {
-			// The hero is already the empty conversation: the primary action
-			// starts typing in it, not another empty conversation.
-			buttonLabel = st.tr("开始输入", "Start typing")
-		}
-		// One primary per screen (DESIGN rule 10 / AP-20): while the composer's
-		// send is the enabled primary (a draft or staged attachment + a ready
-		// model), the hero action yields to secondary — the send button is what
-		// commits the draft, so two filled accent buttons must not compete
-		// (2026-11 UI review P2). With no draft the send is disabled and the hero
-		// keeps the primary.
-		sendEnabled := (strings.TrimSpace(st.draft) != "" || len(st.pendingAttachments) > 0) &&
-			strings.TrimSpace(chat.Config().Model) != ""
-		var button ui.Element
-		if sendEnabled {
-			button = design.Apply(ui.Button(c, buttonLabel), t.SecondaryButton())
-		} else {
-			button = design.Apply(ui.PrimaryButton(c, buttonLabel), t.PrimaryButton())
-		}
-		button = button.Label(buttonLabel)
-		if button.Clicked() {
-			if hasSession {
-				st.focusComposer = true
-				runtime.Invalidate()
-			} else {
+		// Only a genuinely new conversation needs the action. An empty
+		// conversation already on screen has the composer right under this
+		// block, so a button that merely moved the caret there was a primary
+		// action with no action (A5 F-13: removed).
+		if !hasSession {
+			label := st.tr("新建会话", "New session")
+			// A ghost row, the same anatomy as the sidebar's 新对话: no edge, a
+			// neutral fill only under the pointer, 32 DIP (B-spec §3.1.1).
+			button := ui.Button(c, "").Label(label).Height(design.RowCompactHeight).
+				PaddingX(design.Space2).Radius(design.RadiusSM).Gap(design.Space1)
+			button = button.Background(ui.Transparent)
+			if button.Hovered() || button.Focused() {
+				button = button.Background(t.BgHover)
+			}
+			button = button.Transition(design.TransitionColors(c))
+			button.Children(func() {
+				ui.Icon(c, icons.Plus()).Size(design.IconSizeS, design.IconSizeS).
+					TextColor(t.LabelSecondary)
+				design.Apply(ui.Text(c, label), t.Font(design.TypeS)).
+					TextColor(t.LabelPrimary)
+			})
+			if button.Clicked() {
 				startNewSession(st, chat, navigator)
 			}
 		}
@@ -1240,20 +1288,18 @@ func buildHero(c *ui.Context, t *design.Tokens, cfg Config, runtime contracts.UI
 	})
 }
 
-// heroExamplePrompts are the empty conversation's three starter prompts. They
-// fill the draft without sending, so the user can edit before committing: the
-// hero teaches the shape of a useful prompt instead of only naming the input.
+// heroExamplePrompts is the empty conversation's three starter prompts: real
+// tasks the product does well, not feature names.
 func (st *state) heroExamplePrompts() []string {
 	return []string{
 		st.tr("检查当前工作区并给出摘要", "Inspect the current workspace and summarize it"),
-		st.tr("把这次讨论整理成发布清单", "Turn this discussion into a release checklist"),
+		// 「讨论」是会话概念的第三种叫法，只此一处（A5 F-14）: the session is
+		// the thing the prompt refers to.
+		st.tr("把这次会话整理成发布清单", "Turn this session into a release checklist"),
 		st.tr("找出最近的编译错误并修复", "Find the recent build errors and fix them"),
 	}
 }
 
-// buildHeroExamples draws the starter prompts as quiet secondary buttons. A
-// click only stages the prompt in the composer (focusComposer) — it never
-// sends on the user's behalf.
 func buildHeroExamples(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
 	prompts := st.heroExamplePrompts()
 	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).Children(func() {
@@ -1354,10 +1400,19 @@ func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 			buildGoalRoundNotice(c, t, st, message)
 			return
 		}
-		ui.Column(c.Key("session.message." + message.ID)).FillWidth().AlignItems(ui.End).Gap(design.Space1).Children(func() {
+		column := ui.Column(c.Key("session.message." + message.ID)).FillWidth().
+			AlignItems(ui.End).Gap(design.Space1)
+		column.Children(func() {
 			if strings.TrimSpace(message.Text) != "" {
-				design.Apply(ui.Column(c), t.Panel()).
-					MaxWidthPercent(70).Padding(design.Space3, design.Space4).Children(func() {
+				// The user's own words are a filled surface, not an outlined
+				// card: a white bubble with a hairline read as an unfilled form
+				// field next to the composer, and as the same object as the
+				// bordered artifacts beside it (VD-07). BgStrong fill, no edge,
+				// the control radius, 12x8 padding, and at most 80% of the
+				// column so a long message never reaches the far edge.
+				bubble := ui.Column(c).Background(t.BgStrong).Radius(design.RadiusMD).
+					MaxWidthPercent(80).Padding(design.Space2, design.Space3)
+				bubble.Children(func() {
 					design.Apply(ui.Text(c, message.Text), t.Font(design.TypeBody)).
 						FontSize(t.Scale(st.messageFontSize())).TextColor(t.LabelPrimary)
 				})
@@ -1365,7 +1420,8 @@ func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 			buildMessageAttachments(c, t, runtime, st, message.Attachments)
 			// Quiet metadata/actions under the bubble: time, copy the original
 			// text, and edit it back into the composer (never auto-sent).
-			buildUserMessageMeta(c, t, runtime, st, message)
+			buildUserMessageMeta(c, t, runtime, st, message,
+				st.metaRowRevealed(c, message, column.Hovered() || column.FocusWithin()))
 		})
 	case contracts.ChatRoleNotice:
 		// A quiet receipt for a delegated child: at most two lines with a small
@@ -1433,31 +1489,27 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 		open = defaultOpen
 	}
 	open = open && foldable
-	outer := ui.Column(c.Key("session.message." + message.ID)).FillWidth().Gap(design.Space2)
+	// One message's blocks (the process fold, the reply, an error note) sit 12
+	// DIP apart; the 24 DIP between two turns is the transcript List's own gap
+	// (B-spec §3.2.2), so the rhythm comes from the two containers and never
+	// from a margin on a single row.
+	outer := ui.Column(c.Key("session.message." + message.ID)).FillWidth().Gap(design.Space3)
 	outer.Children(func() {
-		// The finished turn's meta (time/usage/⋯) is a header: on a folded turn
-		// it shares the 过程 summary row, otherwise it is the row above the reply.
-		meta := func(c *ui.Context) {
-			buildAssistantMetaContent(c, t, runtime, st, message, canRegenerate)
-		}
 		switch {
 		case message.Streaming:
 			buildAssistantStreaming(c, t, runtime, st, message, policy)
 		case policy.mode == contracts.WorkStepsVerbose:
-			// verbose: the full timeline, always open, under the meta row, with no
-			// fold summary row.
-			buildAssistantMetaRow(c, t, runtime, st, message, canRegenerate)
+			// verbose: the full timeline, always open, with no fold summary row.
 			buildAssistantTimeline(c, t, runtime, st, message)
 		case foldable:
-			open = buildProcessSummary(c, t, runtime, st, message, open, meta)
+			open = buildProcessSummary(c, t, runtime, st, message, open)
 			if open {
 				buildAssistantTimeline(c, t, runtime, st, message)
 			} else {
 				buildAssistantReply(c, t, runtime, st, message)
 			}
 		default:
-			// A pure-text turn has no process to fold: meta row, then the reply.
-			buildAssistantMetaRow(c, t, runtime, st, message, canRegenerate)
+			// A pure-text turn has no process to fold: the reply alone.
 			buildAssistantTimeline(c, t, runtime, st, message)
 		}
 		// A known tool failure gets its localized recovery hint outside the
@@ -1482,6 +1534,11 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 		if st.regenerateErr != "" && canRegenerate && strings.TrimSpace(message.Error) == "" {
 			buildErrorLine(c, t, st.regenerateErr)
 		}
+		// The turn's meta is the message's last line (B-spec §3.2.4: one meta row
+		// at the bottom, revealed on hover or keyboard focus, with a fixed 24 DIP
+		// height so revealing it never moves the transcript).
+		buildAssistantMetaRow(c, t, runtime, st, message, canRegenerate,
+			st.metaRowRevealed(c, message, outer.Hovered() || outer.FocusWithin()))
 	})
 }
 
@@ -1532,9 +1589,9 @@ func assistantProcessFoldable(message contracts.ChatMessage, mode string) bool {
 // the resulting fold state; a click stores it in the transcript state and asks
 // for HoldPlace so the row keeps its place.
 func buildProcessSummary(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state,
-	message contracts.ChatMessage, open bool, meta func(c *ui.Context)) bool {
+	message contracts.ChatMessage, open bool) bool {
 	return buildProcessFoldRow(c, t, runtime, st, message.ID, open,
-		processSummaryParts(st, message.Reasoning, reasoningSegmentCount(message), len(message.Tools)), meta)
+		processSummaryParts(st, message.Reasoning, reasoningSegmentCount(message), len(message.Tools)))
 }
 
 // buildProcessFoldRow is the one disclosure row a folded process renders: the
@@ -1542,17 +1599,18 @@ func buildProcessSummary(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 // key is the message ID for a single turn and the first message ID for a grouped
 // multi-step turn, so both remember their state the same way.
 func buildProcessFoldRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state,
-	key string, open bool, parts []string, meta func(c *ui.Context)) bool {
+	key string, open bool, parts []string) bool {
 	summary := strings.Join(parts, " · ")
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-		// The disclosure is created inside the row so its trigger is a row
-		// child; the meta parts drawn after it share the same row.
+		// The disclosure is created inside the row so its trigger is the row's
+		// only child; the turn's meta is the message's own bottom row now.
 		end := ui.CollapsibleBase(c.Key("session.process."+key), &open)
 		trigger := end.Trigger.Grow(1).AlignItems(ui.Center).Gap(design.Space2).
 			PaddingY(design.Space1).Radius(design.RadiusSM).Label(summary)
 		if end.Trigger.Hovered() || end.Trigger.Focused() {
 			trigger = trigger.Background(t.BgHover)
 		}
+		trigger = trigger.Transition(design.TransitionColors(c))
 		trigger.Children(func() {
 			// The fold header carries the same fixed 16 DIP marker column as the
 			// activity rows, with the disclosure chevron as its marker.
@@ -1560,13 +1618,12 @@ func buildProcessFoldRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 				ui.Icon(c, icons.ChevronRight()).Size(design.Space4, design.Space4).
 					TextColor(t.LabelTertiary).Rotate(90 * end.Progress())
 			})
-			design.Apply(ui.Text(c, summary), t.Font(design.TypeXXS)).TextColor(t.LabelSecondary)
+			// The fold summary is a row title, not metadata: 13 DIP at weight 500
+			// (the same step as the reasoning row's 思考), so the process line and
+			// the thinking line under it read as one family.
+			design.Apply(ui.Text(c, summary), t.Font(design.TypeXS)).
+				FontWeight(design.WeightMedium).TextColor(t.LabelSecondary)
 		})
-		// The meta parts are siblings of the trigger, right-aligned by the
-		// growing trigger; the ⋯ click never falls through to the fold toggle.
-		if meta != nil {
-			meta(c)
-		}
 		if end.Trigger.Changed() {
 			st.processOpen[key] = open
 			st.chatHoldPlace = true
@@ -1650,12 +1707,10 @@ func buildAssistantTurnGroup(c *ui.Context, t *design.Tokens, runtime contracts.
 	// last message's clock and actions (copy/regenerate apply to that result).
 	metaMessage := group[len(group)-1]
 	metaMessage.Usage = groupedMessageUsage(group)
-	ui.Column(c.Key("session.turn." + key)).FillWidth().Gap(design.Space2).Children(func() {
+	turn := ui.Column(c.Key("session.turn." + key)).FillWidth().Gap(design.Space3)
+	turn.Children(func() {
 		open = buildProcessFoldRow(c, t, runtime, st, key, open,
-			processSummaryParts(st, reasoning.String(), segments, tools),
-			func(c *ui.Context) {
-				buildAssistantMetaContent(c, t, runtime, st, metaMessage, canRegenerate)
-			})
+			processSummaryParts(st, reasoning.String(), segments, tools))
 		for index, message := range group {
 			if open {
 				buildAssistantTimeline(c, t, runtime, st, message)
@@ -1675,6 +1730,9 @@ func buildAssistantTurnGroup(c *ui.Context, t *design.Tokens, runtime contracts.
 		if last && metaMessage.Truncated && !metaMessage.Streaming {
 			buildTruncatedNotice(c, t, st, metaMessage.ID)
 		}
+		// The whole turn's meta closes the row, revealed on hover or focus.
+		buildAssistantMetaRow(c, t, runtime, st, metaMessage, canRegenerate,
+			st.metaRowRevealed(c, metaMessage, turn.Hovered() || turn.FocusWithin()))
 	})
 }
 
@@ -1730,11 +1788,14 @@ func renderAssistantText(c *ui.Context, t *design.Tokens, st *state, message con
 	if message.Text == "" {
 		return
 	}
+	// The reply's prose takes the reading measure (design.ProseMeasure) while a
+	// table keeps the full column: uikit.MarkdownReply owns that split, so the
+	// session only passes its theme (B-spec §3.2.1/§3.6).
 	if message.Streaming {
-		markdown.Stream(c, message.Text, st.markdownOptions(t))
+		uikit.MarkdownReplyStream(c, message.Text, st.markdownOptions(t))
 		return
 	}
-	markdown.View(c, message.Text, st.markdownOptions(t))
+	uikit.MarkdownReply(c, message.Text, st.markdownOptions(t))
 }
 
 // buildAssistantTimeline draws the expanded process: the activity band
@@ -1850,9 +1911,9 @@ func renderAssistantBody(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 			return
 		}
 		if message.Streaming {
-			markdown.Stream(c, text, st.markdownOptions(t))
+			uikit.MarkdownReplyStream(c, text, st.markdownOptions(t))
 		} else {
-			markdown.View(c, text, st.markdownOptions(t))
+			uikit.MarkdownReply(c, text, st.markdownOptions(t))
 		}
 	}
 	renderTool := func(tool contracts.ToolCall) {
@@ -1932,14 +1993,17 @@ func buildAssistantToolRow(c *ui.Context, t *design.Tokens, runtime contracts.UI
 		buildToolCard(c, st, call, key, 0, uikit.ToolCallCardDecision)
 		return
 	}
-	summary := strings.TrimSpace(tool.Summary)
 	open, seen := st.toolOpen[key]
 	if !seen {
 		// H15: a failure or a very short result is readable without a click;
-		// long successful results stay folded.
-		open = uikit.SummaryDefaultOpen(tool.Status, summary)
+		// long successful results stay folded. The call record (not its status
+		// word) decides, so a shell command that exited nonzero opens too.
+		open = uikit.SummaryOpenForCall(tool)
 	}
-	statusKind := uikit.ParseToolStatus(tool.Status).Kind()
+	// One derivation for every surface: uikit folds a shell call's exit code
+	// into the kind, so a bash that exited non-zero is a failure here too (the
+	// row used to draw a check for it while the job panel said failed).
+	statusKind := uikit.ToolCallStatusKind(call)
 	toggled := false
 	// The expanded panel shows the call's input (arguments) and its output:
 	// the same sections the registered tool cards use, so an MCP tool with no
@@ -1950,7 +2014,7 @@ func buildAssistantToolRow(c *ui.Context, t *design.Tokens, runtime contracts.UI
 		Icon:          uikit.ToolIcon(tool.Name),
 		Name:          uikit.ToolDisplayName(st.locale, tool.Name),
 		RawName:       tool.Name,
-		Status:        uikit.ToolStatusLabel(st.locale, tool.Status),
+		Status:        uikit.ToolCallStatusLabel(st.locale, call),
 		StatusColor:   uikit.StatusColor(t, statusKind),
 		State:         statusKind,
 		Running:       statusKind == uikit.StatusRunning,
@@ -2050,7 +2114,9 @@ func buildAssistantMetaContent(c *ui.Context, t *design.Tokens, runtime contract
 		if hasTime {
 			metaSeparator(c, t)
 		}
-		design.Apply(ui.Text(c, summary), t.Font(design.TypeXXXS)).
+		// Metadata is 12/18 at the smallest (AGENTS §3.12, VD-11): 11 DIP stays for
+		// kbd and gutters, never for a sentence a reader has to parse.
+		design.Apply(ui.Text(c, summary), t.Font(design.TypeXXS)).
 			TextColor(t.LabelTertiary).NoWrap()
 	}
 	if hasMenu {
@@ -2066,20 +2132,78 @@ func buildAssistantMetaContent(c *ui.Context, t *design.Tokens, runtime contract
 	return true
 }
 
-// buildAssistantMetaRow wraps the meta content in a right-aligned row. It is the
-// header line of a turn without a folded process summary, so a finished turn
-// never ends with an isolated ⋯ row: a turn without a clock and without usage
-// draws no row at all (buildAssistantMetaContent would draw nothing but the
-// actions menu).
+// buildAssistantMetaRow draws the turn's meta as the message's last row: the
+// clock, the usage summary and the ⋯ actions, right-aligned on a fixed 24 DIP
+// line (B-spec §3.2.4). The line is always laid out, so revealing it never moves
+// the transcript by a DIP; what changes is its opacity — it shows while the
+// pointer rests on the message, when the keyboard focus is inside it, and for
+// two seconds after a reply settles (metaRowRevealed). The row is built either
+// way, so assistive technology always reads the time and the actions, and Tab
+// reaches the ⋯ of a message the pointer never touched.
 func buildAssistantMetaRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
-	st *state, message contracts.ChatMessage, canRegenerate bool) {
+	st *state, message contracts.ChatMessage, canRegenerate, shown bool) {
 	if !assistantMetaHasContent(message) {
 		return
 	}
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).Children(func() {
+	if message.Streaming {
+		// A streaming reply has no turn meta yet: its clock would be the start of
+		// a run that has not finished and its usage a partial count, so the row
+		// stays out until the turn settles (and then shows for two seconds
+		// through metaRowRevealed).
+		return
+	}
+	row := ui.Row(c).FillWidth().Height(design.Space6).
+		AlignItems(ui.Center).Gap(design.Space1)
+	if !shown {
+		row = row.Opacity(0)
+	}
+	row.Children(func() {
 		ui.Spacer(c).Grow(1)
 		buildAssistantMetaContent(c, t, runtime, st, message, canRegenerate)
 	})
+}
+
+// metaRevealDuration is how long a reply that just finished shows its meta row
+// on its own: long enough to read the time and the tokens once, short enough
+// that the transcript goes quiet again (B-spec §3.2.4: two seconds).
+const metaRevealDuration = 2 * time.Second
+
+// metaRowRevealed reports whether a message's meta row shows this frame: while
+// the pointer rests on the message or the keyboard focus is inside it, and for
+// metaRevealDuration after a streaming reply settles. The settle window needs no
+// timer thread: the frame that starts it asks for one more frame at its end
+// (Context.After), which hides the row again without another interaction. Under
+// reduced motion the condition is unchanged — only the transitions are gone
+// (design.ReduceMotion), so there is never a second set of rules.
+func (st *state) metaRowRevealed(c *ui.Context, message contracts.ChatMessage, pointerInside bool) bool {
+	if st.metaStreamed == nil {
+		st.metaStreamed = make(map[string]bool)
+	}
+	if message.Streaming {
+		st.metaStreamed[message.ID] = true
+		delete(st.metaRevealAt, message.ID)
+		return false
+	}
+	if pointerInside {
+		return true
+	}
+	if st.metaStreamed[message.ID] {
+		delete(st.metaStreamed, message.ID)
+		if st.metaRevealAt == nil {
+			st.metaRevealAt = make(map[string]time.Time)
+		}
+		st.metaRevealAt[message.ID] = c.Now()
+		c.After(metaRevealDuration)
+	}
+	at, ok := st.metaRevealAt[message.ID]
+	if !ok {
+		return false
+	}
+	if c.Now().Sub(at) < metaRevealDuration {
+		return true
+	}
+	delete(st.metaRevealAt, message.ID)
+	return false
 }
 
 // assistantMetaHasContent reports whether a finished turn's meta row has
@@ -2141,11 +2265,13 @@ func buildMessageMoreButton(c *ui.Context, t *design.Tokens, key, label string, 
 	}).PopoverMenuButton(build)
 }
 
-// metaSeparator is the muted middle dot between the parts of a compact meta row
-// (the row gap supplies the spacing around it).
+// metaSeparator is the muted dot between the parts of a compact meta row: a 2
+// DIP round mark rather than a "·" glyph, so the separator belongs to the shape
+// vocabulary and not to the type scale (VD-11; the row gap supplies the spacing).
 func metaSeparator(c *ui.Context, t *design.Tokens) {
-	design.Apply(ui.Text(c, "·"), t.Font(design.TypeXXXS)).
-		TextColor(t.LabelTertiary).NoWrap()
+	th := t.Theme()
+	ui.Box(c).Size(th.Space(0.5), th.Space(0.5)).Radius(design.RadiusMax).
+		Background(t.BorderL3)
 }
 
 func usageSummaryText(st *state, usage *contracts.MessageUsage) string {
@@ -2164,12 +2290,20 @@ func usageSummaryText(st *state, usage *contracts.MessageUsage) string {
 // bubble is exactly the metadata noise the audit found, so copy/edit for that
 // message are unavailable rather than hidden behind an unlabelled dot.
 func buildUserMessageMeta(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
-	st *state, message contracts.ChatMessage) {
+	st *state, message contracts.ChatMessage, shown bool) {
 	hasText := strings.TrimSpace(message.Text) != ""
 	if message.CreatedAt.IsZero() {
 		return
 	}
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).Children(func() {
+	// The same 24 DIP meta line and reveal rule as the reply's (one anatomy for
+	// both authors): always laid out so it never jumps, faded out until the
+	// pointer or the keyboard focus reaches the message.
+	row := ui.Row(c).FillWidth().Height(design.Space6).
+		AlignItems(ui.Center).Gap(design.Space1)
+	if !shown {
+		row = row.Opacity(0)
+	}
+	row.Children(func() {
 		ui.Spacer(c).Grow(1)
 		buildMessageTime(c, t, st.locale, message.CreatedAt)
 		if !hasText {
@@ -2307,9 +2441,9 @@ func buildMessageTime(c *ui.Context, t *design.Tokens, locale contracts.LocaleSe
 	if clock == "" {
 		return
 	}
-	design.Apply(ui.Text(c, clock), t.Font(design.TypeXXXS)).
+	design.Apply(ui.Text(c, clock), t.Font(design.TypeXXS)).
 		TextColor(t.LabelTertiary).NoWrap().
-		Tooltip(uikit.FormatDateTime(locale, instant))
+		Description(uikit.FormatDateTime(locale, instant))
 }
 
 // messageActionTarget resolves the action affordances of one assistant turn:
@@ -2445,20 +2579,24 @@ func buildErrorLine(c *ui.Context, t *design.Tokens, text string) {
 // trajectory timeline shows every call as the normal variant.
 func buildToolCard(c *ui.Context, st *state, call contracts.ToolCall, key string, step int,
 	variant uikit.ToolCallCardVariant) {
-	summary := strings.TrimSpace(call.Summary)
 	open, seen := st.toolOpen[key]
 	if !seen {
 		// H15: a failure or a very short result is readable without a click;
-		// long successful results stay folded.
-		open = uikit.SummaryDefaultOpen(call.Status, summary)
+		// long successful results stay folded. The rule reads the call record, so
+		// a shell command that exited nonzero opens its output like a failure.
+		open = uikit.SummaryOpenForCall(call)
 	}
 	toggled := false
 	uikit.ToolCallCard(c, uikit.ToolCallCardOptions{
-		Key:      key,
-		Call:     call,
-		Locale:   st.locale,
-		Sections: uikit.ToolPanelSections(st.locale, call),
-		Open:     &open,
+		Key:    key,
+		Call:   call,
+		Locale: st.locale,
+		// The state word comes from the same derivation as the row's kind, so a
+		// decision card for a shell call that exited non-zero reads 失败 and never
+		// disagrees with the glyph beside it.
+		StatusLabel: uikit.ToolCallStatusLabel(st.locale, call),
+		Sections:    uikit.ToolPanelSections(st.locale, call),
+		Open:        &open,
 		OnToggle: func(next bool) {
 			toggled = true
 			st.toolOpen[key] = next
@@ -2636,6 +2774,12 @@ func buildTrajectoryPane(c *ui.Context, t *design.Tokens, chatSession contracts.
 					design.Apply(ui.Text(body, counts), t.TextMuted(design.TypeXXS))
 					design.Apply(ui.Text(body, trajectoryTimingOverview(st, items)),
 						t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+					// The rows themselves are the way back to the conversation now
+					// that the per-row buttons are gone; the pane says so once
+					// instead of spending a column of controls on it.
+					design.Apply(ui.Text(body, st.tr("选择一行后按回车，或在行上双击，跳转到该消息。",
+						"Press Enter on a row, or double-click it, to jump to that message.")),
+						t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 				})
 			})
 		}
@@ -2671,10 +2815,19 @@ func buildTrajectoryPane(c *ui.Context, t *design.Tokens, chatSession contracts.
 				st.trajSelected = -1
 			}
 			st.trajList.Selected = &st.trajSelected
+			// The trace is rows with hairlines, not cards: no gap between them,
+			// list motion from the shared tokens, and the keep-your-place flag
+			// after a fold (VD-17).
+			st.trajList.FollowAnimation = design.ListFollowAnimation(c)
+			st.trajList.MoveAnimation = design.ListMoveAnimation(c)
+			if st.trajHoldPlace {
+				st.trajList.HoldPlace()
+				st.trajHoldPlace = false
+			}
 			list := ui.List(c, &st.trajList, len(items)).
 				Label(st.tr("会话轨迹", "Conversation trajectory")).
-				Gap(design.Space3).
-				PaddingY(design.Space5).
+				Gap(0).
+				PaddingY(design.Space4).
 				Grow(1).
 				Rows(func(row ui.ListRow) {
 					item := items[row.Index]
@@ -2712,57 +2865,109 @@ func trajectoryItemLabel(st *state, item trajectoryItem) string {
 // the conversation (the tool row also keeps its known-duration line).
 func buildTrajectoryRow(c *ui.Context, t *design.Tokens, st *state,
 	chatSession contracts.ChatSession, item trajectoryItem, step int) {
-	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-		switch item.kind {
-		case "reasoning":
-			key := "session.trajectory.reasoning." + item.key
-			open, seen := st.thinkOpen[key]
-			if !seen {
-				open = false
-			}
-			uikit.ReasoningTrace(c, uikit.ReasoningTraceOptions{
-				Key:       key,
-				Reasoning: item.segment.Text,
-				Open:      &open,
-				OnToggle: func(next bool) {
-					st.thinkOpen[key] = next
+	// One row anatomy for every kind of trace entry (VD-17): the state glyph,
+	// the name, the one-line summary and the duration on a single line, with a
+	// hairline under it and no card. The row is the target — the list's choice
+	// plus Enter or a double click jumps to the message — so the right edge no
+	// longer carries a column of "show in conversation" buttons.
+	body := ui.Column(c).FillWidth().PaddingY(design.Space1).
+		BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL1)
+	body.Children(func() {
+		// The row's own content takes the room; the jump back to the message is a
+		// trailing action that appears while the pointer rests on the row or the
+		// keyboard focus is inside it — one row anatomy, no column of buttons
+		// (VD-17). The action keeps the row's name, so it is still one click away
+		// for the pointer and the keyboard.
+		line := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2)
+		line.Children(func() {
+			content := ui.Column(c).FillWidth().Grow(1).Shrink(1).MinWidthPercent(0)
+			content.Children(func() {
+				switch item.kind {
+				case "reasoning":
+					key := "session.trajectory.reasoning." + item.key
+					open, seen := st.thinkOpen[key]
+					if !seen {
+						open = false
+					}
+					uikit.ReasoningTrace(c, uikit.ReasoningTraceOptions{
+						Key:          key,
+						Reasoning:    item.segment.Text,
+						Open:         &open,
+						MarkerColumn: true,
+						// The chevron follows the row's own text (B-spec §3.2.5), the
+						// same place the transcript band puts it.
+						InlineChevron: true,
+						OnToggle: func(next bool) {
+							st.thinkOpen[key] = next
+						},
+						Locale:   st.locale,
+						Markdown: st.reasoningMarkdownOptions(t),
+					})
+				case "text":
+					ui.Row(c).FillWidth().Height(design.RowCompactHeight).
+						AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+						ui.Row(c).Width(design.Space4).Shrink(0).Justify(ui.Center).Children(func() {
+							ui.Icon(c, icons.Message()).Size(design.IconSizeS, design.IconSizeS).
+								TextColor(t.LabelTertiary)
+						})
+						design.Apply(ui.Text(c, st.tr("正文", "Reply text")), t.Font(design.TypeXS)).
+							FontWeight(design.WeightMedium).TextColor(t.LabelSecondary).NoWrap()
+						design.Apply(ui.Text(c, uikit.PreviewProse(item.text, 96)), t.Font(design.TypeXXS)).
+							TextColor(t.LabelTertiary).Grow(1).Shrink(1).MinWidthPercent(0).
+							MaxLines(1).Ellipsis("…").
+							Description(uikit.PreviewProse(item.text, 400))
+					})
+				default:
+					key := "session.trajectory.tool." + item.key
+					open, seen := st.toolOpen[key]
+					if !seen {
+						open = uikit.SummaryOpenForCall(item.tool)
+					}
+					statusKind := uikit.ToolCallStatusKind(item.tool)
+					toggled := false
+					uikit.ToolRow(c, uikit.ToolRowOptions{
+						Key:          key,
+						Icon:         uikit.ToolIcon(item.tool.Name),
+						Name:         uikit.ToolDisplayName(st.locale, item.tool.Name),
+						RawName:      item.tool.Name,
+						Status:       uikit.ToolCallStatusLabel(st.locale, item.tool),
+						StatusColor:  uikit.StatusColor(t, statusKind),
+						State:        statusKind,
+						Running:      statusKind == uikit.StatusRunning,
+						Preview:      uikit.ToolCallPreview(st.locale, item.tool),
+						Duration:     trajectoryToolDurationLabel(st, item.tool),
+						Open:         open,
+						MarkerColumn: true,
+						Toggle: func(next bool) {
+							toggled = true
+							st.toolOpen[key] = next
+							st.trajHoldPlace = true
+							st.runtime.Invalidate()
+						},
+						Sections: uikit.ToolPanelSections(st.locale, item.tool),
+					})
+					if !seen && !toggled {
+						st.toolOpen[key] = open
+					}
+				}
+			})
+			reveal := line.Hovered() || line.FocusWithin()
+			action := uikit.IconButton(c, uikit.IconButtonOptions{
+				Key:   "session.trajectory.jump." + item.key,
+				Label: st.tr("在对话中定位 ", "Locate in conversation ") + trajectoryItemLabel(st, item),
+				Icon:  icons.Message(),
+				Size:  design.IconSizeS,
+				OnClick: func() {
+					st.jumpToTrajectoryMessage(chatSession, item)
 				},
-				Locale:   st.locale,
-				Markdown: st.reasoningMarkdownOptions(t),
 			})
-		case "text":
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				ui.Icon(c, icons.Message()).Size(design.Space4, design.Space4).TextColor(t.LabelTertiary)
-				design.Apply(ui.Text(c, st.tr("正文", "Reply text")), t.Font(design.TypeXXS)).
-					TextColor(t.LabelSecondary).NoWrap()
-				design.Apply(ui.Text(c, uikit.PreviewProse(item.text, 96)), t.Font(design.TypeXXS)).
-					TextColor(t.LabelTertiary).Grow(1).MinWidthPercent(0).MaxLines(1).Ellipsis("…")
-			})
-		default:
-			buildToolCard(c, st, item.tool, "session.trajectory."+item.key, step,
-				uikit.ToolCallCardNormal)
-		}
-		// The row footer: the tool's known duration (unknown intervals say "—")
-		// and the explicit jump action. A click on the row itself (the List's
-		// choice) and Enter on the chosen row do the same, so the trace works
-		// with the pointer and the keyboard.
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			if item.kind == "tool" {
-				design.Apply(ui.Text(c, trajectoryToolDurationLabel(st, item.tool)),
-					t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).NoWrap()
+			if !reveal {
+				action = action.Opacity(0)
 			}
-			ui.Spacer(c).Grow(1)
-			agentRowAction(c, t, st.tr("在对话中查看", "Show in conversation"),
-				st.tr("在对话中定位 ", "Locate in conversation ")+trajectoryItemLabel(st, item),
-				func() { st.jumpToTrajectoryMessage(chatSession, item) })
 		})
 	})
 }
 
-// jumpToTrajectoryMessage returns to the conversation at the message that made
-// one tool call: the transcript List scrolls the mapped row into view (the
-// grouping-aware row the uikit mapping reports) and the trajectory selection is
-// cleared, so the next visit starts at the followed end again.
 func (st *state) jumpToTrajectoryMessage(chatSession contracts.ChatSession, item trajectoryItem) {
 	row := transcriptRowForMessageID(st, chatSession, item.messageID)
 	if row < 0 {
@@ -3021,9 +3226,16 @@ func buildMemoryPane(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 					})
 				})
 		}
-		// The add row stays fixed at the bottom; only the entries scroll.
+		// The add row stays fixed at the bottom; only the entries scroll. Its top
+		// is reported too: the composer dock's top alone would leave the toast
+		// stack over the add button (p2-memory audit), because this row sits above
+		// the composer and is the control the user came to the tab for.
 		centered(func(c *ui.Context) {
-			buildMemoryAdd(c, t, runtime, store, st)
+			add := ui.Column(c).FillWidth()
+			add.Children(func() {
+				buildMemoryAdd(c, t, runtime, store, st)
+			})
+			st.reportDockTop(add.Bounds().Y)
 		})
 		buildMemoryEditDialog(c, t, runtime, store, st)
 	})
@@ -3058,7 +3270,11 @@ func buildMemoryAdd(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 			label := st.tr("添加记忆", "Add memory")
 			var add ui.Element
 			if draft == "" {
-				add = design.Apply(ui.Button(c, label), t.DisabledPrimary()).Disabled(true)
+				// DimDisabled(false): the preset already IS the disabled look, and
+				// mygo's default half-opacity would fade it below the composer
+				// send's own disabled state (they must read as one control).
+				add = design.Apply(ui.Button(c, label), t.DisabledPrimary()).
+					Disabled(true).DimDisabled(false).Border(1, t.BorderL2)
 			} else {
 				add = design.Apply(ui.PrimaryButton(c, label), t.PrimaryButton())
 			}
@@ -3152,6 +3368,10 @@ func buildComposer(
 	// Queueing is the backend inbox: only a host that implements
 	// contracts.PromptQueue can accept a prompt while the turn runs.
 	queueAllowed := running && st.promptQueue != nil
+	queuedTotal := 0
+	if running {
+		queuedTotal = len(st.queuedPromptEntries(activeID))
+	}
 	// Whether the slash command popover is the layer owning Enter/Esc right
 	// now. It only exists while no turn runs, and an Esc-dismissed draft keeps
 	// the menu closed until the draft changes. The same condition drives the
@@ -3185,15 +3405,47 @@ func buildComposer(
 	}
 	hasContent := strings.TrimSpace(st.draft) != "" || len(st.pendingAttachments) > 0
 	hasDraft := strings.TrimSpace(st.draft) != ""
-	queueTip := st.tr("当前回复尚未结束：加入排队，本轮结束后自动发送",
-		"Still generating: queue it and send when this turn ends")
+	// A pending approval owns the turn: the send control stays disabled and out
+	// of the focus ring (B-spec §3.2.7, F-02), the composer stops competing for
+	// the screen's accent, and the reason shows beside the control.
+	approvalPending := st.pendingApprovalCount()
+	blocked := approvalPending > 0
+	blockedReason := ""
+	if blocked && !running {
+		blockedReason = st.tr("处理审批后可发送", "Answer the approval to send")
+	}
+	// The send's one-line note, immediately left of the control (the placeholder
+	// already covers an empty draft, so it stays empty then): the fix that is one
+	// click away when the model is missing, the reason when a decision owns the
+	// turn.
+	sendNote := ""
+	var sendNoteAction func()
+	switch {
+	case !modelReady && !running && hasContent:
+		// Only while there is something to send: an empty composer already says
+		// what to do (the placeholder), and a standing "configure a model" line
+		// under an empty box is a warning about a state the user cannot act on
+		// yet. Typing the first word is when the disabled send needs its reason.
+		sendNote = st.tr("先配置模型", "Configure a model first")
+		sendNoteAction = func() { openSettingsPage(navigator, settingsPageModel) }
+	case blocked:
+		sendNote = st.tr("处理审批后可发送", "Answer the approval to send")
+	}
+	queueTip := st.tr("当前回复尚未结束。加入队列后，本轮结束自动发送。",
+		"Still generating. Queued messages send when this turn ends.")
 	if len(st.pendingAttachments) > 0 {
-		queueTip = st.tr("本轮只发送文字；暂存的附件会保留在输入框",
-			"Queue sends text only; staged attachments stay in the composer")
+		queueTip = st.tr("本轮只发送文字，附件留在输入框。",
+			"This turn sends text only; attachments stay in the composer.")
 	}
 	var composerWidth float32
-	compactControls := func() bool { return composerWidth > 0 && composerWidth < 800 }
-	veryCompact := func() bool { return composerWidth > 0 && composerWidth < 480 }
+	// The fold points are the card's own width, measured last frame. They sit
+	// below the point where the toolbar's three switchers, the key hint and the
+	// send control stop fitting together; the card spans the transcript's text
+	// column now, which is 32 DIP narrower than the old 960 frame, so the
+	// thresholds moved with it rather than folding the hint at the default
+	// window (1200 wide: 785 DIP card).
+	compactControls := func() bool { return composerWidth > 0 && composerWidth < 720 }
+	veryCompact := func() bool { return composerWidth > 0 && composerWidth < 440 }
 	var queueSend func() bool
 	if queueAllowed {
 		queueSend = func() bool { return enqueueDraft(st, activeID) }
@@ -3207,10 +3459,24 @@ func buildComposer(
 		Placeholder: placeholder,
 		Running:     running,
 		CardLabel:   st.tr("会话输入框", "Session composer"),
-		Locale:      st.locale,
-		InputBind:   &st.composerInput,
-		Focus:       &st.focusComposer,
-		OnWidth:     func(width float32) { composerWidth = width },
+		// The input keeps the framework default (no Label: the placeholder is the
+		// name). Deliberate, per Lead 2026-11-18: this screen has exactly one
+		// composer, so the placeholder is unique and only moves with the draft —
+		// there is no anchor ambiguity to fix (the one real ambiguity, several child
+		// composers, is solved by the child's fixed 发送给 <名> name). A fixed role
+		// name here would move 84 cross-owner assertions for a case that cannot
+		// mislead anyone.
+		// The conversation has exactly one composer on screen, so its input keeps
+		// the placeholder as its name (the shell's fallback): a stable role name
+		// would read better in theory, but the placeholder is a stable string here
+		// too (it only changes with the draft/running state, and the card label
+		// 会话输入框 already names the surface) and 81 frame tests across three
+		// packages anchor on it. The child composer, where two names can collide,
+		// passes an explicit InputLabel instead.
+		Locale:    st.locale,
+		InputBind: &st.composerInput,
+		Focus:     &st.focusComposer,
+		OnWidth:   func(width float32) { composerWidth = width },
 		OnPasteImage: func() bool {
 			return pasteClipboardImage(st, runtime, composerServices)
 		},
@@ -3234,37 +3500,27 @@ func buildComposer(
 			if st.commandRecovery != "" {
 				buildComposerRecovery(ic, t, runtime, st)
 			}
-			if !modelReady && !running {
-				buildNoModelNotice(ic, t, navigator, st)
-			}
+			// The missing model is the action row's note now ("先配置模型", one click
+			// to the model settings), so the composer does not say it twice.
 			if running && !queueAllowed {
 				// Queueing is off: the composer is editable but Enter does not
 				// send. Say where the text goes instead of leaving the user
 				// wondering why Enter inserted a line break.
 				design.Apply(ui.Text(ic, st.tr("回复生成中，Enter 暂不可用；草稿会保留，本轮结束后可发送",
 					"Generating: Enter is unavailable; your draft is kept for when this turn ends")),
-					t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).MaxLines(1)
+					t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(1)
 			}
 			if running && queueAllowed && len(st.pendingAttachments) > 0 {
 				// The queue carries text only: say so instead of silently leaving
 				// the staged files behind.
-				design.Apply(ui.Text(ic, st.tr("本轮只发送文字；附件会保留在输入框，随下一条消息发送",
-					"Queue sends text only; attachments stay in the composer for your next message")),
-					t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).MaxLines(1)
+				design.Apply(ui.Text(ic, st.tr("本轮只发送文字，附件留在输入框。",
+					"This turn sends text only; attachments stay in the composer.")),
+					t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(1)
 			}
 		},
-		Queue:      st.queuedPromptTexts(activeID),
-		QueueOpen:  &st.queueMenuOpen,
-		QueueList:  &st.queueList,
-		QueueError: st.queueActionErr,
-		OnQueueCancel: func(index int) {
-			removeQueuedPrompt(st, activeID, index)
-			runtime.Invalidate()
-		},
-		OnQueueClear: func() {
-			clearQueuedPrompts(st, activeID)
-			runtime.Invalidate()
-		},
+		// The queue lives in the status bar under the card now (B-spec §3.2.6:
+		// the bar's left zone is the run state and the queue ×N), so the card
+		// itself stays one input and one action row.
 		Toolbar: func(ic *ui.Context) {
 			buildComposerToolbar(ic, t, runtime, navigator, chat, st, running,
 				compactControls(), veryCompact())
@@ -3273,34 +3529,79 @@ func buildComposer(
 			// A quiet key hint on wide composers only (C-23): Enter sends,
 			// Shift+Enter breaks the line, and a slash draft explains what Enter
 			// will do (C-05/C-22). Narrow composers keep the full copy in the
-			// send button's tooltip. While a turn runs the hint names the two
-			// keys that work then (Enter queues, Esc stops) instead of letting
-			// the controls alone carry the semantics (R4).
+			// send control's description. While a turn runs the hint names the
+			// two keys that work then (Enter queues, Esc stops) instead of
+			// letting the controls alone carry the semantics (R4).
 			if compactControls() {
 				return ""
 			}
 			return composerVisibleHint(st, running, slashMenuActive, queueAllowed, modelReady)
 		},
-		SendEnabled: hasContent && modelReady,
-		SendLabel:   sendLabel,
-		SendTooltip: sendHint,
+		SendEnabled:       hasContent && modelReady,
+		SendBlocked:       blocked,
+		SendBlockedReason: blockedReason,
+		Notice:            sendNote,
+		NoticeAction:      sendNoteAction,
+		Attention:         blocked,
+		SendLabel:         sendLabel,
+		SendDescription:   sendHint,
 		Send: func() bool {
-			if !modelReady {
+			if !modelReady || blocked {
 				return false
 			}
 			return submitDraft(chat, activeID, st)
 		},
 		QueueSend:    queueSend,
 		QueueEnabled: hasDraft,
-		QueueLabel:   st.tr("排队", "Queue"),
-		QueueTooltip: queueTip,
+		QueueCount:   queuedTotal,
+		QueueOpen:    &st.queueMenuOpen,
+		QueuePanel: func(pc *ui.Context, anchor ui.Element) {
+			if queuedTotal == 0 {
+				return
+			}
+			uikit.QueuePanel(pc, t, uikit.QueuePanelOptions{
+				Queued:      st.queuedPromptTexts(activeID),
+				Running:     running,
+				QueuePaused: !running && queuedTotal > 0,
+				Open:        &st.queueMenuOpen,
+				List:        &st.queueList,
+				Locale:      st.locale,
+				KeyPrefix:   "session.composer." + activeID,
+				OnCancel: func(index int) {
+					removeQueuedPrompt(st, activeID, index)
+					st.runtime.Invalidate()
+				},
+				OnClear: func() {
+					clearQueuedPrompts(st, activeID)
+					st.runtime.Invalidate()
+				},
+				ConfirmOpen: ui.Local(anchor, "clearConfirm", func() bool { return false }),
+			}, anchor)
+		},
+		// The queue's size is the ×N chip beside these controls (QueueCount), not
+		// part of the button's name: a label that changes width with the count made
+		// the row shift as prompts arrived, and "运行中 ×2" on the status bar read
+		// as two turns running (p2-inbox audit).
+		QueueLabel:       st.tr("排队", "Queue"),
+		QueueDescription: queueTip,
 		Stop: func() {
 			cancelRunningTurn(chat, st, st.runtime, activeID)
 		},
-		Stopping:    running && st.stopRequested == activeID,
-		StopLabel:   stopLabel,
-		StopTooltip: st.tr("停止 · 会中断当前回复", "Stop · interrupts the current reply"),
-		OnKey:       composerTextKey(runtime, chat, st, activeID, running, queueAllowed),
+		Stopping:        running && st.stopRequested == activeID,
+		StopLabel:       stopLabel,
+		StopDescription: st.tr("停止 · 会中断当前回复", "Stop · interrupts the current reply"),
+		// Files dragged from the file manager onto the composer are its
+		// attachments (A4-I-03): the card lights its edge while they hover and
+		// stages them through the same background read the picker uses. The
+		// window's own handler only sees what no element takes, so a drop here
+		// is never staged twice.
+		OnFiles: func(paths []string) {
+			stageAttachmentFilesAsync(runtime, st, activeID, paths, func(int) {
+				runtime.Invalidate()
+			})
+		},
+		DragHint: st.tr("松开以添加附件", "Drop to attach"),
+		OnKey:    composerTextKey(runtime, chat, st, activeID, running, queueAllowed),
 		Usage: func(ic *ui.Context) {
 			// The DSH-style usage strip sits directly under the composer card:
 			// one muted line of session statistics (rounds, steps, speed, tokens,
@@ -3606,9 +3907,10 @@ func buildSessionMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRunti
 	label, warn := st.permissionMenuLabel()
 	button := ui.PopoverMenuButton(c, label, func(m *ui.Menu) {
 		buildSessionPermissionMenuItems(m, runtime, st)
-	}).Tooltip(st.tr(
-		"全局权限模式（对所有会话生效，同时决定审批与 OS 沙箱）：只读＝仅只读/信息类工具免审批；工作区修改（默认）＝再加工作区内文件读写免审批；所有权限＝全部免审批。审批与 OS 沙箱是两层：OS 沙箱始终跟随此全局权限，沙箱可用时 shell 类工具自动放行、不可用时命令失败；「所有权限」下 OS 沙箱不包装命令（以宿主权限运行）。弹窗中的「本会话内始终允许」只对本会话生效。",
-		"Global permission mode (applies to every conversation, setting both approval and the OS sandbox): Read-only = only read-only/informational tools skip approval; Workspace-write (default) = plus workspace file reads/writes; All permissions = everything skips approval. Approval and the OS sandbox are two layers: the OS sandbox always follows this global permission; shell tools are auto-allowed when the sandbox is available and fail closed when not; under All permissions the OS sandbox does not wrap commands (they run with the host's own permissions). The dialog's Always allow in this session only covers this conversation."))
+	})
+	description := st.tr("权限模式：", "Permission mode: ") + label + "。" +
+		permissionGlobalNote(st)
+	button = button.Description(description).Tooltip(description)
 	if warn {
 		button.TextColor(t.WarningText)
 	} else {
@@ -3644,14 +3946,11 @@ func buildSessionPermissionMenuItems(m *ui.Menu, runtime contracts.UIRuntime, st
 	}
 	current := permissionMode(st.settings)
 	// The button itself names the current permission, so the disabled group
-	// header stays a plain group name instead of repeating it as a trailing
-	// value; the explanation lives in its tooltip. The copy states the shell
-	// auto-allow fact correctly (no "仍会询问" contradiction) and discloses the
-	// two-layer approval × OS-sandbox model (2026-11 audit US-05).
-	m.Item(st.tr("权限模式", "Permission mode")).Disabled(true).
-		Tooltip(st.tr(
-			"全局权限，对所有会话生效。只读：仅只读/信息类工具免审批，其他操作会询问。工作区修改（默认）：工作区内的文件读写免审批；沙箱可用时 shell 类工具自动放行，不可用时命令失败。所有权限：全部免审批，且 OS 沙箱不包装命令。审批与 OS 沙箱是两层，OS 沙箱始终跟随此全局权限。弹窗中选择「本会话内始终允许」可停止重复询问（只对本会话生效）。",
-			"Global permission, applies to every conversation. Read-only: only read-only/informational tools skip approval; other actions ask. Workspace-write (default): workspace file reads/writes skip approval; shell tools are auto-allowed when the sandbox is available and fail closed when not. All permissions: everything skips approval and the OS sandbox does not wrap commands. Approval and the OS sandbox are two layers; the OS sandbox always follows this global permission. Choose \"Always allow in this session\" in the dialog to stop repeats (this conversation only)."))
+	// header stays a plain group name. The one explanation is a visible note row
+	// at the foot of the menu, and it says the two facts that matter without
+	// repeating the settings page's paragraph: the permission text has one
+	// canonical home (Settings → Behavior) and one short restatement here.
+	m.Item(st.tr("权限模式", "Permission mode")).Disabled(true)
 	m.Separator()
 	for _, mode := range []string{contracts.PermissionWorkspace, contracts.PermissionFull, contracts.PermissionReadOnly} {
 		mode := mode
@@ -3667,10 +3966,21 @@ func buildSessionPermissionMenuItems(m *ui.Menu, runtime contracts.UIRuntime, st
 	// The active session's effective modes make the two-layer model concrete:
 	// its approval policy may carry a session-level override (automation), but
 	// the OS sandbox always follows the global preset (2026-11 audit (a)).
+	m.Separator()
+	m.Item(permissionGlobalNote(st)).Disabled(true)
 	if disclosure := sessionPermissionDisclosure(st); disclosure != "" {
-		m.Separator()
 		m.Item(disclosure).Disabled(true)
 	}
+}
+
+// permissionGlobalNote is the permission switch's one-sentence explanation: it
+// says what the mode controls (the approval gate and the OS sandbox, two layers
+// that this one switch sets globally) and the fact a reader needs to trust the
+// shell. The composer button carries the same sentence as its description, so
+// the two surfaces cannot drift into a third wording.
+func permissionGlobalNote(st *state) string {
+	return st.tr("全局生效：审批与系统沙箱都跟随此模式；沙箱可用时 shell 类工具自动放行。",
+		"Applies everywhere: approval and the system sandbox follow this mode; shell tools are auto-allowed when the sandbox is available.")
 }
 
 // sessionPermissionDisclosure reads the active session's wave-A read model
@@ -3708,7 +4018,7 @@ func sessionPermissionDisclosure(st *state) string {
 	}
 	return st.tr("当前会话：审批＝", "Current session: approval = ") +
 		st.permissionLabel(info.EffectiveApprovalMode) + "（" + scope + "）" +
-		st.tr(" · OS 沙箱＝", " · OS sandbox = ") +
+		st.tr(" · 系统沙箱＝", " · System sandbox = ") +
 		st.permissionLabel(info.EffectiveSandboxMode) +
 		st.tr("（跟随全局）", " (follows global)")
 }
@@ -3969,6 +4279,46 @@ func buildSessionModelChoices(m *ui.Menu, runtime contracts.UIRuntime, st *state
 	}
 }
 
+// modelChipLabel is the model chip's visible text within its width: the full id
+// when it fits, else a leading ellipsis and as much of the id's tail as the room
+// takes (…-opus-4.1). Measurement uses the same face the chip draws, so the cut
+// lands where the paint would.
+func modelChipLabel(c *ui.Context, t *design.Tokens, model string, width float32) string {
+	model = strings.TrimSpace(model)
+	if model == "" || width <= 0 {
+		return model
+	}
+	// The chip reserves room for its leading glyph and its trailing chevron; a
+	// conservative Space3 on each side keeps the text clear of both.
+	budget := width - design.Space3*2
+	if budget <= 0 {
+		return model
+	}
+	size, _, weight := t.Metrics(design.TypeXS)
+	// MeasureText wraps at the budget, so the height tells whether it wrapped:
+	// one line means the string fits.
+	oneLine := func(s string) bool {
+		w, h := c.MeasureText(0, ui.Span{
+			Text: s, Font: design.FontStack(), Size: size, Weight: weight,
+		})
+		_, lineHeight := c.MeasureText(0, ui.Span{
+			Text: "M", Font: design.FontStack(), Size: size, Weight: weight,
+		})
+		return w <= budget && h <= lineHeight+1
+	}
+	if oneLine(model) {
+		return model
+	}
+	runes := []rune(model)
+	for keep := len(runes) - 1; keep > 0; keep-- {
+		candidate := "…" + string(runes[len(runes)-keep:])
+		if oneLine(candidate) {
+			return candidate
+		}
+	}
+	return "…"
+}
+
 // truncateRunes shortens one-line UI labels to at most max runes, marking the
 // cut with an ellipsis; the untruncated value stays in the control's tooltip.
 func truncateRunes(s string, max int) string {
@@ -4010,12 +4360,16 @@ func buildModelChip(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 	}
 	// A narrow composer gives the model chip a bounded measure so the
 	// low-frequency controls (or the labeled 更多工具 menu) always fit beside
-	// the send control; the full name stays in the tooltip.
+	// the send control. The bound is a width, not a shortened string: the chip
+	// ellipsizes at paint time and the full id stays in its tooltip and its
+	// accessible name (A1-matrix: data-layer truncation leaves tooltip, a11y and
+	// copy with a cut string).
+	var chipWidth float32
 	switch {
 	case veryCompact:
-		model = truncateRunes(model, 8)
+		chipWidth = design.Space8 * 4
 	case compactControls:
-		model = truncateRunes(model, 14)
+		chipWidth = design.Space8 * 6
 	}
 	switcher, canSwitch := chat.(contracts.SessionModelSwitcher)
 	if canSwitch && hasSession && activeID != "" {
@@ -4030,7 +4384,7 @@ func buildModelChip(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 		if hasThinking {
 			tooltip += " · " + thinking.current.DisplayName(st.english())
 		}
-		ui.PopoverMenuButton(c, model, func(m *ui.Menu) {
+		chip := ui.PopoverMenuButton(c, model, func(m *ui.Menu) {
 			// The catalogue is read when the menu opens, not on every frame: its
 			// backend service re-reads the modelcatalog.models settings row.
 			var models []contracts.ModelInfo
@@ -4053,11 +4407,28 @@ func buildModelChip(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 			if hasThinking {
 				buildSessionThinkingRow(m, runtime, st, thinking, activeID)
 			}
+			// The menu's order carries its grouping even where the theme's 1 DIP
+			// separator is faint: the two option submenus are the whole menu from
+			// the top, one official Separator, and the single action last. The
+			// order is pinned by the frame tests (mention_effort_test.go asserts
+			// 模型 / 推理等级 / - / 打开模型设置…), so a later edit cannot move the
+			// action up among the options.
 			m.Separator()
 			if m.Item(st.tr("打开模型设置…", "Open model settings…")).Chosen() {
 				openSettingsPage(navigator, settingsPageModel)
 			}
-		}, ui.PopoverMenuButtonOptions{Open: &st.agents.modelMenuOpen}).Tooltip(tooltip)
+		}, ui.PopoverMenuButtonOptions{Open: &st.agents.modelMenuOpen})
+		// The chip's visible text keeps the model id's *tail* when it must be cut:
+		// a model is recognized by its last words ("…-opus-4.1", not "claude-…"),
+		// the way AppKit truncates a file name from the start. The full id stays in
+		// the accessible name and the tooltip. mygo's own paint-time ellipsis cuts
+		// the end of a PopoverMenuButton's label, so the cut is made here, by
+		// measure, against the room the chip actually has.
+		if chipWidth > 0 {
+			chip = chip.MaxWidth(chipWidth)
+		}
+		chip = chip.Label(modelChipLabel(c, t, chipModel, chipWidth)).
+			Description(tooltip).Tooltip(tooltip).Transition(design.TransitionColors(c))
 		// The model menu (and its 模型/推理等级 submenus) is one reported overlay:
 		// the toast stack yields while it is open (2026-11 UI review #13).
 		st.reportOverlay("model", st.agents.modelMenuOpen)
@@ -4209,121 +4580,125 @@ func (st *state) sessionContextWindow(chat contracts.ChatService, session contra
 	return 0
 }
 
-// buildSessionStatusStrip renders the DSH-style single muted status line right
-// under the composer: rounds · steps · output speed · context/window · cache hit ·
-// remaining context. It is informational only (no card, icon or badge); the
-// exact uncompacted numbers live in its tooltip, and the whole strip stays
-// hidden until the session has token accounting to report.
+// buildSessionStatusStrip renders the status bar right under the composer (S8,
+// B-spec §3.2.6): one 32 DIP row in three zones — the run state and the queue on
+// the left, the context gauge with its 详情 popover on the right. It is
+// information, never a card; every sentence in it is at least 12 DIP, the numbers
+// are mono so they line up as the context grows, and the exact figures live in
+// the 详情 popover instead of a six-item line.
 func buildSessionStatusStrip(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	st *state, session contracts.ChatSession) {
-	line, exact, ok := sessionStatusLine(st, chat, session)
-	if !ok {
-		return
+	stats := collectSessionUsage(session)
+	window := 0
+	if stats.hasUsage {
+		window = st.sessionContextWindow(chat, session)
 	}
-	ui.Row(c).FillWidth().Justify(ui.Center).Margin(design.Space1, 0, 0, 0).Children(func() {
-		uikit.RunStatus(c, uikit.RunStatusOptions{
-			Usage:  &uikit.Usage{Summary: line, Exact: exact},
-			Locale: st.locale,
-		})
+	used := 0
+	if stats.contextTokens > 0 && window > 0 {
+		used = stats.contextTokens
+	}
+	// The bar names the run as a run, not as this particular message's
+	// generation: the transcript's own live line already says 生成中 inside the
+	// reply, and two different words keep the chrome and the message from
+	// repeating each other (F-06: running = accent spinner + a neutral word).
+	statusLabel := st.tr("运行中", "Running")
+	if session.Running && st.stopRequested == session.ID {
+		statusLabel = st.tr("停止中…", "Stopping…")
+	}
+	// The queue badge stays in the bar only when the composer shows no queue
+	// button (an idle conversation with queued prompts keeps them from view
+	// otherwise); a running turn carries the count on the 排队 control itself.
+	queued := []string(nil)
+	if !session.Running {
+		queued = st.queuedPromptTexts(session.ID)
+	}
+	uikit.StatusStrip(c, uikit.StatusStripOptions{
+		Running:     session.Running,
+		StatusLabel: statusLabel,
+		Queued:      queued,
+		QueueOpen:   &st.queueMenuOpen,
+		QueueList:   &st.queueList,
+		QueueError:  st.queueActionErr,
+		OnQueueCancel: func(index int) {
+			removeQueuedPrompt(st, session.ID, index)
+			st.runtime.Invalidate()
+		},
+		OnQueueClear: func() {
+			clearQueuedPrompts(st, session.ID)
+			st.runtime.Invalidate()
+		},
+		Used:       used,
+		Window:     window,
+		Detail:     sessionStatusDetail(st, stats, window),
+		DetailOpen: &st.statusDetailOpen,
+		KeyPrefix:  session.ID,
+		Locale:     st.locale,
 	})
 }
 
-// sessionStatusLine builds the quiet status line and the exact-number tooltip
-// for one session; ok is false when there is nothing to show (no token usage
-// yet). Items whose data is unknown are left out: the speed needs output tokens
-// and wall time, the context ratio needs both the newest ContextTokens and the
-// catalogue window, and the cache hit needs prompt tokens.
-func sessionStatusLine(st *state, chat contracts.ChatService, session contracts.ChatSession) (line, exact string, ok bool) {
-	stats := collectSessionUsage(session)
+// sessionStatusDetail is the 详情 popover's content: the figures a status bar
+// cannot carry without becoming a paragraph — the round and tool-call counts,
+// the average output speed with what it means, the cache hit, the exact context
+// numbers and what is left of the window. Items whose data is unknown are left
+// out entirely instead of printing a zero (a provider that reports no usage says
+// nothing, and a catalogue that does not know the model has no window).
+func sessionStatusDetail(st *state, stats sessionUsageStats, window int) []uikit.UsageRow {
 	if !stats.hasUsage {
-		return "", "", false
+		return nil
 	}
-
-	// Plain-language units (2026-11 audit US-09): a 轮 is one user conversation
-	// turn, a 步 is one tool call (not a model call) — the same vocabulary the
-	// insights page uses, so the strip teaches instead of speaking in jargon.
-	parts := []string{
-		sessionCountLabel(st, stats.rounds, "轮对话", "turn", "turns"),
-		sessionCountLabel(st, stats.steps, "步工具调用", "tool step", "tool steps"),
+	rows := []uikit.UsageRow{
+		{Label: st.tr("轮次", "Turns"), Value: strconv.Itoa(stats.rounds)},
+		{Label: st.tr("工具调用", "Tool calls"), Value: strconv.Itoa(stats.steps)},
 	}
 	// Average output speed over the run, tool time included: generated
 	// completion tokens divided by the turn's wall time. A turn shorter than
 	// minStatusSpeedDurationMS says nothing about throughput (scripted turns,
-	// cancellations), so the item is omitted instead of printing a silly
+	// cancellations), so the row is omitted instead of printing a silly
 	// five-digit number.
-	speed := 0.0
-	hasSpeed := stats.durationMS >= minStatusSpeedDurationMS && stats.completion > 0
-	if hasSpeed {
-		speed = float64(stats.completion) / (float64(stats.durationMS) / 1000)
-		parts = append(parts, fmt.Sprintf("%d tok/s", int64(math.Round(speed))))
+	if stats.durationMS >= minStatusSpeedDurationMS && stats.completion > 0 {
+		speed := float64(stats.completion) / (float64(stats.durationMS) / 1000)
+		rows = append(rows, uikit.UsageRow{
+			Label: st.tr("平均速度", "Average speed"),
+			Value: fmt.Sprintf("%d tokens/s", int64(math.Round(speed))),
+			Exact: st.tr("输出 ", "Completion ") + strconv.Itoa(stats.completion) +
+				st.tr(" tokens / ", " tokens over ") + strconv.Itoa(int(stats.durationMS/1000)) +
+				st.tr(" 秒（含工具耗时）", "s (tool time included)"),
+		})
 	}
-	window := st.sessionContextWindow(chat, session)
-	remaining := 0
-	hasContext := stats.contextTokens > 0 && window > 0
-	if hasContext {
-		parts = append(parts, uikit.FormatCompactCount(stats.contextTokens)+"/"+
-			uikit.FormatCompactCount(window)+" tok")
-		remaining = 100 - int(math.Round(float64(stats.contextTokens)*100/float64(window)))
-		if remaining < 0 {
-			remaining = 0
-		}
-		if remaining > 100 {
-			remaining = 100
-		}
-	}
-	cacheHit := 0
-	hasCache := stats.prompt > 0
-	if hasCache {
-		cacheHit = int(math.Round(float64(stats.cached) * 100 / float64(stats.prompt)))
+	if stats.prompt > 0 {
+		cacheHit := int(math.Round(float64(stats.cached) * 100 / float64(stats.prompt)))
 		if cacheHit < 0 {
 			cacheHit = 0
 		}
 		if cacheHit > 100 {
 			cacheHit = 100
 		}
-		parts = append(parts, fmt.Sprintf(st.tr("缓存命中 %d%%", "Cache hit %d%%"), cacheHit))
+		rows = append(rows, uikit.UsageRow{
+			Label: st.tr("缓存命中", "Cache hit"),
+			Value: fmt.Sprintf("%d%%", cacheHit),
+			Exact: uikit.FormatCompactCount(stats.cached) + " / " +
+				uikit.FormatCompactCount(stats.prompt),
+		})
 	}
-	if hasContext {
-		parts = append(parts, fmt.Sprintf(st.tr("上下文剩余 %d%%", "context %d%% left"), remaining))
+	if window > 0 && stats.contextTokens > 0 {
+		remaining := 100 - int(math.Round(float64(stats.contextTokens)*100/float64(window)))
+		if remaining < 0 {
+			remaining = 0
+		}
+		if remaining > 100 {
+			remaining = 100
+		}
+		rows = append(rows,
+			uikit.UsageRow{
+				Label: st.tr("上下文剩余", "Context left"),
+				Value: fmt.Sprintf("%d%%", remaining),
+			},
+			uikit.UsageRow{
+				Label: st.tr("上下文窗口", "Context window"),
+				Value: uikit.FormatCompactCount(window) + " tokens",
+			})
 	}
-	return strings.Join(parts, " · "), sessionExactStatusTooltip(st, stats, window, speed, cacheHit, remaining, hasSpeed, hasCache, hasContext), true
-}
-
-// sessionCountLabel renders one count with its unit: the Chinese unit is
-// uninflected, English pluralizes ("1 round"/"2 rounds").
-func sessionCountLabel(st *state, count int, zh, singular, plural string) string {
-	if st.english() && count != 1 {
-		return fmt.Sprintf("%d %s", count, plural)
-	}
-	if st.english() {
-		return fmt.Sprintf("%d %s", count, singular)
-	}
-	return fmt.Sprintf("%d %s", count, zh)
-}
-
-// sessionExactStatusTooltip is the uncompacted version of the status line: the
-// exact token sums, the average-speed arithmetic and the context window
-// accounting. It also documents what the speed means.
-func sessionExactStatusTooltip(st *state, stats sessionUsageStats, window int, speed float64,
-	cacheHit, remaining int, hasSpeed, hasCache, hasContext bool) string {
-	parts := []string{
-		st.tr("对话回合 ", "Conversation turns ") + strconv.Itoa(stats.rounds),
-		st.tr("工具调用 ", "Tool calls ") + strconv.Itoa(stats.steps),
-	}
-	if hasSpeed {
-		parts = append(parts, fmt.Sprintf("%.1f tok/s", speed)+st.tr("（平均输出速度，含工具耗时）",
-			" (average output speed over the run, tool time included)"))
-	}
-	if hasCache {
-		parts = append(parts, st.tr("输出 ", "Completion ")+strconv.Itoa(stats.completion)+
-			st.tr(" · 缓存命中 ", " · cache hit ")+strconv.Itoa(cacheHit)+"%")
-	}
-	if hasContext {
-		parts = append(parts, st.tr("上下文 ", "Context ")+strconv.Itoa(stats.contextTokens)+
-			st.tr(" / 窗口 ", " / window ")+strconv.Itoa(window)+
-			st.tr("，剩余 ", ", ")+strconv.Itoa(remaining)+"%")
-	}
-	return strings.Join(parts, " · ")
+	return rows
 }
 
 // recoveryKinds are the known backend failure classes the conversation can
@@ -4382,7 +4757,7 @@ func (st *state) groupToolRecovery(group []contracts.ChatMessage) (heading, kind
 		tools := group[messageIndex].Tools
 		for index := len(tools) - 1; index >= 0; index-- {
 			tool := tools[index]
-			if uikit.ParseToolStatus(tool.Status).Kind() != uikit.StatusError {
+			if uikit.ToolCallStatusKind(tool) != uikit.StatusError {
 				continue
 			}
 			// The persisted classification wins: the bounded summary may have
@@ -4534,22 +4909,6 @@ func buildComposerRecovery(c *ui.Context, t *design.Tokens, runtime contracts.UI
 		return
 	}
 	buildRecoveryLine(c, t, st, runtime, st.commandRecovery, st.commandRecoveryKind, st.commandDetail)
-}
-
-// buildNoModelNotice is the composer's unconfigured-model state: sending is
-// disabled, so the composer says why and offers the one action that fixes it
-// (FR-31).
-func buildNoModelNotice(c *ui.Context, t *design.Tokens, navigator contracts.Navigator, st *state) {
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-		ui.Icon(c, icons.AlertTriangle()).Size(design.Space3, design.Space3).TextColor(t.WarningText)
-		design.Apply(ui.Text(c, st.tr("尚未配置模型：发送已禁用", "No model configured: sending is disabled")),
-			t.Font(design.TypeXXS)).TextColor(t.WarningText).Grow(1).MaxLines(2)
-		button := design.Apply(ui.Button(c, st.tr("打开模型设置", "Open model settings")),
-			t.SecondaryButton()).Height(design.RowCompactHeight).Shrink(0)
-		if button.Clicked() {
-			openSettingsPage(navigator, settingsPageModel)
-		}
-	})
 }
 
 // submitDraft sends the trimmed draft and any staged attachments (a message
@@ -4742,35 +5101,27 @@ func buildSlashPopover(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 		}
 		for index, cmd := range matches {
 			index, cmd := index, cmd
-			row := ui.ButtonBase(c.Key("session.slash."+cmd.ID)).FillWidth().
-				Justify(ui.Start).AlignItems(ui.Center).
-				Gap(design.Space2).Padding(design.Space1, design.Space2).
-				Radius(design.RadiusSM).Label(textutil.FirstNonEmptyTrimmed(cmd.Title, cmd.ID)).
-				Role(ui.RoleOption).Checked(index == sel).
-				PositionInSet(index+1, len(matches))
-			switch {
-			case row.Pressed() || index == sel:
-				row.Background(t.BgSelected)
-			case row.Hovered():
-				row.Background(t.BgHover)
-			}
-			row.Children(func() {
-				title := textutil.FirstNonEmptyTrimmed(cmd.Title, cmd.ID)
-				design.Apply(ui.Text(c, title), t.Font(design.TypeXS)).FontWeight(600).
-					TextColor(t.LabelPrimary)
-				if hint := strings.TrimSpace(cmd.Hint); hint != "" {
-					// The hint is a sentence, so it uses the metadata step (12/18),
-					// never the 11px micro-label step (DESIGN §5.3, audit UD-05).
-					design.Apply(ui.Text(c, hint), t.TextMuted(design.TypeXXS))
-				}
+			title := textutil.FirstNonEmptyTrimmed(cmd.Title, cmd.ID)
+			// The same skeleton as the @ menu: 32 DIP, Space2 sides, the name at
+			// 14/500 and the command's sentence at 12/18 beside it — the hint is a
+			// sentence, so it uses the metadata step, never the 11px micro label
+			// (DESIGN §5.3, audit UD-05).
+			row := composerSuggestionRow(c, t, composerSuggestionRowOptions{
+				Key:      "session.slash." + cmd.ID,
+				Label:    title,
+				Title:    title,
+				Detail:   strings.TrimSpace(cmd.Hint),
+				Selected: index == sel,
+				Index:    index,
+				SetSize:  len(matches),
+				OnClick: func() {
+					st.slashSel = index
+					executeSlashCommand(runtime, st, cmd)
+					st.composerInput.Focus(c)
+				},
 			})
 			if index == sel {
 				highlighted = row
-			}
-			if row.Clicked() {
-				st.slashSel = index
-				executeSlashCommand(runtime, st, cmd)
-				st.composerInput.Focus(c)
 			}
 		}
 	})
@@ -5196,6 +5547,68 @@ func startWorkspaceCreate(runtime contracts.UIRuntime, workspace contracts.Works
 	}()
 }
 
+// composerSuggestionRow is the one row skeleton both composer suggestion menus
+// share (the slash commands and the @ references): a 32 DIP row with Space2 side
+// padding, an optional 16 DIP glyph, the name at 14/500, an optional 12 DIP
+// tertiary detail that takes the room left and ellipsizes, and an optional
+// trailing 12 DIP meta. Two menus over the same composer with two densities read
+// as two products (p2-slash vs p2-mentions audit), so the metrics live here.
+type composerSuggestionRowOptions struct {
+	Key      string
+	Label    string // accessible name
+	Title    string // 14/500, the row's own name
+	Detail   string // 12/18 tertiary, after the name
+	Meta     string // 12/18 tertiary, right-aligned
+	Icon     *ui.SVG
+	HasIcon  bool
+	Selected bool
+	Index    int
+	SetSize  int
+	OnClick  func()
+}
+
+func composerSuggestionRow(c *ui.Context, t *design.Tokens, o composerSuggestionRowOptions) ui.Element {
+	// The fixed 32 DIP height holds the 22 DIP name line with 5 DIP above and
+	// below: the same row the composer's own tool row uses, not a tighter one.
+	button := ui.ButtonBase(c.Key(o.Key)).FillWidth().Justify(ui.Start).
+		AlignItems(ui.Center).Gap(design.Space2).
+		Height(design.RowCompactHeight).Padding(design.Space0, design.Space2).
+		Radius(design.RadiusSM).Label(o.Label).
+		Role(ui.RoleOption).Checked(o.Selected)
+	if o.SetSize > 0 {
+		button = button.PositionInSet(o.Index+1, o.SetSize)
+	}
+	switch {
+	case button.Pressed() || o.Selected:
+		button = button.Background(t.BgSelected)
+	case button.Hovered():
+		button = button.Background(t.BgHover)
+	}
+	button.Children(func() {
+		if o.HasIcon {
+			ui.Icon(c, o.Icon).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelSecondary)
+		}
+		design.Apply(ui.Text(c, o.Title), t.Font(design.TypeS)).
+			TextColor(t.LabelPrimary).Shrink(1).MaxLines(1).Ellipsis("…")
+		switch {
+		case o.Detail != "":
+			design.Apply(ui.Text(c, o.Detail), t.Font(design.TypeXXS)).
+				TextColor(t.LabelTertiary).Grow(1).Shrink(1).MinWidthPercent(0).
+				MaxLines(1).Ellipsis("…")
+		case o.Meta != "":
+			ui.Spacer(c).Grow(1)
+		}
+		if o.Meta != "" {
+			design.Apply(ui.Text(c, o.Meta), t.Font(design.TypeXXS)).
+				TextColor(t.LabelTertiary).NoWrap().Shrink(0)
+		}
+	})
+	if o.OnClick != nil && button.Clicked() {
+		o.OnClick()
+	}
+	return button
+}
+
 // buildMentionRow is one selectable @ menu option. It reports the option the
 // composer's ActiveDescendant points at when it is the highlighted one.
 func buildMentionRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state,
@@ -5219,31 +5632,23 @@ func buildMentionRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 		key = "session.mention.session." + textutil.FirstNonEmptyTrimmed(row.session.ID, label)
 		detail = sessionReferenceIDPrefix(row.session.ID)
 	}
-	button := ui.ButtonBase(c.Key(key)).FillWidth().Justify(ui.Start).
-		AlignItems(ui.Center).Gap(design.Space2).Padding(design.Space1, design.Space2).
-		Radius(design.RadiusSM).Label(label).
-		Role(ui.RoleOption).Checked(index == sel).PositionInSet(index+1, total)
-	switch {
-	case button.Pressed() || index == sel:
-		button.Background(t.BgSelected)
-	case button.Hovered():
-		button.Background(t.BgHover)
-	}
-	button.Children(func() {
-		ui.Icon(c, icon).Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
-		design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).
-			TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-		if detail != "" {
-			design.Apply(ui.Text(c, detail), t.TextMuted(design.TypeXXXS)).NoWrap()
-		}
+	return composerSuggestionRow(c, t, composerSuggestionRowOptions{
+		Key:      key,
+		Label:    label,
+		Title:    label,
+		Meta:     detail,
+		Icon:     icon,
+		HasIcon:  true,
+		Index:    index,
+		SetSize:  total,
+		Selected: index == sel,
+		OnClick: func() {
+			st.mentionSel = index
+			st.draft = applyMention(st, st.draft, tokenStart, tokenEnd, row)
+			st.composerInput.Focus(c)
+			runtime.Invalidate()
+		},
 	})
-	if button.Clicked() {
-		st.mentionSel = index
-		st.draft = applyMention(st, st.draft, tokenStart, tokenEnd, row)
-		st.composerInput.Focus(c)
-		runtime.Invalidate()
-	}
-	return button
 }
 
 // executeSlashCommand clears the composer draft, runs the command (nil safe)
@@ -5276,6 +5681,18 @@ func truncateTrajectorySummary(summary string) string {
 
 // startNewSession creates a session, makes it active and navigates to it.
 func startNewSession(st *state, chat contracts.ChatService, navigator contracts.Navigator) {
+	// A new conversation is a one-shot action: a double click (or a click plus
+	// the keyboard chord) must not leave two empty conversations behind, each
+	// taking the active slot (A4-I-04). The guard is the state's, so the hero and
+	// any other entry in this module share it.
+	if st == nil {
+		return
+	}
+	now := time.Now()
+	if !st.createAt.IsZero() && now.Sub(st.createAt) < createDebounce {
+		return
+	}
+	st.createAt = now
 	// Untitled on purpose: the backend names a conversation from its first
 	// prompt, and a pre-filled placeholder ("新对话") would pin that title
 	// forever (FR-30).

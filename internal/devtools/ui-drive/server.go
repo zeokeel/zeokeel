@@ -25,6 +25,9 @@ const (
 	// scriptSlowAnswer streams a long answer in small delayed chunks so the
 	// driver can observe the running state and press Stop.
 	scriptSlowAnswer
+	// scriptToolFailThenAnswer calls bash with a command that exits non-zero, so
+	// the tool row renders its failed state (with stderr) instead of a result.
+	scriptToolFailThenAnswer
 	// scriptSpawnTeamThenAnswer replies with a spawn_teammate tool call on the
 	// first request and the markdown answer afterwards, so a driver step can
 	// start a real teammate from inside a chat turn.
@@ -42,6 +45,7 @@ type scriptServer struct {
 	mu        sync.Mutex
 	mode      scriptMode
 	requests  int
+	total     int
 	slowTotal time.Duration
 }
 
@@ -70,7 +74,17 @@ func (s *scriptServer) next() (scriptMode, int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.requests++
+	s.total++
 	return s.mode, s.requests
+}
+
+// Served reports how many chat requests the recording server has answered in
+// this run (diagnostics: a turn that never finishes usually stops after the
+// first request because the tool result never comes back).
+func (s *scriptServer) Served() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.total
 }
 
 func (s *scriptServer) handle(w http.ResponseWriter, r *http.Request) {
@@ -90,6 +104,12 @@ func (s *scriptServer) handle(w http.ResponseWriter, r *http.Request) {
 		}
 	case scriptSlowAnswer:
 		emitSlowAnswer(w, r, s.slowTotal)
+	case scriptToolFailThenAnswer:
+		if request == 1 {
+			emitSSE(w, `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-fail-1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"ls /nonexistent-qa-path\"}"}}]},"index":0,"finish_reason":"tool_calls"}]}`)
+		} else {
+			emitAnswer(w)
+		}
 	case scriptSpawnTeamThenAnswer:
 		if request == 1 {
 			emitSSE(w, `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-team-1","type":"function","function":{"name":"spawn_teammate","arguments":"{\"name\":\"研究员\",\"prompt\":\"研究一下当前工作目录并给出摘要\"}"}}]},"index":0,"finish_reason":"tool_calls"}]}`)

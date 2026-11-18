@@ -22,6 +22,11 @@ import (
 // model, so the host only offers it on that screen.
 const sessionScreenID = "session"
 
+// homeScreenID is the landing screen (internal/ui/home): it holds the same
+// composer anatomy as a conversation, so the toast stack keeps the same inset
+// above it.
+const homeScreenID = "home"
+
 // inspectorPaneHeaderMinWidth is the width below which the inspector module
 // hides its own pane-header close control: buildPaneClose compares the window
 // against the expanded-sidebar worst case. The host draws the docked header
@@ -60,6 +65,14 @@ func (r *Root) view(c *ui.Context) {
 	// The desktop's text-size preference scales the theme's font size, which
 	// every native control reads (design tokens scale their own type scale).
 	c.SetTheme(themeAtScale(r.theme.currentTheme(), c.Preferences().TextScale))
+	// A theme or text-size change re-keys the root content: a scrolled subtree
+	// keeps its painted layer while its identity holds, so a switch inside the
+	// composer dock or an inspector pane would otherwise keep the old theme's
+	// pixels (see Root.themeGen).
+	if dark, scale := c.Theme().Dark, c.Preferences().TextScale; dark != r.themeGenDark || scale != r.themeGenScale {
+		r.themeGenDark, r.themeGenScale = dark, scale
+		r.themeGen++
+	}
 	// Host-owned commands and chrome strings are localized for the current
 	// language; the registry has no locale of its own, so re-register them when
 	// the user switches.
@@ -86,7 +99,15 @@ func (r *Root) view(c *ui.Context) {
 	}
 	r.announceNavigation(c)
 
-	ui.Row(c).Fill().Background(tokens.BgBase).Children(func() {
+	// The window's Escape fallback is declared here, at the frame's root context,
+	// before the chrome builds: it hears the key from any chrome control, and an
+	// open dialog, menu or popover consumes it first in its own deeper scope
+	// (bindScreenEscape, A4-I-01). Declared with Context.OnWindowShortcut it would
+	// only exist inside a dialog, so this call is the one that registers it.
+	r.bindScreenEscape(c)
+
+	root := ui.Row(c).Key("zeokeel.root." + strconv.Itoa(r.themeGen)).Fill().Background(tokens.BgBase)
+	root.Children(func() {
 		if r.effectiveSidebarCollapsed(c) {
 			r.sidebarRail(c)
 			r.contentArea(c)
@@ -153,11 +174,51 @@ func (r *Root) announceNavigation(c *ui.Context) {
 	}
 }
 
+// navTheme is the local theme the persistent navigation builds with: mygo
+// paints a chosen Sidebar row with Theme.Accent as its fill and its icons with
+// the same Accent, so one theme slot carries both "the selected row's fill" and
+// "the icon's ink". A full-accent fill is what AGENTS §3.11 and B-spec §3.1.1
+// forbid, and the 9% selection tint is far too faint to paint a glyph with, so
+// the theme splits the two jobs the slot had:
+//
+//   - Accent (the row's fill while the sidebar holds the keyboard focus, and the
+//     icons' ink at rest) is the secondary label color: navigation glyphs are
+//     ink, not brand blue (audit VD-05 — the expanded sidebar's three blue
+//     destination icons competed with the one primary action).
+//   - SurfacePressed (the chosen row without the focus, which is how the
+//     sidebar reads for a pointer user) is the quiet selection tint.
+//   - AccentText (the chosen row's label while focused) is the sunken surface
+//     color, so the one loud state stays legible on its ink fill.
+//
+// The 2 DIP accent stripe B-spec asks of a persistent selection is not painted
+// here: the official SidebarItem cannot draw one, and AGENTS §3.11 exempts a
+// native tint selection from the stripe. The session tree's own rows already
+// draw theirs.
+func navTheme(t *design.Tokens) *ui.Theme {
+	theme := *t.Theme()
+	theme.Background = t.BgSidebar
+	theme.Accent = t.LabelSecondary
+	theme.AccentHover = t.LabelSecondary
+	theme.AccentPressed = t.LabelSecondary
+	theme.InactiveAccent = t.LabelSecondary
+	theme.AccentText = t.BgSidebar
+	theme.SurfacePressed = t.BgSelected
+	theme.SurfaceHover = t.BgHover
+	return &theme
+}
+
+// chromeSeam is the one pane boundary of the window: 1px BorderL2, drawn once.
+// Every chrome seam — sidebar to content, content to the docked inspector — is
+// a split view's own divider, which paints theme.Border (BorderL2), so the panes
+// beside it paint no edge of their own. Two weights of line on one seam read as
+// a 2px rule and were the heaviest lines in the window (audit VD-03/VD-04).
+func chromeSeam(t *design.Tokens) ui.Color { return t.BorderL2 }
+
 // sidebarExpanded renders the expanded source column inside the sidebar
 // ui.Split pane: the brand row (logo + wordmark), the primary action slot,
 // screen navigation with icons, the session tree slot, the footer slot and the
-// host settings entry. The split view owns the column's width, so the surface
-// only paints the background and the edge.
+// host settings entry. The split view owns the column's width and draws the
+// seam, so the surface only paints the background.
 func (r *Root) sidebarExpanded(c *ui.Context) {
 	t := design.Of(c)
 	screens := visibleScreens(r.rt.screenSpecs())
@@ -166,8 +227,11 @@ func (r *Root) sidebarExpanded(c *ui.Context) {
 	if initial {
 		selected = defaultScreenID(screens)
 	}
+	// The column paints the sunken surface (S1) and no edge of its own: the
+	// split view it fills draws the one 1px structural line that is the pane
+	// seam (chromeSeam), and painting an edge here as well made the seam the
+	// heaviest line in the window — two 1px lines stacked (audit VD-03).
 	column := ui.Column(c).FillHeight().Background(t.BgSidebar).
-		BorderWidth(0, 1, 0, 0).BorderColor(t.BorderL3).
 		// The sidebar is a complementary landmark (mygo RoleComplementary, as
 		// HTML's aside): screen readers can jump to the navigation apart from
 		// the main content. Named because a window can have several
@@ -176,36 +240,48 @@ func (r *Root) sidebarExpanded(c *ui.Context) {
 	changed := false
 	column.Children(func() {
 		// Brand row: the mark, the wordmark and the collapse control (Cmd+B is
-		// the keyboard shortcut; both stay discoverable).
+		// the keyboard shortcut; both stay discoverable). 56 DIP, one step
+		// tighter than the old 64, so the navigation starts higher (B-spec
+		// §3.1.1).
 		brandRow := ui.Row(c).FillWidth().AlignItems(ui.Center).
-			Padding(0, design.Space4, 0, design.Space4).Gap(design.Space2).Height(64)
+			Padding(design.Space0, design.Space4, design.Space0, design.Space4).Gap(design.Space2).
+			Height(design.BrandRowHeight)
 		brandRow.Children(func() {
-			ui.Image(c, brand.Mark(t.Dark)).Size(28, 28)
-			design.Apply(ui.Text(c, r.appName), t.Font(design.TypeM)).FontWeight(600).
+			ui.Image(c, brand.Mark(t.Dark)).Size(design.IconSizeL, design.IconSizeL)
+			design.Apply(ui.Text(c, r.appName), t.Font(design.TypeM)).
 				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 			collapseLabel := r.tr("折叠侧边栏", "Collapse sidebar")
 			uikit.IconButton(c, uikit.IconButtonOptions{
-				Key:     "chrome.sidebar.collapse",
-				Label:   collapseLabel,
-				Tooltip: collapseLabel,
+				Key:   "chrome.sidebar.collapse",
+				Label: collapseLabel,
+				// No Tooltip: a keyboard-raised tip is an overlay with its own
+				// Escape handler and would take the first press the chrome needs
+				// (A4-I-01 NoEscSteal). The Label names the control.
 				Icon:    icons.PanelLeft(),
-				Size:    design.IconSizeM,
+				Size:    design.IconSizeS,
 				OnClick: func() { r.SetSidebarCollapsed(true) },
 			})
 		})
 
 		// The navigation rows, the session tree and the primary action are
 		// module contributions rendered inside the native Sidebar, which owns
-		// selection, keyboard navigation and scrolling. The footer stays docked
-		// below it, outside the scrolling content, so the settings and view
-		// entries never scroll away or get pushed off by a long session list.
-		sidebar := ui.Sidebar(c, &selected, func() {
-			r.slot(c, contracts.SlotSidebarPrimary)
-			r.slot(c, contracts.SlotSidebarNav)
-			r.slot(c, contracts.SlotSidebarTree)
-		}).Grow(1).Shrink(1).FillWidth().PaddingY(design.Space1).Label(r.tr("主导航", "Main navigation"))
-		sidebar.Background(t.BgSidebar)
-		changed = sidebar.Changed()
+		// selection, keyboard navigation and scrolling. They build with the
+		// navigation's local theme, so the native chosen-row paint is the quiet
+		// selection tint instead of mygo's saturated accent block (B-spec
+		// §3.1.1, AGENTS §3.11: no full-blue navigation selection). The footer
+		// stays docked below it, outside the scrolling content, so the settings
+		// and view entries never scroll away or get pushed off by a long
+		// session list.
+		ui.Themed(c, navTheme(t)).Background(ui.Transparent).
+			Grow(1).Shrink(1).FillWidth().Children(func() {
+			sidebar := ui.Sidebar(c, &selected, func() {
+				r.slot(c, contracts.SlotSidebarPrimary)
+				r.slot(c, contracts.SlotSidebarNav)
+				r.slot(c, contracts.SlotSidebarTree)
+			}).Grow(1).Shrink(1).FillWidth().PaddingY(design.Space1).Label(r.tr("主导航", "Main navigation"))
+			sidebar.Background(t.BgSidebar)
+			changed = sidebar.Changed()
+		})
 		ui.Column(c).FillWidth().Shrink(0).Children(func() {
 			r.slot(c, contracts.SlotSidebarFooter)
 		})
@@ -242,7 +318,7 @@ func (r *Root) sidebarRail(c *ui.Context) {
 		Role(ui.RoleComplementary).
 		FocusGroup(ui.Vertical)
 	design.Apply(column, func(el ui.Element) ui.Element {
-		return el.Background(t.BgSidebar).BorderWidth(0, 1, 0, 0).BorderColor(t.BorderL3)
+		return el.Background(t.BgSidebar).BorderWidth(0, 1, 0, 0).BorderColor(chromeSeam(t))
 	})
 	column.Children(func() {
 		expandLabel := r.tr("展开侧边栏", "Expand sidebar")
@@ -252,9 +328,9 @@ func (r *Root) sidebarRail(c *ui.Context) {
 		// there, so the brand control reads as the rail's home affordance at rest
 		// instead of appearing only under the pointer.
 		uikit.IconButton(c, uikit.IconButtonOptions{
-			Key:     "chrome.rail.expand",
-			Label:   expandLabel,
-			Tooltip: expandLabel,
+			Key:   "chrome.rail.expand",
+			Label: expandLabel,
+			// No Tooltip (NoEscSteal): Escape belongs to the window here.
 			Size:    design.IconSizeL,
 			Variant: uikit.IconButtonSubtle,
 			Content: func(cc *ui.Context) {
@@ -268,9 +344,9 @@ func (r *Root) sidebarRail(c *ui.Context) {
 		// toggle sits under the mark, always visible, with the same glyph as
 		// the expanded sidebar's collapse control.
 		uikit.IconButton(c, uikit.IconButtonOptions{
-			Key:     "chrome.rail.toggle",
-			Label:   expandLabel,
-			Tooltip: expandLabel,
+			Key:   "chrome.rail.toggle",
+			Label: expandLabel,
+			// No Tooltip (NoEscSteal).
 			Icon:    icons.PanelLeft(),
 			Size:    design.IconSizeS,
 			Variant: uikit.IconButtonSubtle,
@@ -280,14 +356,16 @@ func (r *Root) sidebarRail(c *ui.Context) {
 		// rail is the same sidebar in its icon form, so it keeps that action
 		// instead of dropping the shell's only pointer affordance for creating
 		// a conversation (fix round SH-05).
-		newChatLabel := r.tr("新对话", "New chat")
+		// The same word the expanded sidebar's primary action uses: one action,
+		// one name (A5: 新对话 → 新建会话).
+		newChatLabel := r.tr("新建会话", "New session")
 		uikit.IconButton(c, uikit.IconButtonOptions{
-			Key:     "chrome.rail.new",
-			Label:   newChatLabel,
-			Tooltip: newChatLabel,
+			Key:   "chrome.rail.new",
+			Label: newChatLabel,
+			// No Tooltip (NoEscSteal).
 			Icon:    icons.NewChat(),
 			Size:    design.IconSizeM,
-			OnClick: func() { r.newSessionShortcut() },
+			OnClick: r.newSessionFromClick,
 		})
 		// The rail does not render the expanded sidebar's conversation tree
 		// (that lives in a module slot), so the rail keeps a conversation entry
@@ -329,11 +407,11 @@ func (r *Root) sidebarRail(c *ui.Context) {
 		ui.Spacer(c).Grow(1)
 		settingsLabel := r.locale.T("nav.settings")
 		uikit.IconButton(c, uikit.IconButtonOptions{
-			Key:     "chrome.rail.settings",
-			Label:   settingsLabel,
-			Tooltip: settingsLabel,
-			Icon:    icons.Sliders(),
-			Size:    design.IconSizeM,
+			Key:   "chrome.rail.settings",
+			Label: settingsLabel,
+			// No Tooltip (NoEscSteal).
+			Icon: icons.Sliders(),
+			Size: design.IconSizeM,
 			OnClick: func() {
 				r.nav.ToggleSettings()
 				r.requestFrame()
@@ -424,8 +502,12 @@ func (r *Root) railSessionRow(c *ui.Context, t *design.Tokens, session contracts
 	// another session moved into it — Enter would open the wrong conversation
 	// (2026-11 audit AR-04).
 	row := ui.ButtonBase(c.Key("chrome.rail.session."+session.ID)).
-		FillWidth().AlignItems(ui.Center).Gap(design.Space2).
-		Padding(design.Space2, design.Space3).Radius(design.RadiusSM).Label(rowLabel)
+		FillWidth().Height(design.RowCompactHeight).AlignItems(ui.Center).Gap(design.Space2).
+		Padding(design.Space0, design.Space3, design.Space0, design.Space3).
+		Radius(design.RadiusSM).Label(rowLabel).
+		// The quick switcher's rows fade between their states like every other
+		// hand-drawn row of the shell (A1 F-01: no hover without a transition).
+		Transition(design.TransitionColors(c))
 	// The registered rich row paints its own states (ButtonBase has no look):
 	// pressed uses the product's one pressed vocabulary (the selection tint,
 	// as rowTint and IconButton do), hover the lighter tint (audit UD-18).
@@ -753,10 +835,10 @@ func (r *Root) inspectorDocked(c *ui.Context) bool {
 func (r *Root) inspectorDockedPane(c *ui.Context) {
 	t := design.Of(c)
 	// The right sidebar owns its own header (tab strip) and page padding: the
-	// host only paints the docked surface and the divider so the tab strip can
-	// sit flush at the top of the column, DSH-style.
+	// host only paints the docked surface, because the split view draws the one
+	// seam line between it and the content (chromeSeam) — an edge here as well
+	// would stack two 1px lines on the same boundary (audit VD-03).
 	ui.Column(c).FillHeight().Background(t.BgSidebar).
-		BorderWidth(1, 0, 0, 0).BorderColor(t.BorderL3).
 		// The docked inspector is the window's second complementary landmark
 		// (the sidebar is the first): the panel stands apart from the main
 		// content and completes it, as HTML's aside.
@@ -781,9 +863,9 @@ func (r *Root) dockedInspectorHeader(c *ui.Context, t *design.Tokens) {
 		return
 	}
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
-		Padding(0, 0, design.Space2, 0).Children(func() {
+		Padding(design.Space0, design.Space0, design.Space2, design.Space0).Children(func() {
 		design.Apply(ui.Text(c, r.tr("检查器", "Inspector")), t.Font(design.TypeS)).
-			FontWeight(600).TextColor(t.LabelPrimary).Grow(1)
+			TextColor(t.LabelPrimary).Grow(1)
 		closeLabel := r.tr("关闭检查器", "Close inspector")
 		uikit.IconButton(c, uikit.IconButtonOptions{
 			Key:   "chrome.inspector.docked.close",
@@ -818,8 +900,10 @@ func (r *Root) contentHeader(c *ui.Context) {
 			r.screenHeaderRow(c, t)
 			if r.hasScreenSlot(contracts.SlotScreenTabs) {
 				// The tabs row rides directly under the header row: one surface, one
-				// bottom border, no line between the two rows.
-				ui.Row(c).FillWidth().Height(design.Space8).PaddingX(design.Space5).
+				// bottom border, no line between the two rows. 36 DIP, the standard
+				// control height, so a tab's 2 DIP underline has room under its
+				// label (B-spec §3.1.2).
+				ui.Row(c).FillWidth().Height(design.ControlHeight).PaddingX(design.Space5).
 					AlignItems(ui.Stretch).Children(func() {
 					r.renderScreenSlot(c, contracts.SlotScreenTabs)
 				})
@@ -827,21 +911,157 @@ func (r *Root) contentHeader(c *ui.Context) {
 		})
 }
 
-// screenHeaderRow draws the band's 40 DIP row: the screen's title area (it takes
+// screenHeaderRow draws the band's 48 DIP row: the screen's title area (it takes
 // the remaining width and ellipsizes), its actions, and the host's palette and
-// inspector controls. The row is window chrome, so its title uses the TypeM
+// inspector controls. The row is window chrome, so its title area uses the TypeM
 // step (16 DIP) rather than the page-title TypeL the retired in-body header
 // used; that keeps the band in proportion with the 13 DIP tabs, 12 DIP badges
 // and 16 DIP icons next to it.
+//
+// The trailing controls fold into one overflow menu when the row cannot hold
+// them (bandFoldsChrome): a 1024 wide window with the docked inspector leaves
+// the pane about 636 DIP, where the chips, the palette and the inspector
+// controls overflowed the pane and were clipped by the inspector — the one
+// structural break of the 2026-11 audit (VD-01).
 func (r *Root) screenHeaderRow(c *ui.Context, t *design.Tokens) {
-	ui.Row(c).FillWidth().Height(design.Space8 + design.Space2).
-		PaddingX(design.Space5).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).FillWidth().Height(design.BandHeight).
+		PaddingX(design.Space5).Gap(design.Space3).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Shrink(1).MinWidthPercent(0).Justify(ui.Center).Children(func() {
 			r.renderScreenSlot(c, contracts.SlotScreenHeader)
 		})
-		r.renderScreenSlot(c, contracts.SlotScreenActions)
-		r.paletteButton(c)
-		r.inspectorButton(c)
+		folded := r.bandFoldsChrome(c)
+		if folded {
+			// One control at the row's end, keeping its Space5 padding from the
+			// pane seam: nothing of the trailing cluster is left to be clipped by
+			// it (VD-01's narrow frame).
+			r.bandOverflowControl(c, t)
+		} else {
+			// The screen's chips: one cluster that gives way before the title, so
+			// a long title ellipsizes instead of pushing the chrome out of the
+			// pane.
+			ui.Row(c).Shrink(1).MinWidthPercent(0).AlignItems(ui.Center).
+				Gap(design.Space3).Children(func() {
+				r.renderScreenSlot(c, contracts.SlotScreenActions)
+			})
+			r.paletteButton(c)
+			r.inspectorButton(c)
+		}
+		r.chromeFocusReturn(c, folded)
+	})
+}
+
+// chromeFocusReturn gives the keyboard back after a close that removed the
+// focused control (the inspector drawer, the narrow docked pane's X): to the
+// inspector toggle when the band shows it, or to the band's overflow control
+// when the trailing cluster is folded (VD-01), which is the control that carries
+// the entry then.
+func (r *Root) chromeFocusReturn(c *ui.Context, folded bool) {
+	if !r.inspectorFocusPending {
+		return
+	}
+	r.inspectorFocusPending = false
+	if folded {
+		r.bandOverflowToggle.Focus(c)
+		return
+	}
+	r.inspectorToggle.Focus(c)
+}
+
+// bandFoldsChrome reports whether the top band gives its trailing cluster one
+// overflow control instead of a line of its own: the cluster folds once the pane
+// the band lives in is narrower than the product's reading measure, where the
+// title, the chips and the two chrome controls cannot share one line without the
+// last control being pushed over the pane's seam and clipped (VD-01; the
+// interaction QA measured the panel toggle cut in half at 1024 with the
+// inspector docked). The inspector's pane is not part of the band's row, so a
+// docked inspector is taken out of the room.
+func (r *Root) bandFoldsChrome(c *ui.Context) bool {
+	room := r.contentColumnWidth(c)
+	if r.inspectorDocked(c) {
+		room -= r.inspectorLayoutWidth(c) + design.Space1
+	}
+	return room > 0 && room < design.ProseMeasure
+}
+
+// bandOverflowControl is the folded band's one trailing control: a ⋯ that opens
+// the screen's chips (the team entry, the subagent switcher, the running state)
+// and the host's two chrome entries as a native popover. Everything keeps its
+// full label there, so a narrow window loses no destination and no name
+// (AGENTS §3.17), it only moves one click away — and the row's end is never
+// pushed over the pane's seam (VD-01).
+func (r *Root) bandOverflowControl(c *ui.Context, t *design.Tokens) {
+	label := r.tr("更多操作", "More actions")
+	anchor := uikit.IconButton(c, uikit.IconButtonOptions{
+		Key:      "chrome.band.overflow",
+		Label:    label,
+		Icon:     icons.More(),
+		Size:     design.IconSizeS,
+		Variant:  uikit.IconButtonGhost,
+		Toggle:   true,
+		Selected: r.bandOverflowOpen,
+		OnClick: func() {
+			r.bandOverflowOpen = !r.bandOverflowOpen
+			r.requestFrame()
+		},
+	}).Bind(&r.bandOverflowToggle)
+	if !r.bandOverflowOpen {
+		return
+	}
+	ui.Popover(c, anchor, &r.bandOverflowOpen, func() {
+		ui.Column(c).Width(design.OverlayWidthS).Gap(design.Space2).Children(func() {
+			if r.hasScreenSlot(contracts.SlotScreenActions) {
+				ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
+					r.renderScreenSlot(c, contracts.SlotScreenActions)
+				})
+				ui.Divider(c)
+			}
+			r.paletteMenuRow(c, t)
+			r.inspectorMenuRow(c, t)
+		})
+	})
+}
+
+// bandMenuRow is one labelled entry of the folded band's popover: the native
+// button (so hover, pressed, focus and the focus ring stay mygo's) wearing the
+// chrome row anatomy — 16 DIP glyph, label, and the key chord at the trailing
+// edge as a key cap. It carries no Tooltip: this row lives inside a surface
+// Escape closes, and the hint line is where chords belong (A4-I-01).
+func (r *Root) bandMenuRow(c *ui.Context, t *design.Tokens, icon *ui.SVG,
+	label, chord string, onClick func(),
+) {
+	row := ui.Button(c, "").Label(label).FillWidth()
+	row.Children(func() {
+		ui.Icon(c, icon).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelSecondary)
+		design.Apply(ui.Text(c, label), t.Font(design.TypeS)).TextColor(t.LabelPrimary).
+			Grow(1).MaxLines(1).Ellipsis("…")
+		if chord != "" {
+			uikit.Kbd(c, t, uikit.FormatShortcut(chord))
+		}
+	})
+	if row.Clicked() {
+		r.bandOverflowOpen = false
+		onClick()
+	}
+}
+
+// paletteMenuRow is the command palette's entry inside the folded band.
+func (r *Root) paletteMenuRow(c *ui.Context, t *design.Tokens) {
+	r.bandMenuRow(c, t, icons.Search(), r.tr("快捷操作", "Quick actions"),
+		"Cmd/Ctrl + K", r.togglePalette)
+}
+
+// inspectorMenuRow is the inspector's entry inside the folded band, shown only on
+// the screen that contributes the inspector's pane.
+func (r *Root) inspectorMenuRow(c *ui.Context, t *design.Tokens) {
+	if !r.inspectorAvailable() {
+		return
+	}
+	label := r.tr("打开右侧栏", "Open inspector")
+	if r.rightOpen {
+		label = r.tr("收起右侧栏", "Close inspector")
+	}
+	r.bandMenuRow(c, t, icons.PanelRight(), label, "Cmd/Ctrl + Alt + I", func() {
+		r.setRightPanelOpen(!r.rightOpen, false)
 	})
 }
 
@@ -851,8 +1071,10 @@ func (r *Root) screenHeaderRow(c *ui.Context, t *design.Tokens) {
 func (r *Root) paletteButton(c *ui.Context) {
 	paletteLabel := r.tr("快捷操作", "Quick actions")
 	uikit.IconButton(c, uikit.IconButtonOptions{
-		Label:   paletteLabel,
-		Tooltip: paletteLabel,
+		Label: paletteLabel,
+		// No Tooltip (NoEscSteal): the chord is on the command palette's own
+		// footer and in this button's KeyShortcuts, not in a tip that would take
+		// the first Escape (A4-I-01).
 		Icon:    icons.Search(),
 		Size:    design.IconSizeS,
 		Variant: uikit.IconButtonNative,
@@ -871,20 +1093,15 @@ func (r *Root) inspectorButton(c *ui.Context) {
 		label = r.tr("收起右侧栏", "Close inspector")
 	}
 	uikit.IconButton(c, uikit.IconButtonOptions{
-		Label:   label,
-		Tooltip: label,
+		Label: label,
+		// No Tooltip (NoEscSteal): the chord rides KeyShortcuts and the settings
+		// surface's keyboard page.
 		Icon:    icons.PanelRight(),
 		Size:    design.IconSizeS,
 		Variant: uikit.IconButtonNative,
 		OnClick: func() { r.setRightPanelOpen(!r.rightOpen, false) },
 	}).KeyShortcuts(ui.Cmd|ui.Alt, ui.KeyI).Bind(&r.inspectorToggle)
-	if r.inspectorFocusPending {
-		// The close that removed the focused control (drawer, or the narrow
-		// docked header's X) asks for the keyboard back on the toggle that opens
-		// the inspector, as a dialog returns it.
-		r.inspectorFocusPending = false
-		r.inspectorToggle.Focus(c)
-	}
+
 }
 
 // hasScreenBandSlots reports whether the current screen contributes to any slot
@@ -959,7 +1176,7 @@ func (r *Root) inspectorDrawer(c *ui.Context) {
 		back.Children(func() {
 			panel := design.Apply(ui.Column(c).Width(design.InspectorWidth).FillHeight(),
 				t.ShadowOverlay()).
-				Background(t.BgRaised).BorderWidth(1, 0, 0, 0).BorderColor(t.BorderL3).
+				Background(t.SurfaceSunken()).BorderWidth(1, 0, 0, 0).BorderColor(t.BorderL3).
 				Padding(design.Space4).
 				Role(ui.RoleDialog).Label(r.tr("检查器", "Inspector"))
 			panel.Children(func() {
@@ -972,7 +1189,7 @@ func (r *Root) inspectorDrawer(c *ui.Context) {
 					Children(func() {
 						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 							design.Apply(ui.Text(c, r.tr("检查器", "Inspector")), t.Font(design.TypeS)).
-								FontWeight(600).TextColor(t.LabelPrimary).Grow(1)
+								TextColor(t.LabelPrimary).Grow(1)
 							// No Tooltip: a keyboard-focused tooltip is an overlay with its
 							// own Escape handler (mygo tooltip.go), and it would take the
 							// first Escape before this drawer's OverlayShortcut could close
@@ -1010,12 +1227,49 @@ func (r *Root) hasAnySlot(names ...string) bool {
 	return false
 }
 
-// paletteShortcutColumnWidth is the palette's fixed right-hand shortcut column:
+// paletteShortcutColumnWidth is the palette's fixed right-hand key-cap column:
 // every command row reserves it (empty when the command has no chord), so the
-// kbd column's start never drifts with the hint or the chord length. It holds
-// the product's longest palette chords ("Ctrl+Shift+Space") at the TypeXXXS
-// mono step; a longer custom chord ellipsizes rather than moving the column.
-const paletteShortcutColumnWidth = design.Space8 * 4 // 128
+// caps line up down the list whatever the chord length. A chord longer than the
+// column ellipsizes in its cap instead of moving it.
+const paletteShortcutColumnWidth = design.Space8 * 3 // 96
+
+// paletteHintWidth bounds a command row's description column: wide enough for a
+// full Chinese sentence fragment (280 DIP, about 23 of the 12 DIP glyphs) and
+// narrow enough that the command's own name keeps the rest of the 640 DIP card.
+const paletteHintWidth = design.OverlayWidthS - design.Space8 - design.Space4 // 280
+
+// selectionTintTheme is the local theme of a list or row whose selection is the
+// quiet persistent tint: mygo paints a chosen row with Theme.Accent and its text
+// with Theme.AccentText, so a theme whose accent is the selection tint turns the
+// native paint into BgSelected + LabelPrimary instead of an accent block. The
+// shell's navigation uses navTheme (which also inks the icons); transient lists
+// such as the command palette, whose glyphs the host colors itself, use this
+// one.
+func selectionTintTheme(t *design.Tokens) *ui.Theme {
+	theme := *t.Theme()
+	theme.Accent = t.BgSelected
+	theme.AccentHover = t.BgSelected
+	theme.AccentPressed = t.BgSelected
+	theme.InactiveAccent = t.BgSelected
+	theme.AccentText = t.LabelPrimary
+	return &theme
+}
+
+// paletteListTheme is the command palette's list theme: the list paints no
+// chosen fill of its own (its accent is transparent), because the row draws the
+// selection itself — one 9% tint with its 2 DIP accent stripe. Two layers of the
+// same 9% alpha tint composite to 18%, which is the loud block the palette's
+// choice must not be (B-spec §3.1.4). The list keeps its keyboard, scrolling and
+// screen-reader selection: only the fill moves to the row.
+func paletteListTheme(t *design.Tokens) *ui.Theme {
+	theme := *t.Theme()
+	theme.Accent = ui.Transparent
+	theme.AccentHover = ui.Transparent
+	theme.AccentPressed = ui.Transparent
+	theme.InactiveAccent = ui.Transparent
+	theme.AccentText = t.LabelPrimary
+	return &theme
+}
 
 // palette is the host command palette: a native Modal with a search field and a
 // native List of the registered commands. Up/Down move the choice, Enter runs
@@ -1028,10 +1282,22 @@ func (r *Root) palette(c *ui.Context) {
 		return
 	}
 	t := design.Of(c)
+	// 640 DIP, the palette's own measure: wide enough for a command, its hint
+	// and its chord on one row, narrower than a form dialog (B-spec §3.1.4). The
+	// card enters and leaves with the shared overlay transition, so a palette
+	// opening or closing never pops.
 	ui.Modal(c, &r.paletteOpen, func() {
-		ui.Column(c).Width(design.DialogWidthM).Gap(design.Space2).Padding(design.Space4).Children(func() {
-			design.Apply(ui.Text(c, r.tr("命令面板", "Command palette")), t.Font(design.TypeM)).FontWeight(600).
-				TextColor(t.LabelPrimary)
+		ui.Column(c).Width(design.PaletteWidth).Gap(design.Space1).Padding(design.Space3).
+			Radius(design.RadiusLG).Transition(design.TransitionOverlay(c)).Children(func() {
+			// A quiet caption names the surface without competing with the
+			// query: the palette is the window's one全量 entry, and its name is
+			// what the user learns to summon it by. The metadata step keeps it a
+			// caption rather than a heading (the search field below is the
+			// surface's real first line).
+			design.Apply(ui.Text(c, r.tr("命令面板", "Command palette")),
+				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).
+				Padding(design.Space0, design.Space1, design.Space0, design.Space1)
+			//
 			// The palette's search row is built from a TextInput rather than
 			// SearchField: one Escape must close the palette, as its footer
 			// promises, and SearchField's own Escape clears the query first
@@ -1039,10 +1305,10 @@ func (r *Root) palette(c *ui.Context) {
 			// editable node, so the magnifier and the field are composed here
 			// around the input the palette can intercept (R14).
 			var search ui.Element
-			design.Apply(ui.Row(c), t.Panel()).FillWidth().Height(design.ControlHeight).
-				AlignItems(ui.Center).Gap(design.Space2).
+			design.Apply(ui.Row(c), t.Panel()).Radius(design.RadiusMD).FillWidth().
+				Height(design.ControlHeight).AlignItems(ui.Center).Gap(design.Space2).
 				Padding(design.Space2, design.Space3).Children(func() {
-				ui.Icon(c, icons.Search()).Size(design.Space4, design.Space4).TextColor(t.LabelTertiary)
+				ui.Icon(c, icons.Search()).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelTertiary)
 				search = ui.TextInput(c, &r.paletteQuery).
 					Label(r.tr("搜索命令", "Search commands")).
 					Placeholder(r.tr("搜索命令…", "Search commands…")).
@@ -1135,79 +1401,123 @@ func (r *Root) palette(c *ui.Context) {
 			// the arrows are on (mygo accessibility.md: a list box a text field
 			// drives with ActiveDescendant).
 			var activeRow ui.Element
-			list := ui.List(c, &r.paletteList, len(entries)).
-				Label(r.tr("命令", "Commands")).Rows(func(row ui.ListRow) {
-				entry := entries[row.Index]
-				if entry.header {
-					// A group heading, not a command: the List marks it as a
-					// header, so the pointer and the keys skip it and it pins to
-					// the top while its group scrolls under it. The opaque fill
-					// is the modal panel's own color, so pinned headings cover
-					// the rows scrolling beneath instead of stacking on them.
-					ui.Row(row.Context).FillWidth().Background(t.BgBase).
-						Padding(design.Space1, design.Space1).Children(func() {
-						design.Apply(ui.Text(row.Context, entry.title), t.SectionLabel())
-					})
-					return
-				}
-				cmd := entry.cmd
-				chosen := row.Selected()
-				// The row is a native button so a single click runs the command,
-				// as in a desktop palette; the List around it still owns Up/Down
-				// and Enter and shows the chosen row.
-				item := ui.ButtonBase(row.Context).FillWidth().AlignItems(ui.Center).
-					Padding(design.Space2, design.Space3).Radius(design.RadiusSM).
-					Label(cmd.Title)
-				// The native list paints the chosen row in the accent fill, so
-				// the row text must switch to the on-accent foreground; only
-				// hovering adds a tint of our own.
-				titleColor, hintColor := t.LabelPrimary, t.LabelTertiary
-				if chosen {
-					titleColor, hintColor = t.AccentText, t.AccentText
-					// The row's own fill, in addition to the native List's
-					// Selected paint: the real desktop assembly can build the
-					// palette rows during a later layout pass, where the List's
-					// chosen fill did not reach the painted frame (fix round
-					// SH-02: Enter ran a row the user could not see).
-					item = item.Background(t.Accent)
-					activeRow = item
-				} else if item.Hovered() {
-					item = item.Background(t.BgHover)
-				}
-				item.Children(func() {
-					ui.Row(row.Context).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-						design.Apply(ui.Text(row.Context, cmd.Title), t.Font(design.TypeXS)).FontWeight(600).
-							TextColor(titleColor).Grow(1).MaxLines(1).Ellipsis("…")
-						if hint := strings.TrimSpace(cmd.Hint); hint != "" {
-							design.Apply(ui.Text(row.Context, hint), t.Font(design.TypeXXXS)).
-								TextColor(hintColor).MaxLines(1).Ellipsis("…").MaxWidth(240)
+			var list ui.Element
+			// The native List paints its chosen row with the theme accent; the
+			// palette's choice is a transient selection, and the product draws it
+			// as the quiet tint plus the 2 DIP accent stripe (B-spec §3.1.4), so
+			// the list builds with the selection-tint theme and the row paints
+			// the stripe itself.
+			ui.Themed(c, paletteListTheme(t)).Background(ui.Transparent).FillWidth().
+				Children(func() {
+					list = ui.List(c, &r.paletteList, len(entries)).
+						Label(r.tr("命令", "Commands")).Rows(func(row ui.ListRow) {
+						entry := entries[row.Index]
+						if entry.header {
+							// A group heading, not a command: the List marks it as a
+							// header, so the pointer and the keys skip it and it pins
+							// to the top while its group scrolls under it. The opaque
+							// fill is the modal panel's own color, so pinned headings
+							// cover the rows scrolling beneath instead of stacking.
+							ui.Row(row.Context).FillWidth().Background(t.BgOverlay).
+								Padding(design.Space2, design.Space3, design.Space1, design.Space3).
+								Children(func() {
+									design.Apply(ui.Text(row.Context, entry.title), t.SectionLabel()).
+										Padding(design.Space0, design.Space0, design.Space0, design.Space0)
+								})
+							return
 						}
-						// The shortcut column is fixed-width on every row, so
-						// the kbd micro-labels start at one x whether or not a
-						// row carries a chord (2026-11-17 UI review P3: the
-						// old hint-then-shortcut run drifted its start with
-						// the hint length). The chord is normalized by the
-						// product's single formatter (uikit.FormatShortcut:
-						// one platform prefix, one plus notation), shared
-						// with the settings keyboard reference.
-						shortcut := strings.TrimSpace(cmd.Shortcut)
-						if shortcut == "" {
-							shortcut = r.commandShortcut(cmd.ID)
+						cmd := entry.cmd
+						chosen := row.Selected()
+						// The row is a native button so a single click runs the
+						// command, as in a desktop palette; the List around it still
+						// owns Up/Down and Enter and shows the chosen row. 36 DIP, the
+						// standard control height (B-spec §3.1.4).
+						// The row carries the selection itself: the 9% tint fill and the
+						// 2 DIP accent stripe, which every row reserves as its leading
+						// border so the label never shifts by 2 DIP when the choice
+						// moves (B-spec §3.1.4); the stripe fades in with the row's
+						// colour transition. The list paints no fill of its own
+						// (paletteListTheme), so the choice is one 9% layer, not two.
+						stripe := ui.Transparent
+						if chosen {
+							stripe = t.Accent
 						}
-						ui.Row(row.Context).Width(paletteShortcutColumnWidth).Shrink(0).
-							AlignItems(ui.Center).Children(func() {
-							if shortcut != "" {
-								design.Apply(ui.Text(row.Context, uikit.FormatShortcut(shortcut)),
-									t.MonoText(design.TypeXXXS)).
-									TextColor(hintColor).NoWrap().MaxLines(1).Ellipsis("…")
-							}
+						item := ui.ButtonBase(row.Context).FillWidth().Height(design.ControlHeight).
+							AlignItems(ui.Center).Radius(design.RadiusSM).Label(cmd.Title).
+							BorderWidth(design.Space0, design.Space0, design.Space0, design.Space1/2).
+							BorderColor(stripe).
+							Transition(design.TransitionColors(c))
+						titleColor, hintColor := t.LabelPrimary, t.LabelTertiary
+						switch {
+						case chosen:
+							// The row's own fill, in addition to the native List's
+							// chosen paint: the real desktop assembly can build the
+							// palette rows during a later layout pass, where the
+							// List's chosen fill did not reach the painted frame (fix
+							// round SH-02: Enter ran a row the user could not see).
+							item = item.Background(t.BgSelected)
+							activeRow = item
+						case item.Hovered():
+							item = item.Background(t.BgHover)
+						}
+						item.Children(func() {
+							ui.Row(row.Context).FillWidth().AlignItems(ui.Center).
+								Gap(design.Space2).Padding(design.Space0, design.Space3, design.Space0, design.Space4).
+								Children(func() {
+									// The name holds the row and the description is the
+									// column that yields: the name grows into the free
+									// space and never shrinks below its own width, the
+									// description sits right before the key caps (so the
+									// descriptions line up) and ellipsizes when the row
+									// is genuinely short (VD-33 both ways: neither the
+									// name squeezed to fit its explanation, nor the
+									// explanation cut while the card has room).
+									design.Apply(ui.Text(row.Context, cmd.Title), t.Font(design.TypeS)).
+										TextColor(titleColor).Grow(1).Shrink(0).
+										MaxLines(1).Ellipsis("…")
+									if hint := strings.TrimSpace(cmd.Hint); hint != "" {
+										// Instruction copy, not a micro label: the
+										// metadata step (12) keeps a hint sentence out of
+										// the 11 DIP display size (AGENTS §3.12).
+										// The description is a column of its own: it may
+										// use the overlay measure (380) and only gives way
+										// when the row is genuinely short. Half of it cut
+										// every Chinese hint after a dozen characters even
+										// though the card had the room, and the name keeps
+										// its Grow/Shrink share so it is never the one
+										// squeezed (VD-33 both ways).
+										design.Apply(ui.Text(row.Context, hint), t.Font(design.TypeXXS)).
+											TextColor(hintColor).MaxLines(1).Ellipsis("…").
+											Shrink(1).MaxWidth(paletteHintWidth)
+									}
+									// The chord sits in the row's trailing column as a key
+									// cap, so the keyboard path is learnable at the row
+									// it runs (uikit.Kbd; one formatter for the whole
+									// product: uikit.FormatShortcut).
+									shortcut := strings.TrimSpace(cmd.Shortcut)
+									if shortcut == "" {
+										shortcut = r.commandShortcut(cmd.ID)
+									}
+									ui.Row(row.Context).Shrink(0).AlignItems(ui.Center).
+										Justify(ui.End).Width(paletteShortcutColumnWidth).
+										Children(func() {
+											// A chord the command's own name already states is
+											// not repeated as a cap: "Esc: 关闭 / 拒绝 / 停止"
+											// beside a cap reading Esc says the same thing
+											// twice and reads as a sentence in the name
+											// column.
+											chord := uikit.FormatShortcut(shortcut)
+											if chord != "" && !strings.Contains(cmd.Title, chord) {
+												uikit.Kbd(row.Context, t, chord)
+											}
+										})
+								})
 						})
-					})
+						if item.Clicked() {
+							r.runPaletteCommand(cmd)
+						}
+					}).MaxHeight(design.Space8 * 10)
 				})
-				if item.Clicked() {
-					r.runPaletteCommand(cmd)
-				}
-			}).MaxHeight(320)
 			// Reconcile after the List built. A List follows the command it
 			// chose by Key and drops it when its item left the list (mygo
 			// list.md): an Enabled change can reorder the rows between frames
@@ -1233,14 +1543,36 @@ func (r *Root) palette(c *ui.Context) {
 					r.runPaletteCommand(matches[r.paletteSelected])
 				}
 			}
-			// Instruction copy, not a kbd-only micro-label: the metadata step
-			// keeps the legend out of TypeXXXS's 11 DIP size (DESIGN.md §5.3,
-			// audit UX-14 — the no-match hint above already follows the rule).
-			design.Apply(ui.Text(c, r.tr("↑↓ 选择 · Enter 运行 · Esc 关闭",
-				"Up/Down to choose · Enter to run · Esc to close")),
-				t.TextMuted(design.TypeXXS))
+			// The footer legend is the palette's key reference: the chords
+			// are key caps beside the words they do, on one 32 DIP row under the
+			// list (B-spec §3.1.4). No tooltip carries a chord here — this is the
+			// one place they are read (A4-I-01: a tooltip would take the first
+			// Escape the palette needs).
+			ui.Row(c).FillWidth().Height(design.RowCompactHeight).Shrink(0).
+				AlignItems(ui.Center).Justify(ui.End).Gap(design.Space2).
+				Padding(design.Space0, design.Space3, design.Space0, design.Space3).Children(func() {
+				design.Apply(ui.Text(c, r.tr("选择", "Choose")), t.Font(design.TypeXXS)).
+					TextColor(t.LabelTertiary)
+				r.legendKbd(c, t, "↑ ↓")
+				design.Apply(ui.Text(c, r.tr("运行", "Run")), t.Font(design.TypeXXS)).
+					TextColor(t.LabelTertiary)
+				r.legendKbd(c, t, "↵")
+				design.Apply(ui.Text(c, r.tr("关闭", "Close")), t.Font(design.TypeXXS)).
+					TextColor(t.LabelTertiary)
+				r.legendKbd(c, t, "Esc")
+			})
 		})
-	})
+	}).Radius(design.RadiusLG).Label(r.tr("命令面板", "Command palette"))
+}
+
+// legendKbd draws one key cap of the palette's footer legend, with an
+// accessible name that says what it is: the cap's visible text is only the key
+// ("Esc"), so a reader — assistive technology, a frame test, a drive step —
+// looking for "Esc" cannot tell the legend's key from a command *named* after
+// it (the session's "Esc: 关闭 / 拒绝 / 停止"). The label carries the legend's
+// own name and the visible glyphs stay as they are.
+func (r *Root) legendKbd(c *ui.Context, t *design.Tokens, key string) {
+	uikit.Kbd(c, t, key).Label(r.tr("图例："+key, "Legend: "+key))
 }
 
 // paletteEntry is one row of the palette's List: a group heading or one
@@ -1437,18 +1769,20 @@ func (r *Root) overlays(c *ui.Context) {
 		open := true
 		// Name the dialog for assistive technology: the modal is a dialog of
 		// navigation + page, and a screen reader announces its name on open.
-		ui.Modal(c, &open, func() { r.settings(c, &open) }).Label(r.tr("设置", "Settings"))
+		// The panel itself stays the official ui.Modal look (one dialog
+		// vocabulary in the window, AGENTS §3.6); it arrives with the product's
+		// overlay transition instead of popping (B-spec §1.5: 160ms in, 120ms
+		// out).
+		ui.Modal(c, &open, func() { r.settings(c, &open) }).
+			Radius(design.RadiusLG).
+			Transition(design.TransitionOverlay(c)).
+			Label(r.tr("设置", "Settings"))
 		if !open {
-			// A dirty page keeps the surface open and asks once; a clean page
-			// (including one the user saved while the bar was showing) closes.
-			if r.settingsHasUnsaved() {
-				r.settingsDiscard = true
-				r.requestFrame()
-			} else {
-				r.settingsDiscard = false
-				r.settingsQuery = ""
-				r.nav.CloseSettings()
-			}
+			// The modal's own Escape and backdrop report the close here; the
+			// decision is shared with the close control and the shell's
+			// panel-level Escape (settingsClosed), so the unsaved guard cannot be
+			// bypassed by one of the three paths.
+			r.settingsClosed()
 		}
 	}
 	for _, name := range r.rt.slotNames(contracts.SlotOverlayPrefix) {
@@ -1462,6 +1796,23 @@ func (r *Root) overlays(c *ui.Context) {
 			}
 		})
 	}
+}
+
+// settingsClosed applies the decision every close path shares: a dirty page
+// keeps the surface open and asks once; a clean page (including one the user
+// saved while the bar was showing) closes. The modal's own Escape and backdrop,
+// the close control and the shell's panel-level Escape all end here, so the
+// unsaved guard cannot be bypassed by one of them.
+func (r *Root) settingsClosed() {
+	if r.settingsHasUnsaved() {
+		r.settingsDiscard = true
+		r.requestFrame()
+		return
+	}
+	r.settingsDiscard = false
+	r.settingsQuery = ""
+	r.nav.CloseSettings()
+	r.requestFrame()
 }
 
 // settingsHasUnsaved reports whether any settings page holds unsaved edits.
@@ -1686,6 +2037,24 @@ func groupSettingsPages(pages []contracts.SettingsPageSpec) []settingsGroup {
 	return groups
 }
 
+// bindSettingsEscape puts the settings surface's Escape on the panel's own
+// ancestor chain: the first press anywhere inside the surface — a page field, a
+// navigation row, a page header, the close control — closes it through the path
+// the close control takes, so the unsaved-changes guard always runs. A
+// focus-scoped handler inside a page could not promise that: the key never
+// reaches a page while the focus rests on another part of the surface
+// (A4-I-01's real cause, reproduced by the interaction QA on the close control
+// itself).
+func (r *Root) bindSettingsEscape(panel ui.Element) {
+	panel.OnShortcut(0, ui.KeyEscape, func() {
+		// The key arrives in the frame's action phase, after this frame built
+		// the surface, so the shell applies the close decision itself — the same
+		// one the modal's own Escape and the close control end in — and asks for
+		// the frame that draws it.
+		r.settingsClosed()
+	})
+}
+
 // settingsTitleRow is the settings surface header: a quiet product-level label,
 // the selected page's unsaved state and the close control. Page modules own the
 // real page title (their PageHeader); the host label here is deliberately muted
@@ -1700,11 +2069,15 @@ func (r *Root) settingsTitleRow(c *ui.Context, t *design.Tokens, open *bool, dir
 				TextColor(t.WarningText)
 		}
 		ui.Spacer(c).Grow(1)
+		// A tooltip here is fine: Escape is heard on the surface's own ancestor
+		// chain (settingsEscape), not through whichever control has the focus, so
+		// a tip cannot stand between the key and the surface (A4-I-01). The
+		// button keeps only its Label because a control named after the thing it
+		// does needs no second line.
 		closeLabel := r.tr("关闭设置", "Close settings")
 		uikit.IconButton(c, uikit.IconButtonOptions{
 			Key:     "chrome.settings.close",
 			Label:   closeLabel,
-			Tooltip: closeLabel,
 			Icon:    icons.Close(),
 			Size:    design.IconSizeS,
 			OnClick: func() { *open = false },
@@ -1736,11 +2109,12 @@ func (r *Root) settingsDiscardBar(c *ui.Context, t *design.Tokens) {
 	})
 }
 
-// settingsNavWidth is the fixed settings navigation column. It grew from 200
-// to 224 for the merged five-group navigation: the longer page names
-// (网络与搜索, 行为与限额) must not truncate while the page body keeps a useful
-// measure.
-const settingsNavWidth = 224
+// settingsNavWidth is the fixed settings navigation column: 220 DIP (B-spec
+// §3.4.1). It grew from 200 to 224 for the merged five-group navigation and
+// settles at 220 now that the page names ellipsize with their full label in a
+// tooltip-free Tooltip-less row (the page title is the row's own name, so the
+// navigation needs no tip that could take Escape from the surface).
+const settingsNavWidth = 220
 
 // settingsNavColumn renders the grouped settings navigation with its filter
 // field. The host owns the navigation; pages only contribute their specs.
@@ -1750,12 +2124,12 @@ func (r *Root) settingsNavColumn(c *ui.Context, t *design.Tokens, selected *stri
 	for _, group := range groups {
 		matchCount += len(group.pages)
 	}
-	// The navigation is a sunken surface (S1), as the window's own sidebar:
-	// ui.Sidebar's default theme.Surface is lighter than the modal panel in
-	// the dark theme, which inverted the ramp (dark navigation must sit below
-	// the page, 2026-11-17 UI review P2). BgSidebar keeps both themes on the
-	// shell's ramp.
-	ui.Column(c).Width(settingsNavWidth).FillHeight().Background(t.BgSidebar).Children(func() {
+	// The navigation is a sunken surface (S1), as the window's own sidebar, and it
+	// is separated from the page by the one pane seam (1px BorderL2): without it
+	// the two columns read as one field split by a 1.04:1 background difference
+	// (audit VD-04).
+	ui.Column(c).Width(settingsNavWidth).FillHeight().Background(t.SurfaceSunken()).
+		BorderWidth(0, 1, 0, 0).BorderColor(chromeSeam(t)).Children(func() {
 		ui.Column(c).FillWidth().Shrink(0).Gap(design.Space1).
 			Padding(design.Space3, design.Space3, design.Space2, design.Space3).Children(func() {
 			ui.SearchField(c, &r.settingsQuery).
@@ -1775,58 +2149,67 @@ func (r *Root) settingsNavColumn(c *ui.Context, t *design.Tokens, selected *stri
 		ui.Column(c).FillWidth().PaddingX(design.Space3).Children(func() {
 			ui.Divider(c)
 		})
-		ui.Sidebar(c, selected, func() {
-			var scrollTarget ui.Element
-			addPages := func(pages []contracts.SettingsPageSpec) {
-				for _, page := range pages {
-					item := ui.SidebarItem(c, page.ID, nil, page.Title)
-					// A page holding an unsaved draft carries a small warning
-					// dot on its nav row, named "未保存" for assistive
-					// technology, so the user sees WHICH page has the draft
-					// (the title row's global badge alone did not say; settings
-					// IA review P0-5, audit UX-16).
-					if page.Dirty != nil && page.Dirty() {
-						item.Children(func() {
-							ui.Box(c).Size(design.Space2, design.Space2).Shrink(0).
-								Radius(design.RadiusMax).Background(t.Warning).
-								Label(r.tr("未保存", "Unsaved"))
-						})
+		// The page rows build with the navigation's local theme, so the native
+		// chosen-row paint is the quiet selection tint instead of mygo's accent
+		// block (B-spec §3.4.1, AGENTS §3.11).
+		ui.Themed(c, navTheme(t)).Background(ui.Transparent).
+			Grow(1).Shrink(1).FillWidth().Children(func() {
+			ui.Sidebar(c, selected, func() {
+				var scrollTarget ui.Element
+				addPages := func(pages []contracts.SettingsPageSpec) {
+					for _, page := range pages {
+						item := ui.SidebarItem(c, page.ID, nil, page.Title)
+						// A page holding an unsaved draft carries a small warning
+						// dot on its nav row, named "未保存" for assistive
+						// technology, so the user sees WHICH page has the draft
+						// (the title row's global badge alone did not say; settings
+						// IA review P0-5, audit UX-16).
+						if page.Dirty != nil && page.Dirty() {
+							item.Children(func() {
+								ui.Box(c).Size(design.Space2, design.Space2).Shrink(0).
+									Radius(design.RadiusMax).Background(t.Warning).
+									Label(r.tr("未保存", "Unsaved"))
+							})
+						}
+						if page.ID == *selected {
+							scrollTarget = item
+						}
 					}
-					if page.ID == *selected {
-						scrollTarget = item
+				}
+				for _, group := range groups {
+					group := group
+					title := r.settingsSectionTitle(group.section)
+					// A group holding one page whose title repeats the section title
+					// (About) renders without a redundant header.
+					if len(group.pages) == 1 && group.pages[0].Title == title {
+						addPages(group.pages)
+						continue
+					}
+					// The 高级 group is a real native collapsible section, closed by
+					// default so the daily pages dominate the navigation. Search and
+					// deep links force it open.
+					var open *bool
+					if group.section == "高级" && !searching {
+						open = &r.settingsAdvancedOpen
+					}
+					ui.SidebarSection(c, title, open, func() { addPages(group.pages) })
+				}
+				if r.settingsScrollToSelected {
+					r.settingsScrollToSelected = false
+					if scrollTarget.Valid() {
+						scrollTarget.ScrollIntoView()
 					}
 				}
-			}
-			for _, group := range groups {
-				group := group
-				title := r.settingsSectionTitle(group.section)
-				// A group holding one page whose title repeats the section title
-				// (About) renders without a redundant header.
-				if len(group.pages) == 1 && group.pages[0].Title == title {
-					addPages(group.pages)
-					continue
-				}
-				// The 高级 group is a real native collapsible section, closed by
-				// default so the daily pages dominate the navigation. Search and
-				// deep links force it open.
-				var open *bool
-				if group.section == "高级" && !searching {
-					open = &r.settingsAdvancedOpen
-				}
-				ui.SidebarSection(c, title, open, func() { addPages(group.pages) })
-			}
-			if r.settingsScrollToSelected {
-				r.settingsScrollToSelected = false
-				if scrollTarget.Valid() {
-					scrollTarget.ScrollIntoView()
-				}
-			}
-			r.slot(c, contracts.SlotSettingsSidebar)
-		}).Label(r.tr("设置导航", "Settings navigation")).
-			Grow(1).Shrink(1).FillWidth().PaddingY(design.Space1).
-			// The native Sidebar paints theme.Surface by default; the sunken
-			// navigation token keeps the dark ramp below the modal panel.
-			Background(t.BgSidebar)
+				r.slot(c, contracts.SlotSettingsSidebar)
+			}).Label(r.tr("设置导航", "Settings navigation")).
+				Grow(1).Shrink(1).FillWidth().PaddingY(design.Space1).
+				// The native Sidebar paints theme.Surface by default. The settings
+				// panel is a floating overlay (S4), so its navigation takes the
+				// raised surface (S2): one step below the page, one step above the
+				// window's own sidebar, and no longer the S1 the scrimmed page
+				// behind it uses.
+				Background(t.SurfaceSunken())
+		})
 	})
 }
 
@@ -1897,7 +2280,9 @@ func (r *Root) settings(c *ui.Context, open *bool) {
 
 	allOrdered := flattenSettingsGroups(groupSettingsPages(allPages))
 	if len(allOrdered) == 0 {
-		ui.Column(c).Width(panelW).Padding(design.Space4).Gap(design.Space2).Children(func() {
+		empty := ui.Column(c).Width(panelW).Padding(design.Space4).Gap(design.Space2)
+		r.bindSettingsEscape(empty)
+		empty.Children(func() {
 			r.settingsTitleRow(c, t, open, false)
 			design.Apply(ui.Text(c, r.locale.T("settings.none")), t.TextMuted(design.TypeXS))
 			r.slot(c, contracts.SlotSettingsSidebar)
@@ -1914,15 +2299,17 @@ func (r *Root) settings(c *ui.Context, open *bool) {
 	if len(ordered) == 0 {
 		// The search matched no page: keep the navigation and the close control
 		// reachable, and say so in the content column.
-		ui.Row(c).Width(panelW).Height(panelH).Children(func() {
+		noMatch := ui.Row(c).Width(panelW).Height(panelH)
+		r.bindSettingsEscape(noMatch)
+		noMatch.Children(func() {
 			r.settingsNavColumn(c, t, &selected, nil)
 			ui.Column(c).FillHeight().Grow(1).Shrink(1).Children(func() {
 				ui.Row(c).FillWidth().Shrink(0).AlignItems(ui.Center).Gap(design.Space2).
-					Padding(design.Space4, design.Space4, design.Space2).Children(func() {
+					Padding(design.Space6, design.Space6, design.Space2, design.Space6).Children(func() {
 					r.settingsTitleRow(c, t, open, false)
 				})
 				design.Apply(ui.Text(c, r.tr("没有匹配的设置", "No matching settings")),
-					t.TextMuted(design.TypeXS)).PaddingX(design.Space4)
+					t.TextMuted(design.TypeXS)).PaddingX(design.Space6)
 			})
 		})
 		return
@@ -1957,21 +2344,30 @@ func (r *Root) settings(c *ui.Context, open *bool) {
 	if !dirty {
 		r.settingsDiscard = false
 	}
-	ui.Row(c).Width(panelW).Height(panelH).Children(func() {
+	// The settings surface is a floating layer, not a page: it takes the
+	// overlay fill (S4) so in the dark appearance it sits above the page instead
+	// of reading as a hole in it (DESIGN.md §5.1 surface ramp).
+	panel := ui.Row(c).Width(panelW).Height(panelH).Background(t.BgOverlay)
+	r.bindSettingsEscape(panel)
+	panel.Children(func() {
 		r.settingsNavColumn(c, t, &displaySelected, groups)
 		ui.Column(c).FillHeight().Grow(1).Shrink(1).Children(func() {
 			ui.Row(c).FillWidth().Shrink(0).AlignItems(ui.Center).Gap(design.Space2).
-				Padding(design.Space4, design.Space4, design.Space2).Children(func() {
+				Padding(design.Space6, design.Space6, design.Space2, design.Space6).Children(func() {
 				r.settingsTitleRow(c, t, open, dirty)
 			})
 			if r.settingsDiscard {
-				ui.Row(c).FillWidth().Shrink(0).PaddingX(design.Space4).Children(func() {
+				ui.Row(c).FillWidth().Shrink(0).PaddingX(design.Space6).Children(func() {
 					r.settingsDiscardBar(c, t)
 				})
 			}
+			// The page column keeps the reading measure: a settings page is prose
+			// and form rows, and a 900 DIP line of 13 DIP text is unreadable
+			// (B-spec §3.4.1: content max width 640). Its inset is Space6, the
+			// page region step.
 			ui.Scroll(c).FillWidth().Grow(1).Shrink(1).
-				Padding(0, design.Space4, design.Space4).Children(func() {
-				ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
+				Padding(design.Space0, design.Space6, design.Space6, design.Space6).Children(func() {
+				ui.Column(c).Gap(design.Space3).MaxWidth(design.ProseMeasure).Children(func() {
 					r.slot(c, contracts.SlotSettingsHeader)
 					r.slot(c, contracts.SlotSettingsPageBody)
 					// Hand a pending item hit to the page before it builds: the
@@ -1991,7 +2387,7 @@ func (r *Root) settings(c *ui.Context, open *bool) {
 			// The page's primary action stays in a fixed footer outside the
 			// scrolling body, so it is visible without scrolling to the end.
 			if current.Footer != nil || r.hasAnySlot(contracts.SlotSettingsPageFooter) {
-				ui.Column(c).FillWidth().Shrink(0).PaddingX(design.Space4).Children(func() {
+				ui.Column(c).FillWidth().Shrink(0).PaddingX(design.Space6).Children(func() {
 					// External slot contributions stay as bare content above the
 					// page's own footer; uikit.PageFooter draws the divider and
 					// action row (the single source — the host must not add a

@@ -16,6 +16,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
@@ -255,47 +256,46 @@ func TestToastCloseButtonDismisses(t *testing.T) {
 	}
 }
 
-func TestToastStackSitsTopRightBelowHeader(t *testing.T) {
-	// The stack is a top-right popup under the app's top header: its copy sits
-	// on the right half of the window, below the 72 DIP header (so it never
-	// covers the title, tabs or header actions), and far above the conversation
-	// composer at the window bottom.
+func TestToastStackSitsInBottomRightCorner(t *testing.T) {
+	// The stack lives in the window's bottom-right corner (audit VD-02): its
+	// copy sits on the right half of the window, low enough that it covers no
+	// message the user is reading, and it never reaches the composer's own
+	// control line at the very bottom of the window.
 	h := newHarness(t, "zh")
 	tester := h.tester()
-	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "右上角通知"})
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "右下角通知"})
 	tester.Frame()
-	rect, ok := tester.Find("右上角通知")
+	tester.Advance(design.MotionBase + 20*time.Millisecond)
+	tester.Frame()
+	rect, ok := tester.Find("右下角通知")
 	if !ok {
 		t.Fatalf("toast text missing; texts = %v", tester.Texts())
 	}
 	const (
 		windowWidth  = 1200
 		windowHeight = 800
-		// The top-level chrome is the 40 DIP title row plus the 32 DIP tab row.
-		headerHeight = 72
 	)
-	if rect.X <= windowWidth*0.6 {
-		t.Fatalf("toast X = %.1f, want it in the top-right (x > %.1f)", rect.X, windowWidth*0.6)
+	if rect.X <= windowWidth*0.5 {
+		t.Fatalf("toast X = %.1f, want it in the right half (x > %.1f)", rect.X, windowWidth*0.5)
 	}
-	if rect.Y >= 140 {
-		t.Fatalf("toast Y = %.1f, want it just below the header (y < 140)", rect.Y)
+	if rect.Y <= windowHeight*0.5 {
+		t.Fatalf("toast Y = %.1f, want it in the bottom half (y > %.1f)", rect.Y, windowHeight*0.5)
 	}
-	if rect.Y < headerHeight {
-		t.Fatalf("toast Y = %.1f, want it below the %d DIP header", rect.Y, headerHeight)
-	}
-	if bottom := rect.Y + rect.H; bottom >= windowHeight/2 {
-		t.Fatalf("toast bottom = %.1f, want it well above the composer (window bottom)", bottom)
+	if bottom := rect.Y + rect.H; bottom > windowHeight-toastInset {
+		t.Fatalf("toast bottom = %.1f, want it above the window's bottom inset", bottom)
 	}
 }
 
-func TestToastStackGrowsDownwardFromTop(t *testing.T) {
-	// The viewport aligns the stack at the top: a newer toast appears below the
-	// older one instead of pushing it upward (the old bottom-anchored layout).
+func TestToastStackGrowsUpwardFromBottom(t *testing.T) {
+	// The viewport pins the stack to the bottom edge: a newer toast appears
+	// below the older one, and the group grows upward as notifications arrive.
 	h := newHarness(t, "zh")
 	tester := h.tester()
 	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "旧通知"})
 	tester.Frame()
 	h.notifier.trigger(contracts.Notification{ID: "n2", Level: contracts.NotifySuccess, Text: "新通知"})
+	tester.Frame()
+	tester.Advance(design.MotionBase + 20*time.Millisecond)
 	tester.Frame()
 	oldRect, ok := tester.Find("旧通知")
 	if !ok {
@@ -305,11 +305,11 @@ func TestToastStackGrowsDownwardFromTop(t *testing.T) {
 	if !ok {
 		t.Fatalf("second toast missing; texts = %v", tester.Texts())
 	}
-	if oldRect.Y >= 140 {
-		t.Fatalf("first toast Y = %.1f, want the stack anchored at the top", oldRect.Y)
+	if oldRect.Y <= 800/2 {
+		t.Fatalf("first toast Y = %.1f, want the stack anchored at the bottom", oldRect.Y)
 	}
 	if newRect.Y <= oldRect.Y {
-		t.Fatalf("newer toast Y = %.1f, want it below the older one at %.1f (top-down stack)",
+		t.Fatalf("newer toast Y = %.1f, want it below the older one at %.1f (bottom-up stack)",
 			newRect.Y, oldRect.Y)
 	}
 }
@@ -348,6 +348,33 @@ func TestToastExpiresThroughTheFramework(t *testing.T) {
 	}
 }
 
+func TestToastErrorStaysUntilClosed(t *testing.T) {
+	h := newHarness(t, "zh")
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyError, Text: "失败消息"})
+	tester.Frame()
+	h.assertTexts(tester, "失败消息")
+
+	// A failure the user missed leaves no trace: an error toast does not expire
+	// on the framework's timeout (B-spec §3.1.5, audit VD-02). Success keeps its
+	// four seconds, so the pair shows which one is sticky.
+	h.notifier.trigger(contracts.Notification{ID: "n2", Level: contracts.NotifySuccess, Text: "成功消息"})
+	tester.Frame()
+	tester.Advance(5 * time.Second)
+	tester.Frame()
+	h.assertTexts(tester, "失败消息")
+	h.assertNoTexts(tester, "成功消息")
+
+	// Closing it dismisses both the native toast and the notifier entry.
+	closeInfo, ok := tester.AccessByRole(ui.RoleButton, "关闭通知")
+	if !ok {
+		t.Fatalf("the error toast has no close control; texts = %v", tester.Texts())
+	}
+	tester.ClickAt(closeInfo.Bounds.X+closeInfo.Bounds.W/2, closeInfo.Bounds.Y+closeInfo.Bounds.H/2)
+	tester.Frame()
+	h.assertNoTexts(tester, "失败消息")
+}
+
 func TestToastShowsAtMostTwoAndQueuesRest(t *testing.T) {
 	h := newHarness(t, "zh")
 	tester := h.tester()
@@ -360,8 +387,8 @@ func TestToastShowsAtMostTwoAndQueuesRest(t *testing.T) {
 	}
 	tester.Frame()
 
-	// H14: at most two toasts show at once; the rest wait in the module's queue
-	// with a visible count so a burst never stacks over the transcript.
+	// H14/VD-02: at most two toasts show at once; the rest wait in the module's
+	// queue with a visible count so a burst never stacks over the reading column.
 	h.assertTexts(tester, "消息1", "消息2", "+ 3 条通知排队")
 	h.assertNoTexts(tester, "消息3", "消息4", "消息5")
 
@@ -541,7 +568,13 @@ func TestToastIgnoresStoredHiddenLevels(t *testing.T) {
 			h.notifier.trigger(contracts.Notification{ID: "n3", Level: contracts.NotifyInfo, Text: "信息消息"})
 			h.notifier.trigger(contracts.Notification{ID: "n4", Level: contracts.NotifyWarning, Text: "警告消息"})
 			tester.Frame()
-			h.assertTexts(tester, "信息消息", "警告消息")
+			// The stack is two deep and the error stays until it is closed, so the
+			// warning waits one timeout behind the info card: every level is still
+			// delivered, just in order.
+			h.assertTexts(tester, "信息消息")
+			tester.Advance(5 * time.Second)
+			tester.Frame()
+			h.assertTexts(tester, "警告消息")
 		})
 	}
 }

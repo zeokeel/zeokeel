@@ -1,7 +1,7 @@
 package home_test
 
 // Whole-shell frame test for UD-01 (2026-11 wave D): on first launch (zero
-// conversations) the screen carries exactly ONE accent-filled primary "新对话"
+// conversations) the screen carries exactly ONE accent-filled primary "新建会话"
 // — the sidebar's. Home's empty-state next steps used to render a second
 // filled primary of the same name, breaking DESIGN.md's ≤1 primary budget
 // (AP-20); the Home action drops to the neutral outlined secondary while the
@@ -30,8 +30,10 @@ func buttonFill(tester *ui.Tester, rect ui.Rect) [4]uint8 {
 }
 
 // TestFirstLaunchSingleAccentPrimary boots the shell with the sidebar and Home
-// and zero conversations, then counts the "新对话" buttons painted with the
-// accent primary fill: exactly one (the sidebar's), not two.
+// and zero conversations: the sidebar's new-session row is a ghost row and
+// Home's action is the outlined secondary, so first launch paints NO accent
+// fill on a "新建会话" control at all (the window's one filled primary belongs
+// to the composer, and with no model configured Home's single action is 配置模型).
 func TestFirstLaunchSingleAccentPrimary(t *testing.T) {
 	h := newHarness(t, &fakeChat{}) // no conversations at all
 	activate(t, h, sidebar.Module(), sidebar.Config{})
@@ -49,7 +51,7 @@ func TestFirstLaunchSingleAccentPrimary(t *testing.T) {
 	primaries := 0
 	newChatButtons := 0
 	for _, info := range tester.AccessAll() {
-		if info.Role != ui.RoleButton || info.Name != "新对话" {
+		if info.Role != ui.RoleButton || info.Name != "新建会话" {
 			continue
 		}
 		newChatButtons++
@@ -57,11 +59,15 @@ func TestFirstLaunchSingleAccentPrimary(t *testing.T) {
 			primaries++
 		}
 	}
-	if newChatButtons < 2 {
-		t.Fatalf("expected the sidebar and Home both to offer 新对话 on first launch; found %d", newChatButtons)
+	// First launch has no model configured, so Home's one action is 配置模型
+	// and the sidebar's 新建会话 is the only accent primary. When a model IS
+	// configured, Home offers 新建会话 as an outlined secondary instead — the
+	// budget stays one accent fill either way.
+	if newChatButtons != 1 {
+		t.Fatalf("expected exactly one 新建会话 button across the sidebar and Home; found %d", newChatButtons)
 	}
-	if primaries != 1 {
-		t.Fatalf("UD-01: first launch paints %d accent-filled 新对话 primaries, want exactly 1 (the sidebar's); Home's must be the outlined secondary",
+	if primaries != 0 {
+		t.Fatalf("UD-01: first launch paints %d accent-filled 新建会话 primaries, want 0 (the sidebar row is a ghost row, Home's action is the outlined secondary)",
 			primaries)
 	}
 }

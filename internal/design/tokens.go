@@ -34,24 +34,30 @@ const (
 // TypeMetrics returns the font size, fixed line height and weight of a role.
 // The numbers are the design system's own scale, tuned for a desktop UI at
 // the brand's 14px base.
+//
+// The weight is part of the role, not a per-call-site choice: headings carry
+// 600, row titles and controls 500, body and metadata 400. A screen that needs
+// emphasis on body text passes design.WeightSemibold explicitly; everything
+// else inherits the role's weight, which keeps one hierarchy across 13 UI
+// modules and removes the raw-literal font weights the old call sites had.
 func TypeMetrics(r TypeRole) (size, line float32, weight int) {
 	switch r {
 	case TypeXL:
-		return 24, 32, 400
+		return 24, 32, 600
 	case TypeL:
-		return 20, 28, 500
+		return 20, 28, 600
 	case TypeM:
-		return 16, 24, 400
+		return 16, 24, 600
 	case TypeBody:
 		return 14, 22, 400
 	case TypeS:
-		return 14, 24, 400
+		return 14, 22, 500
 	case TypeXS:
 		return 13, 20, 400
 	case TypeXXS:
 		return 12, 18, 400
 	default:
-		return 11, 14, 400
+		return 11, 14, 500
 	}
 }
 
@@ -72,6 +78,10 @@ type Tokens struct {
 	BgBase    ui.Color // page background
 	BgSidebar ui.Color // sidebar background
 	BgRaised  ui.Color // raised surface: cards, composer, panels
+	// BgOverlay is the floating layer: dialogs, menus, the palette and
+	// toasts. In the dark appearance it is one step above BgRaised so a
+	// popover still reads as raised above a card.
+	BgOverlay ui.Color
 	BgStrong  ui.Color // strong raised surface: filled neutral controls
 	BgHover   ui.Color // hovered row tint
 	// BgSelected is the stronger tint of the current row, menu item or tab;
@@ -83,8 +93,13 @@ type Tokens struct {
 	LabelSecondary ui.Color
 	LabelTertiary  ui.Color
 
-	BorderL2 ui.Color // regular divider
-	BorderL3 ui.Color // stronger divider
+	// BorderL1 is the hairline inside a surface (a card header rule, a table
+	// head); BorderL2 the structural rule (a pane's edge); BorderL3 the edge
+	// of an interactive box (input, card, compositor, menu at rest). Three
+	// weights are the whole ladder.
+	BorderL1 ui.Color
+	BorderL2 ui.Color
+	BorderL3 ui.Color
 
 	Accent        ui.Color
 	AccentHover   ui.Color
@@ -127,12 +142,14 @@ func fromPalette(p brand.Palette, dark bool) *Tokens {
 		BgBase:         p.Background,
 		BgSidebar:      p.Sidebar,
 		BgRaised:       p.Surface,
+		BgOverlay:      p.SurfaceOverlay,
 		BgStrong:       p.SurfaceStrong,
 		BgHover:        p.Hover,
 		BgSelected:     p.RowSelected,
 		LabelPrimary:   p.Text,
 		LabelSecondary: p.TextSecondary,
 		LabelTertiary:  p.TextTertiary,
+		BorderL1:       p.BorderSubtle,
 		BorderL2:       p.Border,
 		BorderL3:       p.BorderStrong,
 		Accent:         p.Accent,

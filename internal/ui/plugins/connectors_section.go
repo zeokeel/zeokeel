@@ -132,7 +132,13 @@ type connectorsState struct {
 	timeoutMs string
 	// envErr is the environment field's own error (KEY=VALUE per line).
 	envErr string
-	// formErr is the form-level validation/save error shown in the dialog.
+	// nameErr is the name field's own error: the one validation message that has
+	// an obvious field to attach to, so it renders under 名称 instead of in the
+	// dialog's reserved error row at the bottom of the form.
+	nameErr string
+	// formErr is the form-level validation/save error shown in the dialog's
+	// reserved error row above the footer (never inside the scrolling body: an
+	// error inside the clip was sliced in half at the fold, 2026-11-18 review).
 	formErr string
 
 	// testing/testStatus/testErr are the async connection test's state.
@@ -216,9 +222,10 @@ func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 
 	// The intro line comes first, then the count/action row — the same order
 	// the Skills tab uses, so the two tabs read as one page family.
-	design.Apply(ui.Text(c, st.tr(
-		"连接器把外部 MCP 服务（第三方工具服务，如浏览器、数据库、搜索）接入会话；启用变更在重启后生效。",
-		"Connectors bring external MCP servers (third-party tool services such as browsers, databases and search) into the session; enable changes apply after a restart.")),
+	// The page hint states when a change lands, read from the composition's
+	// actual hot-reload capability (A5 P0): the unconditional "restart" sentence
+	// was false wherever the reloader is mounted.
+	design.Apply(ui.Text(c, connectorPageHint(st)),
 		t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
 	p.buildCollectionRow(c, t, st, service, hasPlugins, settings, hasSettings, len(cards))
 	if p.parseErr != "" {
@@ -270,14 +277,25 @@ func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 	// The workspace opt-in is a connector option, not a second connector list:
 	// it stays a disclosure under the grid.
 	ui.Collapsible(c, st.tr("连接器选项", "Connector options"), &p.optionsOpen, func() {
-		ui.Field(c, st.tr("读取工作区 mcp.json", "Read workspace mcp.json"), func() {
-			sw := ui.Switch(c, &p.workspaceOptIn)
-			sw.Label(st.tr("启用工作区 mcp.json", "Enable workspace mcp.json"))
-			if sw.Changed() {
+		// The one boolean option uses the settings pages' switch-row anatomy
+		// (uikit.SwitchRow: caption at the section edge, switch at the trailing
+		// edge of the SAME line, description below). A bare ui.Field left the
+		// switch alone on the next line, reading as an orphaned control
+		// (2026-11-18 review).
+		// The row reads as one pair only inside the product's reading measure:
+		// the settings pages put SwitchRow in a 640 DIP column, so a switch on the
+		// page's right edge (some 500 DIP from its caption) looked detached
+		// (2026-11-18 review). Caption and description share the 640 column.
+		ui.Column(c).MaxWidth(design.ProseMeasure).Children(func() {
+			if uikit.SwitchRow(c, uikit.SwitchRowOptions{
+				Label:       st.tr("读取工作区 mcp.json", "Read workspace mcp.json"),
+				Description: mcpWorkspaceHint(st, p),
+				Value:       &p.workspaceOptIn,
+			}) {
 				p.saveWorkspaceOptIn(st, settings)
 				c.Invalidate()
 			}
-		}).Description(mcpWorkspaceHint(st, p))
+		})
 		// The opt-in lets repository content define commands that run with the
 		// app's full permissions: disclose the trust exchange next to the path
 		// hint (2026-11 audit (d), disclosure only). A static caution is
@@ -343,12 +361,15 @@ func (p *connectorsState) buildCollectionRow(c *ui.Context, t *design.Tokens, st
 		// configuration the user may want to repair by hand.
 		canAdd := hasSettings && p.parseErr == ""
 		add := design.Apply(ui.Button(c, addLabel), t.SecondaryButton()).Disabled(!canAdd)
+		// A disabled control explains itself in the page body (the empty state or
+		// the ErrorLine above), never in a tooltip (B-spec §4.4); the Description
+		// still tells assistive technology why the action is unavailable.
 		switch {
 		case !hasSettings:
-			add = add.Tooltip(st.tr("设置存储未启用，无法保存连接器",
+			add = add.Description(st.tr("设置存储未启用，无法保存连接器",
 				"Settings store not enabled; connectors cannot be saved"))
 		case p.parseErr != "":
-			add = add.Tooltip(st.tr("配置无法解析，请先修复设置中的 mcp.servers",
+			add = add.Description(st.tr("配置无法解析，请先修复设置中的 mcp.servers",
 				"The configuration cannot be parsed; repair mcp.servers in settings first"))
 		}
 		if add.Clicked() && canAdd {
@@ -604,18 +625,26 @@ func buildLiveConnectorCard(st *state, plugin contracts.MCPPlugin, index int) co
 func (p *connectorsState) buildCard(c *ui.Context, t *design.Tokens, st *state,
 	card connectorCard, settings contracts.SettingsService, service contracts.PluginsService,
 	hasPlugins bool, auth contracts.MCPAuthService, hasAuth bool) {
-	design.Apply(ui.Column(c).Key("connector/"+card.Key), t.Panel()).
-		FillWidth().FillHeight().Padding(design.Space3).Gap(design.Space2).Children(func() {
+	// One capability card (B-spec §3.4.6): panel surface at RadiusLG 12, 16 DIP
+	// inside, a 14/600 title and a 12/18 two-line description; hover brightens the
+	// fill and never adds a shadow (a card is not an elevation).
+	cardBody := design.Apply(ui.Column(c).Key("connector/"+card.Key), t.Panel()).
+		FillWidth().FillHeight().Padding(design.SpaceSection).Gap(design.Space2)
+	if cardBody.Hovered() {
+		cardBody = cardBody.Background(t.BgHover)
+	}
+	cardBody.Transition(design.TransitionColors(c)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			ui.Icon(c, icons.Plug()).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelSecondary)
-			design.Apply(ui.Text(c, card.Name), t.Font(design.TypeS)).
+			// TypeBody with the one documented semibold exception (B-spec §1.3).
+			design.Apply(ui.Text(c, card.Name), t.Font(design.TypeBody)).
 				FontWeight(design.WeightSemibold).TextColor(t.LabelPrimary).
 				Grow(1).Shrink(1).MinWidth(design.Space0).MaxLines(1).Ellipsis("…")
 			badge := uikit.StatusBadge(c, t, card.StatusKind, card.StatusLabel)
 			if tooltip := strings.TrimSpace(card.StatusTooltip); tooltip != "" {
 				badge = badge.Tooltip(tooltip)
 			}
-			actionsLabel := st.tr("连接器操作 ", "Connector actions ") + card.Name
+			actionsLabel := rowActionLabel(st, st.tr("连接器操作", "Connector actions"), card.Name)
 			menu := uikit.IconButton(c, uikit.IconButtonOptions{
 				Key:   "connector.menu/" + card.Key,
 				Label: actionsLabel, Tooltip: actionsLabel,
@@ -881,10 +910,10 @@ func connectorToolCountLabel(st *state, count int) string {
 func connectorPageHint(st *state) string {
 	if st != nil && st.mcpHotReload() {
 		return st.tr(
-			"连接器把外部 MCP 服务接入会话；新增、编辑、启停与授权立即生效。",
-			"Connectors expose external MCP servers to sessions; add, edit, enablement and authorization apply immediately.")
+			"连接器把外部 MCP 服务（第三方工具服务，如浏览器、数据库、搜索）接入会话；新增、编辑、启停与授权立即生效。",
+			"Connectors bring external MCP servers (third-party tool services such as browsers, databases and search) into the session; add, edit, enablement and authorization apply immediately.")
 	}
 	return st.tr(
-		"连接器把外部 MCP 服务接入会话；启用变更在重启后生效。",
-		"Connectors expose external MCP servers to sessions; enablement changes apply after a restart.")
+		"连接器把外部 MCP 服务（第三方工具服务，如浏览器、数据库、搜索）接入会话；启用变更在重启后生效。",
+		"Connectors bring external MCP servers (third-party tool services such as browsers, databases and search) into the session; enablement changes apply after a restart.")
 }

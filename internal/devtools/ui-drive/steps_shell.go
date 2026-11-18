@@ -18,14 +18,14 @@ import (
 
 func (d *drive) runShellSteps() {
 	// --- navigation -------------------------------------------------------
-	d.step("nav-landing", "uiroot", "导航：新对话落地页",
-		"侧栏「新对话」→ 进入会话页的新对话落地（hero 开始新对话 + composer），导航状态 session（旧的首页导航已移除）", func(c *check) {
+	d.step("nav-landing", "uiroot", "导航：新建会话落地页",
+		"侧栏「新建会话」→ 进入会话页的新对话落地（hero 发第一条消息 + composer），导航状态 session（旧的首页导航已移除）", func(c *check) {
 			d.resetToSession()
-			if !c.click("新对话") {
+			if !c.click("新建会话") {
 				return
 			}
 			d.drain(3)
-			c.mustText("开始新对话", "输入消息…")
+			c.mustText("发第一条消息", "输入消息…")
 			c.require(d.uiRoot.Navigator().Current() == "session",
 				"navigator.Current()=%q，期望 session", d.uiRoot.Navigator().Current())
 			c.require(!d.hasExactText("首页"), "侧栏仍显示已移除的「首页」导航项")
@@ -187,7 +187,7 @@ func (d *drive) runSidebarSteps() {
 			// Every rail destination must still be a labeled control. The old
 			// 首页 destination is gone: the new-chat landing replaces it.
 			missing := []string{}
-			for _, label := range []string{"新对话", "自动化", "能力", "设置"} {
+			for _, label := range []string{"新建会话", "自动化", "能力", "设置"} {
 				if _, ok := d.find(label); !ok {
 					missing = append(missing, label)
 				}

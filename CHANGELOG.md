@@ -4,6 +4,41 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.51] - 2026-11-18
+
+### Changed
+
+- **视觉语言 v2「精确中性」**：全产品按 Linear 精确中性 + Primer 企业清晰的评审结论重设（`docs/research/redesign-2026-11/A2-industry-design-languages.md`）。token：圆角 4/6/8/12/16（控件 8、卡片 12、composer 16）、边框三档 `BorderL1 6% / L2 9% / L3 15%`（暗 7/10/16）、hover 转中性 4.5%、选中 9% royal（暗 13% cyan）、字重烘焙进 type role（XL/L/M=600、S/XXXS=500）、新增 `BgOverlay`（暗色浮层比卡片高一阶）与 `ProseMeasure 640`；卡片与 composer 不再加阴影，浮层阴影改为接触+环境双层。
+- **动效首次落地**（此前全仓 0 处）：`design.MotionFast/Base/Enter/List` 与 `TransitionColors/TransitionHeight/TransitionOverlay/TransitionSize`、`ListFollowAnimation/ListMoveAnimation`；所有手绘 hover/pressed 接 80ms 渐变，展开 120ms，浮层 160/120ms，列表跟随 200ms；`ReduceMotion` 全关。
+- **壳层**：顶带 40→48（标题 14/600）、tabs 36、品牌行 56、导航/会话行 32、「新建会话」改 32 高 ghost 行 + `Ctrl+N` 键帽；侧栏选中统一 9% tint + 2px 左条（不再整块 accent）、导航图标回中性色；检查器底改 S1、右栏三层 header 合并为 tab/文档 tab/面包屑三层语义行；命令面板 640；toast 改底右锚（≤2 张、错误不自动消失、窄窗自适应 240）；Esc 在窗口级兜底的同时不再吞掉弹层/菜单的 Esc。
+- **会话**：消息节奏 24/12、用户气泡改 `BgStrong` 无描边 r8、助手元信息收到消息底部且 hover/focus 显形（固定 24 行高）、推理行 28/展开 13/20、会话 tabs 换官方 `ui.Tabs`、状态条改 32 高三段（运行态 / 用量 + 3px 进度 + 详情 popover）、composer 改平（1px L3、无阴影、r16）、发送按钮 32/r8、审批 pending 时发送降级且不画 accent 边。
+- **工具/审批/计划/提问/Markdown**：审批卡重做为「中性卡 + 2px Warning 左条 + StatusBadge + mono 目标块 + 范围披露（仅此一次/本会话/总是）+ Esc/⌘↵ 键帽」，去掉满宽警示带与整卡描边；计划审阅在有未提交反馈时禁用批准并说明原因；工具行统一 32 行解剖；Markdown 代码围栏补 28 高头部（语言 + 复制）与 1px 外框、mono 13/20；diff 去整块洗底。
+- **设置/能力/洞察/自动化**：设置面 880、导航 220、正文列 640、页脚 56（唯一 primary）、分组标题 16/600 且不再每节画规则线；权限三态从文字墙改摘要 + Bullet；控件列宽 320/160；能力卡 12 圆角/16 内距；连接器提示按真实热重载状态显示；分段控件改「抬升块」选中（去 accent 下划线）。
+- **侧栏/右栏/首页/欢迎页**：树行 32 + 缩进 12 + hover/focus 动作淡入、行尾 ⋯ 收敛到 `uikit.IconButton`；右栏属性表 96 label、产物行 32、文件树光标跟随预览；首页/欢迎页空态改三句式并删除开发者文案。
+- **术语与文案**：对象名统一「会话 / Session」，按钮「新建会话」，子智能体 / 团队成员 / 能力 / 右侧栏；`tokens`、轮/次、`录制`、`移除` 等按 A5 术语表统一（中英双侧）。
+
+### Added
+
+- `uikit.Kbd` / `uikit.KbdHint`（键位 chip，组合键经 `uikit.FormatShortcut` 按平台拼写）；`design` 新增 `BandHeight/BrandRowHeight/PaletteWidth/ToastWidth/ToastMinWidth/FooterHeight` 与 `SpaceInline/Row/Group/Section/Screen/Page` 语义别名。
+- 帧测试：hover 过渡（`Advance` 后取样）、列表跟随/重排、Esc 五上下文、浮层焦点归还、新建会话幂等、文件拖入落点、树选中跟随预览、`Kbd`、状态条三段。
+- 研发资产：`docs/research/redesign-2026-11/`（业界研究 A2、组件盘点 A1、视觉审计 A3、交互审计 A4、文案审计 A5、视觉契约 B-spec-v2）、`A3-qa/measure.sh`（视觉不变量检查）、`A4-qa/check.sh`（交互 QA 五段闸门）、`ui-drive` a4qa 步骤。
+
+### Fixed
+
+- 「新建会话」双击创建两个会话（同一输入事件重入）；窗口级 Esc 抢掉弹层/菜单的 Esc；禁用发送几乎不可见（1.15:1）；侧栏接缝 2px 双线；设置导航 0px 接缝；窄窗顶带尾簇被检查器裁切；`Breadcrumbs` 根节点不可返回文件树；右栏文件树选中与预览不一致。
+
+### Upgrade
+
+- `github.com/egoist/mygo v0.9.0 → v0.9.2`（新增 `Element.TruncateStart/TruncateMiddle`、`ListState.MoveAnimation/FollowAnimation`、`Dividers`、`ScrollbarStyle`、`PopoverMenuOptions`、touch/recorder；无导出符号删除）。`internal/design/registry.json` 的 `source.mygo` 与文档版本锚点同步到 v0.9.2。
+
+### 发布前逐屏复核（2026-11-18）
+
+- **正确性**：非零退出码不再被画成成功（`ToolCallStatusKind/Label` 把后端状态词与 `[exit code: N]` 折进同一词汇表；仅 shell 类工具重判，`cancelled` 保持中性）；工具行/工具卡/轨迹/生成文件卡/决策卡/后台任务面板同源。
+- **暗色可读性（P0）**：修复亮→暗切换后 Scroll 子树复用旧绘制层导致 composer/能力卡/设置面白底白字（壳层按外观+字号给根内容换 key）；设置面改 S4、导航用 `SurfaceSunken()`。
+- **动态面**：新增流式回复、MCP 测试连接、Skill 编辑、三附件等快照场景；队列计数改由 composer `×N` chip 承担（贴 `排队`、弹出层右对齐、带标题），停止后交回状态条徽章；轨迹与工具行尾部状态词同序；slash 与 `@` 菜单共用行骨架。
+- **表单与弹窗**：连接器/模型/技能五个弹窗统一为「头部固定 / 唯一滚动体 / 预留状态行 / 动作行一行」；校验错误内联在字段下方。
+- **细节**：`待审批 N` chip 改 needs-action warning 语义；能力卡 scope chip 定宽消除路径列错位；自动化行收敛到 3 个可见目标；图例键帽可访问名 `图例：Esc`；行内动作可访问名 `<动作>：<行名>`；设置页不再暴露内部会话 id；通知页不支持系统通知时改只读状态行。
+
 ## [0.2.50] - 2026-11-17
 
 ### Changed
@@ -1582,3 +1617,11 @@ controls (no webview, no browser engine).
 [0.1.2]: https://github.com/zeokeel/zeokeel/releases/tag/v0.1.2
 [0.1.1]: https://github.com/zeokeel/zeokeel/releases/tag/v0.1.1
 [0.1.0]: https://github.com/zeokeel/zeokeel/releases/tag/v0.1.0
+
+### 本轮收尾修复（2026-11-18 夜）
+
+- 暗色主题：修复「亮→暗切换后 Scroll 子树保留旧绘制层」导致的 composer / 能力卡 / 设置面残留亮色（壳层按外观+字号给根内容换 key，切换时整树重绘一次）。
+- 暗色 ramp：设置对话框改为 S4（`BgOverlay`），导航用新 token `SurfaceSunken()`（浅 S1 / 暗 S2），不再出现"对话框比页面还深"。
+- toast 与审批：有 pending 审批时通知栈让出底边、移到顶带下方，不再遮挡 `拒绝 / 允许一次`。
+- 禁用主按钮：页脚与 composer 发送同一套（实心 `BgStrong` + `BorderL2` + `DimDisabled(false)`），对比度从 1.05:1 提到约 5.9:1。
+- 会话：禁用发送的旁注（先配置模型 / 处理审批后可发送，可点），文件页驱动按目录/文件正确分类。

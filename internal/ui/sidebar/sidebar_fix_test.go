@@ -177,8 +177,8 @@ func TestSidebarWorkspaceMoreHitTarget(t *testing.T) {
 func TestSidebarWorkspaceEmptyHintNotMicroType(t *testing.T) {
 	h := newHarnessWithWorkspace(t, &fakeChat{}, sidebar.Config{}, newFakeWorkspace())
 	tester := h.tester()
-	h.assertTexts(tester, "还没有工作区", "点击 + 添加工作区")
-	hint, ok := tester.Find("点击 + 添加工作区")
+	h.assertTexts(tester, "还没有工作区", "选择 + 添加工作区")
+	hint, ok := tester.Find("选择 + 添加工作区")
 	if !ok {
 		t.Fatalf("workspace empty hint missing; texts = %v", tester.Texts())
 	}

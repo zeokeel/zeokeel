@@ -31,8 +31,13 @@ func TestHomeRendersInjectionPointRegions(t *testing.T) {
 	}
 
 	tester := h.tester()
+	// B-spec v2 replaced the developer-facing placeholder line ("这是 home 的
+	// 默认 Hero 空态。") with the product's three-part empty state: what the
+	// product is, what to do next, and the input. home's own fallback hero is
+	// still the thing a third-party contribution replaces, so the assertions
+	// below track that fallback, not the removed dev copy.
 	h.assertTexts(tester, "编译期模块化的桌面 AI agent。",
-		"这是 home 的默认 Hero 空态。", "问点什么…")
+		"选择一项开始，或打开工作区。", "问点什么…")
 
 	// A third-party contribution to home.hero replaces the module's default
 	// hero; home is not edited for this.
@@ -47,12 +52,12 @@ func TestHomeRendersInjectionPointRegions(t *testing.T) {
 	}
 	tester.Frame()
 	h.assertTexts(tester, "来自测试模块的 hero")
-	h.assertNoTexts(tester, "这是 home 的默认 Hero 空态。") // home's default hero is replaced
+	h.assertNoTexts(tester, "选择一项开始，或打开工作区。") // home's default hero is replaced
 
 	unregister()
 	tester.Frame()
 	h.assertNoTexts(tester, "来自测试模块的 hero")
-	h.assertTexts(tester, "这是 home 的默认 Hero 空态。") // default hero is back
+	h.assertTexts(tester, "选择一项开始，或打开工作区。") // default hero is back
 }
 
 // TestWelcomeExtendsHomeHero is the "new module, no host change" proof:
@@ -66,8 +71,11 @@ func TestWelcomeExtendsHomeHero(t *testing.T) {
 
 	welcomeFiber := activate(t, h.ctx, welcome.Module(), welcome.Config{})
 	tester.Frame()
+	// welcome's hero copy is product copy now, not a note about the module
+	// mechanism (A5 copy audit): the title stays, the line says what the agent
+	// does.
 	h.assertTexts(tester, "欢迎使用 ZeoKeel",
-		"这是一个独立编译的 UI 模块，通过注入点出现在宿主中。")
+		"读代码、改文件、跑验证：描述你想完成的事，剩下的交给它。")
 	// No host or home edit was needed for any of the above. Disposing the
 	// module unwinds the contributions through its kernel effects.
 	if err := welcomeFiber.Dispose(); err != nil {

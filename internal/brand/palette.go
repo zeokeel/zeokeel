@@ -80,9 +80,13 @@ const (
 // alternatives without changing the brand defaults.
 type Palette struct {
 	// Surfaces, from the page up to the strongest control fill.
+	// SurfaceOverlay is one step above Surface: a floating layer (dialog,
+	// menu, palette, toast) must still read as raised above a card in the
+	// dark appearance, where a translucent shadow alone barely separates.
 	Background     ui.Color
 	Sidebar        ui.Color
 	Surface        ui.Color
+	SurfaceOverlay ui.Color
 	SurfaceStrong  ui.Color
 	SurfacePressed ui.Color
 
@@ -97,7 +101,13 @@ type Palette struct {
 	TextSecondary ui.Color
 	TextTertiary  ui.Color
 
-	// Border and BorderStrong are the regular and the emphasized dividers.
+	// BorderSubtle, Border and BorderStrong are the three border weights of
+	// the interface: a hairline inside a surface (a card's header rule, a
+	// table head), a structural rule (the sidebar's edge, the top band's
+	// bottom), and the edge of an interactive box (an input, card, composer
+	// or menu at rest). Three weights are the whole ladder; a fourth reads
+	// as noise.
+	BorderSubtle ui.Color
 	Border       ui.Color
 	BorderStrong ui.Color
 
@@ -140,26 +150,33 @@ func LightPalette() Palette {
 	return Palette{
 		Background: ui.Hex(HexWhite), // logo/logo.svg:28
 		// Sidebar and SurfaceStrong are the cool brand neutrals from the
-		// wordmark preview (ADR 0001 §8.2): #F9FAFB and #F1F3F5.
-		Sidebar:        ui.Hex("#F9FAFB"),
+		// wordmark preview (ADR 0001 §8.2): #F7F8FA and #F2F4F7. The sidebar
+		// dropped one step from #F9FAFB so the navigation reads as its own
+		// surface next to a pure-white page without needing a heavier rule.
+		Sidebar:        ui.Hex("#F7F8FA"),
 		Surface:        ui.Hex(HexWhite), // raised cards separate by their border
-		SurfaceStrong:  ui.Hex("#F1F3F5"),
+		SurfaceOverlay: ui.Hex(HexWhite), // light floating layers: same white, elevation by shadow
+		SurfaceStrong:  ui.Hex("#F2F4F7"),
 		SurfacePressed: ui.RGBA(13, 68, 246, 0.10), // brand royal blue at 10%
-		Hover:          ui.RGBA(13, 68, 246, 0.06), // brand royal blue at 6%
-		RowSelected:    ui.RGBA(13, 68, 246, 0.12), // brand royal blue at 12%
-		Text:           ui.Hex(HexInk),             // wordmark light ink, 18.9:1 on white
-		TextSecondary:  ui.Hex("#545C6A"),          // ink cooled toward blue, 6.74:1 on white
+		// Hover is transient and therefore neutral: a blue wash on every
+		// row made the whole window feel tinted. Selection keeps the brand
+		// hue so hover and selection differ in kind, not only in strength.
+		Hover:         ui.RGBA(15, 17, 21, 0.045), // ink at 4.5%
+		RowSelected:   ui.RGBA(13, 68, 246, 0.09), // brand royal blue at 9%
+		Text:          ui.Hex(HexInk),             // wordmark light ink, 18.9:1 on white
+		TextSecondary: ui.Hex("#4A5160"),          // ink cooled toward blue, 7.6:1 on white
 		// Tertiary carries 11–13px explanations, timestamps and usage numbers,
 		// so it must clear WCAG AA (4.5:1) on every light surface AND on the
-		// 12% RowSelected tint over them (selected rows keep their metadata):
-		// resting 6.34:1 on BgBase/BgRaised, 6.07:1 on BgSidebar, 5.70:1 on
-		// BgStrong; selected 5.19/4.99/4.71 (2026-11 audit UX-13). It stays
-		// lighter than TextSecondary so the Text > Secondary > Tertiary
-		// hierarchy survives (P0-2, review-round3); Secondary moved one step
-		// darker with it so the order holds on the tint too (5.52/5.30/5.01).
-		TextTertiary:  ui.Hex("#58606E"),         // ink cooled, WCAG AA resting and selected
-		Border:        ui.RGBA(15, 17, 21, 0.10), // ink at 10%
-		BorderStrong:  ui.RGBA(15, 17, 21, 0.16), // ink at 16%
+		// 9% RowSelected tint over them (selected rows keep their metadata):
+		// 5.44:1 on BgBase/BgRaised, 5.12:1 on BgSidebar, 4.9:1 on BgStrong,
+		// 4.70:1 on the selected tint. It stays lighter than TextSecondary so
+		// the Text > Secondary > Tertiary hierarchy survives.
+		TextTertiary: ui.Hex("#5A6371"), // ink cooled, WCAG AA resting and selected
+		// Three border weights: a hairline inside a surface, the structural
+		// rule, and the edge of an interactive box (DESIGN.md §5.4).
+		BorderSubtle:  ui.RGBA(15, 17, 21, 0.06), // ink at 6%
+		Border:        ui.RGBA(15, 17, 21, 0.09), // ink at 9%
+		BorderStrong:  ui.RGBA(15, 17, 21, 0.15), // ink at 15%
 		Accent:        ui.Hex(HexRoyal),          // logo/logo.svg:12, 6.6:1 with white text
 		AccentHover:   ui.Hex(HexBlue),           // logo/logo.svg:5, one step darker
 		AccentPressed: ui.Hex("#0B38CA"),         // royal blue darkened 18% for the press
@@ -171,8 +188,8 @@ func LightPalette() Palette {
 		// on the light surfaces; 80% gives #3D69F8 on white, 4.24–4.59:1 across
 		// them (2026-11 audit UX-07). The dark ring already clears 3:1 at 70%.
 		Focus:       ui.RGBA(13, 68, 246, 0.80), // royal blue at 80%
-		Scrollbar:   ui.RGBA(15, 17, 21, 0.30),
-		Scrim:       ui.RGBA(15, 17, 21, 0.30), // ink scrim, modal backdrop
+		Scrollbar:   ui.RGBA(15, 17, 21, 0.22),  // ink at 22%: present, not heavy
+		Scrim:       ui.RGBA(15, 17, 21, 0.30),  // ink scrim, modal backdrop
 		Success:     ui.Hex("#16A34A"),
 		SuccessText: ui.Hex("#15803D"), // 4.6:1 on white
 		Danger:      ui.Hex("#DC2626"), // 4.8:1 on white
@@ -192,23 +209,29 @@ func DarkPalette() Palette {
 		// it, and overlays above those (DESIGN.md §5.1 surface ramp). The dark
 		// theme used to raise the sidebar above the page, which inverted the
 		// metaphor between appearances.
-		Background:     ui.Hex("#111118"), // black lifted ~8% toward brand violet
-		Sidebar:        ui.Hex("#0B0B10"), // sunken navigation: darker than the page
-		Surface:        ui.Hex("#1B1B26"),
+		Background: ui.Hex("#111118"), // black lifted ~8% toward brand violet
+		Sidebar:    ui.Hex("#0B0B10"), // sunken navigation: darker than the page
+		Surface:    ui.Hex("#1B1B26"),
+		// Overlays lift one step above the card surface: in the dark, a
+		// translucent shadow alone barely separates two near-black layers,
+		// so the floating layer also carries a lighter fill.
+		SurfaceOverlay: ui.Hex("#23232F"),
 		SurfaceStrong:  ui.Hex("#272736"),
 		SurfacePressed: ui.RGBA(55, 231, 254, 0.16), // logo cyan at 16%
-		Hover:          ui.RGBA(55, 231, 254, 0.10), // logo cyan at 10%
-		RowSelected:    ui.RGBA(55, 231, 254, 0.18), // logo cyan at 18%
-		Text:           ui.Hex(HexInkDark),          // wordmark dark ink, 18.5:1 on the night
-		TextSecondary:  ui.Hex("#C7CAD9"),           // 11.9:1
-		// Tertiary must clear AA on the 18% RowSelected tint over every dark
-		// surface too (selected rows keep their metadata): resting 9.20/9.61/
-		// 8.35/7.19, selected 6.12/6.57/5.41/4.62 (2026-11 audit UX-13; the
-		// old #9AA0B4 measured 3.62 on the BgStrong tint). It stays darker
-		// than TextSecondary so the ink hierarchy survives.
-		TextTertiary:  ui.Hex("#B0B5C7"), // lifted for AA on the selected tint
-		Border:        ui.RGBA(255, 255, 255, 0.12),
-		BorderStrong:  ui.RGBA(255, 255, 255, 0.18),
+		// Hover is neutral white at 6%; selection keeps the brand cyan at a
+		// quieter 13% so a selected row is calm rather than glowing.
+		Hover:         ui.RGBA(255, 255, 255, 0.06),
+		RowSelected:   ui.RGBA(55, 231, 254, 0.13), // logo cyan at 13%
+		Text:          ui.Hex(HexInkDark),          // wordmark dark ink, 18.5:1 on the night
+		TextSecondary: ui.Hex("#C7CAD9"),           // 11.9:1
+		// Tertiary must clear AA (4.5:1) on the 13% RowSelected tint over
+		// every dark surface too (selected rows keep their metadata): 7.6:1
+		// on the page, 6.2:1 on the selected tint. It stays darker than
+		// TextSecondary so the ink hierarchy survives.
+		TextTertiary:  ui.Hex("#A3ABBB"), // lifted for AA on the selected tint
+		BorderSubtle:  ui.RGBA(255, 255, 255, 0.07),
+		Border:        ui.RGBA(255, 255, 255, 0.10),
+		BorderStrong:  ui.RGBA(255, 255, 255, 0.16),
 		Accent:        ui.Hex(HexSky),  // logo/logo.svg:13, 8.7:1 with ink text
 		AccentHover:   ui.Hex(HexIce),  // logo/logo.svg:17
 		AccentPressed: ui.Hex(HexCyan), // logo/logo.svg:4: the press glows brighter in the dark
@@ -216,7 +239,7 @@ func DarkPalette() Palette {
 		OnPrimary:     ui.Hex(HexInk),
 		Selection:     ui.RGBA(60, 187, 250, 0.30), // logo sky at 30%
 		Focus:         ui.RGBA(55, 231, 254, 0.70), // logo cyan at 70%
-		Scrollbar:     ui.RGBA(255, 255, 255, 0.35),
+		Scrollbar:     ui.RGBA(255, 255, 255, 0.24),
 		Scrim:         ui.RGBA(0, 0, 0, 0.55),
 		Success:       ui.Hex("#22C55E"),
 		SuccessText:   ui.Hex("#4ADE80"), // 9.4:1 on the night

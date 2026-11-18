@@ -161,7 +161,7 @@ func buildWorkspaceDeleteDialog(c *ui.Context, workspace contracts.WorkspaceServ
 		"Remove the workspace “%s” from the list? Its folder is not deleted."), name)
 	buildDangerConfirm(c, design.Of(c), &state.workspaceDeleteOpen,
 		state.T("删除工作区", "Delete workspace"), message, "",
-		state.T("删除", "Delete"), state.T("取消", "Cancel"),
+		state.T("删除", "Delete"), state.T("取消", "Cancel"), state.workspaceMenuTrigger,
 		func() {
 			if err := workspace.Delete(context.Background(), target); err != nil {
 				state.workspaceDeleteErr = state.T("删除工作区失败：", "Could not delete the workspace: ") + err.Error()

@@ -242,7 +242,7 @@ func TestUpdateInstallError(t *testing.T) {
 	openUpdateReadyForInstall(t, h, tester, "zh")
 
 	h.click(tester, installButtonZh)
-	waitForText(t, tester, "安装计划失败：denied")
+	waitForText(t, tester, "准备安装失败：denied")
 	h.assertNoTexts(tester, "已计划安装")
 }
 

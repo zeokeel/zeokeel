@@ -1,13 +1,17 @@
 package settings
 
-// OS sandbox section of the Behavior page. The OS sandbox is a basic agent
-// capability with no switch of its own, but whether it actually wraps commands
-// depends on the global permission mode: under "所有权限" (full) the runner
-// passes commands through unconfined, so the status face must say so as a
-// warning instead of claiming protection (2026-11 audit RG-02). Under
+// System sandbox section of the Behavior page. The system sandbox is a basic
+// agent capability with no switch of its own, but whether it actually wraps
+// commands depends on the global permission mode: under "所有权限" (full) the
+// runner passes commands through unconfined, so the status face must say so as
+// a warning instead of claiming protection (2026-11 audit RG-02). Under
 // workspace/read-only an available runner enforces file effects (and lets the
 // agent gate auto-allow shell tools); a host without a usable runner fails
 // commands closed.
+//
+// The copy is the only full statement of the sandbox facts (A5 §3.1: one
+// concept, one wording) — the behavior page's permission block explains the
+// approval presets and does not repeat them.
 
 import (
 	"fmt"
@@ -21,10 +25,10 @@ import (
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
-// sandboxStatusText resolves the one-line status copy of the OS sandbox and its
-// status kind, mode-aware (RG-02):
+// sandboxStatusText resolves the one-line status copy of the system sandbox and
+// its status kind, mode-aware (RG-02):
 //   - full: the runner does not wrap commands, so the state is a warning
-//     ("完全访问：OS 沙箱不包装命令"), never the green "已启用" success that would
+//     ("完全访问：系统沙箱不包装命令"), never the green "已启用" success that would
 //     imply protection that is not there;
 //   - workspace/read-only with a usable runner: success ("已启用");
 //   - no usable runner: failure (the host fails commands closed).
@@ -35,7 +39,7 @@ func sandboxStatusText(locale contracts.LocaleService, status contracts.SandboxS
 	}
 	if mode == contracts.PermissionFull {
 		return fmt.Sprintf(localized(locale,
-				"完全访问：OS 沙箱不包装命令（平台：%s）",
+				"完全访问：系统沙箱不包装命令（平台：%s）",
 				"Full access: the OS sandbox does not wrap commands (platform: %s)"), platform),
 			uikit.StatusNeedsAction
 	}
@@ -57,25 +61,27 @@ func sandboxStatusText(locale contracts.LocaleService, status contracts.SandboxS
 func sandboxNoteText(locale contracts.LocaleService, mode string) string {
 	if mode == contracts.PermissionFull {
 		return localized(locale,
-			"当前为「所有权限」：命令不经 OS 沙箱包装，直接以宿主权限运行。切回「工作区修改」或「只读」后恢复沙箱包装；修改权限模式下次构建工具时生效。",
-			"Under All permissions the OS sandbox does not wrap commands: they run with the host's own permissions. Switch back to Workspace-write or Read-only to restore wrapping; a permission-mode change applies on the next tool build.")
+			"当前为「所有权限」：命令不经系统沙箱包装，直接以宿主权限运行；切回「工作区修改」或「只读」后恢复包装。",
+			"Under All permissions the OS sandbox does not wrap commands: they run with the host's own permissions; switch back to Workspace-write or Read-only to restore wrapping.")
 	}
 	return localized(locale,
-		"始终启用、不可关闭；可用时 shell 类工具自动放行，不可用时命令失败；修改权限模式下次构建工具时生效。",
-		"Always on and not configurable; shell tools are auto-allowed when available and fail closed when not; a permission-mode change applies on the next tool build.")
+		"始终启用、不可关闭；可用时 shell 类工具自动放行，不可用时命令失败。",
+		"Always on and not configurable; shell tools are auto-allowed when available and fail closed when not.")
 }
 
-// buildSandboxSection renders the OS sandbox section: the mode-aware live status
-// line and the mode-conditioned note. There is no switch; a stripped assembly
-// without the module renders the unavailable state. store supplies the global
-// permission mode the status face must reflect (RG-02).
+// buildSandboxSection renders the system sandbox section: the mode-aware live
+// status line, the mode-conditioned note and the one rule that is neither the
+// status nor the note — a session-level override never lifts the sandbox, and a
+// permission change lands on the next tool build. There is no switch; a
+// stripped assembly without the module renders the unavailable state. store
+// supplies the global permission mode the status face must reflect (RG-02).
 func buildSandboxSection(c *ui.Context, locale contracts.LocaleService, service contracts.SandboxService, store contracts.SettingsService) {
 	t := design.Of(c)
 	mode := contracts.PermissionWorkspace
 	if store != nil {
 		mode = contracts.NormalizePermissionMode(store.Get(contracts.SettingAgentPermission, ""))
 	}
-	uikit.Section(c, localized(locale, "OS 沙箱", "OS sandbox"), func(*ui.Context) {
+	uikit.Section(c, localized(locale, "系统沙箱", "OS sandbox"), func(*ui.Context) {
 		status := contracts.SandboxStatus{Platform: runtime.GOOS}
 		if service != nil {
 			status = service.Status()
@@ -83,11 +89,18 @@ func buildSandboxSection(c *ui.Context, locale contracts.LocaleService, service 
 			status.Reason = localized(locale, "未加载 sandbox 模块", "sandbox module is not mounted")
 		}
 		buildSandboxStatusRow(c, t, locale, status, mode)
-		design.Apply(ui.Text(c, sandboxNoteText(locale, mode)), t.TextMuted(design.TypeXXS))
+		ui.Column(c).FillWidth().Gap(design.SpaceRow).MaxWidth(design.ProseMeasure).Children(func() {
+			design.Apply(ui.Text(c, sandboxNoteText(locale, mode)), descStyle(t)).MaxLines(2)
+			design.Apply(ui.Text(c, localized(locale,
+				"会话或自动化的「所有权限」只放宽审批，不解除沙箱；修改在下次构建工具时生效。",
+				"A session or automation-level All permissions only relaxes approval, never lifts the sandbox; a change applies on the next tool build.")),
+				descStyle(t)).MaxLines(2)
+		})
 	})
 }
 
-// buildSandboxStatusRow renders the one-line mode-aware status of the OS sandbox.
+// buildSandboxStatusRow renders the one-line mode-aware status of the system
+// sandbox.
 func buildSandboxStatusRow(c *ui.Context, t *design.Tokens, locale contracts.LocaleService,
 	status contracts.SandboxStatus, mode string) {
 	text, kind := sandboxStatusText(locale, status, mode)

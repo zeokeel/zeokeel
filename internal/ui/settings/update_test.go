@@ -613,7 +613,7 @@ func TestUpdateInstallScheduleError(t *testing.T) {
 	downloadUpdate(t, h, tester)
 
 	h.click(tester, "安装并重启")
-	waitForText(t, tester, "安装计划失败：schedule boom")
+	waitForText(t, tester, "准备安装失败：schedule boom")
 	if got := calls.Load(); got != 0 {
 		t.Fatalf("install command ran after a failed schedule: %d", got)
 	}

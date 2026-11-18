@@ -339,7 +339,8 @@ func buildCatalogContextWindowField(c *ui.Context, locale contracts.LocaleServic
 		// Official number input: typed values apply only in range, and 0 is the
 		// documented "unknown" value (mygo number-input.md).
 		input := ui.NumberInput(c.Key(key), number, 0, 10000000, 1000).
-			Label(inputLabel(locale, localized(locale, "上下文窗口", "Context window")))
+			Label(inputLabel(locale, localized(locale, "上下文窗口", "Context window"))).
+			Width(numberControlWidth)
 		if input.Changed() {
 			*text = strconv.Itoa(int(*number))
 		}
@@ -408,9 +409,14 @@ func buildModelCatalogSection(c *ui.Context, runtime contracts.UIRuntime, store 
 						}
 						return textutil.FirstNonEmpty(strings.TrimSpace(models[index].Name), models[index].ID)
 					})
+					// Rows are separated by a hairline instead of by a gap alone:
+					// a model row is three lines of text, and with 8 DIP between
+					// blocks the next name stuck to the previous price line
+					// (A3 VD-15).
 					ui.List(c, &st.list, len(models)).
 						Label(localized(locale, "模型列表", "Model list")).
-						Gap(design.Space1).
+						Gap(design.Space0).
+						Dividers(1, t.BorderL2).
 						Rows(func(row ui.ListRow) {
 							buildModelCatalogRow(row.Context, t, store, st, models, models[row.Index], locale, row.Selected())
 						})
@@ -442,7 +448,7 @@ func buildModelCatalogRow(c *ui.Context, t *design.Tokens, store contracts.Setti
 	primary, secondary, tertiary := listRowTextColors(t, selected)
 	id := strings.TrimSpace(model.ID)
 	baseURL := strings.TrimRight(strings.TrimSpace(model.BaseURL), "/")
-	ui.Row(c).FillWidth().Padding(design.Space1, design.Space2).
+	ui.Row(c).FillWidth().Padding(design.Space3, design.Space2).
 		AlignItems(ui.Start).Gap(design.Space2).Children(func() {
 		ui.Column(c).Gap(design.Space1).Grow(1).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -492,7 +498,7 @@ func buildModelCatalogRow(c *ui.Context, t *design.Tokens, store contracts.Setti
 		if design.Apply(ui.Button(c, localized(locale, "编辑", "Edit")),
 			t.SecondaryButton()).
 			Label(localized(locale, "编辑模型 ", "Edit model ") + id).
-			Tooltip(localized(locale, "编辑模型与它的服务商连接",
+			Description(localized(locale, "编辑模型与它的服务商连接",
 				"Edit the model and its provider connection")).Clicked() {
 			st.edit = newCatalogEditDraft(model, catalogIsDefault(store, models, id))
 			st.openCatalogEdit()
@@ -501,16 +507,15 @@ func buildModelCatalogRow(c *ui.Context, t *design.Tokens, store contracts.Setti
 		// The destructive remove lives behind the row's ⋯ menu (danger item), so
 		// a list of models never paints one red button per row (DESIGN.md §5.2
 		// danger budget; the shared ListRow keeps one trailing menu).
-		label := localized(locale, "模型操作", "Model actions")
+		label := rowActionLabel(locale, localized(locale, "模型操作", "Model actions"), id)
 		menu := uikit.IconButton(c, uikit.IconButtonOptions{
-			Key:     "model-actions/" + id,
-			Label:   label + " " + id,
-			Tooltip: label,
-			Icon:    icons.More(),
-			Size:    design.IconSizeS,
+			Key:   "model-actions/" + id,
+			Label: label,
+			Icon:  icons.More(),
+			Size:  design.IconSizeS,
 		})
 		menu.PopoverMenuButton(func(m *ui.Menu) {
-			remove := m.Item(localized(locale, "删除模型", "Remove model"))
+			remove := m.Item(localized(locale, "移除模型", "Remove model"))
 			remove.Danger()
 			if remove.Chosen() {
 				st.confirmRemove = id
@@ -592,99 +597,122 @@ func buildCatalogAddDialog(c *ui.Context, t *design.Tokens, runtime contracts.UI
 	}
 	submit := func() { addCatalogModel(st, store, models, locale) }
 	ui.Modal(c, &st.addOpen, func() {
-		design.Apply(ui.Column(c).Width(design.DialogWidthXL).Gap(design.Space3), func(element ui.Element) ui.Element {
-			return element.PaddingX(design.Space5).PaddingY(design.Space2)
-		}).Children(func() {
-			design.Apply(ui.Text(c, localized(locale, "添加模型", "Add model")),
-				t.Font(design.TypeL)).FontWeight(design.WeightSemibold).TextColor(t.LabelPrimary)
+		// The add dialog shares the edit dialog's (and the connector form's) shell:
+		// fixed header, one scrolling body, fixed status row, fixed action row.
+		// Without the bounded body an expanded 生成、价格与自定义模式 group pushed
+		// the panel past the window (2026-11-18 review).
+		design.Apply(ui.Column(c).Key("catalog.add"), t.Panel()).
+			Width(design.DialogWidthXL).Padding(design.Space4).Gap(design.Space3).Children(func() {
+			uikit.DialogHeader(c, uikit.DialogHeaderOptions{
+				Key:      "catalog.add",
+				Title:    localized(locale, "添加模型", "Add model"),
+				Subtitle: localized(locale, "对话与自动化使用的模型连接", "A model connection for chat and automation"),
+				OnClose: func() {
+					st.addOpen = false
+					st.add = nil
+					c.Invalidate()
+				},
+			})
+			ui.Scroll(c).FillWidth().MaxHeight(design.DialogBodyMax).Children(func() {
+				ui.Column(c).FillWidth().
+					Padding(design.Space0, design.Space0, design.Space4, design.Space0).
+					Gap(design.Space3).Children(func() {
 
-			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
-				ui.Column(c).FillWidth().Grow(1).Children(func() {
-					buildCatalogProviderField(c, locale, &draft.providerID, &draft.baseURL, &draft.id)
-				})
-				ui.Column(c).FillWidth().Grow(1).Children(func() {
-					ui.Field(c, localized(locale, "模型 ID", "Model ID"), func() {
-						input := ui.TextInput(c, &draft.id).
-							Label(inputLabel(locale, localized(locale, "模型 ID", "Model ID"))).
-							Placeholder("deepseek-chat").FillWidth().
-							OnTextKey(uikit.EnterTo(submit))
-						if input.Changed() {
-							c.Invalidate()
-						}
+					ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
+						ui.Column(c).FillWidth().Grow(1).Children(func() {
+							buildCatalogProviderField(c, locale, &draft.providerID, &draft.baseURL, &draft.id)
+						})
+						ui.Column(c).FillWidth().Grow(1).Children(func() {
+							ui.Field(c, localized(locale, "模型 ID", "Model ID"), func() {
+								input := ui.TextInput(c, &draft.id).
+									Label(inputLabel(locale, localized(locale, "模型 ID", "Model ID"))).
+									Placeholder("deepseek-chat").FillWidth().
+									OnTextKey(uikit.EnterTo(submit))
+								if input.Changed() {
+									c.Invalidate()
+								}
+							})
+						})
 					})
-				})
-			})
-			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
-				ui.Column(c).FillWidth().Grow(1).Children(func() {
-					ui.Field(c, localized(locale, "名称", "Name"), func() {
-						ui.TextInput(c, &draft.name).
-							Label(inputLabel(locale, localized(locale, "名称", "Name"))).
-							Placeholder(localized(locale, "可选；留空时使用模型 ID",
-								"optional; falls back to the model ID")).FillWidth().
-							OnTextKey(uikit.EnterTo(submit))
+					ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
+						ui.Column(c).FillWidth().Grow(1).Children(func() {
+							ui.Field(c, localized(locale, "名称", "Name"), func() {
+								ui.TextInput(c, &draft.name).
+									Label(inputLabel(locale, localized(locale, "名称", "Name"))).
+									Placeholder(localized(locale, "可选；留空时使用模型 ID",
+										"optional; falls back to the model ID")).FillWidth().
+									OnTextKey(uikit.EnterTo(submit))
+							})
+						})
+						ui.Column(c).FillWidth().Grow(1).Children(func() {
+							buildCatalogBaseURLField(c, locale, &draft.providerID, &draft.baseURL)
+						})
 					})
-				})
-				ui.Column(c).FillWidth().Grow(1).Children(func() {
-					buildCatalogBaseURLField(c, locale, &draft.providerID, &draft.baseURL)
-				})
-			})
-			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
-				ui.Column(c).FillWidth().Grow(1).Children(func() {
-					ui.Field(c, "API Key", func() {
-						ui.TextInput(c, &draft.apiKey).
-							Label(inputLabel(locale, "API Key")).
-							Password().
-							Placeholder(localized(locale, "可留空", "optional")).FillWidth().
-							OnTextKey(uikit.EnterTo(submit))
-					}).Description(localized(locale,
-						"留空时继承同一 Base URL 已有模型的密钥；密钥只保存在本机。",
-						"Blank inherits the key of an existing model with the same base URL; the key is stored locally only."))
-				})
-				ui.Column(c).FillWidth().Grow(1).Children(func() {
-					buildCatalogContextWindowField(c, locale, "catalog.add.contextWindow",
-						&draft.contextWindow, &draft.contextWindowNum)
-				})
-			})
-			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
-				ui.Column(c).FillWidth().Grow(1).Children(func() {
-					ui.Field(c, localized(locale, "模型系列", "Model family"), func() {
-						choice := catalogFamilyLabel(locale, catalogAddFamily(draft))
-						selector := ui.Select(c.Key("catalog.addFamily"), &choice,
-							catalogFamilyOptions(locale)).
-							Label(localized(locale, "模型系列菜单", "Model family menu"))
-						if selector.Changed() {
-							if family := catalogFamilyValue(locale, choice); family != "" {
-								draft.family, draft.familyTouched = family, true
+					ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
+						ui.Column(c).FillWidth().Grow(1).Children(func() {
+							ui.Field(c, "API Key", func() {
+								ui.TextInput(c, &draft.apiKey).
+									Label(inputLabel(locale, "API Key")).
+									Password().
+									Placeholder(localized(locale, "可选", "Optional")).FillWidth().
+									OnTextKey(uikit.EnterTo(submit))
+							}).Description(localized(locale,
+								"留空时继承同一 Base URL 已有模型的密钥；密钥只保存在本机。",
+								"Blank inherits the key of an existing model with the same base URL; the key is stored locally only."))
+						})
+						ui.Column(c).FillWidth().Grow(1).Children(func() {
+							buildCatalogContextWindowField(c, locale, "catalog.add.contextWindow",
+								&draft.contextWindow, &draft.contextWindowNum)
+						})
+					})
+					ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
+						ui.Column(c).FillWidth().Grow(1).Children(func() {
+							ui.Field(c, localized(locale, "模型系列", "Model family"), func() {
+								choice := catalogFamilyLabel(locale, catalogAddFamily(draft))
+								selector := ui.Select(c.Key("catalog.addFamily"), &choice,
+									catalogFamilyOptions(locale)).
+									Label(localized(locale, "模型系列菜单", "Model family menu"))
+								if selector.Changed() {
+									if family := catalogFamilyValue(locale, choice); family != "" {
+										draft.family, draft.familyTouched = family, true
+									}
+									c.Invalidate()
+								}
+							}).Description(localized(locale,
+								"决定内置的思考模式。",
+								"Selects the built-in thinking modes."))
+						})
+						ui.Column(c).FillWidth().Grow(1).Justify(ui.End).Children(func() {
+							hint := localized(locale, "对话输入框默认使用该模型。",
+								"The composer uses it as its default model.")
+							disabled := false
+							if len(models) == 0 {
+								hint = localized(locale, "第一个模型会自动设为默认。",
+									"The first model becomes the default.")
+								disabled = true
 							}
-							c.Invalidate()
-						}
-					}).Description(localized(locale,
-						"决定内置的思考模式。",
-						"Selects the built-in thinking modes."))
-				})
-				ui.Column(c).FillWidth().Grow(1).Justify(ui.End).Children(func() {
-					hint := localized(locale, "对话输入框默认使用该模型。",
-						"The composer uses it as its default model.")
-					disabled := false
-					if len(models) == 0 {
-						hint = localized(locale, "第一个模型会自动设为默认。",
-							"The first model becomes the default.")
-						disabled = true
-					}
-					buildCatalogSetDefaultField(c, t, locale, &draft.setDefault, disabled, hint)
+							buildCatalogSetDefaultField(c, t, locale, &draft.setDefault, disabled, hint)
+						})
+					})
+
 				})
 			})
-
 			testAPIKey := strings.TrimSpace(draft.apiKey)
 			testBaseURL := textutil.FirstNonEmpty(strings.TrimRight(strings.TrimSpace(draft.baseURL), "/"), fallbackBaseURL)
 			if testAPIKey == "" {
 				testAPIKey = textutil.FirstNonEmpty(inheritedCatalogAPIKey(models, draft.baseURL), fallbackAPIKey)
 			}
-			buildCatalogCheckRow(c, t, runtime, &draft.check, testBaseURL, testAPIKey, locale)
-			if draft.err != "" {
-				uikit.ErrorLine(c, draft.err)
-			}
+			// Reserved status row above the action row; the connection test is one
+			// of the actions (one action line, as in the connector form).
+			ui.Column(c).FillWidth().MinHeight(design.Space6).Justify(ui.Center).Children(func() {
+				if draft.err != "" {
+					uikit.ErrorLine(c, draft.err)
+					return
+				}
+				buildCatalogCheckStatus(c, t, &draft.check, testBaseURL, locale)
+			})
 			uikit.DialogFooter(c, []uikit.DialogAction{
+				catalogTestAction(c, t, runtime, &draft.check, testBaseURL, testAPIKey, locale),
 				{Label: localized(locale, "取消", "Cancel"), OnClick: func() {
 					st.addOpen = false
 					st.add = nil
@@ -762,9 +790,9 @@ func buildCatalogRemoveDialog(c *ui.Context, store contracts.SettingsService,
 	id := st.confirmRemove
 	uikit.ConfirmDanger(c, &st.removeOpen, uikit.ConfirmDangerOptions{
 		Key:     "model.remove",
-		Title:   localized(locale, "删除模型", "Remove model"),
-		Message: localized(locale, "确认从模型列表删除「", "Remove ") + id + localized(locale, "」？", " from the model list?"),
-		Confirm: localized(locale, "确认删除", "Confirm remove"),
+		Title:   localized(locale, "移除模型", "Remove model"),
+		Message: localized(locale, "从模型列表移除「", "Remove ") + id + localized(locale, "」？已保存的密钥不会被删除。", " from the model list? Its stored key is kept."),
+		Confirm: localized(locale, "移除", "Remove"),
 		Cancel:  localized(locale, "取消", "Cancel"),
 		OnConfirm: func() {
 			removeCatalogModel(st, store, models, id, locale)
@@ -811,5 +839,5 @@ func removeCatalogModel(st *catalogState, store contracts.SettingsService,
 		return
 	}
 	st.confirmRemove = ""
-	st.status, st.err = localized(locale, "已删除模型", "Model removed"), false
+	st.status, st.err = localized(locale, "已移除模型", "Model removed"), false
 }

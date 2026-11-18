@@ -7,9 +7,9 @@ package uikit
 // on a 32 DIP row, a hairline divides the rows, and the value is selectable so
 // an identifier, a path or a version can be copied out of it.
 //
-// The About, Diagnostics, Network, Update and Context pages draw this sheet;
-// none of them keeps its own label column. KeyValueRows in uikit.go is the
-// older, right-aligned form and is deprecated for new code.
+// The About, Diagnostics, Network, Update, Context and MCP-detail pages draw
+// this sheet; none of them keeps its own label column, and the older
+// right-aligned label/value form is gone rather than lingering beside it.
 
 import (
 	"strings"
@@ -22,10 +22,12 @@ import (
 )
 
 const (
-	// PropertySheetLabelWidth is the fixed label column: 160 DIP, the 32 DIP
-	// grid's Space8 five times over. It fits the longest product label, so the
-	// value column starts at the same x on every page and on every row.
-	PropertySheetLabelWidth float32 = design.Space8 * 5
+	// PropertySheetLabelWidth is the fixed label column: 120 DIP on the 4 DIP
+	// grid. It fits the product's longest label, so the value column starts at the
+	// same x on every page and on every row — and the row stops reading as a
+	// two-column table with a wide empty gutter between a short label and its
+	// value (VD-37).
+	PropertySheetLabelWidth float32 = design.Space8*4 - design.Space2
 	// PropertySheetDefaultMaxWidth bounds a sheet so a label and its value stay
 	// one glance apart instead of spanning a wide page: 560 DIP, the medium
 	// form measure. A dense page passes a narrower MaxWidth.
@@ -97,21 +99,25 @@ func PropertySheet(c *ui.Context, o PropertySheetOptions) {
 	if key == "" {
 		key = "uikit.property-sheet"
 	}
-	sheet := ui.Column(c).FillWidth().Gap(design.Space0)
+	// The row rules are declared once and drawn between rows (never above the
+	// first or below the last), which is why the sheet needs a small gap for the
+	// line to sit in rather than a Divider in the loop.
+	sheet := ui.Column(c).FillWidth().Gap(design.Space1)
 	if !o.FullWidth {
 		sheet = sheet.MaxWidth(maxWidth)
 	}
+	// One declaration of the row rule instead of a Divider inside the loop: the
+	// element draws a 1 DIP BorderL2 line between its children, which is the
+	// sheet's hairline row for row (A1 matrix: Element.Dividers).
+	sheet = sheet.Dividers(1, t.BorderL2)
 	sheet.Children(func() {
-		for index, row := range o.Rows {
+		for _, row := range o.Rows {
 			row := row
-			if index > 0 {
-				ui.Divider(c)
-			}
 			ui.Row(c).FillWidth().Height(design.RowCompactHeight).
 				AlignItems(ui.Center).Gap(design.Space3).Children(func() {
 				design.Apply(ui.Text(c, row.Label), t.TextMuted(design.TypeXS)).
 					Width(PropertySheetLabelWidth).Shrink(0).
-					MaxLines(1).Ellipsis("…").Tooltip(row.Label)
+					MaxLines(1).Ellipsis("…").Description(row.Label)
 				value := row.Value
 				empty := strings.TrimSpace(value) == ""
 				if empty {
@@ -136,7 +142,7 @@ func PropertySheet(c *ui.Context, o PropertySheetOptions) {
 					if tooltip == "" {
 						tooltip = row.Value
 					}
-					valueElement = valueElement.Selectable().Tooltip(tooltip)
+					valueElement = valueElement.Selectable().Description(tooltip)
 				}
 				if row.Copy && !empty {
 					label := row.CopyLabel

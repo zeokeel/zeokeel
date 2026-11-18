@@ -91,8 +91,8 @@ func TestLSPPageRemoveServerClearsLegacy(t *testing.T) {
 		contracts.SettingLSPServer:  `{"command":"legacy"}`,
 	})
 	h, tester := lspPage(t, store)
-	h.click(tester, "服务器操作") // opens the first server's (go) row menu
-	h.click(tester, "移除")    // opens the confirmation for go
+	h.click(tester, "服务器操作：go") // the first server (go) row menu
+	h.click(tester, "移除")       // opens the confirmation for go
 	h.click(tester, "移除服务器")
 
 	servers := storedLSPServers(t, store)

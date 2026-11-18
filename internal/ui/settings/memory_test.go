@@ -154,7 +154,7 @@ func TestMemoryPageRendersEntries(t *testing.T) {
 	h := memoryPageHarness(t, store)
 	tester := h.tester()
 	h.assertTexts(tester, "2 条记忆", "项目使用 Go 1.27", "提交前运行 go test -race",
-		"全局", "记忆操作", "搜索记忆")
+		"全局", "记忆操作：项目使用 Go 1.27", "搜索记忆")
 }
 
 func TestMemoryPageSearchUsesStore(t *testing.T) {
@@ -215,9 +215,9 @@ func TestMemoryPageDelete(t *testing.T) {
 	)
 	h := memoryPageHarness(t, store)
 	tester := h.tester()
-	h.click(tester, "记忆操作")
+	h.click(tester, "记忆操作：要删除的记忆")
 	h.click(tester, "删除记忆")
-	h.click(tester, "确认删除")
+	h.click(tester, "删除")
 	if removes := store.removes(); len(removes) != 1 || removes[0] != "mem-1" {
 		t.Fatalf("Remove calls = %v, want [mem-1]", removes)
 	}
@@ -246,9 +246,9 @@ func TestMemoryPageErrors(t *testing.T) {
 	removeStore.removeErr = true
 	h3 := memoryPageHarness(t, removeStore)
 	tester3 := h3.tester()
-	h3.click(tester3, "记忆操作")
+	h3.click(tester3, "记忆操作：删不掉")
 	h3.click(tester3, "删除记忆")
-	h3.click(tester3, "确认删除")
+	h3.click(tester3, "删除")
 	h3.assertTexts(tester3, "删除记忆失败：mem-1")
 }
 
@@ -714,12 +714,15 @@ func TestMemoryPageEditsEntryInPlace(t *testing.T) {
 	)
 	h := memoryPageHarness(t, store)
 	tester := h.tester()
-	h.assertTexts(tester, "记忆操作")
-	if got := exactTextCount(tester.Texts(), "记忆操作"); got != 2 {
+	// Each row's ⋯ carries its row name in the accessible name, so a page of
+	// identical buttons stays addressable (2026-11-18 review).
+	h.assertTexts(tester, "记忆操作：旧内容", "记忆操作：另一条")
+	if got := exactTextCount(tester.Texts(), "记忆操作：旧内容") +
+		exactTextCount(tester.Texts(), "记忆操作：另一条"); got != 2 {
 		t.Fatalf("row menus = %d, want one per row (2); texts = %v", got, tester.Texts())
 	}
 
-	h.click(tester, "记忆操作")
+	h.click(tester, "记忆操作：旧内容")
 	h.click(tester, "编辑记忆")
 	h.assertTexts(tester, "编辑记忆", "编辑内容", "保存", "取消")
 	clearAndType(t, h, tester, "编辑内容 输入", "新内容")
@@ -745,7 +748,7 @@ func TestMemoryPageEditPrefillsCurrentText(t *testing.T) {
 	store := newFakeUpdatableMemoryStore(memoryEntry("mem-1", "原文"))
 	h := memoryPageHarness(t, store)
 	tester := h.tester()
-	h.click(tester, "记忆操作")
+	h.click(tester, "记忆操作：原文")
 	h.click(tester, "编辑记忆")
 	h.click(tester, "保存")
 
@@ -761,7 +764,7 @@ func TestMemoryPageEditCancelDoesNotSave(t *testing.T) {
 	store := newFakeUpdatableMemoryStore(memoryEntry("mem-1", "原文"))
 	h := memoryPageHarness(t, store)
 	tester := h.tester()
-	h.click(tester, "记忆操作")
+	h.click(tester, "记忆操作：原文")
 	h.click(tester, "编辑记忆")
 	clearAndType(t, h, tester, "编辑内容 输入", "不保存的草稿")
 	h.click(tester, "取消")
@@ -779,7 +782,7 @@ func TestMemoryPageEditValidation(t *testing.T) {
 	store := newFakeUpdatableMemoryStore(memoryEntry("mem-1", "原文"))
 	h := memoryPageHarness(t, store)
 	tester := h.tester()
-	h.click(tester, "记忆操作")
+	h.click(tester, "记忆操作：原文")
 	h.click(tester, "编辑记忆")
 	clearAndType(t, h, tester, "编辑内容 输入", "   ")
 	h.click(tester, "保存")
@@ -797,7 +800,7 @@ func TestMemoryPageEditFailureKeepsModal(t *testing.T) {
 	store.updateErr = errors.New("disk full")
 	h := memoryPageHarness(t, store)
 	tester := h.tester()
-	h.click(tester, "记忆操作")
+	h.click(tester, "记忆操作：原文")
 	h.click(tester, "编辑记忆")
 	clearAndType(t, h, tester, "编辑内容 输入", "改后内容")
 	h.click(tester, "保存")
@@ -814,7 +817,7 @@ func TestMemoryPageEditHiddenWithoutUpdater(t *testing.T) {
 	store := newFakeMemoryStore(memoryEntry("mem-1", "只读后端的记忆"))
 	h := memoryPageHarness(t, store)
 	tester := h.tester()
-	h.assertTexts(tester, "只读后端的记忆", "记忆操作")
+	h.assertTexts(tester, "只读后端的记忆", "记忆操作：只读后端的记忆")
 	h.assertNoTexts(tester, "编辑记忆")
 }
 
@@ -829,9 +832,9 @@ func TestMemoryPageEditEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "Memory")
-	h.assertTexts(tester, "Memory actions")
+	h.assertTexts(tester, "Memory actions: Alpha note")
 
-	h.click(tester, "Memory actions")
+	h.click(tester, "Memory actions: Alpha note")
 	h.click(tester, "Edit memory")
 	h.assertTexts(tester, "Edit memory", "Edit text", "Save", "Cancel")
 	h.click(tester, "Save")

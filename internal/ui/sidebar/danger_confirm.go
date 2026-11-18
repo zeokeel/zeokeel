@@ -10,7 +10,8 @@ package sidebar
 //
 // The dialog follows the product's dialog convention (uikit.DialogFooter): the
 // danger action on the left, the cancel action last (rightmost), the modal
-// taking the keyboard and giving it back to the row menu that opened it. It is
+// taking the keyboard and, on every close, giving it back to the row menu button
+// that opened it (`trigger`, the handle bound to that button). It is
 // rendered on the window-level overlay slot (buildFooter / workspace overlay),
 // so it cannot be clipped by the sidebar.
 
@@ -34,7 +35,7 @@ const dangerConfirmWidth = design.DialogWidthS
 // false success (2026-11 audit UX-10).
 func buildDangerConfirm(c *ui.Context, t *design.Tokens, open *bool,
 	title, message, errText, confirmLabel, cancelLabel string,
-	onConfirm, onClose func()) {
+	trigger *ui.Handle, onConfirm, onClose func()) {
 	if !*open {
 		return
 	}
@@ -73,5 +74,12 @@ func buildDangerConfirm(c *ui.Context, t *design.Tokens, open *bool,
 	}
 	if onClose != nil {
 		onClose()
+	}
+	// The dialog hands the keyboard back to the control that opened it (the row's
+	// ⋯ menu button), as every other overlay in the product does: closing with
+	// Escape or Enter leaves the user where the action started instead of at the
+	// top of the window (A4 interaction audit, focus-return).
+	if trigger != nil {
+		trigger.Focus(c)
 	}
 }

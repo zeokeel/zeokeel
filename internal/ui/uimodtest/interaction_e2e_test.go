@@ -140,14 +140,82 @@ func TestPaletteKeyboardPathEndToEnd(t *testing.T) {
 	if !frameUntil(tester, "命令面板", 2*time.Second) {
 		t.Fatalf("command palette did not open; texts = %v", tester.Texts())
 	}
-	for _, want := range []string{"搜索命令", "↑↓ 选择 · Enter 运行 · Esc 关闭"} {
-		if !tester.HasText(want) {
-			t.Fatalf("palette missing %q; texts = %v", want, tester.Texts())
+	if !tester.HasText("搜索命令") {
+		t.Fatalf("palette missing 搜索命令; texts = %v", tester.Texts())
+	}
+	// B-spec §3.1.4: the footer is a key legend — the words sit beside their
+	// key caps on one 32 DIP row — not a "·"-joined sentence. Assert each word
+	// and each cap individually. The caps carry the legend's own accessible name
+	// ("图例：Esc"), so the Esc cap is found by that name and never has to be told
+	// apart from a command row whose name or hint mentions Esc.
+	words := []string{"选择", "图例：↑ ↓", "运行", "图例：↵", "关闭", "图例：Esc"}
+	rects := make([]ui.Rect, 0, len(words))
+	for _, want := range words {
+		rect, ok := tester.Find(want)
+		if !ok {
+			t.Fatalf("palette key legend missing %q; texts = %v", want, tester.Texts())
+		}
+		rects = append(rects, rect)
+	}
+	for i := 1; i < len(rects); i++ {
+		if rects[i].X <= rects[i-1].X {
+			t.Fatalf("palette legend %q is not to the right of %q: x=%.1f vs %.1f",
+				words[i], words[i-1], rects[i].X, rects[i-1].X)
+		}
+		if dy := rects[i].Y - rects[0].Y; dy < -4 || dy > 4 {
+			t.Fatalf("palette legend %q is not on the same row as 选择: y=%.1f vs %.1f",
+				words[i], rects[i].Y, rects[0].Y)
 		}
 	}
+	for _, gone := range []string{"↑↓ 选择", "Enter 运行", "Esc 关闭"} {
+		if tester.HasText(gone) {
+			t.Fatalf("palette still prints the superseded joined hint %q; texts = %v", gone, tester.Texts())
+		}
+	}
+	// Escape closes the palette (the promise the legend makes).
 	tester.Key(0, ui.KeyEscape)
 	if !frameUntilGone(tester, "命令面板", 2*time.Second) {
 		t.Fatalf("Escape did not close the palette; texts = %v", tester.Texts())
+	}
+
+	// The Esc cap is checked on a filtered palette: a command row may carry the
+	// exact text "Esc" as its own hint, so the check types a query whose rows
+	// carry no such hint (新 …), where Find("Esc") resolves to the legend's cap
+	// and the legend row is measured against it.
+	tester.Key(ui.Cmd, ui.KeyK)
+	if !frameUntil(tester, "命令面板", 2*time.Second) {
+		t.Fatalf("palette did not reopen for the legend check")
+	}
+	tester.Type("新")
+	tester.Frame()
+	if !tester.HasText("新会话") {
+		t.Fatalf("filter 新 did not show 新会话; texts = %v", tester.Texts())
+	}
+	escCap, okEsc := tester.Find("图例：Esc")
+	if !okEsc {
+		t.Fatalf("palette key legend missing its Esc cap; texts = %v", tester.Texts())
+	}
+	legendStart, okStart := tester.Find("选择")
+	closeWord, okClose := tester.Find("关闭")
+	if !okStart || !okClose {
+		t.Fatalf("palette key legend missing 选择/关闭; texts = %v", tester.Texts())
+	}
+	if dy := escCap.Y - legendStart.Y; dy < -4 || dy > 4 {
+		t.Fatalf("palette legend Esc cap is not on the legend row: y=%.1f vs %.1f",
+			escCap.Y, legendStart.Y)
+	}
+	if escCap.X <= closeWord.X {
+		t.Fatalf("palette legend Esc cap (x=%.1f) is not to the right of 关闭 (x=%.1f)",
+			escCap.X, closeWord.X)
+	}
+	// The legend's y is NOT compared with the first frame: the palette panel
+	// sizes to its result list, so the footer moves with the filter. Only the
+	// within-frame relations above are the contract.
+	// Close the filtered palette so the rest of the test starts from an empty
+	// query (closePalette resets it).
+	tester.Key(0, ui.KeyEscape)
+	if !frameUntilGone(tester, "命令面板", 2*time.Second) {
+		t.Fatalf("Escape did not close the filtered palette; texts = %v", tester.Texts())
 	}
 
 	// Typing filters the command list.
@@ -433,20 +501,26 @@ func TestDialogSafetyAndButtonOrder(t *testing.T) {
 		t.Fatalf("approval dialog missing; texts = %v", tester.Texts())
 	}
 	deny, okDeny := tester.Find("拒绝")
-	always, okAlways := tester.Find("本会话内始终允许")
-	allow, okAllow := tester.Find("允许")
-	if !okDeny || !okAlways || !okAllow {
-		t.Fatalf("approval buttons missing (deny=%v always=%v allow=%v); texts = %v",
-			okDeny, okAlways, okAllow, tester.Texts())
+	allow, okAllow := tester.Find("允许一次")
+	more, okMore := tester.Find("更多")
+	if !okDeny || !okAllow || !okMore {
+		t.Fatalf("approval buttons missing (deny=%v allow_once=%v more=%v); texts = %v",
+			okDeny, okAllow, okMore, tester.Texts())
 	}
-	if !(deny.X < always.X && always.X < allow.X) {
-		t.Fatalf("approval order is not deny→always→allow: deny=%.1f always=%.1f allow=%.1f",
-			deny.X, always.X, allow.X)
+	if !(deny.X < allow.X && allow.X < more.X) {
+		t.Fatalf("approval order is not deny→allow-once→more: deny=%.1f allow=%.1f more=%.1f",
+			deny.X, allow.X, more.X)
+	}
+	// B-spec v2 moved the session-scoped allow out of the action row: the
+	// scope lives in the menu beside the actions (one accent fill, one menu),
+	// so the card must not print it before the menu opens.
+	if tester.HasText("本会话内始终允许") {
+		t.Fatalf("approval card shows the session-scoped allow outside the scope menu; texts = %v", tester.Texts())
 	}
 	// No default action: nothing is auto-focused, so a stray Enter (the user
 	// often presses it right after sending a prompt) can neither allow nor
 	// deny the call.
-	if tester.Focused("拒绝") || tester.Focused("允许") || tester.Focused("本会话内始终允许") {
+	if tester.Focused("拒绝") || tester.Focused("允许一次") || tester.Focused("更多") {
 		t.Fatalf("approval dialog autofocuses an action; texts = %v", tester.Texts())
 	}
 	// The inline card carries the no-default semantics as the explicit Esc hint
@@ -510,8 +584,8 @@ func TestDialogSafetyAndButtonOrder(t *testing.T) {
 	if !frameUntil(tester, "需要审批", 5*time.Second) {
 		t.Fatalf("second approval dialog missing")
 	}
-	if err := tester.Click("允许"); err != nil {
-		t.Fatalf("click allow: %v; texts = %v", err, tester.Texts())
+	if err := tester.Click("允许一次"); err != nil {
+		t.Fatalf("click allow once: %v; texts = %v", err, tester.Texts())
 	}
 	select {
 	case result := <-decisions:
@@ -520,6 +594,39 @@ func TestDialogSafetyAndButtonOrder(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatalf("explicit allow did not resolve")
+	}
+	frameUntilGone(tester, "需要审批", 2*time.Second)
+
+	// --- the scope menu is the only route to a session-scoped allow: choosing
+	// it relabels the primary action, and the decision carries the wider scope.
+	// This is the "never grant more than the button says" path (A4-I-04). ---
+	decisions = request("e2e-approval-scope")
+	if !frameUntil(tester, "需要审批", 5*time.Second) {
+		t.Fatalf("scope-menu approval card missing")
+	}
+	if err := tester.Click("更多"); err != nil {
+		t.Fatalf("open the approval scope menu: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !tester.HasText("本会话内始终允许该工具") {
+		t.Fatalf("scope menu missing the session-scoped allow; texts = %v", tester.Texts())
+	}
+	if err := tester.Click("本会话内始终允许该工具"); err != nil {
+		t.Fatalf("choose the session scope: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	// The label now promises the wider scope; the button that resolves it is
+	// exactly that label, not 允许一次.
+	if err := tester.Click("本会话内始终允许"); err != nil {
+		t.Fatalf("primary action did not follow the chosen scope: %v; texts = %v", err, tester.Texts())
+	}
+	select {
+	case result := <-decisions:
+		if result.err != nil || result.decision != contracts.ApprovalAllowAlways {
+			t.Fatalf("session-scoped allow returned (%q, %v)", result.decision, result.err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("session-scoped allow did not resolve")
 	}
 	frameUntilGone(tester, "需要审批", 2*time.Second)
 
@@ -532,27 +639,45 @@ func TestDialogSafetyAndButtonOrder(t *testing.T) {
 	if !frameUntil(tester, "计划待审阅", 5*time.Second) {
 		t.Fatalf("plan review dialog missing; texts = %v", tester.Texts())
 	}
+	// The decision bar has three actions now (B-spec §3.2.6): cancel the plan,
+	// keep planning with feedback (needs feedback, so it is disabled on an
+	// empty box) and the one primary, approve. Approve is last and rightmost.
 	cancelPlan, okCancel := tester.Find("取消计划")
+	keepPlanning, okKeep := tester.Find("继续规划")
 	approve, okApprove := tester.Find("批准")
-	if !okCancel || !okApprove {
-		t.Fatalf("plan review buttons missing (cancel=%v approve=%v); texts = %v",
-			okCancel, okApprove, tester.Texts())
+	if !okCancel || !okKeep || !okApprove {
+		t.Fatalf("plan review buttons missing (cancel=%v keep=%v approve=%v); texts = %v",
+			okCancel, okKeep, okApprove, tester.Texts())
 	}
-	if !(cancelPlan.X < approve.X) {
-		t.Fatalf("plan review order is not cancel→approve: cancel=%.1f approve=%.1f", cancelPlan.X, approve.X)
+	if !(cancelPlan.X < keepPlanning.X && keepPlanning.X < approve.X) {
+		t.Fatalf("plan review order is not cancel→keep→approve: cancel=%.1f keep=%.1f approve=%.1f",
+			cancelPlan.X, keepPlanning.X, approve.X)
 	}
-	if !tester.HasText("点击「批准」批准计划") {
-		t.Fatalf("plan review lacks the explicit-approve hint; texts = %v", tester.Texts())
+	// The header states the scope of the decision and what approving means; the
+	// hint line names the two chords and says plainly that Enter does nothing
+	// without feedback (A4-I-04 replaced the old "点击「批准」批准计划" sentence).
+	if !tester.HasText("批准后开始实施") {
+		t.Fatalf("plan review lacks the what-approving-does line; texts = %v", tester.Texts())
 	}
-	if tester.HasText("Enter = 批准") || tester.HasText("Enter=批准") {
-		t.Fatalf("plan review hint still advertises Enter=approve; texts = %v", tester.Texts())
+	if !tester.HasText("2 步") {
+		t.Fatalf("plan review header does not count the plan's steps; texts = %v", tester.Texts())
 	}
-	// Escape must not cancel a plan under review.
+	if !tester.HasText("不取消计划") || !tester.HasText("无反馈时不生效") {
+		t.Fatalf("plan review hint line is missing the chord warnings; texts = %v", tester.Texts())
+	}
+	if tester.HasText("Enter = 批准") || tester.HasText("Enter=批准") || tester.HasText("点击「批准」批准计划") {
+		t.Fatalf("plan review hint still advertises a one-key approve; texts = %v", tester.Texts())
+	}
+	// Escape must not cancel a plan under review, and it must not look dead: the
+	// card answers the press with the sentence that names the real exits (C-16).
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
 	tester.Frame()
 	if !tester.HasText("计划待审阅") || reviewer.State() != "reviewing" {
 		t.Fatalf("Escape cancelled the plan review (state %q); texts = %v", reviewer.State(), tester.Texts())
+	}
+	if !tester.HasText("Esc 不能关闭计划审阅") {
+		t.Fatalf("Escape did nothing visible in the plan review; texts = %v", tester.Texts())
 	}
 	tester.Key(0, ui.KeyEnter) // empty feedback: must not approve
 	time.Sleep(200 * time.Millisecond)
@@ -585,8 +710,8 @@ func TestDialogSafetyAndButtonOrder(t *testing.T) {
 	}
 	tester.Type("请补充边界测试")
 	tester.Frame()
-	if !tester.HasText("发送反馈给 agent") {
-		t.Fatalf("plan hint did not switch to the keep-planning copy; texts = %v", tester.Texts())
+	if !tester.HasText("发送反馈继续规划") {
+		t.Fatalf("plan hint did not switch to the send-feedback chord; texts = %v", tester.Texts())
 	}
 	sessionID := product.chat.ActiveSession()
 	userMessages := func() int {
@@ -666,8 +791,9 @@ func TestSidebarCollapseAndFooter(t *testing.T) {
 		t.Fatalf("Cmd+B did not collapse the sidebar; texts = %v", tester.Texts())
 	}
 	// The rail keeps the nav destinations and the footer entry; Home is no
-	// longer a destination (the session screen is the landing).
-	for _, want := range []string{"新对话", "自动化", "能力", "设置"} {
+	// longer a destination (the session screen is the landing). The new-session
+	// action is 新建会话 now (A5: 会话/Session wording, not 对话).
+	for _, want := range []string{"新建会话", "自动化", "能力", "设置"} {
 		if !tester.HasText(want) {
 			t.Fatalf("collapsed rail is missing %q; texts = %v", want, tester.Texts())
 		}

@@ -176,9 +176,13 @@ func TestSettingsMemoryPage(t *testing.T) {
 
 		// Delete asks for confirmation, then removes the entry and the count
 		// returns to zero.
-		clickMemorySettings(t, tester, "记忆操作")
+		// A5 §3.1: the dialog's confirm action is 删除 (the old "确认删除"
+		// hedged the verb); the dialog states the consequence instead.
+		// The row menu's accessible name carries the row (记忆操作：<行内容>), so
+		// the step addresses one row instead of the first same-named control.
+		clickMemorySettings(t, tester, "记忆操作：记住这次结论")
 		clickMemorySettings(t, tester, "删除记忆")
-		clickMemorySettings(t, tester, "确认删除")
+		clickMemorySettings(t, tester, "删除")
 		requireHasTexts(t, tester, "0 条记忆", "还没有记忆")
 	})
 }

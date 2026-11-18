@@ -14,10 +14,14 @@ import (
 )
 
 // fakeToastAnchor records the overlay open/close reports a module sends.
-type fakeToastAnchor struct{ reports []bool }
+type fakeToastAnchor struct {
+	reports []bool
+	dockTop float32
+}
 
 func (f *fakeToastAnchor) Anchor() contracts.ToastAnchor { return contracts.ToastAnchor{} }
 func (f *fakeToastAnchor) ReportOverlay(open bool)       { f.reports = append(f.reports, open) }
+func (f *fakeToastAnchor) ReportDockTop(top float32)     { f.dockTop = top }
 
 func TestPopoverReportsOverlayOpenToToastAnchor(t *testing.T) {
 	anchor := &fakeToastAnchor{}

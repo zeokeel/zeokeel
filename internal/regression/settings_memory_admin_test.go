@@ -107,7 +107,7 @@ func TestSettingsMemoryTidyAndClear(t *testing.T) {
 
 	// Clear-all: cancel keeps everything; confirm empties the store.
 	clickMemoryAdmin(t, tester, "全部清空")
-	requireHasTexts(t, tester, "清空全部记忆", "确认删除全部记忆？此操作无法撤销。")
+	requireHasTexts(t, tester, "清空全部记忆", "将删除全部记忆，无法撤销。")
 	clickMemoryAdmin(t, tester, "取消")
 	if got := len(memoryIDs(t, store)); got != 2 {
 		t.Fatalf("memories after cancel = %d, want 2", got)

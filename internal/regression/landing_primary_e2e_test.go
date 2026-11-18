@@ -2,9 +2,9 @@ package regression
 
 // UD-01 cross-wave integration (2026-11 audit, wave F): the first-launch landing
 // (zero sessions, Home + sidebar) keeps AP-20's ≤1 accent-filled primary per
-// screen. The sidebar's 新对话 is the one primary; Home's nextSteps 新对话 was
-// demoted to a secondary (wave D), so the two same-named buttons no longer
-// compete. Promoted from audit/probes/ui/p9_design_test.go (pixel-sampled).
+// screen: the sidebar's 新建会话 entry and Home's next-steps entry carry the same
+// name and must not both be primaries. Promoted from
+// audit/probes/ui/p9_design_test.go (pixel-sampled).
 
 import (
 	"testing"
@@ -54,7 +54,7 @@ func TestLandingSinglePrimaryWholeShell(t *testing.T) {
 	primaryCount := 0
 	buttonCount := 0
 	for _, info := range tester.AccessAll() {
-		if info.Role != ui.RoleButton || info.Name != "新对话" {
+		if info.Role != ui.RoleButton || info.Name != "新建会话" {
 			continue
 		}
 		buttonCount++
@@ -66,8 +66,12 @@ func TestLandingSinglePrimaryWholeShell(t *testing.T) {
 	if buttonCount == 0 {
 		t.Fatalf("no 新对话 button on the landing; texts = %v", tester.Texts())
 	}
-	if primaryCount != 1 {
-		t.Fatalf("UD-01: %d accent-filled primary 新对话 buttons share the landing (AP-20 wants exactly 1); texts = %v",
+	// AP-20 says AT MOST one accent-filled primary per screen. The sidebar's
+	// 新建会话 entry is a 32 DIP ghost row since the 2026-11 redesign (B-spec
+	// §3.1.1), so it contributes no fill and the landing shows one or none; what
+	// the assertion rules out is two same-named entries competing for the accent.
+	if primaryCount > 1 {
+		t.Fatalf("UD-01: %d accent-filled 新建会话 buttons share the landing (AP-20 wants at most 1); texts = %v",
 			primaryCount, tester.Texts())
 	}
 }
