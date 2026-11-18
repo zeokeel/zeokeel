@@ -1,5 +1,19 @@
 # Verification log (final)
 
+## 0.2.53 — 2026-11-18（状态条按 DSH 重做）
+
+```
+$ go build ./...                                  OK
+$ go test ./... -count=1                          51 包 ok, 0 FAIL
+$ go test ./internal/ui/session -run 'TestStatusStrip|TestSessionStatusStrip' -v
+--- PASS（尺度 12/16、居中偏差 0、无 详情 按钮、缺数据整组省略）
+$ go run designlint --strict --baseline .design-baseline.json ./...
+0 error / 0 warn / 0 new / 0 blocking（556 files，含 uikit.usage-ring 登记）
+$ go tool mygo vet .                              OK
+$ ui-snapshot                                      128 PNG
+```
+
+
 ## 0.2.52 — 2026-11-18（流式渲染稳定性）
 
 ```

@@ -697,6 +697,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | rail 会话富行（`uiroot.railSessionRow`，`uiroot.rail-session-rows`） | 标题 + 运行（warning）/未读（accent）点，整行点击打开会话并关闭浮层，RoleButton | 官方 List 行语义是 listitem，不提供按钮行；2026-11 审计 UD-11 补登记（此前被 command-palette.rows 文件前缀误归属） |
 | RunStatus 队列计数徽章（`uikit.run-status-queue-badge`） | ButtonBase 全状态自绘（rest/hover/pressed/focused/selected），H28 | 官方 `ui.Badge` 无点击/键盘语义；`ui.Button` 覆写背景会丢原生 hover/pressed（AP-02）；ButtonBase 保留键盘/焦点/焦点环（2026-11 审计 UD-06） |
 | composer 队列计数 chip（`uikit.composer-queue-chip`） | 与上一行同一词汇：`×N` 贴着加队列的控件（`排队`/发送），空计数不画，点击打开队列面板 | 同上（官方 `ui.Badge` 无点击/键盘语义）；计数必须贴在加队列的控件旁，状态条只报运行态（p2-inbox 审计） |
+| 状态条上下文圆环（`uikit.usage-ring`） | `ui.Path.Circle` 轨道 + 12 点起顺时针弧（cubic 逼近，RoundCap），16 DIP / 2 DIP 描边；`Ratio` 夹到 0..1，`≥0.85` 转 `Warning` | mygo v0.9.2 只有 `ui.Meter`/`ui.Progress`（条形）；状态条要的是「16 DIP 小面积占用」，条形需要 40+ DIP 宽度（用户要求与 DSH 一致）。颜色只用 tokens，`RoleMeter` + 「上下文 N%」名 + 「42K / 128K」描述，已登记 `uikit.usage-ring` | 2027-06-30 |
 | composer 动作行 | Shell 的 Row 承载 Toolbar + hint + 发送/排队/停止 | `ui.Toolbar` 溢出菜单会吞掉发送键，故主操作放在 Toolbar 外；Toolbar 内部仍是官方控件（`uikit.ComposerToolbar`），不新增按钮状态机 |
 | slash/@ 建议菜单 | 富行建议面板（图标/标题/说明） | 官方 Autocomplete 仅纯文本；已按官方 suggestions a11y 模式实现 |
 | 命令面板行按钮 | 单次点击执行 + RoleButton 行 | 官方 List 行语义是 listitem，不提供按钮行 |

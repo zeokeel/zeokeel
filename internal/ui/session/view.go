@@ -3629,7 +3629,7 @@ func buildComposer(
 			// The DSH-style usage strip sits directly under the composer card:
 			// one muted line of session statistics (rounds, steps, speed, tokens,
 			// cache/context) with the exact numbers in its tooltip.
-			buildSessionStatusStrip(ic, t, chat, st, chatSession)
+			buildSessionStatusStrip(ic, t, chat, st, chatSession, composerWidth)
 		},
 	})
 	// The queued-prompts (inbox) popover is a reported overlay: ComposerShell
@@ -4603,6 +4603,31 @@ func (st *state) sessionContextWindow(chat contracts.ChatService, session contra
 	return 0
 }
 
+// sessionUsageSpeed is the run's average output speed in tokens per second, or 0
+// when the turn is too short for the number to mean anything.
+func sessionUsageSpeed(stats sessionUsageStats) float64 {
+	if stats.durationMS < minStatusSpeedDurationMS || stats.completion <= 0 {
+		return 0
+	}
+	return float64(stats.completion) / (float64(stats.durationMS) / 1000)
+}
+
+// sessionUsageCachePercent is the share of the prompt tokens that came from the
+// provider's cache, or 0 when the session has no prompt accounting.
+func sessionUsageCachePercent(stats sessionUsageStats) int {
+	if stats.prompt <= 0 {
+		return 0
+	}
+	percent := int(math.Round(float64(stats.cached) * 100 / float64(stats.prompt)))
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	return percent
+}
+
 // buildSessionStatusStrip renders the status bar right under the composer (S8,
 // B-spec §3.2.6): one 32 DIP row in three zones — the run state and the queue on
 // the left, the context gauge with its 详情 popover on the right. It is
@@ -4610,7 +4635,7 @@ func (st *state) sessionContextWindow(chat contracts.ChatService, session contra
 // are mono so they line up as the context grows, and the exact figures live in
 // the 详情 popover instead of a six-item line.
 func buildSessionStatusStrip(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
-	st *state, session contracts.ChatSession) {
+	st *state, session contracts.ChatSession, composerWidth float32) {
 	stats := collectSessionUsage(session)
 	window := 0
 	if stats.hasUsage {
@@ -4635,13 +4660,20 @@ func buildSessionStatusStrip(c *ui.Context, t *design.Tokens, chat contracts.Cha
 	if !session.Running {
 		queued = st.queuedPromptTexts(session.ID)
 	}
+	// While the conversation tab shows the streaming reply, its own live line
+	// already says the turn is generating, so the bar drops its run row (the user
+	// saw 生成中 and 运行中 stacked). Another tab, a child view or a stop in flight
+	// keeps the row: nothing else on screen says it then.
+	runStateHidden := session.Running && st.tab == tabChat &&
+		strings.TrimSpace(st.agents.childID) == "" && st.stopRequested != session.ID
 	uikit.StatusStrip(c, uikit.StatusStripOptions{
-		Running:     session.Running,
-		StatusLabel: statusLabel,
-		Queued:      queued,
-		QueueOpen:   &st.queueMenuOpen,
-		QueueList:   &st.queueList,
-		QueueError:  st.queueActionErr,
+		Running:        session.Running,
+		RunStateHidden: runStateHidden,
+		StatusLabel:    statusLabel,
+		Queued:         queued,
+		QueueOpen:      &st.queueMenuOpen,
+		QueueList:      &st.queueList,
+		QueueError:     st.queueActionErr,
 		OnQueueCancel: func(index int) {
 			removeQueuedPrompt(st, session.ID, index)
 			st.runtime.Invalidate()
@@ -4650,78 +4682,28 @@ func buildSessionStatusStrip(c *ui.Context, t *design.Tokens, chat contracts.Cha
 			clearQueuedPrompts(st, session.ID)
 			st.runtime.Invalidate()
 		},
-		Used:       used,
-		Window:     window,
-		Detail:     sessionStatusDetail(st, stats, window),
-		DetailOpen: &st.statusDetailOpen,
-		KeyPrefix:  session.ID,
-		Locale:     st.locale,
+		Used:   used,
+		Window: window,
+		// The bar's read-out in the usage audit's order: the run's shape, its
+		// volume, then the context ring. A part without a truthful figure is left
+		// out by the strip itself.
+		Metrics: uikit.StatusStripMetrics{
+			Rounds:       stats.rounds,
+			Steps:        stats.steps,
+			Speed:        sessionUsageSpeed(stats),
+			Tokens:       stats.completion,
+			CachePercent: sessionUsageCachePercent(stats),
+		},
+		// A narrow composer keeps the ring alone: the two text groups would wrap the
+		// bar onto a second line, and every figure they carry is either inlined in
+		// the wide bar or in the ring's own accessible copy (used / window).
+		// The narrow window (1024) gives the composer card about 684 DIP; the
+		// standard one gives 785. 720 is the same cutoff the composer's own compact
+		// toolbar uses, so the bar folds exactly when the controls above it do.
+		Narrow:    composerWidth > 0 && composerWidth < 720,
+		KeyPrefix: session.ID,
+		Locale:    st.locale,
 	})
-}
-
-// sessionStatusDetail is the 详情 popover's content: the figures a status bar
-// cannot carry without becoming a paragraph — the round and tool-call counts,
-// the average output speed with what it means, the cache hit, the exact context
-// numbers and what is left of the window. Items whose data is unknown are left
-// out entirely instead of printing a zero (a provider that reports no usage says
-// nothing, and a catalogue that does not know the model has no window).
-func sessionStatusDetail(st *state, stats sessionUsageStats, window int) []uikit.UsageRow {
-	if !stats.hasUsage {
-		return nil
-	}
-	rows := []uikit.UsageRow{
-		{Label: st.tr("轮次", "Turns"), Value: strconv.Itoa(stats.rounds)},
-		{Label: st.tr("工具调用", "Tool calls"), Value: strconv.Itoa(stats.steps)},
-	}
-	// Average output speed over the run, tool time included: generated
-	// completion tokens divided by the turn's wall time. A turn shorter than
-	// minStatusSpeedDurationMS says nothing about throughput (scripted turns,
-	// cancellations), so the row is omitted instead of printing a silly
-	// five-digit number.
-	if stats.durationMS >= minStatusSpeedDurationMS && stats.completion > 0 {
-		speed := float64(stats.completion) / (float64(stats.durationMS) / 1000)
-		rows = append(rows, uikit.UsageRow{
-			Label: st.tr("平均速度", "Average speed"),
-			Value: fmt.Sprintf("%d tokens/s", int64(math.Round(speed))),
-			Exact: st.tr("输出 ", "Completion ") + strconv.Itoa(stats.completion) +
-				st.tr(" tokens / ", " tokens over ") + strconv.Itoa(int(stats.durationMS/1000)) +
-				st.tr(" 秒（含工具耗时）", "s (tool time included)"),
-		})
-	}
-	if stats.prompt > 0 {
-		cacheHit := int(math.Round(float64(stats.cached) * 100 / float64(stats.prompt)))
-		if cacheHit < 0 {
-			cacheHit = 0
-		}
-		if cacheHit > 100 {
-			cacheHit = 100
-		}
-		rows = append(rows, uikit.UsageRow{
-			Label: st.tr("缓存命中", "Cache hit"),
-			Value: fmt.Sprintf("%d%%", cacheHit),
-			Exact: uikit.FormatCompactCount(stats.cached) + " / " +
-				uikit.FormatCompactCount(stats.prompt),
-		})
-	}
-	if window > 0 && stats.contextTokens > 0 {
-		remaining := 100 - int(math.Round(float64(stats.contextTokens)*100/float64(window)))
-		if remaining < 0 {
-			remaining = 0
-		}
-		if remaining > 100 {
-			remaining = 100
-		}
-		rows = append(rows,
-			uikit.UsageRow{
-				Label: st.tr("上下文剩余", "Context left"),
-				Value: fmt.Sprintf("%d%%", remaining),
-			},
-			uikit.UsageRow{
-				Label: st.tr("上下文窗口", "Context window"),
-				Value: uikit.FormatCompactCount(window) + " tokens",
-			})
-	}
-	return rows
 }
 
 // recoveryKinds are the known backend failure classes the conversation can

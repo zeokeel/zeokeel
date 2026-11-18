@@ -249,21 +249,24 @@ func TestDockedInspectorLongTranscriptKeepsComposerAndFollowsEnd(t *testing.T) {
 	}
 
 	// The composer and the status strip stay at the window bottom. The strip is
-	// the 32 DIP bar under the composer (S8 / B-spec §3.2.6): one zone for the
-	// run state, one for the context gauge and its 详情 popover. This session's
-	// model has no catalogue window, so the gauge is absent and the strip is
-	// just its 详情 control — the old six-item sentence is gone on purpose.
+	// the 32 DIP centred read-out under the composer (S8 / B-spec §3.2.6): the
+	// usage audit's figures, inline — there is no 详情 control any more (every
+	// figure the popover used to hold is either in the bar or in the ring's
+	// accessible copy). This session's model has no catalogue window, so the ring
+	// is absent; the read-out groups remain — what must never come back is the old
+	// six-item sentence that ran the figures together into one string.
 	requireComposerAtBottom(t, tester, width, height)
-	if !tester.HasText("详情") {
-		t.Fatalf("session status strip missing under the composer; texts = %v", tester.Texts())
-	}
 	sendRect, ok := tester.Find("发送")
 	if !ok {
 		t.Fatalf("send control missing")
 	}
-	strip, ok := tester.Find("详情")
+	// The strip's own read-out is the anchor now (the bar has no button).
+	strip, ok := tester.Find("缓存命中")
 	if !ok {
-		t.Fatalf("status strip 详情 control missing")
+		t.Fatalf("session status strip missing under the composer; texts = %v", tester.Texts())
+	}
+	if tester.HasText("详情") {
+		t.Fatalf("the removed 详情 control is back in the status strip; texts = %v", tester.Texts())
 	}
 	if strip.Y <= sendRect.Y {
 		t.Fatalf("status strip (y=%.1f) is not below the composer's send control (y=%.1f)",
@@ -272,7 +275,7 @@ func TestDockedInspectorLongTranscriptKeepsComposerAndFollowsEnd(t *testing.T) {
 	if strip.Y+strip.H > float32(height) {
 		t.Fatalf("status strip (bottom=%.1f) is below the %d DIP window", strip.Y+strip.H, height)
 	}
-	for _, gone := range []string{"轮对话 ·", "tok/s ·", "缓存命中"} {
+	for _, gone := range []string{"轮对话 · 步步", " tok/s · 缓存命中"} {
 		if tester.HasText(gone) {
 			t.Fatalf("status strip still prints the old six-item sentence (%q); texts = %v", gone, tester.Texts())
 		}

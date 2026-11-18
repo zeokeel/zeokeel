@@ -4,6 +4,20 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.53] - 2026-11-18
+
+### Changed
+
+- **状态条（composer 下方 32 高）按 DSH 重做**：右侧不再是「`217K/1M` + 进度条 + `详情`」，而是一条**居中的指标带**——`⟨activity⟩ N 轮 M 步 · X tok/s`、`⟨data⟩ T tok · 缓存命中 P%`、`⟨圆环⟩ Q%`；词序与 DSH 一致（「轮」「步」之间不隔 `·`，只有速度前有），组内 `·` 两侧 4 DIP、组间 12 DIP，缺数据的组整组不画。
+- **尺度统一**：指标文字一律 `TypeXXS`(12)、图标 `IconSizeS`(16)、圆环 16/2，三者中心线对齐；`详情` 按钮删除（数值已全部内联，精确值走圆环的 `Description`「42K / 128K」）。
+- **运行态不重复**：transcript 末尾已有 `生成中`，状态条不再画 `运行中`（只有 `停止中…` 仍在条上）。
+- 新增 `uikit.UsageRing`（16 DIP 上下文圆环，12 点起顺时针弧、RoundCap、≥85% 转 `Warning`、`RoleMeter` + 「上下文 N%」），已在 registry 登记 `uikit.usage-ring` 并写入 `DESIGN.md §7.1`。
+
+### Fixed
+
+- 状态条指标里「缓存命中86%」中英文数字粘在一起（词与数字是两个文本元素、组内 gap 为 0，词尾空格被元素边界吃掉）：间距改成显式的 4 DIP 元素，中英两侧都按数值断言守住。
+- 窄窗 1024：指标带只留 `◔ Q%`，仍居中。
+
 ## [0.2.52] - 2026-11-18
 
 ### Fixed

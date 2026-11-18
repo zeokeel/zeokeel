@@ -13,6 +13,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
 )
 
 // statusChat scripts one session with the given messages after a first user
@@ -70,14 +71,17 @@ func TestSessionStatusStripRendersUsage(t *testing.T) {
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
 
-	h.assertTexts(tester, "120K/128K", "详情")
-	// The six-item sentence the old strip printed is gone (VD-10).
-	h.assertNoTexts(tester, "轮对话 ·", "tok/s ·", "缓存命中 95% ·")
+	// The bar reads in the usage audit's order: the run's shape, its volume, then
+	// the context percentage; the exact figures stay in 详情.
+	h.assertTexts(tester, "2", "3", "82", "7.4K", "95%", "94%")
+	// The read-out carries every figure inline, so the 详情 popover is gone: no
+	// control of that name exists anywhere in the frame (user: 详情都显示出来了).
+	h.assertNoTexts(tester, "详情", "Details")
 	// Cumulative billing prompt tokens never reach the context ratio.
 	h.assertNoTexts(tester, "220K/128K", "100K/128K")
 
 	// The bar sits directly under the composer card, below the send control.
-	strip, ok := tester.Find("120K/128K")
+	strip, ok := tester.Find("94%")
 	if !ok {
 		t.Fatalf("status bar missing; texts = %v", tester.Texts())
 	}
@@ -89,24 +93,17 @@ func TestSessionStatusStripRendersUsage(t *testing.T) {
 		t.Fatalf("status bar y=%.1f is not below the composer send control y=%.1f", strip.Y, send.Y)
 	}
 
-	// The gauge is a real ratio exposed as a progress indicator, never a made-up
-	// value.
-	progress, ok := tester.AccessByRole(ui.RoleProgress, "")
+	// The ring is a real ratio exposed as a meter, never a made-up value: 120K of
+	// a 128K window.
+	ring, ok := tester.AccessByRole(ui.RoleMeter, "上下文 94%")
 	if !ok {
-		t.Fatalf("status bar has no context gauge; texts = %v", tester.Texts())
+		t.Fatalf("status bar has no context ring; texts = %v", tester.Texts())
 	}
-	if progress.Now < 0.93 || progress.Now > 0.95 {
-		t.Fatalf("context gauge = %v, want 120000/128000", progress.Now)
+	if ring.Bounds.W != design.Space4 || ring.Bounds.H != design.Space4 {
+		t.Fatalf("context ring is %.0fx%.0f, want the %v icon step",
+			ring.Bounds.W, ring.Bounds.H, design.Space4)
 	}
 
-	// 详情 opens the exact figures: rounds, tool calls, average speed, cache hit,
-	// the remaining context and the window itself.
-	if err := tester.Click("详情"); err != nil {
-		t.Fatalf("open usage details: %v", err)
-	}
-	tester.Frame()
-	h.assertTexts(tester, "轮次", "工具调用", "平均速度", "82 tokens/s",
-		"缓存命中", "95%", "上下文剩余", "6%", "上下文窗口", "128K tokens")
 }
 
 // TestSessionStatusStripEnglishCopy covers the English wording.
@@ -117,13 +114,9 @@ func TestSessionStatusStripEnglishCopy(t *testing.T) {
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
 
-	h.assertTexts(tester, "120K/128K", "Details")
-	if err := tester.Click("Details"); err != nil {
-		t.Fatalf("open usage details: %v", err)
-	}
-	tester.Frame()
-	h.assertTexts(tester, "Turns", "Tool calls", "Average speed", "Cache hit",
-		"Context left", "Context window")
+	h.assertTexts(tester, "rounds", "steps", "tok/s", "tok", "cached", "94%")
+	// No 详情 popover: its rows (Turns, Tool calls, …) are inline or gone.
+	h.assertNoTexts(tester, "Details", "Turns", "Tool calls")
 }
 
 // TestSessionStatusStripHiddenWithoutUsage covers the empty/failed conversations
@@ -160,13 +153,8 @@ func TestSessionStatusStripWithoutCatalog(t *testing.T) {
 	h := newModelHarness(t, chat, nil)
 	tester := h.tester()
 	h.assertNoTexts(tester, "/128K", "900/", "上下文用量")
-	h.assertTexts(tester, "详情")
-	if err := tester.Click("详情"); err != nil {
-		t.Fatalf("open usage details: %v", err)
-	}
-	tester.Frame()
 	h.assertTexts(tester, "缓存命中", "50%")
-	h.assertNoTexts(tester, "上下文剩余", "上下文窗口")
+	h.assertNoTexts(tester, "详情", "上下文剩余", "上下文窗口")
 }
 
 // TestSessionStatusStripOmitsContextWithUnknownModel covers the catalogue that
@@ -199,8 +187,7 @@ func TestSessionStatusStripOmitsContextWithoutContextTokens(t *testing.T) {
 	})
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
-	h.assertNoTexts(tester, "剩余", "/128K", "0/128K", "上下文用量")
-	h.assertTexts(tester, "详情")
+	h.assertNoTexts(tester, "剩余", "/128K", "0/128K", "上下文用量", "详情")
 }
 
 // TestSessionStatusStripHidesUnknownSpeed covers a usage row without wall time
@@ -215,37 +202,195 @@ func TestSessionStatusStripHidesUnknownSpeed(t *testing.T) {
 	})
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
-	h.assertTexts(tester, "120K/128K")
-	if err := tester.Click("详情"); err != nil {
-		t.Fatalf("open usage details: %v", err)
-	}
-	tester.Frame()
-	h.assertTexts(tester, "缓存命中", "50%")
-	h.assertNoTexts(tester, "tokens/s")
+	h.assertTexts(tester, "94%", "缓存命中", "50%")
+	h.assertNoTexts(tester, "tokens/s", "详情")
 }
 
-// TestSessionStatusStripNamesTheRun covers the left zone: a running turn shows
-// the accent spinner and the neutral run word (running is not a warning), and the
-// bar names the run once — the transcript's own live line keeps 生成中.
-func TestSessionStatusStripNamesTheRun(t *testing.T) {
-	chat := statusChat(statusUsageMessages()...)
+// TestStatusStripOmitsTheDuplicateRunState covers the user's report that the bar
+// repeated the transcript: a streaming reply already says 生成中 inside the
+// conversation, so the bar below it must not say 运行中 as well. A stop in flight
+// is not a duplicate — the transcript does not report it — so it stays on the bar.
+func TestStatusStripOmitsTheDuplicateRunState(t *testing.T) {
+	chat := statusChat(contracts.ChatMessage{
+		ID: "a1", Role: contracts.ChatRoleAssistant, Text: "正在检查", Streaming: true,
+		Usage: &contracts.MessageUsage{CompletionTokens: 40, TotalTokens: 1040, DurationMS: 2000},
+	})
 	session, _ := chat.Session("sess-1")
 	session.Running = true
 	chat.updateSession(session)
+	// Verbose work steps keeps the transcript's own live line visible (this is the
+	// mode the user's screenshot showed).
+	h := newModelThinkingHarness(t, chat, newPermissionSettings(map[string]string{
+		contracts.SettingWorkStepsMode: contracts.WorkStepsVerbose,
+	}), statusCatalog())
+	tester := h.tester()
+
+	// The transcript states the run; the bar keeps only the figures.
+	h.assertTexts(tester, "生成中")
+	runWord := 0
+	for _, text := range tester.Texts() {
+		if text == "运行中" {
+			runWord++
+		}
+	}
+	if runWord != 1 {
+		t.Fatalf("the frame shows the run word %d time(s), want once (the top band's badge); texts = %v",
+			runWord, tester.Texts())
+	}
+	// That one run word belongs to the band above the transcript, never to the bar
+	// under the composer.
+	run, ok := tester.Find("运行中")
+	stop, okStop := tester.Find("停止")
+	if !ok || !okStop || run.Y >= stop.Y {
+		t.Fatalf("a run word sits at y=%.1f, at or below the composer's own controls (y=%.1f)",
+			run.Y, stop.Y)
+	}
+
+	// A stop in flight is the one run state the transcript does not show, so it
+	// stays on the bar: the reply still says 生成中, the bar says 停止中…. This
+	// fake delays the settle, so the stopping state is observable (the plain fake
+	// settles inside Cancel and would skip it).
+	stopping := stoppingChat()
+	stopping.addSession(contracts.ChatSession{
+		ID: "sess-1", Title: "停止中", Running: true,
+		Messages: []contracts.ChatMessage{
+			{ID: "u1", Role: contracts.ChatRoleUser, Text: "第一问"},
+			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "正在检查", Streaming: true},
+		},
+	}, true)
+	stopping.config = contracts.ChatConfig{Model: "gpt-4o"}
+	sh := newChatServiceHarness(t, stopping, &fakeSessionNotifier{})
+	stester := sh.tester()
+	stester.Frame()
+	sh.click(stester, "停止")
+	stester.Frame()
+	// The strip reports the stop; the reply keeps its own live line (its wording
+	// depends on the work-steps policy: 正在回复 here, 生成中 in verbose).
+	sh.assertTexts(stester, "停止中…", "正在回复")
+}
+
+// TestStatusStripMetricsMatchDSH covers the bar's read-out against DSH's line:
+// three zones — 轮次/步数/速度 · 总量/缓存命中 · 上下文圆环 — with the figures in
+// mono, the words beside them, groups Space3 apart and a middot inside a group.
+// A zone with no truthful figure is left out whole, and a narrow window keeps
+// only the ring and 详情.
+func TestStatusStripMetricsMatchDSH(t *testing.T) {
+	chat := statusChat(statusUsageMessages()...)
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
 
-	h.assertTexts(tester, "运行中", "120K/128K")
-	// The bar's own state line is a status region named by the run word (the
-	// neutral running role: running is not a warning), and it sits under the
-	// composer's stop control, not in the top band.
-	run, ok := tester.AccessByRole(ui.RoleStatus, "运行中")
+	// Zone 1: 2 轮 3 步 · 82 tok/s (the middot only before the speed).
+	h.assertTexts(tester, "2", "轮", "3", "步", "82", "tok/s", "·")
+	// Zone 2: 7.4K tok · 缓存命中 95%.
+	h.assertTexts(tester, "7.4K", "tok", "缓存命中", "95%")
+	// Zone 3: the ring and its percentage.
+	ring, ok := tester.AccessByRole(ui.RoleMeter, "上下文 94%")
 	if !ok {
-		t.Fatalf("running state is not a status region; texts = %v", tester.Texts())
+		t.Fatalf("context ring missing; texts = %v", tester.Texts())
 	}
-	stop, ok := tester.Find("停止")
-	if !ok || run.Bounds.Y <= stop.Y {
-		t.Fatalf("run status at y=%.1f is not under the composer stop control (y=%.1f)",
-			run.Bounds.Y, stop.Y)
+	if ring.Bounds.W != design.Space4 {
+		t.Fatalf("ring box = %.0f, want the %v icon step", ring.Bounds.W, design.Space4)
+	}
+	// The cluster ends with the ring: the percentage is the last element and
+	// nothing follows it (the 详情 popover is gone — every figure is inline).
+	percent, ok := tester.Find("94%")
+	if !ok {
+		t.Fatalf("context percentage missing; texts = %v", tester.Texts())
+	}
+	if percent.X <= ring.Bounds.X {
+		t.Fatalf("the percentage at %.1f is not right of the ring at %.1f", percent.X, ring.Bounds.X)
+	}
+	h.assertNoTexts(tester, "详情")
+
+	// Every number is separated from its word by a real 4 DIP gap, in both
+	// languages: a space character inside a text node is trimmed at the element
+	// boundary, which is how 缓存命中86% happened. The gap is measured here so the
+	// regression cannot come back silently.
+	gapAtLeast := func(left, right string, min float32) {
+		t.Helper()
+		l, okL := tester.Find(left)
+		r, okR := tester.Find(right)
+		if !okL || !okR {
+			t.Fatalf("measure %q … %q: missing (%v, %v); texts = %v", left, right, okL, okR, tester.Texts())
+		}
+		if gap := r.X - (l.X + l.W); gap < min {
+			t.Fatalf("gap between %q and %q is %.1f DIP, want at least %.1f", left, right, gap, min)
+		}
+	}
+	// zh: figure then word, except the cache hit, where the word comes first.
+	gapAtLeast("2", "轮", design.Space1-0.5)
+	gapAtLeast("3", "步", design.Space1-0.5)
+	gapAtLeast("82", "tok/s", design.Space1-0.5)
+	gapAtLeast("7.4K", "tok", design.Space1-0.5)
+	gapAtLeast("缓存命中", "95%", design.Space1-0.5)
+
+	// A session with no speed and no cache hit draws no empty zone: only the
+	// parts that have a truthful figure.
+	bare := statusChat(contracts.ChatMessage{
+		ID: "a1", Role: contracts.ChatRoleAssistant, Text: "一",
+		Usage: &contracts.MessageUsage{CompletionTokens: 40, TotalTokens: 1040},
+	})
+	bh := newModelHarness(t, bare, statusCatalog())
+	btester := bh.tester()
+	bh.assertNoTexts(btester, "tok/s", "缓存命中")
+	// A narrow window keeps the ring and 详情 only.
+	btester.SetSize(1024, 720)
+	btester.Frame()
+	btester.Frame()
+	bh.assertNoTexts(btester, "tok/s", "缓存命中", "轮", "详情")
+}
+
+// TestStatusStripScaleAndCentre covers the 5× audit of the bar: one type step
+// across the whole read-out (12 DIP copy, so a text's own box is the 18 DIP line),
+// a 24 DIP 详情 control, a 16 DIP ring — and the whole cluster centred in the
+// reading column rather than pinned to the right edge.
+func TestStatusStripScaleAndCentre(t *testing.T) {
+	chat := statusChat(statusUsageMessages()...)
+	h := newModelHarness(t, chat, statusCatalog())
+	tester := h.tester()
+
+	// Every word and figure of the read-out is the same 12 DIP step.
+	// 详情 is measured as a control below (its accessible name is the button's).
+	for _, label := range []string{"轮", "步", "tok/s", "tok", "缓存命中", "95%", "94%"} {
+		rect, ok := tester.Find(label)
+		if !ok {
+			t.Fatalf("strip part %q missing; texts = %v", label, tester.Texts())
+		}
+		// 12/18: the text's own box is the 18 DIP line, never the 22 DIP body line
+		// the 详情 control used to inherit.
+		if rect.H > 18.5 {
+			t.Fatalf("strip part %q is %.1f high, want the 12/18 line (18)", label, rect.H)
+		}
+	}
+	// The bar has no button of its own: the read-out is text and the ring.
+	if _, ok := tester.AccessByRole(ui.RoleButton, "详情"); ok {
+		t.Fatalf("a 详情 control is back in the bar; texts = %v", tester.Texts())
+	}
+	// The ring shares the icon step.
+	ring, ok := tester.AccessByRole(ui.RoleMeter, "上下文 94%")
+	if !ok {
+		t.Fatalf("context ring missing; texts = %v", tester.Texts())
+	}
+	if ring.Bounds.W != design.Space4 || ring.Bounds.H != design.Space4 {
+		t.Fatalf("ring is %.0fx%.0f, want the %v icon step", ring.Bounds.W, ring.Bounds.H, design.Space4)
+	}
+
+	// The cluster is centred in the reading column, not pushed to the right edge:
+	// its midpoint matches the composer card's midpoint. The card's text field
+	// spans its inner width, so the field's midpoint is the column's centre.
+	field, okField := tester.AccessByRole(ui.RoleTextField, "输入消息…")
+	if !okField {
+		t.Fatalf("composer input missing; texts = %v", tester.Texts())
+	}
+	columnCentre := field.Bounds.X + field.Bounds.W/2
+	left, okLeft := tester.Find("2")
+	right, okRight := tester.Find("94%")
+	if !okLeft || !okRight {
+		t.Fatalf("strip ends missing; texts = %v", tester.Texts())
+	}
+	clusterCentre := (left.X + right.X + right.W) / 2
+	if delta := clusterCentre - columnCentre; delta > 16 || delta < -16 {
+		t.Fatalf("the read-out cluster is %.1f DIP off the column's centre (cluster %.1f, column %.1f)",
+			delta, clusterCentre, columnCentre)
 	}
 }

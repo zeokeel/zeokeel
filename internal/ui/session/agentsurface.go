@@ -538,7 +538,7 @@ func (st *state) anyOverlayOpen() bool {
 	// depend on a reporting side channel. The find bar and the suggestion menus
 	// are deliberately absent: the session's own Escape arbitration closes them
 	// (find first, then the menus), so it has to stay live while they are open.
-	return st.queueMenuOpen || st.statusDetailOpen ||
+	return st.queueMenuOpen ||
 		st.draftOverwriteOpen || st.agents.teamOpen || st.agents.childOpen ||
 		st.agents.jobsOpen || st.agents.modelMenuOpen || st.agents.workbenchOpen ||
 		st.reminders.listOpen || st.reminders.createOpen || st.memoryEditOpen ||

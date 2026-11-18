@@ -177,9 +177,6 @@ type state struct {
 	// keyed by message ID and pruned with the conversation.
 	metaStreamed map[string]bool
 	metaRevealAt map[string]time.Time
-	// statusDetailOpen is the usage-details popover's fold state in the status
-	// bar under the composer (B-spec §3.2.6).
-	statusDetailOpen bool
 	// createAt is when this module last created a conversation: a repetition
 	// inside createDebounce (a double click) is ignored, so one gesture cannot
 	// leave two empty conversations behind (A4-I-04).

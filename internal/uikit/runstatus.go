@@ -13,6 +13,7 @@ package uikit
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -61,6 +62,13 @@ type Usage struct {
 type StatusStripOptions struct {
 	// Running shows the accent spinner and the status word.
 	Running bool
+	// RunStateHidden drops the run row from the bar because another surface on
+	// the same screen already states it: the conversation's reply shows its own
+	// live line (生成中) inside the transcript, and two run states a few DIP apart
+	// read as two runs (user report: "这里出现两个，生成中和运行中"). The stopping
+	// state is not a duplicate and always shows, so a stop in flight stays
+	// visible where the stop was pressed.
+	RunStateHidden bool
 	// StatusLabel is the running copy (运行中); empty uses the product's own.
 	StatusLabel string
 	// Queued lists the prompts waiting for this turn: the left zone shows the
@@ -81,20 +89,42 @@ type StatusStripOptions struct {
 	OnQueueResume func()
 	OnRetryQueue  func()
 	// Used and Window are the newest request's context size and the model's
-	// window; Used 0 or Window 0 hides the gauge (a ratio the product cannot
+	// window; Used 0 or Window 0 hides the ring (a ratio the product cannot
 	// compute is not shown at zero).
 	Used   int
 	Window int
-	// Detail are the popover's rows: rounds, tool calls, cache hit and the
-	// remaining context of this session.
-	Detail []UsageRow
-	// DetailOpen is the details popover's caller-owned open flag; nil leaves it
-	// closed (a host without the extra figures).
-	DetailOpen *bool
+	// Metrics is the bar's read-out, in the order it is drawn: the run's shape
+	// (rounds · steps · speed), its volume (tokens · cache hit) and then the
+	// context ring. A group with no truthful figure is left out whole — the bar
+	// never pads with a zero or a dash.
+	Metrics StatusStripMetrics
+	// Narrow drops the two text groups and keeps the ring and the 详情 control:
+	// the numbers stay one click away instead of wrapping the bar onto a second
+	// line in a narrow window.
+	Narrow bool
 	// KeyPrefix keys the strip and its rows (the session ID).
 	KeyPrefix string
 	// Locale localizes the entry's own copy; nil falls back to Chinese.
 	Locale contracts.LocaleService
+}
+
+// StatusStripMetrics is the strip's read-out, already formatted by the caller:
+// the strip owns the layout, never the wording of a measurement.
+type StatusStripMetrics struct {
+	// Rounds, Steps and Speed form the first group (activity); each is optional,
+	// and a group with nothing to show is not drawn at all.
+	Rounds int
+	Steps  int
+	Speed  float64 // tokens per second, 0 when the turn was too short to say
+	// Tokens is the session's generated volume and CachePercent the share of its
+	// prompt tokens that came from the cache; 0 leaves the part out.
+	Tokens       int
+	CachePercent int
+}
+
+// any reports whether the read-out has anything to say.
+func (m StatusStripMetrics) any() bool {
+	return m.Rounds > 0 || m.Steps > 0 || m.Speed > 0 || m.Tokens > 0 || m.CachePercent > 0
 }
 
 // StatusStrip draws the composer-adjacent status bar. It draws nothing at all
@@ -104,7 +134,7 @@ func StatusStrip(c *ui.Context, o StatusStripOptions) {
 	t := design.Of(c)
 	hasQueue := len(o.Queued) > 0 || o.QueueError != ""
 	hasGauge := o.Used > 0 && o.Window > 0
-	if !o.Running && !hasQueue && !hasGauge && len(o.Detail) == 0 {
+	if !o.Running && !hasQueue && !hasGauge && !o.Metrics.any() {
 		return
 	}
 	key := "runstatus.strip"
@@ -114,12 +144,21 @@ func StatusStrip(c *ui.Context, o StatusStripOptions) {
 	// The bar is 32 DIP, the compact row step: it reads as chrome under the
 	// composer, not as a second panel. Nothing in it is 11 DIP copy (VD-10): the
 	// status word, the queue count and the gauge's numbers are all 12.
+	// The bar is a centred read-out band, not a right-aligned toolbar: the
+	// metrics cluster takes the middle of the reading column, and the queue badge
+	// (when prompts wait) is positioned at the left edge so it can never push the
+	// cluster off centre.
 	row := ui.Row(c.Key(key)).FillWidth().Height(design.RowCompactHeight).
-		AlignItems(ui.Center).Gap(design.Space2)
+		AlignItems(ui.Center).Justify(ui.Center)
 	row.Children(func() {
-		statusStripRun(c, t, o, key)
-		ui.Spacer(c).Grow(1)
-		statusStripGauge(c, t, o, key)
+		statusStripMetrics(c, t, o, key)
+		if hasQueue {
+			ui.Box(c.Key(key + ".queue.slot")).Absolute().
+				Top(0).Bottom(0).Start(0).AlignItems(ui.Center).
+				Children(func() {
+					statusStripQueue(c, t, o, key)
+				})
+		}
 	})
 	if o.QueueError != "" {
 		ErrorLine(c, o.QueueError)
@@ -130,21 +169,29 @@ func StatusStrip(c *ui.Context, o StatusStripOptions) {
 // its count) while prompts wait. Both are quiet; the accent lives in the
 // spinner alone, so the bar never competes with the send control.
 func statusStripRun(c *ui.Context, t *design.Tokens, o StatusStripOptions, key string) {
-	if o.Running {
-		label := o.StatusLabel
-		if strings.TrimSpace(label) == "" {
-			label = T(o.Locale, "运行中", "Running")
-		}
-		// One status line with a stable identity: v0.9 reads a RoleStatus whole
-		// again whenever its text changes (docs/ui/accessibility.md).
-		ui.Row(c.Key(key + ".run")).AlignItems(ui.Center).Gap(design.Space2).
-			Role(ui.RoleStatus).Label(label).Children(func() {
-			ui.Spinner(c).Label(label).Size(design.IconSizeS, design.IconSizeS).
-				TextColor(t.Accent)
-			StatusText(c, t, design.TypeXXS, StatusRunning, label)
-		})
+	if !o.Running || o.RunStateHidden {
+		return
 	}
-	runStatusQueue(c, t, RunStatusOptions{
+	label := o.StatusLabel
+	if strings.TrimSpace(label) == "" {
+		label = T(o.Locale, "运行中", "Running")
+	}
+	// One status line with a stable identity: v0.9 reads a RoleStatus whole again
+	// whenever its text changes (docs/ui/accessibility.md).
+	ui.Row(c.Key(key + ".run")).AlignItems(ui.Center).Gap(design.Space2).
+		Role(ui.RoleStatus).Label(label).Children(func() {
+		ui.Spinner(c).Label(label).Size(design.IconSizeS, design.IconSizeS).
+			TextColor(t.Accent)
+		StatusText(c, t, design.TypeXXS, StatusRunning, label)
+	})
+}
+
+// statusStripQueue draws the queue control and its popover in the strip's left
+// slot: the prompts waiting for the turn, with per-row cancel, the paused
+// explanation and the guarded clear.
+func statusStripQueue(c *ui.Context, t *design.Tokens, o StatusStripOptions, key string) {
+	_ = t
+	runStatusQueue(c, design.Of(c), RunStatusOptions{
 		Running:       o.Running,
 		Queued:        o.Queued,
 		QueueOpen:     o.QueueOpen,
@@ -160,92 +207,159 @@ func statusStripRun(c *ui.Context, t *design.Tokens, o StatusStripOptions, key s
 	})
 }
 
-// statusStripGauge draws the right zone: the newest request's context over the
-// model's window in mono 12, a 3 DIP bar under it in the same green/amber/red
-// vocabulary the usage audit asked for (Warning past 80%, Danger past 95%), and
-// the 详情 control that opens the exact figures (rounds, tool calls, cache hit,
-// remaining context). The numbers are the product's only always-on metric, so
-// they are the one place mono is used for a figure rather than for code.
-func statusStripGauge(c *ui.Context, t *design.Tokens, o StatusStripOptions, key string) {
-	if o.Used <= 0 || o.Window <= 0 {
-		// A session with accounting but no context window still has figures
-		// worth opening (rounds, tool calls, cache hit).
-		statusStripDetailButton(c, t, o, key)
-		return
-	}
-	ratio := float64(o.Used) / float64(o.Window)
-	if ratio > 1 {
-		ratio = 1
-	}
-	if ratio < 0 {
-		ratio = 0
-	}
-	figures := FormatCompactCount(o.Used) + "/" + FormatCompactCount(o.Window)
-	ui.Row(c.Key(key + ".gauge")).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-		design.Apply(ui.Text(c, figures), t.MonoText(design.TypeXXS)).
-			TextColor(t.LabelSecondary).NoWrap().
-			Description(fmt.Sprintf(T(o.Locale, "上下文 %d / %d tokens", "Context %d / %d tokens"),
-				o.Used, o.Window))
-		fill := t.Accent
-		switch {
-		case ratio >= 0.95:
-			fill = t.Danger
-		case ratio >= 0.80:
-			fill = t.Warning
+// statusStripMetrics draws the bar's right zone: the read-out groups of the
+// usage audit (activity, volume, then the context ring), right-aligned, 12 DIP,
+// with the figures in mono and the words in the text face. Groups are separated
+// by Space3 and their parts by a middot with Space1 around it; a group with no
+// truthful figure is skipped whole, so an empty bar is just the 详情 control.
+//
+// In a narrow window the two text groups fold into 详情 and the bar keeps the
+// ring and the control: the figures stay one click away instead of the bar
+// wrapping onto a second line.
+func statusStripMetrics(c *ui.Context, t *design.Tokens, o StatusStripOptions, key string) {
+	row := ui.Row(c.Key(key + ".metrics")).AlignItems(ui.Center).Gap(design.Space3)
+	row.Children(func() {
+		if !o.Narrow {
+			statusStripActivityGroup(c, t, o)
+			statusStripVolumeGroup(c, t, o)
 		}
-		// The official progress bar (a real, truthful ratio — the one meter the
-		// product has) at the gauge's own 3 DIP rule, over the surface's line.
-		ui.Progress(c, ratio).Width(statusGaugeWidth).Height(statusGaugeHeight).
-			TextColor(fill).Background(t.BorderL2).
-			Label(fmt.Sprintf(T(o.Locale, "上下文用量 %d%%", "Context used %d%%"),
-				int(ratio*100)))
-		statusStripDetailButton(c, t, o, key)
+		statusStripRing(c, t, o, key)
 	})
 }
 
-// statusStripDetailButton draws the 详情 control and its popover: the exact
-// session figures, one per row.
-func statusStripDetailButton(c *ui.Context, t *design.Tokens, o StatusStripOptions, key string) {
-	if len(o.Detail) == 0 || o.DetailOpen == nil {
-		return
-	}
-	label := T(o.Locale, "详情", "Details")
-	button := design.Apply(ui.Button(c.Key(key+".detail"), label), t.SecondaryButton()).
-		Label(label).Height(design.ControlCompactHeight).PaddingX(design.Space2).
-		FontWeight(design.WeightMedium)
-	button = button.Transition(design.TransitionColors(c))
-	if button.Clicked() {
-		*o.DetailOpen = !*o.DetailOpen
-		c.Invalidate()
-	}
-	if !*o.DetailOpen {
-		return
-	}
-	open := true
-	ui.PopoverBase(c, button, &open, func(panel ui.Element) {
-		design.Apply(panel.Width(design.OverlayWidthS).MaxWidthPercent(92).
-			Padding(design.Space3).Gap(design.Space2).
-			AttachTo(button, ui.AnchorTopEnd, ui.AnchorBottomEnd).
-			Margin(0, 0, design.Space2, 0).
-			Background(t.BgOverlay).Border(1, t.BorderL3).Radius(design.RadiusLG),
-			t.ShadowOverlay()).
-			Label(T(o.Locale, "用量详情", "Usage details"))
-		for _, row := range o.Detail {
-			row := row
-			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-				design.Apply(ui.Text(c, row.Label), t.TextMuted(design.TypeXXS)).
-					Grow(1).Shrink(1).MaxLines(1).Ellipsis("…")
-				value := design.Apply(ui.Text(c, row.Value), t.MonoText(design.TypeXXS)).
-					TextColor(t.LabelPrimary).NoWrap()
-				if row.Exact != "" {
-					value.Description(T(o.Locale, "精确值：", "Exact: ") + row.Exact)
-				}
-			})
+// statusStripPart draws one part of a group: an optional figure in mono, an
+// optional word in the text face, both 12 DIP tertiary and drawn tight (the part
+// is one token of the line, so no gap lands between a number and its unit).
+func statusStripPart(c *ui.Context, t *design.Tokens, figure, word, description string) {
+	ui.Row(c).Gap(design.Space0).AlignItems(ui.Center).Children(func() {
+		if figure != "" {
+			part := design.Apply(ui.Text(c, figure), t.MonoText(design.TypeXXS)).
+				TextColor(t.LabelTertiary).NoWrap()
+			if description != "" {
+				part.Description(description)
+			}
+		}
+		if word != "" {
+			if figure != "" {
+				// One Space1 between the number and its unit, the same 4 DIP the
+				// middot uses: never a space character inside the string, which the
+				// element boundary would trim.
+				ui.Box(c).Width(design.Space1).Shrink(0)
+				design.Apply(ui.Text(c, strings.TrimSpace(word)), t.Font(design.TypeXXS)).
+					TextColor(t.LabelTertiary).NoWrap()
+				return
+			}
+			design.Apply(ui.Text(c, word), t.Font(design.TypeXXS)).
+				TextColor(t.LabelTertiary).NoWrap()
 		}
 	})
-	if !open {
-		*o.DetailOpen = false
+}
+
+// statusStripGroupSeparator draws the middot between two parts of one group, with
+// Space1 on each side: the group reads as one sentence of figures.
+func statusStripGroupSeparator(c *ui.Context, t *design.Tokens) {
+	ui.Box(c).Width(design.Space1).Shrink(0)
+	design.Apply(ui.Text(c, "·"), t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).NoWrap()
+	ui.Box(c).Width(design.Space1).Shrink(0)
+}
+
+// statusStripActivityGroup is 轮次 · 步数 · 速度, with the activity glyph: the
+// shape of the run.
+func statusStripActivityGroup(c *ui.Context, t *design.Tokens, o StatusStripOptions) {
+	rounds, steps, speed := o.Metrics.Rounds, o.Metrics.Steps, o.Metrics.Speed
+	if rounds <= 0 && steps <= 0 && speed <= 0 {
+		return
 	}
+	ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+		ui.Icon(c, icons.Activity()).Size(design.IconSizeS, design.IconSizeS).
+			TextColor(t.LabelTertiary)
+		parts := ui.Row(c).Gap(design.Space0).AlignItems(ui.Center)
+		parts.Children(func() {
+			// "19 轮 898 步 · 174 tok/s": the counts and the speed are one reading,
+			// so only the speed gets the middot (DSH's own line).
+			first := true
+			if rounds > 0 {
+				statusStripPart(c, t, strconv.Itoa(rounds), T(o.Locale, "轮", "rounds"), "")
+				first = false
+			}
+			if steps > 0 {
+				if !first {
+					// A space, not a middot: 轮 and 步 belong together.
+					ui.Box(c).Width(design.Space1).Shrink(0)
+				}
+				statusStripPart(c, t, strconv.Itoa(steps), T(o.Locale, "步", "steps"), "")
+				first = false
+			}
+			if speed > 0 {
+				if !first {
+					statusStripGroupSeparator(c, t)
+				}
+				statusStripPart(c, t, FormatCompactCount(int(speed+0.5)),
+					T(o.Locale, "tok/s", "tok/s"), "")
+			}
+		})
+	})
+}
+
+// statusStripVolumeGroup is 总量 · 缓存命中, with the data glyph: how much the
+// session moved. English puts the percentage first ("97% cached"), Chinese the
+// word first ("缓存命中 97%").
+func statusStripVolumeGroup(c *ui.Context, t *design.Tokens, o StatusStripOptions) {
+	tokens, cached := o.Metrics.Tokens, o.Metrics.CachePercent
+	if tokens <= 0 && cached <= 0 {
+		return
+	}
+	english := o.Locale != nil && o.Locale.Language() == "en"
+	ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+		ui.Icon(c, icons.Data()).Size(design.IconSizeS, design.IconSizeS).
+			TextColor(t.LabelTertiary)
+		parts := ui.Row(c).Gap(design.Space0).AlignItems(ui.Center)
+		parts.Children(func() {
+			first := true
+			if tokens > 0 {
+				statusStripPart(c, t, FormatCompactCount(tokens), T(o.Locale, "tok", "tok"), "")
+				first = false
+			}
+			if cached > 0 {
+				if !first {
+					statusStripGroupSeparator(c, t)
+				}
+				// The word and the figure are two parts (one face each: mono for the
+				// number, the text face for the word), so the space between them must
+				// be its own element — a trailing space inside a text node is eaten at
+				// the element boundary, and the line read 缓存命中86%.
+				if english {
+					statusStripPart(c, t, strconv.Itoa(cached)+"%", "", "")
+					ui.Box(c).Width(design.Space1).Shrink(0)
+					statusStripPart(c, t, "", "cached", "")
+					return
+				}
+				statusStripPart(c, t, "", T(o.Locale, "缓存命中", "cached"), "")
+				ui.Box(c).Width(design.Space1).Shrink(0)
+				statusStripPart(c, t, strconv.Itoa(cached)+"%", "", "")
+			}
+		})
+	})
+}
+
+// statusStripRing draws the context ring and its percentage through the shared
+// registered entry (uikit.UsageRing): 16 DIP, a 2 DIP stroke, Accent until 85% of
+// the window is spent and Warning from there. The strip only places it.
+func statusStripRing(c *ui.Context, t *design.Tokens, o StatusStripOptions, key string) {
+	if o.Used <= 0 || o.Window <= 0 {
+		return
+	}
+	ratio := float64(o.Used) / float64(o.Window)
+	pct := int(ratio*100 + 0.5)
+	ui.Row(c.Key(key + ".ring")).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		UsageRing(c, UsageRingOptions{
+			Ratio:  ratio,
+			Used:   o.Used,
+			Limit:  o.Window,
+			Locale: o.Locale,
+		})
+		statusStripPart(c, t, strconv.Itoa(pct)+"%", "", "")
+	})
 }
 
 // RunStatusOptions is one run-status area: a generating line, the queue of
