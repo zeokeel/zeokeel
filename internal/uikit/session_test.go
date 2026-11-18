@@ -500,3 +500,35 @@ func TestSessionThreadRowsMatchMapping(t *testing.T) {
 		}
 	}
 }
+
+// TestStreamThreadFollowsInstantlyWhileStreaming covers the follow motion: a
+// streamed reply grows every frame, and mygo's glideToEnd re-targets whenever the
+// last row grew by more than half a DIP, so a 200 ms follow animation can never
+// catch up and the viewport spends the whole turn chasing the text (the shake the
+// user reported). The thread therefore follows instantly while a turn runs and
+// keeps the shipped animation for the settled transcript, where the height stops
+// changing. The row-move animation is untouched: it serves discrete reorders.
+func TestStreamThreadFollowsInstantlyWhileStreaming(t *testing.T) {
+	build := func(running bool) *ui.ListState {
+		var state ui.ListState
+		view := func(c *ui.Context) {
+			uikit.SessionThread(c, uikit.SessionThreadOptions{
+				Running:  running,
+				State:    &state,
+				Messages: []contracts.ChatMessage{{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "流式回答"}},
+			})
+		}
+		tester := ui.NewTester(view, 900, 600)
+		tester.Frame()
+		return &state
+	}
+	if got := build(true); got.FollowAnimation != nil {
+		t.Fatalf("a running turn animates its follow (duration %v); want the instant follow", got.FollowAnimation.Duration)
+	}
+	if got := build(false); got.FollowAnimation == nil {
+		t.Fatal("the settled transcript lost its follow animation")
+	}
+	if got := build(true); got.MoveAnimation == nil {
+		t.Fatal("the row-move animation was dropped from a running turn")
+	}
+}

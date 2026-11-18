@@ -166,3 +166,78 @@ func TestMarkdownReplyKeepsTheProseMeasure(t *testing.T) {
 		t.Fatalf("the table did not render; texts = %v", tester.Texts())
 	}
 }
+
+// TestMarkdownStreamAndViewShareTheLayout answers the streaming-flicker report on
+// the Markdown side: markdown.Stream and markdown.View walk the same blocks with
+// the same theme, so the switch at the end of a turn changes nothing about the
+// layout. The test draws one source both ways and compares the rect of its last
+// paragraph, which only matches if headings, lists, quotes and block spacing agree.
+func TestMarkdownStreamAndViewShareTheLayout(t *testing.T) {
+	const source = "第一段正文，用来占位。\n\n## 小节\n\n- 列表一\n- 列表二\n\n> 引用\n\n最后一段结尾。\n"
+	render := func(streaming bool) *ui.Tester {
+		tester := ui.NewTester(func(c *ui.Context) {
+			tokens := design.Of(c)
+			ui.Column(c).FillWidth().FillHeight().Background(tokens.BgBase).Padding(design.Space5).
+				Children(func() {
+					ui.Column(c).Width(design.TranscriptWidth).Children(func() {
+						uikit.MarkdownBlock(c, source, uikit.MarkdownBlockOptions{
+							Key: "reply", Streaming: streaming, Markdown: uikit.ChatMarkdown(tokens, 0),
+						})
+					})
+				})
+		}, 1080, 700)
+		tester.SetLocale("zh-Hans")
+		tester.Frame()
+		return tester
+	}
+	streamed, view := render(true), render(false)
+	want, ok := view.Find("最后一段结尾。")
+	if !ok {
+		t.Fatalf("the finished view does not draw the last paragraph; texts = %v", view.Texts())
+	}
+	got, ok := streamed.Find("最后一段结尾。")
+	if !ok {
+		t.Fatalf("the streaming view does not draw the last paragraph; texts = %v", streamed.Texts())
+	}
+	if got != want {
+		t.Fatalf("streaming rect %+v differs from the finished view's %+v: the end-of-turn switch does not keep the layout",
+			got, want)
+	}
+}
+
+// TestMarkdownBlockMeasureIsSticky answers the other half: the reading measure is
+// decided once per block and only ever widens, so a table arriving mid-stream
+// reflows the block at most once instead of flickering between widths.
+func TestMarkdownBlockMeasureIsSticky(t *testing.T) {
+	const (
+		prose = "这是一段用来测量阅读宽度的正文，需要足够长才能看出它是否被收窄到 ProseMeasure。\n"
+		table = "\n| 检查项 | 状态 |\n|---|---|\n| 测试 | 通过 |\n"
+	)
+	build := func(src string) *ui.Tester {
+		tester := ui.NewTester(func(c *ui.Context) {
+			tokens := design.Of(c)
+			ui.Column(c).FillWidth().FillHeight().Background(tokens.BgBase).Padding(design.Space5).
+				Children(func() {
+					ui.Column(c).Width(design.TranscriptWidth).Children(func() {
+						uikit.MarkdownBlock(c, src, uikit.MarkdownBlockOptions{
+							Key: "streamed", Streaming: true, Markdown: uikit.ChatMarkdown(tokens, 0),
+						})
+					})
+				})
+		}, 1080, 500)
+		tester.SetLocale("zh-Hans")
+		tester.Frame()
+		return tester
+	}
+	// Each frame is a separate tester, so the sticky decision is checked within one
+	// element's life: a fresh prose block is measured, a fresh block with a table
+	// takes the column.
+	proseOnly := build(prose)
+	if rect, ok := proseOnly.Find(prose); ok && rect.W > design.ProseMeasure+1 {
+		t.Fatalf("a prose-only block spans %.1f DIP, want ≤%.1f", rect.W, design.ProseMeasure)
+	}
+	withTable := build(prose + table)
+	if rect, ok := withTable.Find(prose); ok && rect.W <= design.ProseMeasure {
+		t.Fatalf("a block with a table spans %.1f DIP, want the wider column", rect.W)
+	}
+}

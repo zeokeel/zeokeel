@@ -120,7 +120,19 @@ func SessionThread(c *ui.Context, o SessionThreadOptions) {
 		// below a fold or a reorder glide rather than jump. design's wrappers
 		// return nil under reduced motion, which leaves the list static.
 		state.FollowEnd = true
-		state.FollowAnimation = design.ListFollowAnimation(c)
+		// The follow animation is for a discrete jump to the end, not for a row
+		// that grows every frame: mygo's glideToEnd re-targets on every frame the
+		// last row grows by more than half a DIP, so a 200 ms animation can never
+		// catch up with a streaming reply and the viewport spends the whole turn
+		// chasing it — the visible shake. While the turn streams the follow is
+		// instant (nil); the animation comes back for the settled transcript, where
+		// the height is stable. MoveAnimation stays: it serves discrete reorders
+		// (folds, grouped turns) and never re-targets on growth.
+		if o.Running {
+			state.FollowAnimation = nil
+		} else {
+			state.FollowAnimation = design.ListFollowAnimation(c)
+		}
 		state.MoveAnimation = design.ListMoveAnimation(c)
 		if o.HoldPlace != nil && *o.HoldPlace {
 			state.HoldPlace()

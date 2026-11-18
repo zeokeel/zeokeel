@@ -4,6 +4,25 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.52] - 2026-11-18
+
+### Fixed
+
+- **流式回复期间画面不断跳动、思考/工具调用/输出混杂**（用户报告：停止后才正常）。四个机制逐一定位并修复：
+  - **思考块身份在迭代边界变化**：第 2 段思考到达时，第 1 段的折叠状态键与组件身份一起从 `<id>` 变成 `<id>.seg0`，读者展开的折叠会被重置、整块重建重排。现在键恒为 `<id>.seg<n>`。
+  - **已完成的正文片段仍在按流式解析**：此前整轮所有片段都用 `markdown.Stream`；事件把尾巴切开后，同一位置上的文本变短，mygo 判定"不是同一段文本的延长"而丢弃全部逐块缓存 → 整块重解析重排。现在**只有最后一个事件之后的尾巴是流式**，之前的片段一律静态，并按事件身份传入 `uikit.MarkdownBlock` 的 key（新增 API，`Key` 锁定 markdown 解析缓存）。
+  - **流式期间仍在做跟随动画**：末行每帧长高都会让 mygo 的 `glideToEnd` 重定目标，200ms 动画永远追不上。`FollowEnd` 保留，`FollowAnimation` 在 `Running` 期间关闭（瞬时贴底），回合结束后恢复；`MoveAnimation` 保留。
+  - **时间线并列偏移的破平依赖历史长度**：`takeSegment = !lastSegment` 会让新事件到达时相邻块换位；改为按迭代边界（`si == 0`）决定。
+- **散文阅读量宽度的来回跳**：表格中途出现会让 `ProseMeasure` 判定由 640 变宽再缩回；改为粘性判定（只允许变宽一次）。
+- **推理行尾部横向漂移**：完成瞬间追加「· 2.5s · N 行」会把 chevron 右推；改为 `[label][Spacer(Grow 1)][duration][行数][chevron]`，chevron 钉在行尾。
+- **自动化测试在高负载下超时**：`waitTask`/`waitCall` 的预算从 10s 提到 60s（轮询命中即返回），修掉 `TestRunsReuseBoundSession` 在全量 `-race` 下的超时。
+- **发布门禁**：`TestDeliverableSavedNoticeUsesStatusTint` 在 CI 上取样到徽章抗锯齿边缘而红；改成取药丸内一段像素中最饱和者，并分别断言"是状态色相"与"接近 token 混合"，不再依赖运行机字体度量。
+
+### Tests
+
+- `TestStreamingTranscriptDoesNotJump`（跨 9 帧断言：相邻块间距恒定、已完成块高度与相对偏移恒定、顺序等于到达顺序、读者展开的折叠不被关闭、停止后同一顺序）
+- `TestStreamThreadFollowsInstantlyWhileStreaming`、`TestMarkdownBlockMeasureIsSticky`、`TestMarkdownStreamAndViewShareTheLayout`、`TestReasoningStreamingFlipKeepsTheRowGeometry`
+
 ## [0.2.51] - 2026-11-18
 
 ### Changed

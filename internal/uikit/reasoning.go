@@ -141,25 +141,20 @@ func ReasoningTrace(c *ui.Context, o ReasoningTraceOptions) {
 		if o.Streaming {
 			return
 		}
+		// The tail is pinned: the spacer takes the free room, the metadata (the
+		// measured duration and the line count) grows leftwards into it, and the
+		// chevron stays at the row's end. Appending the metadata when a segment
+		// finishes therefore cannot move the chevron — only the row's text, and only
+		// sideways (the trigger is a fixed 28 DIP line, so no height moves either).
+		ui.Spacer(c).Grow(1)
 		if o.Duration != "" {
 			reasoningMetadata(c, t, o.Duration)
 		}
 		if lines := ReasoningLineCount(o.Reasoning); lines > 1 {
 			reasoningMetadata(c, t, fmt.Sprintf(T(o.Locale, "%d 行", "%d lines"), lines))
 		}
-		chevron := func() {
-			ui.Icon(c, icons.ChevronRight()).Size(design.Space3, design.Space3).
-				TextColor(t.LabelTertiary).Rotate(90 * parts.Progress())
-		}
-		if o.InlineChevron {
-			// The chevron sits right after the label/metadata (the row gap is
-			// the 8 DIP spacing) and the spacer takes the rest of the line.
-			chevron()
-			ui.Spacer(c).Grow(1)
-			return
-		}
-		ui.Spacer(c).Grow(1)
-		chevron()
+		ui.Icon(c, icons.ChevronRight()).Size(design.Space3, design.Space3).
+			TextColor(t.LabelTertiary).Rotate(90 * parts.Progress())
 	})
 	parts.Panel(func() {
 		// The thinking body sits under the trigger's text (past the glyph), as a

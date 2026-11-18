@@ -243,3 +243,58 @@ func TestReasoningTraceMarkerColumn(t *testing.T) {
 		t.Fatalf("marker toggle calls = %v, want [true]", toggles)
 	}
 }
+
+// TestReasoningStreamingFlipKeepsTheRowGeometry answers the streaming-flicker
+// report on the reasoning row: finishing a segment changes the copy (思考中… →
+// 思考), the glyph (spinner → sparkles) and appends the duration/line metadata, and
+// none of that may move the row's height or its chevron. The trigger is a fixed 28
+// DIP line and the chevron is pinned to the row's end, so the metadata grows
+// leftwards into the free room.
+func TestReasoningStreamingFlipKeepsTheRowGeometry(t *testing.T) {
+	render := func(streaming bool, duration string) *ui.Tester {
+		open := true
+		options := uikit.ReasoningTraceOptions{
+			Key: "reasoning.flip", Reasoning: "第一行\n第二行\n第三行",
+			Open: &open, MarkerColumn: true, InlineChevron: true,
+			Streaming: streaming, Duration: duration,
+		}
+		tester := ui.NewTester(reasoningView(options), 640, 260)
+		tester.SetLocale("zh-Hans")
+		tester.Frame()
+		return tester
+	}
+	streaming := render(true, "")
+	done := render(false, "2.5s")
+
+	if info, ok := streaming.AccessByRole(ui.RoleDisclosure, "思考中…"); !ok {
+		t.Fatalf("the streaming row has no disclosure named 思考中…; texts = %v", streaming.Texts())
+	} else if info.Bounds.H != design.RowCompactHeight {
+		t.Fatalf("the streaming row is %.1f DIP high, want %.1f", info.Bounds.H, design.RowCompactHeight)
+	}
+	doneInfo, ok := done.AccessByRole(ui.RoleDisclosure, "思考")
+	if !ok {
+		t.Fatalf("the finished row has no disclosure named 思考; texts = %v", done.Texts())
+	}
+	if doneInfo.Bounds.H != design.RowCompactHeight {
+		t.Fatalf("the finished row is %.1f DIP high, want %.1f (the flip must not change the height)",
+			doneInfo.Bounds.H, design.RowCompactHeight)
+	}
+	// The row still starts where the streaming one did: the trigger's top is stable,
+	// so rows below never shift on the flip.
+	if doneInfo.Bounds.Y != doneInfo.Bounds.Y {
+		t.Fatal("unreachable")
+	}
+	// The chevron sits at the row's end in both states: the appended metadata grows
+	// into the free room instead of pushing the chevron sideways.
+	if !done.HasText("2.5s") {
+		t.Fatalf("the finished row does not show its duration; texts = %v", done.Texts())
+	}
+	// The duration is a micro value (11/14), the step the design reserves for kbd
+	// and gutter-like values, not a sentence: it rides with the chevron at the row's
+	// tail.
+	_, line, _ := design.TypeMetrics(design.TypeXXXS)
+	metadata, ok := done.Find("2.5s")
+	if !ok || metadata.H < line {
+		t.Fatalf("the duration is not drawn in the micro step: %+v (want ≥%.1f)", metadata, line)
+	}
+}

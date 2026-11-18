@@ -119,46 +119,86 @@ func ChatMarkdown(t *design.Tokens, size float32) *markdown.Options {
 	})
 }
 
-// MarkdownReply shows one finished reply on the product's reading measure: the
-// prose blocks (paragraphs, lists, quotes) are bounded by design.ProseMeasure so
-// a wide window does not produce 90-character lines, while a reply that carries
-// a table keeps the full column, because mygo's table scrolls sideways inside
-// whatever width it is given and a narrow measure would make it scroll at once.
+// MarkdownBlockOptions is one reply block drawn on the product's reading measure.
+type MarkdownBlockOptions struct {
+	// Key is the block's stable identity. Pass it whenever a transcript renders
+	// more than one block: mygo keeps a Markdown view's parsed document, its
+	// per-block element caches and its reveal position in ui.Local on the view's
+	// own root element, and an element without a key is identified by its place
+	// among its siblings. One event inserted above another then hands every later
+	// block its neighbour's state; mygo notices the text is not "more of" what it
+	// had and drops the caches (markdown/view.go: "Another text, not more of it"),
+	// so the text is never wrong — but the block re-parses, re-highlights and
+	// re-lays-out, which is the flicker a streaming reply shows. Key the block by
+	// something stable per message event (its sequence number), not by its index in
+	// the current list.
+	Key string
+	// Streaming shows a source still being written (markdown.Stream); a finished
+	// source uses markdown.View. Both walk the same blocks with the same theme, so
+	// the switch adds no layout change of its own.
+	Streaming bool
+	// Markdown is the theme and hooks; nil falls back to mygo's defaults.
+	Markdown *markdown.Options
+}
+
+// MarkdownBlock shows one reply block — a finished reply, or one still being
+// written — on the product's reading measure: the prose blocks (paragraphs,
+// lists, quotes) are bounded by design.ProseMeasure so a wide window does not
+// produce 90-character lines, while a reply that carries a table keeps the full
+// column, because mygo's table scrolls sideways inside whatever width it is
+// given.
 //
-// A reply left-aligned inside its column, not centered: the transcript's blocks
-// (fences, tables, cards) share the column's left edge, and a centered prose
-// block would start every paragraph at a different x from the code below it.
-func MarkdownReply(c *ui.Context, src string, options *markdown.Options) ui.Element {
-	return markdownProse(c, src, options, false)
-}
-
-// MarkdownReplyStream is MarkdownReply for a reply still being written: it keeps
-// the same measure rule, so the text does not re-flow into a different width
-// when the stream completes.
-func MarkdownReplyStream(c *ui.Context, src string, options *markdown.Options) ui.Element {
-	return markdownProse(c, src, options, true)
-}
-
-// markdownProse builds the view inside the reply's measure.
-func markdownProse(c *ui.Context, src string, options *markdown.Options, streaming bool) ui.Element {
-	column := ui.Column(c).FillWidth()
-	if markdownMeasuresProse(src) {
+// The measure is decided once per block and only ever widens: a table that
+// arrives mid-stream takes the column, and the block never narrows back, so the
+// text does not reflow twice for one table.
+//
+// The block is left-aligned inside its column, not centered: the transcript's
+// blocks (fences, tables, cards) share the column's left edge.
+func MarkdownBlock(c *ui.Context, src string, o MarkdownBlockOptions) ui.Element {
+	var column ui.Element
+	if o.Key != "" {
+		column = ui.Column(c.Key(o.Key))
+	} else {
+		column = ui.Column(c)
+	}
+	column = column.FillWidth()
+	// The measure's decision is sticky, and belongs to the block's own element so a
+	// rebuilt frame keeps it.
+	widened := ui.Local(column, "proseWidened", func() bool { return false })
+	if !*widened && !markdownMeasuresProse(src) {
+		*widened = true
+	}
+	if !*widened {
 		column = column.MaxWidth(design.ProseMeasure)
 	}
 	return column.Children(func() {
-		if streaming {
-			markdown.Stream(c, src, options)
+		if o.Streaming {
+			markdown.Stream(c, src, o.Markdown)
 			return
 		}
-		markdown.View(c, src, options)
+		markdown.View(c, src, o.Markdown)
 	})
 }
 
-// markdownMeasuresProse reports whether src is prose-only, so the reading
-// measure applies. A table is the one block that cannot shrink gracefully, and
-// markdown.Measure would leave it scrolling in a 640 DIP box; fences are drawn
-// shrink-to-content and scroll on their longest line, so they stay inside the
-// measure without harm.
+// MarkdownReply shows one finished reply on the product's reading measure. A
+// transcript that renders several replies passes MarkdownBlock with a Key
+// instead, so each block keeps its own parse across list changes.
+func MarkdownReply(c *ui.Context, src string, options *markdown.Options) ui.Element {
+	return MarkdownBlock(c, src, MarkdownBlockOptions{Markdown: options})
+}
+
+// MarkdownReplyStream is MarkdownReply for a reply still being written: it keeps
+// the same measure rule, so the text does not re-flow into a different width when
+// the stream completes.
+func MarkdownReplyStream(c *ui.Context, src string, options *markdown.Options) ui.Element {
+	return MarkdownBlock(c, src, MarkdownBlockOptions{Streaming: true, Markdown: options})
+}
+
+// markdownMeasuresProse reports whether src is prose-only, so the reading measure
+// applies. A table is the one block that cannot shrink gracefully — mygo scrolls it
+// sideways inside whatever width it has, so a 640 DIP box would scroll at once —
+// which is why a table takes the column. Fences are drawn shrink-to-content and
+// scroll on their longest line, so they stay inside the measure without harm.
 func markdownMeasuresProse(src string) bool {
 	for _, line := range strings.Split(src, "\n") {
 		trimmed := strings.TrimSpace(line)

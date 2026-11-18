@@ -308,8 +308,11 @@ func newTestService(t *testing.T, dataDir string, cfg Config, chat contracts.Cha
 func waitTask(t *testing.T, service contracts.AutomationService, id string,
 	predicate func(contracts.AutomationTask) bool) contracts.AutomationTask {
 	t.Helper()
-	// Generous budget: parallel loads can delay the asynchronous scheduler runs.
-	deadline := time.Now().Add(10 * time.Second)
+	// Generous budget: the full suite runs one package per core under -race, so
+	// a scheduler tick that takes milliseconds alone can queue for seconds. The
+	// poll returns the moment the predicate holds, so a big budget costs nothing
+	// when the machine is idle (2026-11-18: 10s timed out on a loaded runner).
+	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		tasks, err := service.List(context.Background())
 		if err == nil {
@@ -331,7 +334,7 @@ func waitCall(t *testing.T, chat *fakeChat) chatCall {
 	select {
 	case call := <-chat.calls:
 		return call
-	case <-time.After(10 * time.Second):
+	case <-time.After(60 * time.Second):
 		t.Fatal("timed out waiting for the automation to run")
 		return chatCall{}
 	}

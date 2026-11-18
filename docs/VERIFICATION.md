@@ -1,5 +1,20 @@
 # Verification log (final)
 
+## 0.2.52 — 2026-11-18（流式渲染稳定性）
+
+```
+$ go build ./...                 OK
+$ go test ./... -count=1         51 包 ok, 0 FAIL
+$ go test ./internal/ui/session -run TestStreamingTranscriptDoesNotJump -v
+--- PASS（9 帧几何表：相邻间距/已完成块高度与相对偏移恒定、顺序=到达顺序）
+$ go run designlint --strict --baseline .design-baseline.json ./...
+0 error / 0 warn / 0 new / 0 blocking
+$ go tool mygo vet .             OK
+$ ui-snapshot                    128 PNG
+```
+
+修的是用户报告的「流式回复期间跳动/混杂」：思考块身份键、尾巴之外的片段静态化 + markdown 缓存 key、流式期间关跟随动画、并列偏移破平改按迭代边界、散文阅读量粘性、推理行 chevron 钉行尾。
+
 ## 0.2.51 — 2026-11-18（视觉语言 v2 重设计 + mygo v0.9.2）
 
 ```

@@ -1855,17 +1855,14 @@ func mergeTimelineEvents(segments []contracts.ReasoningSegment, tools []contract
 	}
 	events := make([]timelineEvent, 0, len(segments)+len(tools))
 	si, ti := 0, 0
-	lastSegment := false // the previous event was a reasoning segment
 	for si < len(segments) || ti < len(tools) {
 		switch {
 		case si >= len(segments):
 			events = append(events, timelineEvent{offset: clamp(tools[ti].TextOffset), segment: -1, tool: ti})
 			ti++
-			lastSegment = false
 		case ti >= len(tools):
 			events = append(events, timelineEvent{offset: clamp(segments[si].TextOffset), segment: si, tool: -1})
 			si++
-			lastSegment = true
 		default:
 			so, to := clamp(segments[si].TextOffset), clamp(tools[ti].TextOffset)
 			takeSegment := false
@@ -1880,16 +1877,21 @@ func mergeTimelineEvents(segments []contracts.ReasoningSegment, tools []contract
 				// iterations called tools without reasoning.
 				takeSegment = segments[si].Iteration <= 1
 			default:
-				takeSegment = !lastSegment
+				// A tie means no prose separates the two events, so the offset
+				// cannot order them; only the iteration boundary can. Iteration
+				// 1's thinking precedes its calls (si == 0), and every later
+				// segment follows the calls of the iteration before it — so on a
+				// tie the tools go first. This must not depend on how many events
+				// were already emitted (the old alternating rule made the order
+				// flip as the turn grew, which re-ordered blocks between frames).
+				takeSegment = si == 0
 			}
 			if takeSegment {
 				events = append(events, timelineEvent{offset: so, segment: si, tool: -1})
 				si++
-				lastSegment = true
 			} else {
 				events = append(events, timelineEvent{offset: to, segment: -1, tool: ti})
 				ti++
-				lastSegment = false
 			}
 		}
 	}
@@ -1906,15 +1908,27 @@ func mergeTimelineEvents(segments []contracts.ReasoningSegment, tools []contract
 // fallback for the calls (their reasoning segments still precede the prose).
 func renderAssistantBody(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	st *state, message contracts.ChatMessage) {
-	renderText := func(text string) {
+	// renderText draws one slice of the reply. Only the slice after the last
+	// event — the tail still being written — is streaming markdown: a slice that
+	// already sits before a tool row or a thinking block is finished text, and
+	// re-parsing it as a live document let a block boundary move under the reader
+	// on every delta (non-monotonic height, the jump the streaming turn showed).
+	renderText := func(text, blockKey string, live bool) {
 		if text == "" {
 			return
 		}
-		if message.Streaming {
-			uikit.MarkdownReplyStream(c, text, st.markdownOptions(t))
-		} else {
-			uikit.MarkdownReply(c, text, st.markdownOptions(t))
-		}
+		// The block is keyed by the event it belongs to, never by its place in the
+		// current list: mygo keeps a Markdown view's parsed document and per-block
+		// caches in a ui.Local on the view's own element, and an unkeyed element is
+		// identified by its sibling position — one event inserted above the others
+		// then hands every later block its neighbour's state, which mygo correctly
+		// discards ("another text, not more of it"), re-parsing and re-laying-out
+		// the whole reply on each arrival (the flicker the streaming turn showed).
+		uikit.MarkdownBlock(c, text, uikit.MarkdownBlockOptions{
+			Key:       blockKey,
+			Streaming: live && message.Streaming,
+			Markdown:  st.markdownOptions(t),
+		})
 	}
 	renderTool := func(tool contracts.ToolCall) {
 		buildAssistantToolRow(c, t, runtime, st, message.ID, tool, true)
@@ -1937,7 +1951,9 @@ func renderAssistantBody(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 		for index := range segments {
 			renderSegment(index)
 		}
-		renderText(text)
+		// No timeline to split by: the whole body is the one live slice while the
+		// turn runs.
+		renderText(text, message.ID+".body", true)
 		for _, tool := range message.Tools {
 			renderTool(tool)
 		}
@@ -1948,12 +1964,15 @@ func renderAssistantBody(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 	// end) is clamped, so events that arrive together render consecutively.
 	events := mergeTimelineEvents(segments, message.Tools, len(text))
 	pos := 0
-	for _, event := range events {
+	for eventIndex, event := range events {
 		offset := event.offset
 		if offset < pos {
 			offset = pos
 		}
-		renderText(text[pos:offset])
+		// The slice before event k keeps the key .slice.k for its whole life: when
+		// the event arrives the slice stops growing under the same identity, so its
+		// parsed blocks survive the cut instead of being rebuilt.
+		renderText(text[pos:offset], fmt.Sprintf("%s.slice.%d", message.ID, eventIndex), false)
 		if event.segment >= 0 {
 			renderSegment(event.segment)
 		} else {
@@ -1961,7 +1980,9 @@ func renderAssistantBody(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 		}
 		pos = offset
 	}
-	renderText(text[pos:])
+	// The tail is the next slice, so it inherits the key the same text keeps once
+	// an event cuts it.
+	renderText(text[pos:], fmt.Sprintf("%s.slice.%d", message.ID, len(events)), true)
 }
 
 // prominentTool reports whether a tool call is a decision/interaction rather
@@ -2051,19 +2072,21 @@ func buildAssistantToolRow(c *ui.Context, t *design.Tokens, runtime contracts.UI
 // shared ReasoningTrace entry (US-01/US-02): open with the official spinner
 // while that iteration is the one still thinking, folded to one quiet row
 // (glue glyph, 思考, line count) once it ends, the muted reasoning Markdown in
-// the panel. A single-segment message (restored turns, legacy read models)
-// keeps the message-ID key and state; a multi-segment live turn keys each
-// segment by its index so the folds are independent. The activity band wants
-// the chevron right after the label, so InlineChevron is on.
+// the panel. Each segment is keyed by its index — one key per segment, from the
+// first one on — so a fold keeps its identity and its open state for the whole
+// turn. The activity band wants the chevron right after the label, so
+// InlineChevron is on.
 func buildReasoningSegmentDisclosure(c *ui.Context, t *design.Tokens, st *state,
 	message contracts.ChatMessage, segment contracts.ReasoningSegment, index, total int) {
 	if strings.TrimSpace(segment.Text) == "" {
 		return
 	}
-	stateKey := message.ID
-	if total > 1 {
-		stateKey = fmt.Sprintf("%s.seg%d", message.ID, index)
-	}
+	// The key carries the index in every case, never only once a second segment
+	// arrives: the state key and the component identity are derived from it, so a
+	// key that changes when total goes 1 → 2 reset both the fold state and the
+	// widget (the block rebuilt and re-laid out mid-stream, which is the visible
+	// jump the turn used to show). index is stable for a given segment.
+	stateKey := fmt.Sprintf("%s.seg%d", message.ID, index)
 	open, chosen := st.thinkOpen[stateKey]
 	// Only the last segment of a streaming message is still thinking: the
 	// earlier iterations finished even while the turn runs.
