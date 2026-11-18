@@ -456,7 +456,7 @@ type RunStatusOptions struct {
 func RunStatus(c *ui.Context, o RunStatusOptions)
 ```
 
-**布局（2026-11-18 v3）**：composer 下方一条 **32 高状态条**，两段：左「队列」（停止后才有 `已排队 N 条`）｜中 空｜右「指标行」= `⟨activity⟩ N 轮 M 步 · X tok/s` + `⟨data⟩ T tok · 缓存命中 P%` + `⟨圆环⟩ Q%`（**没有 `详情` 按钮**：2026-11-18 用户裁决——数值已全部内联；精确值走圆环的 `Description`「42K / 128K」）。整簇在内容列内**水平居中**，不是右对齐工具栏；元素尺度统一：文字 `TypeXXS`(12)、图标 `IconSizeS`(16)、圆环 16/2。**运行态不在条上重复**（2026-11-18 用户裁决）：transcript 末尾已有 `生成中`，条上不再画 `运行中`；只有 `停止中…` 仍在条上显示（那不是重复）。DSH 词序：**「轮」「步」之间不隔 `·`**，只有最后一段前有；组内 `·` 两侧 `Space1`，组间 `Space3`；数字 mono 12，环 16 DIP（`uikit.UsageRing`，≥85% 转 Warning）。窄窗 1024 只留圆环 + 百分比（两组文字省略，不折行）。消息自身的用量收进消息元信息行（时间 · 用时 · tokens · ⋯，12/18，hover/focus 显形、行高固定 24）。**running ≠ warning**：进行中不用琥珀，warning 只给 needs-action。错误行贴近失败内容；toast 只做通知，不替代可操作错误。
+**布局（2026-11-18 v3）**：composer 下方一条 **32 高状态条**，两段：左「队列」（停止后才有 `已排队 N 条`）｜中 空｜右「指标行」= `⟨activity⟩ N 轮 M 步 · X tok/s` + `⟨data⟩ T tok · 缓存命中 P%` + `⟨meter 32×4⟩ Q%`（**没有 `详情` 按钮**：2026-11-18 用户裁决——数值已全部内联；精确值走 meter 的 `Description`「42K / 128K」）。整簇在内容列内**水平居中**，不是右对齐工具栏；元素尺度统一：文字 `TypeXXS`(12)、图标 `IconSizeS`(16)、容量条 `ui.Meter` 32×4（`Warning 85%` 琥珀 / `Critical 100%` 红，`NormalColor` = Accent）。**运行态不在条上重复**（2026-11-18 用户裁决）：transcript 末尾已有 `生成中`，条上不再画 `运行中`；只有 `停止中…` 仍在条上显示（那不是重复）。DSH 词序：**「轮」「步」之间不隔 `·`**，只有最后一段前有；组内 `·` 两侧 `Space1`，组间 `Space3`；数字 mono 12；容量用官方 `ui.Meter` 收窄到 32×4（默认 80×8 太重），阈值 `Warning 85%` / `Critical 100%` 白送。窄窗 1024 只留 meter + 百分比（两组文字省略，不折行）。消息自身的用量收进消息元信息行（时间 · 用时 · tokens · ⋯，12/18，hover/focus 显形、行高固定 24）。**running ≠ warning**：进行中不用琥珀，warning 只给 needs-action。错误行贴近失败内容；toast 只做通知，不替代可操作错误。
 
 **禁止**：伪造进度条；把"停止"和"发送"并排同权重；运行中每帧重排布局（几何稳定）；用常驻 badge 代替 toast/错误；用 `ui.Toggle` 表达忙碌状态。
 

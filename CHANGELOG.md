@@ -4,6 +4,13 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.54] - 2026-11-18
+
+### Changed
+
+- **状态条的上下文读数改用官方 `ui.Meter`**（32×4，`MinWidth/Width/Height` 三个度量都显式钉住——`coreMeter` 内部写死 80×8 的胶囊）：33% 蓝（`NormalColor = Accent`，不落主题 Success 绿）、85% 琥珀、100% 红。`MeterLevels` 的 `Critical` 必须大于 `Warning`，否则会走"低值才坏"的电池语义。
+- **撤回自绘件**：`uikit.UsageRing`（弧线圆环）整体删除，连同它的 4 条测试、`registry.json` 白名单条目 `uikit.usage-ring` 与 `DESIGN.md §7.1` 那一行——这类"官方没有所以自绘"的例外回到 0 新增。
+
 ## [0.2.53] - 2026-11-18
 
 ### Changed

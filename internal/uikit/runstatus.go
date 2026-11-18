@@ -223,7 +223,7 @@ func statusStripMetrics(c *ui.Context, t *design.Tokens, o StatusStripOptions, k
 			statusStripActivityGroup(c, t, o)
 			statusStripVolumeGroup(c, t, o)
 		}
-		statusStripRing(c, t, o, key)
+		statusStripMeter(c, t, o, key)
 	})
 }
 
@@ -342,22 +342,37 @@ func statusStripVolumeGroup(c *ui.Context, t *design.Tokens, o StatusStripOption
 	})
 }
 
-// statusStripRing draws the context ring and its percentage through the shared
-// registered entry (uikit.UsageRing): 16 DIP, a 2 DIP stroke, Accent until 85% of
-// the window is spent and Warning from there. The strip only places it.
-func statusStripRing(c *ui.Context, t *design.Tokens, o StatusStripOptions, key string) {
+// statusStripMeter draws the context level as the official Meter: a 32 by 4 DIP
+// bar filled by the used share of the window, Accent until 85%, Warning to 100%
+// and Danger at the edge. The official meter is the one long, thin level
+// indicator the product has, and its range/label/description give assistive
+// technology the real numbers the bar only sketches.
+//
+// coreMeter sets MinWidth(Space20)/Height(Space2) of its own; the strip wants the
+// icon-height, hairline-weight bar, so the box is pinned here (otherwise it draws
+// an 80 by 8 capsule).
+func statusStripMeter(c *ui.Context, t *design.Tokens, o StatusStripOptions, key string) {
 	if o.Used <= 0 || o.Window <= 0 {
 		return
 	}
 	ratio := float64(o.Used) / float64(o.Window)
+	if ratio > 1 {
+		ratio = 1
+	}
 	pct := int(ratio*100 + 0.5)
-	ui.Row(c.Key(key + ".ring")).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-		UsageRing(c, UsageRingOptions{
-			Ratio:  ratio,
-			Used:   o.Used,
-			Limit:  o.Window,
-			Locale: o.Locale,
-		})
+	ui.Row(c.Key(key + ".meter")).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		// Capacity semantics: 85% is amber and 100% is red, so Warning is below
+		// Critical (MeterLevels reads Critical < Warning as "low values are the bad
+		// ones", the battery reading, which is not this gauge).
+		levels := &ui.MeterLevels{
+			Warning:     0.85 * float64(o.Window),
+			Critical:    float64(o.Window),
+			NormalColor: t.Accent,
+		}
+		ui.Meter(c, float64(o.Used), 0, float64(o.Window), levels).
+			MinWidth(design.Space8).Width(design.Space8).Height(design.Space1).
+			Label(fmt.Sprintf(T(o.Locale, "上下文 %d%%", "Context %d%%"), pct)).
+			Description(FormatCompactCount(o.Used) + " / " + FormatCompactCount(o.Window))
 		statusStripPart(c, t, strconv.Itoa(pct)+"%", "", "")
 	})
 }

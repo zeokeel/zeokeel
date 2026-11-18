@@ -93,15 +93,15 @@ func TestSessionStatusStripRendersUsage(t *testing.T) {
 		t.Fatalf("status bar y=%.1f is not below the composer send control y=%.1f", strip.Y, send.Y)
 	}
 
-	// The ring is a real ratio exposed as a meter, never a made-up value: 120K of
-	// a 128K window.
-	ring, ok := tester.AccessByRole(ui.RoleMeter, "上下文 94%")
+	// The context level is the official Meter, a real ratio, never a made-up
+	// value: 120K of a 128K window.
+	meter, ok := tester.AccessByRole(ui.RoleMeter, "上下文 94%")
 	if !ok {
-		t.Fatalf("status bar has no context ring; texts = %v", tester.Texts())
+		t.Fatalf("status bar has no context meter; texts = %v", tester.Texts())
 	}
-	if ring.Bounds.W != design.Space4 || ring.Bounds.H != design.Space4 {
-		t.Fatalf("context ring is %.0fx%.0f, want the %v icon step",
-			ring.Bounds.W, ring.Bounds.H, design.Space4)
+	if meter.Bounds.W != design.Space8 || meter.Bounds.H != design.Space1 {
+		t.Fatalf("context meter is %.0fx%.0f, want the %vx%v bar",
+			meter.Bounds.W, meter.Bounds.H, design.Space8, design.Space1)
 	}
 
 }
@@ -283,13 +283,13 @@ func TestStatusStripMetricsMatchDSH(t *testing.T) {
 	h.assertTexts(tester, "2", "轮", "3", "步", "82", "tok/s", "·")
 	// Zone 2: 7.4K tok · 缓存命中 95%.
 	h.assertTexts(tester, "7.4K", "tok", "缓存命中", "95%")
-	// Zone 3: the ring and its percentage.
-	ring, ok := tester.AccessByRole(ui.RoleMeter, "上下文 94%")
+	// Zone 3: the context meter and its percentage.
+	meter, ok := tester.AccessByRole(ui.RoleMeter, "上下文 94%")
 	if !ok {
-		t.Fatalf("context ring missing; texts = %v", tester.Texts())
+		t.Fatalf("context meter missing; texts = %v", tester.Texts())
 	}
-	if ring.Bounds.W != design.Space4 {
-		t.Fatalf("ring box = %.0f, want the %v icon step", ring.Bounds.W, design.Space4)
+	if meter.Bounds.W != design.Space8 {
+		t.Fatalf("meter box = %.0f wide, want %v", meter.Bounds.W, design.Space8)
 	}
 	// The cluster ends with the ring: the percentage is the last element and
 	// nothing follows it (the 详情 popover is gone — every figure is inline).
@@ -297,8 +297,8 @@ func TestStatusStripMetricsMatchDSH(t *testing.T) {
 	if !ok {
 		t.Fatalf("context percentage missing; texts = %v", tester.Texts())
 	}
-	if percent.X <= ring.Bounds.X {
-		t.Fatalf("the percentage at %.1f is not right of the ring at %.1f", percent.X, ring.Bounds.X)
+	if percent.X <= meter.Bounds.X {
+		t.Fatalf("the percentage at %.1f is not right of the meter at %.1f", percent.X, meter.Bounds.X)
 	}
 	h.assertNoTexts(tester, "详情")
 
@@ -366,13 +366,15 @@ func TestStatusStripScaleAndCentre(t *testing.T) {
 	if _, ok := tester.AccessByRole(ui.RoleButton, "详情"); ok {
 		t.Fatalf("a 详情 control is back in the bar; texts = %v", tester.Texts())
 	}
-	// The ring shares the icon step.
-	ring, ok := tester.AccessByRole(ui.RoleMeter, "上下文 94%")
+	// The context level is one bar of the icon step's length and the hairline's
+	// weight, never the meter's default 80 by 8 capsule.
+	meter, ok := tester.AccessByRole(ui.RoleMeter, "上下文 94%")
 	if !ok {
-		t.Fatalf("context ring missing; texts = %v", tester.Texts())
+		t.Fatalf("context meter missing; texts = %v", tester.Texts())
 	}
-	if ring.Bounds.W != design.Space4 || ring.Bounds.H != design.Space4 {
-		t.Fatalf("ring is %.0fx%.0f, want the %v icon step", ring.Bounds.W, ring.Bounds.H, design.Space4)
+	if meter.Bounds.W != design.Space8 || meter.Bounds.H != design.Space1 {
+		t.Fatalf("meter is %.0fx%.0f, want %vx%v", meter.Bounds.W, meter.Bounds.H,
+			design.Space8, design.Space1)
 	}
 
 	// The cluster is centred in the reading column, not pushed to the right edge:
@@ -392,5 +394,51 @@ func TestStatusStripScaleAndCentre(t *testing.T) {
 	if delta := clusterCentre - columnCentre; delta > 16 || delta < -16 {
 		t.Fatalf("the read-out cluster is %.1f DIP off the column's centre (cluster %.1f, column %.1f)",
 			delta, clusterCentre, columnCentre)
+	}
+}
+
+// TestStatusStripMeterReadsTheContext covers the context level as the official
+// Meter: a 32 by 4 DIP bar, never the meter's own 80 by 8 capsule, filled accent
+// while there is room, warning from 85% and danger at the edge — the capacity
+// reading (85% amber, 100% red), not the battery reading (where a low value is
+// the bad one, which MeterLevels would take if Critical sat below Warning).
+func TestStatusStripMeterReadsTheContext(t *testing.T) {
+	cases := []struct {
+		name    string
+		used    int
+		want    string
+		wantCol ui.Color
+	}{
+		{"room left", 42_000, "上下文 33%", design.Light().Accent},
+		{"nearly full", 112_640, "上下文 88%", design.Light().Warning},
+		{"full", 128_000, "上下文 100%", design.Light().Danger},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			chat := statusChat(contracts.ChatMessage{
+				ID: "a1", Role: contracts.ChatRoleAssistant, Text: "一",
+				Usage: &contracts.MessageUsage{
+					CompletionTokens: 500, TotalTokens: 1040, DurationMS: 2000,
+					ContextTokens: tc.used,
+				},
+			})
+			h := newModelHarness(t, chat, statusCatalog())
+			tester := h.tester()
+			meter, ok := tester.AccessByRole(ui.RoleMeter, tc.want)
+			if !ok {
+				t.Fatalf("meter %q missing; texts = %v", tc.want, tester.Texts())
+			}
+			if meter.Bounds.W != design.Space8 || meter.Bounds.H != design.Space1 {
+				t.Fatalf("meter is %.0fx%.0f, want %vx%v (the meter's own 80x8 capsule would break the band)",
+					meter.Bounds.W, meter.Bounds.H, design.Space8, design.Space1)
+			}
+			// The fill is read a few DIP into the bar's left end, over the page.
+			img := tester.Image()
+			got := img.RGBAAt(int(meter.Bounds.X)+3, int(meter.Bounds.Y+meter.Bounds.H/2))
+			want := overToken(tc.wantCol, design.Light().BgBase)
+			if !nearColor(got, want, 6) {
+				t.Fatalf("meter fill = %+v, want %+v", got, want)
+			}
+		})
 	}
 }
