@@ -63,8 +63,11 @@ func TestReasoningStreamingShowsOneOpenDisclosure(t *testing.T) {
 	if got := textsContaining(tester.Texts(), strings.Repeat("前", 200)); got != 1 {
 		t.Fatalf("full reasoning rendered %d times, want the open panel only; texts = %v", got, tester.Texts())
 	}
-	if _, ok := tester.AccessByRole(ui.RoleProgress, "生成中"); !ok {
-		t.Fatalf("generation spinner missing; texts = %v", tester.Texts())
+	// While the thinking row spins, the generating row is not drawn: one spinner at
+	// a time (the thinking row already says the turn is working).
+	if _, ok := tester.AccessByRole(ui.RoleProgress, "生成中"); ok {
+		t.Fatalf("a second spinner (生成中) is on screen beside the thinking row; texts = %v",
+			tester.Texts())
 	}
 }
 

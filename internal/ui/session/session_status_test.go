@@ -442,3 +442,89 @@ func TestStatusStripMeterReadsTheContext(t *testing.T) {
 		})
 	}
 }
+
+// TestStatusStripHidesWhileTheTurnRuns covers the half-empty bar the user saw:
+// while a turn runs its usage has not landed yet, so the read-out would print
+// only the round and step counters and leave the speed, tokens, cache hit and
+// context empty. The strip therefore draws no cluster at all mid-turn (and takes
+// no 32 DIP row), and the whole line appears once the turn settles.
+func TestStatusStripHidesWhileTheTurnRuns(t *testing.T) {
+	chat := statusChat(statusUsageMessages()...)
+	session, _ := chat.Session("sess-1")
+	session.Running = true
+	chat.updateSession(session)
+	h := newModelHarness(t, chat, statusCatalog())
+	tester := h.tester()
+
+	// Mid-turn: no meter, no figures, and no empty band under the composer.
+	h.assertNoTexts(tester, "轮", "步", "tok/s", "缓存命中", "上下文")
+	if _, ok := tester.AccessByRole(ui.RoleMeter, ""); ok {
+		t.Fatalf("the context meter is on screen while the turn runs; texts = %v", tester.Texts())
+	}
+	stop, okStop := tester.Find("停止")
+	if !okStop {
+		t.Fatalf("stop control missing; texts = %v", tester.Texts())
+	}
+	if strip, ok := tester.Find("2"); ok && strip.Y > stop.Y {
+		t.Fatalf("an empty strip row is reserved under the composer (y=%.1f, stop at %.1f)",
+			strip.Y, stop.Y)
+	}
+
+	// Settled: the whole read-out appears.
+	session.Running = false
+	chat.updateSession(session)
+	tester.Frame()
+	tester.Frame()
+	h.assertTexts(tester, "轮", "步", "tok/s", "tok", "缓存命中", "94%")
+	if _, ok := tester.AccessByRole(ui.RoleMeter, "上下文 94%"); !ok {
+		t.Fatalf("the meter did not appear once the turn settled; texts = %v", tester.Texts())
+	}
+}
+
+// TestStreamingShowsOneSpinnerAtATime covers the second half of the same report:
+// the thinking row's spinner and the generating row's spinner sat a few DIP
+// apart. While the last reasoning segment is still the live channel the
+// generating row is not drawn; once prose starts streaming the thinking row
+// settles to its quiet 思考 line and 生成中 takes over.
+func TestStreamingShowsOneSpinnerAtATime(t *testing.T) {
+	newChat := func(text string) *fakeChat {
+		chat := newFakeChat()
+		chat.addSession(contracts.ChatSession{
+			ID: "sess-1", Title: "单个 spinner", Running: true,
+			Messages: []contracts.ChatMessage{
+				{ID: "u1", Role: contracts.ChatRoleUser, Text: "看看仓库"},
+				{
+					ID: "a1", Role: contracts.ChatRoleAssistant, Streaming: true, Text: text,
+					ReasoningSegments: []contracts.ReasoningSegment{
+						{Text: "R1 先看看目录", Iteration: 1, TextOffset: 0},
+					},
+				},
+			},
+		}, true)
+		return chat
+	}
+
+	// Thinking: the reasoning row spins, the generating row is absent.
+	thinking := newFakeChat()
+	_ = thinking
+	h := newPermissionHarness(t, newChat(""), newPermissionSettings(map[string]string{
+		contracts.SettingWorkStepsMode: contracts.WorkStepsVerbose,
+	}))
+	tester := h.tester()
+	tester.Frame()
+	h.assertTexts(tester, "思考中…")
+	h.assertNoTexts(tester, "生成中")
+
+	// Prose starts: the thinking row settles and 生成中 appears.
+	chat := newChat("B1 目录结构")
+	session, _ := chat.Session("sess-1")
+	session.Messages[1].Streaming = true
+	chat.updateSession(session)
+	h2 := newPermissionHarness(t, chat, newPermissionSettings(map[string]string{
+		contracts.SettingWorkStepsMode: contracts.WorkStepsVerbose,
+	}))
+	tester2 := h2.tester()
+	tester2.Frame()
+	h2.assertTexts(tester2, "生成中")
+	h2.assertNoTexts(tester2, "思考中…")
+}

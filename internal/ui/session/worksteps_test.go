@@ -72,7 +72,7 @@ func TestLiveWorkStepsStandardSingleLine(t *testing.T) {
 	tester.Frame()
 
 	h.assertTexts(tester, "正在运行命令", "npm test --watch", "用时 8.0s", "认证模块")
-	h.assertNoTexts(tester, "生成中", "思考中…", "过程 ·", "先想一想")
+	h.assertNoTexts(tester, "生成中", "思考", "过程 ·", "先想一想")
 	h.assertNoExactTexts(tester, "运行命令")
 	// The streaming prose still renders through the Markdown view.
 	if tester.HasText("**认证模块**") {
@@ -108,8 +108,14 @@ func TestLiveWorkStepsDetailedKeepsTimeline(t *testing.T) {
 				contracts.SettingWorkStepsMode: mode,
 			})
 			tester := h.tester()
-			h.assertTexts(tester, "思考中…", "先想一想", "运行命令", "生成中", "正在分析")
-			h.assertNoTexts(tester, "正在运行命令")
+			// The thinking row settled when the prose and the call arrived, so it is
+			// the quiet 思考 line with its text one click away — not an open panel
+			// beside a second spinner.
+			h.assertTexts(tester, "思考", "运行命令", "生成中", "正在分析")
+			h.assertNoTexts(tester, "正在运行命令", "先想一想", "思考中…")
+			h.click(tester, "思考")
+			tester.Frame()
+			h.assertTexts(tester, "先想一想")
 		})
 	}
 }
@@ -320,7 +326,7 @@ func TestWorkStepsPolicyReadEveryFrame(t *testing.T) {
 
 	settings.set(contracts.SettingWorkStepsMode, contracts.WorkStepsDetailed)
 	tester.Frame()
-	h.assertTexts(tester, "生成中", "思考中…", "运行命令")
+	h.assertTexts(tester, "生成中", "思考", "运行命令")
 	h.assertNoTexts(tester, "正在运行命令")
 
 	settings.set(contracts.SettingWorkStepsMode, contracts.WorkStepsCompact)
@@ -417,7 +423,7 @@ func TestWorkStepsStreamingCompactKeepsBody(t *testing.T) {
 	})
 	tester := h.tester()
 	h.assertTexts(tester, "认证模块")
-	if _, ok := tester.AccessByRole(ui.RoleDisclosure, "思考中…"); ok {
+	if _, ok := tester.AccessByRole(ui.RoleDisclosure, "思考"); ok {
 		t.Fatalf("compact streaming rendered the reasoning disclosure; texts = %v", tester.Texts())
 	}
 }

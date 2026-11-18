@@ -122,6 +122,19 @@ type StatusStripMetrics struct {
 	CachePercent int
 }
 
+// MetricsVisible reports whether the strip should draw its read-out cluster. A
+// running turn shows nothing here: the usage a session accumulates lands when the
+// turn settles, so mid-turn the cluster would print two counters (轮次, 步数) and
+// leave the speed, the tokens, the cache hit and the context empty — half a line
+// that reads as broken. The transcript's own live line already says the turn is
+// generating; the figures appear when they are whole.
+func MetricsVisible(o StatusStripOptions) bool {
+	if o.Running {
+		return false
+	}
+	return o.Metrics.any() || (o.Used > 0 && o.Window > 0)
+}
+
 // any reports whether the read-out has anything to say.
 func (m StatusStripMetrics) any() bool {
 	return m.Rounds > 0 || m.Steps > 0 || m.Speed > 0 || m.Tokens > 0 || m.CachePercent > 0
@@ -133,8 +146,8 @@ func (m StatusStripMetrics) any() bool {
 func StatusStrip(c *ui.Context, o StatusStripOptions) {
 	t := design.Of(c)
 	hasQueue := len(o.Queued) > 0 || o.QueueError != ""
-	hasGauge := o.Used > 0 && o.Window > 0
-	if !o.Running && !hasQueue && !hasGauge && !o.Metrics.any() {
+	showMetrics := MetricsVisible(o)
+	if !hasQueue && !showMetrics {
 		return
 	}
 	key := "runstatus.strip"
@@ -151,7 +164,9 @@ func StatusStrip(c *ui.Context, o StatusStripOptions) {
 	row := ui.Row(c.Key(key)).FillWidth().Height(design.RowCompactHeight).
 		AlignItems(ui.Center).Justify(ui.Center)
 	row.Children(func() {
-		statusStripMetrics(c, t, o, key)
+		if showMetrics {
+			statusStripMetrics(c, t, o, key)
+		}
 		if hasQueue {
 			ui.Box(c.Key(key + ".queue.slot")).Absolute().
 				Top(0).Bottom(0).Start(0).AlignItems(ui.Center).

@@ -829,7 +829,7 @@ func TestRendersMessagesAndRunningBadges(t *testing.T) {
 		"运行中",        // running badge
 		"帮我修复登录",     // user bubble text
 		"好的，正在检查。",   // assistant text
-		"思考中…",       // open reasoning disclosure while streaming
+		"思考",         // the reasoning row (settled: prose and a call followed it)
 		"生成中",        // the official generation spinner and its label
 		"读取文件",       // tool fallback row, friendly localized name
 		"上一次运行失败：超时", // session error
@@ -841,8 +841,12 @@ func TestRendersMessagesAndRunningBadges(t *testing.T) {
 	// The internal call ID never renders; the raw tool id is the row's
 	// description and its expanded panel's line, not the row's name.
 	h.assertNoTexts(tester, "t1", "详情")
-	// The reasoning disclosure is open while the model is thinking, so the
-	// thinking text (rendered as Markdown) is visible without a click.
+	// The thinking phase is over here (prose and a tool call followed it), so the
+	// reasoning row is the quiet 思考 line and its text lives in the panel: it is
+	// one click away rather than printed into the stream.
+	h.assertNoTexts(tester, "内部推理：先看认证模块")
+	h.click(tester, "思考")
+	tester.Frame()
 	h.assertTexts(tester, "内部推理：先看认证模块")
 	if info, ok := tester.AccessByRole(ui.RoleDisclosure, "读取文件 · 完成"); !ok || !info.Expanded {
 		t.Fatalf("H15 tool row should start expanded: %+v found %v", info, ok)
@@ -858,11 +862,11 @@ func TestRendersMessagesAndRunningBadges(t *testing.T) {
 	h.assertTexts(tester, "输入消息…", "排队", "停止")
 	h.assertNoTexts(tester, "发送")
 
-	// The reasoning disclosure toggles like the official control it is, and its
-	// accessible name switches to 思考 once the turn ends.
-	h.click(tester, "思考中…")
+	// The reasoning disclosure toggles like the official control it is (its name
+	// is the quiet 思考 once the thinking phase ended).
+	h.click(tester, "思考")
 	tester.Advance(300 * time.Millisecond)
-	if info, _ := tester.AccessByRole(ui.RoleDisclosure, "思考中…"); info.Expanded {
+	if info, _ := tester.AccessByRole(ui.RoleDisclosure, "思考"); info.Expanded {
 		t.Fatalf("click did not fold the reasoning panel: %+v", info)
 	}
 

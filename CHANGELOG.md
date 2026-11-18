@@ -4,6 +4,13 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.55] - 2026-11-18
+
+### Fixed
+
+- **运行中状态条只剩「N 轮 M 步」**：turn 未落地时 `usage` 还没来，缺数据的组按规则整组不画，于是条上只剩两个计数，看着像坏了。现在**回合运行中整条指标簇不渲染**（不留 32 高占位），运行态由 transcript 末尾的实时行单独表达；回合结束、usage 到达后整簇一次出现。判据是 `uikit.MetricsVisible`。
+- **两个 spinner 同屏**：思考阶段 `思考中…` 与转录末尾的 `生成中` 相隔不到 40 DIP 同时转。新增 `activeReasoningSegment`：只有「最后一段推理之后没有任何新内容（正文没增长、也没有更晚的工具调用）」时推理行才转；此刻 `生成中` 行不画。推理一结束/正文一开始，思考行settle 成 `思考`、`生成中` 接棒——一屏任何时候只有一个 spinner。
+
 ## [0.2.54] - 2026-11-18
 
 ### Changed

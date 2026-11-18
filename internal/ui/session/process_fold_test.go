@@ -160,7 +160,9 @@ func TestActivityBandIndentsProcessRows(t *testing.T) {
 
 	body, ok1 := tester.Find("正文段落")
 	tool, ok2 := tester.Find("运行命令")
-	reasoning, ok3 := tester.Find("思考中…")
+	// The thinking is settled here (prose and a call arrived after it), so the row
+	// reads 思考 without a spinner; the band indent is measured on the row itself.
+	reasoning, ok3 := tester.Find("思考")
 	if !ok1 || !ok2 || !ok3 {
 		t.Fatalf("band nodes missing; texts = %v", tester.Texts())
 	}

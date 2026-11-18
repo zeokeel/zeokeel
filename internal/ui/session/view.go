@@ -1555,13 +1555,17 @@ func buildAssistantStreaming(c *ui.Context, t *design.Tokens, runtime contracts.
 		buildLiveWorkSteps(c, t, st, message, true)
 	default:
 		buildAssistantTimeline(c, t, runtime, st, message)
-		// The generating indicator is the shared run-status row (S8): the
-		// official spinner with its status copy, never a fake progress bar.
-		uikit.RunStatus(c, uikit.RunStatusOptions{
-			Running:     true,
-			StatusLabel: st.tr("生成中", "Generating"),
-			Locale:      st.locale,
-		})
+		// The generating indicator is the shared run-status row (S8): the official
+		// spinner with its status copy, never a fake progress bar. It yields while
+		// the thinking row still spins — one spinner at a time — and appears the
+		// moment the reply streams prose.
+		if !activeReasoningSegment(message) {
+			uikit.RunStatus(c, uikit.RunStatusOptions{
+				Running:     true,
+				StatusLabel: st.tr("生成中", "Generating"),
+				Locale:      st.locale,
+			})
+		}
 		return
 	}
 	// The single activity line replaces the timeline, not the answer: the
@@ -1898,6 +1902,31 @@ func mergeTimelineEvents(segments []contracts.ReasoningSegment, tools []contract
 	return events
 }
 
+// activeReasoningSegment reports whether the turn's last reasoning segment is
+// still the live channel: nothing has arrived after it (no prose, no tool call).
+// While it is, the transcript shows the thinking row's own spinner and must not
+// also show the generating row: two spinners a few DIP apart say the same thing
+// twice (user report: 思考中… and 生成中 side by side).
+func activeReasoningSegment(message contracts.ChatMessage) bool {
+	if !message.Streaming {
+		return false
+	}
+	segments := reasoningSegmentsOrFallback(message)
+	if len(segments) == 0 {
+		return false
+	}
+	last := segments[len(segments)-1]
+	if len(message.Text) > last.TextOffset {
+		return false // prose started after the thinking
+	}
+	for _, call := range message.Tools {
+		if call.TextOffset > last.TextOffset {
+			return false // a call started after the thinking
+		}
+	}
+	return true
+}
+
 // renderAssistantBody draws one assistant reply in event order: thinking
 // segments, prose and tool cards interleaved by their recorded TextOffsets
 // (US-01/US-02). Live turns record where in the reply each tool call and each
@@ -2090,7 +2119,7 @@ func buildReasoningSegmentDisclosure(c *ui.Context, t *design.Tokens, st *state,
 	open, chosen := st.thinkOpen[stateKey]
 	// Only the last segment of a streaming message is still thinking: the
 	// earlier iterations finished even while the turn runs.
-	streaming := message.Streaming && index == total-1
+	streaming := message.Streaming && index == total-1 && activeReasoningSegment(message)
 	if !chosen {
 		open = streaming
 	}
