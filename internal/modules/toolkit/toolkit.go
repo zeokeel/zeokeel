@@ -37,29 +37,6 @@ import (
 	"github.com/zeokeel/zeokeel/internal/websearch"
 )
 
-// defaultCommands is the shell allowlist used when the assembly does not set
-// one. An explicit empty list in assembly.json disables shell execution.
-//
-// Besides the language/build/runtime commands it carries the routine
-// inspection and navigation commands an agent needs for real development work
-// (pwd, cd, echo, mkdir, ...). The previous list rejected even `pwd`/`echo`
-// with "not in the allowlist", so an already-approved tool call could still
-// not run and real tasks burned iterations on policy errors.
-//
-// Entries are bare command names. Rig compares them with platform semantics
-// (since v0.13.2 Windows ignores case and the ".exe" suffix), so the Windows
-// PowerShell executables are covered by "pwsh" / "powershell" without separate
-// ".exe" spellings.
-var defaultCommands = []string{
-	"bash", "sh", "zsh", "git", "go", "make", "gofmt",
-	"rg", "grep", "sed", "awk", "cat", "ls", "find", "head", "tail", "wc",
-	"pwd", "cd", "echo", "printf", "env", "export", "mkdir", "cp", "mv", "rm",
-	"touch", "tee", "date", "seq", "sort", "uniq", "cut", "tr", "xargs",
-	"test", "true", "false", "which", "basename", "dirname", "realpath",
-	"stat", "file", "diff", "patch", "tar", "unzip", "zip", "curl", "wget",
-	"node", "npm", "python3", "pwsh", "powershell",
-}
-
 // MCPServer configures one MCP server: a Streamable HTTP endpoint or a stdio
 // child process. A non-empty Command (or Transport "stdio") selects stdio and
 // takes priority over URL.
@@ -96,13 +73,16 @@ type Config struct {
 	ReadOnly bool `json:"readOnly"`
 	// Network allows web_fetch and outbound connections from shell tools.
 	Network bool `json:"network"`
-	// CommandAllowlist is the shell allowlist; nil means defaultCommands.
+	// CommandAllowlist optionally restricts which command names shell tools may
+	// run. nil/empty is the personal-client default: any command is allowed and
+	// the approval gate decides per call (Rig's documented recommendation). A
+	// non-empty list keeps shell execution to those bare names.
 	CommandAllowlist []string `json:"commandAllowlist"`
-	// AllowShellOperators permits shell grammar (pipes, lists, &&, ||,
-	// redirections and leading environment assignments) in the shell tool.
-	// The default (false) keeps Rig's strict single-simple-command policy;
-	// products that want the agent to run normal development commands enable
-	// it. The command allowlist still applies to the first command of a line.
+	// AllowShellOperators is kept for assembly compatibility and is ignored:
+	// shell grammar (pipes, lists, &&, ||, redirections, leading env
+	// assignments) is always allowed now. Restricting it only produced
+	// "operator not allowed" loops on ordinary development commands, which is
+	// the opposite of what a personal harness needs.
 	AllowShellOperators bool `json:"allowShellOperators"`
 	// DeniedGlobs hides files (e.g. "**/.env") from every file tool. The
 	// opt-in settings row toolkit.deniedGlobs overrides this list (default
@@ -167,6 +147,11 @@ func Module() *module.Descriptor[Config] {
 		// tools without a filesystem root are registered once below.
 		rootOf := workspaceRootSource(ctx, cfg.Root)
 		group := newRebindGroup(policyCfg, timeout, rootOf, sandboxOf, logf)
+		// The agent gate asks the SDK whether a shell call is already confined; that
+		// needs the live policy, which this module owns (one per root/mode build).
+		if _, err := ctx.Provide(contracts.KeyToolPolicy, contracts.ToolPolicy(policySourceAdapter{group: group})); err != nil {
+			return err
+		}
 		// Optional durable store: execution lifecycle events (job/terminal
 		// start/finish/close) are recorded for the agent session that invoked the
 		// tool. A product without a store keeps the tools working, event-free.
@@ -387,6 +372,7 @@ func Module() *module.Descriptor[Config] {
 		module.Provides(contracts.KeyMCPAuth),
 		module.Provides(contracts.KeyMCPReloader),
 		module.Provides(contracts.KeyMCPToolCatalog),
+		module.Provides(contracts.KeyToolPolicy),
 	).WithName("ZeoKeel Rig toolset")
 }
 
@@ -527,10 +513,6 @@ func shellMaxOutputBytes(cfg Config, settings contracts.SettingsService, hasSett
 // unit-test seam. mode is the linked OS sandbox mode; cfg.ReadOnly keeps forcing
 // read-only.
 func newPolicy(cfg Config, root string, timeout time.Duration, mode sandbox.Mode) *sandbox.Policy {
-	commands := cfg.CommandAllowlist
-	if commands == nil {
-		commands = defaultCommands
-	}
 	options := []sandbox.Option{
 		sandbox.WithRoots(root),
 		sandbox.WithMode(policyMode(cfg, mode)),
@@ -538,11 +520,21 @@ func newPolicy(cfg Config, root string, timeout time.Duration, mode sandbox.Mode
 		sandbox.WithNetwork(cfg.Network),
 		sandbox.WithTimeout(timeout),
 		sandbox.WithMaxOutputBytes(cfg.MaxOutputBytes),
-		sandbox.WithDeniedGlobs(cfg.DeniedGlobs...),
-		sandbox.WithCommandAllowlist(commands...),
+		// Hidden paths are enforced by rig itself (read, write, list, glob,
+		// grep and search all consult them), so the toolkit only has to hand the
+		// patterns over. hiddenPatterns widens every entry to cover the entry
+		// itself and its subtree, which is what "hide this file" meant under the
+		// pre-v0.25 denied-globs rule.
+		sandbox.WithHidden(hiddenPatterns(cfg.DeniedGlobs)...),
+		// Personal client: no command-name allowlist by default — an approved
+		// command runs. An explicit list is an opt-in restriction.
+		sandbox.WithAnyCommandAllowed(true),
+		// Shell grammar (pipes, lists, redirections, env assignments) is on:
+		// ordinary development commands must work without extra configuration.
+		sandbox.WithAllowShellOperators(),
 	}
-	if cfg.AllowShellOperators {
-		options = append(options, sandbox.WithAllowShellOperators())
+	if commands := cfg.CommandAllowlist; len(commands) > 0 {
+		options = append(options, sandbox.WithCommandAllowlist(commands...))
 	}
 	return sandbox.New(options...)
 }

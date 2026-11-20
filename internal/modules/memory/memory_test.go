@@ -21,10 +21,10 @@ import (
 
 	rig "github.com/zeokeel/zeokeel-rig"
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
-	rigmemory "github.com/zeokeel/zeokeel-rig/tools/memory"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/hosttools"
+	"github.com/zeokeel/zeokeel/internal/memorytools"
 )
 
 // testLogger is a goroutine-safe contracts.Logger test double.
@@ -353,8 +353,8 @@ func TestToolkitToolRegistration(t *testing.T) {
 	if registry.Len() != 1 {
 		t.Fatalf("toolkit tools = %d, want the registered memory tool", registry.Len())
 	}
-	if names := toolNames(registry.Tools()); len(names) != 1 || names[0] != rigmemory.ToolName {
-		t.Fatalf("toolkit names = %v, want [%s]", names, rigmemory.ToolName)
+	if names := toolNames(registry.Tools()); len(names) != 1 || names[0] != memorytools.ToolName {
+		t.Fatalf("toolkit names = %v, want [%s]", names, memorytools.ToolName)
 	}
 	tool := registry.Tools()[0]
 	if !strings.Contains(tool.Description(), "- update:") {
@@ -373,7 +373,7 @@ func TestToolkitToolRegistration(t *testing.T) {
 
 	result, err := registry.Invoke(context.Background(), rig.ToolCall{
 		ID:        "call-1",
-		Name:      rigmemory.ToolName,
+		Name:      memorytools.ToolName,
 		Arguments: `{"action":"add","text":"durable through the tool"}`,
 	})
 	if err != nil {
@@ -395,7 +395,7 @@ func TestToolkitToolRegistration(t *testing.T) {
 	}
 	updated, err := registry.Invoke(context.Background(), rig.ToolCall{
 		ID:        "call-2",
-		Name:      rigmemory.ToolName,
+		Name:      memorytools.ToolName,
 		Arguments: fmt.Sprintf(`{"action":"update","id":%q,"text":"edited through the tool"}`, addFields[2]),
 	})
 	if err != nil {
@@ -423,7 +423,7 @@ func TestToolkitToolRegistration(t *testing.T) {
 // durable tool registration is a logged no-op and activation still succeeds.
 func TestToolkitDuplicateIsLoggedAndTolerated(t *testing.T) {
 	dataDir := t.TempDir()
-	existing := rigmemory.Tools(nil)[0]
+	existing := memorytools.Tools(nil)[0]
 	registry := rigtools.NewRegistry(existing)
 	h, err := loadMemory(t, dataDir, nil, func(ctx cordis.Context) {
 		if _, err := ctx.Provide(hosttools.KeyRegistry, registry); err != nil {

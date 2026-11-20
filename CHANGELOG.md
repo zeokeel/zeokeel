@@ -4,6 +4,40 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **个人客户端口径：沙箱与审批不再加自家安全规则**（2026-11-20）：
+  - **不再有命令名白名单**：`defaultCommands` 删除，默认 `sandbox.WithAnyCommandAllowed(true)`——审批通过的命令直接能跑；`toolkit.Config.CommandAllowlist` 保留为显式收窄（非空才生效）。
+  - **shell 语法默认全开**：管道、列表、重定向、前置环境变量不再需要 `allowShellOperators`（该配置保留但被忽略），普通开发命令不再因"operator not allowed"空转。
+  - **read-only 按 SDK 语义**：挂了 OS runner 时只读档命令照跑（写被 runner 围栏限制），没有 runner 时由策略拒绝；产品不再额外禁止"只读档执行命令"，也不再为了这条规则扣住 runner。系统提示词与设置页文案同步。
+  - **没有 OS 沙箱不再等于全量失败**：`SandboxService.Runner()` 在探测失败时返回 **nil**（个人客户端"尽力而为"），命令以宿主权限运行、只受应用层策略与审批约束；删除 fail-closed `unavailableRunner` 与相关测试。设置页状态行如实说明"没有系统沙箱，仅应用层校验"。
+  - **接线两个 SDK 沙箱工具**：`sandbox_status`（只读、自动免问：模型能看到当前策略、可写面、网络与授权余量）与 `request_sandbox_access`（工具必须写固定目录时申请一个目录的会话级可写授权；由审批门禁决定，通过后 runner 的可写面随之扩大）。
+- **DSH goal 三件套改用 SDK 实现**：`get_goal`/`create_goal`/`update_goal` 过去由 `internal/hosttools/goaltools.go` 自研（343 行 + 173 行测试），因为当时的 rig 只提供没有 context 的 goal 选项；rig v0.25 起 `tools/hosttools` 的 `GoalRevision` 选项带 context，产品只需要提供 `GoalRevisionStore` 适配器（`internal/hosttools/goalrevision.go`，保留直接人类回合/轮次/阻塞校验）。现在把三件套交给 SDK，自研实现与测试整体删除，工具名、schema、结果 JSON 与既有行为测试不变。
+
+- **OS 沙箱的 shell 免审批改用 SDK 判定**：先前产品自己判断「runner 可用 + 工具名是 bash/pwsh」就跳过审批（不看策略模式，也不看 runner 自报的强制完整度）。现在把当前 run 的 runner 与策略交给 `gate.AllowSandboxedCommands`，判据回到 SDK：shell 类工具 + runner 自报强制程度不是 `none` + 策略不是 `danger-full-access`。产品只提供事实（`SandboxService.Runner()` + 新增的 `contracts.ToolPolicy`，由 toolkit 暴露每个工作区/权限构建出的同一份 `sandbox.Policy`），并保留自家否决：**只读预设一律拒绝执行命令**（rig v0.26 在有 runner 时允许，产品不跟随）、`never` 档一律拒绝、plan/minimal/creator 白名单与会话级覆盖仍在最前。宿主无可用 runner 时注入的 fail-closed runner 现在**自称 `EnforcementNone`**（`internal/modules/sandbox`），不会被误判成隔离。
+- **只读免审批工具表改由 SDK 派生**：`contracts.ReadOnlyAutoAllowedTools` 由 `gate.SandboxReadOnlyTools` 生成，产品只保留两张显式增量表（取出 `memory`——只读档不得改持久记忆；补入产品自有的 skills/todo/team_task 查询/LSP 查询），SDK 新增的只读工具会自动进入集合；新增 `contracts/permissions_sdk_test.go` 钉住这套派生与增量，两处白名单不再漂移。
+- **DSH goal 三件套改用 SDK 实现**：`get_goal`/`create_goal`/`update_goal` 过去由 `internal/hosttools/goaltools.go` 自研（343 行 + 173 行测试），因为当时的 rig 只提供没有 context 的 goal 选项；rig v0.25 起 `tools/hosttools` 的 `GoalRevision` 选项带 context，产品只需要提供 `GoalRevisionStore` 适配器（`internal/hosttools/goalrevision.go`，保留直接人类回合/轮次/阻塞校验）。现在把三件套交给 SDK，自研实现与测试整体删除，工具名、schema、结果 JSON 与既有行为测试不变。
+
+
+- **依赖升级：`github.com/zeokeel/zeokeel-rig` v0.19.0 → v0.26.1**（升级当日最新发布 tag，2026-11-20）。这一跨度里 rig 新增 854 个导出符号 / 34 个包，同时删掉约 1.5 万行企业形态能力并重写若干语义。本仓按「能用 SDK 就用 SDK、不机械替换、行为不变」迁移，**模型可见的工具名与产品承诺全部保持**：
+  - **隐藏路径（设置 → 数据与隐私 → 文件隐藏）改由 SDK 强制执行**。rig v0.24.0 曾把旧的"拒绝 glob"降级成只记录（本仓当时自建了一层 gate），v0.25.0 起有一等公民 `sandbox.WithHidden`：读、写、列目录、`glob`/`grep`/`search` 结果全部参与判定。现在产品只做**模式加宽**（`hiddenPatterns`）再交给 SDK：`**/.git` → `**/.git` + `**/.git/**`，`secrets/**` → `secrets` + `secrets/**`，无斜杠模式 → 基名 + `**/<pattern>/**`，从而保留"命中目录连整棵子树一起隐藏"的既有承诺；自建的 529 行 gate 与 379 行测试整体删除。设置页文案同步说明"命中目录连子树一起隐藏"。
+  - **read-only 档仍然禁止执行命令**。rig v0.26.0 起允许"read-only + 有 OS runner"执行命令（写围栏由 runner 承担），但产品的只读预设（系统提示词与权限矩阵都写着 shell 被禁用；只读子代理不得启动进程）在该组合下**不把 runner 交给 shell 工具**，`bash`/`pwsh` 继续返回原文案 `shell commands are disabled in read-only mode`。
+  - **`memory` 工具仍由产品实现**：rig v0.24.0 把 `tools/memory` 换成 wiki 契约（页/摘要/Index·Read·Write·Append·Delete·Search）并删掉扁平动作集；产品的持久存储、设置页与模型可见的 `add`/`list`/`search`/`remove`/`clear`/`update` 仍是扁平的，因此 `internal/memorytools` 自己实现（描述、schema、错误文案与 v0.19.0 逐字兼容）。
+  - **`settings_get`/`settings_set` 由产品接管**：rig v0.20.0 删除 `tools/settings`；产品侧实现保持名字与 schema 不变，并继续套用凭据脱敏包装（`settings_get` 永不回明文，审批矩阵里不被任何预设自动允许）。
+  - **MCP 资源/提示工具名**：rig v0.24.0 起工具名自带 server 段，产品只提供 `mcp__` 前缀，最终形状仍是 `mcp__<server>__list_resources`（`read_resource`/`list_resource_templates`/`list_prompts`/`get_prompt`）；清洗撞名由 rig 加确定性 `__2` 后缀。**`mcp.disabledTools` 里写旧名字（如 `mcp_list_resources`）的条目需要迁移**（rig 提供 `mcp.MigrateLegacyNames`）。
+  - **工具结果溢出目录回收**：rig v0.24.0 改为按会话作用域回收（`spill.<scope>.…`），产品侧保留 legacy 文件清理，`.zeokeel/tool-results` 仍压在 100 个文件以内。
+  - **轮数与循环口径**：rig 的 agent 循环自带重复调用闸（连续 3 轮完全相同的调用注入提示、同一签名第 5 轮起返回 `rig: repeated call blocked`），且没有 `AgentSpec` 开关——v0.2.50「让工具自由发挥」只对**不同**调用成立，详见 `docs/AGENT-SURFACES.md`。
+- **能力对照与 SDK 增量报告**：新增 `docs/research/rig-upgrade-2026-11/PARITY-v0.24.0.md`（可替换能力 / 须接管清单 / 分批建议）与 `SDK-v0.26.1-DELTA.md`（导出面量化、逐包新增、破坏性删除、细节与坑）。
+
+### Tests
+
+- 新增 `toolkit/hidden_paths_test.go`：走真实工具注册表钉住隐藏路径的行为契约——命中目录的**子树**（read/glob/grep/list_dir/write 全拒绝且不落盘）、基名模式任意深度、绝对路径写法、`dir/**` 与 `dir/` 两种写法、工作目录切换后的相对路径、默认空列表不隐藏任何内容，以及 `hiddenPatterns` 的加宽规则（幂等/去重/反斜杠）。
+- `toolkit`：MCP 资源工具断言改为新命名与 `__2` 消歧；`sandbox_test.go` 的"read-only 拒绝 shell"在新 SDK 下由产品侧 runner 注入策略守住。
+- `memorytools` 的测试改用产品自带的进程内 store（rig 的 `tools/memory` 已无 `NewMemoryStore`）。
+- `agent`：`TestRunSpillPrunesToMaxFiles` 按 rig 的会话作用域前缀造数据，新增 `TestRunSpillPrunesLegacyFiles`；`TestDefaultRunIdenticalCallsFollowRigRepeatGuard` 钉住 rig 自带闸的行为。
+
 ## [0.2.55] - 2026-11-18
 
 ### Fixed

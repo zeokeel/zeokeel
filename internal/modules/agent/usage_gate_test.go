@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	rigsandbox "github.com/zeokeel/zeokeel-rig/sandbox"
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -367,8 +368,11 @@ func TestGateNilApprovalsFailsClosed(t *testing.T) {
 	if decision, err := approve("bash"); decision != rig.DecisionDeny || err != nil {
 		t.Fatalf("nil approvals read-only bash = %q/%v, want the hard read-only deny", decision, err)
 	}
-	// An OS-sandboxed shell stays auto-allowed without an approvals service.
-	svc.sandboxService = fakeSandbox{available: true}
+	// An OS-sandboxed shell stays auto-allowed without an approvals service. The
+	// SDK's criterion needs a confining runner and the live policy, not just the
+	// availability flag.
+	svc.sandboxService = healthyRunnerSandbox()
+	svc.policySource = fakePolicySource{policy: sandboxPolicy(t, rigsandbox.ModeWorkspaceWrite)}
 	if err := svc.SetSessionPermission(sessionID, contracts.PermissionWorkspace); err != nil {
 		t.Fatalf("SetSessionPermission(workspace): %v", err)
 	}
@@ -376,6 +380,7 @@ func TestGateNilApprovalsFailsClosed(t *testing.T) {
 		t.Fatalf("nil approvals sandboxed bash = %q/%v, want the sandbox auto-allow", decision, err)
 	}
 	svc.sandboxService = nil
+	svc.policySource = nil
 	// A full per-session override is an explicit allow-all and needs no prompt.
 	if err := svc.SetSessionPermission(sessionID, contracts.PermissionFull); err != nil {
 		t.Fatalf("SetSessionPermission(full): %v", err)

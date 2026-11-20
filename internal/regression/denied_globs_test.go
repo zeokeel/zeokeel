@@ -24,7 +24,7 @@ func TestDeniedGlobsSaveEncodesJSONList(t *testing.T) {
 
 	// The disclosure states the opt-in default, the shell bypass and the restart.
 	requireHasText(t, tester, "文件隐藏（高级）")
-	requireHasText(t, tester, "默认留空＝不隐藏任何文件")
+	requireHasText(t, tester, "默认留空＝不隐藏任何内容")
 	requireHasText(t, tester, "shell 旁路仍在")
 	requireHasText(t, tester, "修改后重启应用生效")
 

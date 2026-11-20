@@ -18,6 +18,8 @@ import (
 	"github.com/zeokeel/zeokeel-rig/tools/image"
 	"github.com/zeokeel/zeokeel-rig/tools/jobs"
 	"github.com/zeokeel/zeokeel-rig/tools/misc"
+	"github.com/zeokeel/zeokeel-rig/tools/sandboxgrant"
+	"github.com/zeokeel/zeokeel-rig/tools/sandboxstatus"
 	"github.com/zeokeel/zeokeel-rig/tools/worktree"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -93,6 +95,11 @@ func workspaceRootSource(ctx cordis.Context, configured string) func() string {
 // serving a build with a stale policy or a stale runner.
 type rootScoped struct {
 	root string
+	// policy is the sandbox policy every tool in this build shares. The agent
+	// gate reads it (contracts.KeyToolPolicy) and hands it to the SDK's
+	// gate.AllowSandboxedCommands, so the "already confined, skip the prompt"
+	// decision uses the same policy the tools execute under.
+	policy *sandbox.Policy
 	// mode is the effective sandbox mode of this build (cfg.ReadOnly already
 	// folded in), and sandboxOn reports whether an OS runner was injected.
 	mode      sandbox.Mode
@@ -201,6 +208,12 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode san
 		builtin.WithBackgroundJobs(background),
 		builtin.WithWorkingDirectory(workingDirectory.Current),
 	}
+	// rig v0.26 owns the read-only semantics: with an OS runner attached a
+	// read-only policy may execute commands (the runner confines every write),
+	// without one the policy itself denies them. The product used to withhold
+	// the runner to force "read-only = no shell"; that was our own extra rule,
+	// and it broke ordinary read-only work (`ls`, `git status`) on hosts that do
+	// have a sandbox. Personal-client stance: use the SDK's rule as-is.
 	if runner != nil {
 		builtinOpts = append(builtinOpts, builtin.WithRunner(runner))
 	}
@@ -233,6 +246,23 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode san
 	}
 	tools = append(tools, worktree.Tools(policy, worktreeOpts...)...)
 	tools = append(tools, workingDirectory)
+	// SDK sandbox affordances (personal harness): the model can read the policy
+	// it is under (sandbox_status, read-only and auto-allowed) and ask for one
+	// writable directory when a tool insists on a fixed path
+	// (request_sandbox_access; the approval gate decides, since it is not in the
+	// read-only set). Both are bound to this build's policy, so a workspace or
+	// permission change rebuilds them.
+	statusOpts := []sandboxstatus.Option{}
+	if runner != nil {
+		statusOpts = append(statusOpts, sandboxstatus.WithRunnerInfo(func() (string, sandbox.Enforcement) {
+			name, enforcement, _ := sandbox.RunnerStatus(runner)
+			return name, enforcement
+		}))
+	}
+	tools = append(tools,
+		sandboxstatus.New(policy, statusOpts...),
+		sandboxgrant.New(policy),
+	)
 
 	byName := make(map[string]rig.Tool, len(tools))
 	for _, tool := range tools {
@@ -240,6 +270,7 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode san
 	}
 	return &rootScoped{
 		root:      root,
+		policy:    policy,
 		mode:      policyMode(cfg, mode),
 		sandboxOn: runner != nil,
 		tools:     tools,
@@ -328,6 +359,31 @@ func (g *rebindGroup) sandboxState() (sandbox.Mode, sandbox.Runner) {
 		return sandbox.ModeWorkspaceWrite, nil
 	}
 	return g.sandboxOf()
+}
+
+// currentPolicy returns the policy of the current tool build, or nil before any
+// build exists. It is the value behind contracts.ToolPolicy.
+func (g *rebindGroup) currentPolicy() *sandbox.Policy {
+	if g == nil {
+		return nil
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.current == nil {
+		return nil
+	}
+	return g.current.policy
+}
+
+// policySourceAdapter exposes the group's live policy to the agent gate.
+type policySourceAdapter struct{ group *rebindGroup }
+
+// CurrentPolicy implements contracts.ToolPolicy.
+func (a policySourceAdapter) CurrentPolicy() *sandbox.Policy {
+	if a.group == nil {
+		return nil
+	}
+	return a.group.currentPolicy()
 }
 
 // buildKey folds cfg.ReadOnly and the runner-on state into the rebuild identity.

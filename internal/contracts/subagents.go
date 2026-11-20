@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
+
+	"github.com/zeokeel/zeokeel-rig/gate"
 )
 
 // SubagentRequest is one synchronous delegation to an in-process subagent (the
@@ -85,43 +87,60 @@ func NormalizePermissionMode(raw string) string {
 	}
 }
 
-// ReadOnlyAutoAllowedTools is the set of tools the read-only preset runs
-// without an approval prompt: read-only file tools plus informational tools
-// that cannot modify the workspace, settings or the outside world. Everything
-// else (workspace writes, shell, network, MCP, settings writes and unknown
-// tools) asks. It is the read-only subset of WorkspaceAutoAllowedTools.
-var ReadOnlyAutoAllowedTools = map[string]bool{
-	// Read-only file tools.
-	"read_file": true,
-	"list_dir":  true,
-	"glob":      true,
-	"grep":      true,
-	// Read-only / informational tools.
-	"read_image":        true,
-	"working_directory": true,
-	// The memory tool is NOT read-only: it can add/update/remove/clear the
-	// persistent memory store, so it lives in the workspace-only state set
-	// below instead (read-only must not mutate durable state).
-	"skill":                true,
-	"skills":               true,
-	"todo":                 true,
-	"todos":                true,
-	"todo_write":           true,
-	"team_task_list":       true,
-	"team_task_get":        true,
-	"job_list":             true,
-	"job_output":           true,
-	"session_search":       true,
-	"session_event_search": true,
-	"session_event_read":   true,
-	"session_event_trace":  true,
-	"session_trace":        true,
-	"lsp_definition":       true,
-	"lsp_diagnostics":      true,
-	"lsp_hover":            true,
-	"lsp_implementation":   true,
-	"lsp_references":       true,
-	"lsp_symbols":          true,
+// The read-only approval set is derived from the SDK's judgement instead of a
+// private copy: gate.SandboxReadOnlyTools is the SDK's list of tools that are
+// safe without asking (its criterion is "does not touch the user's files,
+// processes or network"), and it grows with every SDK release. Only two small
+// deltas are product decisions.
+
+// productReadOnlyRemovals are SDK read-only tools this product deliberately
+// keeps OUT of the read-only preset.
+var productReadOnlyRemovals = map[string]bool{
+	// The memory tool writes the durable memory store (add/update/remove/clear).
+	// The read-only preset must not mutate durable state, so it asks for those
+	// edits; the default workspace preset keeps it auto-allowed (see
+	// workspaceStateTools).
+	"memory": true,
+}
+
+// productReadOnlyAdditions are product-only tools with no SDK counterpart that
+// are informational/read-only, so the read-only preset runs them without asking.
+var productReadOnlyAdditions = map[string]bool{
+	"skills":             true,
+	"todo":               true,
+	"todos":              true,
+	"team_task_list":     true,
+	"team_task_get":      true,
+	"lsp_definition":     true,
+	"lsp_diagnostics":    true,
+	"lsp_hover":          true,
+	"lsp_implementation": true,
+	"lsp_references":     true,
+	"lsp_symbols":        true,
+}
+
+// ReadOnlyAutoAllowedTools is the set of tools the read-only preset runs without
+// an approval prompt: the SDK's read-only set minus the documented product
+// removals, plus the product-only informational tools. Everything else
+// (workspace writes, shell, network, MCP, settings writes and unknown tools)
+// asks. It is the read-only subset of WorkspaceAutoAllowedTools.
+var ReadOnlyAutoAllowedTools = composeReadOnlyTools()
+
+// composeReadOnlyTools derives the read-only set from the SDK list plus the
+// documented product deltas above.
+func composeReadOnlyTools() map[string]bool {
+	out := make(map[string]bool, len(gate.SandboxReadOnlyTools)+len(productReadOnlyAdditions))
+	for _, name := range gate.SandboxReadOnlyTools {
+		name = strings.TrimSpace(name)
+		if name == "" || productReadOnlyRemovals[name] {
+			continue
+		}
+		out[name] = true
+	}
+	for name := range productReadOnlyAdditions {
+		out[name] = true
+	}
+	return out
 }
 
 // workspaceWriteFileTools are the file tools the workspace preset adds on top

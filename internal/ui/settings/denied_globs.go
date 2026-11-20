@@ -2,7 +2,8 @@ package settings
 
 // Opt-in denied-globs field of the Data & privacy page (2026-11 audit RG-10).
 // The toolkit reads toolkit.deniedGlobs at activation (a JSON string list) and
-// hides the matching files from the FILE tools only. This is defense in depth
+// hides the matching paths — a matching directory hides its subtree — from the
+// FILE tools only. This is defense in depth
 // for the model's file surface, NOT a security boundary: the shell bypass remains
 // (bash/pwsh can still cat a denied file). The default is empty (opt-in) — a
 // personal-scale agent gets no friction until the user asks for it. The UI edits
@@ -44,8 +45,8 @@ func buildDeniedGlobsSection(c *ui.Context, t *design.Tokens, store contracts.Se
 				Label(inputLabel(locale, localized(locale, "隐藏的文件", "Hidden files"))).
 				Placeholder("**/.env, **/*.pem, **/*.key").Width(controlWidth)
 		}).Description(localized(locale,
-			"逗号分隔的 glob，匹配的文件对文件类工具（read_file/glob/grep/编辑/图片/LSP）隐藏。默认留空＝不隐藏任何文件；shell 旁路仍在（bash/pwsh 仍可读取这些文件），这不是安全边界。修改后重启应用生效。",
-			"Comma-separated globs; matching files are hidden from the file tools (read_file/glob/grep/editor/image/LSP). Empty (the default) hides nothing; the shell bypass remains (bash/pwsh can still read these files), so this is not a security boundary. A change applies after restarting the app."))
+			"逗号分隔的 glob，匹配的路径对文件类工具（read_file/list_dir/glob/grep/编辑/图片/LSP）隐藏；命中目录时连它的整棵子树一起隐藏。默认留空＝不隐藏任何内容；shell 旁路仍在（bash/pwsh 仍可读取这些路径），这不是安全边界。修改后重启应用生效。",
+			"Comma-separated globs; matching paths are hidden from the file tools (read_file/list_dir/glob/grep/editor/image/LSP), and a matching directory hides its whole subtree. Empty (the default) hides nothing; the shell bypass remains (bash/pwsh can still read these paths), so this is not a security boundary. A change applies after restarting the app."))
 		statusBadgesRow(c, t, st.globsStatus, st.globsStatusErr)
 	})
 }

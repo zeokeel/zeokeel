@@ -1,8 +1,10 @@
 package toolkit
 
 // Opt-in denied-globs wiring (2026-11 audit): the settings key
-// toolkit.deniedGlobs hides workspace files (secrets like .env/*.pem) from the
-// FILE tools. The default is empty — opt-in, no friction for personal use.
+// toolkit.deniedGlobs hides workspace paths (secrets like .env/*.pem) from the
+// FILE tools; a matching directory hides its whole subtree (the behavioral
+// contract lives in hidden_paths_test.go). The default is empty — opt-in, no
+// friction for personal use.
 // Disclosure that must stay true: this is defense in depth for the file tools
 // only; the shell bypass remains (bash/pwsh can still cat a denied file, and
 // the command allowlist is advisory), so the key is not a security boundary.

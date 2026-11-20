@@ -32,7 +32,7 @@ func TestWorkingDirectoryLineThreeStates(t *testing.T) {
 		},
 		{
 			mode:     contracts.PermissionReadOnly,
-			contains: []string{"File policy: read-only", "cannot modify", "shell commands are disabled"},
+			contains: []string{"File policy: read-only", "cannot modify", "shell commands run only while an OS sandbox confines their writes"},
 			absent:   []string{"workspace-write", "full-access"},
 		},
 		{

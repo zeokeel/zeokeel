@@ -65,8 +65,8 @@ func sandboxNoteText(locale contracts.LocaleService, mode string) string {
 			"Under All permissions the OS sandbox does not wrap commands: they run with the host's own permissions; switch back to Workspace-write or Read-only to restore wrapping.")
 	}
 	return localized(locale,
-		"始终启用、不可关闭；可用时 shell 类工具自动放行，不可用时命令失败。",
-		"Always on and not configurable; shell tools are auto-allowed when available and fail closed when not.")
+		"始终启用、不可关闭；可用时 shell 类工具自动放行（命令在系统沙箱内运行，写被限制到策略允许的范围）；本机没有系统沙箱时命令以宿主权限运行，只受应用层策略与审批约束。",
+		"Always on and not configurable; shell tools are auto-allowed when the OS sandbox is available (commands run inside it and writes are limited to the policy's writable surface); without one, commands run with the host's own permissions under the application-level policy and approval only.")
 }
 
 // buildSandboxSection renders the system sandbox section: the mode-aware live

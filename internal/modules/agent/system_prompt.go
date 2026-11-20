@@ -120,7 +120,7 @@ func workingDirectoryLine(workspaceRoot, sandboxMode string) string {
 	}
 	switch mode {
 	case contracts.PermissionReadOnly:
-		return fmt.Sprintf("Working directory: %s. File policy: read-only; the file tools may read files inside it but cannot modify them, and shell commands are disabled.", root)
+		return fmt.Sprintf("Working directory: %s. File policy: read-only; the file tools may read files inside it but cannot modify them, and shell commands run only while an OS sandbox confines their writes (without one they are disabled).", root)
 	case contracts.PermissionFull:
 		return fmt.Sprintf("Working directory: %s. File policy: full-access; the OS file sandbox is bypassed — file tools and shell commands are not confined to this directory.", root)
 	default:

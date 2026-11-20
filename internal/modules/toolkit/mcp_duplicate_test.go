@@ -106,10 +106,10 @@ func TestToolkitMCPTwoStdioServersNoDuplicatePanic(t *testing.T) {
 	}
 	for _, want := range []string{
 		"mcp__alpha__stdio_echo", "mcp__beta__stdio_echo",
-		"mcp__alpha__mcp_list_resources", "mcp__alpha__mcp_read_resource",
-		"mcp__alpha__mcp_list_prompts", "mcp__alpha__mcp_get_prompt",
-		"mcp__beta__mcp_list_resources", "mcp__beta__mcp_read_resource",
-		"mcp__beta__mcp_list_prompts", "mcp__beta__mcp_get_prompt",
+		"mcp__alpha__list_resources", "mcp__alpha__read_resource",
+		"mcp__alpha__list_prompts", "mcp__alpha__get_prompt",
+		"mcp__beta__list_resources", "mcp__beta__read_resource",
+		"mcp__beta__list_prompts", "mcp__beta__get_prompt",
 	} {
 		if !names[want] {
 			t.Fatalf("registry lacks %q (have %v)", want, names)
@@ -138,17 +138,20 @@ func TestToolkitMCPDuplicateSanitizedNameSkipped(t *testing.T) {
 	if len(plugins.MCP()) != 1 || !strings.Contains(plugins.MCP()[0].Status, "已连接") {
 		t.Fatalf("MCP entries = %+v, want one connected server", plugins.MCP())
 	}
-	registered := 0
+	// rig v0.24.0 resolves sanitized name collisions itself: the first tool keeps
+	// its name and the colliding one gets a deterministic "__2" suffix, so the
+	// registry never sees a duplicate and the toolkit's skip path is not used.
+	names := map[string]int{}
 	for _, spec := range tools.Specs() {
-		if spec.Name == "mcp__evil__run_sh" {
-			registered++
+		names[spec.Name]++
+	}
+	for _, want := range []string{"mcp__evil__run_sh", "mcp__evil__run_sh__2"} {
+		if names[want] != 1 {
+			t.Fatalf("%s registered %d times, want exactly once (have %v)", want, names[want], names)
 		}
 	}
-	if registered != 1 {
-		t.Fatalf("mcp__evil__run_sh registered %d times, want exactly once", registered)
-	}
-	if !logger.contains("skip duplicate tool") {
-		t.Fatalf("duplicate registration was not logged: %v", logger.lines)
+	if logger.contains("skip duplicate tool") {
+		t.Fatalf("rig now suffixes collisions, but the toolkit still logged a skip: %v", logger.lines)
 	}
 }
 
@@ -194,19 +197,19 @@ func TestMCPDisabledToolsFilterPrefixedResourceTools(t *testing.T) {
 	command := writeMCPStdioTwoToolsServer(t)
 	settings := newMutableSettings(map[string]string{
 		contracts.SettingMCPServers:       stdioToolSettings(t, command),
-		contracts.SettingMCPDisabledTools: `["mcp__local__echo","mcp__local__mcp_list_resources"]`,
+		contracts.SettingMCPDisabledTools: `["mcp__local__echo","mcp__local__list_resources"]`,
 	})
 	tools, _ := activateMCPToolkit(t, map[string]any{"root": "."}, settings, nil)
 	names := make(map[string]bool)
 	for _, spec := range tools.Specs() {
 		names[spec.Name] = true
 	}
-	for _, disabled := range []string{"mcp__local__echo", "mcp__local__mcp_list_resources"} {
+	for _, disabled := range []string{"mcp__local__echo", "mcp__local__list_resources"} {
 		if names[disabled] {
 			t.Fatalf("disabled MCP tool %q is registered: %v", disabled, names)
 		}
 	}
-	for _, kept := range []string{"mcp__local__second", "mcp__local__mcp_read_resource"} {
+	for _, kept := range []string{"mcp__local__second", "mcp__local__read_resource"} {
 		if !names[kept] {
 			t.Fatalf("enabled MCP tool %q missing: %v", kept, names)
 		}

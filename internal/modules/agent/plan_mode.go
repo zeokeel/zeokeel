@@ -296,14 +296,18 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 				}
 			}
 		}
-		// OS sandbox auto-allow: when the enabled platform runner is available
-		// the OS profile already enforces the file effects, so the shell family
-		// runs without an approval prompt (DSH-style). The branch sits after the
-		// plan/chat whitelists and the per-session override so those keep their
-		// veto, and before the interaction/remembered/approval branches so no
-		// dialog is requested. An explicit headless deny-all policy still denies:
-		// skipping the prompt must never bypass it.
-		if s.sandboxShellAutoAllowed(name) {
+		// OS sandbox: the SDK decides whether this shell call is already confined
+		// (gate.AllowSandboxedCommands: shell surface + runner reports real
+		// enforcement + policy is not danger-full-access). The branch sits after
+		// the plan/chat whitelists and the per-session override so those keep
+		// their veto, and before the interaction/remembered/approval branches so
+		// no dialog is requested. The product's read-only preset still forbids
+		// commands outright, and an explicit headless deny-all policy still
+		// denies: skipping the prompt must never bypass either.
+		if shell, allowed := s.sandboxedCommandDecision(ctx, tool, call); shell {
+			if !allowed {
+				return rig.DecisionDeny, nil
+			}
 			if s.approvals != nil && strings.EqualFold(strings.TrimSpace(s.approvals.Mode()), approvalModeNever) {
 				return rig.DecisionDeny, nil
 			}

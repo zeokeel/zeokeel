@@ -161,16 +161,21 @@ func assertFreeRunFinished(t *testing.T, session contracts.ChatSession) {
 	}
 }
 
-// TestDefaultRunIdenticalCallsCompleteWithoutNudge is the run-level red/green
-// pin for the removal: under the DEFAULT configuration, 8 consecutive identical
-// tool calls run to completion — every call executes, the turn finishes with its
-// answer, and no advisory nudge rides any tool result.
-func TestDefaultRunIdenticalCallsCompleteWithoutNudge(t *testing.T) {
+// TestDefaultRunIdenticalCallsFollowRigRepeatGuard documents the one behavior
+// change the rig v0.24.0 upgrade brings to tool freedom: rig's agent loop now
+// hardcodes its own repeat-call guard — a notice after 3 identical rounds and
+// "rig: repeated call blocked" errors from the 5th — and exposes no AgentSpec
+// knob to switch it off. The product's 2026-11 "no nudge, no breaker" stance
+// therefore still holds for distinct calls (see the 45-call read-only chain
+// below), but identical repeats are bounded by rig. Revisit when rig ships a
+// knob; until then this test pins the upstream behavior instead of pretending
+// the product controls it.
+func TestDefaultRunIdenticalCallsFollowRigRepeatGuard(t *testing.T) {
 	provider := &identicalCallProvider{repeats: 8}
 	tool := &echoTool{}
 	svc := newTestService(t, Config{}, newFakeSettings(nil), nil, tool)
 	svc.providerFactory = func(contracts.ChatConfig) (rig.Provider, error) { return provider, nil }
-	id, err := svc.NewSession("free repeat")
+	id, err := svc.NewSession("bounded repeat")
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
@@ -179,10 +184,21 @@ func TestDefaultRunIdenticalCallsCompleteWithoutNudge(t *testing.T) {
 	}
 	session := waitIdle(t, svc, id)
 	assertFreeRunFinished(t, session)
-	if got := tool.calls.Load(); got != 8 {
-		t.Fatalf("echo calls = %d, want 8 (every repeated call executed)", got)
+	// Rounds 1-4 execute; the 5th and later identical calls are blocked by rig.
+	if got := tool.calls.Load(); got != 4 {
+		t.Fatalf("echo calls = %d, want 4 (rig blocks the 5th identical round)", got)
 	}
-	assertNoLoopGuardText(t, provider.recordedRequests())
+	var transcriptBuilder strings.Builder
+	for _, request := range provider.recordedRequests() {
+		transcriptBuilder.WriteString(rigMessagesText(request.Messages))
+	}
+	transcript := transcriptBuilder.String()
+	if !strings.Contains(transcript, "rig: notice: you have called") {
+		t.Fatalf("no repeat notice in the conversation:\n%s", transcript)
+	}
+	if !strings.Contains(transcript, "rig: repeated call blocked") {
+		t.Fatalf("no blocked-call error in the conversation:\n%s", transcript)
+	}
 }
 
 // TestDefaultRunReadOnlyChainCompletesWithoutNudge pins the second chain: under

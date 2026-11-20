@@ -1,20 +1,20 @@
 package memorytools_test
 
-// Tests for the product memory tool: one stable "memory" tool that wraps the
-// Rig memory tool, delegates add/list/search/remove/clear verbatim and adds the
-// update action over contracts.MemoryUpdater.
+// Tests for the product memory tool: one stable "memory" tool implementing
+// add/list/search/remove/clear over contracts.MemoryStore plus the update action
+// over contracts.MemoryUpdater. The tool used to wrap the Rig memory tool; rig
+// v0.24.0 dropped that flat tool, so the product owns these tests outright.
 
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
-	rigmemory "github.com/zeokeel/zeokeel-rig/tools/memory"
-
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/memorytools"
 )
@@ -29,7 +29,7 @@ type updateCall struct {
 // fakeUpdater is a Rig memory store with the optional MemoryUpdater half: the
 // embedded store handles the delegated actions, Update records the call.
 type fakeUpdater struct {
-	*rigmemory.MemoryStore
+	*testStore
 	mu     sync.Mutex
 	calls  []updateCall
 	result contracts.Memory
@@ -37,7 +37,7 @@ type fakeUpdater struct {
 }
 
 func newFakeUpdater() *fakeUpdater {
-	return &fakeUpdater{MemoryStore: rigmemory.NewMemoryStore()}
+	return &fakeUpdater{testStore: newTestStore()}
 }
 
 func (f *fakeUpdater) Update(_ context.Context, id, text, scope string) (contracts.Memory, error) {
@@ -71,18 +71,18 @@ func invoke(t *testing.T, tool rig.Tool, arguments string) rig.ToolResult {
 
 func TestToolsReturnsOneStableMemoryTool(t *testing.T) {
 	for name, store := range map[string]contracts.MemoryStore{
-		"rig store": rigmemory.NewMemoryStore(),
+		"rig store": newTestStore(),
 		"nil store": nil,
 	} {
 		tools := memorytools.Tools(store)
 		if len(tools) != 1 {
 			t.Fatalf("%s: Tools = %d tools, want exactly 1", name, len(tools))
 		}
-		if got := tools[0].Name(); got != rigmemory.ToolName {
-			t.Fatalf("%s: tool name = %q, want the rig name %q", name, got, rigmemory.ToolName)
+		if got := tools[0].Name(); got != memorytools.ToolName {
+			t.Fatalf("%s: tool name = %q, want the rig name %q", name, got, memorytools.ToolName)
 		}
-		if rigmemory.ToolName != "memory" {
-			t.Fatalf("rig memory tool name = %q, want the stable product name memory", rigmemory.ToolName)
+		if memorytools.ToolName != "memory" {
+			t.Fatalf("rig memory tool name = %q, want the stable product name memory", memorytools.ToolName)
 		}
 	}
 }
@@ -90,7 +90,7 @@ func TestToolsReturnsOneStableMemoryTool(t *testing.T) {
 // TestDescriptionExtendsRigActions pins the extended copy: the Rig action
 // bullets stay and the update bullet joins the list.
 func TestDescriptionExtendsRigActions(t *testing.T) {
-	tool := memorytools.Tools(rigmemory.NewMemoryStore())[0]
+	tool := memorytools.Tools(newTestStore())[0]
 	description := tool.Description()
 	for _, fragment := range []string{
 		"Manage the agent's memory entries through a host-provided store.",
@@ -112,7 +112,7 @@ func TestDescriptionExtendsRigActions(t *testing.T) {
 }
 
 func TestSchemaExtendsUpdateAction(t *testing.T) {
-	tool := memorytools.Tools(rigmemory.NewMemoryStore())[0]
+	tool := memorytools.Tools(newTestStore())[0]
 	schema := tool.Schema()
 	if schema["type"] != "object" || schema["additionalProperties"] != false {
 		t.Fatalf("schema = %+v, want an object without additional properties", schema)
@@ -160,7 +160,7 @@ func TestSchemaExtendsUpdateAction(t *testing.T) {
 }
 
 func TestDelegatesRigActions(t *testing.T) {
-	tool := memorytools.Tools(rigmemory.NewMemoryStore())[0]
+	tool := memorytools.Tools(newTestStore())[0]
 
 	if result := invoke(t, tool, `{"action":"add","text":"alpha","scope":"global"}`); result.IsError || !strings.HasPrefix(result.Content, "added memory ") {
 		t.Fatalf("add = %+v, want the rig success text", result)
@@ -254,7 +254,7 @@ func TestUpdateValidation(t *testing.T) {
 func TestUpdateUnsupportedStore(t *testing.T) {
 	// A store without the optional MemoryUpdater half reports the documented
 	// readable error instead of panicking.
-	tool := memorytools.Tools(rigmemory.NewMemoryStore())[0]
+	tool := memorytools.Tools(newTestStore())[0]
 	result := invoke(t, tool, `{"action":"update","id":"mem-1","text":"x"}`)
 	if !result.IsError || result.Content != "memory: update: store does not support update" {
 		t.Fatalf("update on a read-only store = %+v", result)
@@ -286,7 +286,7 @@ func TestUpdateDisplayScopeFallsBackToRigDefault(t *testing.T) {
 	store.result = contracts.Memory{ID: "mem-1", Text: "new", Created: time.Unix(1700000000, 0)}
 	tool := memorytools.Tools(store)[0]
 	result := invoke(t, tool, `{"action":"update","id":"mem-1","text":"new"}`)
-	if want := "updated memory mem-1 (scope=" + rigmemory.DefaultScope + ")"; result.Content != want {
+	if want := "updated memory mem-1 (scope=" + memorytools.DefaultScope + ")"; result.Content != want {
 		t.Fatalf("update content = %q, want %q", result.Content, want)
 	}
 }
@@ -295,13 +295,13 @@ func TestUpdateDisplayScopeFallsBackToRigDefault(t *testing.T) {
 // default: the product wrapper must leave the scope empty when the model omits
 // it, so the durable store's configured default (FR-25) applies.
 type recordingStore struct {
-	*rigmemory.MemoryStore
+	*testStore
 	mu    sync.Mutex
 	scope []string
 }
 
 func newRecordingStore() *recordingStore {
-	return &recordingStore{MemoryStore: rigmemory.NewMemoryStore()}
+	return &recordingStore{testStore: newTestStore()}
 }
 
 func (r *recordingStore) Add(ctx context.Context, memory contracts.Memory) (contracts.Memory, error) {
@@ -311,7 +311,7 @@ func (r *recordingStore) Add(ctx context.Context, memory contracts.Memory) (cont
 	if strings.TrimSpace(memory.Scope) == "" {
 		memory.Scope = contracts.MemoryScopeGlobal
 	}
-	return r.MemoryStore.Add(ctx, memory)
+	return r.testStore.Add(ctx, memory)
 }
 
 func (r *recordingStore) scopes() []string {
@@ -340,11 +340,72 @@ func TestAddWithoutScopeLeavesTheConfiguredDefaultToTheStore(t *testing.T) {
 }
 
 func TestDescriptionIsDurableNotProcessLocal(t *testing.T) {
-	description := memorytools.Tools(rigmemory.NewMemoryStore())[0].Description()
+	description := memorytools.Tools(newTestStore())[0].Description()
 	if strings.Contains(description, "process-local") {
 		t.Fatalf("model-facing description still claims a process-local store:\n%s", description)
 	}
 	if !strings.Contains(description, "durable") {
 		t.Fatalf("model-facing description does not mention durability:\n%s", description)
 	}
+}
+
+// testStore is the test suite's in-memory contracts.MemoryStore: insertion-order
+// list, "mem-<n>" IDs, UTC creation stamps and case-insensitive substring search.
+// It has no update half on purpose (fakeUpdater adds it explicitly).
+type testStore struct {
+	mu    sync.Mutex
+	seq   uint64
+	items []contracts.Memory
+}
+
+var _ contracts.MemoryStore = (*testStore)(nil)
+
+func newTestStore() *testStore { return &testStore{} }
+
+func (s *testStore) List(context.Context) ([]contracts.Memory, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]contracts.Memory(nil), s.items...), nil
+}
+
+func (s *testStore) Add(_ context.Context, memory contracts.Memory) (contracts.Memory, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if strings.TrimSpace(memory.ID) == "" {
+		s.seq++
+		memory.ID = "mem-" + strconv.FormatUint(s.seq, 10)
+	}
+	if memory.Created.IsZero() {
+		memory.Created = time.Now().UTC()
+	}
+	s.items = append(s.items, memory)
+	return memory, nil
+}
+
+func (s *testStore) Remove(_ context.Context, id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index, memory := range s.items {
+		if memory.ID == strings.TrimSpace(id) {
+			s.items = append(s.items[:index], s.items[index+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+func (s *testStore) Search(_ context.Context, query string) ([]contracts.Memory, error) {
+	query = strings.ToLower(strings.TrimSpace(query))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if query == "" {
+		return append([]contracts.Memory(nil), s.items...), nil
+	}
+	matches := make([]contracts.Memory, 0, len(s.items))
+	for _, memory := range s.items {
+		if strings.Contains(strings.ToLower(memory.Text), query) {
+			matches = append(matches, memory)
+		}
+	}
+	return matches, nil
 }

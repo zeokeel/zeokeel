@@ -4,14 +4,14 @@
 // toolkit can inject it into the command-executing tools and the agent gate can
 // auto-allow shell-family tools.
 //
-// The sandbox is always on: an agent must not run commands unconfined. When the
-// host has no usable runner, Runner returns a fail-closed runner and commands
-// error instead of silently running unrestricted; Status tells the settings
-// surface why, and Available keeps the gate on the approval path.
+// Personal-client model: the OS sandbox is used whenever the machine has one.
+// When it does not, Runner returns nil and commands run with the host's own
+// permissions (the application-level policy and the approval gate still apply) —
+// a personal harness should not fail every command because bwrap is missing.
+// Status tells the settings surface why there is no OS fence.
 package sandbox
 
 import (
-	"fmt"
 	"runtime"
 	"time"
 
@@ -79,7 +79,7 @@ func newService(cfg Config, logger contracts.Logger, factory runnerFactory) *ser
 	if logger != nil {
 		switch {
 		case probeErr != nil:
-			logger.Printf("[sandbox] unavailable on %s (commands fail closed): %v", runtime.GOOS, probeErr)
+			logger.Printf("[sandbox] unavailable on %s (commands run with host permissions): %v", runtime.GOOS, probeErr)
 		case runner != nil:
 			logger.Printf("[sandbox] enabled on %s", runtime.GOOS)
 		}
@@ -92,15 +92,12 @@ func (s *service) Available() bool {
 	return s != nil && s.probeError == nil && s.runner != nil
 }
 
-// Runner returns the runner injected into tools. An unusable host gets a
-// fail-closed runner, never nil, so commands cannot run unconfined.
+// Runner returns the platform runner, or nil when this host has none. A nil
+// runner makes the command tools run under the application-level policy only
+// (best effort); it never fails startup.
 func (s *service) Runner() rigsandbox.Runner {
 	if s == nil || s.probeError != nil || s.runner == nil {
-		var reason error
-		if s != nil {
-			reason = s.probeError
-		}
-		return unavailableRunner{reason: reason}
+		return nil
 	}
 	return s.runner
 }
@@ -118,19 +115,4 @@ func (s *service) Status() contracts.SandboxStatus {
 		status.Reason = s.probeError.Error()
 	}
 	return status
-}
-
-// unavailableRunner is injected when this host has no usable runner: every
-// Confine fails closed instead of running unconfined.
-type unavailableRunner struct {
-	reason error
-}
-
-// Confine implements sandbox.Runner.
-func (r unavailableRunner) Confine([]string, *rigsandbox.Policy) (rigsandbox.ConfinedCommand, error) {
-	reason := r.reason
-	if reason == nil {
-		reason = rigsandbox.ErrSandboxUnavailable
-	}
-	return rigsandbox.ConfinedCommand{}, fmt.Errorf("os sandbox unavailable (%v): %w", reason, rigsandbox.ErrSandboxUnavailable)
 }

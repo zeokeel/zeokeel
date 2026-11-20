@@ -1,11 +1,13 @@
 package toolkit
 
-// Model-facing settings tools. The product wraps rig's settings_get so a
-// credential-named key never returns its plaintext value to the model (the
-// read-only/workspace approval presets used to auto-allow the raw tool, which
-// exposed provider/search keys without any approval), and so JSON-valued
-// settings (mcp.servers env rows, model catalog entries) are redacted with the
-// same rules the diagnostics export uses. settings_set keeps rig's semantics.
+// Model-facing settings tools. The product owns the pair (rig removed its
+// tools/settings package in v0.20.0 — see settings_tool_impl.go) and wraps
+// settings_get so a credential-named key never returns its plaintext value to
+// the model (the read-only/workspace approval presets used to auto-allow the raw
+// tool, which exposed provider/search keys without any approval), and so
+// JSON-valued settings (mcp.servers env rows, model catalog entries) are
+// redacted with the same rules the diagnostics export uses. settings_set keeps
+// the original semantics.
 
 import (
 	"context"
@@ -13,7 +15,6 @@ import (
 	"strings"
 
 	rig "github.com/zeokeel/zeokeel-rig"
-	"github.com/zeokeel/zeokeel-rig/tools/settings"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -24,10 +25,7 @@ const hiddenSettingValue = "已设置(隐藏)"
 
 // maskedSettingsTools returns the product's settings_get/settings_set pair.
 func maskedSettingsTools(store contracts.SettingsService) []rig.Tool {
-	base := settings.Tools(store)
-	if len(base) != 2 {
-		return base
-	}
+	base := productSettingsTools(store)
 	return []rig.Tool{maskedSettingsGet{inner: base[0]}, base[1]}
 }
 

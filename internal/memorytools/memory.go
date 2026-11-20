@@ -1,162 +1,123 @@
-// Package memorytools exposes the product's memory tool to the model: the Rig
-// memory tool (github.com/zeokeel/zeokeel-rig/tools/memory) plus the optional
-// update action the Rig tool cannot provide.
+// Package memorytools exposes the product's memory tool to the model.
 //
-// The Rig tool decides add/list/search/remove/clear from rig.MemoryStore, which
-// has no update half. The product store additionally implements
-// contracts.MemoryUpdater, so this package wraps the Rig tool under the same
-// stable name ("memory"), extends the description/schema with "update" and
-// delegates every other action verbatim. Keeping one tool with the Rig name
-// means the toolkit registry (and therefore the model-facing tool list) is
-// unchanged apart from the new action.
+// History: until rig v0.19.0 this package wrapped the Rig memory tool
+// (github.com/zeokeel/zeokeel-rig/tools/memory) and only added the "update"
+// action, because the flat rig.MemoryStore contract has no update half. Rig
+// v0.24.0 replaced that tool with a wiki contract (pages, summaries,
+// Index/Read/Write/Append/Delete/Search) and dropped the flat action set, while
+// keeping rig.MemoryStore as a host-side type. The product's durable store, its
+// settings page and the model-facing action names are still flat (add/list/
+// search/remove/clear), so the product now owns this tool outright instead of
+// wrapping a tool that no longer exists. Migrating the memory feature to the wiki
+// contract is tracked in docs/research/rig-upgrade-2026-11/PARITY-v0.24.0.md.
 package memorytools
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
-	rigmemory "github.com/zeokeel/zeokeel-rig/tools/memory"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// updateAction is the action this wrapper handles instead of the Rig tool.
-const updateAction = "update"
+const (
+	// ToolName is the model-facing tool name. It must stay "memory": prompts,
+	// the permission matrix and the session memory tab all address it by name.
+	ToolName = "memory"
+	// DefaultScope is what the model-visible output calls an empty scope.
+	DefaultScope = "workspace"
+	// updateAction is the action this package adds over the flat store contract.
+	updateAction = "update"
+	// maxOutputBytes bounds one tool response.
+	maxOutputBytes = 32 << 10
+	// truncatedMarker is appended when a listing is cut at maxOutputBytes.
+	truncatedMarker = "\n[truncated: output exceeded the memory tool limit]"
+)
 
-// delegatedActions are the actions the Rig memory tool implements and this
-// wrapper delegates. They are listed in the tool's action order.
-var delegatedActions = []string{"add", "list", "search", "remove", "clear"}
+// actions is the tool's complete action list, in schema order.
+var actions = []string{"add", "list", "search", "remove", "clear", updateAction}
 
-// actionList renders the tool's complete action list for error messages (in
-// schema order). The delegated list alone would omit "update".
-func actionList() string {
-	return strings.Join(delegatedActions, ", ") + ", " + updateAction
-}
+// actionList renders the action list for error messages.
+func actionList() string { return strings.Join(actions, ", ") }
 
 // Tools returns the product memory tool bound to store: exactly one tool named
-// "memory", the same name the Rig memory tool uses so the registry stays
-// stable. store may be nil, which mirrors rigmemory.Tools(nil): the Rig tool
-// falls back to a fresh process-local store. That fallback has no update half,
-// so its update action reports the unsupported-store error.
+// "memory". store may be nil, which binds a fresh process-local store (that
+// fallback has no update half, so its update action reports the documented
+// unsupported-store error).
 func Tools(store contracts.MemoryStore) []rig.Tool {
 	if store == nil {
-		store = rigmemory.NewMemoryStore()
+		store = newMemoryStore()
 	}
-	inner := rigmemory.Tools(store)[0]
-	return []rig.Tool{&tool{store: store, inner: inner}}
+	return []rig.Tool{&tool{store: store}}
 }
 
-// tool wraps the Rig memory tool. Add/list/search/remove/clear are delegated to
-// inner unchanged; update runs against the store's optional MemoryUpdater half.
+// tool is the `memory` tool implementation.
 type tool struct {
 	store contracts.MemoryStore
-	inner rig.Tool
 }
 
 var _ rig.Tool = (*tool)(nil)
 
-// Name mirrors the Rig tool name ("memory") so registration names stay stable.
-func (t *tool) Name() string { return t.inner.Name() }
+// Name implements rig.Tool.
+func (t *tool) Name() string { return ToolName }
 
-// Description is the Rig description extended with the update action. The
-// bullet is inserted into the Rig action list (before the trailing store notes)
-// so the delegated actions keep their exact wording; a Rig description without
-// that list gets the bullet appended.
+// Description implements rig.Tool. The action list mirrors the flat store
+// contract; the durability sentence is the product's (the host store persists,
+// unlike the Rig tool's process-local default).
 func (t *tool) Description() string {
-	const storeNotesMarker = "\n\nThe stored entry keeps"
-	const updateBullet = `- update: replace the text of one memory. "id" and "text" are required; optional "scope" changes the entry's scope (omitted keeps the current scope). The memory keeps its ID and creation time. Unknown IDs and stores without edit support are errors.`
-	description := t.inner.Description()
-	if index := strings.Index(description, storeNotesMarker); index >= 0 {
-		description = description[:index] + "\n" + updateBullet + description[index:]
-	} else {
-		description += "\n" + updateBullet
-	}
-	// The Rig tool's trailing note describes its process-local default store;
-	// the product always binds a durable host store (memory.json), so the
-	// model-facing text must not claim memories are lost on restart.
-	if index := strings.Index(description, "Whether the store"); index >= 0 {
-		description = description[:index] + "ZeoKeel persists entries in the host's durable memory store, so they survive restarts and are shared by later conversations."
-	}
-	return description
+	return `Manage the agent's memory entries through a host-provided store.
+
+Actions:
+- add: store a new memory. "text" is required; optional "scope" (default workspace) groups entries (for example workspace or global).
+- list: show memories as "- <id> [<scope>] <text>". Optional "scope" filters by exact scope.
+- search: case-insensitive substring search over memory text. "query" is required; optional "scope" filters by exact scope.
+- remove: delete one memory by "id". Unknown IDs are an error.
+- clear: remove every memory in the optional "scope" (all memories when the scope is omitted) and report the count.
+- update: replace the text of one memory. "id" and "text" are required; optional "scope" changes the entry's scope (omitted keeps the current scope). The memory keeps its ID and creation time. Unknown IDs and stores without edit support are errors.
+
+The stored entry keeps its ID, text, scope and creation time. ZeoKeel persists entries in the host's durable memory store, so they survive restarts and are shared by later conversations.`
 }
 
-// Schema is the Rig schema extended with the update action and its id/text
-// parameters (the Rig schema already declares both for remove/add). The Rig
-// schema is deep-copied, never mutated: the wrapped tool may be shared and the
-// same call happens for every model turn.
+// Schema implements rig.Tool.
 func (t *tool) Schema() map[string]any {
-	schema, ok := cloneSchema(t.inner.Schema()).(map[string]any)
-	if !ok {
-		schema = map[string]any{"type": "object"}
-	}
-	properties, ok := schema["properties"].(map[string]any)
-	if !ok {
-		properties = map[string]any{}
-		schema["properties"] = properties
-	}
-	action, ok := properties["action"].(map[string]any)
-	if !ok {
-		action = map[string]any{"type": "string", "description": "Operation to perform."}
-		properties["action"] = action
-	}
-	addEnumValue(action, updateAction)
-	ensureStringProperty(properties, "id", "Memory ID (required for remove).")
-	ensureStringProperty(properties, "text", "Memory text (required for add).")
-	return schema
-}
-
-// Invoke implements rig.Tool. "update" is handled here; the five Rig actions
-// are delegated verbatim. Malformed arguments are also left to the Rig tool so
-// its message stays byte-identical.
-func (t *tool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
-	if err := ctx.Err(); err != nil {
-		return rig.ToolResult{}, err
-	}
-	arguments := arguments{}
-	if err := decodeArguments(call, &arguments); err != nil {
-		return t.inner.Invoke(ctx, call)
-	}
-	switch strings.ToLower(strings.TrimSpace(arguments.Action)) {
-	case updateAction:
-		return t.update(ctx, arguments), nil
-	case "add":
-		return t.add(ctx, call, arguments)
-	case "":
-		return errorResultf("memory: action is required (%s)", actionList()), nil
-	case "list", "search", "remove", "clear":
-		return t.inner.Invoke(ctx, call)
-	default:
-		return errorResultf("memory: unknown action %q (%s)", arguments.Action, actionList()), nil
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"action": map[string]any{
+				"type":        "string",
+				"description": "Operation to perform.",
+				"enum":        actions,
+			},
+			"text": map[string]any{
+				"type":        "string",
+				"description": "Memory text (required for add).",
+			},
+			"scope": map[string]any{
+				"type":        "string",
+				"description": "Optional scope for add/list/search/clear (default workspace for add).",
+			},
+			"id": map[string]any{
+				"type":        "string",
+				"description": "Memory ID (required for remove).",
+			},
+			"query": map[string]any{
+				"type":        "string",
+				"description": "Search query (required for search).",
+			},
+		},
+		"required":             []string{"action"},
+		"additionalProperties": false,
 	}
 }
 
-// add handles the Rig add action with one product difference: when the model
-// omits the scope, the scope stays empty so the durable store applies its
-// configured default (Config.Scope, FR-25) instead of the Rig tool's hardcoded
-// "workspace". Everything else (text validation, result wording) mirrors the
-// Rig tool.
-func (t *tool) add(ctx context.Context, call rig.ToolCall, arguments arguments) (rig.ToolResult, error) {
-	if strings.TrimSpace(arguments.Scope) != "" {
-		return t.inner.Invoke(ctx, call)
-	}
-	text := strings.TrimSpace(arguments.Text)
-	if text == "" {
-		// Let the Rig tool render its canonical error and malformed-argument
-		// behaviour.
-		return t.inner.Invoke(ctx, call)
-	}
-	added, err := t.store.Add(ctx, contracts.Memory{Text: text})
-	if err != nil {
-		return errorResultf("memory: add: %v", err), nil
-	}
-	return rig.ToolResult{Content: fmt.Sprintf("added memory %s (scope=%s)", added.ID, displayScope(added.Scope))}, nil
-}
-
-// arguments is the decoded memory tool arguments (the same JSON fields the Rig
-// tool decodes).
+// arguments is the decoded memory tool argument object.
 type arguments struct {
 	Action string `json:"action"`
 	Text   string `json:"text"`
@@ -165,25 +126,115 @@ type arguments struct {
 	Query  string `json:"query"`
 }
 
-// decodeArguments decodes one tool call's JSON arguments; an empty argument
-// string is the empty object, like the Rig tool's decoder.
-func decodeArguments(call rig.ToolCall, target *arguments) error {
-	raw := strings.TrimSpace(call.Arguments)
-	if raw == "" {
-		raw = "{}"
+// Invoke implements rig.Tool. Action matching is case-insensitive and trimmed;
+// malformed arguments are a hard error (the run stops on a contract violation).
+func (t *tool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return rig.ToolResult{}, err
 	}
-	return json.Unmarshal([]byte(raw), target)
+	var decoded arguments
+	if err := decodeArguments(call, &decoded); err != nil {
+		return rig.ToolResult{}, err
+	}
+	switch strings.ToLower(strings.TrimSpace(decoded.Action)) {
+	case "add":
+		return t.add(ctx, decoded), nil
+	case "list":
+		return t.list(ctx, decoded), nil
+	case "search":
+		return t.search(ctx, decoded), nil
+	case "remove":
+		return t.remove(ctx, decoded), nil
+	case "clear":
+		return t.clear(ctx, decoded), nil
+	case updateAction:
+		return t.update(ctx, decoded), nil
+	case "":
+		return errorResultf("memory: action is required (%s)", actionList()), nil
+	default:
+		return errorResultf("memory: unknown action %q (%s)", decoded.Action, actionList()), nil
+	}
 }
 
-// update implements the update action: id + text are required, the store must
-// implement contracts.MemoryUpdater, and the result mirrors the Rig tool's
-// success style ("updated memory <id> (scope=<scope>)").
-func (t *tool) update(ctx context.Context, arguments arguments) rig.ToolResult {
-	id := strings.TrimSpace(arguments.ID)
+// add stores one memory. A model-supplied scope is passed through verbatim; an
+// omitted scope stays empty so the durable store applies its configured default
+// (Config.Scope, FR-25) instead of the tool hardcoding "workspace".
+func (t *tool) add(ctx context.Context, decoded arguments) rig.ToolResult {
+	text := strings.TrimSpace(decoded.Text)
+	if text == "" {
+		return errorResultf("memory: text is required for action: add")
+	}
+	added, err := t.store.Add(ctx, contracts.Memory{Text: text, Scope: strings.TrimSpace(decoded.Scope)})
+	if err != nil {
+		return errorResultf("memory: add: %v", err)
+	}
+	return rig.ToolResult{Content: fmt.Sprintf("added memory %s (scope=%s)", added.ID, displayScope(added.Scope))}
+}
+
+// list renders the stored memories, optionally filtered by exact scope.
+func (t *tool) list(ctx context.Context, decoded arguments) rig.ToolResult {
+	memories, err := t.store.List(ctx)
+	if err != nil {
+		return errorResultf("memory: list: %v", err)
+	}
+	return rig.ToolResult{Content: truncateBytes(formatMemories(filterScope(memories, decoded.Scope)), maxOutputBytes, truncatedMarker)}
+}
+
+// search runs the store's case-insensitive substring search, then applies the
+// optional scope filter.
+func (t *tool) search(ctx context.Context, decoded arguments) rig.ToolResult {
+	query := strings.TrimSpace(decoded.Query)
+	if query == "" {
+		return errorResultf("memory: query is required for action: search")
+	}
+	memories, err := t.store.Search(ctx, query)
+	if err != nil {
+		return errorResultf("memory: search: %v", err)
+	}
+	return rig.ToolResult{Content: truncateBytes(formatMemories(filterScope(memories, decoded.Scope)), maxOutputBytes, truncatedMarker)}
+}
+
+// remove deletes one memory by ID.
+func (t *tool) remove(ctx context.Context, decoded arguments) rig.ToolResult {
+	id := strings.TrimSpace(decoded.ID)
+	if id == "" {
+		return errorResultf("memory: id is required for action: remove")
+	}
+	if !t.store.Remove(ctx, id) {
+		return errorResultf("memory: no memory with id %q", id)
+	}
+	return rig.ToolResult{Content: fmt.Sprintf("removed memory %s", id)}
+}
+
+// clear removes every memory in the optional scope (all of them when omitted).
+func (t *tool) clear(ctx context.Context, decoded arguments) rig.ToolResult {
+	memories, err := t.store.List(ctx)
+	if err != nil {
+		return errorResultf("memory: clear: %v", err)
+	}
+	memories = filterScope(memories, decoded.Scope)
+	removed := 0
+	for _, memory := range memories {
+		if t.store.Remove(ctx, memory.ID) {
+			removed++
+		}
+	}
+	scope := strings.TrimSpace(decoded.Scope)
+	if scope == "" {
+		return rig.ToolResult{Content: fmt.Sprintf("cleared %d memor(ies)", removed)}
+	}
+	return rig.ToolResult{Content: fmt.Sprintf("cleared %d memor(ies) in scope %s", removed, scope)}
+}
+
+// update implements the update action: id + text are required, and the store
+// must implement contracts.MemoryUpdater. The success wording mirrors the other
+// actions ("updated memory <id> (scope=<scope>)").
+func (t *tool) update(ctx context.Context, decoded arguments) rig.ToolResult {
+	id := strings.TrimSpace(decoded.ID)
 	if id == "" {
 		return errorResultf("memory: id is required for action: update")
 	}
-	text := strings.TrimSpace(arguments.Text)
+	text := strings.TrimSpace(decoded.Text)
 	if text == "" {
 		return errorResultf("memory: text is required for action: update")
 	}
@@ -192,86 +243,163 @@ func (t *tool) update(ctx context.Context, arguments arguments) rig.ToolResult {
 		return errorResultf("memory: update: store does not support update")
 	}
 	// An empty scope keeps the entry's current scope (the store documents it).
-	updated, err := updater.Update(ctx, id, text, strings.TrimSpace(arguments.Scope))
+	updated, err := updater.Update(ctx, id, text, strings.TrimSpace(decoded.Scope))
 	if err != nil {
 		return errorResultf("memory: update: %v", err)
 	}
 	return rig.ToolResult{Content: fmt.Sprintf("updated memory %s (scope=%s)", updated.ID, displayScope(updated.Scope))}
 }
 
-// displayScope renders an empty scope as the Rig tool's default scope, matching
-// the Rig memory tool's model-visible formatting.
-func displayScope(scope string) string {
-	scope = strings.TrimSpace(scope)
-	if scope == "" {
-		return rigmemory.DefaultScope
+// --- helpers ----------------------------------------------------------------
+
+// decodeArguments decodes one tool call's JSON arguments; empty means {}.
+func decodeArguments(call rig.ToolCall, target *arguments) error {
+	raw := strings.TrimSpace(call.Arguments)
+	if raw == "" {
+		raw = "{}"
 	}
-	return scope
+	if err := json.Unmarshal([]byte(raw), target); err != nil {
+		return fmt.Errorf("invalid arguments JSON: %w", err)
+	}
+	return nil
 }
 
-// --- result/schema helpers --------------------------------------------------
-//
-// rig.ToolResult{Content: ..., IsError: true} is exactly what the Rig tools'
-// internal toolutil.TextResult/ErrorResult helpers build; that package is
-// module-internal, so the two constructors are mirrored here.
-
-// errorResultf builds one model-visible tool failure, like toolutil.ErrorResultf.
+// errorResultf builds one model-visible tool failure (the run continues).
 func errorResultf(format string, args ...any) rig.ToolResult {
 	return rig.ToolResult{Content: fmt.Sprintf(format, args...), IsError: true}
 }
 
-// addEnumValue appends value to one schema property's enum unless it is already
-// there, tolerating the []string and []any spellings JSON schema maps use.
-func addEnumValue(property map[string]any, value string) {
-	switch enum := property["enum"].(type) {
-	case []string:
-		for _, existing := range enum {
-			if strings.EqualFold(existing, value) {
-				return
-			}
-		}
-		property["enum"] = append(enum, value)
-	case []any:
-		for _, existing := range enum {
-			if text, ok := existing.(string); ok && strings.EqualFold(text, value) {
-				return
-			}
-		}
-		property["enum"] = append(enum, value)
-	default:
-		property["enum"] = []string{value}
+// filterScope keeps entries whose scope matches (case-insensitive, exact); an
+// empty scope keeps every entry.
+func filterScope(memories []contracts.Memory, scope string) []contracts.Memory {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return memories
 	}
+	filtered := make([]contracts.Memory, 0, len(memories))
+	for _, memory := range memories {
+		if strings.EqualFold(strings.TrimSpace(memory.Scope), scope) {
+			filtered = append(filtered, memory)
+		}
+	}
+	return filtered
 }
 
-// ensureStringProperty adds a string property unless the schema already
-// declares it (the Rig schema already declares the fields it uses).
-func ensureStringProperty(properties map[string]any, name, description string) {
-	if _, exists := properties[name]; exists {
-		return
+// formatMemories renders memories one per line in a deterministic order
+// (creation time, then ID).
+func formatMemories(memories []contracts.Memory) string {
+	if len(memories) == 0 {
+		return "no memories"
 	}
-	properties[name] = map[string]any{"type": "string", "description": description}
+	ordered := slices.Clone(memories)
+	slices.SortStableFunc(ordered, func(a, b contracts.Memory) int {
+		return cmp.Or(a.Created.Compare(b.Created), strings.Compare(a.ID, b.ID))
+	})
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "%d memor(ies):\n", len(ordered))
+	for _, memory := range ordered {
+		fmt.Fprintf(&builder, "- %s [%s] %s\n", memory.ID, displayScope(memory.Scope), oneLine(memory.Text))
+	}
+	return strings.TrimSuffix(builder.String(), "\n")
 }
 
-// cloneSchema deep-copies the JSON-schema-shaped value so extending the copy
-// cannot mutate the wrapped tool's schema. Values the tool may return are the
-// JSON schema primitives: maps, slices of any/string and scalars.
-func cloneSchema(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		cloned := make(map[string]any, len(typed))
-		for key, item := range typed {
-			cloned[key] = cloneSchema(item)
-		}
-		return cloned
-	case []any:
-		cloned := make([]any, len(typed))
-		for index, item := range typed {
-			cloned[index] = cloneSchema(item)
-		}
-		return cloned
-	case []string:
-		return append([]string(nil), typed...)
-	default:
-		return value
+// displayScope renders an empty scope as the default scope.
+func displayScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return DefaultScope
 	}
+	return scope
+}
+
+// oneLine folds newlines so one memory occupies exactly one output line.
+func oneLine(text string) string {
+	return strings.Join(strings.Fields(text), " ")
+}
+
+// truncateBytes cuts content at limit bytes without splitting a UTF-8 rune and
+// appends marker when the cut happened.
+func truncateBytes(content string, limit int, marker string) string {
+	if limit <= 0 || len(content) <= limit {
+		return content
+	}
+	cut := limit
+	for cut > 0 && !utf8StartsRune(content[cut]) {
+		cut--
+	}
+	return content[:cut] + marker
+}
+
+// utf8StartsRune reports whether b starts a UTF-8 rune (not a continuation byte).
+func utf8StartsRune(b byte) bool { return b&0xC0 != 0x80 }
+
+// --- process-local fallback store -------------------------------------------
+
+// memoryStore is the process-local contracts.MemoryStore used when the host binds
+// no store (and by tests). It deliberately has no update half: the fallback cannot
+// edit entries, which the tool reports as "store does not support update".
+type memoryStore struct {
+	mu    sync.Mutex
+	seq   uint64
+	items []contracts.Memory
+}
+
+var _ contracts.MemoryStore = (*memoryStore)(nil)
+
+// newMemoryStore returns an empty process-local store.
+func newMemoryStore() *memoryStore { return &memoryStore{} }
+
+// List implements rig.MemoryStore, returning entries in insertion order.
+func (s *memoryStore) List(context.Context) ([]contracts.Memory, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.items), nil
+}
+
+// Add implements rig.MemoryStore: a missing ID is generated ("mem-<n>") and a
+// zero Created is stamped with the current UTC time.
+func (s *memoryStore) Add(_ context.Context, memory contracts.Memory) (contracts.Memory, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if strings.TrimSpace(memory.ID) == "" {
+		s.seq++
+		memory.ID = fmt.Sprintf("mem-%d", s.seq)
+	}
+	if memory.Created.IsZero() {
+		memory.Created = time.Now().UTC()
+	}
+	s.items = append(s.items, memory)
+	return memory, nil
+}
+
+// Remove implements rig.MemoryStore.
+func (s *memoryStore) Remove(_ context.Context, id string) bool {
+	id = strings.TrimSpace(id)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index, memory := range s.items {
+		if memory.ID == id {
+			s.items = slices.Delete(s.items, index, index+1)
+			return true
+		}
+	}
+	return false
+}
+
+// Search implements rig.MemoryStore: case-insensitive substring match over the
+// text; an empty query returns everything.
+func (s *memoryStore) Search(_ context.Context, query string) ([]contracts.Memory, error) {
+	query = strings.ToLower(strings.TrimSpace(query))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if query == "" {
+		return slices.Clone(s.items), nil
+	}
+	matches := make([]contracts.Memory, 0, len(s.items))
+	for _, memory := range s.items {
+		if strings.Contains(strings.ToLower(memory.Text), query) {
+			matches = append(matches, memory)
+		}
+	}
+	return matches, nil
 }

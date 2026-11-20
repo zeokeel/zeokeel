@@ -116,38 +116,12 @@ func startHTTPMCP(ctx context.Context, server MCPServer, auth *mcpAuthRuntime) (
 }
 
 // mcpResourceTools adapts the resource/prompt tool subset of one MCP server.
-// rig names those five tools without any server identity, so a second server
-// would register the same names and panic the tool registry; the toolkit gives
-// every server its own "mcp__<server>__" prefix instead.
+//
+// rig v0.24.0 names those five tools "mcp__<server>__<base>" itself (the server
+// segment comes from client.ServerName(), sanitized by rig), so the toolkit only
+// supplies the "mcp__" namespace prefix. Before v0.24.0 the rig names carried no
+// server identity and the toolkit had to add one; passing the server again would
+// now produce "mcp__<server>__<server>__<base>".
 func mcpResourceTools(client *mcp.Client) []rig.Tool {
-	serverName := ""
-	if client != nil {
-		serverName = client.ServerName()
-	}
-	return mcp.ResourceTools(client, "mcp__"+sanitizeMCPName(serverName)+"__")
-}
-
-// sanitizeMCPName maps an MCP server name onto the model-visible tool namespace
-// characters ([A-Za-z0-9_-]). It mirrors rig's tools/mcp sanitizeName so the
-// resource tools share the exact namespace of the tools/list tools
-// ("mcp__<server>__<tool>").
-func sanitizeMCPName(name string) string {
-	var builder strings.Builder
-	builder.Grow(len(name))
-	for _, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z',
-			r >= 'A' && r <= 'Z',
-			r >= '0' && r <= '9',
-			r == '_', r == '-':
-			builder.WriteRune(r)
-		default:
-			builder.WriteByte('_')
-		}
-	}
-	out := strings.Trim(builder.String(), "_")
-	if out == "" {
-		return "tool"
-	}
-	return out
+	return mcp.ResourceTools(client, mcp.DefaultPrefix)
 }

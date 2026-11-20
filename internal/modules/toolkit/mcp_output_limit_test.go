@@ -152,7 +152,7 @@ func TestToolkitMCPResultsBoundedByMaxOutputBytes(t *testing.T) {
 	} {
 		toolName := "mcp__big__big"
 		if name == "resource" {
-			toolName = "mcp__big__mcp_read_resource"
+			toolName = "mcp__big__read_resource"
 		}
 		result, err := tools.Invoke(context.Background(), rig.ToolCall{Name: toolName, Arguments: arguments})
 		if err != nil {

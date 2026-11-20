@@ -2,12 +2,11 @@ package hosttools
 
 // The model-facing host tools. The Rig host-tool set
 // (github.com/zeokeel/zeokeel-rig/tools/hosttools) contributes ask_user,
-// plan_review and exit_plan_mode. The DSH goal trio
-// get_goal/create_goal/update_goal is product-owned (hostcaps.GoalTools): Rig
-// v0.16.2 only exposes it through a context-less option the product cannot use,
-// so internal/hosttools implements the same model-visible contract on top of the
-// per-session durable contracts.GoalService adapter. present stays product-owned
-// because ZeoKeel's present is a content artifact (title + body ->
+// plan_review, exit_plan_mode and the DSH goal trio (get_goal/create_goal/
+// update_goal) — since rig v0.25 the goal trio takes a context-carrying
+// GoalRevisionStore, so the product supplies its durable adapter
+// (hostcaps.GoalRevisionStore) and owns no tool code of its own. present stays
+// product-owned because ZeoKeel's present is a content artifact (title + body ->
 // contracts.ArtifactPresenter), while Rig's present declares existing files for
 // a FilePresenter; the two must not share a name.
 //
@@ -32,18 +31,18 @@ import (
 	hostcaps "github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
-// Model-facing host tool names. They are stable identifiers shared with the
-// rest of the agent tool catalog; the Rig-provided names come from the Rig
-// constants so the two can never drift, and the product-owned goal trio exposes
-// the same names through internal/hosttools.
+// Model-facing host tool names. They are stable identifiers shared with the rest
+// of the agent tool catalog: every name but present comes from the Rig constants,
+// so the two can never drift (present is the product's content-artifact tool and
+// deliberately does not reuse Rig's file-presenter name).
 const (
 	ToolAskUser      = righosttools.ToolAskUser
 	ToolPresent      = "present"
 	ToolPlanReview   = righosttools.ToolPlanReview
 	ToolExitPlanMode = righosttools.ToolExitPlanMode
-	ToolGetGoal      = hostcaps.ToolGetGoal
-	ToolCreateGoal   = hostcaps.ToolCreateGoal
-	ToolUpdateGoal   = hostcaps.ToolUpdateGoal
+	ToolGetGoal      = righosttools.ToolGetGoal
+	ToolCreateGoal   = righosttools.ToolCreateGoal
+	ToolUpdateGoal   = righosttools.ToolUpdateGoal
 	// ToolGoal is the retired Goal v1 host tool name. It is no longer
 	// registered; the constant stays so name filters/tests can refer to it.
 	ToolGoal = "goal"
@@ -52,7 +51,10 @@ const (
 // rigHostToolNames are the Rig host tools this product registers, in Rig
 // catalog order. Anything else Rig returns is filtered out: the legacy Goal v1
 // `goal` tool and present_artifact are intentionally absent.
-var rigHostToolNames = []string{ToolAskUser, ToolPlanReview, ToolExitPlanMode}
+var rigHostToolNames = []string{
+	ToolAskUser, ToolPlanReview, ToolExitPlanMode,
+	ToolGetGoal, ToolCreateGoal, ToolUpdateGoal,
+}
 
 // planReviewToolNames are the tools whose state machine needs a live user
 // decision; non-interactive products omit them.
@@ -76,16 +78,13 @@ func newTools(capabilities hostcaps.Host, interactive bool, goalStore hostcaps.R
 		}
 	}
 	tools := make([]rig.Tool, 0, len(rigHostToolNames)+4)
-	for _, tool := range righosttools.Tools(rigHostOptions(capabilities, interactive)) {
+	for _, tool := range righosttools.Tools(rigHostOptions(capabilities, interactive, goalStore)) {
 		if !wanted[tool.Name()] {
 			continue
 		}
 		tools = append(tools, tool)
 	}
 	tools = append(tools, &presentTool{presenter: capabilities.Presenter})
-	// DSH goal trio: product-owned tools over the ctx-carrying durable goal
-	// service adapter (Rig v0.16.2 has no ctx-aware GoalRevision option).
-	tools = append(tools, hostcaps.GoalTools(goalStore)...)
 	return tools
 }
 
@@ -96,10 +95,11 @@ func newTools(capabilities hostcaps.Host, interactive bool, goalStore hostcaps.R
 // calling it), so Rig's context-carrying PlanController goes through an
 // adapter. Root is left empty: none of the registered tools resolves workspace
 // files (present is our own content-artifact tool, not Rig's file presenter).
-func rigHostOptions(capabilities hostcaps.Host, interactive bool) righosttools.Options {
+func rigHostOptions(capabilities hostcaps.Host, interactive bool, goalStore hostcaps.RevisionGoalStore) righosttools.Options {
 	options := righosttools.Options{
-		Asker:       capabilities.Asker,
-		Interactive: interactive,
+		Asker:        capabilities.Asker,
+		Interactive:  interactive,
+		GoalRevision: goalStore,
 	}
 	if capabilities.Plan != nil {
 		options.Plan = rigPlanController{plan: capabilities.Plan}

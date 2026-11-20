@@ -15,8 +15,11 @@ package agent
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
 )
@@ -39,8 +42,14 @@ const (
 // spilling outside the run's sandbox roots made the spilled file unreadable by
 // the model's read_file, WithRoots contract).
 func (s *service) spillPolicy(ctx context.Context, workspaceRoot string) *rig.SpillPolicy {
+	dir := s.spillDir(ctx, workspaceRoot)
+	// rig v0.24.0 partitions its prune by session ("spill.<scope>.…"), so files
+	// written by earlier versions — and any other file this directory already
+	// holds — are no longer pruned by anything. Keep the directory bounded across
+	// that naming change; rig still owns its own per-session files.
+	pruneLegacySpillFiles(dir, spillKeepFiles)
 	return &rig.SpillPolicy{
-		Dir:            s.spillDir(ctx, workspaceRoot),
+		Dir:            dir,
 		ThresholdBytes: spillThresholdBytes,
 		MaxFiles:       spillKeepFiles,
 	}
@@ -60,4 +69,48 @@ func (s *service) spillDir(ctx context.Context, workspaceRoot string) string {
 		return filepath.Join(dataDir, filepath.FromSlash(spillDirName))
 	}
 	return ""
+}
+
+// spillScopedPrefix is the file-name prefix rig v0.24.0 writes for a session
+// scope ("spill.<scope>.<tool>-<id>-<time>-<rand>.txt"). Only files carrying it
+// belong to rig's per-session prune; everything else in the directory is legacy
+// (or foreign) and is bounded here.
+const spillScopedPrefix = "spill."
+
+// pruneLegacySpillFiles keeps the newest keep files among the *.txt files rig's
+// scoped prune does not own, mirroring the whole-directory prune the previous
+// rig version performed. It is best-effort: an unreadable entry is skipped, and
+// a directory that does not exist yet is a no-op. keep <= 0 disables it.
+func pruneLegacySpillFiles(dir string, keep int) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" || keep <= 0 {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	type legacyFile struct {
+		path string
+		mod  time.Time
+	}
+	files := make([]legacyFile, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".txt") || strings.HasPrefix(name, spillScopedPrefix) {
+			continue
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			continue
+		}
+		files = append(files, legacyFile{path: filepath.Join(dir, name), mod: info.ModTime()})
+	}
+	if len(files) <= keep {
+		return
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].mod.After(files[j].mod) })
+	for _, file := range files[keep:] {
+		_ = os.Remove(file.path)
+	}
 }

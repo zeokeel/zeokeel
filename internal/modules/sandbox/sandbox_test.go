@@ -54,8 +54,9 @@ func TestServiceAvailable(t *testing.T) {
 	}
 }
 
-// 本机不可用：必须返回 fail-closed runner，而不是 nil，且没有关闭路径。
-func TestServiceUnavailableFailsClosed(t *testing.T) {
+// 本机不可用：个人客户端走"尽力而为"——Runner 返回 nil，命令以宿主权限运行
+// （仍受应用层策略与审批约束），启动不失败；Status 说明原因。
+func TestServiceUnavailableReturnsNilRunner(t *testing.T) {
 	probeErr := errors.New("no landlock and no bwrap")
 	svc := newTestService(t, func(osrunner.Config) (rigsandbox.Runner, error) {
 		return nil, probeErr
@@ -63,16 +64,8 @@ func TestServiceUnavailableFailsClosed(t *testing.T) {
 	if svc.Available() {
 		t.Fatal("Available = true despite a probe error")
 	}
-	runner := svc.Runner()
-	if runner == nil {
-		t.Fatal("Runner = nil, want a fail-closed runner")
-	}
-	_, err := runner.Confine([]string{"/bin/sh", "-c", "echo hi"}, rigsandbox.New())
-	if err == nil {
-		t.Fatal("Confine succeeded, want a fail-closed error")
-	}
-	if !errors.Is(err, rigsandbox.ErrSandboxUnavailable) {
-		t.Fatalf("Confine error = %v, want ErrSandboxUnavailable", err)
+	if runner := svc.Runner(); runner != nil {
+		t.Fatalf("Runner = %v, want nil (best effort, not fail closed)", runner)
 	}
 	status := svc.Status()
 	if status.Available {
@@ -83,18 +76,14 @@ func TestServiceUnavailableFailsClosed(t *testing.T) {
 	}
 }
 
-// nil service 也必须 fail closed（防御性）。
-func TestNilServiceFailsClosed(t *testing.T) {
+// nil service 同样返回 nil：装配里没有 sandbox 模块时不能假装有围栏。
+func TestNilServiceReturnsNilRunner(t *testing.T) {
 	var svc *service
 	if svc.Available() {
 		t.Fatal("nil service reports available")
 	}
-	runner := svc.Runner()
-	if runner == nil {
-		t.Fatal("nil service Runner = nil, want a fail-closed runner")
-	}
-	if _, err := runner.Confine([]string{"/bin/sh"}, rigsandbox.New()); err == nil {
-		t.Fatal("nil service Confine succeeded")
+	if runner := svc.Runner(); runner != nil {
+		t.Fatalf("nil service Runner = %v, want nil", runner)
 	}
 	if status := svc.Status(); status.Available {
 		t.Fatalf("nil service Status = %+v", status)

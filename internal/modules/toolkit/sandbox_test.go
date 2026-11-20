@@ -644,11 +644,13 @@ func TestModuleRebuildsToolsOnSandboxAndModeChange(t *testing.T) {
 		t.Fatalf("runner Confine calls = %d, want 1", len(calls))
 	}
 
-	// 3) Read-only permission is applied to the rebuilt policy: bash is denied.
+	// 3) Read-only permission is applied to the rebuilt policy: with a runner
+	// attached the command still runs, confined (rig v0.26 semantics — the
+	// runner confines every write).
 	settings.Set(contracts.SettingAgentPermission, contracts.PermissionReadOnly)
-	denied := invokeRegistryTool(t, tools, "bash", `{"command":"echo denied"}`)
-	if !denied.IsError || !strings.Contains(denied.Content, "read-only") {
-		t.Fatalf("bash under read-only permission = %q (err %v), want a read-only denial", denied.Content, denied.IsError)
+	readOnly := invokeRegistryTool(t, tools, "bash", `{"command":"echo read-only-confined"}`)
+	if readOnly.IsError || !strings.Contains(readOnly.Content, "confined-two") {
+		t.Fatalf("bash under read-only permission = %q (err %v), want a confined run", readOnly.Content, readOnly.IsError)
 	}
 
 	// 4) Full permission switches the policy to danger-full-access (visible on

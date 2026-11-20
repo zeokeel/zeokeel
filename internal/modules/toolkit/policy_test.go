@@ -1,9 +1,11 @@
 package toolkit
 
-// Tests for the sandbox shell policy the toolkit builds from its module config:
-// the default command allowlist must cover routine development commands, the
-// strict single-command grammar stays the default, and assemblies can opt into
-// shell operators without losing the allowlist on the first command.
+// Tests for the sandbox shell policy the toolkit builds from its module config.
+//
+// Personal-client defaults (2026-11-20): no command-name allowlist and full
+// shell grammar, because an already-approved command must simply run — the
+// approval gate is the decision point, not a name list. Assemblies that want a
+// restriction can still pass CommandAllowlist explicitly.
 
 import (
 	"testing"
@@ -12,49 +14,22 @@ import (
 	"github.com/zeokeel/zeokeel-rig/sandbox"
 )
 
-// TestDefaultAllowlistCoversRoutineDevelopmentCommands guards the usability fix:
-// an approved shell call must be able to run pwd/echo/mkdir/... instead of
-// failing with "not in the allowlist" and burning agent iterations.
-func TestDefaultAllowlistCoversRoutineDevelopmentCommands(t *testing.T) {
-	want := []string{
-		"pwd", "cd", "echo", "printf", "env", "mkdir", "cp", "mv", "rm",
-		"touch", "date", "seq", "sort", "test", "true", "false",
-		"git", "go", "make", "gofmt", "python3", "node", "npm",
-	}
-	have := make(map[string]bool, len(defaultCommands))
-	for _, command := range defaultCommands {
-		have[command] = true
-	}
-	for _, command := range want {
-		if !have[command] {
-			t.Errorf("defaultCommands lacks %q", command)
-		}
-	}
+// TestDefaultPolicyRunsAnyCommand pins the default: any command name runs,
+// including ones no hand-maintained allowlist would have listed.
+func TestDefaultPolicyRunsAnyCommand(t *testing.T) {
 	policy := newPolicy(Config{}, t.TempDir(), time.Second, sandbox.ModeWorkspaceWrite)
-	for _, command := range want {
+	for _, command := range []string{"pwd", "echo", "mkdir", "git", "go", "node", "npm", "python3", "my-own-tool"} {
 		if err := policy.CheckCommand([]string{command}, "."); err != nil {
-			t.Errorf("CheckCommand(%q) = %v, want nil", command, err)
+			t.Errorf("CheckCommand(%q) = %v, want nil (any command is allowed by default)", command, err)
 		}
 	}
 }
 
-// TestPolicyKeepsStrictGrammarByDefault documents the pre-existing default:
-// without the assembly opt-in a shell line with operators is still rejected.
-func TestPolicyKeepsStrictGrammarByDefault(t *testing.T) {
+// TestDefaultPolicyAllowsShellGrammar pins the second default: ordinary
+// development commands (pipes, lists, redirections, leading env assignments)
+// parse without an assembly opt-in.
+func TestDefaultPolicyAllowsShellGrammar(t *testing.T) {
 	policy := newPolicy(Config{}, t.TempDir(), time.Second, sandbox.ModeWorkspaceWrite)
-	if err := policy.CheckShellCommand("echo hi && echo bye"); err == nil {
-		t.Fatal("strict policy accepted a compound command, want denial")
-	}
-	if err := policy.CheckShellCommand("echo hi > out.txt"); err == nil {
-		t.Fatal("strict policy accepted a redirection, want denial")
-	}
-}
-
-// TestPolicyAllowsShellOperatorsWhenConfigured covers the product assemblies'
-// opt-in: pipes, lists and leading environment assignments parse and the
-// allowlist still applies to the first command.
-func TestPolicyAllowsShellOperatorsWhenConfigured(t *testing.T) {
-	policy := newPolicy(Config{AllowShellOperators: true}, t.TempDir(), time.Second, sandbox.ModeWorkspaceWrite)
 	for _, command := range []string{
 		"echo hi",
 		"echo hi && echo bye",
@@ -66,10 +41,6 @@ func TestPolicyAllowsShellOperatorsWhenConfigured(t *testing.T) {
 			t.Errorf("CheckShellCommand(%q) = %v, want nil", command, err)
 		}
 	}
-	// The allowlist still governs the first command of the line.
-	if err := policy.CheckCommand([]string{"definitely-not-allowed-xyz"}, "."); err == nil {
-		t.Fatal("allowlist accepted an unknown command under allowShellOperators")
-	}
 	argv, err := policy.ParseShellCommand("echo hi && echo bye")
 	if err != nil {
 		t.Fatalf("ParseShellCommand: %v", err)
@@ -79,11 +50,16 @@ func TestPolicyAllowsShellOperatorsWhenConfigured(t *testing.T) {
 	}
 }
 
-// TestExplicitEmptyAllowlistDisablesShell keeps the documented escape hatch:
-// an explicit empty list in assembly.json disables shell execution.
-func TestExplicitEmptyAllowlistDisablesShell(t *testing.T) {
-	policy := newPolicy(Config{CommandAllowlist: []string{}}, t.TempDir(), time.Second, sandbox.ModeWorkspaceWrite)
-	if err := policy.CheckCommand([]string{"echo"}, "."); err == nil {
-		t.Fatal("empty allowlist accepted a command, want denial")
+// TestExplicitAllowlistStillRestricts keeps the opt-in restriction working:
+// a non-empty assembly list limits shell execution to those bare names.
+func TestExplicitAllowlistStillRestricts(t *testing.T) {
+	policy := newPolicy(Config{CommandAllowlist: []string{"git", "echo"}}, t.TempDir(), time.Second, sandbox.ModeWorkspaceWrite)
+	for _, command := range []string{"git", "echo"} {
+		if err := policy.CheckCommand([]string{command}, "."); err != nil {
+			t.Errorf("CheckCommand(%q) = %v, want nil (listed)", command, err)
+		}
+	}
+	if err := policy.CheckCommand([]string{"curl"}, "."); err == nil {
+		t.Fatal("allowlist accepted an unlisted command, want denial")
 	}
 }

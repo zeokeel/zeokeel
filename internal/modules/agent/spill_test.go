@@ -238,10 +238,63 @@ func TestRunDoesNotSpillAtThreshold(t *testing.T) {
 	}
 }
 
-// TestRunSpillPrunesToMaxFiles pins the MaxFiles cleanup: pre-existing older
-// spill files are pruned down to 100 after one new spill.
+// TestRunSpillPrunesToMaxFiles pins rig's per-session MaxFiles cleanup: older
+// spill files of the SAME session scope are pruned down to 100 by the next
+// spill. (rig v0.24.0 partitions the prune by session — "spill.<scope>.…" — so
+// one session can no longer delete another session's handles.)
 func TestRunSpillPrunesToMaxFiles(t *testing.T) {
 	payload := strings.Repeat("D", 40<<10)
+	svc, _, dataDir := newSpillService(t, &hugeResultTool{payload: payload})
+	dir := filepath.Join(dataDir, ".zeokeel", "tool-results")
+
+	// The first run spills one file; its name carries the session scope prefix.
+	sessionID, first := runSpillTool(t, svc, &spillToolProvider{toolName: "huge_result"})
+	prefix := spillScopePrefix(t, filepath.Base(spillSummaryPath(t, first)))
+
+	// Seed 105 older files that belong to the same scope, then spill once more in
+	// the same session: rig prunes that scope to the newest 100.
+	base := time.Now().Add(-3 * time.Hour)
+	for index := 0; index < 105; index++ {
+		name := filepath.Join(dir, fmt.Sprintf("%sold-%03d.txt", prefix, index))
+		if err := os.WriteFile(name, []byte("x"), 0o600); err != nil {
+			t.Fatalf("write old spill file %d: %v", index, err)
+		}
+		at := base.Add(time.Duration(index) * time.Minute)
+		if err := os.Chtimes(name, at, at); err != nil {
+			t.Fatalf("chtimes old spill file %d: %v", index, err)
+		}
+	}
+	svc.providerFactory = func(contracts.ChatConfig) (rig.Provider, error) {
+		return &spillToolProvider{toolName: "huge_result"}, nil
+	}
+	if err := svc.Send(sessionID, "spill again"); err != nil {
+		t.Fatalf("second Send: %v", err)
+	}
+	waitIdle(t, svc, sessionID)
+
+	scoped := scopedSpillFiles(t, dir, prefix)
+	if len(scoped) != spillKeepFiles {
+		t.Fatalf("scoped spill files after prune = %d, want %d", len(scoped), spillKeepFiles)
+	}
+	names := make(map[string]bool, len(scoped))
+	for _, name := range scoped {
+		names[name] = true
+	}
+	if names[prefix+"old-000.txt"] {
+		t.Fatal("oldest scoped spill file survived the prune")
+	}
+	// The two spill files of this test's own runs are newer than every seeded
+	// file, so they occupy two of the 100 kept slots.
+	if !names[prefix+"old-104.txt"] {
+		t.Fatal("the newest scoped spill file was pruned")
+	}
+}
+
+// TestRunSpillPrunesLegacyFiles pins the product's own cleanup: files written
+// before rig v0.24.0 (no "spill.<scope>." prefix) are no longer pruned by rig,
+// so the product bounds them itself, keeping the newest MaxFiles.
+func TestRunSpillPrunesLegacyFiles(t *testing.T) {
+	payload := strings.Repeat("E", 40<<10)
 	svc, _, dataDir := newSpillService(t, &hugeResultTool{payload: payload})
 	dir := filepath.Join(dataDir, ".zeokeel", "tool-results")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -251,41 +304,67 @@ func TestRunSpillPrunesToMaxFiles(t *testing.T) {
 	for index := 0; index < 105; index++ {
 		name := filepath.Join(dir, fmt.Sprintf("old-%03d.txt", index))
 		if err := os.WriteFile(name, []byte("x"), 0o600); err != nil {
-			t.Fatalf("write old spill file %d: %v", index, err)
+			t.Fatalf("write legacy spill file %d: %v", index, err)
 		}
 		at := base.Add(time.Duration(index) * time.Minute)
 		if err := os.Chtimes(name, at, at); err != nil {
-			t.Fatalf("chtimes old spill file %d: %v", index, err)
+			t.Fatalf("chtimes legacy spill file %d: %v", index, err)
 		}
 	}
 
-	provider := &spillToolProvider{toolName: "huge_result"}
-	if _, persisted := runSpillTool(t, svc, provider); !rig.IsSpilledToolResult(persisted) {
-		t.Fatalf("tool result was not spilled: %q", boundedForTest(persisted))
-	}
+	runSpillTool(t, svc, &spillToolProvider{toolName: "huge_result"})
 
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read spill dir: %v", err)
-	}
-	files := 0
-	names := make(map[string]bool, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".txt") {
+	legacy := 0
+	names := map[string]bool{}
+	for _, entry := range readSpillDir(t, dir) {
+		if strings.HasPrefix(entry.Name(), spillScopedPrefix) {
 			continue
 		}
-		files++
+		legacy++
 		names[entry.Name()] = true
 	}
-	if files != spillKeepFiles {
-		t.Fatalf("spill files after prune = %d, want %d", files, spillKeepFiles)
+	if legacy != spillKeepFiles {
+		t.Fatalf("legacy spill files after prune = %d, want %d", legacy, spillKeepFiles)
 	}
 	if names["old-000.txt"] {
-		t.Fatal("oldest spill file survived the prune")
+		t.Fatal("oldest legacy spill file survived the prune")
 	}
 	if !names["old-006.txt"] {
-		t.Fatal("the 100 newest pre-existing spill files should survive the prune")
+		t.Fatal("the 100 newest legacy spill files should survive the prune")
 	}
+}
+
+// spillScopePrefix extracts rig's "<spill>.<scope>." prefix from one spill file
+// name ("spill.<scope>.<tool>-<id>-<time>-<rand>.txt").
+func spillScopePrefix(t *testing.T, fileName string) string {
+	t.Helper()
+	parts := strings.SplitN(fileName, ".", 3)
+	if len(parts) < 3 || parts[0] != "spill" || parts[1] == "" {
+		t.Fatalf("spill file name %q has no <spill>.<scope>. prefix", fileName)
+	}
+	return parts[0] + "." + parts[1] + "."
+}
+
+// scopedSpillFiles returns the *.txt file names of one session scope.
+func scopedSpillFiles(t *testing.T, dir, prefix string) []string {
+	t.Helper()
+	names := make([]string, 0, 128)
+	for _, entry := range readSpillDir(t, dir) {
+		if strings.HasPrefix(entry.Name(), prefix) {
+			names = append(names, entry.Name())
+		}
+	}
+	return names
+}
+
+// readSpillDir lists a spill directory, failing the test on a read error.
+func readSpillDir(t *testing.T, dir string) []os.DirEntry {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read spill dir %q: %v", dir, err)
+	}
+	return entries
 }
 
 // boundedForTest shortens a string for failure messages.

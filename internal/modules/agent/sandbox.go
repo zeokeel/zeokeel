@@ -1,27 +1,50 @@
 package agent
 
-// OS-sandbox shell auto-allow. When the optional contracts.SandboxService
-// (provided by zeokeel/sandbox) reports a usable platform runner, the OS
-// profile already enforces the file effects of command execution, so the shell
-// family no longer needs a per-call approval prompt. The service is read on
-// every approval: switching the sandbox off or a host without a usable runner
-// restores the previous approval flow without a restart.
+// OS-sandbox shell auto-allow.
+//
+// "This shell call is already confined, so the user need not approve it" is the
+// SDK's judgement, not the product's: gate.AllowSandboxedCommands checks the
+// shell surface, that the runner reports real enforcement (a runner that reports
+// none never qualifies), and that the active policy is not danger-full-access.
+// The product only supplies the live runner and the policy the toolkit built for
+// the current workspace — no extra mode rules, no private shell list.
 
-import "strings"
+import (
+	"context"
 
-// sandboxShellTools is the shell family covered by the auto-allow: command
-// execution (bash/pwsh); background commands use bash run_in_background.
-var sandboxShellTools = map[string]bool{
-	"bash": true,
-	"pwsh": true,
-}
+	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/gate"
+)
 
-// sandboxShellAutoAllowed 报告 shell 家族工具能否因 OS 沙箱可用而跳过审批。
-// 仅当 sandbox 服务存在且其平台 runner 可用（Available）且工具名裁剪空白后
-// 精确命中 shell 家族时为 true；服务为 nil 视为不可用，保持原有审批流程。
-func (s *service) sandboxShellAutoAllowed(name string) bool {
-	if s == nil || s.sandboxService == nil || !s.sandboxService.Available() {
-		return false
+// sandboxedCommandDecision reports whether the call is a shell call the SDK would
+// confine, and whether the product may run it without asking.
+//
+// shell is false when the SDK does not recognise the call as a shell call (file
+// tools never go through the runner) or when no runner/policy is available.
+// allowed is true only when the SDK would allow it and the product's read-only
+// rule does not forbid commands in this mode.
+func (s *service) sandboxedCommandDecision(ctx context.Context, tool rig.Tool, call rig.ToolCall) (shell, allowed bool) {
+	if s == nil || s.sandboxService == nil || s.policySource == nil {
+		return false, false
 	}
-	return sandboxShellTools[strings.TrimSpace(name)]
+	policy := s.policySource.CurrentPolicy()
+	if policy == nil {
+		return false, false
+	}
+	// Ask the SDK with an inner gate of nil: it answers allow for a confined
+	// shell call and deny for everything else, so an allow doubles as "this is a
+	// shell call the runner would wrap".
+	allowance := gate.AllowSandboxedCommands(gate.SandboxedOptions{
+		Runner: s.sandboxService.Runner(),
+		Policy: policy,
+	}, nil)
+	decision, err := allowance.Approve(ctx, tool, call)
+	if err != nil || decision != rig.DecisionAllow {
+		return false, false
+	}
+	// rig owns the mode semantics: read-only + a runner means commands run with
+	// every write confined by the runner, and without a runner the policy itself
+	// rejects them (the tool reports "shell commands are disabled in read-only
+	// mode"). No product-side extra rule.
+	return true, true
 }

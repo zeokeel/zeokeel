@@ -213,6 +213,11 @@ func Module() *module.Descriptor[Config] {
 			// run).
 			svc.skills = skillsService
 		}
+		if policySource, ok := ctx.Get(contracts.KeyToolPolicy); ok && policySource != nil {
+			// Optional: the toolkit provides its live policy; an assembly without
+			// it keeps asking for shell approval.
+			svc.policySource = policySource
+		}
 		if sandboxService, ok := ctx.Get(contracts.KeySandbox); ok && sandboxService != nil {
 			// Optional: when the enabled OS sandbox has a usable runner, the gate
 			// auto-allows shell-family tools because the OS profile enforces their
@@ -369,6 +374,11 @@ type service struct {
 	// not assembled or the switch is off; the gate then keeps the approval
 	// flow exactly as before.
 	sandboxService contracts.SandboxService
+	// policySource is optional: it is the toolkit's live sandbox policy, which
+	// the gate hands to the SDK (gate.AllowSandboxedCommands) so the
+	// "already confined, skip the prompt" decision uses the SDK's criteria
+	// (runner enforcement, policy mode, shell family) instead of a private copy.
+	policySource contracts.ToolPolicy
 
 	sessions map[string]*sessionState
 	active   string
@@ -2624,14 +2634,17 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	noticeBatch := newChildNoticeBatch(s, sessionID)
 	history = withChildNotices(history, noticeBatch)
 	generation := s.modelCatalogInfo(cfg.Model)
-	// The product's default is unlimited; Rig treats 0 as its built-in 20-round
-	// default, so a 0 limit is passed as an effectively unreachable cap.
+	// The product's default is unlimited, and Rig's own default is unlimited too
+	// (0 / negative = no round cap), so the configured value passes through.
 	maxIterations := effectiveMaxIterations(cfg.MaxIterations)
-	// Tools run freely (user ruling, v0.2.50): loop protection and every
-	// tool-loop configuration surface are removed — no hard breaker cancels a
-	// run and no advisory reminder rides a tool result. The workspace-root
-	// wrapper is outermost so every tool call sees the session's root even when
-	// another workspace is current.
+	// No product-side loop protection exists (user ruling, v0.2.50): no run
+	// budget and no advisory reminder is added by the product. The Rig version
+	// used here does carry its own repeat-call guard inside the agent loop (a
+	// notice after three identical rounds, an error from the fifth); it has no
+	// AgentSpec knob, so it is upstream behavior rather than a product setting
+	// (see docs/AGENT-SURFACES.md). The workspace-root wrapper is outermost so
+	// every tool call sees the session's root even when another workspace is
+	// current.
 	runTools := withWorkspaceRoot(withAgentScope(tools, sessionID, origin), workspaceRoot)
 	spec := rig.AgentSpec{
 		Provider:      provider,
