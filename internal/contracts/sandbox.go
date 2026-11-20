@@ -9,9 +9,11 @@ import (
 // SandboxStatus is the read model of the OS sandbox for settings and
 // diagnostics. The OS sandbox has no user switch: whenever the host has a
 // usable runner, commands run inside it (writes confined to the policy). When
-// the host has none, Available is false and Runner is nil: commands then run
-// with the host's own permissions under the application-level policy and the
-// approval gate — personal-client best effort, never a startup failure.
+// the host has none, Available is false and Runner is nil: the tool side decides
+// by policy — a workspace-write policy runs commands with the host's own
+// permissions under the application-level policy and the approval gate
+// (personal-client best effort, never a startup failure), while a read-only
+// policy refuses shell commands outright.
 type SandboxStatus struct {
 	// Available reports whether this host has a usable runner.
 	Available bool

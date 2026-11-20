@@ -6,9 +6,11 @@ package settings
 // runner passes commands through unconfined, so the status face must say so as
 // a warning instead of claiming protection (2026-11 audit RG-02). Under
 // workspace/read-only an available runner enforces file effects (and lets the
-// agent gate auto-allow shell tools); a host without a usable runner runs
-// commands with the host's own permissions under the application-level policy
-// (personal-client best effort, shown as a needs-action row).
+// agent gate auto-allow shell tools). Without a usable runner the two modes
+// differ: workspace-write runs commands with the host's own permissions under
+// the application-level policy (personal-client best effort, shown as a
+// needs-action row), while read-only refuses shell commands in the tool and
+// keeps file tools read-only.
 //
 // The copy is the only full statement of the sandbox facts (A5 §3.1: one
 // concept, one wording) — the behavior page's permission block explains the

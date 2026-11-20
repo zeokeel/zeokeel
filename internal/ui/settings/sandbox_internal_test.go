@@ -136,4 +136,8 @@ func TestSandboxNoteTextModeConditioned(t *testing.T) {
 	if !strings.Contains(full, "所有权限") || !strings.Contains(full, "不经系统沙箱包装") {
 		t.Fatalf("full-access note does not disclose the passthrough: %q", full)
 	}
+	readOnly := sandboxNoteText(zh, contracts.PermissionReadOnly)
+	if !strings.Contains(readOnly, "不执行 shell 命令") || !strings.Contains(readOnly, "工具侧直接拒绝") {
+		t.Fatalf("read-only note does not say what a host without a runner does: %q", readOnly)
+	}
 }
