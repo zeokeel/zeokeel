@@ -78,6 +78,7 @@ var realToolNames = []string{
 	"team_task_create",
 	"team_task_update",
 	"todo",
+	"todo_write",
 	"plan_review",
 	// skills
 	"skill",

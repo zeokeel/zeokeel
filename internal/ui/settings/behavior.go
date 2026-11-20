@@ -172,8 +172,8 @@ func buildPermissionSection(c *ui.Context, t *design.Tokens, locale contracts.Lo
 				t.TextMuted(design.TypeXS))
 			ui.Column(c).FillWidth().Gap(design.SpaceInline).Children(func() {
 				uikit.Bullet(c, localized(locale,
-					"只读：仅只读与信息类工具免审批。",
-					"Read-only: only read-only and informational tools skip approval."))
+					"只读：仅只读与信息类工具免审批（本机有系统沙箱时，命令类工具也在沙箱内免问执行）。",
+					"Read-only: only read-only and informational tools skip approval (with an OS sandbox, shell tools also run without asking, confined)."))
 				uikit.Bullet(c, localized(locale,
 					"工作区修改（默认）：再加上工作区内的文件读写。",
 					"Workspace-write (default): plus file reads and writes inside the workspace."))

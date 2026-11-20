@@ -220,7 +220,7 @@ func ToolIcon(name string) *ui.SVG {
 		return icons.Globe()
 	case "grep", "glob":
 		return icons.Search()
-	case "todo", "team_task_create", "team_task_update":
+	case "todo", "todo_write", "team_task_create", "team_task_update":
 		return icons.Data()
 	case "list_dir", "write_file", "edit_file", "str_replace_editor",
 		"enter_worktree", "list_worktrees":

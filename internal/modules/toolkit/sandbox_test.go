@@ -668,3 +668,33 @@ func TestModuleRebuildsToolsOnSandboxAndModeChange(t *testing.T) {
 		t.Fatalf("full-permission policy mode = %q, want danger-full-access", got)
 	}
 }
+
+// TestReadOnlyWithRunnerRunsConfinedCommands pins the SDK read-only semantic the
+// product now follows: with a runner attached, a read-only policy still runs
+// shell commands, and they go through the runner (writes confined). Without this
+// test the behaviour was only implied by SDK source plus the injection test.
+func TestReadOnlyWithRunnerRunsConfinedCommands(t *testing.T) {
+	requireUnixShell(t)
+	root := t.TempDir()
+	runner := &fakeSandboxRunner{rewrite: []string{"/bin/sh", "-c", "echo read-only-confined"}}
+	scoped := newSandboxBuild(t, Config{}, root, rigsandbox.ModeReadOnly, runner)
+
+	if scoped.mode != rigsandbox.ModeReadOnly {
+		t.Fatalf("build mode = %q, want read-only", scoped.mode)
+	}
+	result := invokeScopedTool(t, scoped, "bash", `{"command":"echo original"}`)
+	if result.IsError {
+		t.Fatalf("read-only bash with a runner failed: %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "read-only-confined") {
+		t.Fatalf("bash output = %q, want the confined command output", result.Content)
+	}
+	calls := runner.recordedCalls()
+	if len(calls) != 1 {
+		t.Fatalf("runner Confine calls = %d, want 1", len(calls))
+	}
+	policies := runner.recordedPolicies()
+	if len(policies) != 1 || policies[0] == nil || policies[0].Mode() != rigsandbox.ModeReadOnly {
+		t.Fatalf("runner policies = %v, want one read-only policy", policies)
+	}
+}

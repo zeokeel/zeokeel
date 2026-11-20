@@ -71,7 +71,7 @@ func toolDisplayNamePair(key string) (zh, en string) {
 		return "团队任务", "Team task"
 	case strings.HasPrefix(key, "memory"):
 		return "记忆", "Memory"
-	case key == "todo":
+	case key == "todo", key == "todo_write":
 		return "更新待办", "Update todo list"
 	case key == "get_goal":
 		return "读取目标", "Read goal"
