@@ -26,8 +26,9 @@ type SandboxStatus struct {
 // SandboxService owns the OS sandbox runner and its status.
 //
 // Personal-client model: the platform runner is used when the machine has one,
-// and Runner returns nil when it does not (commands then run under the
-// application-level policy only — best effort, never a startup failure). The
+// and Runner returns nil when it does not (the tool side then decides by policy:
+// workspace-write runs commands under the application-level policy — best
+// effort, never a startup failure — and read-only refuses shell commands). The
 // agent gate hands Runner and the toolkit's live Policy to the SDK's
 // gate.AllowSandboxedCommands to decide whether a shell call may skip the
 // approval prompt; Available/Status are the settings-surface read model. The

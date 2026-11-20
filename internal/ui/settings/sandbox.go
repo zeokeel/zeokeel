@@ -34,8 +34,9 @@ import (
 //     ("完全访问：系统沙箱不包装命令"), never the green "已启用" success that would
 //     imply protection that is not there;
 //   - workspace/read-only with a usable runner: success ("已启用");
-//   - no usable runner: needs-action (no OS fence; commands run with the host's
-//     own permissions under the application-level policy).
+//   - no usable runner: needs-action (no OS fence; workspace-write runs commands
+//     with the host's own permissions under the application-level policy, while
+//     read-only refuses shell commands and keeps file tools read-only).
 func sandboxStatusText(locale contracts.LocaleService, status contracts.SandboxStatus, mode string) (string, uikit.StatusKind) {
 	platform := strings.TrimSpace(status.Platform)
 	if platform == "" {
