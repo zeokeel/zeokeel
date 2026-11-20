@@ -37,6 +37,8 @@ var planModeAllowedTools = []string{
 	"memory",
 	"skill",
 	"skills",
+	"search",
+	"sandbox_status",
 	"web_fetch",
 }
 
@@ -50,6 +52,8 @@ var minimalModeAllowedTools = []string{
 	"memory",
 	"skill",
 	"skills",
+	"search",
+	"sandbox_status",
 	"web_fetch",
 	"ask_user",
 	"present",
@@ -227,7 +231,10 @@ var interactionTools = map[string]bool{
 	"present":        true,
 	"plan_review":    true,
 	"exit_plan_mode": true,
-	"goal":           true,
+	// "goal" is the retired Goal v1 name. It is no longer registered, but the
+	// interaction exemption keeps naming it so old transcripts and the plan/
+	// creator whitelists stay consistent (a call can never arrive).
+	"goal": true,
 	// The DSH goal trio renders no approval dialog of its own: the goal tools
 	// prompt nothing, and approval would only add a second meaningless modal.
 	"get_goal":    true,
@@ -247,6 +254,10 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 	if len(sessionIDs) > 0 {
 		sessionID = strings.TrimSpace(sessionIDs[0])
 	}
+	// Snapshot the run's tool root once: the sandbox exemption must be judged
+	// against the policy that will actually dispatch these calls, not against
+	// whichever workspace is current when a call happens.
+	runRoot := s.sessionWorkspaceRoot(sessionID)
 	return gate.Func(func(ctx context.Context, tool rig.Tool, call rig.ToolCall) (rig.Decision, error) {
 		name := call.Name
 		if tool != nil && strings.TrimSpace(tool.Name()) != "" {
@@ -301,13 +312,9 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 		// enforcement + policy is not danger-full-access). The branch sits after
 		// the plan/chat whitelists and the per-session override so those keep
 		// their veto, and before the interaction/remembered/approval branches so
-		// no dialog is requested. The product's read-only preset still forbids
-		// commands outright, and an explicit headless deny-all policy still
-		// denies: skipping the prompt must never bypass either.
-		if shell, allowed := s.sandboxedCommandDecision(ctx, tool, call); shell {
-			if !allowed {
-				return rig.DecisionDeny, nil
-			}
+		// no dialog is requested. An explicit headless deny-all policy still
+		// denies: skipping the prompt must never bypass it.
+		if s.sandboxedCommand(ctx, runRoot, tool, call) {
 			if s.approvals != nil && strings.EqualFold(strings.TrimSpace(s.approvals.Mode()), approvalModeNever) {
 				return rig.DecisionDeny, nil
 			}
@@ -340,7 +347,7 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 			return rig.DecisionDeny, fmt.Errorf(
 				"tool approval requires an approvals service; this product has none")
 		}
-		summary := summarizeToolArguments(call.Arguments)
+		summary := summarizeToolArguments(name, call.Arguments)
 		decision, err := s.approvals.Request(ctx, contracts.ApprovalRequest{
 			Tool:      name,
 			Summary:   summary,

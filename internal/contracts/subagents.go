@@ -106,9 +106,6 @@ var productReadOnlyRemovals = map[string]bool{
 // productReadOnlyAdditions are product-only tools with no SDK counterpart that
 // are informational/read-only, so the read-only preset runs them without asking.
 var productReadOnlyAdditions = map[string]bool{
-	"skills":             true,
-	"todo":               true,
-	"todos":              true,
 	"team_task_list":     true,
 	"team_task_get":      true,
 	"lsp_definition":     true,
@@ -149,6 +146,10 @@ var workspaceWriteFileTools = map[string]bool{
 	"write_file":         true,
 	"edit_file":          true,
 	"str_replace_editor": true,
+	// apply_patch writes user files inside the workspace exactly like the tools
+	// above (one atomic multi-file edit), so the workspace preset must not make
+	// it the only edit tool that prompts on every call.
+	"apply_patch": true,
 }
 
 // workspaceStateTools are the state-mutating product tools the default

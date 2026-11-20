@@ -76,12 +76,20 @@ func (f fakeSandbox) Status() contracts.SandboxStatus {
 }
 
 // fakePolicySource is a contracts.ToolPolicy test double: it returns the policy
-// the toolkit would have built for the current workspace.
+// the toolkit would have built for the requested root. onRoot (optional) sees
+// every root the gate asks about, so a test can prove the gate judged the run's
+// own workspace instead of whatever is current.
 type fakePolicySource struct {
 	policy *rigsandbox.Policy
+	onRoot func(root string)
 }
 
-func (f fakePolicySource) CurrentPolicy() *rigsandbox.Policy { return f.policy }
+func (f fakePolicySource) PolicyFor(root string) *rigsandbox.Policy {
+	if f.onRoot != nil {
+		f.onRoot(root)
+	}
+	return f.policy
+}
 
 // sandboxPolicy builds a policy with one root and the given mode.
 func sandboxPolicy(t *testing.T, mode rigsandbox.Mode) *rigsandbox.Policy {
@@ -357,6 +365,32 @@ func TestSandboxedAllowanceUsesSDKGate(t *testing.T) {
 		decision, err := allowance.Approve(context.Background(), &gateTestTool{name: name}, rig.ToolCall{Name: name})
 		if err != nil || decision != rig.DecisionAllow {
 			t.Fatalf("SDK allowance(%s) = %v/%v, want allow", name, decision, err)
+		}
+	}
+}
+
+// TestSandboxGateJudgesTheRunWorkspacePolicy pins the wiring: the decision asks
+// the toolkit for the policy of the run's own workspace root, not for whichever
+// workspace happens to be current.
+func TestSandboxGateJudgesTheRunWorkspacePolicy(t *testing.T) {
+	sandbox, _ := healthySandbox(t)
+	var asked []string
+	policy := fakePolicySource{
+		policy: sandboxPolicy(t, rigsandbox.ModeWorkspaceWrite),
+		onRoot: func(root string) { asked = append(asked, root) },
+	}
+	approvals := &recordingApprovals{decision: contracts.ApprovalDeny}
+	svc, sessionID := newSandboxGateService(t, sandbox, policy, nil, approvals)
+	if got := gateDecision(t, svc, sessionID, "bash"); got != rig.DecisionAllow {
+		t.Fatalf("bash = %v, want allow", got)
+	}
+	want := svc.sessionWorkspaceRoot(sessionID)
+	if len(asked) == 0 {
+		t.Fatal("gate never asked for a policy root")
+	}
+	for _, root := range asked {
+		if root != want {
+			t.Fatalf("gate asked for policy of %q, want the run root %q", root, want)
 		}
 	}
 }

@@ -19,7 +19,7 @@ import (
 // tools plus the read-only/informational tools the audit found prompting.
 var workspaceAutoAllowedSample = []string{
 	"read_file", "write_file", "edit_file", "str_replace_editor", "list_dir", "glob", "grep",
-	"read_image", "working_directory", "memory", "skill", "skills",
+	"read_image", "working_directory", "memory", "skill",
 	"todo_write", "team_task_list", "team_task_get",
 	"job_list", "job_output", "session_search", "session_event_trace",
 	"lsp_diagnostics",
@@ -100,7 +100,7 @@ func TestGateWorkspaceKeepsInteractionToolsAllowed(t *testing.T) {
 		t.Fatalf("SetSessionPermission: %v", err)
 	}
 	svc.approvals = denyApprovals{}
-	for _, tool := range []string{"ask_user", "present", "plan_review", "exit_plan_mode", "goal"} {
+	for _, tool := range []string{"ask_user", "present", "plan_review", "exit_plan_mode"} {
 		if got := gateDecision(t, svc, sessionID, tool); got != rig.DecisionAllow {
 			t.Fatalf("interaction tool %q = %v, want allow", tool, got)
 		}

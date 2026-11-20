@@ -31,8 +31,9 @@ type SandboxStatus struct {
 // approval prompt; Available/Status are the settings-surface read model. The
 // toolkit injects Runner into the command-executing tools.
 type SandboxService interface {
-	// Runner returns the runner to inject into tools. It is never nil for a
-	// mounted service: an unusable host gets a fail-closed runner instead.
+	// Runner returns the runner to inject into tools, or nil when this host has
+	// no usable OS sandbox (the tools then run under the application-level
+	// policy only — personal-client best effort, never a startup failure).
 	Runner() rigsandbox.Runner
 	// Available reports whether the host has a usable runner.
 	Available() bool
@@ -44,16 +45,18 @@ type SandboxService interface {
 // by the toolkit (runner injection) and the agent gate (shell auto-allow).
 var KeySandbox = cordis.NewServiceKey[SandboxService]("zeokeel/sandbox")
 
-// ToolPolicy exposes the sandbox policy the toolkit built for the workspace
-// current at call time. The agent gate needs it to ask the SDK whether a shell
-// call is really confined (gate.AllowSandboxedCommands needs both the runner and
-// the active policy: a danger-full-access policy has no fence, so nothing may be
-// skipped). The toolkit owns policies (they are built per workspace root and
-// permission mode), so this interface is the read-only bridge to them.
+// ToolPolicy exposes the sandbox policy the toolkit built for one workspace
+// root. The agent gate needs it to ask the SDK whether a shell call is really
+// confined (gate.AllowSandboxedCommands needs both the runner and the policy
+// that will dispatch the call: a danger-full-access policy has no fence, so
+// nothing may be skipped). The toolkit owns policies (one per
+// root+mode+runner build), so this interface is the read-only bridge to them.
 type ToolPolicy interface {
-	// CurrentPolicy returns the policy of the current tool build, or nil when
-	// no build exists yet (nothing has been executed in this workspace).
-	CurrentPolicy() *rigsandbox.Policy
+	// PolicyFor returns the policy of the tool build that dispatches calls for
+	// root — building/reusing that retained build when needed. Empty root means
+	// the current workspace. nil means no policy is available (nothing was
+	// built), and the gate then asks.
+	PolicyFor(root string) *rigsandbox.Policy
 }
 
 // KeyToolPolicy is provided by the toolkit module and consumed by the agent

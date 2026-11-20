@@ -1,12 +1,10 @@
 package hosttools
 
-// The DSH goal tools bridge: the product-owned get_goal/create_goal/update_goal
-// tools (goaltools.go) call this revision-checked adapter, which maps them onto
-// ZeoKeel's per-session durable contracts.GoalService. Rig v0.16.2 (the
-// published dependency) has no ctx-carrying GoalRevision option, so the tools
-// live in this product package instead of being the Rig host-tool set's; the
-// model-visible names/schema/result JSON stay DSH-compatible. The adapter adds
-// the DSH rules the service store does not know about:
+// The DSH goal tools bridge: the SDK's goal trio (tools/hosttools
+// Options.GoalRevision) calls this revision-checked adapter, which maps it onto
+// ZeoKeel's per-session durable contracts.GoalService. The product ships no goal
+// tool code of its own; names/schema/result JSON come from the SDK. The adapter
+// adds the DSH rules the service store does not know about:
 //
 //   - every call resolves the session from the agent session stamped into the
 //     tool context (one process-wide tool instance serves every conversation);
@@ -32,9 +30,9 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// GoalStore is the ctx-carrying revision store the product DSH goal tools need.
-// GoalRevisionStore implements it; the interface is product-owned (Rig v0.16.2's
-// hosttools.GoalRevisionStore is context-less and no longer used).
+// RevisionGoalStore is the ctx-carrying revision store the SDK's DSH goal tools
+// call (rig tools/hosttools GoalRevisionStore). It is declared here because the
+// product's durable adapter implements exactly this method set.
 type RevisionGoalStore interface {
 	// CurrentGoal returns the ctx session's current goal.
 	CurrentGoal(ctx context.Context) (righosttools.GoalSnapshot, bool)

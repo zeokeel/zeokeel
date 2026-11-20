@@ -37,6 +37,14 @@ func toolDisplayNamePair(key string) (zh, en string) {
 		return "写入文件", "Write file"
 	case key == "edit_file", key == "str_replace_editor":
 		return "编辑文件", "Edit file"
+	case key == "apply_patch":
+		return "编辑多个文件", "Edit multiple files"
+	case key == "search":
+		return "按相关性搜索", "Search by relevance"
+	case key == "sandbox_status":
+		return "查看沙箱状态", "Show sandbox status"
+	case key == "request_sandbox_access":
+		return "申请目录访问", "Request directory access"
 	case key == "list_dir":
 		return "列出目录", "List directory"
 	case key == "glob":

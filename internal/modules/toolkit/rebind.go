@@ -272,7 +272,7 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode san
 		// traversal does not go through Policy.OpenPath, so the hidden-path
 		// predicate is wired explicitly — otherwise search would be the one
 		// surface that still reads hidden files.
-		search.New(root, search.WithTimeout(timeout), search.WithHiddenFunc(func(abs string) bool {
+		search.New(root, search.WithHiddenFunc(func(abs string) bool {
 			return policy.Hidden(abs)
 		})),
 	)
@@ -374,29 +374,29 @@ func (g *rebindGroup) sandboxState() (sandbox.Mode, sandbox.Runner) {
 	return g.sandboxOf()
 }
 
-// currentPolicy returns the policy of the current tool build, or nil before any
-// build exists. It is the value behind contracts.ToolPolicy.
-func (g *rebindGroup) currentPolicy() *sandbox.Policy {
+// policyForRoot returns the policy of the tool build that dispatches calls for
+// root (empty = the current workspace), building/reusing that retained build
+// when needed. It is the value behind contracts.ToolPolicy.
+func (g *rebindGroup) policyForRoot(root string) *sandbox.Policy {
 	if g == nil {
 		return nil
 	}
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.current == nil {
+	scoped := g.forRootValue(root)
+	if scoped == nil {
 		return nil
 	}
-	return g.current.policy
+	return scoped.policy
 }
 
-// policySourceAdapter exposes the group's live policy to the agent gate.
+// policySourceAdapter exposes the group's live policies to the agent gate.
 type policySourceAdapter struct{ group *rebindGroup }
 
-// CurrentPolicy implements contracts.ToolPolicy.
-func (a policySourceAdapter) CurrentPolicy() *sandbox.Policy {
+// PolicyFor implements contracts.ToolPolicy.
+func (a policySourceAdapter) PolicyFor(root string) *sandbox.Policy {
 	if a.group == nil {
 		return nil
 	}
-	return a.group.currentPolicy()
+	return a.group.policyForRoot(root)
 }
 
 // buildKey folds cfg.ReadOnly and the runner-on state into the rebuild identity.

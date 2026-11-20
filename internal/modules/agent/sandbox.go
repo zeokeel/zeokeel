@@ -16,35 +16,35 @@ import (
 	"github.com/zeokeel/zeokeel-rig/gate"
 )
 
-// sandboxedCommandDecision reports whether the call is a shell call the SDK would
-// confine, and whether the product may run it without asking.
+// sandboxedCommand reports whether the SDK considers this call an already
+// confined shell call, so the approval prompt can be skipped.
 //
-// shell is false when the SDK does not recognise the call as a shell call (file
-// tools never go through the runner) or when no runner/policy is available.
-// allowed is true only when the SDK would allow it and the product's read-only
-// rule does not forbid commands in this mode.
-func (s *service) sandboxedCommandDecision(ctx context.Context, tool rig.Tool, call rig.ToolCall) (shell, allowed bool) {
+// root is the workspace the run's tools are bound to: the decision must use the
+// same policy the tool call will execute under, not whichever workspace happens
+// to be current when the gate runs.
+func (s *service) sandboxedCommand(ctx context.Context, root string, tool rig.Tool, call rig.ToolCall) bool {
 	if s == nil || s.sandboxService == nil || s.policySource == nil {
-		return false, false
+		return false
 	}
-	policy := s.policySource.CurrentPolicy()
+	policy := s.policySource.PolicyFor(root)
 	if policy == nil {
-		return false, false
+		return false
 	}
-	// Ask the SDK with an inner gate of nil: it answers allow for a confined
-	// shell call and deny for everything else, so an allow doubles as "this is a
-	// shell call the runner would wrap".
+	// Ask the SDK with an inner gate of nil: it answers allow only for a shell
+	// call the runner would confine, so an allow doubles as "this is a shell
+	// call". The shell surface is pinned here instead of inheriting the SDK's
+	// default, so a future SDK default cannot silently widen what skips the
+	// prompt.
 	allowance := gate.AllowSandboxedCommands(gate.SandboxedOptions{
-		Runner: s.sandboxService.Runner(),
-		Policy: policy,
+		Runner:     s.sandboxService.Runner(),
+		Policy:     policy,
+		ShellTools: sandboxShellTools,
 	}, nil)
 	decision, err := allowance.Approve(ctx, tool, call)
-	if err != nil || decision != rig.DecisionAllow {
-		return false, false
-	}
-	// rig owns the mode semantics: read-only + a runner means commands run with
-	// every write confined by the runner, and without a runner the policy itself
-	// rejects them (the tool reports "shell commands are disabled in read-only
-	// mode"). No product-side extra rule.
-	return true, true
+	return err == nil && decision == rig.DecisionAllow
 }
+
+// sandboxShellTools is the command-execution surface this product lets the SDK
+// judge for the "already confined" exemption. Jobs share the bash tool; pwsh is
+// the Windows shell.
+var sandboxShellTools = []string{"bash", "pwsh"}

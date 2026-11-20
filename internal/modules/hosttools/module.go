@@ -3,12 +3,11 @@
 // It puts the product-side agent tools into the shared ZeoKeel Rig tool
 // registry (provided by the toolkit module as hostcaps.KeyRegistry): ask_user,
 // present, plan_review, exit_plan_mode and the DSH goal trio get_goal/
-// create_goal/update_goal. ask_user, plan_review and exit_plan_mode are the
-// official Rig host tools (github.com/zeokeel/zeokeel-rig/tools/hosttools); the
-// goal trio and present are product-owned (rig v0.16.2 has no ctx-carrying goal
-// revision option, and ZeoKeel's present is a content artifact rather than a
-// file declaration), wired to this product's process capabilities through the
-// internal/hosttools seam. The legacy Goal v1 `goal` tool is no longer
+// create_goal/update_goal. ask_user, plan_review, exit_plan_mode and the goal
+// trio are the official Rig host tools (github.com/zeokeel/zeokeel-rig/tools/
+// hosttools) — the goal trio takes the product's ctx-carrying GoalRevisionStore
+// adapter. present stays product-owned: ZeoKeel's present is a content artifact
+// rather than a file declaration. The legacy Goal v1 `goal` tool is no longer
 // registered: goals are per-session and durable behind contracts.GoalService. The legacy in-memory
 // "team" stub was removed: the agent module registers the real rig team tools
 // (spawn_teammate, list_agents, team_task_*, ...) against contracts.KeyTeam, so

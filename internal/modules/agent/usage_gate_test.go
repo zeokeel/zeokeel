@@ -395,7 +395,7 @@ func TestGateNilApprovalsFailsClosed(t *testing.T) {
 // interactionToolNames are the host tools that interact with the user directly;
 // their own overlay (question, artifact, goal, plan review) is the interaction,
 // so the gate must not front-load a generic tool approval prompt.
-var interactionToolNames = []string{"ask_user", "present", "plan_review", "exit_plan_mode", "goal"}
+var interactionToolNames = []string{"ask_user", "present", "plan_review", "exit_plan_mode"}
 
 // recordingApprovals is a contracts.Approvals that records every request and
 // answers with a fixed decision; fakeApprovals auto-allows but cannot record.

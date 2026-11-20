@@ -76,7 +76,7 @@ func TestBoundedToolArguments(t *testing.T) {
 // TestApprovalSummaryStaysShort keeps the approval dialog's summary a prompt,
 // not a dump: the long-argument block is the dialog's separate parameters area.
 func TestApprovalSummaryStaysShort(t *testing.T) {
-	got := summarizeToolArguments(strings.Repeat("y", maxApprovalSummaryRunes+50))
+	got := summarizeToolArguments("bash", strings.Repeat("y", maxApprovalSummaryRunes+50))
 	if runes := []rune(got); len(runes) != maxApprovalSummaryRunes+1 || !strings.HasSuffix(got, "…") {
 		t.Fatalf("approval summary runes = %d, want %d plus the ellipsis", len(runes), maxApprovalSummaryRunes+1)
 	}

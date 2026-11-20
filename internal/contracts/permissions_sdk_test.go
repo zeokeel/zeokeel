@@ -64,8 +64,7 @@ func TestProductDeltasAreDocumented(t *testing.T) {
 	sort.Strings(additions)
 	want := []string{
 		"lsp_definition", "lsp_diagnostics", "lsp_hover", "lsp_implementation",
-		"lsp_references", "lsp_symbols", "skills", "team_task_get", "team_task_list",
-		"todo", "todos",
+		"lsp_references", "lsp_symbols", "team_task_get", "team_task_list",
 	}
 	if len(additions) != len(want) {
 		t.Fatalf("product read-only additions = %v, want %v", additions, want)
@@ -73,6 +72,34 @@ func TestProductDeltasAreDocumented(t *testing.T) {
 	for index, name := range want {
 		if additions[index] != name {
 			t.Fatalf("product read-only additions = %v, want %v", additions, want)
+		}
+	}
+}
+
+// TestWorkspaceWriteToolsAutoAllowed pins the write half of the presets: every
+// workspace file writer runs without asking in the workspace preset and asks in
+// the read-only preset.
+func TestWorkspaceWriteToolsAutoAllowed(t *testing.T) {
+	for _, name := range []string{"write_file", "edit_file", "str_replace_editor", "apply_patch"} {
+		if !WorkspaceAutoAllowed(name) {
+			t.Errorf("workspace preset does not auto-allow %q", name)
+		}
+		if ReadOnlyAutoAllowed(name) {
+			t.Errorf("read-only preset auto-allows the writer %q", name)
+		}
+	}
+}
+
+// TestSandboxAffordancesApproval pins the sandbox tools' approval posture:
+// sandbox_status is read-only and auto-allowed; request_sandbox_access widens
+// the writable surface and must never be auto-allowed (the human decides).
+func TestSandboxAffordancesApproval(t *testing.T) {
+	if !ReadOnlyAutoAllowed("sandbox_status") || !WorkspaceAutoAllowed("sandbox_status") {
+		t.Error("sandbox_status must be auto-allowed (read-only diagnostic)")
+	}
+	for _, name := range []string{"request_sandbox_access"} {
+		if ReadOnlyAutoAllowed(name) || WorkspaceAutoAllowed(name) {
+			t.Errorf("%q is auto-allowed, but it widens the writable surface", name)
 		}
 	}
 }
