@@ -89,6 +89,26 @@ func (service *jobService) Jobs() []contracts.BackgroundJob {
 	return nil
 }
 
+// jobKindFromID derives the job kind from the manager's "<kind>-<hex>" id. The
+// hex suffix is stripped, not the first segment: rig itself has kinds with a
+// hyphen (pty-send), and a first-segment cut would report "pty".
+func jobKindFromID(id string) string {
+	index := strings.LastIndexByte(id, '-')
+	if index <= 0 {
+		return id
+	}
+	suffix := id[index+1:]
+	if len(suffix) < 6 {
+		return id
+	}
+	for _, char := range suffix {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
+			return id
+		}
+	}
+	return id[:index]
+}
+
 // backgroundJobsFromSnapshots maps the manager's typed snapshots onto the UI
 // read model. Kind comes from the job id's "<kind>-<hex>" shape, Running from
 // the state, and Duration from Started/Finished (a running job counts up to
@@ -104,10 +124,7 @@ func backgroundJobsFromSnapshots(snapshots []jobs.JobSnapshot, now time.Time) []
 		if !snap.Started.IsZero() && end.After(snap.Started) {
 			duration = end.Sub(snap.Started)
 		}
-		kind := snap.ID
-		if index := strings.IndexByte(kind, '-'); index > 0 {
-			kind = kind[:index]
-		}
+		kind := jobKindFromID(snap.ID)
 		rows = append(rows, contracts.BackgroundJob{
 			ID:       snap.ID,
 			Kind:     kind,

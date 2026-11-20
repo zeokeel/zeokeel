@@ -1,10 +1,10 @@
 package toolkit
 
 // Tests for the session header's background-jobs service (contracts.JobService).
-// Rig's background manager lives inside the root-scoped build that is rebuilt on
-// every workspace switch, so the service must resolve the live job tools on
-// every call (never cache a retired manager) and must decode Rig's stable
-// job_list text format into the UI read model.
+// Rig's background managers live inside the root-scoped builds that are rebuilt
+// on every workspace switch, so the service must resolve the live managers on
+// every call (never cache a retired one) and read each manager's typed Snapshot
+// across every build of the caller's root.
 
 import (
 	"context"
@@ -108,7 +108,11 @@ func TestJobServiceJobsUseManagerSnapshot(t *testing.T) {
 // TestJobServiceJobsDegradesOnFailure: the header chip is read-only chrome and
 // must show nothing when the build has no manager or the group has none.
 func TestJobServiceJobsDegradesOnFailure(t *testing.T) {
-	if got := newJobService(&rebindGroup{rootOf: func() string { return "" }, current: &rootScoped{done: make(chan struct{})}}).Jobs(); len(got) != 0 {
+	noManager := &rebindGroup{
+		rootOf:  func() string { return "" },
+		current: &rootScoped{mode: sandbox.ModeWorkspaceWrite, done: make(chan struct{})},
+	}
+	if got := newJobService(noManager).Jobs(); len(got) != 0 {
 		t.Fatalf("Jobs() without a manager = %#v, want no rows", got)
 	}
 	var nilGroup *rebindGroup
@@ -555,5 +559,42 @@ func TestJobServiceJobOutputStripsMetadataAndCRLF(t *testing.T) {
 	}
 	if text != "build ok\n" {
 		t.Fatalf("JobOutput = %q, want the LF-normalized output body", text)
+	}
+}
+
+// TestJobServiceJobsMergeBuildsOfTheRoot pins the scope of the chip: a job
+// spawned before a permission/runner rebuild still belongs to the same
+// workspace root and must stay listed (the popover controls it by id).
+func TestJobServiceJobsMergeBuildsOfTheRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("background shell jobs need /bin/sh")
+	}
+	root := t.TempDir()
+	currentManager, oldManager := jobs.NewManager(), jobs.NewManager()
+	t.Cleanup(func() {
+		_ = currentManager.CloseAll()
+		_ = oldManager.CloseAll()
+	})
+	currentJob := startTestJob(t, currentManager, "sleep 30")
+	oldJob := startTestJob(t, oldManager, "sleep 31")
+
+	current := &rootScoped{root: root, mode: sandbox.ModeWorkspaceWrite, jobs: currentManager, done: make(chan struct{})}
+	older := &rootScoped{root: root, mode: sandbox.ModeReadOnly, jobs: oldManager, done: make(chan struct{})}
+	group := &rebindGroup{
+		rootOf:  func() string { return root },
+		current: current,
+		builds:  map[rebindKey]*rootScoped{},
+	}
+	group.mu.Lock()
+	group.addBuildLocked(group.buildKey(root, sandbox.ModeWorkspaceWrite, nil), current)
+	group.addBuildLocked(group.buildKey(root, sandbox.ModeReadOnly, nil), older)
+	group.mu.Unlock()
+
+	ids := make(map[string]bool)
+	for _, row := range newJobService(group).Jobs() {
+		ids[row.ID] = true
+	}
+	if !ids[currentJob] || !ids[oldJob] {
+		t.Fatalf("Jobs() ids = %v, want both %q and %q", ids, currentJob, oldJob)
 	}
 }

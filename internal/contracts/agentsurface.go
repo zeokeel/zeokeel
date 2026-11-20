@@ -111,9 +111,11 @@ var KeyChildAgents = cordis.NewServiceKey[ChildAgentService]("zeokeel/childagent
 
 // BackgroundJob is one row of the header's background-jobs popover.
 type BackgroundJob struct {
-	ID       string
-	Kind     string
-	Command  string
+	ID      string
+	Kind    string
+	Command string
+	// Status is the manager's state word (same value as State). It stays for
+	// callers that want one string; the UI reads State/ExitCode instead.
 	Status   string
 	State    string
 	ExitCode int

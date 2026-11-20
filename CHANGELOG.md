@@ -14,7 +14,7 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
-- **后台任务读模型改用 SDK 的类型化快照**：`contracts.JobService.Jobs()` 过去把 rig 的 `job_list` 文本解析成行（状态/命令是自由文本，靠锚定正则切 `exit=/duration_ms=/command=`），现在直接读 `jobs.Manager.Snapshot()`：`State`/`ExitCode`/`Command` 来自结构体，`Duration` 由 `Started/Finished` 算（运行中计到当前），`Kind` 取 id 的 `<kind>-` 前缀。「过期权限任务」提示与执行历史的运行态判断也一并改走同一份快照，删除 `parseJobList`/`parseJobListRow`/`jobListTailPattern` 与约 90 行解析代码；模型可见的 `job_list` 仍由 rig 的文本工具提供（合并多 build 的展示逻辑不变）。
+- **后台任务读模型改用 SDK 的类型化快照**：`contracts.JobService.Jobs()` 过去把 rig 的 `job_list` 文本解析成行（状态/命令是自由文本，靠锚定正则切 `exit=/duration_ms=/command=`），现在直接读 `jobs.Manager.Snapshot()`：`State`/`ExitCode`/`Command` 来自结构体，`Duration` 由 `Started/Finished` 算（运行中计到当前），`Kind` 取 id 的 `<kind>-` 前缀。「过期权限任务」提示与执行历史的运行态判断也一并改走同一份快照，删除 `parseJobList`/`parseJobListRow`/`jobListTailPattern` 与约 90 行解析代码。范围与旧行为一致：chip 合并**调用方工作区根下所有 build** 的 job（换权限/换 runner 重建前的 job 仍可见、可按 id 停止），`Kind` 从 id 的 `<kind>-<hex>` 后缀前面部分取（`pty-send` 这类带连字符的 kind 不会被截断）；模型可见的 `job_list` 仍是 rig 的文本工具。
 
 - **个人客户端口径：沙箱与审批不再加自家安全规则**（2026-11-20）：
   - **不再有命令名白名单**：`defaultCommands` 删除，默认 `sandbox.WithAnyCommandAllowed(true)`——审批通过的命令直接能跑；`toolkit.Config.CommandAllowlist` 保留为显式收窄（非空才生效）。

@@ -334,6 +334,7 @@ type rebindGroup struct {
 	logf      func(string, ...any)
 
 	mu      sync.Mutex
+	closed  bool
 	current *rootScoped
 	// builds keeps every build ever created in this module, keyed by identity.
 	builds map[rebindKey]*rootScoped
@@ -540,6 +541,7 @@ func (g *rebindGroup) buildsSnapshot() []*rootScoped {
 // It is idempotent and synchronous.
 func (g *rebindGroup) close() {
 	g.mu.Lock()
+	g.closed = true
 	builds := make([]*rootScoped, 0, len(g.builds)+1)
 	seen := make(map[*rootScoped]bool, len(g.builds)+1)
 	for _, scoped := range g.order {
@@ -603,8 +605,8 @@ func (g *rebindGroup) drainNotices() []string {
 //
 // The read is side-effect free: it resolves the current identity WITHOUT
 // creating a build, scopes to the caller's current workspace root (the same
-// scope as the job chip's merged list) and lists each older build's jobs through
-// that build's own manager. Finished jobs are excluded.
+// scope as the job chip's list) and lists each older build's jobs through that
+// build's own manager. Finished jobs are excluded.
 func (g *rebindGroup) stalePermissionJobs() []contracts.BackgroundJob {
 	root := g.contextRoot(nil)
 	mode, runner := g.sandboxState()
@@ -626,17 +628,35 @@ func (g *rebindGroup) stalePermissionJobs() []contracts.BackgroundJob {
 	return stale
 }
 
-// listJobs implements the toolkit's typed job read model: the retained jobs of
-// the build that currently dispatches calls for the current workspace root.
+// listJobs implements the toolkit's typed job read model: every job retained by
+// any build of the caller's current workspace root, merged oldest build first —
+// the same scope the header chip had when it merged job_list text, so a job
+// spawned before a permission/runner rebuild stays visible (and controllable)
+// instead of disappearing from the popover. It never creates a build: a root
+// without one simply has no rows.
 func (g *rebindGroup) listJobs() []contracts.BackgroundJob {
 	if g == nil {
 		return nil
 	}
-	scoped := g.forRoot()
-	if scoped == nil || scoped.jobs == nil {
+	g.mu.Lock()
+	closed := g.closed
+	g.mu.Unlock()
+	if closed {
 		return nil
 	}
-	return backgroundJobsFromSnapshots(scoped.jobs.Snapshot(), time.Now())
+	builds := g.buildsForRoot(g.contextRoot(nil))
+	if len(builds) == 0 {
+		return nil
+	}
+	now := time.Now()
+	var rows []contracts.BackgroundJob
+	for _, scoped := range builds {
+		if scoped == nil || scoped.jobs == nil {
+			continue
+		}
+		rows = append(rows, backgroundJobsFromSnapshots(scoped.jobs.Snapshot(), now)...)
+	}
+	return rows
 }
 
 // runningJob reports whether one job id is running in any build retained for the
