@@ -239,16 +239,7 @@ func TestExecutionHistoryReadErrorIsEmpty(t *testing.T) {
 	}
 }
 
-func TestExecutionListLivenessHelpers(t *testing.T) {
-	jobList := "jobs: 2\n" +
-		"- job-1 [bash] state=running status=running exit=-1 duration_ms=1200 command=tail -f /dev/null\n" +
-		"- job-2 [bash] state=exited status=completed exit=0 duration_ms=100 command=go build ./...\n"
-	if !executionListHasRunningJob(jobList, "job-1") {
-		t.Fatalf("running job not detected in:\n%s", jobList)
-	}
-	if executionListHasRunningJob(jobList, "job-2") {
-		t.Fatalf("finished job detected as running")
-	}
+func TestExecutionListLivenessTerminal(t *testing.T) {
 	terminalList := "session_id: term-1\n" +
 		"transport: pipe\ncwd: /tmp/ws\nrunning: true\nexit: -\n\n" +
 		"session_id: term-2\ntransport: pipe\ncwd: /tmp/ws\nrunning: false\nexit: 0\n"

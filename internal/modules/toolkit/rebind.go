@@ -106,9 +106,13 @@ type rootScoped struct {
 	// folded in), and sandboxOn reports whether an OS runner was injected.
 	mode      sandbox.Mode
 	sandboxOn bool
-	tools     []rig.Tool
-	byName    map[string]rig.Tool
-	close     func()
+	// jobs is this build's background-job manager: the typed read model behind
+	// contracts.JobService.Jobs (manager.Snapshot) and the stale-permission
+	// report. Control still goes through the job_* tools.
+	jobs   *jobs.Manager
+	tools  []rig.Tool
+	byName map[string]rig.Tool
+	close  func()
 	// drainJobNotices drains the root's pending background-job completion
 	// notices (the toolkit turns them into model-facing lines and durable
 	// execution events).
@@ -287,6 +291,7 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode san
 		policy:    policy,
 		mode:      policyMode(cfg, mode),
 		sandboxOn: runner != nil,
+		jobs:      background,
 		tools:     tools,
 		byName:    byName,
 		done:      make(chan struct{}),
@@ -609,17 +614,49 @@ func (g *rebindGroup) stalePermissionJobs() []contracts.BackgroundJob {
 		if scoped == nil || scoped.matches(key) {
 			continue
 		}
-		result, err := invokeRootScoped(context.Background(), scoped, rig.ToolCall{Name: jobs.ToolJobList, Arguments: "{}"})
-		if err != nil || result.IsError {
+		if scoped.jobs == nil {
 			continue
 		}
-		for _, row := range parseJobList(result.Content) {
+		for _, row := range backgroundJobsFromSnapshots(scoped.jobs.Snapshot(), time.Now()) {
 			if row.Running {
 				stale = append(stale, row)
 			}
 		}
 	}
 	return stale
+}
+
+// listJobs implements the toolkit's typed job read model: the retained jobs of
+// the build that currently dispatches calls for the current workspace root.
+func (g *rebindGroup) listJobs() []contracts.BackgroundJob {
+	if g == nil {
+		return nil
+	}
+	scoped := g.forRoot()
+	if scoped == nil || scoped.jobs == nil {
+		return nil
+	}
+	return backgroundJobsFromSnapshots(scoped.jobs.Snapshot(), time.Now())
+}
+
+// runningJob reports whether one job id is running in any build retained for the
+// caller's current workspace root (a job spawned before a permission rebuild
+// still belongs to its older build).
+func (g *rebindGroup) runningJob(ctx context.Context, id string) bool {
+	if g == nil {
+		return false
+	}
+	for _, scoped := range g.buildsForRoot(g.contextRoot(ctx)) {
+		if scoped == nil || scoped.jobs == nil {
+			continue
+		}
+		for _, snap := range scoped.jobs.Snapshot() {
+			if snap.ID == id {
+				return snap.State == "running"
+			}
+		}
+	}
+	return false
 }
 
 // boundTool is the stable registry entry for one root-scoped tool.

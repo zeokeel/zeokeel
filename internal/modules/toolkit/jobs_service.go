@@ -15,8 +15,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -71,18 +69,57 @@ func (service *jobService) StalePermissionJobs() []contracts.BackgroundJob {
 	return nil
 }
 
+// jobLister is the rebind group's typed job read model: the manager's own
+// Snapshot(), never the job_list text. Test fakes of jobToolInvoker need not
+// implement it.
+type jobLister interface {
+	listJobs() []contracts.BackgroundJob
+}
+
 // Jobs lists the manager's retained jobs, oldest first. The header chip is
-// read-only chrome: a missing manager or a failed listing yields no rows rather
-// than surfacing an error that would fail the session surface.
+// read-only chrome: a missing manager yields no rows rather than surfacing an
+// error that would fail the session surface.
 func (service *jobService) Jobs() []contracts.BackgroundJob {
 	if service == nil || service.invoker == nil {
 		return nil
 	}
-	result, err := service.invoker.invokeJobTool(context.Background(), jobs.ToolJobList, "{}")
-	if err != nil || result.IsError {
-		return nil
+	if lister, ok := service.invoker.(jobLister); ok {
+		return lister.listJobs()
 	}
-	return parseJobList(result.Content)
+	return nil
+}
+
+// backgroundJobsFromSnapshots maps the manager's typed snapshots onto the UI
+// read model. Kind comes from the job id's "<kind>-<hex>" shape, Running from
+// the state, and Duration from Started/Finished (a running job counts up to
+// now).
+func backgroundJobsFromSnapshots(snapshots []jobs.JobSnapshot, now time.Time) []contracts.BackgroundJob {
+	rows := make([]contracts.BackgroundJob, 0, len(snapshots))
+	for _, snap := range snapshots {
+		end := snap.Finished
+		if end.IsZero() {
+			end = now
+		}
+		var duration time.Duration
+		if !snap.Started.IsZero() && end.After(snap.Started) {
+			duration = end.Sub(snap.Started)
+		}
+		kind := snap.ID
+		if index := strings.IndexByte(kind, '-'); index > 0 {
+			kind = kind[:index]
+		}
+		rows = append(rows, contracts.BackgroundJob{
+			ID:       snap.ID,
+			Kind:     kind,
+			Command:  snap.Command,
+			State:    snap.State,
+			Status:   snap.State,
+			ExitCode: snap.ExitCode,
+			Duration: duration,
+			Running:  snap.State == "running",
+		})
+	}
+	return rows
 }
 
 // KillJob stops a running job through the model-facing job_kill tool. Unknown
@@ -201,93 +238,6 @@ func boundJobOutput(text string) string {
 		cut = cut[index+1:]
 	}
 	return contracts.JobOutputTruncatedMarker + cut
-}
-
-// parseJobList decodes the stable text format emitted by Rig's job_list tool
-// (tools/jobs/tools.go, listTool):
-//
-//	jobs: <n>
-//	- <id> [<kind>] owner=<owner>? state=<state> status=<status> exit=<code> duration_ms=<ms> command=<command>
-//
-// The " owner=" segment is optional (Rig omits it for unowned jobs) and is not
-// part of the UI read model. state/status/exit/duration_ms are single tokens up
-// to the next fixed key; status is a DSH status word that may carry a detail in
-// parentheses, and command is free text to the end of the line (with spaces,
-// UTF-8 and Rig's 120-byte truncation ellipsis).
-//
-// Unparseable rows are skipped rather than failing the whole list so one odd
-// line can never hide the rest of the manager's state from the header.
-func parseJobList(text string) []contracts.BackgroundJob {
-	rows := make([]contracts.BackgroundJob, 0, 4)
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "- ") {
-			continue
-		}
-		row, ok := parseJobListRow(strings.TrimPrefix(line, "- "))
-		if !ok {
-			continue
-		}
-		rows = append(rows, row)
-	}
-	if len(rows) == 0 {
-		return nil
-	}
-	return rows
-}
-
-// jobListTailPattern matches the rig list format's numeric tail:
-// " exit=<n> duration_ms=<n> command=<free text>". The status and command are
-// free text, so the tail is located as the LAST such occurrence (the status
-// can contain " exit=..." and the command everything after the real match).
-var jobListTailPattern = regexp.MustCompile(` exit=(-?\d+) duration_ms=(\d+) command=`)
-
-// parseJobListRow parses one "- id [kind] ..." body:
-// "id [kind] owner=<o>? state=<s> status=<free text> exit=<n> duration_ms=<n>
-// command=<free text>". Because status/command are free text, the numeric tail
-// is found by its anchored pattern rather than by cutting from the left.
-func parseJobListRow(body string) (contracts.BackgroundJob, bool) {
-	var row contracts.BackgroundJob
-	id, rest, found := strings.Cut(body, " ")
-	if !found || id == "" {
-		return row, false
-	}
-	rest = strings.TrimPrefix(rest, "[")
-	kind, rest, found := strings.Cut(rest, "]")
-	if !found || kind == "" {
-		return row, false
-	}
-	stateAt := strings.Index(rest, " state=")
-	if stateAt < 0 {
-		return row, false
-	}
-	rest = rest[stateAt+len(" state="):]
-	state, rest, ok := strings.Cut(rest, " status=")
-	if !ok || state == "" {
-		return row, false
-	}
-	matches := jobListTailPattern.FindAllStringSubmatchIndex(rest, -1)
-	if len(matches) == 0 {
-		return row, false
-	}
-	tail := matches[len(matches)-1]
-	exitCode, err := strconv.Atoi(rest[tail[2]:tail[3]])
-	if err != nil {
-		return row, false
-	}
-	durationMS, err := strconv.ParseInt(rest[tail[4]:tail[5]], 10, 64)
-	if err != nil {
-		return row, false
-	}
-	row.ID = id
-	row.Kind = kind
-	row.State = state
-	row.Status = rest[:tail[0]]
-	row.ExitCode = exitCode
-	row.Duration = time.Duration(durationMS) * time.Millisecond
-	row.Command = rest[tail[1]:]
-	row.Running = state == "running"
-	return row, true
 }
 
 // jobKillOutcome returns the "outcome: …" word job_kill prefixes to its final

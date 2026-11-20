@@ -14,6 +14,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **后台任务读模型改用 SDK 的类型化快照**：`contracts.JobService.Jobs()` 过去把 rig 的 `job_list` 文本解析成行（状态/命令是自由文本，靠锚定正则切 `exit=/duration_ms=/command=`），现在直接读 `jobs.Manager.Snapshot()`：`State`/`ExitCode`/`Command` 来自结构体，`Duration` 由 `Started/Finished` 算（运行中计到当前），`Kind` 取 id 的 `<kind>-` 前缀。「过期权限任务」提示与执行历史的运行态判断也一并改走同一份快照，删除 `parseJobList`/`parseJobListRow`/`jobListTailPattern` 与约 90 行解析代码；模型可见的 `job_list` 仍由 rig 的文本工具提供（合并多 build 的展示逻辑不变）。
+
 - **个人客户端口径：沙箱与审批不再加自家安全规则**（2026-11-20）：
   - **不再有命令名白名单**：`defaultCommands` 删除，默认 `sandbox.WithAnyCommandAllowed(true)`——审批通过的命令直接能跑；`toolkit.Config.CommandAllowlist` 保留为显式收窄（非空才生效）。
   - **shell 语法默认全开**：管道、列表、重定向、前置环境变量不再需要 `allowShellOperators`（该配置保留但被忽略），普通开发命令不再因 "operator not allowed" 空转。

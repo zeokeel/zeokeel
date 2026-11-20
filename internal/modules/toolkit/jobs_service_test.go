@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -58,124 +57,63 @@ func jobServiceScopedBuild(root string, tools ...rig.Tool) *rootScoped {
 	return &rootScoped{root: root, mode: sandbox.ModeWorkspaceWrite, tools: tools, byName: byName, done: make(chan struct{})}
 }
 
-// jobServiceListing is one realistic job_list payload with every documented
-// variant: an owned running job, an exited job without owner, a killed terminal
-// job and a UTF-8 command.
-const jobServiceListing = `jobs: 4
-- job-a [bash] owner=alice state=running status=running (running) exit=-1 duration_ms=1503 command=sleep 30
-- job-b [pwsh] state=exited status=completed (exit code: 0) exit=0 duration_ms=42 command=echo done
-- job-c [terminal] state=killed status=killed (killed) exit=-1 duration_ms=900 command=tail -f /dev/null
-- job-d [bash] state=exited status=completed (exit code: 1) exit=1 duration_ms=7 command=echo 后台任务
-`
-
-// TestParseJobList pins the decoder for Rig's documented job_list format:
-// "jobs: N" then one "- id [kind] owner=…? state=… status=… exit=… duration_ms=…
-// command=…" line per retained job. The owner segment is optional and must not
-// leak into state, status is free text up to " exit=", and command is the rest
-// of the line.
-func TestParseJobList(t *testing.T) {
-	want := []contracts.BackgroundJob{
-		{
-			ID: "job-a", Kind: "bash", Command: "sleep 30",
-			Status: "running (running)", State: "running",
-			ExitCode: -1, Duration: 1503 * time.Millisecond, Running: true,
-		},
-		{
-			ID: "job-b", Kind: "pwsh", Command: "echo done",
-			Status: "completed (exit code: 0)", State: "exited",
-			ExitCode: 0, Duration: 42 * time.Millisecond,
-		},
-		{
-			ID: "job-c", Kind: "terminal", Command: "tail -f /dev/null",
-			Status: "killed (killed)", State: "killed",
-			ExitCode: -1, Duration: 900 * time.Millisecond,
-		},
-		{
-			ID: "job-d", Kind: "bash", Command: "echo 后台任务",
-			Status: "completed (exit code: 1)", State: "exited",
-			ExitCode: 1, Duration: 7 * time.Millisecond,
-		},
+// startTestJob starts a real manager process job that stays running until the
+// test cleanup kills it.
+func startTestJob(t *testing.T, manager *jobs.Manager, command string) string {
+	t.Helper()
+	job, err := manager.StartProcess(jobs.ProcessSpec{
+		Kind:    "bash",
+		Label:   command,
+		Command: command,
+		Argv:    []string{"/bin/sh", "-c", command},
+	})
+	if err != nil {
+		t.Fatalf("StartProcess(%q): %v", command, err)
 	}
-	if got := parseJobList(jobServiceListing); !reflect.DeepEqual(got, want) {
-		t.Fatalf("parseJobList() = %#v, want %#v", got, want)
-	}
+	return job.ID()
 }
 
-// TestParseJobListEmpty covers the empty manager output ("no jobs", which is
-// Rig's sentinel) and tolerant handling of blank/header-only text.
-func TestParseJobListEmpty(t *testing.T) {
-	for name, text := range map[string]string{
-		"empty":        "",
-		"blank":        "\n \t\n",
-		"no jobs":      "no jobs",
-		"no jobs crlf": "no jobs\r\n",
-		"header only":  "jobs: 0\n",
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := parseJobList(text); len(got) != 0 {
-				t.Fatalf("parseJobList(%q) = %#v, want no rows", text, got)
-			}
-		})
+// TestJobServiceJobsUseManagerSnapshot pins the typed read model: Jobs() reads
+// the manager's Snapshot() (no job_list text), so the row carries the real id,
+// command, state, exit code and a live duration.
+func TestJobServiceJobsUseManagerSnapshot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("background shell jobs need /bin/sh")
 	}
-}
+	root := t.TempDir()
+	manager := jobs.NewManager()
+	t.Cleanup(func() { _ = manager.CloseAll() })
+	jobID := startTestJob(t, manager, "sleep 30")
 
-// TestParseJobListSkipsMalformedRows keeps the header chip usable when the
-// tool output has trailing noise or an unparseable row: valid rows survive.
-func TestParseJobListSkipsMalformedRows(t *testing.T) {
-	text := "jobs: 2\n" +
-		"- not a job row\n" +
-		"- job-ok [bash] state=running status=running (running) exit=-1 duration_ms=5 command=sleep 1\n" +
-		"trailing noise\n"
-	got := parseJobList(text)
-	if len(got) != 1 || got[0].ID != "job-ok" || got[0].Command != "sleep 1" {
-		t.Fatalf("parseJobList() = %#v, want only job-ok", got)
-	}
-}
-
-// TestJobServiceJobsReadsLiveManager proves the read path invokes the rig
-// job_list tool of the build that is current and maps its rows.
-func TestJobServiceJobsReadsLiveManager(t *testing.T) {
-	list := &jobServiceStubTool{name: jobs.ToolJobList, result: rig.ToolResult{Content: jobServiceListing}}
 	group := &rebindGroup{
-		rootOf:  func() string { return "" },
-		current: jobServiceScopedBuild("", list),
+		rootOf:  func() string { return root },
+		current: &rootScoped{root: root, mode: sandbox.ModeWorkspaceWrite, jobs: manager, done: make(chan struct{})},
 	}
-	service := newJobService(group)
-	var _ contracts.JobService = service
-
-	got := service.Jobs()
-	if len(got) != 4 {
-		t.Fatalf("Jobs() rows = %d, want 4 (%#v)", len(got), got)
+	got := newJobService(group).Jobs()
+	if len(got) != 1 {
+		t.Fatalf("Jobs() rows = %#v, want the one started job", got)
 	}
-	if got[0].ID != "job-a" || !got[0].Running || got[0].ExitCode != -1 {
-		t.Fatalf("first row = %#v, want the running job-a", got[0])
+	row := got[0]
+	if row.ID != jobID || !row.Running || row.State != "running" {
+		t.Fatalf("job row = %#v, want id %q running", row, jobID)
 	}
-	if got[1].Running {
-		t.Fatalf("exited job %q marked running", got[1].ID)
+	if row.Command != "sleep 30" || row.Kind != "bash" {
+		t.Fatalf("job row command/kind = %q/%q, want sleep 30/bash", row.Command, row.Kind)
 	}
-	if list.calls != 1 {
-		t.Fatalf("job_list invoked %d times, want 1", list.calls)
-	}
-	if list.lastCall.Name != jobs.ToolJobList || strings.TrimSpace(list.lastCall.Arguments) != "{}" {
-		t.Fatalf("job_list call = %+v, want empty JSON args", list.lastCall)
+	if row.Duration <= 0 {
+		t.Fatalf("job duration = %v, want a positive elapsed time", row.Duration)
 	}
 }
 
 // TestJobServiceJobsDegradesOnFailure: the header chip is read-only chrome and
-// must show nothing instead of panicking when the listing tool errors.
+// must show nothing when the build has no manager or the group has none.
 func TestJobServiceJobsDegradesOnFailure(t *testing.T) {
-	tests := map[string]*jobServiceStubTool{
-		"tool error result": {name: jobs.ToolJobList, result: rig.ToolResult{Content: "boom", IsError: true}},
-		"invoke error":      {name: jobs.ToolJobList, err: errors.New("invoke exploded")},
-		"garbage output":    {name: jobs.ToolJobList, result: rig.ToolResult{Content: "totally not a listing"}},
+	if got := newJobService(&rebindGroup{rootOf: func() string { return "" }, current: &rootScoped{done: make(chan struct{})}}).Jobs(); len(got) != 0 {
+		t.Fatalf("Jobs() without a manager = %#v, want no rows", got)
 	}
-	for name, list := range tests {
-		t.Run(name, func(t *testing.T) {
-			group := &rebindGroup{rootOf: func() string { return "" }, current: jobServiceScopedBuild("", list)}
-			if got := newJobService(group).Jobs(); len(got) != 0 {
-				t.Fatalf("Jobs() = %#v, want no rows", got)
-			}
-		})
+	var nilGroup *rebindGroup
+	if got := newJobService(nilGroup).Jobs(); len(got) != 0 {
+		t.Fatalf("Jobs() on a nil group = %#v, want no rows", got)
 	}
 }
 
@@ -267,34 +205,36 @@ func TestJobServiceKillJobErrors(t *testing.T) {
 // service must read the new one on the next call, while the header's service
 // value itself is never re-provided.
 func TestJobServiceResolvesTheLiveBuildPerCall(t *testing.T) {
-	listA := &jobServiceStubTool{name: jobs.ToolJobList, result: rig.ToolResult{
-		Content: "jobs: 1\n- job-a [bash] state=running status=running (running) exit=-1 duration_ms=1 command=sleep 1\n",
-	}}
-	listB := &jobServiceStubTool{name: jobs.ToolJobList, result: rig.ToolResult{
-		Content: "jobs: 1\n- job-b [bash] state=running status=running (running) exit=-1 duration_ms=2 command=sleep 2\n",
-	}}
-	scopedA := jobServiceScopedBuild("root-a", listA)
-	scopedB := jobServiceScopedBuild("root-b", listB)
+	if runtime.GOOS == "windows" {
+		t.Skip("background shell jobs need /bin/sh")
+	}
+	managerA, managerB := jobs.NewManager(), jobs.NewManager()
+	t.Cleanup(func() {
+		_ = managerA.CloseAll()
+		_ = managerB.CloseAll()
+	})
+	jobA := startTestJob(t, managerA, "sleep 30")
+	jobB := startTestJob(t, managerB, "sleep 31")
 
 	root := "root-a"
-	group := &rebindGroup{rootOf: func() string { return root }, current: scopedA}
+	group := &rebindGroup{
+		rootOf:  func() string { return root },
+		current: &rootScoped{root: root, mode: sandbox.ModeWorkspaceWrite, jobs: managerA, done: make(chan struct{})},
+	}
 	service := newJobService(group)
-	if rows := service.Jobs(); len(rows) != 1 || rows[0].ID != "job-a" {
-		t.Fatalf("Jobs() before rebind = %#v, want job-a", rows)
+	if rows := service.Jobs(); len(rows) != 1 || rows[0].ID != jobA {
+		t.Fatalf("Jobs() before rebind = %#v, want %q", rows, jobA)
 	}
 
 	// This is exactly what forRoot installs on a workspace switch; the service
 	// is deliberately not told about it.
 	root = "root-b"
 	group.mu.Lock()
-	group.current = scopedB
+	group.current = &rootScoped{root: root, mode: sandbox.ModeWorkspaceWrite, jobs: managerB, done: make(chan struct{})}
 	group.mu.Unlock()
 
-	if rows := service.Jobs(); len(rows) != 1 || rows[0].ID != "job-b" {
-		t.Fatalf("Jobs() after rebind = %#v, want job-b (stale manager)", rows)
-	}
-	if listA.calls != 1 || listB.calls != 1 {
-		t.Fatalf("job_list calls = A:%d B:%d, want one each", listA.calls, listB.calls)
+	if rows := service.Jobs(); len(rows) != 1 || rows[0].ID != jobB {
+		t.Fatalf("Jobs() after rebind = %#v, want %q (stale manager)", rows, jobB)
 	}
 }
 
@@ -423,8 +363,8 @@ func TestJobServiceAgainstRealRigManager(t *testing.T) {
 	if row.Command != "tail -f /dev/null" {
 		t.Fatalf("real job command = %q, want the full command", row.Command)
 	}
-	if row.Kind == "" || !strings.Contains(row.Status, "running") {
-		t.Fatalf("real job kind/status = %q/%q", row.Kind, row.Status)
+	if row.Kind != "bash" || row.Status != "running" {
+		t.Fatalf("real job kind/status = %q/%q, want bash/running", row.Kind, row.Status)
 	}
 
 	if err := service.KillJob(jobID); err != nil {
@@ -436,23 +376,6 @@ func TestJobServiceAgainstRealRigManager(t *testing.T) {
 	}
 	if rows[0].Running || rows[0].State != "killed" {
 		t.Fatalf("killed job row = %#v, want state killed and not running", rows[0])
-	}
-}
-
-// TestParseJobListFreeTextFields covers free-text status/command values that
-// contain the later field names: a kill reason like "exit=1 duration_ms=2
-// command=x" must not shift the real exit/duration/command fields.
-func TestParseJobListFreeTextFields(t *testing.T) {
-	text := "jobs: 1\n- job-x [bash] state=killed status=killed (reason: exit=1 duration_ms=2 command=fake) exit=-1 duration_ms=1503 command=echo command=ok\n"
-	rows := parseJobList(text)
-	if len(rows) != 1 {
-		t.Fatalf("parseJobList() = %+v, want one row", rows)
-	}
-	got := rows[0]
-	if got.State != "killed" || got.Status != "killed (reason: exit=1 duration_ms=2 command=fake)" ||
-		got.ExitCode != -1 || got.Duration != 1503*time.Millisecond ||
-		got.Command != "echo command=ok" {
-		t.Fatalf("row = %+v, want the real trailing fields", got)
 	}
 }
 

@@ -223,11 +223,7 @@ func (l groupExecutionLiveness) running(kind, id string) bool {
 	ctx := context.Background()
 	switch kind {
 	case contracts.ExecutionKindJob:
-		result, err := l.group.mergeJobLists(ctx)
-		if err != nil || result.IsError {
-			return false
-		}
-		return executionListHasRunningJob(result.Content, id)
+		return l.group.runningJob(ctx, id)
 	case contracts.ExecutionKindTerminal:
 		result, err := l.group.mergeTerminalLists(ctx)
 		if err != nil || result.IsError {
@@ -237,17 +233,6 @@ func (l groupExecutionLiveness) running(kind, id string) bool {
 	default:
 		return false
 	}
-}
-
-// executionListHasRunningJob reports whether one id is a running row in the
-// merged job_list text.
-func executionListHasRunningJob(listText, id string) bool {
-	for _, job := range parseJobList(listText) {
-		if job.ID == id {
-			return job.Running
-		}
-	}
-	return false
 }
 
 // executionListHasRunningTerminal reports whether one session id's block in the
