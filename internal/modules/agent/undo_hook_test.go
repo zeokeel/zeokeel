@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+
+	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
 // fakeUndo records the roots it was asked to snapshot.
@@ -60,5 +62,37 @@ func TestNoUndoServiceNoHooks(t *testing.T) {
 	svc := newService(Config{}, nil, nil, &fakeLogger{}, newFakeStore(), nil)
 	if hooks := svc.turnHooks("/work"); len(hooks) != 0 {
 		t.Fatalf("turn hooks = %d, want none without an undo service", len(hooks))
+	}
+}
+
+// TestUndoTurnHookSilentForUnavailable pins the log policy: "no tracker for this
+// workspace" is a normal read-only condition, other snapshot failures are logged.
+func TestUndoTurnHookSilentForUnavailable(t *testing.T) {
+	quiet := &fakeUndo{err: contracts.ErrUndoUnavailable}
+	logger := &fakeLogger{}
+	svc := newService(Config{}, nil, nil, logger, newFakeStore(), nil)
+	svc.undo = quiet
+	if err := svc.turnHooks("/work")[0].BeforeRun(context.Background(), rig.RunRequest{}); err != nil {
+		t.Fatalf("BeforeRun: %v", err)
+	}
+	logger.mu.Lock()
+	lines := len(logger.lines)
+	logger.mu.Unlock()
+	if lines != 0 {
+		t.Fatalf("unavailable tracker logged %d lines, want none", lines)
+	}
+
+	noisy := &fakeUndo{err: errors.New("disk full")}
+	logger = &fakeLogger{}
+	svc = newService(Config{}, nil, nil, logger, newFakeStore(), nil)
+	svc.undo = noisy
+	if err := svc.turnHooks("/work")[0].BeforeRun(context.Background(), rig.RunRequest{}); err != nil {
+		t.Fatalf("BeforeRun: %v", err)
+	}
+	logger.mu.Lock()
+	lines = len(logger.lines)
+	logger.mu.Unlock()
+	if lines != 1 {
+		t.Fatalf("real snapshot failure logged %d lines, want one", lines)
 	}
 }

@@ -5,6 +5,7 @@ package toolkit
 // (agent side) takes the snapshot, the toolkit owns the tracker.
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -120,5 +121,85 @@ func TestReadOnlyBuildLeavesTheDataDirAlone(t *testing.T) {
 	t.Cleanup(scoped.close)
 	if entries, err := os.ReadDir(dataDir); err == nil && len(entries) != 0 {
 		t.Fatalf("read-only build wrote %d entries to the data dir", len(entries))
+	}
+}
+
+// TestUndoIgnoreRulesExcludeHiddenPathsEndToEnd pins the wiring (not just the
+// conversion): with denied globs configured, the tracker's own changes report
+// only the files the user did not hide.
+func TestUndoIgnoreRulesExcludeHiddenPathsEndToEnd(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not available")
+	}
+	root := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit("init", "-q")
+	for path, content := range map[string]string{
+		".env":                  "A=1\n",
+		"sub/.env":              "B=1\n",
+		"secrets/token":         "T\n",
+		"docs/generated/out.go": "package out\n",
+		"other/secrets/x":       "X\n",
+		"keep.txt":              "keep\n",
+	} {
+		writeFile(t, filepath.Join(root, filepath.FromSlash(path)), content)
+	}
+	runGit("add", "-A")
+	runGit("commit", "-qm", "init")
+
+	patterns := hiddenPatterns([]string{"**/.env", "secrets/**", "docs/generated/**"})
+	tracker := newUndoTracker(root, t.TempDir(), patterns, t.Logf)
+	if tracker == nil {
+		t.Fatal("git workspace got no tracker")
+	}
+	turn, err := tracker.Begin()
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	for path := range map[string]string{
+		".env": "A=2\n", "sub/.env": "B=2\n", "secrets/token": "T2\n",
+		"docs/generated/out.go": "package out2\n", "keep.txt": "changed\n",
+	} {
+		writeFile(t, filepath.Join(root, filepath.FromSlash(path)), map[string]string{
+			".env": "A=2\n", "sub/.env": "B=2\n", "secrets/token": "T2\n",
+			"docs/generated/out.go": "package out2\n", "keep.txt": "changed\n",
+		}[path])
+	}
+	changes, err := tracker.Changes(turn, "")
+	if err != nil {
+		t.Fatalf("changes: %v", err)
+	}
+	if len(changes) != 1 || changes[0].Path != "keep.txt" {
+		t.Fatalf("changes = %+v, want only keep.txt (hidden paths excluded)", changes)
+	}
+}
+
+// TestUndoBeginTurnRespectsCancelledContext pins the ctx contract: a cancelled
+// run must not copy the workspace into the snapshot store.
+func TestUndoBeginTurnRespectsCancelledContext(t *testing.T) {
+	root, dataDir := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(root, "a.txt"), "v1\n")
+	group := newRebindGroup(Config{}, 5*time.Second, func() string { return root }, nil, nil)
+	group.dataDir = dataDir
+	t.Cleanup(group.close)
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := group.BeginTurn(cancelled, root); err == nil {
+		t.Fatal("BeginTurn accepted a cancelled context")
+	}
+	// The SDK consumes the turn number before taking the snapshot, so the
+	// cancelled attempt still advances it; the next call must succeed.
+	turn, err := group.BeginTurn(context.Background(), root)
+	if err != nil || turn != 2 {
+		t.Fatalf("BeginTurn = %d/%v, want 2 (number consumed by the cancelled take)", turn, err)
 	}
 }

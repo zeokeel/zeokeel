@@ -687,8 +687,10 @@ func newUndoTracker(root, dataDir string, hidden []string, logf func(string, ...
 			logf("[toolkit] undo: git probe failed for %q (%v); using the file backend", root, err)
 		}
 	} else if git {
-		// Hidden paths stay out of the snapshot, so undo can neither restore nor
-		// delete a file the user hid from the model.
+		// Hidden patterns that reduce to a literal name/prefix (see
+		// undoIgnoreRules) are excluded from the snapshot report and the revert;
+		// wildcard basenames cannot be expressed in the SDK's ignore syntax and
+		// stay in the snapshot. Best effort, not a boundary.
 		return undo.NewTracker(root, undo.Options{Retain: 32, Dir: stateDir, Ignore: undoIgnoreRules(hidden)})
 	}
 	tracker, err := undo.NewFileTracker(root, undo.FileOptions{
