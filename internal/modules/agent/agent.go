@@ -218,6 +218,9 @@ func Module() *module.Descriptor[Config] {
 			// it keeps asking for shell approval.
 			svc.policySource = policySource
 		}
+		if undoService, ok := ctx.Get(contracts.KeyUndo); ok && undoService != nil {
+			svc.undo = undoService
+		}
 		if sandboxService, ok := ctx.Get(contracts.KeySandbox); ok && sandboxService != nil {
 			// Optional: when the enabled OS sandbox has a usable runner, the gate
 			// auto-allows shell-family tools because the OS profile enforces their
@@ -379,6 +382,9 @@ type service struct {
 	// "already confined, skip the prompt" decision uses the SDK's criteria
 	// (runner enforcement, policy mode, shell family) instead of a private copy.
 	policySource contracts.ToolPolicy
+	// undo snapshots the run's workspace before each turn (the undo tool reverts
+	// those snapshots). Optional: a stripped assembly leaves it nil.
+	undo contracts.UndoService
 
 	sessions map[string]*sessionState
 	active   string
@@ -795,6 +801,48 @@ func (s *service) currentWorkspaceRoot(ctx context.Context) string {
 	}
 	return strings.TrimSpace(workspace.Root)
 }
+
+// turnHooks returns the SDK turn hooks for one run: currently the undo snapshot.
+// A hook is created per run because it captures that run's workspace root.
+func (s *service) turnHooks(workspaceRoot string) []rig.TurnHook {
+	if s == nil || s.undo == nil {
+		return nil
+	}
+	hook := &undoTurnHook{service: s.undo, root: workspaceRoot}
+	if s.logger != nil {
+		hook.logf = s.logger.Printf
+	}
+	return []rig.TurnHook{hook}
+}
+
+// undoTurnHook snapshots the run's workspace when a turn begins, so the model's
+// undo tool can revert it. Snapshot failures never fail the run (a host without
+// git and without a snapshot directory simply has nothing to undo).
+type undoTurnHook struct {
+	service contracts.UndoService
+	root    string
+	logf    func(string, ...any)
+}
+
+// BeforeRun implements rig.TurnHook.
+func (h *undoTurnHook) BeforeRun(ctx context.Context, _ rig.RunRequest) error {
+	if h == nil || h.service == nil {
+		return nil
+	}
+	if _, err := h.service.BeginTurn(h.root); err != nil && h.logf != nil {
+		h.logf("[agent] undo snapshot skipped: %v", err)
+	}
+	return nil
+}
+
+// AfterRun implements rig.TurnHook.
+func (h *undoTurnHook) AfterRun(context.Context, rig.RunResult) {}
+
+// BeforeTool implements rig.TurnHook.
+func (h *undoTurnHook) BeforeTool(context.Context, rig.ToolCall) error { return nil }
+
+// AfterTool implements rig.TurnHook.
+func (h *undoTurnHook) AfterTool(context.Context, rig.ToolCall, *rig.ToolResult) {}
 
 // sessionWorkspaceRoot resolves the workspace root a session's run must use.
 // A session bound to a registered workspace keeps its project even when the
@@ -2665,6 +2713,7 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		Spill:           s.spillPolicy(ctx, workspaceRoot),
 		Logger:          s.logger,
 		CheckpointStore: s.guardedCheckpointStore(s.checkpointStore()),
+		Hooks:           s.turnHooks(workspaceRoot),
 	}
 	// Context safety default: the explicit chat.contextBudget when set, else a
 	// budget derived from the model's context window; a known budget also

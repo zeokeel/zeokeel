@@ -355,6 +355,7 @@ func TestWorkStepsActivityWords(t *testing.T) {
 		{"search", "正在搜索工作区"},
 		{"apply_patch", "正在编辑文件"},
 		{"todo_write", "正在更新计划"},
+		{"undo", "正在回退改动"},
 		{"bash", "正在运行命令"},
 		{"terminal_send", "正在运行命令"},
 		{"run_code", "正在运行代码"},

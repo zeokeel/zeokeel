@@ -689,6 +689,8 @@ Agent 客户端的界面不是一次性输出：用户对界面的操作要作�
 
 **只读免审批工具表以 SDK 为唯一来源**：`contracts.ReadOnlyAutoAllowedTools` 由 `gate.SandboxReadOnlyTools` 派生（SDK 的判据是「是否触及用户的文件/进程/网络」），产品只保留两张显式增量表——`productReadOnlyRemovals`（当前仅 `memory`：只读档不得改持久记忆）与 `productReadOnlyAdditions`（产品自有只读工具：skills/todo/team_task 查询/LSP 查询）。`contracts/permissions_sdk_test.go` 钉住「SDK 新增工具会自动进入只读集，除非显式列入 removals」，两处白名单不再可能漂移。
 
+**`undo`（2026-11-21 接入）**：每次 run 开始时 harness 为该 run 工作区拍快照（git 隐藏提交；非 git 用 `<root>/.zeokeel/undo` 文件后端），模型可用 `undo` 回退本轮或指定轮次/单文件。**只读构建不注册 `undo`**（它通过 tracker 直接写盘，不经过 `sandbox.Policy`，注册就等于给只读写盘入口）；工作区预设自动放行（与 write_file/edit_file/apply_patch 同档），plan/minimal/creator 不包含它。快照失败只记日志，不影响 run；同一 root 的多次 run 共用该 build 的 tracker（回合号持久化在状态目录，重启后继续递增）。
+
 **新增 SDK 工具的两个已知边界（2026-11-21 审计结论，选择显式记录而不是加适配层）**：
 - `apply_patch` 与 `search` 的相对路径**以工具根为基准**，不跟随 `working_directory`（SDK 的这两个构造器没有 cwd 选项；其余文件工具都跟随）。模型先 `working_directory("docs")` 再 `apply_patch` 相对路径时落点是 `<root>/x` 而不是 `<root>/docs/x`——这是 SDK 语义，不是越权；需要按会话 cwd 操作时用绝对路径或先 `read_file` 确认。
 - `apply_patch` 的改动**不进回合尾的"已编辑 N 个文件"卡**（该卡按单文件 `path` 参数聚合，而补丁一次涉及多文件）。补丁结果在工具结果里逐文件列出。

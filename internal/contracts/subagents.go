@@ -150,6 +150,9 @@ var workspaceWriteFileTools = map[string]bool{
 	// above (one atomic multi-file edit), so the workspace preset must not make
 	// it the only edit tool that prompts on every call.
 	"apply_patch": true,
+	// undo reverts the turn's snapshot inside the workspace (the same trust
+	// domain as the writers above); read-only builds do not register it.
+	"undo": true,
 }
 
 // workspaceStateTools are the state-mutating product tools the default

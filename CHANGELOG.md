@@ -8,6 +8,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Added
 
+- **接入 SDK 的 `undo` 工具 + 回合快照**：产品在每次 run 开始（`rig.TurnHook.BeforeRun`）让 toolkit 为本次 run 的工作区拍一份快照（git 工作区用隐藏提交后端，其余用 `<root>/.zeokeel/undo` 文件后端），模型即可用 `undo` 回退本轮（或指定轮次/单文件，`dry_run` 只预览）。只读构建**不注册**该工具（undo 走 tracker 直接写盘，绕过沙箱策略），工作区预设自动放行（与 write_file/edit_file/apply_patch 同信任域）。快照失败只记日志、不影响 run。
+
 - **接线 SDK 的 `apply_patch` 工具**：一次原子地新增/修改/删除/移动多个文件（统一 diff 与应用式补丁两种写法，三级上下文容错，歧义即拒绝）。工具强制要求沙箱策略，因此路径逃逸、只读档与隐藏路径都由同一份策略拦；产品此前只有单文件编辑器。
 - **接线 SDK 的 `search` 工具**：BM25 内容检索 + 文件名模糊匹配，补上 `glob`（精确模式）与 `grep`（逐行正则）之间的空档。它的遍历不走策略的 `OpenPath`，所以隐藏路径谓词显式接进 `search.WithHiddenFunc`——否则它会是唯一还能读到隐藏文件的入口。
 - **接线两个 SDK 沙箱工具**：`sandbox_status`（只读、自动免问：模型能看到当前策略、可写面、网络与授权余量）与 `request_sandbox_access`（工具必须写固定目录时申请一个目录的可写授权；不在任何免审批集里，由审批门禁决定）。

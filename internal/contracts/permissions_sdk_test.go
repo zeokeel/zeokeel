@@ -80,7 +80,7 @@ func TestProductDeltasAreDocumented(t *testing.T) {
 // workspace file writer runs without asking in the workspace preset and asks in
 // the read-only preset.
 func TestWorkspaceWriteToolsAutoAllowed(t *testing.T) {
-	for _, name := range []string{"write_file", "edit_file", "str_replace_editor", "apply_patch"} {
+	for _, name := range []string{"write_file", "edit_file", "str_replace_editor", "apply_patch", "undo"} {
 		if !WorkspaceAutoAllowed(name) {
 			t.Errorf("workspace preset does not auto-allow %q", name)
 		}

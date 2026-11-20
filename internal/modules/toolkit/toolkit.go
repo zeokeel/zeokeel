@@ -152,6 +152,11 @@ func Module() *module.Descriptor[Config] {
 		if _, err := ctx.Provide(contracts.KeyToolPolicy, contracts.ToolPolicy(policySourceAdapter{group: group})); err != nil {
 			return err
 		}
+		// The agent's turn hook asks for a snapshot before each run so the undo
+		// tool can revert it; the toolkit owns the per-workspace trackers.
+		if _, err := ctx.Provide(contracts.KeyUndo, contracts.UndoService(undoSourceAdapter{group: group})); err != nil {
+			return err
+		}
 		// Optional durable store: execution lifecycle events (job/terminal
 		// start/finish/close) are recorded for the agent session that invoked the
 		// tool. A product without a store keeps the tools working, event-free.
@@ -373,6 +378,7 @@ func Module() *module.Descriptor[Config] {
 		module.Provides(contracts.KeyMCPReloader),
 		module.Provides(contracts.KeyMCPToolCatalog),
 		module.Provides(contracts.KeyToolPolicy),
+		module.Provides(contracts.KeyUndo),
 	).WithName("ZeoKeel Rig toolset")
 }
 

@@ -2,8 +2,11 @@ package toolkit
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -22,6 +25,7 @@ import (
 	"github.com/zeokeel/zeokeel-rig/tools/sandboxgrant"
 	"github.com/zeokeel/zeokeel-rig/tools/sandboxstatus"
 	"github.com/zeokeel/zeokeel-rig/tools/search"
+	"github.com/zeokeel/zeokeel-rig/tools/undo"
 	"github.com/zeokeel/zeokeel-rig/tools/worktree"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -106,6 +110,9 @@ type rootScoped struct {
 	// folded in), and sandboxOn reports whether an OS runner was injected.
 	mode      sandbox.Mode
 	sandboxOn bool
+	// undo snapshots this build's workspace at the start of a turn; the model's
+	// undo tool reverts to one of them.
+	undo *undo.Tracker
 	// jobs is this build's background-job manager: the typed read model behind
 	// contracts.JobService.Jobs (manager.Snapshot) and the stale-permission
 	// report. Control still goes through the job_* tools.
@@ -282,6 +289,18 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode san
 		})),
 	)
 
+	// Undo: snapshot the workspace at the start of each turn so `undo` can
+	// revert it. A git workspace uses the hidden-commit backend (cheap, exact);
+	// anything else copies files into <root>/.zeokeel/undo.
+	tracker := newUndoTracker(cfg, root)
+	// A read-only build must not ship a tool that writes the workspace back:
+	// undo reverts through the tracker, not through the sandbox policy, so the
+	// promise "read-only never modifies files" would otherwise be one call away
+	// from being broken.
+	if tracker != nil && !policy.ReadOnly() {
+		tools = append(tools, undo.New(tracker))
+	}
+
 	byName := make(map[string]rig.Tool, len(tools))
 	for _, tool := range tools {
 		byName[tool.Name()] = tool
@@ -292,6 +311,7 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode san
 		mode:      policyMode(cfg, mode),
 		sandboxOn: runner != nil,
 		jobs:      background,
+		undo:      tracker,
 		tools:     tools,
 		byName:    byName,
 		done:      make(chan struct{}),
@@ -634,6 +654,52 @@ func (g *rebindGroup) stalePermissionJobs() []contracts.BackgroundJob {
 		}
 	}
 	return stale
+}
+
+// newUndoTracker builds the snapshot tracker for one workspace root: the
+// hidden-commit git backend when the root is a git worktree, otherwise the file
+// backend under <root>/.zeokeel/undo. nil means undo is unavailable.
+func newUndoTracker(cfg Config, root string) *undo.Tracker {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return nil
+	}
+	if info, err := os.Stat(filepath.Join(root, ".git")); err == nil && info.IsDir() {
+		return undo.NewTracker(root, undo.Options{Retain: 32})
+	}
+	tracker, err := undo.NewFileTracker(root, undo.FileOptions{
+		Dir:      filepath.Join(root, ".zeokeel", "undo"),
+		MaxTurns: 16,
+	})
+	if err != nil {
+		return nil
+	}
+	return tracker
+}
+
+// BeginTurn implements contracts.UndoService: snapshot the run's workspace
+// before its turn starts. It resolves (and retains) the build for that root, so
+// the snapshot belongs to the same policy identity the tools will use.
+func (g *rebindGroup) BeginTurn(root string) (int, error) {
+	if g == nil {
+		return 0, errors.New("undo: no toolkit")
+	}
+	scoped := g.forRootValue(root)
+	if scoped == nil || scoped.undo == nil {
+		return 0, errors.New("undo: no snapshot tracker for this workspace")
+	}
+	return scoped.undo.BeginContext(context.Background())
+}
+
+// undoSourceAdapter exposes the group's trackers to the agent's turn hook.
+type undoSourceAdapter struct{ group *rebindGroup }
+
+// BeginTurn implements contracts.UndoService.
+func (a undoSourceAdapter) BeginTurn(root string) (int, error) {
+	if a.group == nil {
+		return 0, errors.New("undo: no toolkit")
+	}
+	return a.group.BeginTurn(root)
 }
 
 // listJobs implements the toolkit's typed job read model: every job retained by

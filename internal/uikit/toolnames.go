@@ -39,6 +39,8 @@ func toolDisplayNamePair(key string) (zh, en string) {
 		return "编辑文件", "Edit file"
 	case key == "apply_patch":
 		return "编辑多个文件", "Edit multiple files"
+	case key == "undo":
+		return "回退本轮改动", "Undo this turn"
 	case key == "search":
 		return "按相关性搜索", "Search by relevance"
 	case key == "sandbox_status":
