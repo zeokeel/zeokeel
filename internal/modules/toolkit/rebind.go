@@ -21,6 +21,7 @@ import (
 	"github.com/zeokeel/zeokeel-rig/tools/patch"
 	"github.com/zeokeel/zeokeel-rig/tools/sandboxgrant"
 	"github.com/zeokeel/zeokeel-rig/tools/sandboxstatus"
+	"github.com/zeokeel/zeokeel-rig/tools/search"
 	"github.com/zeokeel/zeokeel-rig/tools/worktree"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -267,6 +268,13 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode san
 		// delete and move files in one call. A policy is mandatory — the tool
 		// refuses to run without one.
 		patch.New(root, patch.WithPolicy(policy)),
+		// Ranked retrieval (SDK): BM25 over content plus fuzzy file names. Its
+		// traversal does not go through Policy.OpenPath, so the hidden-path
+		// predicate is wired explicitly — otherwise search would be the one
+		// surface that still reads hidden files.
+		search.New(root, search.WithTimeout(timeout), search.WithHiddenFunc(func(abs string) bool {
+			return policy.Hidden(abs)
+		})),
 	)
 
 	byName := make(map[string]rig.Tool, len(tools))

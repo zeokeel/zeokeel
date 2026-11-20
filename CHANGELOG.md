@@ -8,6 +8,7 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **接线 SDK 的 `search` 工具**：BM25 内容检索 + 文件名模糊匹配，补上 `glob`（精确模式）与 `grep`（逐行正则）之间的空档。它的遍历不走策略的 `OpenPath`，所以隐藏路径谓词显式接进 `search.WithHiddenFunc`——否则它会是唯一还能读到隐藏文件的入口。
 - **接线 SDK 的 `apply_patch` 工具**：一次原子地新增/修改/删除/移动多个文件（统一 diff 与应用式补丁两种写法，三级上下文容错，歧义即拒绝）。工具强制要求沙箱策略，因此路径逃逸、只读档与隐藏路径都由同一份策略拦；产品此前只有单文件编辑器。
 - **个人客户端口径：沙箱与审批不再加自家安全规则**（2026-11-20）：
   - **不再有命令名白名单**：`defaultCommands` 删除，默认 `sandbox.WithAnyCommandAllowed(true)`——审批通过的命令直接能跑；`toolkit.Config.CommandAllowlist` 保留为显式收窄（非空才生效）。
