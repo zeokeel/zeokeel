@@ -134,7 +134,11 @@ func TestUndoIgnoreRulesExcludeHiddenPathsEndToEnd(t *testing.T) {
 	root := t.TempDir()
 	runGit := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", args...)
+		// Pinned config: a host with commit.gpgsign=true would fail the commit
+		// (no gpg in CI) and a host excludes file naming .env would silently
+		// change what this test snapshots.
+		full := append([]string{"-c", "commit.gpgsign=false", "-c", "core.excludesFile="}, args...)
+		cmd := exec.Command("git", full...)
 		cmd.Dir = root
 		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -164,14 +168,15 @@ func TestUndoIgnoreRulesExcludeHiddenPathsEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	for path := range map[string]string{
-		".env": "A=2\n", "sub/.env": "B=2\n", "secrets/token": "T2\n",
-		"docs/generated/out.go": "package out2\n", "keep.txt": "changed\n",
+	for _, file := range []struct{ path, content string }{
+		{".env", "A=2\n"},
+		{"sub/.env", "B=2\n"},
+		{"secrets/token", "T2\n"},
+		{"docs/generated/out.go", "package out2\n"},
+		{"other/secrets/x", "X2\n"},
+		{"keep.txt", "changed\n"},
 	} {
-		writeFile(t, filepath.Join(root, filepath.FromSlash(path)), map[string]string{
-			".env": "A=2\n", "sub/.env": "B=2\n", "secrets/token": "T2\n",
-			"docs/generated/out.go": "package out2\n", "keep.txt": "changed\n",
-		}[path])
+		writeFile(t, filepath.Join(root, filepath.FromSlash(file.path)), file.content)
 	}
 	changes, err := tracker.Changes(turn, "")
 	if err != nil {

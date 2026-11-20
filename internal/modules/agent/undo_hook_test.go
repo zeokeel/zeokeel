@@ -17,11 +17,13 @@ import (
 // fakeUndo records the roots it was asked to snapshot.
 type fakeUndo struct {
 	roots []string
+	ctxs  []context.Context
 	err   error
 }
 
-func (f *fakeUndo) BeginTurn(_ context.Context, root string) (int, error) {
+func (f *fakeUndo) BeginTurn(ctx context.Context, root string) (int, error) {
 	f.roots = append(f.roots, root)
+	f.ctxs = append(f.ctxs, ctx)
 	if f.err != nil {
 		return 0, f.err
 	}
@@ -42,6 +44,23 @@ func TestUndoTurnHookSnapshotsTheRunRoot(t *testing.T) {
 	}
 	if len(undo.roots) != 1 || undo.roots[0] != "/work/project" {
 		t.Fatalf("snapshot roots = %v, want the run workspace", undo.roots)
+	}
+}
+
+// TestUndoTurnHookPassesTheRunContext pins the ctx forwarding: the snapshot must
+// see the run's cancellation, not a background context.
+func TestUndoTurnHookPassesTheRunContext(t *testing.T) {
+	undo := &fakeUndo{}
+	svc := newService(Config{}, nil, nil, &fakeLogger{}, newFakeStore(), nil)
+	svc.undo = undo
+	hooks := svc.turnHooks("/work")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := hooks[0].BeforeRun(ctx, rig.RunRequest{}); err != nil {
+		t.Fatalf("BeforeRun: %v", err)
+	}
+	if len(undo.ctxs) != 1 || undo.ctxs[0] != ctx {
+		t.Fatal("hook did not forward the run's context")
 	}
 }
 
