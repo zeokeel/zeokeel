@@ -829,7 +829,7 @@ func (h *undoTurnHook) BeforeRun(ctx context.Context, _ rig.RunRequest) error {
 	if h == nil || h.service == nil {
 		return nil
 	}
-	if _, err := h.service.BeginTurn(ctx, h.root); err != nil && h.logf != nil {
+	if _, err := h.service.BeginTurn(ctx, h.root); err != nil && !errors.Is(err, contracts.ErrUndoUnavailable) && h.logf != nil {
 		h.logf("[agent] undo snapshot skipped: %v", err)
 	}
 	return nil

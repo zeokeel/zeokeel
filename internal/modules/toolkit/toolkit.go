@@ -157,7 +157,7 @@ func Module() *module.Descriptor[Config] {
 		}
 		// The agent's turn hook asks for a snapshot before each run so the undo
 		// tool can revert it; the toolkit owns the per-workspace trackers.
-		if _, err := ctx.Provide(contracts.KeyUndo, contracts.UndoService(undoSourceAdapter{group: group})); err != nil {
+		if _, err := ctx.Provide(contracts.KeyUndo, contracts.UndoService(group)); err != nil {
 			return err
 		}
 		// Optional durable store: execution lifecycle events (job/terminal

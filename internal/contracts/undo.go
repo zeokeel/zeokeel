@@ -2,9 +2,15 @@ package contracts
 
 import (
 	"context"
+	"errors"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 )
+
+// ErrUndoUnavailable reports "this host has no snapshot tracker for the run's
+// workspace" (read-only build, no data directory, snapshot backend failure). The
+// agent hook treats it as an expected condition, not an error to log.
+var ErrUndoUnavailable = errors.New("undo: no snapshot tracker for this workspace")
 
 // UndoService snapshots the run's workspace before a turn so the model's `undo`
 // tool can revert that turn. The toolkit owns the trackers (one per workspace

@@ -682,10 +682,14 @@ func newUndoTracker(root, dataDir string, hidden []string, logf func(string, ...
 		return nil
 	}
 	stateDir := filepath.Join(dataDir, "undo", undoStateKey(root))
-	if git, err := undo.IsGitRepo(context.Background(), root); err == nil && git {
+	if git, err := undo.IsGitRepo(context.Background(), root); err != nil {
+		if logf != nil {
+			logf("[toolkit] undo: git probe failed for %q (%v); using the file backend", root, err)
+		}
+	} else if git {
 		// Hidden paths stay out of the snapshot, so undo can neither restore nor
 		// delete a file the user hid from the model.
-		return undo.NewTracker(root, undo.Options{Retain: 32, Dir: stateDir, Ignore: hidden})
+		return undo.NewTracker(root, undo.Options{Retain: 32, Dir: stateDir, Ignore: undoIgnoreRules(hidden)})
 	}
 	tracker, err := undo.NewFileTracker(root, undo.FileOptions{
 		Dir:      stateDir,
@@ -700,12 +704,33 @@ func newUndoTracker(root, dataDir string, hidden []string, logf func(string, ...
 	return tracker
 }
 
-// dataDirOrEmpty returns the product data directory captured at activation.
-func (g *rebindGroup) dataDirOrEmpty() string {
-	if g == nil {
-		return ""
+// undoIgnoreRules maps the product's hidden globs onto the SDK undo ignore
+// syntax (a no-slash rule matches a path element at any depth; a rule with a
+// slash is a literal prefix). Globs therefore have to be reduced: "**/.env"
+// becomes ".env", "secrets/**" becomes "secrets". A pattern whose basename still
+// contains a wildcard ("*.pem") has no literal equivalent and is dropped — the
+// SDK's no-glob matching cannot express it, so such files are still covered by
+// the tool surface (read/write/grep) but not by undo's snapshot exclusion.
+func undoIgnoreRules(patterns []string) []string {
+	rules := make([]string, 0, len(patterns))
+	seen := make(map[string]bool, len(patterns))
+	for _, pattern := range patterns {
+		rule := strings.ReplaceAll(strings.TrimSpace(pattern), "\\", "/")
+		for strings.HasPrefix(rule, "**/") {
+			rule = strings.TrimPrefix(rule, "**/")
+		}
+		rule = strings.TrimSuffix(rule, "/**")
+		rule = strings.Trim(rule, "/")
+		if rule == "" || rule == "." || strings.ContainsAny(rule, "*?[") {
+			continue
+		}
+		if seen[rule] {
+			continue
+		}
+		seen[rule] = true
+		rules = append(rules, rule)
 	}
-	return g.dataDir
+	return rules
 }
 
 // undoStateKey derives a stable, filesystem-safe directory name for one
@@ -727,20 +752,9 @@ func (g *rebindGroup) BeginTurn(ctx context.Context, root string) (int, error) {
 	}
 	scoped := g.forRootValue(root)
 	if scoped == nil || scoped.undo == nil {
-		return 0, errors.New("undo: no snapshot tracker for this workspace")
+		return 0, contracts.ErrUndoUnavailable
 	}
 	return scoped.undo.BeginContext(ctx)
-}
-
-// undoSourceAdapter exposes the group's trackers to the agent's turn hook.
-type undoSourceAdapter struct{ group *rebindGroup }
-
-// BeginTurn implements contracts.UndoService.
-func (a undoSourceAdapter) BeginTurn(ctx context.Context, root string) (int, error) {
-	if a.group == nil {
-		return 0, errors.New("undo: no toolkit")
-	}
-	return a.group.BeginTurn(ctx, root)
 }
 
 // listJobs implements the toolkit's typed job read model: every job retained by
