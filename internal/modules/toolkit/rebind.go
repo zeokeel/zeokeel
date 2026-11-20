@@ -18,6 +18,7 @@ import (
 	"github.com/zeokeel/zeokeel-rig/tools/image"
 	"github.com/zeokeel/zeokeel-rig/tools/jobs"
 	"github.com/zeokeel/zeokeel-rig/tools/misc"
+	"github.com/zeokeel/zeokeel-rig/tools/patch"
 	"github.com/zeokeel/zeokeel-rig/tools/sandboxgrant"
 	"github.com/zeokeel/zeokeel-rig/tools/sandboxstatus"
 	"github.com/zeokeel/zeokeel-rig/tools/worktree"
@@ -262,6 +263,10 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode san
 	tools = append(tools,
 		sandboxstatus.New(policy, statusOpts...),
 		sandboxgrant.New(policy),
+		// Multi-file atomic patches (SDK): the single-file editors cannot add,
+		// delete and move files in one call. A policy is mandatory — the tool
+		// refuses to run without one.
+		patch.New(root, patch.WithPolicy(policy)),
 	)
 
 	byName := make(map[string]rig.Tool, len(tools))

@@ -8,6 +8,7 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **接线 SDK 的 `apply_patch` 工具**：一次原子地新增/修改/删除/移动多个文件（统一 diff 与应用式补丁两种写法，三级上下文容错，歧义即拒绝）。工具强制要求沙箱策略，因此路径逃逸、只读档与隐藏路径都由同一份策略拦；产品此前只有单文件编辑器。
 - **个人客户端口径：沙箱与审批不再加自家安全规则**（2026-11-20）：
   - **不再有命令名白名单**：`defaultCommands` 删除，默认 `sandbox.WithAnyCommandAllowed(true)`——审批通过的命令直接能跑；`toolkit.Config.CommandAllowlist` 保留为显式收窄（非空才生效）。
   - **shell 语法默认全开**：管道、列表、重定向、前置环境变量不再需要 `allowShellOperators`（该配置保留但被忽略），普通开发命令不再因"operator not allowed"空转。
