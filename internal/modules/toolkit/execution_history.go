@@ -205,7 +205,7 @@ func foldExecutionHistory(events []rig.SessionEvent, sessionID string, live exec
 }
 
 // groupExecutionLiveness resolves live ownership from the retained root-scoped
-// builds: a job is running when its merged job_list row says so, a terminal when
+// builds: a job is running when its manager's snapshot says so, a terminal when
 // its merged terminal_list block is still running.
 type groupExecutionLiveness struct {
 	group *rebindGroup

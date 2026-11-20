@@ -15,7 +15,7 @@ func TestJobsOverlayFooterHintConditional(t *testing.T) {
 	t.Run("running keeps the stop warning", func(t *testing.T) {
 		jobs := &fakeJobs{jobs: []contracts.BackgroundJob{
 			{ID: "job-1", Kind: "bash", Command: "npm test --watch",
-				State: "running", Status: "running", Running: true},
+				State: "running", Running: true},
 		}}
 		h := newAgentSurfaceHarness(t, headerChat("任务会话"), agentServices{jobs: jobs})
 		tester := h.tester()
@@ -27,7 +27,7 @@ func TestJobsOverlayFooterHintConditional(t *testing.T) {
 	t.Run("idle keeps only the close hint", func(t *testing.T) {
 		jobs := &fakeJobs{jobs: []contracts.BackgroundJob{
 			{ID: "job-2", Kind: "bash", Command: "go build ./...",
-				State: "exited", Status: "completed", ExitCode: 0},
+				State: "exited", ExitCode: 0},
 		}}
 		h := newAgentSurfaceHarness(t, headerChat("任务会话"), agentServices{jobs: jobs})
 		tester := h.tester()

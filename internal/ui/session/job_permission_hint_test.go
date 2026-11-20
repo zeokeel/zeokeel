@@ -28,8 +28,8 @@ func (s *staleJobs) StalePermissionJobs() []contracts.BackgroundJob {
 
 func twoRunningJobs() []contracts.BackgroundJob {
 	return []contracts.BackgroundJob{
-		{ID: "job-1", Kind: "bash", Command: "npm test --watch", State: "running", Status: "running", Running: true, Duration: 3 * time.Second},
-		{ID: "job-2", Kind: "bash", Command: "go build ./...", State: "running", Status: "running", Running: true, Duration: 2 * time.Second},
+		{ID: "job-1", Kind: "bash", Command: "npm test --watch", State: "running", Running: true, Duration: 3 * time.Second},
+		{ID: "job-2", Kind: "bash", Command: "go build ./...", State: "running", Running: true, Duration: 2 * time.Second},
 	}
 }
 

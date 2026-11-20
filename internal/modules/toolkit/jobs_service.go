@@ -1,14 +1,15 @@
 package toolkit
 
 // The session header's background-jobs chip (contracts.JobService) is backed by
-// the root-scoped Rig job manager that lives inside each workspace build. Rig
-// v0.13.2 exports the manager's job_* tools but no public job snapshot, so the
-// read model is decoded from the stable text of the job_list tool and kill goes
-// through job_kill (the tool-facing API the model itself uses).
+// the root-scoped Rig job managers that live inside the workspace builds. The
+// read model is each manager's typed Snapshot() (exported since rig v0.25.0; the repo pins v0.26.1), merged across the
+// builds of the caller's workspace root; control goes through job_kill and
+// job_output, the tool-facing API the model itself uses.
 //
-// Every call resolves the build for the workspace root that is current at call
-// time: a workspace switch builds a fresh manager and retires the old one, so
-// caching a manager or one of its tools would freeze the chip on a dead root.
+// Nothing is cached: every call re-resolves the retained builds for the current
+// workspace root. A workspace switch (or a permission/runner change) builds a
+// fresh manager and KEEPS the old build alive for its jobs, which is exactly why
+// the read model merges every build of the root instead of only the newest one.
 
 import (
 	"context"
@@ -76,7 +77,8 @@ type jobLister interface {
 	listJobs() []contracts.BackgroundJob
 }
 
-// Jobs lists the manager's retained jobs, oldest first. The header chip is
+// Jobs lists the retained jobs of every build of the caller's workspace root, in
+// build creation order (each manager's rows stay Started-ascending). The header chip is
 // read-only chrome: a missing manager yields no rows rather than surfacing an
 // error that would fail the session surface.
 func (service *jobService) Jobs() []contracts.BackgroundJob {
@@ -130,7 +132,6 @@ func backgroundJobsFromSnapshots(snapshots []jobs.JobSnapshot, now time.Time) []
 			Kind:     kind,
 			Command:  snap.Command,
 			State:    snap.State,
-			Status:   snap.State,
 			ExitCode: snap.ExitCode,
 			Duration: duration,
 			Running:  snap.State == "running",

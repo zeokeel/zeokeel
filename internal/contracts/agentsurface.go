@@ -114,9 +114,8 @@ type BackgroundJob struct {
 	ID      string
 	Kind    string
 	Command string
-	// Status is the manager's state word (same value as State). It stays for
-	// callers that want one string; the UI reads State/ExitCode instead.
-	Status   string
+	// State is the manager's lifecycle word: running, exited, killed, failed or
+	// timed_out (the same value rig's job_list prints as state=).
 	State    string
 	ExitCode int
 	Duration time.Duration
@@ -148,7 +147,10 @@ var (
 // toolkit module exposes the rig job manager through it (list/output/kill; the
 // tool-facing job_* tools stay the model's API).
 type JobService interface {
-	// Jobs lists the manager's retained jobs, oldest first.
+	// Jobs lists the retained jobs of every build of the caller's workspace
+	// root: build creation order across builds, start-time ascending inside one
+	// manager (a permission/runner change keeps the previous build's jobs
+	// visible and controllable).
 	Jobs() []BackgroundJob
 	// KillJob stops a running job. Unknown or finished ids return an error.
 	KillJob(id string) error

@@ -26,7 +26,7 @@ func runningJobChat() *fakeChat { return headerChat("任务会话") }
 func runningJob() contracts.BackgroundJob {
 	return contracts.BackgroundJob{
 		ID: "job-1", Kind: "bash", Command: "npm test --watch",
-		State: "running", Status: "running", Running: true,
+		State: "running", Running: true,
 		Duration: 3 * time.Second,
 	}
 }
@@ -149,7 +149,7 @@ func jobsPollIntervalForTest() time.Duration { return 500 * time.Millisecond }
 func TestJobOutputPanelTruncationAndInterruptHints(t *testing.T) {
 	killed := contracts.BackgroundJob{
 		ID: "job-2", Kind: "bash", Command: "tail -f /dev/null",
-		State: "killed", Status: "killed", ExitCode: -1, Duration: 4 * time.Second,
+		State: "killed", ExitCode: -1, Duration: 4 * time.Second,
 	}
 	jobs := &fakeJobs{
 		jobs: []contracts.BackgroundJob{killed},
@@ -313,7 +313,6 @@ func TestJobOutputFinalReadAfterJobFinishes(t *testing.T) {
 	// The job finishes while its panel is open.
 	jobs.mu.Lock()
 	jobs.jobs[0].State = "exited"
-	jobs.jobs[0].Status = "completed (exit code: 0)"
 	jobs.jobs[0].Running = false
 	jobs.mu.Unlock()
 	jobs.setOutput("job-1", "final output\n")

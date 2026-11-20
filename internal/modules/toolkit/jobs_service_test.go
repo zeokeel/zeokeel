@@ -328,10 +328,9 @@ func TestModuleProvidesJobService(t *testing.T) {
 	}
 }
 
-// TestJobServiceAgainstRealRigManager is the end-to-end format check: a real
+// TestJobServiceAgainstRealRigManager is the end-to-end check: a real
 // root-scoped build starts a real Rig background job, and the service must list
-// it (proving the parser matches the actual job_list output, not just the
-// fixture) and kill it by id.
+// it from the manager's snapshot (not a fixture) and kill it by id.
 func TestJobServiceAgainstRealRigManager(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("background shell jobs need /bin/sh, which Rig only has on Unix")
@@ -367,8 +366,8 @@ func TestJobServiceAgainstRealRigManager(t *testing.T) {
 	if row.Command != "tail -f /dev/null" {
 		t.Fatalf("real job command = %q, want the full command", row.Command)
 	}
-	if row.Kind != "bash" || row.Status != "running" {
-		t.Fatalf("real job kind/status = %q/%q, want bash/running", row.Kind, row.Status)
+	if row.Kind != "bash" {
+		t.Fatalf("real job kind = %q, want bash", row.Kind)
 	}
 
 	if err := service.KillJob(jobID); err != nil {
@@ -588,13 +587,99 @@ func TestJobServiceJobsMergeBuildsOfTheRoot(t *testing.T) {
 	group.mu.Lock()
 	group.addBuildLocked(group.buildKey(root, sandbox.ModeWorkspaceWrite, nil), current)
 	group.addBuildLocked(group.buildKey(root, sandbox.ModeReadOnly, nil), older)
+	// The same build object under a second, otherwise unused identity must not
+	// grow the merge order (and therefore must not duplicate rows).
+	group.addBuildLocked(group.buildKey(root, sandbox.ModeReadOnly, &fakeSandboxRunner{}), current)
 	group.mu.Unlock()
 
+	group.mu.Lock()
+	order := len(group.order)
+	group.mu.Unlock()
+	if order != 2 {
+		t.Fatalf("merge order = %d builds, want 2 (the same build must not register twice)", order)
+	}
+	rows := newJobService(group).Jobs()
+	if len(rows) != 2 {
+		t.Fatalf("Jobs() rows = %#v, want exactly the two jobs (no duplicates)", rows)
+	}
 	ids := make(map[string]bool)
-	for _, row := range newJobService(group).Jobs() {
+	for _, row := range rows {
 		ids[row.ID] = true
 	}
 	if !ids[currentJob] || !ids[oldJob] {
 		t.Fatalf("Jobs() ids = %v, want both %q and %q", ids, currentJob, oldJob)
+	}
+}
+
+// TestJobKindFromID pins the id-to-kind derivation: the hex suffix is stripped,
+// so hyphenated kinds survive (rig itself spawns pty-send jobs).
+func TestJobKindFromID(t *testing.T) {
+	cases := map[string]string{
+		"bash-a1b2c3d4e5f6":     "bash",
+		"pty-send-a1b2c3d4e5f6": "pty-send",
+		"nohyphen":              "nohyphen",
+		"bash-xyz":              "bash-xyz",
+		"a-b-c-123456":          "a-b-c",
+		"bash-a1b2c3":           "bash",
+		"":                      "",
+	}
+	for id, want := range cases {
+		if got := jobKindFromID(id); got != want {
+			t.Errorf("jobKindFromID(%q) = %q, want %q", id, got, want)
+		}
+	}
+}
+
+// TestJobServiceJobsAfterClose pins the shutdown guard: a late poll must list
+// nothing and must not resurrect a build (which would leak its job manager).
+func TestJobServiceJobsAfterClose(t *testing.T) {
+	root := t.TempDir()
+	manager := jobs.NewManager()
+	t.Cleanup(func() { _ = manager.CloseAll() })
+	// One real running job makes the guard observable: without the closed early
+	// return, this late poll would list it.
+	startTestJob(t, manager, "sleep 30")
+	scoped := &rootScoped{root: root, mode: sandbox.ModeWorkspaceWrite, jobs: manager, done: make(chan struct{})}
+	group := &rebindGroup{rootOf: func() string { return root }, current: scoped}
+	group.mu.Lock()
+	group.addBuildLocked(group.buildKey(root, sandbox.ModeWorkspaceWrite, nil), scoped)
+	group.mu.Unlock()
+	if rows := newJobService(group).Jobs(); len(rows) != 1 {
+		t.Fatalf("Jobs() before close = %#v, want the one running job", rows)
+	}
+
+	// Mark the group closed WITHOUT releasing the build, so the guard itself (not
+	// the cleared maps) is what has to refuse the late poll: a removed early
+	// return would list the retained build's (empty) manager but, more
+	// importantly, a guard that only checked current != nil would still rebuild.
+	group.mu.Lock()
+	group.closed = true
+	group.mu.Unlock()
+
+	service := newJobService(group)
+	if rows := service.Jobs(); len(rows) != 0 {
+		t.Fatalf("Jobs() after close = %#v, want no rows", rows)
+	}
+	group.mu.Lock()
+	builds, current := len(group.builds), group.current
+	group.mu.Unlock()
+	if builds != 1 || current != scoped {
+		t.Fatalf("Jobs() after close changed retained state: builds=%d current=%v", builds, current)
+	}
+
+	// A real close releases everything; a late poll still lists nothing and must
+	// not resurrect a build.
+	group.mu.Lock()
+	group.closed = false
+	group.mu.Unlock()
+	group.close()
+	if rows := service.Jobs(); len(rows) != 0 {
+		t.Fatalf("Jobs() after real close = %#v, want no rows", rows)
+	}
+	group.mu.Lock()
+	builds, current = len(group.builds), group.current
+	group.mu.Unlock()
+	if builds != 0 || current != nil {
+		t.Fatalf("Jobs() after real close rebuilt state: builds=%d current=%v", builds, current)
 	}
 }

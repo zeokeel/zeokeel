@@ -416,10 +416,18 @@ func (s *rootScoped) matches(key rebindKey) bool {
 	return s != nil && s.root == key.root && s.mode == key.mode && s.sandboxOn == key.sandboxOn
 }
 
-// addBuildLocked registers one build in the retained set.
+// addBuildLocked registers one build in the retained set. A build object is
+// registered at most once in the merge order, even if a second identity points
+// at it (the read models dedupe by pointer too, but the order should not grow).
 func (g *rebindGroup) addBuildLocked(key rebindKey, scoped *rootScoped) {
 	if scoped == nil {
 		return
+	}
+	for _, existing := range g.order {
+		if existing == scoped {
+			// Keep the merge order unique; do not move the key between builds.
+			return
+		}
 	}
 	if g.builds == nil {
 		g.builds = make(map[rebindKey]*rootScoped)
@@ -629,8 +637,8 @@ func (g *rebindGroup) stalePermissionJobs() []contracts.BackgroundJob {
 }
 
 // listJobs implements the toolkit's typed job read model: every job retained by
-// any build of the caller's current workspace root, merged oldest build first —
-// the same scope the header chip had when it merged job_list text, so a job
+// any build of the caller's current workspace root, merged in build creation
+// order — the same scope the header chip always had, so a job
 // spawned before a permission/runner rebuild stays visible (and controllable)
 // instead of disappearing from the popover. It never creates a build: a root
 // without one simply has no rows.

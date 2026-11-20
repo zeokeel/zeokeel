@@ -688,12 +688,12 @@ func TestJobsOverlayAndKill(t *testing.T) {
 	jobs := &fakeJobs{jobs: []contracts.BackgroundJob{
 		{
 			ID: "job-1", Kind: "bash", Command: "npm test --watch",
-			State: "running", Status: "running", Running: true,
+			State: "running", Running: true,
 			Duration: 3 * time.Second,
 		},
 		{
 			ID: "job-2", Kind: "bash", Command: "go build ./...",
-			State: "exited", Status: "completed", ExitCode: 0,
+			State: "exited", ExitCode: 0,
 			Duration: 6200 * time.Millisecond,
 		},
 	}}
@@ -725,7 +725,7 @@ func TestJobsOverlayShowsFailureExitCode(t *testing.T) {
 	chat := headerChat("任务会话")
 	jobs := &fakeJobs{jobs: []contracts.BackgroundJob{{
 		ID: "job-9", Command: "make release", State: "failed",
-		Status: "failed", ExitCode: 2, Duration: time.Second,
+		ExitCode: 2, Duration: time.Second,
 	}}}
 	h := newAgentSurfaceHarness(t, chat, agentServices{jobs: jobs})
 	tester := h.tester()
@@ -1487,7 +1487,7 @@ func TestJobsOverlayHistoryFiltersLiveJobs(t *testing.T) {
 	at := time.Date(2026, 11, 15, 9, 0, 0, 0, time.Local)
 	jobs := &fakeJobs{jobs: []contracts.BackgroundJob{{
 		ID: "job-1", Kind: "bash", Command: "npm test --watch",
-		State: "running", Status: "running", Running: true,
+		State: "running", Running: true,
 	}}}
 	records := historyFixture(at)
 	records["sess-1"] = append(records["sess-1"], contracts.ExecutionRecord{
@@ -1512,7 +1512,7 @@ func TestJobsOverlayHistoryFiltersLiveJobs(t *testing.T) {
 func TestJobsOverlayHistoryWithoutServiceKeepsLiveOnly(t *testing.T) {
 	chat := headerChat("任务会话")
 	jobs := &fakeJobs{jobs: []contracts.BackgroundJob{{
-		ID: "job-1", Command: "go build ./...", State: "exited", Status: "completed",
+		ID: "job-1", Command: "go build ./...", State: "exited",
 	}}}
 	h := newAgentSurfaceHarness(t, chat, agentServices{jobs: jobs})
 	tester := h.tester()
