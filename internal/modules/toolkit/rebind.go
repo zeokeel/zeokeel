@@ -212,10 +212,11 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode san
 	}
 	// rig v0.26 owns the read-only semantics: with an OS runner attached a
 	// read-only policy may execute commands (the runner confines every write),
-	// without one the policy itself denies them. The product used to withhold
-	// the runner to force "read-only = no shell"; that was our own extra rule,
-	// and it broke ordinary read-only work (`ls`, `git status`) on hosts that do
-	// have a sandbox. Personal-client stance: use the SDK's rule as-is.
+	// without one the policy itself denies them. Under rig v0.19 the builtin
+	// shell refused commands outright in that mode ("sandbox policy is
+	// read-only"), so ordinary read-only work (`ls`, `git status`) could not run
+	// even on hosts that do have a sandbox. Personal-client stance: use the
+	// SDK's rule as-is and always inject the runner.
 	if runner != nil {
 		builtinOpts = append(builtinOpts, builtin.WithRunner(runner))
 	}

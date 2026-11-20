@@ -66,6 +66,11 @@ func sandboxNoteText(locale contracts.LocaleService, mode string) string {
 			"当前为「所有权限」：命令不经系统沙箱包装，直接以宿主权限运行；切回「工作区修改」或「只读」后恢复包装。",
 			"Under All permissions the OS sandbox does not wrap commands: they run with the host's own permissions; switch back to Workspace-write or Read-only to restore wrapping.")
 	}
+	if mode == contracts.PermissionReadOnly {
+		return localized(locale,
+			"始终启用、不可关闭；可用时 shell 类工具自动放行（命令在系统沙箱内运行，写被限制到策略允许的范围）；本机没有系统沙箱时不执行 shell 命令（工具侧直接拒绝），文件类工具仍只读。",
+			"Always on and not configurable; shell tools are auto-allowed when the OS sandbox is available (commands run inside it and writes are limited to the policy's writable surface); without one, shell commands are refused by the tool and file tools stay read-only.")
+	}
 	return localized(locale,
 		"始终启用、不可关闭；可用时 shell 类工具自动放行（命令在系统沙箱内运行，写被限制到策略允许的范围）；本机没有系统沙箱时命令以宿主权限运行，只受应用层策略与审批约束。",
 		"Always on and not configurable; shell tools are auto-allowed when the OS sandbox is available (commands run inside it and writes are limited to the policy's writable surface); without one, commands run with the host's own permissions under the application-level policy and approval only.")

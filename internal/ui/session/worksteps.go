@@ -108,13 +108,17 @@ func workStepStatus(name string) workStepActivity {
 		return workStepActivity{zh: "正在运行代码", en: "Running code"}
 	case key == "web_search":
 		return workStepActivity{zh: "正在搜索网页", en: "Searching the web"}
+	case key == "search":
+		return workStepActivity{zh: "正在搜索工作区", en: "Searching the workspace"}
+	case key == "apply_patch":
+		return workStepActivity{zh: "正在编辑文件", en: "Editing files"}
 	case key == "web_fetch":
 		return workStepActivity{zh: "正在访问网页", en: "Fetching a web page"}
 	case key == "subagent" || key == "workflow" || key == "ralph" ||
 		strings.HasPrefix(key, "team_"):
 		return workStepActivity{zh: "正在协调子智能体", en: "Coordinating subagents"}
 	case key == "plan_review" || key == "exit_plan_mode" ||
-		key == "update_plan" || key == "todo":
+		key == "update_plan" || key == "todo" || key == "todo_write":
 		return workStepActivity{zh: "正在更新计划", en: "Updating the plan"}
 	case key == "ask_user":
 		return workStepActivity{zh: "等待你的操作", en: "Waiting for you"}

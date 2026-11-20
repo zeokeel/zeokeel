@@ -139,7 +139,7 @@ func TestToolGuidanceLines(t *testing.T) {
 		"bash": true, "pwsh": true,
 		"read_file": true, "list_dir": true, "read_image": true,
 		"write_file": true, "edit_file": true,
-		"glob": true, "grep": true,
+		"glob": true, "grep": true, "search": true, "apply_patch": true,
 		"web_search": true, "web_fetch": true,
 		"subagent": true,
 	}
@@ -154,6 +154,8 @@ func TestToolGuidanceLines(t *testing.T) {
 		"Use edit_file for targeted changes to an existing file",
 		"Use the glob tool — not shell find — to discover files by path pattern.",
 		"Use the grep tool — not shell grep/rg — to search file contents.",
+		"Use search for ranked retrieval",
+		"Use apply_patch to change several files atomically",
 		"Check the [exit code: N] marker on every bash result",
 		"Check the [exit code: N] marker on every pwsh result",
 		"On Windows a process started with Start-Process is detached",
@@ -173,6 +175,7 @@ func TestToolGuidanceLines(t *testing.T) {
 		"every bash result", "every pwsh result",
 		"read_file tool", "list_dir tool", "read_image tool",
 		"Use write_file", "Use edit_file", "Use the glob tool", "Use the grep tool",
+		"Use search for ranked retrieval", "Use apply_patch to change several files atomically",
 		"background job id", "web_search results", "web_fetch returns",
 		"independent delegations",
 	}
