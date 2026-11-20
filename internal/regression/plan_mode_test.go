@@ -21,7 +21,7 @@ import (
 // planWhitelist is the plan-mode allowed set the audit expects (read-only
 // exploration, interaction boxes, planning tools, task-board reads, web read).
 var planWhitelist = []string{
-	"read_file", "list_dir", "glob", "grep",
+	"read_file", "list_dir", "glob", "grep", "search", "sandbox_status",
 	"ask_user", "present", "plan_review", "exit_plan_mode", "goal",
 	"team_task_list", "team_task_get", "memory", "skill", "skills", "web_fetch",
 }
@@ -29,8 +29,8 @@ var planWhitelist = []string{
 // planDeniedTools are representative mutating/exec/orchestration tools the plan
 // mode must reject.
 var planDeniedTools = []string{
-	"write_file", "edit", "bash", "terminal", "spawn_teammate", "team_spawn",
-	"workflow", "ralph", "mcp__srv__echo",
+	"write_file", "edit", "apply_patch", "bash", "terminal", "spawn_teammate",
+	"team_spawn", "workflow", "ralph", "mcp__srv__echo", "request_sandbox_access",
 }
 
 // planScript drives the scripted model: the first request of a turn calls

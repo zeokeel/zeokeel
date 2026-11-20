@@ -3184,9 +3184,11 @@ func (s *service) persistInterruptedTurn(sessionID string, partial contracts.Cha
 // the full raw arguments block, and a 4k-character summary would push the
 // decision buttons off a small window.
 func summarizeToolArguments(name, arguments string) string {
+	summary := strings.Join(strings.Fields(arguments), " ")
 	if strings.EqualFold(strings.TrimSpace(name), "request_sandbox_access") {
 		// This approval permanently widens the writable surface, so the reviewer
-		// must see the directory and the reason, not a JSON blob.
+		// must see the directory and the reason, not a JSON blob. The composed
+		// string still goes through the shared bound below.
 		var args struct {
 			Path   string `json:"path"`
 			Reason string `json:"reason"`
@@ -3195,14 +3197,13 @@ func summarizeToolArguments(name, arguments string) string {
 			path := strings.TrimSpace(args.Path)
 			reason := strings.TrimSpace(args.Reason)
 			if path != "" {
-				if reason == "" {
-					return path
+				summary = path
+				if reason != "" {
+					summary += " — " + reason
 				}
-				return path + " — " + reason
 			}
 		}
 	}
-	summary := strings.Join(strings.Fields(arguments), " ")
 	runes := []rune(summary)
 	if len(runes) <= maxApprovalSummaryRunes {
 		return summary

@@ -7,11 +7,11 @@ import (
 )
 
 // SandboxStatus is the read model of the OS sandbox for settings and
-// diagnostics. The OS sandbox is always on: it is a basic capability of the
-// agent (commands must not run unconfined), so there is no user switch. When
-// the host has no usable runner, Available is false and Runner is nil: commands
-// then run with the host's own permissions under the application-level policy
-// (personal-client best effort).
+// diagnostics. The OS sandbox has no user switch: whenever the host has a
+// usable runner, commands run inside it (writes confined to the policy). When
+// the host has none, Available is false and Runner is nil: commands then run
+// with the host's own permissions under the application-level policy and the
+// approval gate — personal-client best effort, never a startup failure.
 type SandboxStatus struct {
 	// Available reports whether this host has a usable runner.
 	Available bool
@@ -54,8 +54,8 @@ var KeySandbox = cordis.NewServiceKey[SandboxService]("zeokeel/sandbox")
 type ToolPolicy interface {
 	// PolicyFor returns the policy of the tool build that dispatches calls for
 	// root — building/reusing that retained build when needed. Empty root means
-	// the current workspace. nil means no policy is available (nothing was
-	// built), and the gate then asks.
+	// the current workspace. nil means no policy is available (no policy source,
+	// or the group is closed), and the gate then asks.
 	PolicyFor(root string) *rigsandbox.Policy
 }
 

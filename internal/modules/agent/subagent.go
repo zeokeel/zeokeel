@@ -51,7 +51,6 @@ func subagentExcludedTools() []string {
 		subagentToolName,
 		subagentForkToolName,
 		"ralph",
-		"todo",
 		"todo_write",
 	} {
 		add(name)

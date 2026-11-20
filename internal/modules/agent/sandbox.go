@@ -5,9 +5,10 @@ package agent
 // "This shell call is already confined, so the user need not approve it" is the
 // SDK's judgement, not the product's: gate.AllowSandboxedCommands checks the
 // shell surface, that the runner reports real enforcement (a runner that reports
-// none never qualifies), and that the active policy is not danger-full-access.
-// The product only supplies the live runner and the policy the toolkit built for
-// the current workspace — no extra mode rules, no private shell list.
+// none never qualifies), and that the policy is not danger-full-access. The
+// product supplies the live runner, the policy the toolkit built for the run's
+// workspace root, and the shell surface it explicitly wants judged
+// (sandboxShellTools: bash/pwsh).
 
 import (
 	"context"

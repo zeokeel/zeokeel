@@ -12,7 +12,7 @@
     send_message/interrupt_agent）+ **会话头部智能体团队浮层**（成员/状态/最新回答、打开成员会话）
     + **共享任务**（team_task_* 工具，团队浮层只读展示）+ goal 工具/会话 goal chip。
   - **Composer 高级控制**：/goal /plan /memory 原生对话框、**权限模式**（命令 + composer badge（标注「全局」），默认工作区修改：工作区文件读写免审批，
-    OS 沙箱可用时 shell 类工具在沙箱内自动放行、不可用时命令失败；审批与 OS 沙箱是两层，会话级「所有权限」仅放宽审批、OS 沙箱跟随全局；
+    OS 沙箱可用时 shell 类工具在沙箱内自动放行、没有系统沙箱时命令以宿主权限运行（仅应用层策略与审批）；审批与 OS 沙箱是两层，会话级「所有权限」仅放宽审批、OS 沙箱跟随全局；
     只读/工作区可写/所有权限（DSH 同款预设），settings `agent.permission`）、**思考强度**（per-session、按模型系列/自定义模式 +
     toolbar 菜单 + provider `reasoning_effort`）、**@session 引用**（@ 菜单会话分组、token 持久化、
     agent 注入尾部 20 条/≤8000 rune、`session_refs` 事件）。

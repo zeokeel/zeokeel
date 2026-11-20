@@ -64,7 +64,7 @@ func TestSandboxStatusText(t *testing.T) {
 			status:   contracts.SandboxStatus{Available: false, Platform: "linux", Reason: "bwrap not found"},
 			mode:     contracts.PermissionWorkspace,
 			want:     "本机不可用：bwrap not found",
-			wantKind: uikit.StatusError,
+			wantKind: uikit.StatusNeedsAction,
 		},
 		{
 			name:     "unavailable without a reason zh",
@@ -72,7 +72,7 @@ func TestSandboxStatusText(t *testing.T) {
 			status:   contracts.SandboxStatus{Available: false, Platform: "linux"},
 			mode:     contracts.PermissionWorkspace,
 			want:     "本机不可用：未找到可用的平台沙箱",
-			wantKind: uikit.StatusError,
+			wantKind: uikit.StatusNeedsAction,
 		},
 		{
 			name:     "available en",
@@ -88,7 +88,7 @@ func TestSandboxStatusText(t *testing.T) {
 			status:   contracts.SandboxStatus{Available: false, Platform: "windows", Reason: "seatbelt probe failed"},
 			mode:     contracts.PermissionWorkspace,
 			want:     "Unavailable on this host: seatbelt probe failed",
-			wantKind: uikit.StatusError,
+			wantKind: uikit.StatusNeedsAction,
 		},
 		{
 			name:     "full access warns even with a runner zh",

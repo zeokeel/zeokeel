@@ -81,3 +81,19 @@ func TestApprovalSummaryStaysShort(t *testing.T) {
 		t.Fatalf("approval summary runes = %d, want %d plus the ellipsis", len(runes), maxApprovalSummaryRunes+1)
 	}
 }
+
+// TestApprovalSummaryGrantShowsPathAndReason pins the request_sandbox_access
+// summary: the reviewer sees the directory and the reason instead of a JSON
+// blob, and the shared 200-character bound still applies.
+func TestApprovalSummaryGrantShowsPathAndReason(t *testing.T) {
+	got := summarizeToolArguments("request_sandbox_access",
+		`{"path":"/home/me/.cache/tool","reason":"the tool keeps its cache here"}`)
+	if !strings.HasPrefix(got, "/home/me/.cache/tool") || !strings.Contains(got, "the tool keeps its cache here") {
+		t.Fatalf("grant summary = %q, want path and reason", got)
+	}
+	long := summarizeToolArguments("request_sandbox_access",
+		`{"path":"/tmp/x","reason":"`+strings.Repeat("y", 600)+`"}`)
+	if runes := []rune(long); len(runes) != maxApprovalSummaryRunes+1 || !strings.HasSuffix(long, "…") {
+		t.Fatalf("long grant summary runes = %d, want the bound plus the ellipsis", len(runes))
+	}
+}

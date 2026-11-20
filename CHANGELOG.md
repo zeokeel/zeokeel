@@ -17,7 +17,7 @@ All notable changes to ZeoKeel are documented here. The format follows
 - **个人客户端口径：沙箱与审批不再加自家安全规则**（2026-11-20）：
   - **不再有命令名白名单**：`defaultCommands` 删除，默认 `sandbox.WithAnyCommandAllowed(true)`——审批通过的命令直接能跑；`toolkit.Config.CommandAllowlist` 保留为显式收窄（非空才生效）。
   - **shell 语法默认全开**：管道、列表、重定向、前置环境变量不再需要 `allowShellOperators`（该配置保留但被忽略），普通开发命令不再因 "operator not allowed" 空转。
-  - **read-only 完全按 SDK 语义**：挂了 OS runner 时命令照跑（写由 runner 围栏限制，执行侧走 `CheckConfinedCommand`），没有 runner 时由策略拒绝。产品**不再**额外禁止"只读档执行命令"，也不再为这条规则扣住 runner；系统提示词与设置页文案同步为同一口径。
+  - **全局 read-only 预设按 SDK 语义**：挂了 OS runner 时命令照跑（写由 runner 围栏限制，执行侧走 `CheckConfinedCommand`），没有 runner 时由策略拒绝。产品**不再**为这条规则扣住 runner；系统提示词与设置页文案同步为同一口径。**会话/自动化级的只读覆盖仍是硬拒绝**（不弹窗、直接 deny），这是另一层语义，审批矩阵与文档都已写明。
   - **没有 OS 沙箱不再等于全量失败**：`SandboxService.Runner()` 在探测失败时返回 **nil**（个人客户端"尽力而为"），命令以宿主权限运行、只受应用层策略与审批约束；删除 fail-closed `unavailableRunner` 及其测试，启动日志与设置页状态如实说明"没有系统沙箱，仅应用层校验"。
 - **OS 沙箱的 shell 免审批改用 SDK 判定**：先前产品自己判断「runner 可用 + 工具名是 bash/pwsh」就跳过审批（不看策略模式，也不看 runner 自报的强制完整度）。现在把本次调用要用的 runner 与策略交给 `gate.AllowSandboxedCommands`，判据回到 SDK：shell 类工具 + runner 自报强制程度不是 `none` + 策略不是 `danger-full-access`。产品只提供事实（`SandboxService.Runner()` + `contracts.ToolPolicy`，由 toolkit 暴露每个工作区/权限构建出的 `sandbox.Policy`），`never` 档、plan/minimal/creator 白名单与会话级覆盖仍在最前。
 - **只读免审批工具表改由 SDK 派生**：`contracts.ReadOnlyAutoAllowedTools` 由 `gate.SandboxReadOnlyTools` 生成，产品只保留两张显式增量表（取出 `memory`——只读档不得改持久记忆；补入产品自有的 team_task 查询与 LSP 查询），SDK 新增的只读工具自动进入集合；`contracts/permissions_sdk_test.go` 钉住派生与增量。

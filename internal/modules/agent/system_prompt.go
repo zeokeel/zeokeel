@@ -199,6 +199,12 @@ func toolGuidanceLines(names map[string]bool) []string {
 	if names["grep"] {
 		add("Use the grep tool — not shell grep/rg — to search file contents. Use read_file on a matched file when you need surrounding context.")
 	}
+	if names["search"] {
+		add("Use search for ranked retrieval (BM25 content matches and fuzzy file names) when glob/grep would need several guesses; it searches the workspace root, not the working directory you last selected.")
+	}
+	if names["apply_patch"] {
+		add("Use apply_patch to change several files atomically (add/update/delete/move) — one call equals all-or-nothing. Its relative paths resolve against the workspace root, not the last working directory; the patch body must use the *** Begin Patch / *** End Patch format.")
+	}
 	if names["bash"] || names["pwsh"] || hasToolPrefix(names, "job_") {
 		add("Track every background job id you start (bash/pwsh run_in_background for long-running commands). You are notified in-session when a job finishes — do not busy-poll or sleep on one; keep working on independent steps and do not duplicate a running job's work. Before giving your final answer, collect every still-relevant job with job_output (set wait: true only when you are genuinely blocked on it), and job_kill jobs that stopped mattering. A server job never finishes on its own: start one instance, verify it with job_output, and keep it or job_kill it — never leave several copies running.")
 	}

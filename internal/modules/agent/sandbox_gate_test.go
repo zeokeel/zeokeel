@@ -5,10 +5,10 @@ package agent
 // The judgement itself belongs to the SDK: gate.AllowSandboxedCommands decides
 // "this shell call is already confined" (shell family + a runner that reports
 // non-none enforcement + a policy that is not danger-full-access). The product
-// supplies the live runner and the policy the toolkit built for the current
-// workspace, and keeps its own vetoes in front of it (plan/chat whitelists,
-// session permission overrides, the deny-all "never" policy, and the read-only
-// preset's "no commands at all" rule).
+// supplies the live runner, the policy the toolkit built for the run's
+// workspace root, and the shell surface it wants judged (bash/pwsh). It keeps its
+// own vetoes in front of it: plan/chat whitelists, session permission overrides
+// and the deny-all "never" policy.
 //
 // Precedence is part of the contract: the plan/chat whitelists and the
 // per-session read-only override keep their veto even when the OS sandbox is
@@ -202,7 +202,7 @@ func TestSandboxReadOnlyPolicyAutoAllowsShellWithRunner(t *testing.T) {
 	approvals := &recordingApprovals{mode: contracts.PermissionReadOnly, decision: contracts.ApprovalDeny}
 	svc, sessionID := newSandboxGateService(t,
 		fakeSandbox{available: true, runner: reportingRunner{enforcement: rigsandbox.EnforcementFull}},
-		fakePolicySource{policy: sandboxPolicy(t, rigsandbox.ModeWorkspaceWrite)},
+		fakePolicySource{policy: sandboxPolicy(t, rigsandbox.ModeReadOnly)},
 		map[string]string{contracts.SettingAgentPermission: contracts.PermissionReadOnly},
 		approvals)
 
@@ -222,7 +222,7 @@ func TestSandboxReadOnlyPolicyAutoAllowsShellWithRunner(t *testing.T) {
 func TestSandboxReadOnlyWithoutRunnerAsks(t *testing.T) {
 	approvals := &recordingApprovals{mode: contracts.PermissionReadOnly, decision: contracts.ApprovalDeny}
 	svc, sessionID := newSandboxGateService(t, nil,
-		fakePolicySource{policy: sandboxPolicy(t, rigsandbox.ModeWorkspaceWrite)},
+		fakePolicySource{policy: sandboxPolicy(t, rigsandbox.ModeReadOnly)},
 		map[string]string{contracts.SettingAgentPermission: contracts.PermissionReadOnly},
 		approvals)
 	if got := gateDecision(t, svc, sessionID, "bash"); got != rig.DecisionDeny {

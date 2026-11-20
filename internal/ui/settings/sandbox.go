@@ -6,8 +6,9 @@ package settings
 // runner passes commands through unconfined, so the status face must say so as
 // a warning instead of claiming protection (2026-11 audit RG-02). Under
 // workspace/read-only an available runner enforces file effects (and lets the
-// agent gate auto-allow shell tools); a host without a usable runner fails
-// commands closed.
+// agent gate auto-allow shell tools); a host without a usable runner runs
+// commands with the host's own permissions under the application-level policy
+// (personal-client best effort, shown as a needs-action row).
 //
 // The copy is the only full statement of the sandbox facts (A5 §3.1: one
 // concept, one wording) — the behavior page's permission block explains the
@@ -31,7 +32,8 @@ import (
 //     ("完全访问：系统沙箱不包装命令"), never the green "已启用" success that would
 //     imply protection that is not there;
 //   - workspace/read-only with a usable runner: success ("已启用");
-//   - no usable runner: failure (the host fails commands closed).
+//   - no usable runner: needs-action (no OS fence; commands run with the host's
+//     own permissions under the application-level policy).
 func sandboxStatusText(locale contracts.LocaleService, status contracts.SandboxStatus, mode string) (string, uikit.StatusKind) {
 	platform := strings.TrimSpace(status.Platform)
 	if platform == "" {
@@ -51,7 +53,7 @@ func sandboxStatusText(locale contracts.LocaleService, status contracts.SandboxS
 	if reason == "" {
 		reason = localized(locale, "未找到可用的平台沙箱", "no usable platform sandbox found")
 	}
-	return localized(locale, "本机不可用：", "Unavailable on this host: ") + reason, uikit.StatusError
+	return localized(locale, "本机不可用：", "Unavailable on this host: ") + reason, uikit.StatusNeedsAction
 }
 
 // sandboxNoteText is the one sentence under the status row, conditioned on the
