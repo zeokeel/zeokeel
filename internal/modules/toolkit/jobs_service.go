@@ -2,9 +2,10 @@ package toolkit
 
 // The session header's background-jobs chip (contracts.JobService) is backed by
 // the root-scoped Rig job managers that live inside the workspace builds. The
-// read model is each manager's typed Snapshot() (exported since rig v0.25.0; the repo pins v0.26.1), merged across the
-// builds of the caller's workspace root; control goes through job_kill and
-// job_output, the tool-facing API the model itself uses.
+// read model is each manager's typed Snapshot() (exported since rig v0.25.0;
+// this repo pins v0.26.1), merged across the builds of the caller's workspace
+// root; control goes through job_kill and job_output, the tool-facing API the
+// model itself uses.
 //
 // Nothing is cached: every call re-resolves the retained builds for the current
 // workspace root. A workspace switch (or a permission/runner change) builds a

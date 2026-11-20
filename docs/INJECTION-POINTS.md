@@ -123,7 +123,7 @@ go test -race ./internal/ui/... ./internal/uikit/... -count=1
 | 方向 | 名称 | 提供方 | 消费方 | 说明 |
 | --- | --- | --- | --- | --- |
 | Service | `contracts.KeyChildAgents`（`zeokeel/childagents`） | `internal/modules/agent`（`childagents.go`） | `internal/ui/session` | 统一子代理/团队成员的只读会话视图：`ChildAgents(parentSessionID)` / `ChildAgent(id)` / `SendChildAgent`（一次性只读，队友可继续） |
-| Service | `contracts.KeyJobs`（`zeokeel/jobs`） | `internal/modules/toolkit`（`jobs_service.go`） | `internal/ui/session` | 后台任务 chip：`Jobs()`（status/command/duration/exit/state）/`KillJob(id)`；每帧解析当前 workspace 的 rig job manager |
+| Service | `contracts.KeyJobs`（`zeokeel/jobs`） | `internal/modules/toolkit`（`jobs_service.go`） | `internal/ui/session` | 后台任务 chip：`Jobs()`（逐 build 的 `jobs.Manager.Snapshot()`：kind/command/state/exit/duration/running）/`KillJob(id)`/`JobOutput(id)`；读取当前 workspace 根下所有 build 的任务（不解析文本） |
 | Service | `contracts.KeyFilePreview`（`zeokeel/filepreview`） | `internal/ui/rightpanel` | `internal/ui/session` | 生成文件卡与文件引用打开右栏标签：`PreviewFile(path)` / `OpenFiles()` / `OpenTerminal()` / `OpenNative(path)`（`internal/lib/openpath`） |
 | 命令 | `uiroot.open-inspector` | `internal/uiroot` | 右栏/文件卡 | 幂等展开右侧栏（与 `uiroot.toggle-inspector` 区分） |
 | 命令 | `rightpanel.files.open` | `internal/ui/rightpanel` | 宿主快捷键 | `Cmd/Ctrl+Alt+P` 文件页（guide 卡片标注）；`rightpanel.terminal.open` 与侧边栏终端已于 0.2.41 删除；旧 `rightpanel.pane.*`、`rightpanel.team.open`、`rightpanel.tasks.open` 已删除 |
