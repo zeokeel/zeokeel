@@ -689,7 +689,7 @@ Agent 客户端的界面不是一次性输出：用户对界面的操作要作�
 
 **只读免审批工具表以 SDK 为唯一来源**：`contracts.ReadOnlyAutoAllowedTools` 由 `gate.SandboxReadOnlyTools` 派生（SDK 的判据是「是否触及用户的文件/进程/网络」），产品只保留两张显式增量表——`productReadOnlyRemovals`（当前仅 `memory`：只读档不得改持久记忆）与 `productReadOnlyAdditions`（产品自有只读工具：skills/todo/team_task 查询/LSP 查询）。`contracts/permissions_sdk_test.go` 钉住「SDK 新增工具会自动进入只读集，除非显式列入 removals」，两处白名单不再可能漂移。
 
-**`undo`（2026-11-21 接入）**：每次 run 开始时 harness 为该 run 工作区拍快照（git 隐藏提交；非 git 用 `<root>/.zeokeel/undo` 文件后端），模型可用 `undo` 回退本轮或指定轮次/单文件。**只读构建不注册 `undo`**（它通过 tracker 直接写盘，不经过 `sandbox.Policy`，注册就等于给只读写盘入口）；工作区预设自动放行（与 write_file/edit_file/apply_patch 同档），plan/minimal/creator 不包含它。快照失败只记日志，不影响 run；同一 root 的多次 run 共用该 build 的 tracker（回合号持久化在状态目录，重启后继续递增）。
+**`undo`（2026-11-21 接入）**：每次 run 开始时 harness 为该 run 工作区拍快照，模型可用 `undo` 回退本轮或指定轮次/单文件（`dry_run` 预览）。快照存储放在**产品数据目录**（`<dataDir>/undo/<root 哈希>`），不在工作区内——工作区内的镜像会被文件工具读到隐藏路径、让 glob/grep/search 结果翻倍，也可能被改写后由 undo 写回真文件。后端判定用 `undo.IsGitRepo`（git worktree/submodule 的 `.git` 是文件，仍走隐藏提交）；非 git 用文件后端（每回合复制工作区，保留 16 回合，个人客户端可接受）。**只读构建不建 tracker、不注册 `undo`**（它通过 tracker 直接写盘，不经过 `sandbox.Policy`）；工作区预设自动放行（与 write_file/edit_file/apply_patch 同档），plan/minimal/creator 不包含它；隐藏路径不进快照（undo 不会恢复/删除被隐藏的文件）。快照失败只记日志，不影响 run；**已知限制**：同一工作区根下多个会话/运行共用一个 tracker，`undo` 无参数时回退最近一个回合（可能是另一个会话的），需要精确回退时显式传 `turn`；文件后端不设总量上限（工作区大小 × 保留回合数）。
 
 **新增 SDK 工具的两个已知边界（2026-11-21 审计结论，选择显式记录而不是加适配层）**：
 - `apply_patch` 与 `search` 的相对路径**以工具根为基准**，不跟随 `working_directory`（SDK 的这两个构造器没有 cwd 选项；其余文件工具都跟随）。模型先 `working_directory("docs")` 再 `apply_patch` 相对路径时落点是 `<root>/x` 而不是 `<root>/docs/x`——这是 SDK 语义，不是越权；需要按会话 cwd 操作时用绝对路径或先 `read_file` 确认。

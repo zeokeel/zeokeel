@@ -2,9 +2,10 @@ package toolkit
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -203,6 +204,12 @@ func buildRootScoped(cfg Config, root string, timeout time.Duration, mode sandbo
 // buildRootScopedFor is buildRootScoped with the platform and PATH probe
 // injectable for tests.
 func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode sandbox.Mode, runner sandbox.Runner, goos string, lookPath func(string) (string, error)) *rootScoped {
+	return buildRootScopedWith(cfg, root, timeout, mode, runner, "", nil, goos, lookPath)
+}
+
+// buildRootScopedWith is the real builder: dataDir is where the undo snapshot
+// store lives (outside the workspace); empty disables undo.
+func buildRootScopedWith(cfg Config, root string, timeout time.Duration, mode sandbox.Mode, runner sandbox.Runner, dataDir string, logf func(string, ...any), goos string, lookPath func(string) (string, error)) *rootScoped {
 	policy := newPolicy(cfg, root, timeout, mode)
 	// The runner is injected into every command-executing surface: the built-in
 	// bash/pwsh tools, the background job manager and the worktree git calls. A
@@ -291,13 +298,15 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode san
 
 	// Undo: snapshot the workspace at the start of each turn so `undo` can
 	// revert it. A git workspace uses the hidden-commit backend (cheap, exact);
-	// anything else copies files into <root>/.zeokeel/undo.
-	tracker := newUndoTracker(cfg, root)
-	// A read-only build must not ship a tool that writes the workspace back:
-	// undo reverts through the tracker, not through the sandbox policy, so the
-	// promise "read-only never modifies files" would otherwise be one call away
-	// from being broken.
-	if tracker != nil && !policy.ReadOnly() {
+	// anything else copies files into the data directory. A read-only build has
+	// no tracker at all: undo reverts through the tracker, not through the
+	// sandbox policy, so any tracker there would silently write the workspace
+	// (and already creates its state directory) behind the read-only promise.
+	var tracker *undo.Tracker
+	if !policy.ReadOnly() {
+		tracker = newUndoTracker(root, dataDir, hiddenPatterns(cfg.DeniedGlobs), logf)
+	}
+	if tracker != nil {
 		tools = append(tools, undo.New(tracker))
 	}
 
@@ -352,6 +361,9 @@ type rebindGroup struct {
 	// workspace-write mode with no runner injection.
 	sandboxOf func() (sandbox.Mode, sandbox.Runner)
 	logf      func(string, ...any)
+	// dataDir is the product data directory (undo snapshot store, outside the
+	// workspace). Empty = undo unavailable.
+	dataDir string
 
 	mu      sync.Mutex
 	closed  bool
@@ -472,7 +484,7 @@ func (g *rebindGroup) initial() *rootScoped {
 	mode, runner := g.sandboxState()
 	root := strings.TrimSpace(g.rootOf())
 	key := g.buildKey(root, mode, runner)
-	scoped := buildRootScoped(g.cfg, root, g.timeout, mode, runner)
+	scoped := buildRootScopedWith(g.cfg, root, g.timeout, mode, runner, g.dataDir, g.logf, runtime.GOOS, exec.LookPath)
 	g.mu.Lock()
 	g.current = scoped
 	g.addBuildLocked(key, scoped)
@@ -498,7 +510,7 @@ func (g *rebindGroup) forRoot() *rootScoped {
 		g.mu.Unlock()
 		return retained
 	}
-	next := buildRootScoped(g.cfg, root, g.timeout, mode, runner)
+	next := buildRootScopedWith(g.cfg, root, g.timeout, mode, runner, g.dataDir, g.logf, runtime.GOOS, exec.LookPath)
 	g.current = next
 	g.addBuildLocked(key, next)
 	g.mu.Unlock()
@@ -527,7 +539,7 @@ func (g *rebindGroup) forRootValue(root string) *rootScoped {
 		g.mu.Unlock()
 		return retained
 	}
-	scoped := buildRootScoped(g.cfg, root, g.timeout, mode, runner)
+	scoped := buildRootScopedWith(g.cfg, root, g.timeout, mode, runner, g.dataDir, g.logf, runtime.GOOS, exec.LookPath)
 	g.addBuildLocked(key, scoped)
 	g.mu.Unlock()
 	if g.logf != nil {
@@ -657,49 +669,78 @@ func (g *rebindGroup) stalePermissionJobs() []contracts.BackgroundJob {
 }
 
 // newUndoTracker builds the snapshot tracker for one workspace root: the
-// hidden-commit git backend when the root is a git worktree, otherwise the file
-// backend under <root>/.zeokeel/undo. nil means undo is unavailable.
-func newUndoTracker(cfg Config, root string) *undo.Tracker {
+// hidden-commit git backend when the root is a git worktree (linked worktrees
+// and submodules report .git as a FILE, so ask git, not the filesystem shape),
+// otherwise the file backend. The snapshot store lives OUTSIDE the workspace
+// (dataDir/undo/<root hash>): a mirror inside the root was readable by the model,
+// doubled every glob/grep/search result and could be edited so that a later undo
+// wrote the tampered copy back. nil means undo is unavailable.
+func newUndoTracker(root, dataDir string, hidden []string, logf func(string, ...any)) *undo.Tracker {
 	root = strings.TrimSpace(root)
-	if root == "" {
+	dataDir = strings.TrimSpace(dataDir)
+	if root == "" || dataDir == "" {
 		return nil
 	}
-	if info, err := os.Stat(filepath.Join(root, ".git")); err == nil && info.IsDir() {
-		return undo.NewTracker(root, undo.Options{Retain: 32})
+	stateDir := filepath.Join(dataDir, "undo", undoStateKey(root))
+	if git, err := undo.IsGitRepo(context.Background(), root); err == nil && git {
+		// Hidden paths stay out of the snapshot, so undo can neither restore nor
+		// delete a file the user hid from the model.
+		return undo.NewTracker(root, undo.Options{Retain: 32, Dir: stateDir, Ignore: hidden})
 	}
 	tracker, err := undo.NewFileTracker(root, undo.FileOptions{
-		Dir:      filepath.Join(root, ".zeokeel", "undo"),
+		Dir:      stateDir,
 		MaxTurns: 16,
 	})
 	if err != nil {
+		if logf != nil {
+			logf("[toolkit] undo unavailable for %q: %v", root, err)
+		}
 		return nil
 	}
 	return tracker
 }
 
+// dataDirOrEmpty returns the product data directory captured at activation.
+func (g *rebindGroup) dataDirOrEmpty() string {
+	if g == nil {
+		return ""
+	}
+	return g.dataDir
+}
+
+// undoStateKey derives a stable, filesystem-safe directory name for one
+// workspace root's snapshot store.
+func undoStateKey(root string) string {
+	sum := sha256.Sum256([]byte(filepath.Clean(root)))
+	return hex.EncodeToString(sum[:8])
+}
+
 // BeginTurn implements contracts.UndoService: snapshot the run's workspace
 // before its turn starts. It resolves (and retains) the build for that root, so
 // the snapshot belongs to the same policy identity the tools will use.
-func (g *rebindGroup) BeginTurn(root string) (int, error) {
+func (g *rebindGroup) BeginTurn(ctx context.Context, root string) (int, error) {
 	if g == nil {
 		return 0, errors.New("undo: no toolkit")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	scoped := g.forRootValue(root)
 	if scoped == nil || scoped.undo == nil {
 		return 0, errors.New("undo: no snapshot tracker for this workspace")
 	}
-	return scoped.undo.BeginContext(context.Background())
+	return scoped.undo.BeginContext(ctx)
 }
 
 // undoSourceAdapter exposes the group's trackers to the agent's turn hook.
 type undoSourceAdapter struct{ group *rebindGroup }
 
 // BeginTurn implements contracts.UndoService.
-func (a undoSourceAdapter) BeginTurn(root string) (int, error) {
+func (a undoSourceAdapter) BeginTurn(ctx context.Context, root string) (int, error) {
 	if a.group == nil {
 		return 0, errors.New("undo: no toolkit")
 	}
-	return a.group.BeginTurn(root)
+	return a.group.BeginTurn(ctx, root)
 }
 
 // listJobs implements the toolkit's typed job read model: every job retained by

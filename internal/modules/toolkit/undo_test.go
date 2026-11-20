@@ -23,6 +23,12 @@ func TestUndoToolRevertsTheTurnSnapshot(t *testing.T) {
 	if scoped.undo == nil {
 		t.Fatal("workspace build has no undo tracker")
 	}
+	// The snapshot store must live outside the workspace: a mirror inside it is
+	// readable through the file tools (hidden patterns are root-anchored) and
+	// would double every glob/grep/search result.
+	if _, err := os.Stat(filepath.Join(root, ".zeokeel", "undo")); err == nil {
+		t.Fatal("undo snapshot store was created inside the workspace")
+	}
 	if _, err := scoped.undo.Begin(); err != nil {
 		t.Fatalf("undo snapshot: %v", err)
 	}
@@ -48,5 +54,11 @@ func TestUndoToolAbsentInReadOnlyBuild(t *testing.T) {
 	scoped := newSandboxBuild(t, Config{}, root, sandbox.ModeReadOnly, nil)
 	if _, ok := scoped.byName["undo"]; ok {
 		t.Fatal("read-only build registered the undo tool")
+	}
+	if scoped.undo != nil {
+		t.Fatal("read-only build created an undo tracker (it would snapshot into the workspace)")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".zeokeel")); err == nil {
+		t.Fatal("read-only build created workspace state for undo")
 	}
 }

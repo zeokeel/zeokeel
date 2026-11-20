@@ -156,7 +156,7 @@ func TestToolGuidanceLines(t *testing.T) {
 		"Use the grep tool — not shell grep/rg — to search file contents.",
 		"Use search for ranked retrieval",
 		"Use apply_patch to change several files atomically",
-		"Use undo to revert the file changes of the current turn",
+		"Use undo only when the user explicitly asks to revert changes",
 		"Check the [exit code: N] marker on every bash result",
 		"Check the [exit code: N] marker on every pwsh result",
 		"On Windows a process started with Start-Process is detached",
@@ -177,7 +177,7 @@ func TestToolGuidanceLines(t *testing.T) {
 		"read_file tool", "list_dir tool", "read_image tool",
 		"Use write_file", "Use edit_file", "Use the glob tool", "Use the grep tool",
 		"Use search for ranked retrieval", "Use apply_patch to change several files atomically",
-		"Use undo to revert the file changes of the current turn",
+		"Use undo only when the user explicitly asks to revert changes",
 		"background job id", "web_search results", "web_fetch returns",
 		"independent delegations",
 	}

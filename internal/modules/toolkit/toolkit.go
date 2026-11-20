@@ -147,6 +147,9 @@ func Module() *module.Descriptor[Config] {
 		// tools without a filesystem root are registered once below.
 		rootOf := workspaceRootSource(ctx, cfg.Root)
 		group := newRebindGroup(policyCfg, timeout, rootOf, sandboxOf, logf)
+		if dataDir, ok := ctx.Get(contracts.KeyDataDir); ok {
+			group.dataDir = strings.TrimSpace(dataDir)
+		}
 		// The agent gate asks the SDK whether a shell call is already confined; that
 		// needs the live policy, which this module owns (one per root/mode build).
 		if _, err := ctx.Provide(contracts.KeyToolPolicy, contracts.ToolPolicy(policySourceAdapter{group: group})); err != nil {

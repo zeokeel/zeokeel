@@ -206,7 +206,7 @@ func toolGuidanceLines(names map[string]bool) []string {
 		add("Use apply_patch to change several files atomically (add/update/delete/move) — one call equals all-or-nothing. Its relative paths resolve against the workspace root, not the last working directory; the patch body must use the *** Begin Patch / *** End Patch format.")
 	}
 	if names["undo"] {
-		add("Use undo to revert the file changes of the current turn (or an earlier one) when you or the user conclude an edit was wrong; pass dry_run to preview, and path to revert only one file.")
+		add("Use undo only when the user explicitly asks to revert changes: it restores the workspace to a turn snapshot (pass dry_run to preview, path to revert one file). Never undo on your own initiative — it can delete files the turn created.")
 	}
 	if names["bash"] || names["pwsh"] || hasToolPrefix(names, "job_") {
 		add("Track every background job id you start (bash/pwsh run_in_background for long-running commands). You are notified in-session when a job finishes — do not busy-poll or sleep on one; keep working on independent steps and do not duplicate a running job's work. Before giving your final answer, collect every still-relevant job with job_output (set wait: true only when you are genuinely blocked on it), and job_kill jobs that stopped mattering. A server job never finishes on its own: start one instance, verify it with job_output, and keep it or job_kill it — never leave several copies running.")

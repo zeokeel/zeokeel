@@ -116,7 +116,9 @@ func (s *fakeSandboxService) setRunner(runner rigsandbox.Runner) {
 // platform/PATH seam (no pwsh on the fake PATH, so the shell surface is bash).
 func newSandboxBuild(t *testing.T, cfg Config, root string, mode rigsandbox.Mode, runner rigsandbox.Runner) *rootScoped {
 	t.Helper()
-	scoped := buildRootScopedFor(cfg, root, 5*time.Second, mode, runner, "linux",
+	// The undo snapshot store lives in the product data directory; tests give it
+	// a temp dir so a workspace build has a tracker without touching the repo.
+	scoped := buildRootScopedWith(cfg, root, 5*time.Second, mode, runner, t.TempDir(), nil, "linux",
 		func(string) (string, error) { return "", os.ErrNotExist })
 	t.Cleanup(scoped.close)
 	return scoped

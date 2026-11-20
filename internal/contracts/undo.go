@@ -1,6 +1,10 @@
 package contracts
 
-import cordis "github.com/zeokeel/zeokeel-kernel"
+import (
+	"context"
+
+	cordis "github.com/zeokeel/zeokeel-kernel"
+)
 
 // UndoService snapshots the run's workspace before a turn so the model's `undo`
 // tool can revert that turn. The toolkit owns the trackers (one per workspace
@@ -10,8 +14,9 @@ import cordis "github.com/zeokeel/zeokeel-kernel"
 // must not fail the run — undo simply reports that nothing can be reverted.
 type UndoService interface {
 	// BeginTurn takes a snapshot for the turn about to run in root (empty root =
-	// the current workspace) and returns the turn number on success.
-	BeginTurn(root string) (int, error)
+	// the current workspace) and returns the turn number on success. It must
+	// respect ctx: a cancelled run must not keep copying files.
+	BeginTurn(ctx context.Context, root string) (int, error)
 }
 
 // KeyUndo is the toolkit-provided undo snapshot service (optional: a stripped

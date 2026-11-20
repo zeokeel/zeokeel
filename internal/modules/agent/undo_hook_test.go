@@ -18,7 +18,7 @@ type fakeUndo struct {
 	err   error
 }
 
-func (f *fakeUndo) BeginTurn(root string) (int, error) {
+func (f *fakeUndo) BeginTurn(_ context.Context, root string) (int, error) {
 	f.roots = append(f.roots, root)
 	if f.err != nil {
 		return 0, f.err
