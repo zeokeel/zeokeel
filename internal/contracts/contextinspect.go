@@ -198,6 +198,9 @@ type ContextEvent struct {
 	At time.Time
 	// Detail is a short human-readable description.
 	Detail string
+	// Ref is the store handle of a spilled tool result (empty with the file
+	// backend, whose location is Path).
+	Ref string
 	// Before and After are the context token counts around a compaction (0 when
 	// not applicable).
 	Before int

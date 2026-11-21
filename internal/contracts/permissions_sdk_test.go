@@ -90,6 +90,15 @@ func TestWorkspaceWriteToolsAutoAllowed(t *testing.T) {
 	}
 }
 
+// TestSpilledResultsStayReadable pins the read-back capability in both presets:
+// if the SDK list ever drops spill_read, spilled results would become unreadable
+// in the default preset and CI must notice.
+func TestSpilledResultsStayReadable(t *testing.T) {
+	if !ReadOnlyAutoAllowed("spill_read") || !WorkspaceAutoAllowed("spill_read") {
+		t.Fatal("spill_read must be auto-allowed in both presets (oversized results would be unreadable)")
+	}
+}
+
 // TestSandboxAffordancesApproval pins the sandbox tools' approval posture:
 // sandbox_status is read-only and auto-allowed; request_sandbox_access widens
 // the writable surface and must never be auto-allowed (the human decides).

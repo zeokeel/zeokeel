@@ -410,6 +410,7 @@ func (s *service) applyContextEvent(sessionID, eventType string, payload []byte,
 			Kind:   contracts.ContextEventSpill,
 			At:     now,
 			Detail: strings.TrimSpace(decoded.Tool),
+			Ref:    decoded.Ref,
 			Path:   decoded.Path,
 			Bytes:  decoded.Bytes,
 		})

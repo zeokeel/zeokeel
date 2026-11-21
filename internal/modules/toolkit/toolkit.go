@@ -155,10 +155,14 @@ func Module() *module.Descriptor[Config] {
 		// ones the model can read back.
 		if store, err := newSpillStore(group.dataDir); err == nil {
 			group.spillStore = store
-			if _, provideErr := ctx.Provide(contracts.KeySpillStore, store); provideErr != nil && logf != nil {
-				// Optional capability: a failed provide degrades to the file
-				// backend instead of failing the whole toolkit.
-				logf("[toolkit] spill store not provided: %v", provideErr)
+			if _, provideErr := ctx.Provide(contracts.KeySpillStore, store); provideErr != nil {
+				// Optional capability: a failed provide degrades BOTH sides to the
+				// file backend (the tools must not read a store the agent cannot
+				// see) instead of failing the whole toolkit.
+				group.spillStore = nil
+				if logf != nil {
+					logf("[toolkit] spill store not provided: %v", provideErr)
+				}
 			}
 		} else if logf != nil {
 			logf("[toolkit] spill store unavailable: %v", err)

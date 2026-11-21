@@ -46,6 +46,7 @@ func TestGateChatModePolicies(t *testing.T) {
 			name:     "minimal allows read-only exploration",
 			chatMode: contracts.ChatModeMinimal,
 			allows: []string{"read_file", "list_dir", "glob", "grep", "memory", "skill", "skills", "web_fetch",
+				"spill_read", "search", "sandbox_status",
 				"ask_user", "present", "goal", "plan_review", "exit_plan_mode", "team_task_list", "team_task_get"},
 			denies: []string{"write_file", "edit_file", "bash", "pwsh", "job_run", "team_task_create", "unknown_tool"},
 		},
@@ -58,7 +59,7 @@ func TestGateChatModePolicies(t *testing.T) {
 		{
 			name:     "creator allows persona/planning helpers only",
 			chatMode: contracts.ChatModeCreator,
-			allows:   []string{"ask_user", "present", "goal", "plan_review", "exit_plan_mode", "memory", "skill", "skills"},
+			allows:   []string{"ask_user", "present", "goal", "plan_review", "exit_plan_mode", "memory", "skill", "skills", "spill_read"},
 			denies:   []string{"read_file", "list_dir", "glob", "grep", "write_file", "bash", "web_fetch", "team_task_list", "unknown_tool"},
 		},
 		{

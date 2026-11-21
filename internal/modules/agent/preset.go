@@ -223,7 +223,8 @@ func (s *service) enabledRegistryTools() []rig.Tool {
 	}
 	filtered := make([]rig.Tool, 0, len(tools))
 	for _, tool := range tools {
-		if disabled[strings.TrimSpace(tool.Name())] {
+		name := strings.TrimSpace(tool.Name())
+		if disabled[name] && !runtimeCapabilityTools[name] {
 			continue
 		}
 		filtered = append(filtered, tool)

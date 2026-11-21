@@ -12,7 +12,8 @@ package agent
 // handing over the shared store. Writing, naming, summarizing and prune-to-MaxFiles
 // are Rig's rig.SpillPolicy (rig/context.go, applied in rig/agent/agent.go
 // before the tool message is recorded); the policy is installed on the run's
-// AgentSpec in agent.go. With a store the model gets a handle plus the toolkit's
+// AgentSpec in agent.go. The one prune the product still runs itself is the
+// legacy workspace directory, which no Rig version owns any more. With a store the model gets a handle plus the toolkit's
 // spill_read entry instead of a path. The tombstone guard stays outermost on the
 // History wrapper (see guardedHistory).
 

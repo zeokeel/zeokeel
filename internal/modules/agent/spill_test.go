@@ -430,3 +430,30 @@ func TestSpillPolicyFallsBackToFiles(t *testing.T) {
 		t.Fatalf("spill policy = %+v, want the file backend directory", policy)
 	}
 }
+
+// TestSpillStoreBranchStillPrunesTheLegacyDirectory pins the one prune the
+// product still runs itself after switching to the store.
+func TestSpillStoreBranchStillPrunesTheLegacyDirectory(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, filepath.FromSlash(spillDirName))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for index := 0; index < spillKeepFiles+5; index++ {
+		name := filepath.Join(dir, fmt.Sprintf("legacy-%03d.txt", index))
+		if err := os.WriteFile(name, []byte("x"), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	svc := newService(Config{}, nil, nil, &fakeLogger{}, newFakeStore(), nil)
+	svc.spillStore = &fakeSpillStore{}
+	svc.spillPolicy(context.Background(), root)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	if len(entries) > spillKeepFiles {
+		t.Fatalf("legacy spill files = %d, want at most %d", len(entries), spillKeepFiles)
+	}
+}
