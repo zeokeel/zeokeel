@@ -92,4 +92,55 @@ func TestModuleProvidesSpillStore(t *testing.T) {
 	if !found {
 		t.Fatal("registry lacks spill_read")
 	}
+	// Same instance: content saved through the required store is read back
+	// through the registered tool.
+	ref, err := store.Save(context.Background(), rig.ToolCall{Name: "bash"}, "shared-instance-payload")
+	if err != nil {
+		t.Fatalf("store.Save: %v", err)
+	}
+	args, err := json.Marshal(map[string]string{"id": ref.ID})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	result, err := tools.Invoke(context.Background(), rig.ToolCall{Name: "spill_read", Arguments: string(args)})
+	if err != nil || result.IsError {
+		t.Fatalf("spill_read via registry = %q (err %v)", result.Content, err)
+	}
+	if !strings.Contains(result.Content, "shared-instance-payload") {
+		t.Fatalf("spill_read content = %q, want the saved payload", result.Content)
+	}
+}
+
+// TestModuleWithoutDataDirHasNoSpillRead pins the fallback: no data directory
+// means no store and no spill_read tool (the file-backed summary stays).
+func TestModuleWithoutDataDirHasNoSpillRead(t *testing.T) {
+	root := cordis.Root()
+	defer func() { _ = root.DisposeAll() }()
+	if _, err := root.Provide(contracts.KeySettings, contracts.SettingsService(testSettings{})); err != nil {
+		t.Fatalf("provide settings: %v", err)
+	}
+	registry := module.NewRegistry()
+	if err := registry.Register(Module()); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	loader, err := module.Load(root, registry, []module.Entry{{
+		ID: "toolkit", Module: "zeokeel/toolkit", Config: map[string]any{"root": ".", "shellTimeoutMs": 5000},
+	}})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	defer func() { _ = loader.Close() }()
+
+	if _, ok := root.Get(contracts.KeySpillStore); ok {
+		t.Fatal("spill store was provided without a data directory")
+	}
+	tools, err := root.Require(hosttools.KeyRegistry)
+	if err != nil {
+		t.Fatalf("require registry: %v", err)
+	}
+	for _, spec := range tools.Specs() {
+		if spec.Name == "spill_read" {
+			t.Fatal("registry registered spill_read without a store")
+		}
+	}
 }

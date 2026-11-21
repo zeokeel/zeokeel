@@ -2,10 +2,11 @@ package agent
 
 // Tool-result spilling for the persisted conversation history.
 //
-// Results over 32 KiB are written to <workspace>/.zeokeel/tool-results/ (or
-// <dataDir>/.zeokeel/tool-results for headless/ACP sessions without a registered
-// workspace) and the model only sees Rig's stable summary + path, so an
-// oversized tool output is not resent in every following model round.
+// Results over 32 KiB are stored instead of being resent: with the toolkit's
+// shared store (the real product) the model sees a ref handle it can read back
+// with spill_read; without a store (stripped assemblies/tests) they are written
+// to <workspace>/.zeokeel/tool-results/ (or <dataDir>/.zeokeel/tool-results for
+// headless sessions) and the model sees the summary + path.
 //
 // The product keeps two things here: resolving the directory (file fallback) and
 // handing over the shared store. Writing, naming, summarizing and prune-to-MaxFiles
@@ -47,7 +48,11 @@ func (s *service) spillPolicy(ctx context.Context, workspaceRoot string) *rig.Sp
 	// A shared store (toolkit's data-dir store) turns oversized results into
 	// handles the model can read back with spill_read; the file backend below is
 	// the fallback for assemblies without one.
-	if s != nil && s.spillStore != nil {
+	if s.spillStore != nil {
+		// Keep the old workspace directory bounded even though new results go to
+		// the store: existing .zeokeel/tool-results files were written by earlier
+		// versions and nothing prunes them any more.
+		pruneLegacySpillFiles(s.spillDir(ctx, workspaceRoot), spillKeepFiles)
 		return &rig.SpillPolicy{
 			Store:          s.spillStore,
 			ThresholdBytes: spillThresholdBytes,

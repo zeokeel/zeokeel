@@ -343,6 +343,11 @@ func TestParseSpillSummary(t *testing.T) {
 	if _, ok := parseSpillSummary("plain tool output"); ok {
 		t.Fatal("parseSpillSummary accepted a non-spilled result")
 	}
+	storeShape := rig.SpillSummaryPrefix + "\nref: spill.sess.123-abc.txt\nbytes: 51200\npreview: head"
+	parsed, ok = parseSpillSummary(storeShape)
+	if !ok || parsed.Ref == "" || parsed.Bytes != 51200 || parsed.Path != "" {
+		t.Fatalf("store-shaped spill parsed = %+v (ok=%v), want ref and bytes without a path", parsed, ok)
+	}
 }
 
 // TestContextInspectorSurvivesRestart covers the durable fold: a restart over the

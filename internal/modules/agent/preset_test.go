@@ -159,3 +159,22 @@ func TestNoPresetKeepsDefaults(t *testing.T) {
 		t.Fatalf("default run = model %q tools %d", request.Model, len(request.Tools))
 	}
 }
+
+// TestPresetAllowlistKeepsRuntimeReadBack pins that a user allowlist cannot turn
+// spilled results unreadable: spill_read is a runtime capability, always kept.
+func TestPresetAllowlistKeepsRuntimeReadBack(t *testing.T) {
+	tools := []rig.Tool{
+		&fixNamedTool{name: "bash"},
+		&fixNamedTool{name: "spill_read"},
+		&fixNamedTool{name: "read_file"},
+	}
+	kept := filterToolsByAllowlist(tools, []string{"bash"})
+	if len(kept) != 2 {
+		t.Fatalf("filtered tools = %d, want bash + spill_read", len(kept))
+	}
+	for _, tool := range kept {
+		if notWanted := tool.Name() != "bash" && tool.Name() != "spill_read"; notWanted {
+			t.Fatalf("unexpected kept tool %q", tool.Name())
+		}
+	}
+}

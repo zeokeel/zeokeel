@@ -121,9 +121,13 @@ type compactPayload struct {
 
 // spillPayload is the durable spill event payload.
 type spillPayload struct {
-	CallID  string `json:"callId"`
-	Tool    string `json:"tool"`
-	Path    string `json:"path"`
+	CallID string `json:"callId"`
+	Tool   string `json:"tool"`
+	// Path is the file-backed summary's location (empty with the store backend).
+	Path string `json:"path,omitempty"`
+	// Ref is the store handle from the summary's "ref:" line (empty with the
+	// file backend).
+	Ref     string `json:"ref,omitempty"`
 	Bytes   int    `json:"bytes"`
 	Preview string `json:"preview,omitempty"`
 }
@@ -586,7 +590,7 @@ func (s *service) foldRestoredContextEvents(sessionID string, events []rig.Sessi
 // spilled tool result:
 //
 //	[tool result spilled to file]
-//	path: <path>
+//	path: <path>      (file backend)  or  ref: <handle>  (store backend)
 //	bytes: <n>
 //	preview: <one line>
 func parseSpillSummary(content string) (spillPayload, bool) {
@@ -599,6 +603,8 @@ func parseSpillSummary(content string) (spillPayload, bool) {
 		switch {
 		case strings.HasPrefix(line, "path:"):
 			parsed.Path = strings.TrimSpace(strings.TrimPrefix(line, "path:"))
+		case strings.HasPrefix(line, "ref:"):
+			parsed.Ref = strings.TrimSpace(strings.TrimPrefix(line, "ref:"))
 		case strings.HasPrefix(line, "bytes:"):
 			if value, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "bytes:"))); err == nil {
 				parsed.Bytes = value
@@ -607,7 +613,7 @@ func parseSpillSummary(content string) (spillPayload, bool) {
 			parsed.Preview = strings.TrimSpace(strings.TrimPrefix(line, "preview:"))
 		}
 	}
-	if parsed.Path == "" && parsed.Bytes == 0 {
+	if parsed.Path == "" && parsed.Ref == "" && parsed.Bytes == 0 {
 		return spillPayload{}, false
 	}
 	return parsed, true

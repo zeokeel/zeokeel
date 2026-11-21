@@ -21,7 +21,7 @@ import (
 // planWhitelist is the plan-mode allowed set the audit expects (read-only
 // exploration, interaction boxes, planning tools, task-board reads, web read).
 var planWhitelist = []string{
-	"read_file", "list_dir", "glob", "grep", "search", "sandbox_status",
+	"read_file", "list_dir", "glob", "grep", "search", "sandbox_status", "spill_read",
 	"ask_user", "present", "plan_review", "exit_plan_mode", "goal",
 	"team_task_list", "team_task_get", "memory", "skill", "skills", "web_fetch",
 }

@@ -155,8 +155,10 @@ func Module() *module.Descriptor[Config] {
 		// ones the model can read back.
 		if store, err := newSpillStore(group.dataDir); err == nil {
 			group.spillStore = store
-			if _, provideErr := ctx.Provide(contracts.KeySpillStore, store); provideErr != nil {
-				return provideErr
+			if _, provideErr := ctx.Provide(contracts.KeySpillStore, store); provideErr != nil && logf != nil {
+				// Optional capability: a failed provide degrades to the file
+				// backend instead of failing the whole toolkit.
+				logf("[toolkit] spill store not provided: %v", provideErr)
 			}
 		} else if logf != nil {
 			logf("[toolkit] spill store unavailable: %v", err)

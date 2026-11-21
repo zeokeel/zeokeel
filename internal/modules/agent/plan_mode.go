@@ -39,6 +39,7 @@ var planModeAllowedTools = []string{
 	"skills",
 	"search",
 	"sandbox_status",
+	"spill_read",
 	"web_fetch",
 }
 
@@ -54,6 +55,7 @@ var minimalModeAllowedTools = []string{
 	"skills",
 	"search",
 	"sandbox_status",
+	"spill_read",
 	"web_fetch",
 	"ask_user",
 	"present",
@@ -81,6 +83,7 @@ var creatorModeAllowedTools = []string{
 	"memory",
 	"skill",
 	"skills",
+	"spill_read",
 }
 
 // toolAllowed checks one tool against a whitelist (exact, trimmed).

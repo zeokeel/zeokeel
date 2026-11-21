@@ -157,6 +157,14 @@ func (s *service) toolsForSession(sessionID string) []rig.Tool {
 	return filterToolsForMode(tools, s.runtimeMode())
 }
 
+// runtimeCapabilityTools are kept even when a preset allowlist does not name
+// them: they are the read-back path for oversized tool results, which is a
+// runtime capability rather than a capability the user chooses to grant (a
+// surface without spill_read leaves every spilled result unreadable).
+var runtimeCapabilityTools = map[string]bool{
+	"spill_read": true,
+}
+
 // filterToolsByAllowlist keeps the named tools in registration order (trimmed
 // exact match). An empty allowlist is handled by the caller (keep every tool).
 func filterToolsByAllowlist(tools []rig.Tool, allow []string) []rig.Tool {
@@ -166,7 +174,11 @@ func filterToolsByAllowlist(tools []rig.Tool, allow []string) []rig.Tool {
 	}
 	filtered := make([]rig.Tool, 0, len(tools))
 	for _, tool := range tools {
-		if tool != nil && allowed[strings.TrimSpace(tool.Name())] {
+		if tool == nil {
+			continue
+		}
+		name := strings.TrimSpace(tool.Name())
+		if allowed[name] || runtimeCapabilityTools[name] {
 			filtered = append(filtered, tool)
 		}
 	}
