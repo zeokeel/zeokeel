@@ -61,7 +61,9 @@ func (s *service) retryContextOverflow(ctx context.Context, sessionID string, cf
 		return rig.RunResult{}, nil, false
 	}
 	before := rig.EstimateTokens(messages)
-	budget := s.effectiveContextBudget(cfg) - rig.EstimateTextTokens(spec.SystemPrompt)
+	// spec carries the prompt through SystemPromptFunc, so the rendered prompt
+	// lives in cfg: the recovery compaction must reserve its tokens.
+	budget := s.effectiveContextBudget(cfg) - rig.EstimateTextTokens(cfg.SystemPrompt)
 	if budget <= 0 {
 		if effective := s.effectiveContextBudget(cfg); effective > 1 {
 			budget = effective / 2

@@ -201,15 +201,24 @@ func TestRunPromptCarriesTheDateThroughSystemPromptFunc(t *testing.T) {
 	root := t.TempDir()
 	workspace := &fakeWorkspace{}
 	svc, provider := newAgentsFileService(t, newFakeSettings(nil), workspace, nil)
-	frozen := time.Date(2026, 11, 21, 9, 0, 0, 0, time.UTC)
+	// Two different dates prove which render wins: the snapshot build reads one
+	// day, the SDK-side SystemPromptFunc reads the next.
+	snapshotDay := time.Date(2026, 11, 21, 9, 0, 0, 0, time.UTC)
+	sdkDay := snapshotDay.AddDate(0, 0, 1)
 	calls := 0
 	svc.now = func() time.Time {
 		calls++
-		return frozen
+		if calls == 1 {
+			return snapshotDay
+		}
+		return sdkDay
 	}
 	system := runAndSystemPrompt(t, svc, provider, workspace, root)
-	if !strings.Contains(system, "Today's date is 2026-11-21 (Saturday).") {
-		t.Fatalf("system prompt lacks the run date: %q", system)
+	if !strings.Contains(system, "Today's date is 2026-11-22 (Sunday).") {
+		t.Fatalf("system prompt does not carry the SDK-side date: %q", system)
+	}
+	if strings.Contains(system, "Today's date is 2026-11-21") {
+		t.Fatalf("system prompt carries the snapshot build's date: %q", system)
 	}
 	if !strings.HasPrefix(system, "You are ZeoKeel") {
 		t.Fatalf("SystemPromptFunc did not render the base prompt: %q", system)
@@ -228,5 +237,74 @@ func TestPromptOmitsTheDateWithoutAClock(t *testing.T) {
 		contracts.PermissionWorkspace, "", "base", map[string]bool{"bash": true})
 	if strings.Contains(prompt, "Today's date") {
 		t.Fatalf("legacy assembly invented a date: %q", prompt)
+	}
+}
+
+// TestRunPromptAlwaysCarriesTheProcessDate covers the production path: no clock
+// override, so the prompt must still carry today's local date (a nil clock must
+// not silently drop the line).
+func TestRunPromptAlwaysCarriesTheProcessDate(t *testing.T) {
+	root := t.TempDir()
+	workspace := &fakeWorkspace{}
+	svc, provider := newAgentsFileService(t, newFakeSettings(nil), workspace, nil)
+	system := runAndSystemPrompt(t, svc, provider, workspace, root)
+	want := "Today's date is " + time.Now().Format("2006-01-02")
+	if !strings.Contains(system, want) {
+		t.Fatalf("system prompt lacks %q: %q", want, system)
+	}
+}
+
+// TestPromptDateUsesTheClockLocation pins the date as the clock's local date,
+// not UTC: 20:00 in UTC+8 is already the next day locally.
+func TestPromptDateUsesTheClockLocation(t *testing.T) {
+	zone := time.FixedZone("UTC+8", 8*3600)
+	clock := time.Date(2026, 11, 20, 20, 0, 0, 0, zone)
+	sections := promptSectionsForRun("linux", "amd64", "/work", contracts.PermissionWorkspace,
+		contracts.PermissionWorkspace, "", clock, nil, map[string]bool{"bash": true})
+	rendered := renderPromptSections(sections)
+	if !strings.Contains(rendered, "Today's date is 2026-11-20 (Friday).") {
+		t.Fatalf("date does not follow the clock location: %q", rendered)
+	}
+}
+
+// TestPromptSnapshotCarriesTheDateSection pins the inspector side: the recorded
+// snapshot has the date section and its byte total equals the prompt the model
+// actually received.
+func TestPromptSnapshotCarriesTheDateSection(t *testing.T) {
+	root := t.TempDir()
+	workspace := &fakeWorkspace{}
+	svc, provider := newAgentsFileService(t, newFakeSettings(nil), workspace, nil)
+	workspace.setCurrent(contracts.Workspace{ID: "ws-1", Root: root}, true)
+	sessionID, err := svc.NewSession("")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := svc.Send(sessionID, "hello"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	waitIdle(t, svc, sessionID)
+	folded, ok := svc.SessionContext(sessionID)
+	if !ok {
+		t.Fatal("no context snapshot")
+	}
+	hasDate := false
+	for _, section := range folded.Snapshot.Sections {
+		if section.ID == PromptSectionDate {
+			hasDate = true
+		}
+	}
+	if !hasDate {
+		t.Fatalf("snapshot sections lack the date: %+v", folded.Snapshot.Sections)
+	}
+	system := ""
+	for _, message := range provider.lastRequest().Messages {
+		if message.Role == rig.RoleSystem {
+			for _, chunk := range message.Content {
+				system += chunk.Text
+			}
+		}
+	}
+	if folded.Snapshot.SystemPromptBytes != len(system) {
+		t.Fatalf("snapshot prompt bytes = %d, received system prompt = %d", folded.Snapshot.SystemPromptBytes, len(system))
 	}
 }

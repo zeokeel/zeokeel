@@ -542,6 +542,8 @@ func contextSectionLabel(st *state, section contracts.ContextSection) string {
 		return st.tr("身份", "Identity")
 	case "environment":
 		return st.tr("运行环境", "Environment")
+	case "date":
+		return st.tr("日期", "Date")
 	case "working-directory":
 		return st.tr("工作目录", "Working directory")
 	case "approval":

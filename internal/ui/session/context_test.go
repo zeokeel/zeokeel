@@ -339,6 +339,7 @@ func withContextSections(data contracts.SessionContext) contracts.SessionContext
 	data.Snapshot.Sections = []contracts.ContextSection{
 		{ID: "identity", Label: "identity", Source: "builtin", Bytes: 1024, Tokens: 256, Hash: "hash-identity"},
 		{ID: "environment", Label: "environment", Source: "builtin", Bytes: 512, Tokens: 128, Hash: "hash-env"},
+		{ID: "date", Label: "date", Source: "builtin", Bytes: 38, Tokens: 10, Hash: "hash-date"},
 		{ID: "agents-md", Label: "agents-md", Source: "workspace", Bytes: 1536, Tokens: 384, Hash: "hash-agents"},
 	}
 	data.Snapshot.EstimatedPrompt = 16000
@@ -405,12 +406,12 @@ func TestContextSystemPromptSections(t *testing.T) {
 	h.assertTexts(tester, "系统提示分段",
 		"仅展示分段的元数据（大小/估算 tokens），正文不进入事件。",
 		// Localized known IDs and their metadata.
-		"身份", "运行环境", "AGENTS.md", "builtin", "workspace",
+		"身份", "运行环境", "日期", "AGENTS.md", "builtin", "workspace",
 		"1.0 KB", "256", "512", "128", "1.5 KB", "384",
-		"分段合计", "3.0 KB · 768 tokens",
+		"分段合计", "3.0 KB · 778 tokens",
 		"估算输入占比", "16K / 131.1K tokens (12%)")
 	// The raw section IDs stay out of the visible table (tooltip only).
-	h.assertNoTexts(tester, "identity", "environment", "working-directory")
+	h.assertNoTexts(tester, "identity", "environment", "working-directory", "date")
 }
 
 func TestContextSystemPromptSectionsHiddenWhenEmpty(t *testing.T) {
