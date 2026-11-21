@@ -205,6 +205,9 @@ func toolGuidanceLines(names map[string]bool) []string {
 	if names["apply_patch"] {
 		add("Use apply_patch to change several files atomically (add/update/delete/move) — one call equals all-or-nothing. Its relative paths resolve against the workspace root, not the last working directory; the patch body must use the *** Begin Patch / *** End Patch format.")
 	}
+	if names["spill_read"] {
+		add("When a tool result was replaced by a spilled summary with a `ref: <id>` line, call spill_read with that id to read it back (8 KiB per read); narrow the original command if you need the rest.")
+	}
 	if names["undo"] {
 		add("Use undo only when the user explicitly asks to revert changes: it restores the workspace to a turn snapshot (pass dry_run to preview, path to revert one file). Never undo on your own initiative — it can delete files the turn created.")
 	}

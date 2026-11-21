@@ -17,6 +17,7 @@ import (
 
 	rig "github.com/zeokeel/zeokeel-rig"
 	"github.com/zeokeel/zeokeel-rig/sandbox"
+	"github.com/zeokeel/zeokeel-rig/spillfile"
 	"github.com/zeokeel/zeokeel-rig/tools/builtin"
 	"github.com/zeokeel/zeokeel-rig/tools/editor"
 	"github.com/zeokeel/zeokeel-rig/tools/image"
@@ -204,12 +205,12 @@ func buildRootScoped(cfg Config, root string, timeout time.Duration, mode sandbo
 // buildRootScopedFor is buildRootScoped with the platform and PATH probe
 // injectable for tests.
 func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode sandbox.Mode, runner sandbox.Runner, goos string, lookPath func(string) (string, error)) *rootScoped {
-	return buildRootScopedWith(cfg, root, timeout, mode, runner, "", nil, goos, lookPath)
+	return buildRootScopedWith(cfg, root, timeout, mode, runner, "", nil, nil, goos, lookPath)
 }
 
 // buildRootScopedWith is the real builder: dataDir is where the undo snapshot
 // store lives (outside the workspace); empty disables undo.
-func buildRootScopedWith(cfg Config, root string, timeout time.Duration, mode sandbox.Mode, runner sandbox.Runner, dataDir string, logf func(string, ...any), goos string, lookPath func(string) (string, error)) *rootScoped {
+func buildRootScopedWith(cfg Config, root string, timeout time.Duration, mode sandbox.Mode, runner sandbox.Runner, dataDir string, spillStore rig.SpillStore, logf func(string, ...any), goos string, lookPath func(string) (string, error)) *rootScoped {
 	policy := newPolicy(cfg, root, timeout, mode)
 	// The runner is injected into every command-executing surface: the built-in
 	// bash/pwsh tools, the background job manager and the worktree git calls. A
@@ -295,6 +296,12 @@ func buildRootScopedWith(cfg Config, root string, timeout time.Duration, mode sa
 			return policy.Hidden(abs)
 		})),
 	)
+	// Oversized results become handles in the shared spill store; this is the
+	// read-back entry the model uses. nil store (no toolkit data dir) keeps the
+	// file-backed spill summary and no spill_read tool.
+	if spillReader := builtin.NewSpillRead(spillStore); spillReader != nil {
+		tools = append(tools, spillReader)
+	}
 
 	// Undo: snapshot the workspace at the start of each turn so `undo` can
 	// revert it. A git workspace uses the hidden-commit backend (cheap, exact);
@@ -364,6 +371,9 @@ type rebindGroup struct {
 	// dataDir is the product data directory (undo snapshot store, outside the
 	// workspace). Empty = undo unavailable.
 	dataDir string
+	// spillStore is the oversized-result store shared with the agent's
+	// SpillPolicy (nil when the host has no data directory).
+	spillStore rig.SpillStore
 
 	mu      sync.Mutex
 	closed  bool
@@ -484,7 +494,7 @@ func (g *rebindGroup) initial() *rootScoped {
 	mode, runner := g.sandboxState()
 	root := strings.TrimSpace(g.rootOf())
 	key := g.buildKey(root, mode, runner)
-	scoped := buildRootScopedWith(g.cfg, root, g.timeout, mode, runner, g.dataDir, g.logf, runtime.GOOS, exec.LookPath)
+	scoped := buildRootScopedWith(g.cfg, root, g.timeout, mode, runner, g.dataDir, g.spillStore, g.logf, runtime.GOOS, exec.LookPath)
 	g.mu.Lock()
 	g.current = scoped
 	g.addBuildLocked(key, scoped)
@@ -510,7 +520,7 @@ func (g *rebindGroup) forRoot() *rootScoped {
 		g.mu.Unlock()
 		return retained
 	}
-	next := buildRootScopedWith(g.cfg, root, g.timeout, mode, runner, g.dataDir, g.logf, runtime.GOOS, exec.LookPath)
+	next := buildRootScopedWith(g.cfg, root, g.timeout, mode, runner, g.dataDir, g.spillStore, g.logf, runtime.GOOS, exec.LookPath)
 	g.current = next
 	g.addBuildLocked(key, next)
 	g.mu.Unlock()
@@ -539,7 +549,7 @@ func (g *rebindGroup) forRootValue(root string) *rootScoped {
 		g.mu.Unlock()
 		return retained
 	}
-	scoped := buildRootScopedWith(g.cfg, root, g.timeout, mode, runner, g.dataDir, g.logf, runtime.GOOS, exec.LookPath)
+	scoped := buildRootScopedWith(g.cfg, root, g.timeout, mode, runner, g.dataDir, g.spillStore, g.logf, runtime.GOOS, exec.LookPath)
 	g.addBuildLocked(key, scoped)
 	g.mu.Unlock()
 	if g.logf != nil {
@@ -704,6 +714,16 @@ func newUndoTracker(root, dataDir string, hidden []string, logf func(string, ...
 		return nil
 	}
 	return tracker
+}
+
+// newSpillStore creates the shared oversized-result store under the product
+// data directory (outside the workspace, per-session GC by scope).
+func newSpillStore(dataDir string) (rig.SpillStore, error) {
+	dataDir = strings.TrimSpace(dataDir)
+	if dataDir == "" {
+		return nil, errors.New("spill: no data directory")
+	}
+	return spillfile.New(filepath.Join(dataDir, "spill"))
 }
 
 // undoIgnoreRules maps the product's hidden globs onto the SDK undo ignore

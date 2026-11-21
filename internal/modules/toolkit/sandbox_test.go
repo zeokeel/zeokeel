@@ -118,7 +118,7 @@ func newSandboxBuild(t *testing.T, cfg Config, root string, mode rigsandbox.Mode
 	t.Helper()
 	// The undo snapshot store lives in the product data directory; tests give it
 	// a temp dir so a workspace build has a tracker without touching the repo.
-	scoped := buildRootScopedWith(cfg, root, 5*time.Second, mode, runner, t.TempDir(), nil, "linux",
+	scoped := buildRootScopedWith(cfg, root, 5*time.Second, mode, runner, t.TempDir(), nil, nil, "linux",
 		func(string) (string, error) { return "", os.ErrNotExist })
 	t.Cleanup(scoped.close)
 	return scoped

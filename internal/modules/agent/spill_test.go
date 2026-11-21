@@ -387,3 +387,46 @@ func rigMessagesText(messages []rig.Message) string {
 	}
 	return builder.String()
 }
+
+// fakeSpillStore is a rig.SpillStore double for the policy wiring test.
+type fakeSpillStore struct {
+	saved int
+}
+
+func (f *fakeSpillStore) Save(context.Context, rig.ToolCall, string) (rig.SpillRef, error) {
+	f.saved++
+	return rig.SpillRef{ID: "ref-1"}, nil
+}
+
+func (f *fakeSpillStore) Load(context.Context, string) (string, error) { return "", nil }
+
+func (f *fakeSpillStore) GC(context.Context, int) (int, error) { return 0, nil }
+
+// TestSpillPolicyPrefersSharedStore pins the switch: with a store the run's
+// policy writes handles (no workspace directory), keeping threshold and cap.
+func TestSpillPolicyPrefersSharedStore(t *testing.T) {
+	store := &fakeSpillStore{}
+	svc := newService(Config{}, nil, nil, &fakeLogger{}, newFakeStore(), nil)
+	svc.spillStore = store
+
+	policy := svc.spillPolicy(context.Background(), "/work")
+	if policy == nil || policy.Store == nil {
+		t.Fatalf("spill policy = %+v, want the shared store", policy)
+	}
+	if policy.Dir != "" {
+		t.Fatalf("spill policy Dir = %q, want empty (store backend)", policy.Dir)
+	}
+	if policy.ThresholdBytes != spillThresholdBytes || policy.MaxFiles != spillKeepFiles {
+		t.Fatalf("spill policy = %+v, want threshold %d and cap %d", policy, spillThresholdBytes, spillKeepFiles)
+	}
+}
+
+// TestSpillPolicyFallsBackToFiles pins the fallback: without a store the policy
+// keeps the workspace directory.
+func TestSpillPolicyFallsBackToFiles(t *testing.T) {
+	svc := newService(Config{}, nil, nil, &fakeLogger{}, newFakeStore(), nil)
+	policy := svc.spillPolicy(context.Background(), "/work")
+	if policy.Store != nil || policy.Dir == "" {
+		t.Fatalf("spill policy = %+v, want the file backend directory", policy)
+	}
+}

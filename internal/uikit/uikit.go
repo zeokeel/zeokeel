@@ -224,6 +224,8 @@ func ToolIcon(name string) *ui.SVG {
 		return icons.Folder()
 	case "undo":
 		return icons.Reload()
+	case "spill_read":
+		return icons.File()
 	case "todo", "todo_write", "team_task_create", "team_task_update":
 		return icons.Data()
 	case "list_dir", "write_file", "edit_file", "str_replace_editor",

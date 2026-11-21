@@ -150,6 +150,17 @@ func Module() *module.Descriptor[Config] {
 		if dataDir, ok := ctx.Get(contracts.KeyDataDir); ok {
 			group.dataDir = strings.TrimSpace(dataDir)
 		}
+		// One store instance is shared with the agent (SpillPolicy.Store) and the
+		// model-facing spill_read tool, so handles written by the runtime are the
+		// ones the model can read back.
+		if store, err := newSpillStore(group.dataDir); err == nil {
+			group.spillStore = store
+			if _, provideErr := ctx.Provide(contracts.KeySpillStore, store); provideErr != nil {
+				return provideErr
+			}
+		} else if logf != nil {
+			logf("[toolkit] spill store unavailable: %v", err)
+		}
 		// The agent gate asks the SDK whether a shell call is already confined; that
 		// needs the live policy, which this module owns (one per root/mode build).
 		if _, err := ctx.Provide(contracts.KeyToolPolicy, contracts.ToolPolicy(policySourceAdapter{group: group})); err != nil {

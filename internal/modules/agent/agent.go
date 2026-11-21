@@ -221,6 +221,9 @@ func Module() *module.Descriptor[Config] {
 		if undoService, ok := ctx.Get(contracts.KeyUndo); ok && undoService != nil {
 			svc.undo = undoService
 		}
+		if store, ok := ctx.Get(contracts.KeySpillStore); ok && store != nil {
+			svc.spillStore = store
+		}
 		if sandboxService, ok := ctx.Get(contracts.KeySandbox); ok && sandboxService != nil {
 			// Optional: when the enabled OS sandbox has a usable runner, the gate
 			// auto-allows shell-family tools because the OS profile enforces their
@@ -385,6 +388,10 @@ type service struct {
 	// undo snapshots the run's workspace before each turn (the undo tool reverts
 	// those snapshots). Optional: a stripped assembly leaves it nil.
 	undo contracts.UndoService
+	// spillStore stores oversized tool results as handles (the toolkit's
+	// spill_read tool reads them back). Optional: nil keeps the file-backed
+	// spill summaries.
+	spillStore rig.SpillStore
 
 	sessions map[string]*sessionState
 	active   string

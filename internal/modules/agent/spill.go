@@ -7,11 +7,13 @@ package agent
 // workspace) and the model only sees Rig's stable summary + path, so an
 // oversized tool output is not resent in every following model round.
 //
-// The product keeps exactly one thing here: resolving the directory. Writing,
-// naming, summarizing and prune-to-MaxFiles are Rig's rig.SpillPolicy
-// (rig/context.go, applied in rig/agent/agent.go before the tool message is
-// recorded); the policy is installed on the run's AgentSpec in agent.go. The
-// tombstone guard stays outermost on the History wrapper (see guardedHistory).
+// The product keeps two things here: resolving the directory (file fallback) and
+// handing over the shared store. Writing, naming, summarizing and prune-to-MaxFiles
+// are Rig's rig.SpillPolicy (rig/context.go, applied in rig/agent/agent.go
+// before the tool message is recorded); the policy is installed on the run's
+// AgentSpec in agent.go. With a store the model gets a handle plus the toolkit's
+// spill_read entry instead of a path. The tombstone guard stays outermost on the
+// History wrapper (see guardedHistory).
 
 import (
 	"context"
@@ -42,6 +44,16 @@ const (
 // spilling outside the run's sandbox roots made the spilled file unreadable by
 // the model's read_file, WithRoots contract).
 func (s *service) spillPolicy(ctx context.Context, workspaceRoot string) *rig.SpillPolicy {
+	// A shared store (toolkit's data-dir store) turns oversized results into
+	// handles the model can read back with spill_read; the file backend below is
+	// the fallback for assemblies without one.
+	if s != nil && s.spillStore != nil {
+		return &rig.SpillPolicy{
+			Store:          s.spillStore,
+			ThresholdBytes: spillThresholdBytes,
+			MaxFiles:       spillKeepFiles,
+		}
+	}
 	dir := s.spillDir(ctx, workspaceRoot)
 	// rig v0.24.0 partitions its prune by session ("spill.<scope>.…"), so files
 	// written by earlier versions — and any other file this directory already

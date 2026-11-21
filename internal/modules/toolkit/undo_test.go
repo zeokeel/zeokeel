@@ -116,7 +116,7 @@ func TestUndoGitSnapshotPersistsTurnNumbers(t *testing.T) {
 // promise: no tracker, no snapshot store, not even in the product data dir.
 func TestReadOnlyBuildLeavesTheDataDirAlone(t *testing.T) {
 	root, dataDir := t.TempDir(), t.TempDir()
-	scoped := buildRootScopedWith(Config{}, root, 5*time.Second, sandbox.ModeReadOnly, nil, dataDir, nil, "linux",
+	scoped := buildRootScopedWith(Config{}, root, 5*time.Second, sandbox.ModeReadOnly, nil, dataDir, nil, nil, "linux",
 		func(string) (string, error) { return "", os.ErrNotExist })
 	t.Cleanup(scoped.close)
 	if entries, err := os.ReadDir(dataDir); err == nil && len(entries) != 0 {
