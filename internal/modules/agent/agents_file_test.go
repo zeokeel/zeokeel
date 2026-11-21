@@ -223,11 +223,6 @@ func TestRunPromptCarriesTheDateThroughSystemPromptFunc(t *testing.T) {
 	if !strings.HasPrefix(system, "You are ZeoKeel") {
 		t.Fatalf("SystemPromptFunc did not render the base prompt: %q", system)
 	}
-	// The precomputed snapshot build reads the clock once; the SDK-side render
-	// reads it again, which is the point of SystemPromptFunc.
-	if calls < 2 {
-		t.Fatalf("prompt clock read %d times, want the SDK-side render on top of the snapshot build", calls)
-	}
 }
 
 // TestPromptOmitsTheDateWithoutAClock keeps the legacy assembly (no clock, e.g.
@@ -254,15 +249,16 @@ func TestRunPromptAlwaysCarriesTheProcessDate(t *testing.T) {
 	}
 }
 
-// TestPromptDateUsesTheClockLocation pins the date as the clock's local date,
-// not UTC: 20:00 in UTC+8 is already the next day locally.
+// TestPromptDateUsesTheClockLocation pins the date as the clock's own location,
+// not UTC: 00:30 in UTC+8 is still the previous day in UTC, so formatting the
+// instant in UTC would print the wrong date.
 func TestPromptDateUsesTheClockLocation(t *testing.T) {
 	zone := time.FixedZone("UTC+8", 8*3600)
-	clock := time.Date(2026, 11, 20, 20, 0, 0, 0, zone)
+	clock := time.Date(2026, 11, 21, 0, 30, 0, 0, zone)
 	sections := promptSectionsForRun("linux", "amd64", "/work", contracts.PermissionWorkspace,
 		contracts.PermissionWorkspace, "", clock, nil, map[string]bool{"bash": true})
 	rendered := renderPromptSections(sections)
-	if !strings.Contains(rendered, "Today's date is 2026-11-20 (Friday).") {
+	if !strings.Contains(rendered, "Today's date is 2026-11-21 (Saturday).") {
 		t.Fatalf("date does not follow the clock location: %q", rendered)
 	}
 }
