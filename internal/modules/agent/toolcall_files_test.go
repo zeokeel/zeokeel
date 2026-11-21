@@ -70,6 +70,16 @@ func TestGeneratedCallFilesKinds(t *testing.T) {
 		"new/name.txt": {},
 		"old/name.txt": {deleted: true},
 	})
+
+	// One patch that both adds and deletes the same path keeps BOTH flags.
+	checkFiles(t, generatedCallFiles("apply_patch", patchArgs(t, "*** Begin Patch\n*** Add File: tmp/x.md\n+x\n*** Delete File: tmp/x.md\n*** End Patch", false)), map[string]struct{ added, deleted bool }{
+		"tmp/x.md": {added: true, deleted: true},
+	})
+	diffAddDelete := "diff --git a/tmp/y.md b/tmp/y.md\nnew file mode 100644\nindex 000..111\n--- /dev/null\n+++ b/tmp/y.md\n@@\n+x\n" +
+		"diff --git a/tmp/y.md b/tmp/y.md\ndeleted file mode 100644\nindex 111..000\n--- a/tmp/y.md\n+++ /dev/null\n@@\n-x\n"
+	checkFiles(t, generatedCallFiles("apply_patch", patchArgs(t, diffAddDelete, false)), map[string]struct{ added, deleted bool }{
+		"tmp/y.md": {added: true, deleted: true},
+	})
 }
 
 // TestGeneratedCallFilesIgnoresContextAndDryRun pins the ways a patch must NOT
@@ -83,6 +93,12 @@ func TestGeneratedCallFilesIgnoresContextAndDryRun(t *testing.T) {
 	}
 	hunkContent := "diff --git a/x.txt b/x.txt\nindex 111..222 100644\n--- a/x.txt\n+++ b/x.txt\n@@ -1,2 +1,2 @@\n--- foo\n+++ bar\n"
 	checkFiles(t, generatedCallFiles("apply_patch", patchArgs(t, hunkContent, false)), map[string]struct{ added, deleted bool }{
+		"x.txt": {},
+	})
+	// A context line (leading space) whose text looks like git metadata must not
+	// open a section for the following content lines.
+	metadataLookingContext := "diff --git a/x.txt b/x.txt\n--- a/x.txt\n+++ b/x.txt\n@@ -1,3 +1,3 @@\n index 111..222 100644\n--- foo\n+++ bar\n"
+	checkFiles(t, generatedCallFiles("apply_patch", patchArgs(t, metadataLookingContext, false)), map[string]struct{ added, deleted bool }{
 		"x.txt": {},
 	})
 	if files := generatedCallFiles("apply_patch", patchArgs(t, "*** Add File: x.md\n", true)); len(files) != 0 {
@@ -196,6 +212,9 @@ func TestPatchFileListParsesRealGitDiff(t *testing.T) {
 	if _, ok := seen["keep.txt"]; ok {
 		t.Fatalf("unchanged file appeared: %+v", files)
 	}
+	if len(files) != 5 {
+		t.Fatalf("files = %d rows, want 5 (no phantom rows): %+v", len(files), files)
+	}
 }
 
 // writeTestFile writes one workspace file, creating parent directories.
@@ -247,12 +266,16 @@ func TestRestoreRecoversLargePatchArguments(t *testing.T) {
 	var body strings.Builder
 	body.WriteString("*** Begin Patch\n*** Update File: src/big.go\n@@\n")
 	for index := 0; index < 300; index++ {
-		body.WriteString("-old\n+new\n")
+		body.WriteString("-old line\n+new line\n")
 	}
 	body.WriteString("*** End Patch")
+	encoded := patchArgs(t, body.String(), false)
+	if len([]rune(encoded)) <= 4000 {
+		t.Fatalf("fixture arguments = %d runes, want beyond the transcript bound", len([]rune(encoded)))
+	}
 	restored := chatMessagesFromRig([]rig.Message{{
 		Role:      rig.RoleAssistant,
-		ToolCalls: []rig.ToolCall{{ID: "c1", Name: "apply_patch", Arguments: patchArgs(t, body.String(), false)}},
+		ToolCalls: []rig.ToolCall{{ID: "c1", Name: "apply_patch", Arguments: encoded}},
 	}})
 	files := restored[0].Tools[0].Generated
 	if len(files) != 1 || files[0].Path != "src/big.go" {

@@ -88,6 +88,8 @@ func patchFileList(patch string) []contracts.ToolCallFile {
 			add(strings.TrimPrefix(line, "rename from "), false, true)
 		case strings.HasPrefix(line, "rename to "):
 			add(strings.TrimPrefix(line, "rename to "), false, false)
+		case strings.HasPrefix(line, "copy to "):
+			add(strings.TrimPrefix(line, "copy to "), true, false)
 		case strings.HasPrefix(line, "--- ") && position+1 < len(lines) && strings.HasPrefix(lines[position+1], "+++ ") &&
 			diffHeaderBoundary(lines, position):
 			oldPath := stripDiffPrefix(strings.TrimPrefix(lines[position], "--- "))
@@ -118,9 +120,15 @@ func diffHeaderBoundary(lines []string, position int) bool {
 	if position == 0 {
 		return true
 	}
-	previous := strings.TrimSpace(lines[position-1])
+	rawPrevious := lines[position-1]
+	previous := strings.TrimSpace(rawPrevious)
 	if previous == "" {
 		return true
+	}
+	// Metadata lives at column 0 in git output; a context line (leading space)
+	// whose text happens to start with "index " must not open a file section.
+	if strings.HasPrefix(rawPrevious, " ") || strings.HasPrefix(rawPrevious, "\t") {
+		return false
 	}
 	for _, prefix := range []string{
 		"diff --git ", "index ", "new file mode ", "deleted file mode ",
