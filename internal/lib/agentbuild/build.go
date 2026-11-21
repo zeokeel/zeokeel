@@ -1,6 +1,7 @@
-package hostbundle
+package agentbuild
 
 import (
+	"os"
 	"strings"
 
 	"github.com/zeokeel/zeokeel-rig"
@@ -18,6 +19,18 @@ const (
 	// the agent (the thin-shell path).
 	ModeKit
 )
+
+// KitAgentEnabled reports whether runs should be assembled through kit. The kit
+// path is the default after the P3 parity gates; ZEOKEEL_DIRECT_AGENT=1 keeps the
+// old direct agent.New path available as an escape hatch.
+func KitAgentEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ZEOKEEL_DIRECT_AGENT"))) {
+	case "1", "true", "yes", "on":
+		return false
+	default:
+		return true
+	}
+}
 
 // BuildAgent builds one run's agent from an already-resolved product spec.
 // ModeKit and ModeDirect must produce the same surface for the same spec; the

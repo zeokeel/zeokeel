@@ -33,9 +33,9 @@ import (
 	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
-	rigagent "github.com/zeokeel/zeokeel-rig/agent"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/lib/agentbuild"
 )
 
 // ErrColdResumeUnavailable reports a historical child that cannot be resumed
@@ -385,7 +385,11 @@ func (s *service) runColdResumeAgent(ctx context.Context, record childSessionRec
 		// must stay nil or the tail would be hidden with no way to load it.
 	}
 	s.withContextBudget(&spec, cfg, provider)
-	runner, err := rigagent.New(spec)
+	mode := agentbuild.ModeDirect
+	if agentbuild.KitAgentEnabled() {
+		mode = agentbuild.ModeKit
+	}
+	runner, err := agentbuild.BuildAgent(spec, mode)
 	if err != nil {
 		return rig.RunResult{}, fmt.Errorf("agent: cold resume %q: create agent: %w", record.ID, err)
 	}

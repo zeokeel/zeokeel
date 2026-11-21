@@ -17,6 +17,7 @@ import (
 	"github.com/zeokeel/zeokeel-rig/session"
 
 	"github.com/zeokeel/zeokeel/internal/hostbundle"
+	"github.com/zeokeel/zeokeel/internal/lib/agentbuild"
 )
 
 type parityProvider struct{ requests []rig.Request }
@@ -71,12 +72,12 @@ func eventTypes(events []rig.Event) []rig.EventType {
 func TestKitParityWithDirectAgentSpec(t *testing.T) {
 	history := session.NewMemory()
 	directProvider := &parityProvider{}
-	direct, err := hostbundle.BuildAgent(productShapedSpec(directProvider, history), hostbundle.ModeDirect)
+	direct, err := agentbuild.BuildAgent(productShapedSpec(directProvider, history), agentbuild.ModeDirect)
 	if err != nil {
 		t.Fatalf("BuildAgent(direct): %v", err)
 	}
 	kitProvider := &parityProvider{}
-	viaKit, err := hostbundle.BuildAgent(productShapedSpec(kitProvider, session.NewMemory()), hostbundle.ModeKit)
+	viaKit, err := agentbuild.BuildAgent(productShapedSpec(kitProvider, session.NewMemory()), agentbuild.ModeKit)
 	if err != nil {
 		t.Fatalf("BuildAgent(kit): %v", err)
 	}

@@ -33,7 +33,6 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	rig "github.com/zeokeel/zeokeel-rig"
-	rigagent "github.com/zeokeel/zeokeel-rig/agent"
 	"github.com/zeokeel/zeokeel-rig/provider/openai"
 	"github.com/zeokeel/zeokeel-rig/session"
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
@@ -42,6 +41,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/hosttools"
+	"github.com/zeokeel/zeokeel/internal/lib/agentbuild"
 )
 
 // effectiveMaxIterations maps the product's assembly-level round cap onto the
@@ -2814,13 +2814,21 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		// Lazy discovery: the request carries the core surface plus whatever the
 		// session activated; tool_search loads the rest.
 		InitialActiveTools: s.initialActiveTools(sessionID, runTools),
+		// The single owner of the session's active set: the product state is
+		// mirrored here, so the rig agent loads/saves it instead of only the
+		// per-run list.
+		ActivationStore: s,
 	}
 	// Context safety default: the explicit chat.contextBudget when set, else a
 	// budget derived from the model's context window; a known budget also
 	// installs the automatic compactor.
 	s.withContextBudget(&spec, cfg, provider)
 	spec.ContextRecovery = s.contextRecoveryHooks()
-	runner, err := rigagent.New(spec)
+	mode := agentbuild.ModeDirect
+	if agentbuild.KitAgentEnabled() {
+		mode = agentbuild.ModeKit
+	}
+	runner, err := agentbuild.BuildAgent(spec, mode)
 	if err != nil {
 		s.finish(sessionID, ctx, fmt.Errorf("create agent: %w", err))
 		return

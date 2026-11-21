@@ -9,6 +9,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	rig "github.com/zeokeel/zeokeel-rig"
@@ -155,6 +156,9 @@ func (s *service) activateSessionToolsFor(sessionID string, names []string) (act
 		return nil, names
 	}
 	activated, unknown = runner.ActivateTools(sessionID, names...)
+	// Mirror the activation for activators that are not backed by this service
+	// (unit fakes); when the runner does use the ActivationStore, Save writes
+	// the authoritative full set immediately afterwards.
 	if len(activated) > 0 {
 		s.mu.Lock()
 		if state := s.sessions[sessionID]; state != nil {
@@ -168,6 +172,42 @@ func (s *service) activateSessionToolsFor(sessionID string, names []string) (act
 		s.mu.Unlock()
 	}
 	return activated, unknown
+}
+
+// Load implements rig.ToolActivationStore: the session's full active set,
+// mirrored from the live agent (the memory fallback is the core surface).
+func (s *service) Load(_ context.Context, sessionID string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.sessions[sessionID]
+	if state == nil || len(state.activeTools) == 0 {
+		return nil, rig.ErrNoActivationRecord
+	}
+	names := make([]string, 0, len(state.activeTools))
+	for name := range state.activeTools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// Save implements rig.ToolActivationStore: the rig agent writes the full active
+// set after activation/deactivation so a restart and the product's prompt
+// surface read the same source.
+func (s *service) Save(_ context.Context, sessionID string, tools []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.sessions[sessionID]
+	if state == nil {
+		return nil
+	}
+	state.activeTools = make(map[string]bool, len(tools))
+	for _, name := range tools {
+		if trimmed := strings.TrimSpace(name); trimmed != "" {
+			state.activeTools[trimmed] = true
+		}
+	}
+	return nil
 }
 
 // bindSessionRunner records the live runner so tool_search can activate tools
