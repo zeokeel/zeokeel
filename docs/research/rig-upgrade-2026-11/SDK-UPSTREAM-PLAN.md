@@ -115,8 +115,8 @@ GOPROXY=file://$PWD/.cache/rigproxy GOSUMDB=off go get github.com/zeokeel/zeokee
 
 | 项 | 结论 | 理由 |
 |---|---|---|
-| B.1 模式白名单（plan/minimal/creator） | 留产品 | 模式与白名单是产品策略；SDK 的 `gate`/`tools` 已提供机制，上移只会把产品词汇写进 SDK |
-| B.2 发现尾部/初始 active | 留产品 | `discovery` 已提供机制；尾部名单与 preset 保留规则是产品取舍，且已有"家族覆盖/未知工具保持 active"测试守护 |
+| B.1 模式白名单（plan/minimal/creator） | 机制已上移，策略留产品 | `tools/surface.OnlyNames` 提供过滤；模式表仍是产品策略 |
+| B.2 发现尾部/初始 active | 机制已上移，策略留产品 | `discovery.Activation` 提供尾部/前缀/forced 规则；名单与 preset 取舍仍是产品策略 |
 | B.3 jobs 读模型 | 留产品 | 跨工作区合并是桌面 chip 的展示语义；`jobs.Manager` 已提供单任务快照 |
 | B.4 工作区注册表 | 留产品 | 工作区列表/当前绑定是产品 UI 域，不是宿主无关能力 |
 | B.5 模型目录 | 留产品 | 用户可编辑的模型/上下文/备注是产品设置与 UI；rig `modelprice` 是只读价格表，语义不同 |

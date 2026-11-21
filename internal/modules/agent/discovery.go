@@ -31,57 +31,41 @@ var discoveryTailTools = []string{
 	"schedule_create", "schedule_list", "schedule_update", "schedule_delete",
 }
 
-// isDiscoverableTail reports whether a tool starts out hidden from the request
-// (MCP tools are always part of the tail: a server can register dozens).
+// discoveryActivation is the hidden tail: worktree/LSP/schedule families plus
+// every MCP server (a prefix rule). A preset can force a tail tool back on.
+var discoveryActivation = discovery.Activation{
+	Tail:         discoveryTailTools,
+	TailPrefixes: []string{"mcp__"},
+}
+
+// isDiscoverableTail reports whether a tool starts out hidden from the request.
 func isDiscoverableTail(name string) bool {
-	name = strings.TrimSpace(name)
-	if strings.HasPrefix(name, "mcp__") {
-		return true
-	}
-	for _, tail := range discoveryTailTools {
-		if name == tail {
-			return true
-		}
-	}
-	return false
+	return discoveryActivation.Hidden(name)
 }
 
 // initialActiveTools is the run's starting active set over the session's
-// exposed surface (preset/mode already applied): every exposed tool except the
-// discoverable tail, plus whatever the session activated. Basing it on the
-// exposed surface keeps a tail tool the preset explicitly names active, and a
-// nil/empty surface keeps everything active.
+// exposed surface (preset/mode already applied): the SDK activation rule (every
+// exposed tool except the hidden tail, forced names kept, unknown tools active)
+// plus whatever the session activated with tool_search.
 func (s *service) initialActiveTools(sessionID string, tools []rig.Tool) []string {
 	if s == nil {
 		return nil
 	}
-	names := make([]string, 0, len(tools))
-	seen := make(map[string]bool, len(tools))
-	for _, tool := range tools {
-		if tool == nil {
-			continue
-		}
-		name := strings.TrimSpace(tool.Name())
-		if name == "" || seen[name] || isDiscoverableTail(name) {
-			continue
-		}
-		seen[name] = true
-		names = append(names, name)
-	}
-	// A preset allowlist is an explicit user decision: a tail tool it names is
-	// active (hiding it would silently drop a capability the preset grants).
+	activation := discoveryActivation
 	if preset, ok := s.agentPresetForSession(sessionID); ok {
-		present := make(map[string]bool, len(tools))
-		for _, tool := range tools {
-			if tool != nil {
-				present[strings.TrimSpace(tool.Name())] = true
-			}
+		activation.Forced = preset.Tools
+	}
+	names := discovery.ActiveNames(tools, activation)
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		seen[name] = true
+	}
+	// Tools the runtime always keeps active count as well.
+	for _, tool := range tools {
+		if tool == nil || rig.IsToolDiscoverable(tool) {
+			continue
 		}
-		for _, name := range preset.Tools {
-			name = strings.TrimSpace(name)
-			if name == "" || !present[name] || seen[name] {
-				continue
-			}
+		if name := strings.TrimSpace(tool.Name()); name != "" && !seen[name] {
 			seen[name] = true
 			names = append(names, name)
 		}

@@ -14,6 +14,7 @@ import (
 
 	rig "github.com/zeokeel/zeokeel-rig"
 	"github.com/zeokeel/zeokeel-rig/gate"
+	"github.com/zeokeel/zeokeel-rig/tools/surface"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -141,16 +142,10 @@ func filterToolsForMode(tools []rig.Tool, mode string) []rig.Tool {
 	if len(allowed) == 0 {
 		return tools
 	}
-	filtered := make([]rig.Tool, 0, len(tools))
-	for _, tool := range tools {
-		if tool == nil {
-			continue
-		}
-		if toolAllowed(tool.Name(), allowed) {
-			filtered = append(filtered, tool)
-		}
+	if len(allowed) == 0 {
+		return tools
 	}
-	return filtered
+	return surface.OnlyNames(tools, allowed)
 }
 
 // modePolicyLine is the model-facing runtime-mode sentence: the current mode,

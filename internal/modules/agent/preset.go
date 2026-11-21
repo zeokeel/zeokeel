@@ -8,9 +8,11 @@ package agent
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/tools/surface"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -166,50 +168,25 @@ var runtimeCapabilityTools = map[string]bool{
 	"tool_search": true,
 }
 
-// filterToolsByAllowlist keeps the named tools in registration order (trimmed
-// exact match). An empty allowlist is handled by the caller (keep every tool).
+// filterToolsByAllowlist keeps the named tools in registration order; runtime
+// capability tools stay even when a preset does not name them.
 func filterToolsByAllowlist(tools []rig.Tool, allow []string) []rig.Tool {
-	allowed := make(map[string]bool, len(allow))
-	for _, name := range allow {
-		allowed[strings.TrimSpace(name)] = true
-	}
-	filtered := make([]rig.Tool, 0, len(tools))
-	for _, tool := range tools {
-		if tool == nil {
-			continue
-		}
-		name := strings.TrimSpace(tool.Name())
-		if allowed[name] || runtimeCapabilityTools[name] {
-			filtered = append(filtered, tool)
-		}
-	}
-	return filtered
+	return surface.OnlyNames(tools, allow, runtimeCapabilityNames()...)
 }
 
-// withoutToolNames drops the named tools from a surface, preserving order. Used
-// by the delegated child runners to remove the orchestration tools after the
-// preset/mode surface has been resolved.
+// runtimeCapabilityNames lists the capability tools a preset may not remove.
+func runtimeCapabilityNames() []string {
+	names := make([]string, 0, len(runtimeCapabilityTools))
+	for name := range runtimeCapabilityTools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// withoutToolNames drops the named tools from a surface (SDK filter).
 func withoutToolNames(tools []rig.Tool, names []string) []rig.Tool {
-	excluded := make(map[string]bool, len(names))
-	for _, name := range names {
-		if trimmed := strings.TrimSpace(name); trimmed != "" {
-			excluded[trimmed] = true
-		}
-	}
-	if len(excluded) == 0 {
-		return tools
-	}
-	filtered := make([]rig.Tool, 0, len(tools))
-	for _, tool := range tools {
-		if tool == nil {
-			continue
-		}
-		if excluded[strings.TrimSpace(tool.Name())] {
-			continue
-		}
-		filtered = append(filtered, tool)
-	}
-	return filtered
+	return surface.WithoutNames(tools, names)
 }
 
 // enabledRegistryTools returns the registry tools without the user-disabled
