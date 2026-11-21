@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **组合层 P3a：产品 `hostbundle` 缝**（2026-11-21）：新增 `internal/hostbundle`，把产品会话 History/SessionLog/Checkpoint、产品 prompt 区段、业务工具、阶段/钩子打包成 `kit.Module`，可用 `kit.Build` 编译出 agent；端到端测试证明 prompt 区段、业务工具与产品 History 均生效。依赖切到 rig `v0.28.0-rc.2`（尚未切换产品运行路径）。
+
 - **SDK 上移 B.6（ACP 传输层）**（2026-11-21）：rig 新增 `acp` 包——换行分帧、请求校验、initialize/能力通告、方法分发、并发 prompt 轮次、cancel、通知串行化、`ErrNoResponse` 与 JSON-RPC 错误映射，宿主实现 `Handler`；产品 `acp` 模块删除自研传输/分发 289 行，只保留 ACP 方法到 Chat/Workspace 的映射、工作区绑定、图片 prompt 与工具事件。依赖切到 `rig v0.27.3`（+ `session/sqlstore v0.2.3`）。
 
 - **SDK 依赖切到正式发布版本**（2026-11-21）：`github.com/zeokeel/zeokeel-rig v0.27.3` + `github.com/zeokeel/zeokeel-rig/session/sqlstore v0.2.3`（rig `main` 上的正式 tag，含本次全部上移能力；v0.27.0/rc 与 v0.27.1 均因发布门禁未通过，tag 不可移动，故用补丁版本重新发布）；本地代理仍可离线复现，go.sum 为 canonical 哈希。

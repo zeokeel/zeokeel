@@ -1,6 +1,6 @@
 # rig 组合层设计：kit 作为 agent 编译器，产品作为薄壳
 
-> 状态：设计稿（2026-11-21）；P1（阶段钩子 + kit 透传）与 P2（Spec/Build/注册表/LoadFile + ExtraTools + 模块能力/生命周期）已落地；P3 产品 hostbundle 待做。
+> 状态：设计稿（2026-11-21）；P1（阶段钩子 + kit 透传）与 P2（Spec/Build/注册表/LoadFile + ExtraTools + 模块能力/生命周期）已落地；P3a 产品 hostbundle 缝已落地（`internal/hostbundle`，未切运行路径）。
 > 目标读者：维护 rig/kit 与 ZeoKeel 装配层的人。
 
 ## 0. 目标与非目标
