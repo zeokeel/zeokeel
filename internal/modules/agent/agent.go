@@ -2810,6 +2810,10 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		InitialActiveTools: s.initialActiveTools(sessionID, runTools),
 	}
 	if surfaceHasTool(runTools, "tool_search") {
+		// The product registers and drives its own tool_search; kit must keep it
+		// and pass InitialActiveTools through (discovery on) without injecting a
+		// second tool.
+		runConfig.HostOwnsToolSearch = true
 		runConfig.ToolDiscovery = kit.Bool(true)
 	}
 	// Context safety default: explicit chat.contextBudget when set, else derived.
