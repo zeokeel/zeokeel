@@ -107,6 +107,34 @@ GOPROXY=file://$PWD/.cache/rigproxy GOSUMDB=off go get github.com/zeokeel/zeokee
 - **迁移**：一次性 `MigrateFromLegacy(ctx, db)`（旧库四表 → 新库，按 session 分批 + 事务；失败回滚、旧库只读保留）；产品在装配启动时执行并记录事件。
 - **测试**：嵌套模块内用真实 SQLite 跑 CRUD/检索/迁移/并发/损坏 payload；产品保留"旧实现 ↔ 新实现"golden 对照（同一操作后导出对比）后才删 `sessionstore`。
 
+## 4.7 A.5b 与 B 级的收口决策（2026-11-21）
+
+**A.5b 不上移**：子会话的通用文档已在 A.5a 进入 `session/children`，运行器本身就是 `rig.Agent`（`SessionID` + 历史即"继续"）。剩下的 `delegatedParentSpec`（12 行配置搬运）、冷启动的记录种子/状态/收据/通知都是产品的子会话编排，绑在既有契约与事件上；把它们做成 SDK API 只会产出一个只有本产品使用的形状。
+
+**B 级逐项评估（当前不迁移）**：
+
+| 项 | 结论 | 理由 |
+|---|---|---|
+| B.1 模式白名单（plan/minimal/creator） | 留产品 | 模式与白名单是产品策略；SDK 的 `gate`/`tools` 已提供机制，上移只会把产品词汇写进 SDK |
+| B.2 发现尾部/初始 active | 留产品 | `discovery` 已提供机制；尾部名单与 preset 保留规则是产品取舍，且已有"家族覆盖/未知工具保持 active"测试守护 |
+| B.3 jobs 读模型 | 留产品 | 跨工作区合并是桌面 chip 的展示语义；`jobs.Manager` 已提供单任务快照 |
+| B.4 工作区注册表 | 留产品 | 工作区列表/当前绑定是产品 UI 域，不是宿主无关能力 |
+| B.5 模型目录 | 留产品 | 用户可编辑的模型/上下文/备注是产品设置与 UI；rig `modelprice` 是只读价格表，语义不同 |
+| B.6 ACP 服务端 | 按需 | 单一消费者（本产品）；若第二个宿主需要 ACP，再整体上移（协议宿主适配，不涉及策略） |
+
+## 4.8 迁移总览（A 级完成）
+
+| 项 | SDK 位置 | 产品净删（行） |
+|---|---|---|
+| A.2 提示词分段/度量/哈希 | `prompt` | ~40 |
+| A.3 溢出恢复 | `agent.ContextRecovery` + `rig.IsContextOverflowError` | ~113 |
+| A.4 审批队列 | `gate.Queue` | ~227 |
+| A.1a 检索文本/片段 | `session/sqlsearch` | ~183 |
+| A.1b 会话存储 | `session/sqlstore`（嵌套模块） | ~1150 |
+| A.5a 子会话记录 | `session/children` | ~442 |
+| A.5b 冷启动/委派 spec | 决策不上移 | 0 |
+| 合计 | — | **约 2150 行** |
+
 ## 5. 建议顺序（若决定推进）
 
 1. **A.2 提示词装配/快照**（纯函数、无 I/O、无迁移风险）→ 建立"上移一套 + 产品接线"的样板。
