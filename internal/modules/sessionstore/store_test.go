@@ -73,8 +73,8 @@ func metaOf(t *testing.T, current *store, id string) contracts.SessionMeta {
 func TestOpenCreatesSchemaAndPragmas(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "nested", "data")
 	current := openTestStoreAt(t, dataDir)
-	if current.path != filepath.Join(dataDir, DBFileName) {
-		t.Fatalf("store path = %q, want %q", current.path, filepath.Join(dataDir, DBFileName))
+	if current.dbPath != filepath.Join(dataDir, DBFileName) {
+		t.Fatalf("store path = %q, want %q", current.dbPath, filepath.Join(dataDir, DBFileName))
 	}
 	if info, err := os.Stat(dataDir); err != nil || !info.IsDir() {
 		t.Fatalf("data dir was not created: %v", err)

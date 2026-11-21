@@ -6,6 +6,7 @@ require (
 	github.com/egoist/mygo v0.9.2
 	github.com/zeokeel/zeokeel-kernel v0.1.1
 	github.com/zeokeel/zeokeel-rig v0.27.0-rc.8
+	github.com/zeokeel/zeokeel-rig/session/sqlstore v0.1.1
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.43.0
 	modernc.org/sqlite v1.61.1

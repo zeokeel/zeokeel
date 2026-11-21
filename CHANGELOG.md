@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **SDK 上移 A.1b 完成：会话存储切到 rig `session/sqlstore`**（2026-11-21）：产品 `sessionstore` 从 939 行实现缩成约 230 行接线（打开库/DSN/PRAGMA 仍在产品），schema、`rig.History/SessionLog/CheckpointStore`、检查点、事件日志、会话元数据/重命名/工作区绑定、解码列检索全部由 SDK 模块提供；`search.go`/`search_text.go` 删除。schema 与既有 `zeokeel.db` 兼容，**零数据拷贝**；产品原有 30 个存储测试未改断言（仅改一个内部字段名）全部通过。产品 `go.mod` 增加 `session/sqlstore v0.1.1`。净删约 1150 行。
+
 - **SDK 上移 A.1b（SDK 侧就绪）**：rig 新增嵌套模块 `session/sqlstore`（宿主传入 `*sql.DB`，包内建 schema 与旧列迁移、`rig.History/SessionLog/CheckpointStore`、会话元数据/重命名/作用域绑定、跨会话检索），schema 与现有 `zeokeel.db` 兼容，可零拷贝切换；`scripts/publish-rig-local.sh` 支持把嵌套模块发布到本地离线代理（`session/sqlstore/v0.1.1`）。产品侧切换与删除 `sessionstore` 实现留到下一轮（涉及 1.5k 行测试迁移）。
 
 - **SDK 上移 A.1a：会话检索的文本/片段层进入 rig `session/sqlsearch`**（2026-11-21）：`MessageColumns`（递归解码 tool 参数 JSON，引号/反斜杠是内容不是转义）、`EventText`、`EscapeLike`、`Snippet`/`PlainText`（rune 安全、去 Markdown 噪声）下移；产品删除 `search_text.go` 的解码实现与 `search.go` 的片段/转义实现，仅保留 schema、SQL 与扫描（`MessageSearchHit` 映射）。纯函数、无新依赖。`go.mod` 抬到 `v0.27.0-rc.8`（本地离线代理）。A.1 的第二半（schema/CRUD/RenameSession 整店上移）仍待做。
