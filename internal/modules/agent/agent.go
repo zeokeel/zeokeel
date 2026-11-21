@@ -384,7 +384,9 @@ type service struct {
 	// its child-completion receipts).
 	runWG sync.WaitGroup
 
-	cfg       Config
+	cfg Config
+	// now is the clock seam for the prompt's date line (nil uses time.Now).
+	now       func() time.Time
 	registry  *rigtools.Registry
 	settings  contracts.SettingsService
 	logger    contracts.Logger
@@ -2699,6 +2701,10 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// per-tool guidance for the tools this run actually receives.
 	promptSections := []contracts.PromptSection(nil)
 	promptTools := activeRunTools(tools, s.activeToolSet(sessionID, tools))
+	// SystemPromptFunc re-renders from the unsectioned config: the precomputed
+	// string below already carries the workspace/preset/tool sections and must
+	// not be fed back into the builder.
+	promptCfg := cfg
 	cfg.SystemPrompt, promptSections = s.buildRunSystemPromptSections(ctx, sessionID, cfg, toolNameSet(promptTools), workspaceRoot)
 	provider, err := s.newProvider(cfg, thinking)
 	if err != nil {
@@ -2733,9 +2739,13 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// current.
 	runTools := withWorkspaceRoot(withAgentScope(tools, sessionID, origin), workspaceRoot)
 	spec := rig.AgentSpec{
-		Provider:      provider,
-		Model:         cfg.Model,
-		SystemPrompt:  cfg.SystemPrompt,
+		Provider: provider,
+		Model:    cfg.Model,
+		// The prompt is rendered by the SDK inside every Run (after the BeforeRun
+		// hooks): the date line and any state a hook changed are then current.
+		SystemPromptFunc: func(renderCtx context.Context, _ rig.RunRequest) string {
+			return s.buildRunSystemPrompt(renderCtx, sessionID, promptCfg, toolNameSet(promptTools), workspaceRoot)
+		},
 		MaxIterations: maxIterations,
 		Temperature:   generation.Temperature,
 		TopP:          generation.TopP,

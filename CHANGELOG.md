@@ -8,6 +8,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Added
 
+- **系统提示词改为 SDK 每 run 渲染 + 日期行**：`AgentSpec.SystemPrompt` 换成 `SystemPromptFunc`（在 `BeforeRun` 之后、读历史之前渲染），环境段新增 `date` 小节（`Today's date is 2026-11-21 (Saturday).`，来源 `builtin`，零值时钟时省略），并作为 `PromptSectionDate` 进入上下文快照的提示词来源；日期每天变化一次，prefix cache 不受影响。
+
 - **懒加载工具发现（SDK `tools/discovery`）**：agent 注册 `tool_search` 并给每个 run 传 `InitialActiveTools`——请求默认只带常用面，worktrees（enter/exit/list）/ LSP / schedule / `mcp__*` 这些「尾部」工具按需 `tool_search` 列出并激活；激活通过当前 run 的 `rig.ToolActivator` 立即生效（同一会话后续请求可见、追加在末尾保持 prefix cache）并记住供后续 run 使用（重启回到默认面）。未知的自定义工具默认仍是 active，避免新工具被静默隐藏；preset 显式点名的尾部工具保持 active；`tool_search` 免审批、进入 plan/minimal/creator 白名单并被 preset 收窄保留；context-overflow 重试重绑 runner 且带上已有激活；系统提示词与上下文快照只描述 active 面；委派子会话不收 `tool_search`。
 
 - **`apply_patch` 的 UI 呈现补齐**：运行时在记录工具调用时从**完整参数**解析文件清单（`ToolCall.Generated`），回合尾文件卡据此渲染——新增进「交付文件」，更新/删除/移动进「已编辑 N 个文件」，删除行标「已删除」且没有预览动作，`dry_run` 不产行；支持应用式补丁与 unified diff（`/dev/null` 新增/删除、重命名），单次上限 200 文件，卡片显示前 8 行 + "还有 N 个文件"（转写参数被 4000 字符截断，之前按参数解析会整条失效）。审批卡展示补丁正文并注明「多文件补丁：按文件应用，无逐文件 diff」。

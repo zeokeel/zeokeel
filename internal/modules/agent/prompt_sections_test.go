@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
 
@@ -71,8 +72,9 @@ func TestPromptSectionsShape(t *testing.T) {
 	configured := []contracts.PromptSection{{
 		ID: PromptSectionConfig, Source: "config", Text: "base system prompt",
 	}}
+	frozen := time.Date(2026, 11, 21, 9, 0, 0, 0, time.UTC)
 	sections := promptSectionsForRun("linux", "amd64", "/work", contracts.PermissionWorkspace, contracts.PermissionWorkspace,
-		"", configured, toolNames)
+		"", frozen, configured, toolNames)
 	ids := make([]string, 0, len(sections))
 	for _, section := range sections {
 		ids = append(ids, section.ID)
@@ -87,11 +89,13 @@ func TestPromptSectionsShape(t *testing.T) {
 		}
 	}
 	wantIDs := []string{PromptSectionIdentity, PromptSectionEnvironment, PromptSectionWorkingDirectory,
-		PromptSectionApproval, PromptSectionConfig, PromptSectionToolGuidance}
+		PromptSectionDate, PromptSectionApproval, PromptSectionConfig, PromptSectionToolGuidance}
 	if strings.Join(ids, ",") != strings.Join(wantIDs, ",") {
 		t.Fatalf("section order = %v, want %v", ids, wantIDs)
 	}
-	rendered := renderPromptSections(sections)
+	// The section render must equal the legacy assembly plus the date line (the
+	// legacy helper takes no clock).
+	rendered := strings.Replace(renderPromptSections(sections), "Today's date is 2026-11-21 (Saturday).\n", "", 1)
 	if want := systemPromptForRun("linux", "amd64", "/work", contracts.PermissionWorkspace, contracts.PermissionWorkspace, "", "base system prompt", toolNames); rendered != want {
 		t.Fatalf("renderPromptSections = %q, want %q", rendered, want)
 	}
@@ -119,6 +123,7 @@ func TestBuildRunSystemPromptSectionsMatchesLegacy(t *testing.T) {
 	if err := svc.SetSessionPreset(sessionID, "p1"); err != nil {
 		t.Fatalf("SetSessionPreset: %v", err)
 	}
+	svc.now = func() time.Time { return time.Date(2026, 11, 21, 9, 0, 0, 0, time.UTC) }
 	toolNames := map[string]bool{"bash": true, "read_file": true}
 	cfg := svc.Config()
 
@@ -129,6 +134,8 @@ func TestBuildRunSystemPromptSectionsMatchesLegacy(t *testing.T) {
 	legacyCfg = svc.withPresetInstructions(sessionID, legacyCfg)
 	want := legacySystemPrompt("linux", "amd64", root, svc.effectiveSandboxMode(), svc.effectiveApprovalMode(sessionID),
 		svc.runtimeMode(), legacyCfg.SystemPrompt, toolNames)
+	// The service additionally injects the run's date into the environment group.
+	want = strings.Replace(want, "\n\nApproval policy", "\nToday's date is 2026-11-21 (Saturday).\n\nApproval policy", 1)
 	if prompt != want {
 		t.Fatalf("service prompt drifted from the legacy assembly:\n got: %q\nwant: %q", prompt, want)
 	}

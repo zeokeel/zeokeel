@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
@@ -190,5 +191,42 @@ func TestAgentsFileWithoutWorkspaceIsIgnored(t *testing.T) {
 		if message.Role == rig.RoleSystem && strings.Contains(message.Content[0].Text, "# 工作区指令") {
 			t.Fatalf("workspace instructions injected without workspace: %q", message.Content[0].Text)
 		}
+	}
+}
+
+// TestRunPromptCarriesTheDateThroughSystemPromptFunc pins the SDK-side render:
+// the spec no longer carries a static SystemPrompt, so the provider's system
+// message can only come from SystemPromptFunc — and it carries today's date.
+func TestRunPromptCarriesTheDateThroughSystemPromptFunc(t *testing.T) {
+	root := t.TempDir()
+	workspace := &fakeWorkspace{}
+	svc, provider := newAgentsFileService(t, newFakeSettings(nil), workspace, nil)
+	frozen := time.Date(2026, 11, 21, 9, 0, 0, 0, time.UTC)
+	calls := 0
+	svc.now = func() time.Time {
+		calls++
+		return frozen
+	}
+	system := runAndSystemPrompt(t, svc, provider, workspace, root)
+	if !strings.Contains(system, "Today's date is 2026-11-21 (Saturday).") {
+		t.Fatalf("system prompt lacks the run date: %q", system)
+	}
+	if !strings.HasPrefix(system, "You are ZeoKeel") {
+		t.Fatalf("SystemPromptFunc did not render the base prompt: %q", system)
+	}
+	// The precomputed snapshot build reads the clock once; the SDK-side render
+	// reads it again, which is the point of SystemPromptFunc.
+	if calls < 2 {
+		t.Fatalf("prompt clock read %d times, want the SDK-side render on top of the snapshot build", calls)
+	}
+}
+
+// TestPromptOmitsTheDateWithoutAClock keeps the legacy assembly (no clock, e.g.
+// tests and tooling that only need the static part) free of a guessed date.
+func TestPromptOmitsTheDateWithoutAClock(t *testing.T) {
+	prompt := systemPromptForRun("linux", "amd64", "/work", contracts.PermissionWorkspace,
+		contracts.PermissionWorkspace, "", "base", map[string]bool{"bash": true})
+	if strings.Contains(prompt, "Today's date") {
+		t.Fatalf("legacy assembly invented a date: %q", prompt)
 	}
 }

@@ -335,6 +335,7 @@ const (
 	PromptSectionIdentity         = "identity"
 	PromptSectionEnvironment      = "environment"
 	PromptSectionWorkingDirectory = "working-directory"
+	PromptSectionDate             = "date"
 	PromptSectionApproval         = "approval"
 	PromptSectionMode             = "runtime-mode"
 	PromptSectionConfig           = "config"
@@ -366,7 +367,7 @@ func newPromptSection(id, source, text string) contracts.PromptSection {
 // guidance) are prepended/appended here. sandboxMode is the effective OS file
 // policy (global preset); approvalMode is the gate's policy (session override
 // wins) — the two axes are independent (audit (a)/(b)).
-func promptSectionsForRun(goos, goarch, workspaceRoot, sandboxMode, approvalMode, mode string,
+func promptSectionsForRun(goos, goarch, workspaceRoot, sandboxMode, approvalMode, mode string, now time.Time,
 	configured []contracts.PromptSection, toolNames map[string]bool) []contracts.PromptSection {
 	shellSentence := shellEnvironmentSentence(goos)
 	if toolNames != nil {
@@ -377,8 +378,16 @@ func promptSectionsForRun(goos, goarch, workspaceRoot, sandboxMode, approvalMode
 		newPromptSection(PromptSectionEnvironment, "builtin",
 			fmt.Sprintf("Environment: %s/%s. %s", goos, goarch, shellSentence)),
 		newPromptSection(PromptSectionWorkingDirectory, "builtin", workingDirectoryLine(workspaceRoot, sandboxMode)),
-		newPromptSection(PromptSectionApproval, "policy", approvalPolicyLine(approvalMode)),
 	}
+	// The date belongs to the environment group: it changes between runs (the
+	// SDK re-renders the prompt through SystemPromptFunc), and a model that
+	// never sees today's date plans against a stale calendar.
+	if !now.IsZero() {
+		sections = append(sections, newPromptSection(PromptSectionDate, "builtin",
+			fmt.Sprintf("Today's date is %s (%s).", now.Format("2006-01-02"), now.Weekday())))
+	}
+	sections = append(sections,
+		newPromptSection(PromptSectionApproval, "policy", approvalPolicyLine(approvalMode)))
 	if modeLine := modePolicyLine(mode, toolNames); modeLine != "" {
 		sections = append(sections, newPromptSection(PromptSectionMode, "policy", modeLine))
 	}
@@ -432,7 +441,7 @@ func renderPromptSections(sections []contracts.PromptSection) string {
 			continue
 		}
 		switch section.ID {
-		case PromptSectionIdentity, PromptSectionEnvironment, PromptSectionWorkingDirectory:
+		case PromptSectionIdentity, PromptSectionEnvironment, PromptSectionWorkingDirectory, PromptSectionDate:
 			environmentGroup = append(environmentGroup, text)
 			continue
 		}
@@ -449,7 +458,7 @@ func renderPromptSections(sections []contracts.PromptSection) string {
 // toolNames is the exact model-visible tool surface of the run; sandboxMode is
 // the effective OS file policy and approvalMode the gate's policy.
 func systemPromptForRun(goos, goarch, workspaceRoot, sandboxMode, approvalMode, mode, configuredPrompt string, toolNames map[string]bool) string {
-	return renderPromptSections(promptSectionsForRun(goos, goarch, workspaceRoot, sandboxMode, approvalMode, mode,
+	return renderPromptSections(promptSectionsForRun(goos, goarch, workspaceRoot, sandboxMode, approvalMode, mode, time.Time{},
 		configuredPromptSections(configuredPrompt), toolNames))
 }
 
@@ -514,6 +523,14 @@ func (s *service) effectiveApprovalMode(sessionID string) string {
 	return normalizeApprovalMode(s.approvals.Mode())
 }
 
+// clockNow is the prompt clock (the date line): tests freeze it.
+func (s *service) clockNow() time.Time {
+	if s != nil && s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
 // buildRunSystemPrompt resolves the complete system prompt for one run:
 // environment, approval policy and runtime mode first, then the configured
 // prompt with the workspace instructions, the selected preset, the bounded
@@ -566,6 +583,7 @@ func (s *service) buildRunSystemPromptSections(ctx context.Context, sessionID st
 		s.effectiveSandboxMode(),
 		s.effectiveApprovalMode(sessionID),
 		s.runtimeMode(),
+		s.clockNow(),
 		configured,
 		toolNames,
 	)
