@@ -491,4 +491,12 @@ func TestDiscoveryColdResumeChildKeepsItsFullSurface(t *testing.T) {
 	if hasToolNamed(request.Tools, "tool_search") {
 		t.Fatalf("cold-resumed child received tool_search: %v", toolNamesOf(request.Tools))
 	}
+	// The prompt must describe the same surface (no discovery guidance).
+	if system := systemTextOf(request); strings.Contains(system, "Call tool_search with no arguments") {
+		t.Fatalf("cold-resumed child prompt advertises tool_search: %q", system)
+	}
+	// The child run must not leave its runner bound to the parent session.
+	if runner := svc.sessionRunner(parentID); runner != nil {
+		t.Fatal("cold resume bound the child runner onto the parent session")
+	}
 }
