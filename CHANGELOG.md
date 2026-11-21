@@ -8,6 +8,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Added
 
+- **懒加载工具发现（SDK `tools/discovery`）**：agent 注册 `tool_search` 并给每个 run 传 `InitialActiveTools`——请求默认只带常用面，worktrees / LSP / schedule / `mcp__*` 这些「尾部」工具按需 `tool_search` 列出并激活；激活通过当前 run 的 `rig.ToolActivator` 立即生效（同一会话后续请求可见）并记住供后续 run 使用（重启回到默认面）。未知的自定义工具默认仍是 active，避免新工具被静默隐藏；系统提示词与工具面一致（只描述 active 工具），`tool_search` 免审批且进入 plan/minimal/creator 白名单与 preset 豁免。
+
 - **`apply_patch` 的 UI 呈现补齐**：运行时在记录工具调用时从**完整参数**解析文件清单（`ToolCall.Generated`），回合尾文件卡据此渲染——新增进「交付文件」，更新/删除/移动进「已编辑 N 个文件」，删除行标「已删除」且没有预览动作，`dry_run` 不产行；支持应用式补丁与 unified diff（`/dev/null` 新增/删除、重命名），单次上限 200 文件，卡片显示前 8 行 + "还有 N 个文件"（转写参数被 4000 字符截断，之前按参数解析会整条失效）。审批卡展示补丁正文并注明「多文件补丁：按文件应用，无逐文件 diff」。
 
 - **超大工具结果改走 SDK 共享存储 + `spill_read`**：toolkit 在数据目录建一个 `spillfile` store（`<dataDir>/spill`，按会话作用域回收），同时提供给 agent（`SpillPolicy.Store`）与模型可见的 `spill_read`——模型拿到 `ref: <id>` 后能按句柄读回（单次 8 KiB），不再只有"已落盘"的摘要。没有数据目录的装配继续走文件后端（工作区 `.zeokeel/tool-results` 或数据目录），行为不变。

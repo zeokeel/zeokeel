@@ -43,6 +43,8 @@ func toolDisplayNamePair(key string) (zh, en string) {
 		return "回退本轮改动", "Undo this turn"
 	case key == "spill_read":
 		return "读取溢出结果", "Read spilled result"
+	case key == "tool_search":
+		return "查找并加载工具", "Find and load tools"
 	case key == "search":
 		return "按相关性搜索", "Search by relevance"
 	case key == "sandbox_status":

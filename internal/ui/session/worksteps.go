@@ -114,6 +114,8 @@ func workStepStatus(name string) workStepActivity {
 		return workStepActivity{zh: "正在回退改动", en: "Undoing changes"}
 	case key == "spill_read":
 		return workStepActivity{zh: "正在读取溢出结果", en: "Reading a spilled result"}
+	case key == "tool_search":
+		return workStepActivity{zh: "正在加载工具", en: "Loading tools"}
 	case key == "web_fetch":
 		return workStepActivity{zh: "正在访问网页", en: "Fetching a web page"}
 	case key == "subagent" || key == "workflow" || key == "ralph" ||

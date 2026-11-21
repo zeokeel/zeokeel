@@ -232,6 +232,29 @@ func Module() *module.Descriptor[Config] {
 			svc.sandboxService = sandboxService
 		}
 		svc.restore(context.Background())
+		// Lazy tool discovery: tool_search lists and activates the registered
+		// tools the request does not carry yet. It registers after the store so
+		// its list covers the session tools too; later registrations (subagents,
+		// team) are visible because the list reads the live registry.
+		discoveryTool := svc.newDiscoveryTool()
+		if err := svc.registerDiscoveryTool(discoveryTool); err != nil {
+			return err
+		}
+		if _, err := ctx.Effect(func() cordis.Effect {
+			return cordis.Effect{cordis.CleanupOf(func() {
+				// Only remove our own instance: a reloaded module may already
+				// have replaced it.
+				for _, registered := range registry.Tools() {
+					if registered == discoveryTool {
+						registry.Unregister(discoveryName())
+						return
+					}
+				}
+			})}
+		}); err != nil {
+			registry.Unregister(discoveryName())
+			return err
+		}
 		// The durable store now backs the session-query tools: register them
 		// into the shared toolkit registry (the toolkit module has no store
 		// dependency, so the session tools join here).
@@ -552,7 +575,14 @@ type sessionState struct {
 	// text length at the turn's start. A reasoning segment of that iteration
 	// carries the recorded offset even when prose arrived before the thinking
 	// (US-01 per-iteration reasoning timeline).
-	turnStarted    bool
+	turnStarted bool
+	// activeTools are the tools this session loaded with tool_search on top of
+	// the product's core surface (in-memory: a restart falls back to the core).
+	activeTools map[string]bool
+	// runner is the live rig agent of the session's current run; tool_search
+	// activates against it so the next model request of the same run sees the
+	// tool.
+	runner         rig.ToolActivator
 	turnIteration  int
 	turnTextOffset int
 	// compacting marks an in-flight manual compaction (/compact): Send and
@@ -2668,7 +2698,8 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// configured prompt with the workspace instructions and preset, then
 	// per-tool guidance for the tools this run actually receives.
 	promptSections := []contracts.PromptSection(nil)
-	cfg.SystemPrompt, promptSections = s.buildRunSystemPromptSections(ctx, sessionID, cfg, toolNameSet(tools), workspaceRoot)
+	promptTools := activeRunTools(tools, s.activeToolSet(sessionID, tools))
+	cfg.SystemPrompt, promptSections = s.buildRunSystemPromptSections(ctx, sessionID, cfg, toolNameSet(promptTools), workspaceRoot)
 	provider, err := s.newProvider(cfg, thinking)
 	if err != nil {
 		s.finish(sessionID, ctx, fmt.Errorf("create provider: %w", err))
@@ -2721,6 +2752,9 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		Logger:          s.logger,
 		CheckpointStore: s.guardedCheckpointStore(s.checkpointStore()),
 		Hooks:           s.turnHooks(workspaceRoot),
+		// Lazy discovery: the request carries the core surface plus whatever the
+		// session activated; tool_search loads the rest.
+		InitialActiveTools: s.initialActiveTools(sessionID),
 	}
 	// Context safety default: the explicit chat.contextBudget when set, else a
 	// budget derived from the model's context window; a known budget also
@@ -2731,6 +2765,7 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		s.finish(sessionID, ctx, fmt.Errorf("create agent: %w", err))
 		return
 	}
+	s.bindSessionRunner(sessionID, runner)
 	// Context observability: the request-level snapshot of this run (model,
 	// window, rendered system-prompt size, exact tool catalog, history counts and
 	// injected prompt sources).
@@ -3062,6 +3097,7 @@ func (s *service) finish(sessionID string, ctx context.Context, runErr error) {
 // crash-recovery marker for a graceful stop. The partial message is captured in
 // the same critical section as the read-model state, not read back later.
 func (s *service) finishWithReason(sessionID string, ctx context.Context, runErr error, finishReason string) {
+	s.clearSessionRunner(sessionID)
 	errText := ""
 	if ctx != nil && ctx.Err() != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {

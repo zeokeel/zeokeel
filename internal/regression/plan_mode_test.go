@@ -21,7 +21,7 @@ import (
 // planWhitelist is the plan-mode allowed set the audit expects (read-only
 // exploration, interaction boxes, planning tools, task-board reads, web read).
 var planWhitelist = []string{
-	"read_file", "list_dir", "glob", "grep", "search", "sandbox_status", "spill_read",
+	"read_file", "list_dir", "glob", "grep", "search", "sandbox_status", "spill_read", "tool_search",
 	"ask_user", "present", "plan_review", "exit_plan_mode", "goal",
 	"team_task_list", "team_task_get", "memory", "skill", "skills", "web_fetch",
 }
@@ -72,6 +72,11 @@ func newPlanHarnessFromModel(t *testing.T, mode string, model *fakeModel) *planH
 	seeds := make([]rig.Tool, 0, len(planWhitelist)+len(planDeniedTools))
 	for _, name := range append(append([]string(nil), planWhitelist...), planDeniedTools...) {
 		if _, ok := counters[name]; ok {
+			continue
+		}
+		// tool_search is registered by the agent module itself (discovery is a
+		// runtime capability, not a fake seeded by this harness).
+		if name == "tool_search" {
 			continue
 		}
 		counters[name] = new(counter)
@@ -166,6 +171,13 @@ func TestPlanModeWhitelistTable(t *testing.T) {
 	for _, name := range planWhitelist {
 		before := harness.count(name)
 		session := harness.runImmediate(t, sessionID, name)
+		if name == "tool_search" {
+			// Real tool: it must run (status ok), but there is no fake counter.
+			if status, _ := lastToolStatus(t, session); status != "ok" {
+				t.Fatalf("whitelisted %q tool status = %q, want ok", name, status)
+			}
+			continue
+		}
 		if got := harness.count(name) - before; got != 1 {
 			t.Fatalf("whitelisted %q executed %d times, want 1", name, got)
 		}
