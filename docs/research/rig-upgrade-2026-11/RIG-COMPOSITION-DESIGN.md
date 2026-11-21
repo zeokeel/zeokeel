@@ -259,3 +259,14 @@ func RegisterModule(name string, f Factory[Module])
 - **审批/沙箱**：判定与执行机制在 SDK；审批文案、危险操作清单、组织策略在产品。
 
 结论：super agent 不是“一个更大的 agent 对象”，而是 **SDK 的编排机制 + 产品的一组能力模块 + 产品策略**。产品薄壳通过模块注册把钉钉这类业务工具注入，通过实现/配置 Runner 表达团队策略；rig 不吸收业务。
+
+## 完成状态（2026-11-22）
+
+- P1–P4 组合层已完成；产品运行入口为 `hostbundle + kit.BuildConfig`，无 `rig.AgentSpec` 直拼。
+- 已上移 SDK 的 host-agnostic 能力：prompt 阶段、context recovery、approvals、sqlstore、children 收据、
+  ACP transport、surface/tool discovery、skills（发现+编辑器）、execution 读模型、memory 文件持久化+保留策略、
+  DSH 导入（解析+发现+导入编排）。
+- 正式版本 `v0.28.14`；产品 `rig v0.28.14`，两仓 build/vet/test 全绿。
+- 明确留在产品侧：goal 状态机（contracts 类型/测试耦合需单独设计）、memory 完整 Store（scope/workspace 策略）、
+  toolkit 多 root 执行路由、UI/业务模块（workspace/settings/modelcatalog/team/automation/insights/importer 服务层/update/appinfo）。
+- 明确留后续：super agent 与钉钉等业务工具。
