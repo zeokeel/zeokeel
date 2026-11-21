@@ -56,6 +56,18 @@
 - **产品策略与内容**：系统提示词正文、审批文案、权限档默认值、预设（persona/prompt）、团队/子代理的展示语义、洞察口径、自动化触发器 UI、更新器、导入器。
 - **安全边界的最终决定权**：隐藏路径列表、沙箱降级策略、审批默认值——SDK 提供机制，产品做选择。
 
+## 2.5 离线开发链路（本仓已落地）
+
+rig 改动需要产品立刻消费，而本环境无网络：每完成一个 rig 提交就
+
+```bash
+git -C /data/zeokeel-rig tag -f -m rc v0.27.0-rc.N HEAD
+scripts/publish-rig-local.sh v0.27.0-rc.N
+GOPROXY=file://$PWD/.cache/rigproxy GOSUMDB=off go get github.com/zeokeel/zeokeel-rig@v0.27.0-rc.N
+```
+
+脚本生成一个本地文件代理（去掉嵌套子模块，符合 module zip 规则），模块缓存随后保留解包副本，日常 `go build/test` 仍用 `GOPROXY=off` 即可复现。发布正式 tag 后把产品 `go.mod` 换成正式版本即可。
+
 ## 3. 迁移机制（保证产品仍"只接线"）
 
 1. **先在 SDK 定义接口 + 语义文档 + 迁移测试**（rig 侧 `storagetest` 这类契约测试已有先例）。
