@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **SDK 上移 A.4：审批队列进入 rig `gate`**（2026-11-21）：新增 `gate.Queue`/`QueueRequest`/`Ask`/`AskTimeout`/`Pending`/`Resolve`/`Subscribe`——编号、等待、幂等回答、取消、订阅与可选超时全部下移；超时按"已拒绝"记录（迟到的 Resolve 仍幂等），订阅者 panic 被隔离。产品侧删除自研 `pending/resolved/subscribers/nextSeq` 队列机制与 `rememberAnswerLocked`/`notify`/`requestSequence`，只保留权限档策略、等待/超时文案、OS 通知与 decision 词表映射；`approvals` 的 Pending/Resolve/Subscribe 变成 SDK 队列适配。产品 `go.mod` 抬到 `v0.27.0-rc.7`（本地离线代理）。全量门禁通过。
+
 - **SDK 上移 A.3：上下文溢出恢复进入 rig `agent`**（2026-11-21）：新增 `rig.AgentSpec.ContextRecovery` + `rig.IsContextOverflowError`——一次压缩 + 同轮重试、当前用户消息保留、失败尝试的用量并回、`BeforeReplace`（压缩前/后历史）供宿主 fail-closed 归档、`OnRecovery` 回报前后 token 与结果；只认稳定的"超上下文"短语，限流/鉴权错误不触发。产品侧删除 `retryContextOverflow`/`isContextOverflowError` 与整段编排，只保留归档与事件两个钩子；`withContextBudget` 在预算未知时也安装压缩器（供中途恢复使用），`historyView`/`tombstoneHistory` 支持 `HistoryReplacer`。`go.mod` 抬到 `v0.27.0-rc.5`（本地离线代理）。全量门禁通过。
 
 - **SDK 上移 A.2：系统提示词分段模型进入 rig `prompt`**（2026-11-21）：`github.com/zeokeel/zeokeel-rig/prompt` 负责分段顺序、环境组渲染（identity/environment/working-directory/date 单换行成组）、空段丢弃、Bytes/Tokens 度量与稳定内容哈希；产品侧删除自研的渲染/度量/哈希实现，只保留各段**文案**与接线（`newPromptSection`/`renderPromptSections` 变成 SDK 适配器，快照 Hash 直接用 SDK 值）。产品 `go.mod` 抬到 `v0.27.0-rc.3`（本地离线代理建包）。行为字节级不变，全量门禁通过。

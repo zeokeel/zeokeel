@@ -38,14 +38,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
+
+	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/gate"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -128,23 +129,6 @@ func Module() *module.Descriptor[Config] {
 		WithName("ZeoKeel approvals backend")
 }
 
-// resolution is one answer delivered to a waiting Request.
-type resolution struct {
-	decision contracts.ApprovalDecision
-	err      error
-}
-
-// pendingRequest is one waiting approval.
-type pendingRequest struct {
-	request contracts.ApprovalRequest
-	result  chan resolution
-}
-
-// subscription is one Subscribe callback.
-type subscription struct {
-	fn func()
-}
-
 // service is the contracts.Approvals implementation.
 type service struct {
 	mu     sync.Mutex
@@ -168,14 +152,10 @@ type service struct {
 	// defaults to Chinese, matching the product's default language).
 	locale contracts.LocaleService
 
-	nextSeq uint64
-	pending map[string]*pendingRequest
-
-	// resolved remembers the first answer per ID for idempotent Resolve calls.
-	resolved      map[string]contracts.ApprovalDecision
-	resolvedOrder []string
-
-	subscribers []*subscription
+	// queue is the SDK approval queue (ids, waiting, idempotent Resolve,
+	// cancellation, subscriptions, optional timeout); the policy above and the
+	// notice wording below stay here.
+	queue *gate.Queue
 }
 
 var _ contracts.Approvals = (*service)(nil)
@@ -195,13 +175,18 @@ func newServiceWithSettings(mode string, logger contracts.Logger, settings contr
 	if logger == nil {
 		logger = discardLogger{}
 	}
-	return &service{
+	svc := &service{
 		mode:     normalized,
 		logger:   logger,
 		settings: settings,
-		pending:  make(map[string]*pendingRequest),
-		resolved: make(map[string]contracts.ApprovalDecision),
-	}, nil
+	}
+	svc.queue = gate.NewQueue(
+		gate.WithQueuePrefix(requestIDPrefix),
+		gate.WithQueueLogger(logger.Printf),
+		gate.WithQueueResolvedLimit(maxRememberedAnswers),
+		gate.WithQueueEnqueueHook(svc.approvalQueued),
+	)
+	return svc, nil
 }
 
 // normalizeMode canonicalizes one mode string; an empty config defaults to the
@@ -287,109 +272,91 @@ func (s *service) Request(ctx context.Context, request contracts.ApprovalRequest
 		}
 	}
 
-	s.mu.Lock()
-	s.nextSeq++
-	id := requestIDPrefix + strconv.FormatUint(s.nextSeq, 10)
-	request.ID = id
-	if request.CreatedAt.IsZero() {
-		request.CreatedAt = time.Now()
-	}
-	entry := &pendingRequest{request: request, result: make(chan resolution, 1)}
-	s.pending[id] = entry
-	s.mu.Unlock()
-	s.notify()
-	if s.notifier != nil {
-		// The owning session travels as the notification's session tag when the
-		// host keeps one (contracts.SessionNotifier), so a click on the OS
-		// notification opens the conversation that is waiting. Plain notifiers
-		// still get the toast.
-		text := s.approvalWaitingText(request)
-		if sessionID := strings.TrimSpace(request.SessionID); sessionID != "" {
-			if sessionNotifier, ok := s.notifier.(contracts.SessionNotifier); ok && sessionNotifier != nil {
-				sessionNotifier.NotifySystemFor(contracts.NotifyWarning, text, sessionID)
-			} else {
-				contracts.NotifyApprovalWaiting(s.notifier, text)
-			}
-		} else {
-			contracts.NotifyApprovalWaiting(s.notifier, text)
-		}
-	}
-
-	// RG-04 (2026-11 audit, personal-scale ruling): an OPT-IN timeout for
-	// automation-origin requests only. Default 0 = off — interactive approvals
-	// keep waiting exactly as before. There is NO run-level time fallback:
-	// loop protection and every tool-loop budget were removed (v0.2.50 user
-	// ruling — tools run freely), so an unattended run has no implicit cancel.
-	// The settings page discloses that unattended automation should set this
-	// timeout when a parked approval must not wait forever. When configured,
-	// an unattended request nobody answers is auto-denied, recorded and
-	// notified instead of parking indefinitely.
-	var timeoutC <-chan time.Time
+	// RG-04 (personal-scale ruling): an OPT-IN timeout for automation-origin
+	// requests only. Default 0 = off; interactive approvals keep waiting.
+	var timeout time.Duration
 	if s.settings != nil && strings.EqualFold(strings.TrimSpace(request.Source), contracts.SessionOriginAutomation) {
 		if seconds := contracts.NormalizeApprovalTimeoutSeconds(
 			s.settings.Get(contracts.SettingAgentApprovalTimeoutSeconds, "")); seconds > 0 {
-			timer := time.NewTimer(time.Duration(seconds) * time.Second)
-			defer timer.Stop()
-			timeoutC = timer.C
+			timeout = time.Duration(seconds) * time.Second
 		}
 	}
-
-	select {
-	case resolved := <-entry.result:
-		return resolved.decision, resolved.err
-	case <-timeoutC:
-		s.mu.Lock()
-		timedOut := false
-		if current, ok := s.pending[id]; ok && current == entry {
-			delete(s.pending, id)
-			// Record the deny: a late Resolve stays idempotent, and the gate
-			// reports a normal tool denial the run can continue from.
-			s.rememberAnswerLocked(id, contracts.ApprovalDeny)
-			timedOut = true
-		}
-		s.mu.Unlock()
-		if !timedOut {
-			// A human answer landed between the timer firing and this lock:
-			// deliver it instead of the deny.
-			resolved := <-entry.result
-			return resolved.decision, resolved.err
-		}
-		s.notify()
+	decision, err := s.queue.AskTimeout(ctx, gate.QueueRequest{
+		Tool:      request.Tool,
+		Summary:   request.Summary,
+		Arguments: request.Arguments,
+		SessionID: request.SessionID,
+		Source:    request.Source,
+	}, timeout)
+	switch {
+	case errors.Is(err, gate.ErrTimeout):
+		// The queue recorded the denial: a late Resolve stays idempotent and the
+		// gate reports a normal tool denial the run can continue from.
 		s.logger.Printf("[approvals] request %s (%s, session %s) auto-denied after approval timeout",
-			id, request.Tool, request.SessionID)
+			request.ID, request.Tool, request.SessionID)
 		if s.notifier != nil {
-			text := s.approvalTimeoutText(request)
-			if sessionID := strings.TrimSpace(request.SessionID); sessionID != "" {
-				if sessionNotifier, ok := s.notifier.(contracts.SessionNotifier); ok && sessionNotifier != nil {
-					sessionNotifier.NotifySystemFor(contracts.NotifyWarning, text, sessionID)
-				} else {
-					contracts.NotifyApprovalWaiting(s.notifier, text)
-				}
-			} else {
-				contracts.NotifyApprovalWaiting(s.notifier, text)
-			}
+			s.notifyApprovalIssue(s.approvalTimeoutText(request), request.SessionID)
 		}
 		return contracts.ApprovalDeny, nil
-	case <-ctx.Done():
-		s.mu.Lock()
-		if current, ok := s.pending[id]; ok && current == entry {
-			// Nobody answered: drop the pending request and tell the UI.
-			delete(s.pending, id)
-			s.mu.Unlock()
-			s.notify()
-		} else {
-			s.mu.Unlock()
+	case err != nil:
+		return "", err
+	}
+	return approvalDecisionFromRig(decision), nil
+}
+
+// approvalQueued is the queue's enqueue hook: tell the host that a run parked on
+// an approval (OS notification + in-app toast). The owning session travels as
+// the notification's session tag when the host keeps one.
+func (s *service) approvalQueued(request gate.QueueRequest) {
+	if s.notifier == nil {
+		return
+	}
+	s.notifyApprovalIssue(s.approvalWaitingText(contracts.ApprovalRequest{
+		Tool: request.Tool, SessionID: request.SessionID, Source: request.Source,
+	}), request.SessionID)
+}
+
+// notifyApprovalIssue sends one approval notice, tagged with the session when
+// the notifier supports it.
+func (s *service) notifyApprovalIssue(text, sessionID string) {
+	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
+		if sessionNotifier, ok := s.notifier.(contracts.SessionNotifier); ok && sessionNotifier != nil {
+			sessionNotifier.NotifySystemFor(contracts.NotifyWarning, text, sessionID)
+			return
 		}
-		return "", ctx.Err()
+	}
+	contracts.NotifyApprovalWaiting(s.notifier, text)
+}
+
+// approvalDecisionFromRig maps the SDK's decision vocabulary to the product's.
+func approvalDecisionFromRig(decision rig.Decision) contracts.ApprovalDecision {
+	switch decision {
+	case rig.DecisionAllow:
+		return contracts.ApprovalAllow
+	case rig.DecisionAllowAlways:
+		return contracts.ApprovalAllowAlways
+	default:
+		return contracts.ApprovalDeny
+	}
+}
+
+// approvalDecisionToRig is the inverse mapping used by Resolve.
+func approvalDecisionToRig(decision contracts.ApprovalDecision) (rig.Decision, bool) {
+	switch decision {
+	case contracts.ApprovalAllow:
+		return rig.DecisionAllow, true
+	case contracts.ApprovalAllowAlways:
+		return rig.DecisionAllowAlways, true
+	case contracts.ApprovalDeny:
+		return rig.DecisionDeny, true
+	default:
+		return "", false
 	}
 }
 
 // approvalTimeoutText is the visible copy of the automation approval-timeout
 // auto-deny notification (the waiting notice's sibling): it says the unattended
 // request was denied because nobody answered within the configured window.
-// Like the waiting notice, its payload is the stable tool id the toast overlay
-// localizes at render time (uikit.ToolDisplayName); the automation origin rides
-// the translatable affix suffix (2026-11-17 UI review P3).
 func (s *service) approvalTimeoutText(request contracts.ApprovalRequest) string {
 	english := uikit.Language(s.locale) == "en"
 	name := strings.TrimSpace(request.Tool)
@@ -400,13 +367,8 @@ func (s *service) approvalTimeoutText(request contracts.ApprovalRequest) string 
 }
 
 // approvalWaitingText is the visible copy of the approval-waiting notification.
-// The payload is the stable tool id, not a display name frozen at generation
-// time: the toast overlay localizes it at render time (uikit.ToolDisplayName),
-// so a language switch while the toast is alive translates the tool name too
-// (2026-11-17 UI review P3). An id the kit does not know falls back to the id
-// itself at render time (lead ruling); the approval dialog still owns the
-// request's full details. A request from a background run carries its origin
-// in the affix suffix, which the overlay translates with the prefix.
+// The payload is the stable tool id, localised at render time by the toast
+// overlay; a background origin rides the translatable affix suffix.
 func (s *service) approvalWaitingText(request contracts.ApprovalRequest) string {
 	english := uikit.Language(s.locale) == "en"
 	text := "审批等待："
@@ -449,120 +411,49 @@ func approvalSourceLabel(locale contracts.LocaleService, source string) string {
 
 // Pending implements contracts.Approvals.
 func (s *service) Pending() []contracts.ApprovalRequest {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	requests := make([]contracts.ApprovalRequest, 0, len(s.pending))
-	for _, entry := range s.pending {
-		requests = append(requests, entry.request)
+	queued := s.queue.Pending()
+	requests := make([]contracts.ApprovalRequest, 0, len(queued))
+	for _, request := range queued {
+		requests = append(requests, contracts.ApprovalRequest{
+			ID:        request.ID,
+			Tool:      request.Tool,
+			Summary:   request.Summary,
+			Arguments: request.Arguments,
+			CreatedAt: request.CreatedAt,
+			SessionID: request.SessionID,
+			Source:    request.Source,
+		})
 	}
-	sort.SliceStable(requests, func(i, j int) bool {
-		if !requests[i].CreatedAt.Equal(requests[j].CreatedAt) {
-			return requests[i].CreatedAt.Before(requests[j].CreatedAt)
-		}
-		return requestSequence(requests[i].ID) < requestSequence(requests[j].ID)
-	})
 	return requests
 }
 
-// requestSequence parses the numeric suffix of a generated approval ID.
-func requestSequence(id string) uint64 {
-	if !strings.HasPrefix(id, requestIDPrefix) {
-		return 0
-	}
-	sequence, err := strconv.ParseUint(strings.TrimPrefix(id, requestIDPrefix), 10, 64)
-	if err != nil {
-		return 0
-	}
-	return sequence
-}
-
-// Resolve implements contracts.Approvals. The first answer wins; resolving an
-// already answered ID again returns nil without changing the answer.
+// Resolve implements contracts.Approvals: it answers one pending request. A
+// second Resolve of an answered ID is a no-op; unknown IDs and invalid
+// decisions are reported with the module's sentinels.
 func (s *service) Resolve(id string, decision contracts.ApprovalDecision) error {
-	if !validDecision(decision) {
+	rigDecision, ok := approvalDecisionToRig(decision)
+	if !ok {
 		return fmt.Errorf("%w: %q", ErrInvalidDecision, decision)
 	}
-	id = strings.TrimSpace(id)
-	s.mu.Lock()
-	entry, ok := s.pending[id]
-	if !ok {
-		_, answered := s.resolved[id]
-		s.mu.Unlock()
-		if answered {
-			return nil // idempotent after the first answer
-		}
+	err := s.queue.Resolve(strings.TrimSpace(id), rigDecision)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, gate.ErrUnknownRequest):
 		return fmt.Errorf("%w: %q", ErrUnknownRequest, id)
-	}
-	delete(s.pending, id)
-	s.rememberAnswerLocked(id, decision)
-	entry.result <- resolution{decision: decision}
-	s.mu.Unlock()
-	s.notify()
-	return nil
-}
-
-// rememberAnswerLocked records the first answer for idempotent Resolve calls.
-func (s *service) rememberAnswerLocked(id string, decision contracts.ApprovalDecision) {
-	s.resolved[id] = decision
-	s.resolvedOrder = append(s.resolvedOrder, id)
-	if len(s.resolvedOrder) <= maxRememberedAnswers {
-		return
-	}
-	oldest := s.resolvedOrder[0]
-	s.resolvedOrder = s.resolvedOrder[1:]
-	delete(s.resolved, oldest)
-}
-
-// validDecision reports whether decision is one of the three contract values.
-func validDecision(decision contracts.ApprovalDecision) bool {
-	switch decision {
-	case contracts.ApprovalAllow, contracts.ApprovalAllowAlways, contracts.ApprovalDeny:
-		return true
+	case errors.Is(err, gate.ErrInvalidDecision):
+		return fmt.Errorf("%w: %q", ErrInvalidDecision, decision)
 	default:
-		return false
+		return err
 	}
 }
 
-// Subscribe implements contracts.Approvals.
+// Subscribe implements contracts.Approvals: the UI redraws whenever the pending
+// set changes (the SDK queue runs subscribers outside its lock and contains
+// panics).
 func (s *service) Subscribe(fn func()) (func(), error) {
 	if fn == nil {
 		return func() {}, nil
 	}
-	listener := &subscription{fn: fn}
-	s.mu.Lock()
-	s.subscribers = append(s.subscribers, listener)
-	s.mu.Unlock()
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			for index, candidate := range s.subscribers {
-				if candidate == listener {
-					s.subscribers = append(s.subscribers[:index], s.subscribers[index+1:]...)
-					return
-				}
-			}
-		})
-	}, nil
-}
-
-// notify calls every subscriber outside the service lock, containing panics.
-func (s *service) notify() {
-	s.mu.Lock()
-	subscribers := append([]*subscription(nil), s.subscribers...)
-	s.mu.Unlock()
-	for _, listener := range subscribers {
-		if listener == nil || listener.fn == nil {
-			continue
-		}
-		func() {
-			defer func() {
-				if recovered := recover(); recovered != nil {
-					s.logger.Printf("[approvals] subscriber panicked: %v", recovered)
-				}
-			}()
-			listener.fn()
-		}()
-	}
+	return s.queue.Subscribe(fn)
 }
