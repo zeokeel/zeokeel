@@ -1,6 +1,6 @@
 # rig 组合层设计：kit 作为 agent 编译器，产品作为薄壳
 
-> 状态：设计稿（2026-11-21）；P1（阶段钩子 + kit 透传）与 P2（Spec/Build/注册表/LoadFile + ExtraTools + 模块能力/生命周期）已落地；P3a 产品 hostbundle 缝已落地（`internal/hostbundle`，未切运行路径）。
+> 状态：设计稿（2026-11-21）；P1（阶段钩子 + kit 透传）与 P2（Spec/Build/注册表/LoadFile + ExtraTools + 模块能力/生命周期）已落地；P3a 产品 hostbundle 缝已落地；P3b 双装配 parity 已跑通（同 spec 经 direct/kit 事件序列一致），但**完整产品运行**经 kit 路径时发现发现态（session active set）由产品自己持有、kit 的 discovery 默认行为不同，故产品运行路径仍走 direct，待把发现态迁到 rig ActivationStore 后再切。
 > 目标读者：维护 rig/kit 与 ZeoKeel 装配层的人。
 
 ## 0. 目标与非目标

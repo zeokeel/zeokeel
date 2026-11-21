@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **组合层 P3b：双装配 parity**（2026-11-21）：新增 `hostbundle.BuildAgent(spec, ModeDirect|ModeKit)` 与 parity 测试——同一份产品形态 `rig.AgentSpec` 经 `agent.New` 与 `kit.New(FromAgentSpec)` 构建后，工具面/事件序列/结果一致；kit 补了 `SystemPromptFunc`、`Temperature/TopP/MaxTokens`、`ContextRecovery` 透传，并修掉"宿主已自带 tool_search 时 kit 再注入一个"的重名问题。完整产品运行暂不切 kit：产品自持发现态（session active set），与 kit discovery 的默认行为不一致；先保持 direct，下一轮把发现态迁到 rig `ActivationStore` 再切。依赖 `rig v0.28.0-rc.4`。
+
 - **组合层 P3a：产品 `hostbundle` 缝**（2026-11-21）：新增 `internal/hostbundle`，把产品会话 History/SessionLog/Checkpoint、产品 prompt 区段、业务工具、阶段/钩子打包成 `kit.Module`，可用 `kit.Build` 编译出 agent；端到端测试证明 prompt 区段、业务工具与产品 History 均生效。依赖切到 rig `v0.28.0-rc.2`（尚未切换产品运行路径）。
 
 - **SDK 上移 B.6（ACP 传输层）**（2026-11-21）：rig 新增 `acp` 包——换行分帧、请求校验、initialize/能力通告、方法分发、并发 prompt 轮次、cancel、通知串行化、`ErrNoResponse` 与 JSON-RPC 错误映射，宿主实现 `Handler`；产品 `acp` 模块删除自研传输/分发 289 行，只保留 ACP 方法到 Chat/Workspace 的映射、工作区绑定、图片 prompt 与工具事件。依赖切到 `rig v0.27.3`（+ `session/sqlstore v0.2.3`）。
