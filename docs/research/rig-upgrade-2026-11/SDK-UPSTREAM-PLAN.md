@@ -76,7 +76,7 @@
 | 项 | 状态 | rig 侧 | 产品侧删除 |
 |---|---|---|---|
 | A.2 提示词分段/度量/渲染/哈希 | ✅ 完成 | 新包 `prompt`（`Section`/`Measure`/`Render`/`Assemble`/`Hash`/`DateSection` + 测试） | 自研环境组渲染、度量、哈希删除，仅留文案与适配 |
-| A.3 上下文溢出恢复 | 进行中 | — | — |
+| A.3 上下文溢出恢复 | ✅ 完成 | `rig.AgentSpec.ContextRecovery` + `rig.IsContextOverflowError` + agent 实现与测试 | 产品删除 `retryContextOverflow`/`isContextOverflowError` 与编排，仅留归档/事件钩子 |
 | A.4 审批队列 | 待做 | — | — |
 | A.1 会话存储 | 待做 | — | — |
 | A.5 委派子会话 | 待做 | — | — |

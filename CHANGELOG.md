@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **SDK 上移 A.3：上下文溢出恢复进入 rig `agent`**（2026-11-21）：新增 `rig.AgentSpec.ContextRecovery` + `rig.IsContextOverflowError`——一次压缩 + 同轮重试、当前用户消息保留、失败尝试的用量并回、`BeforeReplace`（压缩前/后历史）供宿主 fail-closed 归档、`OnRecovery` 回报前后 token 与结果；只认稳定的"超上下文"短语，限流/鉴权错误不触发。产品侧删除 `retryContextOverflow`/`isContextOverflowError` 与整段编排，只保留归档与事件两个钩子；`withContextBudget` 在预算未知时也安装压缩器（供中途恢复使用），`historyView`/`tombstoneHistory` 支持 `HistoryReplacer`。`go.mod` 抬到 `v0.27.0-rc.5`（本地离线代理）。全量门禁通过。
+
 - **SDK 上移 A.2：系统提示词分段模型进入 rig `prompt`**（2026-11-21）：`github.com/zeokeel/zeokeel-rig/prompt` 负责分段顺序、环境组渲染（identity/environment/working-directory/date 单换行成组）、空段丢弃、Bytes/Tokens 度量与稳定内容哈希；产品侧删除自研的渲染/度量/哈希实现，只保留各段**文案**与接线（`newPromptSection`/`renderPromptSections` 变成 SDK 适配器，快照 Hash 直接用 SDK 值）。产品 `go.mod` 抬到 `v0.27.0-rc.3`（本地离线代理建包）。行为字节级不变，全量门禁通过。
 
 - **评估：能力上移 rig（SDK）的分层清单**（2026-11-21）：按"宿主无关/UI 无感/策略中性/可复用"四条标准评估了 17 个后端模块，给出 A 级（会话存储+解码检索、提示词分段/快照、上下文溢出恢复、审批队列、委派子会话，合计可减 4–5k 行）、B 级（模式白名单、发现尾部、jobs 读模型、工作区探测、模型目录、ACP）与 C 级（UI、产品契约、提示词内容、权限默认值——留产品）。结论：后端可做到约 7–10% 缩减，"只做接线"只对后端成立；UI 与契约层不变，短期总工作量是净增。详见 `docs/research/rig-upgrade-2026-11/SDK-UPSTREAM-PLAN.md`。

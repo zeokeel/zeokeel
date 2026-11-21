@@ -743,6 +743,19 @@ func (h *tombstoneHistory) Append(ctx context.Context, sessionID string, message
 	return h.inner.Append(ctx, sessionID, messages...)
 }
 
+// Replace forwards the compaction window replacement with the same tombstone
+// guard (a deleted session must not have its history rewritten after the fact).
+func (h *tombstoneHistory) Replace(ctx context.Context, sessionID string, messages []rig.Message) error {
+	if h.deleted(sessionID) {
+		return nil
+	}
+	replacer, ok := h.inner.(rig.HistoryReplacer)
+	if !ok {
+		return fmt.Errorf("agent: history does not support replacement")
+	}
+	return replacer.Replace(ctx, sessionID, messages)
+}
+
 // tombstoneCheckpoints does the same for the run's checkpoint store: a write
 // must not re-create a deleted session either.
 type tombstoneCheckpoints struct {
@@ -780,6 +793,42 @@ func (s *service) guardedHistory(history rig.History) rig.History {
 		return nil
 	}
 	return &tombstoneHistory{inner: history, deleted: s.sessionDeleted}
+}
+
+// replaceableHistory makes the store's history replaceable for the SDK's
+// context recovery even when the History view itself does not implement
+// rig.HistoryReplacer (the durable store has ReplaceHistory; the view may be a
+// narrower type).
+type replaceableHistory struct {
+	inner   rig.History
+	replace func(ctx context.Context, sessionID string, messages []rig.Message) error
+}
+
+func (h replaceableHistory) Load(ctx context.Context, sessionID string) ([]rig.Message, error) {
+	return h.inner.Load(ctx, sessionID)
+}
+
+func (h replaceableHistory) Append(ctx context.Context, sessionID string, messages ...rig.Message) error {
+	return h.inner.Append(ctx, sessionID, messages...)
+}
+
+func (h replaceableHistory) Replace(ctx context.Context, sessionID string, messages []rig.Message) error {
+	return h.replace(ctx, sessionID, messages)
+}
+
+// replaceableHistory adds Replace to a history view; a view that already
+// supports replacement keeps its own implementation.
+func (s *service) replaceableHistory(history rig.History) rig.History {
+	if history == nil {
+		return nil
+	}
+	if _, ok := history.(rig.HistoryReplacer); ok {
+		return history
+	}
+	if s.store == nil {
+		return history
+	}
+	return replaceableHistory{inner: history, replace: s.store.ReplaceHistory}
 }
 
 // guardedCheckpointStore wraps one run's checkpoint store with the tombstone
@@ -2753,7 +2802,7 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		Tools:         runTools,
 		// The tombstone guard is outermost: a session deleted mid-run must drop
 		// its late history write before it reaches the store.
-		History: s.guardedHistory(history),
+		History: s.guardedHistory(s.replaceableHistory(history)),
 		Gate:    s.gate(sessionID),
 		// Oversized tool results are spilled by Rig before the tool message is
 		// recorded (rig.SpillPolicy); the product only resolves the directory —
@@ -2770,6 +2819,7 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// budget derived from the model's context window; a known budget also
 	// installs the automatic compactor.
 	s.withContextBudget(&spec, cfg, provider)
+	spec.ContextRecovery = s.contextRecoveryHooks()
 	runner, err := rigagent.New(spec)
 	if err != nil {
 		s.finish(sessionID, ctx, fmt.Errorf("create agent: %w", err))
@@ -2801,14 +2851,8 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		Input:     input,
 		Emit:      emit,
 	})
-	// Context overflow recovery (DSH): compact once and retry the same turn
-	// once. The user message is already durable, so no new input is appended
-	// and executed tools are not replayed.
-	if runErr != nil && ctx.Err() == nil && isContextOverflowError(runErr) {
-		if retryResult, retryErr, retried := s.retryContextOverflow(ctx, sessionID, cfg, spec, provider, emit, usage, result); retried {
-			result, runErr = retryResult, retryErr
-		}
-	}
+	// Context overflow recovery is the SDK's now (ContextRecovery): it compacts
+	// once, archives through our hook and retries the same turn.
 	if runErr == nil {
 		noticeBatch.commit()
 	}

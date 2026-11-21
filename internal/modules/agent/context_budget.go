@@ -89,10 +89,9 @@ func (s *service) withContextBudget(spec *rig.AgentSpec, cfg contracts.ChatConfi
 	}
 	budget := s.effectiveContextBudget(cfg)
 	spec.ContextBudget = budget
-	if budget <= 0 {
-		spec.Compactor = nil
-		return
-	}
+	// The compactor is installed even without a known budget: the SDK's
+	// context-overflow recovery compacts mid-turn and needs it (the pre-turn
+	// path still gates on ContextBudget > 0).
 	spec.Compactor = compact.LLMCompactor{
 		Provider: provider,
 		Model:    cfg.Model,

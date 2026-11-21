@@ -306,6 +306,12 @@ func (s *store) History() rig.History { return historyView{store: s} }
 // CheckpointStore implements contracts.Store.
 func (s *store) CheckpointStore() rig.CheckpointStore { return checkpointView{store: s} }
 
+// Replace implements rig.HistoryReplacer: compaction replaces the stored window
+// atomically (the raw history is archived by the caller first, fail-closed).
+func (v historyView) Replace(ctx context.Context, sessionID string, messages []rig.Message) error {
+	return v.store.ReplaceHistory(ctx, sessionID, messages)
+}
+
 // Load implements rig.History.
 func (v historyView) Load(ctx context.Context, sessionID string) ([]rig.Message, error) {
 	return v.store.loadMessages(ctx, sessionID)
