@@ -16,7 +16,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
 	"github.com/zeokeel/zeokeel-rig/session/sqlstore"
@@ -175,12 +174,4 @@ func (s *store) Close() error {
 		return nil
 	}
 	return s.closeDatabase()
-}
-
-// timeFromNanos is kept for the module tests that decode stored timestamps.
-func timeFromNanos(nanos int64) time.Time {
-	if nanos == 0 {
-		return time.Time{}
-	}
-	return time.Unix(0, nanos).UTC()
 }

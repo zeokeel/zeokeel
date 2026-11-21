@@ -317,36 +317,6 @@ func normalizeChildStatus(status, kind string) string {
 	return childStatusFromSubagentStatus(status)
 }
 
-// childSessionRecordEqual reports whether two snapshots describe the same
-// record (the update stamp excluded).
-func childSessionRecordEqual(left, right childSessionRecord) bool {
-	if len(left.Activity) != len(right.Activity) {
-		return false
-	}
-	for index := range left.Activity {
-		a, b := left.Activity[index], right.Activity[index]
-		if a.ID != b.ID || a.Kind != b.Kind || a.Text != b.Text || a.Error != b.Error || !a.Time.Equal(b.Time) {
-			return false
-		}
-	}
-	return left.ID == right.ID &&
-		left.ParentSessionID == right.ParentSessionID &&
-		left.BackendRef == right.BackendRef &&
-		left.Kind == right.Kind &&
-		left.Name == right.Name &&
-		left.Model == right.Model &&
-		left.Prompt == right.Prompt &&
-		left.Status == right.Status &&
-		left.Output == right.Output &&
-		left.Error == right.Error &&
-		left.Fork == right.Fork &&
-		left.Started.Equal(right.Started) &&
-		left.Finished.Equal(right.Finished) &&
-		left.UsageTokens == right.UsageTokens &&
-		left.Iterations == right.Iterations &&
-		left.Notified == right.Notified
-}
-
 // --- status vocabulary conversions -----------------------------------------
 
 // childStatusFromRunState folds a teammate run state onto the child-agent

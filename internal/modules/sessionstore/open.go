@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	_ "modernc.org/sqlite" // pure-Go SQLite driver (registers the "sqlite" driver)
+
 	rig "github.com/zeokeel/zeokeel-rig"
 	"github.com/zeokeel/zeokeel-rig/session/sqlstore"
 
