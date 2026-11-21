@@ -80,6 +80,11 @@ func TestGeneratedCallFilesKinds(t *testing.T) {
 	checkFiles(t, generatedCallFiles("apply_patch", patchArgs(t, diffAddDelete, false)), map[string]struct{ added, deleted bool }{
 		"tmp/y.md": {added: true, deleted: true},
 	})
+	// `git diff -C` copy: the destination is a new file, the source stays.
+	copyDiff := "diff --git a/keep.txt b/keep2.txt\nsimilarity index 100%\ncopy from keep.txt\ncopy to keep2.txt\n"
+	checkFiles(t, generatedCallFiles("apply_patch", patchArgs(t, copyDiff, false)), map[string]struct{ added, deleted bool }{
+		"keep2.txt": {added: true},
+	})
 }
 
 // TestGeneratedCallFilesIgnoresContextAndDryRun pins the ways a patch must NOT
@@ -186,10 +191,6 @@ func TestPatchFileListParsesRealGitDiff(t *testing.T) {
 	diff := run("diff", "-M", "--cached", "HEAD")
 
 	files := generatedCallFiles("apply_patch", patchArgs(t, diff, false))
-	want := map[string]struct{ added, deleted bool }{
-		"keep.txt": {}, // not in the diff at all, so it must be absent below
-	}
-	_ = want
 	seen := make(map[string]contracts.ToolCallFile, len(files))
 	for _, file := range files {
 		seen[file.Path] = file
