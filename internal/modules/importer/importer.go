@@ -10,12 +10,9 @@ package importer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
@@ -190,101 +187,82 @@ func (s *service) Import(ctx context.Context, dir string) (contracts.ImportResul
 	if err != nil {
 		return contracts.ImportResult{}, err
 	}
-	result := contracts.ImportResult{Skipped: preview.Skipped}
-	metas, err := s.store.Sessions(ctx)
-	if err != nil {
-		return contracts.ImportResult{}, fmt.Errorf("%s: list existing sessions: %w", ModuleID, err)
-	}
-	existing := make(map[string]bool, len(metas))
-	for _, meta := range metas {
-		existing[meta.ID] = true
-	}
-	registeredWorkspaces := make(map[string]bool)
-	// BE-04 (2026-11 audit): workspace.Create makes the registered root
-	// current, so importing used to silently move the user's current workspace
-	// to the last imported cwd (unbound sessions follow Current for their tool
-	// root). Save the current workspace and restore it after the registration
-	// loop. With no current workspace there is no user project to protect: the
-	// first imported root stays current (the workspace contract has no
-	// "register without switching" API).
-	previousCurrentID := ""
-	if s.workspace != nil {
-		if current, ok, currentErr := s.workspace.Current(ctx); currentErr == nil && ok {
-			previousCurrentID = current.ID
-		}
-	}
-	registeredAny := false
+	sources := make([]rigimporter.Source, 0, len(scanned))
 	for _, item := range scanned {
-		if err := ctx.Err(); err != nil {
-			return contracts.ImportResult{}, err
-		}
-		session := item.session
-		sessionID := importedSessionPrefix + session.ID
-		if existing[sessionID] {
-			result.Skipped++
-			continue
-		}
-		title := importedTitle(session.Messages)
-		if err := s.store.CreateSession(ctx, sessionID, title); err != nil {
-			result.Errors = append(result.Errors,
-				fmt.Sprintf("%s: create session: %v", item.sourcePath, err))
-			continue
-		}
-		if err := s.store.RenameSession(ctx, sessionID, title); err != nil {
-			result.Errors = append(result.Errors,
-				fmt.Sprintf("%s: rename session: %v", item.sourcePath, err))
-		}
-		messages := importedRigMessages(session.Messages)
-		if err := s.store.ReplaceHistory(ctx, sessionID, messages); err != nil {
-			result.Errors = append(result.Errors,
-				fmt.Sprintf("%s: replace history: %v", item.sourcePath, err))
-			continue
-		}
-		s.appendImportEvent(ctx, sessionID, session.ID, &result)
-		result.ImportedSessions++
-		result.ImportedMessages += len(messages)
-		existing[sessionID] = true
-		if session.Cwd != "" && !registeredWorkspaces[session.Cwd] {
-			registeredWorkspaces[session.Cwd] = true
-			if info, statErr := os.Stat(session.Cwd); statErr == nil && info.IsDir() {
-				if s.workspace == nil {
-					result.Errors = append(result.Errors,
-						fmt.Sprintf("%s: register workspace %q: workspace service unavailable", item.sourcePath, session.Cwd))
-				} else if _, err := s.workspace.Create(ctx, filepath.Base(session.Cwd), session.Cwd); err != nil {
-					result.Errors = append(result.Errors,
-						fmt.Sprintf("%s: register workspace %q: %v", item.sourcePath, session.Cwd, err))
-				} else {
-					result.ImportedWorkspaces++
-					registeredAny = true
-				}
-			}
-		}
+		sources = append(sources, rigimporter.Source{Session: item.session, RelativePath: item.sourcePath})
 	}
-	// Restore the user's current workspace after the registrations switched it
-	// (BE-04). A failed restore is logged, never fatal: the import succeeded.
-	if previousCurrentID != "" && registeredAny {
-		if _, err := s.workspace.Open(ctx, previousCurrentID); err != nil {
-			s.logger.Printf("%s: restore current workspace %q after import: %v", ModuleID, previousCurrentID, err)
-		}
+	result, err := rigimporter.Import(ctx, sources, preview.Skipped, storeTarget{store: s.store}, workspaceRegistrar{workspace: s.workspace}, s.logger)
+	if err != nil {
+		return contracts.ImportResult{}, err
 	}
 	s.logger.Printf("%s: imported %d sessions/%d messages/%d workspaces (%d skipped)",
 		ModuleID, result.ImportedSessions, result.ImportedMessages, result.ImportedWorkspaces, result.Skipped)
-	return result, nil
+	return contracts.ImportResult{
+		ImportedSessions:   result.ImportedSessions,
+		ImportedMessages:   result.ImportedMessages,
+		ImportedWorkspaces: result.ImportedWorkspaces,
+		Skipped:            result.Skipped,
+		Errors:             result.Errors,
+	}, nil
 }
 
-// appendImportEvent records an optional durable "import" event.
-func (s *service) appendImportEvent(ctx context.Context, sessionID, sourceID string,
-	result *contracts.ImportResult) {
-	payload, err := json.Marshal(map[string]string{"source": sourceID})
+// storeTarget adapts contracts.Store to the SDK import target.
+type storeTarget struct{ store contracts.Store }
+
+func (t storeTarget) SessionIDs(ctx context.Context) ([]string, error) {
+	metas, err := t.store.Sessions(ctx)
 	if err != nil {
-		return
+		return nil, err
 	}
-	if err := s.store.AppendEvent(ctx, rig.SessionEvent{
-		SessionID: sessionID,
-		Type:      "import",
-		Time:      time.Now().UTC(),
-		Payload:   payload,
-	}); err != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("%s: append import event: %v", sessionID, err))
+	ids := make([]string, 0, len(metas))
+	for _, meta := range metas {
+		ids = append(ids, meta.ID)
 	}
+	return ids, nil
+}
+
+func (t storeTarget) CreateSession(ctx context.Context, id, title string) error {
+	return t.store.CreateSession(ctx, id, title)
+}
+
+func (t storeTarget) RenameSession(ctx context.Context, id, title string) error {
+	return t.store.RenameSession(ctx, id, title)
+}
+
+func (t storeTarget) ReplaceHistory(ctx context.Context, id string, messages []rig.Message) error {
+	return t.store.ReplaceHistory(ctx, id, messages)
+}
+
+func (t storeTarget) AppendEvent(ctx context.Context, event rig.SessionEvent) error {
+	return t.store.AppendEvent(ctx, event)
+}
+
+// workspaceRegistrar adapts contracts.WorkspaceService.
+type workspaceRegistrar struct{ workspace contracts.WorkspaceService }
+
+func (w workspaceRegistrar) Current(ctx context.Context) (string, bool, error) {
+	if w.workspace == nil {
+		return "", false, nil
+	}
+	current, ok, err := w.workspace.Current(ctx)
+	if err != nil || !ok {
+		return "", false, err
+	}
+	return current.ID, true, nil
+}
+
+func (w workspaceRegistrar) Create(ctx context.Context, name, root string) error {
+	if w.workspace == nil {
+		return fmt.Errorf("workspace service unavailable")
+	}
+	_, err := w.workspace.Create(ctx, name, root)
+	return err
+}
+
+func (w workspaceRegistrar) Open(ctx context.Context, id string) error {
+	if w.workspace == nil {
+		return fmt.Errorf("workspace service unavailable")
+	}
+	_, err := w.workspace.Open(ctx, id)
+	return err
 }
