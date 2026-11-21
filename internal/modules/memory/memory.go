@@ -25,7 +25,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -564,73 +563,28 @@ func (s *Store) Consolidate(ctx context.Context, policy contracts.MemoryPolicy) 
 // not at all) and returns the counts; a persistence failure leaves the store
 // untouched and is reported.
 func (s *Store) consolidate(policy contracts.MemoryPolicy, now time.Time) (contracts.MemoryConsolidationReport, error) {
-	report := contracts.MemoryConsolidationReport{}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if policy.MaxAge <= 0 && policy.MaxEntries <= 0 {
-		report.Remaining = len(s.entries)
-		return report, nil
+	kept, report := memoryfile.Consolidate(s.entries, memoryfile.Policy{
+		MaxEntries: policy.MaxEntries,
+		MaxAge:     policy.MaxAge,
+	}, now)
+	if report.RemovedExpired == 0 && report.RemovedOverCap == 0 {
+		return contracts.MemoryConsolidationReport{Remaining: report.Remaining}, nil
 	}
 	previous := cloneEntries(s.entries)
-	keep := make([]bool, len(s.entries))
-	for index := range keep {
-		keep[index] = true
-	}
-	if policy.MaxAge > 0 {
-		cutoff := now.Add(-policy.MaxAge)
-		for index, memory := range s.entries {
-			if memory.Created.IsZero() || !memory.Created.Before(cutoff) {
-				continue
-			}
-			keep[index] = false
-			report.RemovedExpired++
-		}
-	}
-	if policy.MaxEntries > 0 {
-		remaining := 0
-		for index := range s.entries {
-			if keep[index] {
-				remaining++
-			}
-		}
-		if remaining > policy.MaxEntries {
-			order := make([]int, 0, remaining)
-			for index := range s.entries {
-				if keep[index] {
-					order = append(order, index)
-				}
-			}
-			sort.SliceStable(order, func(left, right int) bool {
-				return s.entries[order[left]].Created.Before(s.entries[order[right]].Created)
-			})
-			for _, index := range order[:remaining-policy.MaxEntries] {
-				keep[index] = false
-				report.RemovedOverCap++
-			}
-		}
-	}
-	if report.RemovedExpired == 0 && report.RemovedOverCap == 0 {
-		report.Remaining = len(s.entries)
-		return report, nil
-	}
-	kept := make([]contracts.Memory, 0, len(s.entries))
-	for index, memory := range s.entries {
-		if keep[index] {
-			kept = append(kept, memory)
-		}
-	}
 	s.entries = kept
 	if err := s.persistLocked(); err != nil {
-		// Nothing was persisted, so report no removals either: the in-memory
-		// store is rolled back and the caller only sees the failure.
 		s.entries = previous
-		report = contracts.MemoryConsolidationReport{Remaining: len(previous)}
-		return report, fmt.Errorf("%s: consolidate: persist: %w", ModuleID, err)
+		return contracts.MemoryConsolidationReport{Remaining: len(previous)},
+			fmt.Errorf("%s: consolidate: persist: %w", ModuleID, err)
 	}
 	s.version++
-	report.Remaining = len(s.entries)
-	return report, nil
+	return contracts.MemoryConsolidationReport{
+		RemovedExpired: report.RemovedExpired,
+		RemovedOverCap: report.RemovedOverCap,
+		Remaining:      report.Remaining,
+	}, nil
 }
 
 // enforcePolicy applies the configured automatic policy and logs failures.
