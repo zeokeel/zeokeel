@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **决策：会话存储不迁移到 rig `session/sqlite`**（2026-11-21）：本仓 `sessionstore` 已是 SQLite（modernc），而 rig 的替代实现缺 `RenameSession`、检索退化为对 JSON 载荷 `LIKE`（本仓用 `search_text` 解码列保证中文/引号内容不漏命中）、且是无正式 tag 的嵌套子模块（要求 sqlite 1.62.0）。净删约 600 行换来的是功能回退与数据迁移风险，故保留自研存储；理由、证据与"何时重新评估"见 `docs/research/rig-upgrade-2026-11/SESSION-SQLITE-DECISION.md`。
+
 - **后台任务读模型改用 SDK 的类型化快照**：`contracts.JobService.Jobs()` 过去把 rig 的 `job_list` 文本解析成行（状态/命令是自由文本，靠锚定正则切 `exit=/duration_ms=/command=`），现在直接读 `jobs.Manager.Snapshot()`：`State`/`ExitCode`/`Command` 来自结构体，`Duration` 由 `Started/Finished` 算（运行中计到当前），`Kind` 取 id 的 `<kind>-` 前缀。「过期权限任务」提示与执行历史的运行态判断也一并改走同一份快照，删除 `parseJobList`/`parseJobListRow`/`jobListTailPattern` 与约 90 行解析代码。范围与旧行为一致：chip 合并**调用方工作区根下所有 build** 的 job（换权限/换 runner 重建前的 job 仍可见、可按 id 停止），`Kind` 从 id 的 `<kind>-<hex>` 后缀前面部分取（`pty-send` 这类带连字符的 kind 不会被截断）；模型可见的 `job_list` 仍是 rig 的文本工具。
 
 - **个人客户端口径：沙箱与审批不再加自家安全规则**（2026-11-20）：
