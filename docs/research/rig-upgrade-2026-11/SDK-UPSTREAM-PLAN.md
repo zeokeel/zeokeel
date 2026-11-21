@@ -91,10 +91,11 @@ GOPROXY=file://$PWD/.cache/rigproxy GOSUMDB=off go get github.com/zeokeel/zeokee
 | A.3 上下文溢出恢复 | ✅ 完成 | `rig.AgentSpec.ContextRecovery` + `rig.IsContextOverflowError` + agent 实现与测试 | 产品删除 `retryContextOverflow`/`isContextOverflowError` 与编排，仅留归档/事件钩子 |
 | A.4 审批队列 | ✅ 完成 | `gate.Queue`（Ask/AskTimeout/Pending/Resolve/Subscribe/EnqueueHook + 测试） | 产品删除 pending/resolved/subscribers/编号/幂等缓存/notify，仅留策略、文案、通知与映射 |
 | A.1a 检索文本/片段层 | ✅ 完成 | `session/sqlsearch`（MessageColumns/EventText/EscapeLike/Snippet + 测试） | 删除解码/片段/转义实现，保留 schema/SQL/扫描 |
-| A.1b 存储 schema/CRUD/RenameSession | ✅ 完成 | 嵌套模块 `session/sqlstore`（`New(ctx,*sql.DB)`；schema/History/Checkpoint/Events/Meta/Rename/Scope/Search + 测试；tag `session/sqlstore/v0.1.1`） | 产品 `store.go` 939→约 230 行接线；删 `search.go`/`search_text.go`；净删约 1150 行，30 个原测试不改断言全绿 |
-| A.5 委派子会话 | 待做 | — | — |
+| A.1b 存储 schema/CRUD/RenameSession | ✅ 完成 | 嵌套模块 `session/sqlstore`（`New(ctx,*sql.DB)`；schema/History/Checkpoint/Events/Meta/Rename/Scope/Search + 测试；tag `session/sqlstore/v0.2.0`） | 产品 `store.go` 939→约 230 行接线；删 `search.go`/`search_text.go`；净删约 1150 行，30 个原测试不改断言全绿 |
+| A.5a 委派子会话记录 | ✅ 完成 | `session/children`（原子文档/保留/隔离/版本/收据） | 删记录存储实现约 442 行，保留状态映射与 legacy 迁移 |
+| A.5b 冷启动/委派 spec | ✅ 决策不上移 | 运行器为 `rig.Agent` | 无需删除（见 §4.7） |
 
-## 4.6 A.1b 设计草案（下一轮）
+## 4.6 A.1b 设计草案（已落地）
 
 - **形态**：rig 新嵌套模块 `session/sqlstore`（与 `session/sqlite` 同级），`go.mod` 自带驱动依赖（`modernc.org/sqlite`），不污染根模块；产品按子模块 tag 消费（本地代理已支持）。
 - **API**：`Open(db *sql.DB, Options) (*Store, error)`（宿主提供 DSN/PRAGMA/驱动，包内只建 schema 与查询）：
