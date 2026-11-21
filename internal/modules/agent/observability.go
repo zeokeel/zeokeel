@@ -25,8 +25,6 @@ package agent
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -444,7 +442,7 @@ func (s *service) contextSnapshotForRun(sessionID string, cfg contracts.ChatConf
 			Source: section.Source,
 			Bytes:  section.Bytes,
 			Tokens: section.Tokens,
-			Hash:   promptSectionHash(section.Text),
+			Hash:   section.Hash,
 		})
 	}
 	info := s.modelCatalogInfo(cfg.Model)
@@ -473,13 +471,6 @@ func (s *service) contextSnapshotForRun(sessionID string, cfg contracts.ChatConf
 	}
 	snapshot.Injected = s.promptInjectionSources(sessionID, cfg.SystemPrompt)
 	return snapshot
-}
-
-// promptSectionHash returns the stable short content hash of one prompt section
-// (used to diff adjacent context snapshots).
-func promptSectionHash(text string) string {
-	sum := sha256.Sum256([]byte(text))
-	return hex.EncodeToString(sum[:8])
 }
 
 // historyBreakdown returns the read-model message counts of a session and the

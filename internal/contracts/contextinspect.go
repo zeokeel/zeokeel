@@ -62,6 +62,8 @@ type PromptSection struct {
 	Bytes int
 	// Tokens is the estimated token count of Text.
 	Tokens int
+	// Hash is the stable short content hash of Text (snapshot diffing).
+	Hash string
 }
 
 // ContextSection is one labelled part of the request context. P0 records the

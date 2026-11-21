@@ -13,6 +13,7 @@ import (
 	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	rigprompt "github.com/zeokeel/zeokeel-rig/prompt"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -156,14 +157,15 @@ func TestBuildRunSystemPromptSectionsMatchesLegacy(t *testing.T) {
 	}
 }
 
-// TestPromptSectionHashIsStable pins the snapshot hash helper.
+// TestPromptSectionHashIsStable pins the snapshot hash the SDK prompt model
+// attaches to every measured section.
 func TestPromptSectionHashIsStable(t *testing.T) {
-	first := promptSectionHash("same text")
-	second := promptSectionHash("same text")
-	if first == "" || first != second {
-		t.Fatalf("promptSectionHash = %q/%q, want a stable non-empty hash", first, second)
+	first := newPromptSection("config", "config", "same text").Hash
+	second := newPromptSection("config", "config", " same text ").Hash
+	if first == "" || first != second || first != rigprompt.Hash("same text") {
+		t.Fatalf("section hash = %q/%q, want the SDK's stable hash", first, second)
 	}
-	if promptSectionHash("other text") == first {
-		t.Fatal("promptSectionHash collided for different text")
+	if newPromptSection("config", "config", "other text").Hash == first {
+		t.Fatal("section hash collided for different text")
 	}
 }

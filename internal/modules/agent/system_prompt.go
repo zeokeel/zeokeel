@@ -25,6 +25,7 @@ import (
 	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	rigprompt "github.com/zeokeel/zeokeel-rig/prompt"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -349,14 +350,16 @@ const (
 
 // newPromptSection builds one measured prompt section (empty sections are the
 // caller's responsibility: they are skipped everywhere they are appended).
+// newPromptSection measures one section through the SDK prompt model (trim,
+// bytes, tokens, content hash).
 func newPromptSection(id, source, text string) contracts.PromptSection {
-	text = strings.TrimSpace(text)
+	section := rigprompt.NewSection(id, source, text)
+	if section.Text == "" {
+		return contracts.PromptSection{}
+	}
 	return contracts.PromptSection{
-		ID:     id,
-		Source: source,
-		Text:   text,
-		Bytes:  len(text),
-		Tokens: rig.EstimateTextTokens(text),
+		ID: section.ID, Source: section.Source, Text: section.Text,
+		Bytes: section.Bytes, Tokens: section.Tokens, Hash: section.Hash,
 	}
 }
 
@@ -425,31 +428,18 @@ func configuredPromptSections(configuredPrompt string) []contracts.PromptSection
 // byte-identical to the pre-sections assembly: the identity/environment/
 // working-directory sections form one single-newline group, then every other
 // non-empty section is separated by a blank line.
+// renderPromptSections renders the SDK prompt model's sections. The grouping
+// (identity/environment/working-directory/date as one block) lives in the SDK;
+// the product only owns which section goes where and what it says.
 func renderPromptSections(sections []contracts.PromptSection) string {
-	parts := make([]string, 0, len(sections))
-	environmentGroup := make([]string, 0, 3)
-	flushEnvironment := func() {
-		if len(environmentGroup) == 0 {
-			return
-		}
-		parts = append(parts, strings.Join(environmentGroup, "\n"))
-		environmentGroup = environmentGroup[:0]
-	}
+	rigSections := make([]rigprompt.Section, 0, len(sections))
 	for _, section := range sections {
-		text := strings.TrimSpace(section.Text)
-		if text == "" {
-			continue
-		}
-		switch section.ID {
-		case PromptSectionIdentity, PromptSectionEnvironment, PromptSectionWorkingDirectory, PromptSectionDate:
-			environmentGroup = append(environmentGroup, text)
-			continue
-		}
-		flushEnvironment()
-		parts = append(parts, text)
+		rigSections = append(rigSections, rigprompt.Section{
+			ID: section.ID, Source: section.Source, Text: section.Text,
+			Bytes: section.Bytes, Tokens: section.Tokens, Hash: section.Hash,
+		})
 	}
-	flushEnvironment()
-	return strings.Join(parts, "\n\n")
+	return rigprompt.Render(rigSections)
 }
 
 // systemPromptForRun assembles the complete model-facing system prompt for one
