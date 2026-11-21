@@ -2516,6 +2516,9 @@ type generatedFile struct {
 	Path string
 	Name string
 	Dir  string
+	// Deleted marks a file the turn removed (apply_patch Delete File): the row
+	// stays honest about it and offers no preview actions.
+	Deleted bool
 }
 
 // generatedFiles is one finished turn's file output, split into the files the
@@ -2556,8 +2559,20 @@ func tailTurnMessages(messages []contracts.ChatMessage) []contracts.ChatMessage 
 // belongs to (delivered vs edited). One call can produce several entries
 // (apply_patch writes, deletes and moves multiple files).
 type generatedFileEntry struct {
-	path string
-	kind string
+	path    string
+	kind    string
+	deleted bool
+}
+
+// removeGeneratedFile drops one path from a card list (write supersedes edit).
+func removeGeneratedFile(files []generatedFile, path string) []generatedFile {
+	kept := files[:0]
+	for _, file := range files {
+		if file.Path != path {
+			kept = append(kept, file)
+		}
+	}
+	return kept
 }
 
 // turnGeneratedFiles collects the current turn's file-producing calls:
@@ -2587,13 +2602,19 @@ func turnGeneratedFiles(messages []contracts.ChatMessage) generatedFiles {
 						continue
 					}
 					delivered[entry.path] = true
+					// A file written after it was edited counts as delivered
+					// only (drop the earlier edited row).
+					files.edited = removeGeneratedFile(files.edited, entry.path)
+					delete(edited, entry.path)
 					files.delivered = append(files.delivered, newGeneratedFile(entry.path))
 				case generatedToolEdit:
 					if delivered[entry.path] || edited[entry.path] {
 						continue
 					}
 					edited[entry.path] = true
-					files.edited = append(files.edited, newGeneratedFile(entry.path))
+					file := newGeneratedFile(entry.path)
+					file.Deleted = entry.deleted
+					files.edited = append(files.edited, file)
 				}
 			}
 		}
@@ -2626,6 +2647,20 @@ func generatedFileTool(name string) string {
 // file in its patch body, so one call can fill several rows (added files count
 // as delivered, updated/deleted/moved files as edited).
 func generatedFileEntries(call contracts.ToolCall) []generatedFileEntry {
+	// The runtime records the file list of a multi-file call from the full
+	// arguments (the bounded patch body is not valid JSON). Older transcripts
+	// fall back to parsing the arguments below.
+	if len(call.Generated) > 0 {
+		entries := make([]generatedFileEntry, 0, len(call.Generated))
+		for _, file := range call.Generated {
+			kind := generatedToolEdit
+			if file.Added {
+				kind = generatedToolWrite
+			}
+			entries = append(entries, generatedFileEntry{path: file.Path, kind: kind, deleted: file.Deleted})
+		}
+		return entries
+	}
 	if strings.EqualFold(strings.TrimSpace(call.Name), "apply_patch") {
 		return generatedPatchEntries(call)
 	}
@@ -2637,9 +2672,10 @@ func generatedFileEntries(call contracts.ToolCall) []generatedFileEntry {
 	return []generatedFileEntry{{path: path, kind: kind}}
 }
 
-// maxGeneratedPatchFiles bounds how many rows one patch can add to the tail
-// card (the card shows the first rows and a "more" line anyway).
-const maxGeneratedPatchFiles = 16
+// maxGeneratedPatchFiles mirrors the runtime parser's cap (the SDK accepts up
+// to 200 files per patch); the card itself shows the first rows and a "more"
+// line.
+const maxGeneratedPatchFiles = 200
 
 // generatedPatchEntries parses the file lines of an apply_patch body
 // (*** Add File / Update File / Delete File / Move to). A body that does not
@@ -2650,24 +2686,27 @@ func generatedPatchEntries(call contracts.ToolCall) []generatedFileEntry {
 		return nil
 	}
 	var args struct {
-		Patch string `json:"patch"`
+		Patch  string `json:"patch"`
+		DryRun bool   `json:"dry_run"`
 	}
-	if json.Unmarshal([]byte(raw), &args) != nil {
+	if json.Unmarshal([]byte(raw), &args) != nil || args.DryRun {
 		return nil
 	}
 	entries := make([]generatedFileEntry, 0, 4)
 	seen := make(map[string]bool, 4)
 	for _, line := range strings.Split(args.Patch, "\n") {
-		line = strings.TrimSpace(line)
+		// Directives are matched at column 0, exactly like the SDK: a context
+		// line that merely mentions one must not invent a file.
 		kind := generatedToolNone
 		path := ""
+		deleted := false
 		switch {
 		case strings.HasPrefix(line, "*** Add File:"):
 			kind, path = generatedToolWrite, strings.TrimPrefix(line, "*** Add File:")
 		case strings.HasPrefix(line, "*** Update File:"):
 			kind, path = generatedToolEdit, strings.TrimPrefix(line, "*** Update File:")
 		case strings.HasPrefix(line, "*** Delete File:"):
-			kind, path = generatedToolEdit, strings.TrimPrefix(line, "*** Delete File:")
+			kind, path, deleted = generatedToolEdit, strings.TrimPrefix(line, "*** Delete File:"), true
 		case strings.HasPrefix(line, "*** Move to:"):
 			kind, path = generatedToolEdit, strings.TrimPrefix(line, "*** Move to:")
 		default:
@@ -2678,7 +2717,7 @@ func generatedPatchEntries(call contracts.ToolCall) []generatedFileEntry {
 			continue
 		}
 		seen[path] = true
-		entries = append(entries, generatedFileEntry{path: path, kind: kind})
+		entries = append(entries, generatedFileEntry{path: path, kind: kind, deleted: deleted})
 		if len(entries) >= maxGeneratedPatchFiles {
 			break
 		}
@@ -2782,8 +2821,14 @@ func buildGeneratedFileRow(c *ui.Context, t *design.Tokens, st *state, file gene
 			design.Apply(ui.Text(c, file.Dir), t.Font(design.TypeXXXS)).
 				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 		}
+		if file.Deleted {
+			design.Apply(ui.Text(c, st.tr("· 已删除", "· deleted")), t.Font(design.TypeXXXS)).
+				TextColor(t.LabelTertiary)
+		}
 		ui.Spacer(c)
-		if previewer == nil {
+		// A deleted file has nothing to preview or open: showing the actions
+		// would open a missing path and read as "the delete did not happen".
+		if previewer == nil || file.Deleted {
 			return
 		}
 		agentRowAction(c, t, st.tr("在侧边栏预览", "Preview"),

@@ -2921,6 +2921,7 @@ func (s *service) handleEvent(ctx context.Context, sessionID, workspaceRoot stri
 				// boundedToolArguments cuts a whole file body out of them; the
 				// generated-file cards need it structurally (audit F4).
 				path := toolCallPath(event.Call.Name, event.Call.Arguments, workspaceRoot)
+				generated := generatedCallFiles(event.Call.Name, event.Call.Arguments)
 				arguments := boundedToolArguments(event.Call.Arguments)
 				message.Tools = append(message.Tools, contracts.ToolCall{
 					ID:         event.Call.ID,
@@ -2928,6 +2929,7 @@ func (s *service) handleEvent(ctx context.Context, sessionID, workspaceRoot stri
 					Status:     "running",
 					Arguments:  arguments,
 					Path:       path,
+					Generated:  generated,
 					TextOffset: textOffset,
 					// The live read model stamps the call so the trajectory can
 					// show its duration without a restart; restore backfills the

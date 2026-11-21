@@ -1593,3 +1593,37 @@ func TestGeneratedFileCardsFromApplyPatch(t *testing.T) {
 	h.assertTexts(tester, "交付文件", "new.md", "docs/",
 		"已编辑 2 个文件", "README.md", "old.md")
 }
+
+// TestGeneratedFileCardsUseRecordedPatchFiles pins the structured path: the
+// transcript's arguments are bounded (the patch body no longer parses), so the
+// card must read the file list the runtime recorded with the call. Deleted
+// files are labelled and offer no preview action.
+func TestGeneratedFileCardsUseRecordedPatchFiles(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{
+		ID: "sess-patch-recorded", Title: "补丁回合",
+		Messages: []contracts.ChatMessage{
+			{ID: "u1", Role: contracts.ChatRoleUser, Text: "打补丁"},
+			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "补丁已应用。",
+				Tools: []contracts.ToolCall{{
+					ID: "t1", Name: "apply_patch", Status: "ok",
+					Arguments: `{"patch":"*** Begin Patch\n*** Update File: README.md\n@@\n-a\n…`,
+					Generated: []contracts.ToolCallFile{
+						{Path: "docs/a.md", Added: true},
+						{Path: "README.md"},
+						{Path: "old.md", Deleted: true},
+					},
+				}}},
+		},
+	}, true)
+	h := newAgentSurfaceHarness(t, chat, agentServices{preview: &fakeFilePreview{}})
+	tester := h.tester()
+	tester.Frame()
+	h.assertTexts(tester, "交付文件", "a.md", "docs/", "已编辑 2 个文件", "README.md", "old.md", "· 已删除")
+	if tester.HasText("在侧边栏预览 old.md") {
+		t.Fatalf("deleted file still offers preview; texts = %v", tester.Texts())
+	}
+	if !tester.HasText("在侧边栏预览 README.md") {
+		t.Fatalf("edited file lost its preview action; texts = %v", tester.Texts())
+	}
+}

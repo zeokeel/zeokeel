@@ -98,6 +98,16 @@ type SettingsSearchItem struct {
 // ToolCall is the read-only summary a tool renderer receives. The full tool
 // state belongs to the session read model and is added when that module is
 // ported; keep renderers tolerant of zero values.
+// ToolCallFile is one file of a multi-file tool call.
+type ToolCallFile struct {
+	// Path is the workspace-relative path the call touched.
+	Path string
+	// Added reports a created file; Deleted reports a removed one (both false
+	// means modified/moved).
+	Added   bool
+	Deleted bool
+}
+
 type ToolCall struct {
 	ID      string
 	Name    string
@@ -112,6 +122,12 @@ type ToolCall struct {
 	// restored/malformed calls; the generated-file cards use it as the primary
 	// source and fall back to parsing Arguments for older records.
 	Path string
+	// Generated lists every file a multi-file call produced (apply_patch), with
+	// its kind, captured from the FULL arguments before they are bounded in the
+	// transcript: a bounded patch body is no longer valid JSON and could not be
+	// parsed for the cards afterwards. Empty for single-file tools (Path is the
+	// source) and for records written before this field existed.
+	Generated []ToolCallFile
 	// TextOffset is the assistant text length (in bytes) when the call was
 	// requested. The transcript renders text/tool cards in this order instead
 	// of drawing the whole reply above every call: 0 with text present means
