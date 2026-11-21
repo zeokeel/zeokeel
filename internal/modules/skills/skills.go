@@ -175,7 +175,7 @@ func newService(dataDir string, cfg Config, logger contracts.Logger, workspace c
 		logger:    logger,
 		workspace: workspace,
 	}
-	service.store = rigskills.New(rigskills.Options{Roots: service.Roots, Logger: logger})
+	service.store = rigskills.New(rigskills.Options{Roots: service.Roots, DataDir: dataDir, Logger: logger})
 	service.logger.Printf("%s: initialized with %d configured skill directories", ModuleID, len(configured))
 	return service
 }
