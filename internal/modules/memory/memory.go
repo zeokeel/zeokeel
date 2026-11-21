@@ -23,11 +23,7 @@ package memory
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -38,6 +34,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
 
+	"github.com/zeokeel/zeokeel-rig/session/memoryfile"
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -307,45 +304,12 @@ func (s *Store) Path() string { return s.path }
 // unreadable or malformed file is quarantined and reported through
 // RecoveryNotice instead of failing activation (FR-06).
 func (s *Store) load() error {
-	data, err := os.ReadFile(s.path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		// BE-09 (2026-11 audit): a non-NotExist READ error quarantines exactly
-		// like a decode error — an empty start with the entry left in place
-		// would let the next persist overwrite it and lose the original bytes.
-		s.quarantine(fmt.Sprintf("memory file %q could not be read (%v)", s.path, err))
-		return nil
-	}
-	entries, err := decodeEntries(data)
-	if err != nil {
-		s.quarantine(fmt.Sprintf("memory file %q is corrupt (%v)", s.path, err))
-		return nil
+	entries, recovery := memoryfile.Load(s.path)
+	if recovery != "" {
+		s.noteRecovery(recovery + "; starting with an empty memory store")
 	}
 	s.entries = entries
 	return nil
-}
-
-// decodeEntries accepts the canonical {"entries": [...]} document and, for
-// forward/backward compatibility with hand-written files, a bare array.
-func decodeEntries(data []byte) ([]contracts.Memory, error) {
-	trimmed := strings.TrimSpace(string(data))
-	if trimmed == "" {
-		return nil, nil
-	}
-	if strings.HasPrefix(trimmed, "[") {
-		var entries []contracts.Memory
-		if err := json.Unmarshal([]byte(trimmed), &entries); err != nil {
-			return nil, err
-		}
-		return entries, nil
-	}
-	var document fileDocument
-	if err := json.Unmarshal([]byte(trimmed), &document); err != nil {
-		return nil, err
-	}
-	return document.Entries, nil
 }
 
 // RecoveryNotice returns the last recovery warning ("" when the store loaded
@@ -355,21 +319,6 @@ func (s *Store) RecoveryNotice() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.recovery
-}
-
-// quarantine renames the unusable memory file out of the way and records the
-// recovery notice; the original error is kept in the notice so the log is
-// actionable. A rename failure only weakens the message: the store still starts
-// empty either way.
-func (s *Store) quarantine(reason string) {
-	backup := fmt.Sprintf("%s.corrupt-%d", s.path, time.Now().UTC().UnixNano())
-	message := reason + "; starting with an empty memory store"
-	if err := os.Rename(s.path, backup); err != nil {
-		message += fmt.Sprintf(" (could not quarantine the file: %v)", err)
-	} else {
-		message += fmt.Sprintf(" (quarantined as %s)", backup)
-	}
-	s.noteRecovery(message)
 }
 
 // noteRecovery records and logs one recovery warning.
@@ -731,56 +680,7 @@ func (s *Store) Search(ctx context.Context, query string) ([]contracts.Memory, e
 // directory is written, synced, closed and renamed over the target, then the
 // directory is synced so the rename itself survives a power loss.
 func (s *Store) persistLocked() error {
-	directory := filepath.Dir(s.path)
-	if err := os.MkdirAll(directory, dirMode); err != nil {
-		return fmt.Errorf("%s: create memory directory %q: %w", ModuleID, directory, err)
-	}
-	data, err := json.MarshalIndent(fileDocument{Entries: s.entries}, "", "  ")
-	if err != nil {
-		return fmt.Errorf("%s: encode memory document: %w", ModuleID, err)
-	}
-	temporary, err := os.CreateTemp(directory, ".memory-*.tmp")
-	if err != nil {
-		return fmt.Errorf("%s: create temporary memory file: %w", ModuleID, err)
-	}
-	temporaryPath := temporary.Name()
-	cleanup := func() {
-		_ = temporary.Close()
-		_ = os.Remove(temporaryPath)
-	}
-	if err := temporary.Chmod(fileMode); err != nil {
-		cleanup()
-		return fmt.Errorf("%s: chmod temporary memory file: %w", ModuleID, err)
-	}
-	if _, err := temporary.Write(data); err != nil {
-		cleanup()
-		return fmt.Errorf("%s: write temporary memory file: %w", ModuleID, err)
-	}
-	if err := temporary.Sync(); err != nil {
-		cleanup()
-		return fmt.Errorf("%s: sync temporary memory file: %w", ModuleID, err)
-	}
-	if err := temporary.Close(); err != nil {
-		_ = os.Remove(temporaryPath)
-		return fmt.Errorf("%s: close temporary memory file: %w", ModuleID, err)
-	}
-	if err := os.Rename(temporaryPath, s.path); err != nil {
-		_ = os.Remove(temporaryPath)
-		return fmt.Errorf("%s: replace memory file %q: %w", ModuleID, s.path, err)
-	}
-	syncDirectory(directory)
-	return nil
-}
-
-// syncDirectory fsyncs a directory so a completed rename survives a power loss
-// (best effort: some platforms/filesystems cannot sync directories).
-func syncDirectory(directory string) {
-	handle, err := os.Open(directory)
-	if err != nil {
-		return
-	}
-	_ = handle.Sync()
-	_ = handle.Close()
+	return memoryfile.Save(s.path, s.entries)
 }
 
 // cloneEntries returns a shallow copy of the entry slice (entries contain no

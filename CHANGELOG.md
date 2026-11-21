@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **SDK 上移：memory 文件持久化**（2026-11-22）：rig `session/memoryfile` 负责读取（legacy 数组、损坏隔离）与原子保存；产品 memory store 删除 codec/原子写/隔离实现（-106 行），保留条目策略、scope 与 workspace/settings 逻辑。
+
 - **SDK 上移：skills 编辑器**（2026-11-22）：rig `skills` 提供 create/update/delete（仅 `<DataDir>/skills` 可写），产品编辑器缩成 draft 映射；skills 测试全绿。
 
 - **SDK 上移：执行历史读模型**（2026-11-22）：rig 新增 `session/execution`（start/end 成对折叠、有界窗口、live overlay、running/finished/interrupted、按开始时间倒序）；产品 `toolkit/execution_history` 只保留 live 解析与 `contracts.ExecutionRecord` 映射，删除折叠/排序/上限实现，原有 toolkit 测试通过。
@@ -44,7 +46,7 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 - **SDK 上移 B.6（ACP 传输层）**（2026-11-21）：rig 新增 `acp` 包——换行分帧、请求校验、initialize/能力通告、方法分发、并发 prompt 轮次、cancel、通知串行化、`ErrNoResponse` 与 JSON-RPC 错误映射，宿主实现 `Handler`；产品 `acp` 模块删除自研传输/分发 289 行，只保留 ACP 方法到 Chat/Workspace 的映射、工作区绑定、图片 prompt 与工具事件。依赖切到 `rig v0.27.3`（+ `session/sqlstore v0.2.3`）。
 
-- **SDK 依赖切到正式发布版本**（2026-11-21）：`github.com/zeokeel/zeokeel-rig v0.28.6` + `github.com/zeokeel/zeokeel-rig/session/sqlstore v0.2.3`（rig `main` 上的正式 tag，含本次全部上移能力；v0.27.0/rc 与 v0.27.1 均因发布门禁未通过，tag 不可移动，故用补丁版本重新发布）；本地代理仍可离线复现，go.sum 为 canonical 哈希。
+- **SDK 依赖切到正式发布版本**（2026-11-21）：`github.com/zeokeel/zeokeel-rig v0.28.7` + `github.com/zeokeel/zeokeel-rig/session/sqlstore v0.2.3`（rig `main` 上的正式 tag，含本次全部上移能力；v0.27.0/rc 与 v0.27.1 均因发布门禁未通过，tag 不可移动，故用补丁版本重新发布）；本地代理仍可离线复现，go.sum 为 canonical 哈希。
 
 - **SDK 上移 B.1/B.2 的机制部分：工具面过滤与发现激活**（2026-11-21）：rig 新增 `tools/surface`（`Names/NameSet/WithoutNames/OnlyNames`，保持注册顺序、处理 nil/空白）与 `discovery.Activation`（隐藏尾部：精确名 + 前缀，`Forced` 覆盖；未知工具保持 active）。产品删除自研的 `withoutToolNames`/`filterToolsByAllowlist`/模式过滤循环与发现尾部推导，改为 SDK 调用；尾部名单、模式白名单与 preset 策略仍留在产品（策略归产品，机制归 SDK）。`go.mod` 抬到 `v0.27.0-rc.11`。
 
