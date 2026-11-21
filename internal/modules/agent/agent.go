@@ -39,9 +39,9 @@ import (
 	rigsession "github.com/zeokeel/zeokeel-rig/tools/session"
 	rigteam "github.com/zeokeel/zeokeel-rig/tools/team"
 
+	"github.com/zeokeel/zeokeel-rig/kit"
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/hosttools"
-	"github.com/zeokeel/zeokeel/internal/lib/agentbuild"
 )
 
 // effectiveMaxIterations maps the product's assembly-level round cap onto the
@@ -2787,11 +2787,11 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// every tool call sees the session's root even when another workspace is
 	// current.
 	runTools := withWorkspaceRoot(withAgentScope(tools, sessionID, origin), workspaceRoot)
-	spec := rig.AgentSpec{
+	// The run is assembled as a kit.Config: kit owns the agent build, the
+	// product only supplies the resolved pieces of this run.
+	runConfig := kit.Config{
 		Provider: provider,
 		Model:    cfg.Model,
-		// The prompt is rendered by the SDK inside every Run (after the BeforeRun
-		// hooks): the date line and any state a hook changed are then current.
 		SystemPromptFunc: func(renderCtx context.Context, _ rig.RunRequest) string {
 			return s.buildRunSystemPrompt(renderCtx, sessionID, promptCfg, toolNameSet(promptTools), workspaceRoot)
 		},
@@ -2802,33 +2802,27 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		Tools:         runTools,
 		// The tombstone guard is outermost: a session deleted mid-run must drop
 		// its late history write before it reaches the store.
-		History: s.guardedHistory(s.replaceableHistory(history)),
-		Gate:    s.gate(sessionID),
-		// Oversized tool results are spilled by Rig before the tool message is
-		// recorded (rig.SpillPolicy); the product only resolves the directory —
-		// under the run's captured session-bound root (BE-11).
+		History:         s.guardedHistory(s.replaceableHistory(history)),
+		Gate:            s.gate(sessionID),
 		Spill:           s.spillPolicy(ctx, workspaceRoot),
 		Logger:          s.logger,
 		CheckpointStore: s.guardedCheckpointStore(s.checkpointStore()),
 		Hooks:           s.turnHooks(workspaceRoot),
 		// Lazy discovery: the request carries the core surface plus whatever the
-		// session activated; tool_search loads the rest.
+		// session activated; tool_search loads the rest. The product owns the
+		// search tool, so kit must not inject a second one.
 		InitialActiveTools: s.initialActiveTools(sessionID, runTools),
 		// The single owner of the session's active set: the product state is
-		// mirrored here, so the rig agent loads/saves it instead of only the
-		// per-run list.
-		ActivationStore: s,
+		// mirrored in the ActivationStore the rig agent loads/saves.
+		Activations: s,
 	}
-	// Context safety default: the explicit chat.contextBudget when set, else a
-	// budget derived from the model's context window; a known budget also
-	// installs the automatic compactor.
-	s.withContextBudget(&spec, cfg, provider)
-	spec.ContextRecovery = s.contextRecoveryHooks()
-	mode := agentbuild.ModeDirect
-	if agentbuild.KitAgentEnabled() {
-		mode = agentbuild.ModeKit
+	if surfaceHasTool(runTools, "tool_search") {
+		runConfig.ToolDiscovery = kit.Bool(true)
 	}
-	runner, err := agentbuild.BuildAgent(spec, mode)
+	// Context safety default: explicit chat.contextBudget when set, else derived.
+	s.withKitContextBudget(&runConfig, cfg, provider)
+	runConfig.ContextRecovery = s.contextRecoveryHooks()
+	runner, err := kit.New(runConfig)
 	if err != nil {
 		s.finish(sessionID, ctx, fmt.Errorf("create agent: %w", err))
 		return

@@ -34,8 +34,8 @@ import (
 
 	rig "github.com/zeokeel/zeokeel-rig"
 
+	"github.com/zeokeel/zeokeel-rig/kit"
 	"github.com/zeokeel/zeokeel/internal/contracts"
-	"github.com/zeokeel/zeokeel/internal/lib/agentbuild"
 )
 
 // ErrColdResumeUnavailable reports a historical child that cannot be resumed
@@ -370,11 +370,11 @@ func (s *service) runColdResumeAgent(ctx context.Context, record childSessionRec
 	if err != nil {
 		return rig.RunResult{}, fmt.Errorf("agent: cold resume %q: create provider: %w", record.ID, err)
 	}
-	spec := rig.AgentSpec{
-		Provider:     provider,
-		Model:        cfg.Model,
-		SystemPrompt: cfg.SystemPrompt,
-		// Delegated children use the explicit delegation budget, not Rig's 20.
+	// The cold-resume turn is a kit.Config: the child session is the history.
+	runConfig := kit.Config{
+		Provider:      provider,
+		Model:         cfg.Model,
+		SystemPrompt:  cfg.SystemPrompt,
 		MaxIterations: delegatedIterationBudget(cfg),
 		Tools:         withWorkspaceRoot(withAgentScope(childTools, parentID, contracts.AgentRunOriginSubagent), workspaceRoot),
 		Gate:          s.gate(parentID),
@@ -382,14 +382,10 @@ func (s *service) runColdResumeAgent(ctx context.Context, record childSessionRec
 		Spill:         s.spillPolicy(ctx, workspaceRoot),
 		Logger:        s.logger,
 		// No discovery here: the child excludes tool_search, so InitialActiveTools
-		// must stay nil or the tail would be hidden with no way to load it.
+		// stays nil (all registered tools active).
 	}
-	s.withContextBudget(&spec, cfg, provider)
-	mode := agentbuild.ModeDirect
-	if agentbuild.KitAgentEnabled() {
-		mode = agentbuild.ModeKit
-	}
-	runner, err := agentbuild.BuildAgent(spec, mode)
+	s.withKitContextBudget(&runConfig, cfg, provider)
+	runner, err := kit.New(runConfig)
 	if err != nil {
 		return rig.RunResult{}, fmt.Errorf("agent: cold resume %q: create agent: %w", record.ID, err)
 	}

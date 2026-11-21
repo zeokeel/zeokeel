@@ -243,6 +243,16 @@ func (s *service) sessionRunner(sessionID string) rig.ToolActivator {
 	return nil
 }
 
+// surfaceHasTool reports whether the run surface contains name.
+func surfaceHasTool(tools []rig.Tool, name string) bool {
+	for _, tool := range tools {
+		if tool != nil && strings.TrimSpace(tool.Name()) == name {
+			return true
+		}
+	}
+	return false
+}
+
 // discoveryName is the model-visible name of the discovery tool (kept as a
 // helper so registration and cleanup cannot drift).
 func discoveryName() string { return discovery.ToolSearch }

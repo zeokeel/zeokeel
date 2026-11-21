@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/kit"
 	"github.com/zeokeel/zeokeel-rig/session/compact"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -83,6 +84,20 @@ func (s *service) effectiveContextBudget(cfg contracts.ChatConfig) int {
 // the LLM compactor on one runner spec. It gives full runs and delegated
 // children the same automatic protection whether or not the user ever set
 // chat.contextBudget by hand.
+func (s *service) withKitContextBudget(cfg *kit.Config, chat contracts.ChatConfig, provider rig.Provider) {
+	if cfg == nil {
+		return
+	}
+	budget := s.effectiveContextBudget(chat)
+	cfg.ContextBudget = budget
+	cfg.Compactor = compact.LLMCompactor{
+		Provider: provider,
+		Model:    chat.Model,
+		Fallback: compact.WindowCompactor{},
+	}
+}
+
+// withContextBudget is the rig.AgentSpec variant used by delegated children.
 func (s *service) withContextBudget(spec *rig.AgentSpec, cfg contracts.ChatConfig, provider rig.Provider) {
 	if spec == nil {
 		return

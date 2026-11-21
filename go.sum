@@ -37,6 +37,8 @@ github.com/zeokeel/zeokeel-rig v0.28.0-rc.3 h1:AhIBRz2H0/33tSlQyEogLYtkMZXes5rrV
 github.com/zeokeel/zeokeel-rig v0.28.0-rc.3/go.mod h1:B00A4YCGjMifwsh4UNphW8ADXyJu/wovwQaNL+B03qI=
 github.com/zeokeel/zeokeel-rig v0.28.0-rc.4 h1:aTmEp2buVcd+bwaa1bGGs2jgm0flPPcahDqGATZ5p14=
 github.com/zeokeel/zeokeel-rig v0.28.0-rc.4/go.mod h1:B00A4YCGjMifwsh4UNphW8ADXyJu/wovwQaNL+B03qI=
+github.com/zeokeel/zeokeel-rig v0.28.0-rc.5 h1:J9xGrYpEEgju8B5dLhBqnYWi1GYtsRgyOjmaEfGB7Eo=
+github.com/zeokeel/zeokeel-rig v0.28.0-rc.5/go.mod h1:B00A4YCGjMifwsh4UNphW8ADXyJu/wovwQaNL+B03qI=
 github.com/zeokeel/zeokeel-rig/session/sqlstore v0.2.3 h1:/0dzg9uk2aAWtVK7QPK1/1qf2siU1CuEioteB63nmmI=
 github.com/zeokeel/zeokeel-rig/session/sqlstore v0.2.3/go.mod h1:vMNhsruEkfHHPu6H4PcEwlOsxq08rkNXpe7JSUvRcwI=
 go.digitalxero.dev/rpm v0.3.4 h1:iq+rx7zB6wQeNhLQ1mcvW92v9ZqNaxCvuu0+nPVit4w=

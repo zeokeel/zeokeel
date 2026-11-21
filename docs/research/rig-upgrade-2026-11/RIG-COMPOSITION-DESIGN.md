@@ -1,6 +1,6 @@
 # rig 组合层设计：kit 作为 agent 编译器，产品作为薄壳
 
-> 状态：设计稿（2026-11-21）；P1（阶段钩子 + kit 透传）与 P2（Spec/Build/注册表/LoadFile + ExtraTools + 模块能力/生命周期）已落地；P3a 产品 hostbundle 缝已落地；P3c 完成：产品实现 `rig.ToolActivationStore`（单一 active-set 所有者），父回合与冷启动默认走 `kit.Build`（`agentbuild.ModeKit`），direct 保留为 `ZEOKEEL_DIRECT_AGENT=1` 逃生门；kit 路径通过产品全量 `verify.sh`。P4（切 cmd/删重复装配）待做。
+> 状态：设计稿（2026-11-21）；P1（阶段钩子 + kit 透传）与 P2（Spec/Build/注册表/LoadFile + ExtraTools + 模块能力/生命周期）已落地；P3a 产品 hostbundle 缝已落地；P3c 完成：产品实现 `rig.ToolActivationStore`（单一 active-set 所有者），父回合与冷启动默认走 `kit.Build`（`agentbuild.ModeKit`），direct 保留为 `ZEOKEEL_DIRECT_AGENT=1` 逃生门；kit 路径通过产品全量 `verify.sh`。P4 部分完成：产品已删除直接 `AgentSpec` 装配与 direct 逃生门，运行路径改为 `kit.Config + kit.New`；剩余是把动态输入接进 `kit.Build(Spec, Modules)` 并删除 hostbundle 之外的手工装配。
 > 目标读者：维护 rig/kit 与 ZeoKeel 装配层的人。
 
 ## 0. 目标与非目标
