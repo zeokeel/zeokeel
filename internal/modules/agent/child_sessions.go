@@ -129,6 +129,22 @@ func (s *childSessionStore) markNotified(id string, finished time.Time) bool {
 	return s != nil && s.inner != nil && s.inner.MarkNotified(id, finished)
 }
 
+// pendingReceipts returns finished, unnotified records of one parent and kind.
+func (s *childSessionStore) pendingReceipts(sessionID, kind string) []childSessionRecord {
+	if s == nil || s.inner == nil {
+		return nil
+	}
+	return s.inner.PendingReceipts(sessionID, kind)
+}
+
+// markReceipts commits delivered receipts.
+func (s *childSessionStore) markReceipts(records []childSessionRecord) {
+	if s == nil || s.inner == nil {
+		return
+	}
+	s.inner.MarkReceipts(records)
+}
+
 // records returns the retained records, newest first.
 func (s *childSessionStore) records() []childSessionRecord {
 	if s == nil || s.inner == nil {

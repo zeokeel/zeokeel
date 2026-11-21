@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **SDK 上移：子会话完成收据**（2026-11-22）：`session/children` 新增 `PendingReceipts/MarkReceipts`（完成、未通知、按父会话与 kind 过滤、按完成时间排序；成功 run 后提交），产品 `child_notices` 的扫描/排序/ref 记录删除，只保留模型文案与 Run 成功后提交的批次。依赖 `rig v0.28.3-rc.1`。
+
 - **SDK 上移：skills 文件发现/读取**（2026-11-22）：rig 新增 `skills` 包（宿主提供有序 roots；有界 SKILL.md 扫描、同名遮蔽 warning、精确 `---` frontmatter、防穿越读取、全量读上限）；产品 `skills` 模块只保留 roots 选择（workspace/settings/dataDir/env）、模块描述与编辑器，删除 310 行扫描/解析实现，原有 skills 测试全部通过。依赖 `rig v0.28.2-rc.1`。
 
 - **P4 完成：产品运行入口改为 `hostbundle + kit.BuildConfig`**（2026-11-21）：父回合与冷启动把动态能力（tombstone 保护的 History、Checkpoint、per-session Gate、Spill、ActivationStore）作为 `hostbundle.Module` 交给 `kit.BuildConfig`，产品侧不再手工拼接这些能力；`internal/lib/hostbundle` 移到 lib 以满足模块边界。kit 新增 `BuildConfig(ctx, Config, ...Module)`，让"每运行解析"的宿主与声明式 `Spec/Build` 共用同一构建路径。产品全量测试绿。

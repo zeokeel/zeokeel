@@ -23,28 +23,19 @@ package agent
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
-	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// childNoticeRef identifies one finished child whose receipt is staged for the
-// current run.
-type childNoticeRef struct {
-	id       string
-	finished time.Time
-}
-
 // childNoticeBatch stages the receipts one run delivered to the model. commit
 // persists their Notified flags only once the run succeeded.
 type childNoticeBatch struct {
 	service   *service
 	sessionID string
-	pending   []childNoticeRef
+	pending   []childSessionRecord
 	loaded    bool
 }
 
@@ -62,9 +53,7 @@ func (b *childNoticeBatch) commit() {
 	if b == nil || b.service == nil || b.service.childSessions == nil {
 		return
 	}
-	for _, ref := range b.pending {
-		b.service.childSessions.markNotified(ref.id, ref.finished)
-	}
+	b.service.childSessions.markReceipts(b.pending)
 	b.pending = nil
 }
 
@@ -88,11 +77,11 @@ func (h *childNoticeHistory) Load(ctx context.Context, sessionID string) ([]rig.
 		return messages, nil
 	}
 	h.batch.loaded = true
-	notices, refs := h.batch.service.prepareChildNotices(sessionID)
+	notices, records := h.batch.service.prepareChildNotices(sessionID)
 	if len(notices) == 0 {
 		return messages, nil
 	}
-	h.batch.pending = refs
+	h.batch.pending = records
 	merged := make([]rig.Message, 0, len(messages)+len(notices))
 	merged = append(merged, messages...)
 	merged = append(merged, notices...)
@@ -117,7 +106,7 @@ func withChildNotices(history rig.History, batch *childNoticeBatch) rig.History 
 // without marking them; the run's batch commits the flags after success. It is
 // called from the run's history Load, which happens on the run goroutine, never
 // on the UI frame path.
-func (s *service) prepareChildNotices(sessionID string) ([]rig.Message, []childNoticeRef) {
+func (s *service) prepareChildNotices(sessionID string) ([]rig.Message, []childSessionRecord) {
 	if s == nil || s.childSessions == nil {
 		return nil, nil
 	}
@@ -125,45 +114,21 @@ func (s *service) prepareChildNotices(sessionID string) ([]rig.Message, []childN
 	if sessionID == "" {
 		return nil, nil
 	}
-	type pendingNotice struct {
-		finished time.Time
-		message  rig.Message
-		ref      childNoticeRef
-	}
-	var pending []pendingNotice
-	for _, record := range s.childSessions.records() {
-		if record.ParentSessionID != sessionID || record.Finished.IsZero() || record.Notified {
-			continue
-		}
-		// A synchronous one-shot subagent's answer is already in the parent
-		// history as the subagent tool result; only continuable teammate
-		// completions need a separate model-facing receipt.
-		if record.Kind != contracts.ChildAgentTeammate {
-			continue
-		}
+	records := s.childSessions.pendingReceipts(sessionID, contracts.ChildAgentTeammate)
+	notices := make([]rig.Message, 0, len(records))
+	pending := make([]childSessionRecord, 0, len(records))
+	for _, record := range records {
 		text := childNoticeTextForModel(record)
 		if text == "" {
 			continue
 		}
-		pending = append(pending, pendingNotice{
-			finished: record.Finished,
-			message: rig.Message{
-				Role:    rig.RoleUser,
-				Content: []rig.ContentPart{rig.TextPart(text)},
-			},
-			ref: childNoticeRef{id: record.ID, finished: record.Finished},
+		notices = append(notices, rig.Message{
+			Role:    rig.RoleUser,
+			Content: []rig.ContentPart{rig.TextPart(text)},
 		})
+		pending = append(pending, record)
 	}
-	sort.SliceStable(pending, func(i, j int) bool {
-		return pending[i].finished.Before(pending[j].finished)
-	})
-	notices := make([]rig.Message, 0, len(pending))
-	refs := make([]childNoticeRef, 0, len(pending))
-	for _, notice := range pending {
-		notices = append(notices, notice.message)
-		refs = append(refs, notice.ref)
-	}
-	return notices, refs
+	return notices, pending
 }
 
 // childNoticeTextForModel is the model-facing completion receipt of one child.
