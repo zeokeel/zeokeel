@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **SDK 依赖切到正式发布版本**（2026-11-21）：`github.com/zeokeel/zeokeel-rig v0.27.0` + `github.com/zeokeel/zeokeel-rig/session/sqlstore v0.2.0`（rig 分支 `feat/sdk-migrations` 上打的正式 tag，含本次全部上移能力）；本地代理仍可离线复现。正式推送后其他机器/CI 可直接拉取。
+
 - **SDK 上移 B.1/B.2 的机制部分：工具面过滤与发现激活**（2026-11-21）：rig 新增 `tools/surface`（`Names/NameSet/WithoutNames/OnlyNames`，保持注册顺序、处理 nil/空白）与 `discovery.Activation`（隐藏尾部：精确名 + 前缀，`Forced` 覆盖；未知工具保持 active）。产品删除自研的 `withoutToolNames`/`filterToolsByAllowlist`/模式过滤循环与发现尾部推导，改为 SDK 调用；尾部名单、模式白名单与 preset 策略仍留在产品（策略归产品，机制归 SDK）。`go.mod` 抬到 `v0.27.0-rc.11`。
 
 - **SDK 上移 A.5a：子会话记录存储进入 rig `session/children`**（2026-11-21）：子会话文档（原子写、排序、TTL/条数保留、损坏文件隔离、版本化 schema、重启恢复、完成收据"只投递一次"）下移；宿主通过 `Options` 提供路径、id 前缀、保留策略、normalize（截断/状态词表）与 `OnLoad`（"running 重启后即 interrupted"）。产品删除 442 行记录存储实现（加载/持久化/隔离/裁剪/ID/相等比较），保留团队/子代理状态映射、活动形状与 legacy sidecar 迁移，`child_sessions.go` 变成 SDK 适配器；原有 agent 测试不改断言全绿。`go.mod` 抬到 `v0.27.0-rc.10`（本地离线代理）。
