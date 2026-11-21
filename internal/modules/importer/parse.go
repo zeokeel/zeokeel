@@ -4,6 +4,7 @@ package importer
 // importer's existing call sites and tests unchanged.
 
 import (
+	rig "github.com/zeokeel/zeokeel-rig"
 	rigimporter "github.com/zeokeel/zeokeel-rig/session/importer"
 )
 
@@ -14,4 +15,12 @@ var ErrUnsupportedVersion = rigimporter.ErrUnsupportedVersion
 
 func parseSessionFile(path string) (*parsedSession, error) {
 	return rigimporter.ParseSessionFile(path)
+}
+
+func importedTitle(messages []parsedMessage) string {
+	return rigimporter.Title(messages)
+}
+
+func importedRigMessages(messages []parsedMessage) []rig.Message {
+	return rigimporter.Messages(messages)
 }

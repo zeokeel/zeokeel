@@ -31,14 +31,14 @@ const (
 	ModuleID = "zeokeel/importer"
 	// Version is the module's semantic version.
 	Version = "1.0.0"
+	// titleRunes mirrors the SDK's title bound (tests assert it).
+	titleRunes = 60
+	// defaultImportedTitle mirrors the SDK's fallback title (tests assert it).
+	defaultImportedTitle = "导入的会话"
 	// sessionFileName is the DSH v4 session log file name.
 	sessionFileName = "session.v4.jsonl"
 	// importedSessionPrefix prefixes imported session IDs.
 	importedSessionPrefix = "dsh-"
-	// titleRunes bounds an imported session title.
-	titleRunes = 60
-	// defaultImportedTitle is used when a session has no user message.
-	defaultImportedTitle = "导入的会话"
 )
 
 // Config is the module's typed assembly config.
@@ -375,39 +375,4 @@ func (s *service) appendImportEvent(ctx context.Context, sessionID, sourceID str
 	}); err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("%s: append import event: %v", sessionID, err))
 	}
-}
-
-// importedTitle derives the session title from the first user message.
-func importedTitle(messages []parsedMessage) string {
-	for _, message := range messages {
-		if message.Role != "user" {
-			continue
-		}
-		text := strings.TrimSpace(message.Text)
-		if text == "" {
-			continue
-		}
-		runes := []rune(text)
-		if len(runes) > titleRunes {
-			runes = runes[:titleRunes]
-		}
-		return string(runes)
-	}
-	return defaultImportedTitle
-}
-
-// importedRigMessages rebuilds the durable rig history.
-func importedRigMessages(messages []parsedMessage) []rig.Message {
-	out := make([]rig.Message, 0, len(messages))
-	for _, message := range messages {
-		switch message.Role {
-		case "user":
-			out = append(out, rig.NewMessage(rig.RoleUser, message.Text))
-		case "assistant":
-			assistant := rig.NewMessage(rig.RoleAssistant, message.Text)
-			assistant.Reasoning = message.Reasoning
-			out = append(out, assistant)
-		}
-	}
-	return out
 }
