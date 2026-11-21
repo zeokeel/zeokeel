@@ -94,6 +94,17 @@ GOPROXY=file://$PWD/.cache/rigproxy GOSUMDB=off go get github.com/zeokeel/zeokee
 | A.1b 存储 schema/CRUD/RenameSession | 待做 | — | — |
 | A.5 委派子会话 | 待做 | — | — |
 
+## 4.6 A.1b 设计草案（下一轮）
+
+- **形态**：rig 新嵌套模块 `session/sqlstore`（与 `session/sqlite` 同级），`go.mod` 自带驱动依赖（`modernc.org/sqlite`），不污染根模块；产品按子模块 tag 消费（本地代理已支持）。
+- **API**：`Open(db *sql.DB, Options) (*Store, error)`（宿主提供 DSN/PRAGMA/驱动，包内只建 schema 与查询）：
+  - `rig.History`（Load/Append/Replace）、`rig.SessionLog`（Append/Events）、`rig.CheckpointStore`；
+  - `RenameSession`、`Sessions/GetSessionMeta`、`DeleteSession`、`AppendEvent`；
+  - `SearchMessages(ctx, query, limit) ([]Hit, error)`（`session/sqlsearch` 的文本/片段层，schema 用 `messages.search_text`/`events.text` 解码列）。
+- **Schema**：`sessions / messages / events / checkpoints` 四表；产品特有的 `workspace_id` 用 `Options.ExtraSessionColumns` 或 `Meta` JSON 列承载（不逼 SDK 认识"工作区"）。
+- **迁移**：一次性 `MigrateFromLegacy(ctx, db)`（旧库四表 → 新库，按 session 分批 + 事务；失败回滚、旧库只读保留）；产品在装配启动时执行并记录事件。
+- **测试**：嵌套模块内用真实 SQLite 跑 CRUD/检索/迁移/并发/损坏 payload；产品保留"旧实现 ↔ 新实现"golden 对照（同一操作后导出对比）后才删 `sessionstore`。
+
 ## 5. 建议顺序（若决定推进）
 
 1. **A.2 提示词装配/快照**（纯函数、无 I/O、无迁移风险）→ 建立"上移一套 + 产品接线"的样板。
