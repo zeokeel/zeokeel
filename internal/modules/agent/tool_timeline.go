@@ -35,6 +35,10 @@ type toolCallEvent struct {
 	// truthful path after a restart (audit F4). Empty for non-file calls and for
 	// events written before the field existed.
 	Path string `json:"path"`
+	// Generated is the file list of a multi-file call (apply_patch), recorded
+	// from the unbounded arguments like Path so a restored transcript still
+	// feeds the generated-file cards.
+	Generated []contracts.ToolCallFile `json:"generated,omitempty"`
 	// TextOffset is the assistant text length when the call arrived. It is a
 	// pointer: old events have no such field and must not be mistaken for a
 	// recorded offset of 0.
@@ -150,6 +154,9 @@ func (s *service) hydrateToolTimeline(ctx context.Context, sessionID string, sta
 			// even when the event carries no offset (path-only/older events).
 			if path := strings.TrimSpace(payload.Path); path != "" {
 				tool.Path = path
+			}
+			if len(payload.Generated) > 0 {
+				tool.Generated = payload.Generated
 			}
 			// The call's clock: the durable event time. Old events have no time
 			// (zero), and those calls stay unknown instead of guessing one.

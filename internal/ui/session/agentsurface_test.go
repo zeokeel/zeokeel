@@ -1627,3 +1627,52 @@ func TestGeneratedFileCardsUseRecordedPatchFiles(t *testing.T) {
 		t.Fatalf("edited file lost its preview action; texts = %v", tester.Texts())
 	}
 }
+
+// TestGeneratedFileCardsWriteSupersedesEdit pins the ordering fix: a file edited
+// and then written in the same turn is delivered, not edited.
+func TestGeneratedFileCardsWriteSupersedesEdit(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{
+		ID: "sess-order", Title: "顺序回合",
+		Messages: []contracts.ChatMessage{
+			{ID: "u1", Role: contracts.ChatRoleUser, Text: "改再写"},
+			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "完成。",
+				Tools: []contracts.ToolCall{
+					{ID: "t1", Name: "edit_file", Status: "ok",
+						Arguments: `{"path":"docs/a.md","old_string":"a","new_string":"b"}`},
+					{ID: "t2", Name: "write_file", Status: "ok",
+						Arguments: `{"path":"docs/a.md","content":"final"}`},
+				}},
+		},
+	}, true)
+	h := newAgentSurfaceHarness(t, chat, agentServices{preview: &fakeFilePreview{}})
+	tester := h.tester()
+	tester.Frame()
+	h.assertTexts(tester, "交付文件", "a.md")
+	if tester.HasText("已编辑 1 个文件") {
+		t.Fatalf("edited card survived a later write; texts = %v", tester.Texts())
+	}
+}
+
+// TestGeneratedFileCardsIgnoreDryRunPatch pins that a dry-run patch reports no
+// files (nothing was written).
+func TestGeneratedFileCardsIgnoreDryRunPatch(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{
+		ID: "sess-dry", Title: "预览回合",
+		Messages: []contracts.ChatMessage{
+			{ID: "u1", Role: contracts.ChatRoleUser, Text: "预览补丁"},
+			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "补丁校验通过。",
+				Tools: []contracts.ToolCall{{
+					ID: "t1", Name: "apply_patch", Status: "ok",
+					Arguments: `{"patch":"*** Begin Patch\n*** Add File: docs/a.md\n+x\n*** End Patch","dry_run":true}`,
+				}}},
+		},
+	}, true)
+	h := newAgentSurfaceHarness(t, chat, agentServices{preview: &fakeFilePreview{}})
+	tester := h.tester()
+	tester.Frame()
+	if tester.HasText("交付文件") || tester.HasText("已编辑") {
+		t.Fatalf("dry-run patch produced file cards; texts = %v", tester.Texts())
+	}
+}

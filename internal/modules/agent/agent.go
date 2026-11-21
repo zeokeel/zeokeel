@@ -2948,6 +2948,9 @@ func (s *service) handleEvent(ctx context.Context, sessionID, workspaceRoot stri
 				if path != "" {
 					fields["path"] = path
 				}
+				if len(generated) > 0 {
+					fields["generated"] = generated
+				}
 				deferredWrites = append(deferredWrites, func() {
 					s.appendEvent(context.Background(), sessionID, "tool_call", fields)
 				})
@@ -3381,8 +3384,12 @@ func chatMessagesFromRig(messages []rig.Message) []contracts.ChatMessage {
 				CreatedAt:         messageTime(message),
 			}
 			for _, call := range message.ToolCalls {
+				// rig keeps the FULL arguments in history: recover the file list
+				// here too, so a restored transcript does not depend on the
+				// durable event having the field (older events do not).
 				chatMessage.Tools = append(chatMessage.Tools, contracts.ToolCall{
 					ID: call.ID, Name: call.Name, Status: "ok",
+					Generated: generatedCallFiles(call.Name, call.Arguments),
 				})
 			}
 			out = append(out, chatMessage)

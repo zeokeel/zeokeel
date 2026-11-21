@@ -2654,7 +2654,7 @@ func generatedFileEntries(call contracts.ToolCall) []generatedFileEntry {
 		entries := make([]generatedFileEntry, 0, len(call.Generated))
 		for _, file := range call.Generated {
 			kind := generatedToolEdit
-			if file.Added {
+			if file.Added && !file.Deleted {
 				kind = generatedToolWrite
 			}
 			entries = append(entries, generatedFileEntry{path: file.Path, kind: kind, deleted: file.Deleted})

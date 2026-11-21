@@ -2,9 +2,9 @@ package agent
 
 // Structured file lists for multi-file tool calls. apply_patch carries its file
 // names inside a patch body that is far larger than the transcript's argument
-// bound, so the list has to be extracted from the FULL arguments when the call
-// is recorded (and persisted with the call), exactly like toolCallPath does for
-// the single-file tools.
+// bound, so the list is extracted from the FULL arguments when the call is
+// recorded and persisted with the durable tool_call event (and recovered from
+// rig history on restore), exactly like toolCallPath does for single-file tools.
 
 import (
 	"encoding/json"
@@ -48,8 +48,9 @@ func patchFileList(patch string) []contracts.ToolCallFile {
 	files := make([]contracts.ToolCallFile, 0, 4)
 	index := make(map[string]int, 4)
 	add := func(path string, added, deleted bool) {
-		path = filepath.ToSlash(strings.TrimSpace(path))
-		if path == "" || path == "/dev/null" || strings.HasPrefix(path, "../") {
+		path = filepath.ToSlash(strings.ReplaceAll(strings.TrimSpace(path), "\\", "/"))
+		if path == "" || path == "/dev/null" || strings.HasPrefix(path, "../") ||
+			strings.HasPrefix(path, "/") {
 			return
 		}
 		if existing, ok := index[path]; ok {
@@ -64,18 +65,27 @@ func patchFileList(patch string) []contracts.ToolCallFile {
 		files = append(files, contracts.ToolCallFile{Path: path, Added: added, Deleted: deleted})
 	}
 	lines := strings.Split(patch, "\n")
+	lastUpdated := ""
 	for position := 0; position < len(lines); position++ {
 		line := lines[position]
 		switch {
 		case strings.HasPrefix(line, "*** Add File:"):
 			add(strings.TrimPrefix(line, "*** Add File:"), true, false)
 		case strings.HasPrefix(line, "*** Update File:"):
-			add(strings.TrimPrefix(line, "*** Update File:"), false, false)
+			lastUpdated = strings.TrimSpace(strings.TrimPrefix(line, "*** Update File:"))
+			add(lastUpdated, false, false)
 		case strings.HasPrefix(line, "*** Delete File:"):
 			add(strings.TrimPrefix(line, "*** Delete File:"), false, true)
 		case strings.HasPrefix(line, "*** Move to:"):
+			// A move renames the file named by the preceding Update directive:
+			// the source no longer exists afterwards.
 			add(strings.TrimPrefix(line, "*** Move to:"), false, false)
-		case strings.HasPrefix(line, "--- ") && position+1 < len(lines) && strings.HasPrefix(lines[position+1], "+++ "):
+			if lastUpdated != "" {
+				add(lastUpdated, false, true)
+			}
+			lastUpdated = ""
+		case strings.HasPrefix(line, "--- ") && position+1 < len(lines) && strings.HasPrefix(lines[position+1], "+++ ") &&
+			diffHeaderBoundary(lines, position):
 			oldPath := stripDiffPrefix(strings.TrimPrefix(lines[position], "--- "))
 			newPath := stripDiffPrefix(strings.TrimPrefix(lines[position+1], "+++ "))
 			switch {
@@ -93,6 +103,18 @@ func patchFileList(patch string) []contracts.ToolCallFile {
 		}
 	}
 	return files
+}
+
+// diffHeaderBoundary reports whether a "--- " line can be a file header rather
+// than a hunk content line: a diff header is either the first line of the
+// patch or follows a blank line / another "diff --git" header. Inside a hunk a
+// removed line that happens to start with "-- " must not invent a file.
+func diffHeaderBoundary(lines []string, position int) bool {
+	if position == 0 {
+		return true
+	}
+	previous := strings.TrimSpace(lines[position-1])
+	return previous == "" || strings.HasPrefix(previous, "diff --git ")
 }
 
 // stripDiffPrefix removes the a/ b/ prefix of a unified-diff path and trims the
