@@ -15,7 +15,7 @@ import (
 	"github.com/zeokeel/zeokeel-rig/kit"
 	"github.com/zeokeel/zeokeel-rig/session"
 
-	"github.com/zeokeel/zeokeel/internal/hostbundle"
+	"github.com/zeokeel/zeokeel/internal/lib/hostbundle"
 )
 
 type fakeProvider struct{ requests []rig.Request }

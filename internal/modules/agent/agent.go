@@ -40,8 +40,10 @@ import (
 	rigteam "github.com/zeokeel/zeokeel-rig/tools/team"
 
 	"github.com/zeokeel/zeokeel-rig/kit"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/hosttools"
+	"github.com/zeokeel/zeokeel/internal/lib/hostbundle"
 )
 
 // effectiveMaxIterations maps the product's assembly-level round cap onto the
@@ -2800,21 +2802,12 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		TopP:          generation.TopP,
 		MaxTokens:     generation.MaxTokens,
 		Tools:         runTools,
-		// The tombstone guard is outermost: a session deleted mid-run must drop
-		// its late history write before it reaches the store.
-		History:         s.guardedHistory(s.replaceableHistory(history)),
-		Gate:            s.gate(sessionID),
-		Spill:           s.spillPolicy(ctx, workspaceRoot),
-		Logger:          s.logger,
-		CheckpointStore: s.guardedCheckpointStore(s.checkpointStore()),
-		Hooks:           s.turnHooks(workspaceRoot),
+		Logger:        s.logger,
+		Hooks:         s.turnHooks(workspaceRoot),
 		// Lazy discovery: the request carries the core surface plus whatever the
 		// session activated; tool_search loads the rest. The product owns the
 		// search tool, so kit must not inject a second one.
 		InitialActiveTools: s.initialActiveTools(sessionID, runTools),
-		// The single owner of the session's active set: the product state is
-		// mirrored in the ActivationStore the rig agent loads/saves.
-		Activations: s,
 	}
 	if surfaceHasTool(runTools, "tool_search") {
 		runConfig.ToolDiscovery = kit.Bool(true)
@@ -2822,7 +2815,17 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// Context safety default: explicit chat.contextBudget when set, else derived.
 	s.withKitContextBudget(&runConfig, cfg, provider)
 	runConfig.ContextRecovery = s.contextRecoveryHooks()
-	runner, err := kit.New(runConfig)
+	// Dynamic host capabilities travel as a module: the tombstone-guarded
+	// history/checkpoints, the per-session gate, spill policy and the session's
+	// active-set store are values only this run can resolve.
+	hostModule := hostbundle.New(hostbundle.Options{
+		History:         s.guardedHistory(s.replaceableHistory(history)),
+		CheckpointStore: s.guardedCheckpointStore(s.checkpointStore()),
+		Gate:            s.gate(sessionID),
+		Spill:           s.spillPolicy(ctx, workspaceRoot),
+		Activations:     s,
+	})
+	runner, err := kit.BuildConfig(ctx, runConfig, hostModule)
 	if err != nil {
 		s.finish(sessionID, ctx, fmt.Errorf("create agent: %w", err))
 		return

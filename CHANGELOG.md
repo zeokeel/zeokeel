@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **P4 完成：产品运行入口改为 `hostbundle + kit.BuildConfig`**（2026-11-21）：父回合与冷启动把动态能力（tombstone 保护的 History、Checkpoint、per-session Gate、Spill、ActivationStore）作为 `hostbundle.Module` 交给 `kit.BuildConfig`，产品侧不再手工拼接这些能力；`internal/lib/hostbundle` 移到 lib 以满足模块边界。kit 新增 `BuildConfig(ctx, Config, ...Module)`，让"每运行解析"的宿主与声明式 `Spec/Build` 共用同一构建路径。产品全量测试绿。
+
 - **P4：产品不再构造 rig.AgentSpec，kit 成为唯一 agent 构建器**（2026-11-21）：父回合与冷启动直接构造 `kit.Config` 并 `kit.New`；删除 `internal/lib/agentbuild` 与 direct 逃生门，`rig.AgentSpec` 字面量从产品运行路径移除。kit 新增 `Logger` 透传；`withKitContextBudget` 与产品 `ActivationStore` 继续作为唯一装配输入。产品全量测试绿。`internal/hostbundle` 保留为下一阶段 `kit.Build/Spec` 的动态模块入口。
 
 - **P3c 完成：发现态单一所有者 + kit 成为默认装配路径**（2026-11-21）：产品 `service` 实现 `rig.ToolActivationStore`（`Load/Save` 镜像 session active set），并传给 `AgentSpec.ActivationStore`，因此 rig agent 是唯一的 active-set 所有者；`initialActiveTools` 只负责首轮默认集。新增 `internal/lib/agentbuild`（`BuildAgent(spec, ModeDirect|ModeKit)`），父回合与冷启动都走它；**默认 ModeKit**，`ZEOKEEL_DIRECT_AGENT=1` 保留 direct 逃生门。kit 路径已跑通产品全量 `scripts/verify.sh`（13/13，含 -race/regression/snapshot/smokes）。

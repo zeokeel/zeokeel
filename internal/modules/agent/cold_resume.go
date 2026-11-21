@@ -35,7 +35,9 @@ import (
 	rig "github.com/zeokeel/zeokeel-rig"
 
 	"github.com/zeokeel/zeokeel-rig/kit"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/lib/hostbundle"
 )
 
 // ErrColdResumeUnavailable reports a historical child that cannot be resumed
@@ -377,15 +379,17 @@ func (s *service) runColdResumeAgent(ctx context.Context, record childSessionRec
 		SystemPrompt:  cfg.SystemPrompt,
 		MaxIterations: delegatedIterationBudget(cfg),
 		Tools:         withWorkspaceRoot(withAgentScope(childTools, parentID, contracts.AgentRunOriginSubagent), workspaceRoot),
-		Gate:          s.gate(parentID),
-		History:       s.store.History(),
-		Spill:         s.spillPolicy(ctx, workspaceRoot),
 		Logger:        s.logger,
 		// No discovery here: the child excludes tool_search, so InitialActiveTools
 		// stays nil (all registered tools active).
 	}
 	s.withKitContextBudget(&runConfig, cfg, provider)
-	runner, err := kit.New(runConfig)
+	hostModule := hostbundle.New(hostbundle.Options{
+		History: s.store.History(),
+		Gate:    s.gate(parentID),
+		Spill:   s.spillPolicy(ctx, workspaceRoot),
+	})
+	runner, err := kit.BuildConfig(ctx, runConfig, hostModule)
 	if err != nil {
 		return rig.RunResult{}, fmt.Errorf("agent: cold resume %q: create agent: %w", record.ID, err)
 	}

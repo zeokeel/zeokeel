@@ -20,6 +20,10 @@ type Options struct {
 	History         rig.History
 	SessionLog      rig.SessionLog
 	CheckpointStore rig.CheckpointStore
+	Gate            rig.Gate
+	Spill           *rig.SpillPolicy
+	Compactor       rig.Compactor
+	Activations     rig.ToolActivationStore
 	// PromptSections are the product's per-run prompt contributions.
 	PromptSections []kit.PromptSection
 	// Tools are product/business tools (for example future DingTalk tools).
@@ -72,6 +76,18 @@ func (m *Module) Capabilities() map[string]any {
 	}
 	if m.opts.CheckpointStore != nil {
 		capabilities["checkpointStore"] = m.opts.CheckpointStore
+	}
+	if m.opts.Gate != nil {
+		capabilities["gate"] = m.opts.Gate
+	}
+	if m.opts.Spill != nil {
+		capabilities["spill"] = m.opts.Spill
+	}
+	if m.opts.Compactor != nil {
+		capabilities["compactor"] = m.opts.Compactor
+	}
+	if m.opts.Activations != nil {
+		capabilities["activations"] = m.opts.Activations
 	}
 	return capabilities
 }
