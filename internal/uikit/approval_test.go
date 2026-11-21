@@ -1120,3 +1120,28 @@ func quoteApprovalJSON(t *testing.T, s string) string {
 	}
 	return string(encoded)
 }
+
+// TestApprovalDialogShowsApplyPatchBody pins the multi-file patch preview: the
+// reviewer sees the patch body (and the honest "no per-file diff" note), not a
+// raw JSON blob.
+func TestApprovalDialogShowsApplyPatchBody(t *testing.T) {
+	patch := "*** Begin Patch\n*** Update File: README.md\n@@\n-a\n+b\n*** End Patch"
+	request := approvalTestRequest("a1", "apply_patch", "", `{"patch":"*** Begin Patch\n*** Update File: README.md\n@@\n-a\n+b\n*** End Patch"}`)
+	_, tester := approvalOpenHarness(t, request, 0)
+	if !tester.HasText(patch) && !hasTextContaining(tester, "*** Begin Patch") {
+		t.Fatalf("patch body not shown; texts = %v", tester.Texts())
+	}
+	if !hasTextContaining(tester, "多文件补丁") {
+		t.Fatalf("honest multi-file note missing; texts = %v", tester.Texts())
+	}
+}
+
+// hasTextContaining reports whether any frame text contains want.
+func hasTextContaining(tester *ui.Tester, want string) bool {
+	for _, text := range tester.Texts() {
+		if strings.Contains(text, want) {
+			return true
+		}
+	}
+	return false
+}

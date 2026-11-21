@@ -2552,6 +2552,14 @@ func tailTurnMessages(messages []contracts.ChatMessage) []contracts.ChatMessage 
 	return messages[start:]
 }
 
+// generatedFileEntry is one file the turn produced, with the card family it
+// belongs to (delivered vs edited). One call can produce several entries
+// (apply_patch writes, deletes and moves multiple files).
+type generatedFileEntry struct {
+	path string
+	kind string
+}
+
 // turnGeneratedFiles collects the current turn's file-producing calls:
 // write_file paths are the delivered files, edit_file/str_replace_editor paths
 // the edited files. A path appears once; a file both written and edited counts
@@ -2572,23 +2580,21 @@ func turnGeneratedFiles(messages []contracts.ChatMessage) generatedFiles {
 			if uikit.ToolCallStatusKind(call) != uikit.StatusSuccess {
 				continue
 			}
-			path := generatedFileFromToolCall(call)
-			if path == "" {
-				continue
-			}
-			switch generatedFileTool(call.Name) {
-			case generatedToolWrite:
-				if delivered[path] {
-					continue
+			for _, entry := range generatedFileEntries(call) {
+				switch entry.kind {
+				case generatedToolWrite:
+					if delivered[entry.path] {
+						continue
+					}
+					delivered[entry.path] = true
+					files.delivered = append(files.delivered, newGeneratedFile(entry.path))
+				case generatedToolEdit:
+					if delivered[entry.path] || edited[entry.path] {
+						continue
+					}
+					edited[entry.path] = true
+					files.edited = append(files.edited, newGeneratedFile(entry.path))
 				}
-				delivered[path] = true
-				files.delivered = append(files.delivered, newGeneratedFile(path))
-			case generatedToolEdit:
-				if delivered[path] || edited[path] {
-					continue
-				}
-				edited[path] = true
-				files.edited = append(files.edited, newGeneratedFile(path))
 			}
 		}
 	}
@@ -2613,6 +2619,71 @@ func generatedFileTool(name string) string {
 	default:
 		return generatedToolNone
 	}
+}
+
+// generatedFileEntries resolves the files one successful call produced. The
+// single-file tools name their path in the arguments; apply_patch names every
+// file in its patch body, so one call can fill several rows (added files count
+// as delivered, updated/deleted/moved files as edited).
+func generatedFileEntries(call contracts.ToolCall) []generatedFileEntry {
+	if strings.EqualFold(strings.TrimSpace(call.Name), "apply_patch") {
+		return generatedPatchEntries(call)
+	}
+	path := generatedFileFromToolCall(call)
+	kind := generatedFileTool(call.Name)
+	if path == "" || kind == generatedToolNone {
+		return nil
+	}
+	return []generatedFileEntry{{path: path, kind: kind}}
+}
+
+// maxGeneratedPatchFiles bounds how many rows one patch can add to the tail
+// card (the card shows the first rows and a "more" line anyway).
+const maxGeneratedPatchFiles = 16
+
+// generatedPatchEntries parses the file lines of an apply_patch body
+// (*** Add File / Update File / Delete File / Move to). A body that does not
+// parse yields no rows: the card never invents a path.
+func generatedPatchEntries(call contracts.ToolCall) []generatedFileEntry {
+	raw := strings.TrimSpace(call.Arguments)
+	if raw == "" {
+		return nil
+	}
+	var args struct {
+		Patch string `json:"patch"`
+	}
+	if json.Unmarshal([]byte(raw), &args) != nil {
+		return nil
+	}
+	entries := make([]generatedFileEntry, 0, 4)
+	seen := make(map[string]bool, 4)
+	for _, line := range strings.Split(args.Patch, "\n") {
+		line = strings.TrimSpace(line)
+		kind := generatedToolNone
+		path := ""
+		switch {
+		case strings.HasPrefix(line, "*** Add File:"):
+			kind, path = generatedToolWrite, strings.TrimPrefix(line, "*** Add File:")
+		case strings.HasPrefix(line, "*** Update File:"):
+			kind, path = generatedToolEdit, strings.TrimPrefix(line, "*** Update File:")
+		case strings.HasPrefix(line, "*** Delete File:"):
+			kind, path = generatedToolEdit, strings.TrimPrefix(line, "*** Delete File:")
+		case strings.HasPrefix(line, "*** Move to:"):
+			kind, path = generatedToolEdit, strings.TrimPrefix(line, "*** Move to:")
+		default:
+			continue
+		}
+		path = strings.ReplaceAll(strings.TrimSpace(path), "\\", "/")
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		entries = append(entries, generatedFileEntry{path: path, kind: kind})
+		if len(entries) >= maxGeneratedPatchFiles {
+			break
+		}
+	}
+	return entries
 }
 
 // generatedFileFromToolCall reads the file path of one file-producing call: the

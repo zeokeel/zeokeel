@@ -1570,3 +1570,26 @@ func clickRoleButton(t *testing.T, tester *ui.Tester, label string) {
 	tester.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
 	tester.Frame()
 }
+
+// TestGeneratedFileCardsFromApplyPatch pins the multi-file card: one
+// apply_patch call fills the delivered row (added file) and the edited row
+// (updated/deleted files), each with its own action row.
+func TestGeneratedFileCardsFromApplyPatch(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{
+		ID: "sess-patch", Title: "补丁回合",
+		Messages: []contracts.ChatMessage{
+			{ID: "u1", Role: contracts.ChatRoleUser, Text: "打补丁"},
+			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "补丁已应用。",
+				Tools: []contracts.ToolCall{{
+					ID: "t1", Name: "apply_patch", Status: "ok",
+					Arguments: `{"patch":"*** Begin Patch\n*** Add File: docs/new.md\n+x\n*** Update File: README.md\n@@\n-a\n+b\n*** Delete File: old.md\n*** End Patch\n"}`,
+				}}},
+		},
+	}, true)
+	h := newAgentSurfaceHarness(t, chat, agentServices{preview: &fakeFilePreview{}})
+	tester := h.tester()
+	tester.Frame()
+	h.assertTexts(tester, "交付文件", "new.md", "docs/",
+		"已编辑 2 个文件", "README.md", "old.md")
+}

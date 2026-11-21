@@ -8,6 +8,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Added
 
+- **`apply_patch` 的 UI 呈现补齐**：回合尾文件卡从补丁正文解析 `*** Add/Update/Delete/Move` 行——新增进「交付文件」，更新/删除/移动进「已编辑 N 个文件」（最多 16 行，超出显示"还有 N 个文件"）；审批卡展示补丁正文并注明「多文件补丁：按文件应用，无逐文件 diff」，不再只有原始 JSON 预览。
+
 - **超大工具结果改走 SDK 共享存储 + `spill_read`**：toolkit 在数据目录建一个 `spillfile` store（`<dataDir>/spill`，按会话作用域回收），同时提供给 agent（`SpillPolicy.Store`）与模型可见的 `spill_read`——模型拿到 `ref: <id>` 后能按句柄读回（单次 8 KiB），不再只有"已落盘"的摘要。没有数据目录的装配继续走文件后端（工作区 `.zeokeel/tool-results` 或数据目录），行为不变。
 
 - **接入 SDK 的 `undo` 工具 + 回合快照**：每次 run 开始时（`rig.TurnHook.BeforeRun`）toolkit 为本次 run 的工作区拍快照，模型可用 `undo` 回退本轮（或指定轮次/单文件，`dry_run` 只预览）。后端选择用 `undo.IsGitRepo`（worktree/submodule 的 `.git` 是文件也走 git 隐藏提交），非 git 工作区用文件后端；**快照存储放在产品数据目录**（`<dataDir>/undo/<root 哈希>`），不放工作区——放工作区里会被文件工具读到隐藏路径、让 glob/grep/search 结果翻倍，也可能被改后由 undo 写回真文件。**只读构建不建 tracker、不注册工具**（undo 走 tracker 直接写盘，绕过沙箱策略）；工作区预设自动放行（与 write_file/edit_file/apply_patch 同信任域）。隐藏路径只做**尽力而为**的排除：SDK 的 undo 忽略规则是「名字/前缀」匹配、不支持 glob，因此 `**/.env`（→ `.env`）、`secrets/**`（→ `secrets`）这类能归约成字面量的模式会让 undo 既不报告也不回退它们；带通配符的基名（如 `**/*.pem`）无法归约，且非 git 工作区的文件后端根本没有忽略选项——这些情况下 undo 仍可能恢复/删除被隐藏的文件（隐藏列表本身不是安全边界，shell 也可绕过）。快照失败只记日志、不影响 run；`BeginTurn` 接收 ctx（取消的 run 不会继续复制文件）。

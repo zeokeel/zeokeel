@@ -844,6 +844,19 @@ var approvalChangeTools = map[string]bool{
 // explains itself instead of showing nothing.
 func approvalChangeFor(locale contracts.LocaleService, tool, arguments string) approvalChange {
 	key := strings.ToLower(strings.TrimSpace(tool))
+	// apply_patch is one call over several files, so a per-file before/after
+	// diff would have to be reconstructed here; show the patch body instead and
+	// say so honestly.
+	if key == "apply_patch" {
+		if patch, ok := approvalPatchBody(arguments); ok {
+			return approvalChange{
+				show:     true,
+				fallback: approvalTruncate(patch, approvalMaxArgumentsRunes),
+				note: T(locale, "多文件补丁：按文件应用，下方展示补丁正文（无逐文件 diff）。",
+					"Multi-file patch: applied per file; the patch body is shown below (no per-file diff)."),
+			}
+		}
+	}
 	if !approvalChangeTools[key] {
 		return approvalChange{}
 	}
@@ -874,6 +887,20 @@ func approvalChangeFor(locale contracts.LocaleService, tool, arguments string) a
 		return approvalEditorChange(locale, path, values)
 	}
 	return approvalChange{}
+}
+
+// approvalPatchBody extracts the patch text of an apply_patch call (the
+// arguments may also be a JSON string holding the object).
+func approvalPatchBody(arguments string) (string, bool) {
+	values, ok := approvalArgumentObject(strings.TrimSpace(arguments))
+	if !ok {
+		return "", false
+	}
+	patch, ok := approvalFirstStringArgument(values, "patch")
+	if !ok || strings.TrimSpace(patch) == "" {
+		return "", false
+	}
+	return patch, true
 }
 
 // approvalEditChange resolves the old/new pair of an edit. A payload missing
