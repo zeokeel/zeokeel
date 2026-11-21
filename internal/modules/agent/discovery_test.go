@@ -319,10 +319,25 @@ func TestDiscoveryActivationEndToEnd(t *testing.T) {
 		t.Fatalf("Send again: %v", err)
 	}
 	waitIdle(t, svc, sessionID)
-	if third := provider.request(t, 3); !hasToolNamed(third.Tools, "lsp_definition") {
+	third := provider.request(t, 3)
+	if !hasToolNamed(third.Tools, "lsp_definition") {
 		t.Fatalf("activation not remembered for the next run: %v", toolNamesOf(third.Tools))
 	}
 	_ = registry
+	// The context snapshot (tool directory / estimated prompt) must describe the
+	// same surface as the request.
+	folded, ok := svc.SessionContext(sessionID)
+	if !ok {
+		t.Fatal("no context snapshot for the session")
+	}
+	snapshotNames := make([]string, 0, len(folded.Snapshot.Tools))
+	for _, tool := range folded.Snapshot.Tools {
+		snapshotNames = append(snapshotNames, tool.Name)
+	}
+	requestNames := toolNamesOf(third.Tools)
+	if strings.Join(snapshotNames, ",") != strings.Join(requestNames, ",") {
+		t.Fatalf("snapshot tools %v != request tools %v", snapshotNames, requestNames)
+	}
 }
 
 // systemTextOf joins the request's system messages.
@@ -354,4 +369,126 @@ func toolNamesOf(tools []rig.ToolSpec) []string {
 		names = append(names, tool.Name)
 	}
 	return names
+}
+
+// retryDiscoveryProvider scripts a tool_search activation, then a context
+// overflow, then (on the retried run) another activation and an answer.
+type retryDiscoveryProvider struct {
+	mu       sync.Mutex
+	calls    int
+	requests []rig.Request
+}
+
+func (p *retryDiscoveryProvider) Name() string { return "retry-discovery" }
+
+func (p *retryDiscoveryProvider) Stream(_ context.Context, request rig.Request) (rig.Stream, error) {
+	if isCompactionSummaryRequest(request) {
+		return &scriptedStream{chunks: []rig.Chunk{{Delta: "SUMMARY"}}}, nil
+	}
+	p.mu.Lock()
+	p.calls++
+	p.requests = append(p.requests, request)
+	call := p.calls
+	p.mu.Unlock()
+	switch call {
+	case 1:
+		return &scriptedStream{chunks: []rig.Chunk{
+			{ToolCalls: []rig.ToolCallDelta{{Index: 0, ID: "call-1", Name: "tool_search",
+				Arguments: `{"activate":["lsp_definition"]}`}}},
+			{FinishReason: "tool_calls"},
+		}}, nil
+	case 2:
+		return nil, contextOverflowErr()
+	case 3:
+		return &scriptedStream{chunks: []rig.Chunk{
+			{ToolCalls: []rig.ToolCallDelta{{Index: 0, ID: "call-2", Name: "tool_search",
+				Arguments: `{"activate":["schedule_list"]}`}}},
+			{FinishReason: "tool_calls"},
+		}}, nil
+	}
+	return &scriptedStream{chunks: []rig.Chunk{{Delta: "done"}, {FinishReason: "stop"}}}, nil
+}
+
+func (p *retryDiscoveryProvider) request(t *testing.T, n int) rig.Request {
+	t.Helper()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.requests) < n {
+		t.Fatalf("provider requests = %d, want at least %d", len(p.requests), n)
+	}
+	return p.requests[n-1]
+}
+
+// TestDiscoveryOverflowRetryKeepsTheSurface pins the recovery path: the retried
+// run carries the activations made before the overflow and can activate again.
+func TestDiscoveryOverflowRetryKeepsTheSurface(t *testing.T) {
+	provider := &retryDiscoveryProvider{}
+	svc, store := newRecoveryService(t, provider)
+	if err := svc.registerDiscoveryTool(svc.newDiscoveryTool()); err != nil {
+		t.Fatalf("register tool_search: %v", err)
+	}
+	// The registry from newRecoveryService is empty: replace it with one that
+	// carries the tail tools the provider activates.
+	svc.registry = rigtools.NewRegistry(
+		&discoveryStubTool{name: "read_file", description: "Read one file."},
+		&discoveryStubTool{name: "lsp_definition", description: "Go to a symbol definition."},
+		&discoveryStubTool{name: "schedule_list", description: "List reminders."},
+	)
+	if err := svc.registerDiscoveryTool(svc.newDiscoveryTool()); err != nil {
+		t.Fatalf("register tool_search after registry swap: %v", err)
+	}
+	sessionID, err := svc.NewSession("overflow")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	seedRecoveryHistory(t, store, sessionID, 10)
+	if err := svc.Send(sessionID, "the question"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	waitIdle(t, svc, sessionID)
+
+	retry := provider.request(t, 3)
+	if !hasToolNamed(retry.Tools, "lsp_definition") {
+		t.Fatalf("retried request lost the pre-overflow activation: %v", toolNamesOf(retry.Tools))
+	}
+	after := provider.request(t, 4)
+	if !hasToolNamed(after.Tools, "schedule_list") {
+		t.Fatalf("activation inside the retry did not reach the reborn runner: %v", toolNamesOf(after.Tools))
+	}
+}
+
+// TestDiscoveryColdResumeChildKeepsItsFullSurface pins the delegated child: it
+// excludes tool_search, so InitialActiveTools must stay nil or the tail would be
+// hidden with no way to load it (request and prompt must agree).
+func TestDiscoveryColdResumeChildKeepsItsFullSurface(t *testing.T) {
+	dataDir := t.TempDir()
+	store := newFakeStore()
+	settings := newFakeSettings(map[string]string{contracts.SettingsChatModel: "test-model"})
+	provider := &captureProvider{}
+	svc := newService(Config{}, rigtools.NewRegistry(
+		&discoveryStubTool{name: "read_file", description: "Read one file."},
+		&discoveryStubTool{name: "lsp_definition", description: "Go to a symbol definition."},
+	), contracts.SettingsService(settings), &fakeLogger{}, store, fakeApprovals{})
+	svc.dataDir = dataDir
+	svc.childSessions = newChildSessionStore(dataDir, &fakeLogger{})
+	svc.providerFactory = func(contracts.ChatConfig) (rig.Provider, error) { return provider, nil }
+	if err := svc.registerDiscoveryTool(svc.newDiscoveryTool()); err != nil {
+		t.Fatalf("register tool_search: %v", err)
+	}
+	parentID, err := svc.NewSession("parent")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	record := seedHistoricalChild(t, svc, parentID, contracts.ChildAgentSubagent, "researcher", "summarize", "first")
+	children := newChildAgentsService(svc, nil)
+	if _, err := children.SendChildAgent(context.Background(), record.ID, "continue"); err != nil {
+		t.Fatalf("SendChildAgent: %v", err)
+	}
+	request := provider.lastRequest()
+	if !hasToolNamed(request.Tools, "lsp_definition") {
+		t.Fatalf("cold-resumed child lost its tail tools: %v", toolNamesOf(request.Tools))
+	}
+	if hasToolNamed(request.Tools, "tool_search") {
+		t.Fatalf("cold-resumed child received tool_search: %v", toolNamesOf(request.Tools))
+	}
 }

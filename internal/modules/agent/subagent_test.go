@@ -237,7 +237,7 @@ func TestSubagentToolsRegisteredAndInvokable(t *testing.T) {
 
 func TestSubagentExcludedTools(t *testing.T) {
 	names := subagentExcludedTools()
-	want := []string{"subagent", "subagent_fork", "workflow", "team", "ralph", "todo_write", "spawn_teammate"}
+	want := []string{"subagent", "subagent_fork", "workflow", "team", "ralph", "todo_write", "spawn_teammate", "tool_search"}
 	for _, name := range want {
 		found := false
 		for _, excluded := range names {

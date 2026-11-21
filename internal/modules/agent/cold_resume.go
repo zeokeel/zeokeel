@@ -381,16 +381,14 @@ func (s *service) runColdResumeAgent(ctx context.Context, record childSessionRec
 		History:       s.store.History(),
 		Spill:         s.spillPolicy(ctx, workspaceRoot),
 		Logger:        s.logger,
-		// The child resumes with the same active surface rules as any run
-		// (discovery is not in its tool list, so this only pins the default).
-		InitialActiveTools: s.initialActiveTools(parentID, childTools),
+		// No discovery here: the child excludes tool_search, so InitialActiveTools
+		// must stay nil or the tail would be hidden with no way to load it.
 	}
 	s.withContextBudget(&spec, cfg, provider)
 	runner, err := rigagent.New(spec)
 	if err != nil {
 		return rig.RunResult{}, fmt.Errorf("agent: cold resume %q: create agent: %w", record.ID, err)
 	}
-	s.bindSessionRunner(parentID, runner)
 	result, runErr := runner.Run(ctx, rig.RunRequest{
 		SessionID: record.ID, // the child session is the history
 		Input:     []rig.Message{rig.NewMessage(rig.RoleUser, message)},
