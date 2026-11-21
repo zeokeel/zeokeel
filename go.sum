@@ -29,7 +29,7 @@ github.com/zeokeel/zeokeel-kernel v0.1.1 h1:WPkO74p7bDqXl2gbnchXxknGrIPS4Yd+UAFX
 github.com/zeokeel/zeokeel-kernel v0.1.1/go.mod h1:WvJXgG5V0gCaaF1w0MX7D4cVb15qoG4SsCq1FG30hIw=
 github.com/zeokeel/zeokeel-rig v0.27.0 h1:W7+f2/4retNe+I3rtaK2SMVRtuk8UANf06qvhKTf3KM=
 github.com/zeokeel/zeokeel-rig v0.27.0/go.mod h1:B00A4YCGjMifwsh4UNphW8ADXyJu/wovwQaNL+B03qI=
-github.com/zeokeel/zeokeel-rig/session/sqlstore v0.2.0 h1:VcrYv2tlSjGZr6XDgYhRwl+qm8lWoIhZjwhz0Vc9a5c=
+github.com/zeokeel/zeokeel-rig/session/sqlstore v0.2.0 h1:cYvsbjn+5yA+LOwxUza3dVGDXhxEefuhWKDy9LmBsAw=
 github.com/zeokeel/zeokeel-rig/session/sqlstore v0.2.0/go.mod h1:5ZSaGHLZQeaFmTz4hVvoMPmZi01I/0fYiCvnGDHsHx0=
 go.digitalxero.dev/rpm v0.3.4 h1:iq+rx7zB6wQeNhLQ1mcvW92v9ZqNaxCvuu0+nPVit4w=
 go.digitalxero.dev/rpm v0.3.4/go.mod h1:45EsEzHamzqInyWQx9vpj7OYpL0BrkbQF87VdrLn5wo=

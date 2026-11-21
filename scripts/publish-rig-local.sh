@@ -39,9 +39,14 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/tree"
 if [ -n "$SUB" ]; then
-  # Only the submodule subtree ships, at the zip root.
+  # Only the submodule subtree ships, at the zip root; Go also carries the
+  # repository-root LICENSE into a submodule zip, so it must be present for the
+  # zip hash to match the canonical module proxy.
   depth=$(awk -F/ '{print NF}' <<<"$SUB")
   git -C "$RIG" archive --format=tar "$TAG" -- "$SUB" | tar -x -C "$work/tree" --strip-components="$depth"
+  if [ -f "$RIG/LICENSE" ]; then
+    cp "$RIG/LICENSE" "$work/tree/LICENSE"
+  fi
 else
   git -C "$RIG" archive --format=tar "$TAG" | tar -x -C "$work/tree"
   while IFS= read -r mod; do
