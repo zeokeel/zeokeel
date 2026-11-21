@@ -138,9 +138,9 @@ GOPROXY=file://$PWD/.cache/rigproxy GOSUMDB=off go get github.com/zeokeel/zeokee
 
 ## 4.9 发布状态（2026-11-21）
 
-- rig `v0.27.1`：A.2/A.3/A.4/A.1a/A.5a + B.1/B.2 机制（`prompt`、`agent.ContextRecovery`、`gate.Queue`、`session/sqlsearch`、`session/children`、`tools/surface`、`discovery.Activation`）。
-- rig `session/sqlstore v0.2.1`：嵌套模块（A.1b），require 根模块 `v0.27.1`。
-- `v0.27.0`/`sqlstore v0.2.0` 的 tag 因发布门禁（`version.go` 未同步、gofmt 未过）被拒绝，未发布模块；补丁版本已通过门禁并推送。
+- rig `v0.27.2`（`main` 合并后发布）：A.2/A.3/A.4/A.1a/A.5a + B.1/B.2 机制（`prompt`、`agent.ContextRecovery`、`gate.Queue`、`session/sqlsearch`、`session/children`、`tools/surface`、`discovery.Activation`）。
+- rig `session/sqlstore v0.2.2`：嵌套模块（A.1b），require 根模块 `v0.27.2`。
+- `v0.27.0`/`v0.27.1` 的 tag 因发布门禁（`version.go`、gofmt、tag 必须在 main）被拒绝；tag 不可移动，补丁版本 `v0.27.2` 在合并后的 main 上重新发布。
 - 产品 `go.mod` 已切到这两个正式版本；tag 只存在于本地（离线环境），推送后即可用于 CI/其他机器。
 
 ## 5. 建议顺序（若决定推进）
