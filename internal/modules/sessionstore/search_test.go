@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/session/sqlsearch"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -103,7 +104,7 @@ func TestSearchMessagesAcrossSessions(t *testing.T) {
 	if !strings.HasPrefix(snippet, "…") || !strings.HasSuffix(snippet, "…") {
 		t.Fatalf("long snippet = %q, want both ellipses", snippet)
 	}
-	if runes := []rune(snippet); len(runes) > 2*searchSnippetContext+3+2 {
+	if runes := []rune(snippet); len(runes) > 2*sqlsearch.SnippetContext+3+2 {
 		t.Fatalf("snippet has %d runes, want a bounded window", len(runes))
 	}
 
@@ -287,8 +288,8 @@ func TestSearchMessagesSnippetLength(t *testing.T) {
 	if err != nil || len(hits) != 1 {
 		t.Fatalf("search = %+v/%v", hits, err)
 	}
-	if got := len([]rune(hits[0].Snippet)); got != searchSnippetFallback {
-		t.Fatalf("fallback snippet has %d runes, want %d", got, searchSnippetFallback)
+	if got := len([]rune(hits[0].Snippet)); got != sqlsearch.SnippetFallback {
+		t.Fatalf("fallback snippet has %d runes, want %d", got, sqlsearch.SnippetFallback)
 	}
 }
 

@@ -10,11 +10,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
-	"strconv"
-	"strings"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/session/sqlsearch"
 )
 
 // encodedMessage is one message prepared for insertion: the JSON payload plus
@@ -25,95 +23,15 @@ type encodedMessage struct {
 	searchText string
 }
 
-// messageSearchTextColumns returns the snippet text (the message's plain text)
-// and the decoded searchable aggregate. Tool-call argument JSON is decoded
-// recursively so its values are searchable without reintroducing JSON escaping;
-// reasoning and non-text content metadata are searchable too, matching the old
-// raw-payload surface minus structural punctuation.
+// messageSearchTextColumns delegates the decode to the SDK (JSON escaping is not
+// user content; tool arguments are decoded recursively).
 func messageSearchTextColumns(message rig.Message) (text, searchText string) {
-	text = message.Text()
-	var builder strings.Builder
-	appendSearchToken(&builder, string(message.Role))
-	appendSearchToken(&builder, text)
-	appendSearchToken(&builder, message.Reasoning)
-	appendSearchToken(&builder, message.Name)
-	appendSearchToken(&builder, message.ToolCallID)
-	for _, part := range message.Content {
-		appendSearchToken(&builder, part.ImageURL)
-		appendSearchToken(&builder, part.Detail)
-	}
-	for _, call := range message.ToolCalls {
-		appendSearchToken(&builder, call.ID)
-		appendSearchToken(&builder, call.Name)
-		if arguments := strings.TrimSpace(call.Arguments); arguments != "" {
-			var decoded any
-			if err := json.Unmarshal([]byte(arguments), &decoded); err == nil {
-				appendJSONSearchText(&builder, decoded)
-			}
-		}
-	}
-	return text, strings.TrimSpace(builder.String())
+	return sqlsearch.MessageColumns(message)
 }
 
-// eventPayloadSearchText decodes one raw JSON payload into searchable text. The
-// event type is matched separately; this is the payload half.
+// eventPayloadSearchText delegates the payload decode to the SDK.
 func eventPayloadSearchText(payload []byte) string {
-	if len(payload) == 0 {
-		return ""
-	}
-	var decoded any
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		return ""
-	}
-	var builder strings.Builder
-	appendJSONSearchText(&builder, decoded)
-	return strings.TrimSpace(builder.String())
-}
-
-// appendJSONSearchText appends every scalar in a decoded JSON value (object keys
-// included, so field names remain searchable), without structural JSON
-// punctuation.
-func appendJSONSearchText(builder *strings.Builder, value any) {
-	switch typed := value.(type) {
-	case nil:
-		return
-	case string:
-		appendSearchToken(builder, typed)
-	case bool:
-		appendSearchToken(builder, strconv.FormatBool(typed))
-	case float64:
-		appendSearchToken(builder, strconv.FormatFloat(typed, 'g', -1, 64))
-	case json.Number:
-		appendSearchToken(builder, typed.String())
-	case []any:
-		for _, entry := range typed {
-			appendJSONSearchText(builder, entry)
-		}
-	case map[string]any:
-		keys := make([]string, 0, len(typed))
-		for key := range typed {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			appendSearchToken(builder, key)
-			appendJSONSearchText(builder, typed[key])
-		}
-	default:
-		appendSearchToken(builder, fmt.Sprint(typed))
-	}
-}
-
-// appendSearchToken appends one non-empty token separated by a space.
-func appendSearchToken(builder *strings.Builder, value string) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return
-	}
-	if builder.Len() > 0 {
-		builder.WriteByte(' ')
-	}
-	builder.WriteString(value)
+	return sqlsearch.EventText(payload)
 }
 
 // migrateSearchColumns adds the decoded-text columns to databases created

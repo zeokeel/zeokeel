@@ -59,6 +59,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/session/sqlsearch"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -774,7 +775,7 @@ func (s *store) Search(ctx context.Context, query string, limit int) ([]rig.Sess
 	statement := `SELECT seq, session_id, type, payload, created_at FROM events`
 	var args []any
 	if trimmed != "" {
-		pattern := "%" + escapeLike(trimmed) + "%"
+		pattern := "%" + sqlsearch.EscapeLike(trimmed) + "%"
 		statement += ` WHERE (type LIKE ? ESCAPE '\' OR text LIKE ? ESCAPE '\')`
 		args = append(args, pattern, pattern)
 	}
@@ -916,11 +917,6 @@ func scanEvents(rows *sql.Rows) ([]rig.SessionEvent, error) {
 }
 
 // escapeLike escapes LIKE wildcards in a user-supplied search string.
-func escapeLike(value string) string {
-	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-	return replacer.Replace(value)
-}
-
 // requireSessionID trims and validates one session ID argument.
 func requireSessionID(id string) (string, error) {
 	id = strings.TrimSpace(id)
