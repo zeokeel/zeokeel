@@ -11,9 +11,7 @@ package importer
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +20,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
 	rig "github.com/zeokeel/zeokeel-rig"
+	rigimporter "github.com/zeokeel/zeokeel-rig/session/importer"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -158,109 +157,22 @@ func (s *service) Scan(ctx context.Context, dir string) (contracts.ImportPreview
 	return preview, err
 }
 
-// scan walks <dir>/sessions and parses every uncompressed session.v4.jsonl.
+// scan discovers and parses the DSH sessions below dir through the SDK.
 func (s *service) scan(ctx context.Context, dir string) ([]scannedSession, contracts.ImportPreview, error) {
-	preview := contracts.ImportPreview{SourceDir: dir}
-	sessionsRoot := filepath.Join(dir, "sessions")
-	info, err := os.Stat(sessionsRoot)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, preview, nil
+	discovery, err := rigimporter.Discover(ctx, dir)
+	preview := contracts.ImportPreview{
+		SourceDir:  dir,
+		Sessions:   discovery.Sessions,
+		Messages:   discovery.Messages,
+		Workspaces: discovery.Workspaces,
+		Skipped:    discovery.Skipped,
+		Notes:      discovery.Notes,
 	}
-	if err != nil {
-		return nil, preview, fmt.Errorf("%s: sessions directory %q: %w", ModuleID, sessionsRoot, err)
+	scanned := make([]scannedSession, 0, len(discovery.Sources))
+	for _, source := range discovery.Sources {
+		scanned = append(scanned, scannedSession{session: source.Session, sourcePath: source.RelativePath})
 	}
-	if !info.IsDir() {
-		return nil, preview, fmt.Errorf("%s: %q is not a directory", ModuleID, sessionsRoot)
-	}
-	workspaceDirs := make(map[string]bool)
-	seenSourceIDs := make(map[string]bool)
-	scanned := make([]scannedSession, 0)
-	walkErr := filepath.WalkDir(sessionsRoot, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		relative := relativeSourcePath(dir, path)
-		// WalkDir does not descend into symlinked directories, but it does
-		// report the symlink entries themselves; parseSessionFile would then
-		// follow a symlinked session log out of the DSH home. Skip every
-		// symlink (file or directory) and record it: the import boundary is
-		// the scanned sessions tree only.
-		if entry.Type()&fs.ModeSymlink != 0 {
-			preview.Notes = append(preview.Notes,
-				fmt.Sprintf("skipped symlink %s (not followed)", relative))
-			return nil
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		name := strings.ToLower(entry.Name())
-		if strings.HasSuffix(name, ".zstd") {
-			preview.Skipped++
-			preview.Notes = append(preview.Notes,
-				fmt.Sprintf("skipped compressed session %s (zstd is not supported)", relative))
-			return nil
-		}
-		if name != sessionFileName {
-			return nil
-		}
-		parsed, err := parseSessionFile(path)
-		if err != nil {
-			preview.Skipped++
-			if errors.Is(err, ErrUnsupportedVersion) {
-				preview.Notes = append(preview.Notes,
-					fmt.Sprintf("unsupported session version in %s: %v", relative, err))
-			} else {
-				preview.Notes = append(preview.Notes, fmt.Sprintf("skipped %s: %v", relative, err))
-			}
-			return nil
-		}
-		// Two logs can carry the same DSH session ID; only the first one is
-		// importable, so count the preview the way Import will actually
-		// behave. The duplicate stays in scanned so Import still reports it
-		// as skipped (existing sessions are skipped, not errors).
-		if parsed.ID != "" {
-			if seenSourceIDs[parsed.ID] {
-				preview.Notes = append(preview.Notes,
-					fmt.Sprintf("duplicate session id %q in %s; the first log is imported", parsed.ID, relative))
-				scanned = append(scanned, scannedSession{session: parsed, sourcePath: relative})
-				return nil
-			}
-			seenSourceIDs[parsed.ID] = true
-		}
-		if parsed.DroppedAttachments > 0 {
-			preview.Skipped += parsed.DroppedAttachments
-			preview.Notes = append(preview.Notes,
-				fmt.Sprintf("%s: %d image/file attachment(s) not imported", relative, parsed.DroppedAttachments))
-		}
-		if parsed.Cwd != "" {
-			if cwdInfo, statErr := os.Stat(parsed.Cwd); statErr == nil && cwdInfo.IsDir() {
-				workspaceDirs[parsed.Cwd] = true
-			}
-		}
-		preview.Sessions++
-		preview.Messages += len(parsed.Messages)
-		scanned = append(scanned, scannedSession{session: parsed, sourcePath: relative})
-		return nil
-	})
-	if walkErr != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, preview, ctxErr
-		}
-		return nil, preview, fmt.Errorf("%s: walk %q: %w", ModuleID, sessionsRoot, walkErr)
-	}
-	preview.Workspaces = len(workspaceDirs)
-	return scanned, preview, nil
-}
-
-// relativeSourcePath renders a session path relative to the DSH home.
-func relativeSourcePath(root, path string) string {
-	if relative, err := filepath.Rel(root, path); err == nil {
-		return filepath.ToSlash(relative)
-	}
-	return filepath.ToSlash(path)
+	return scanned, preview, err
 }
 
 // Import implements contracts.ImporterService: it scans and writes sessions,
