@@ -206,7 +206,7 @@ func toolGuidanceLines(names map[string]bool) []string {
 		add("Use apply_patch to change several files atomically (add/update/delete/move) — one call equals all-or-nothing. Its relative paths resolve against the workspace root, not the last working directory; the patch body must use the *** Begin Patch / *** End Patch format.")
 	}
 	if names["tool_search"] {
-		add("The request carries only the tools you usually need. Call tool_search with no arguments to list the rest (worktrees, delegation, code intelligence, MCP servers, …), filter with query, and pass activate to load the tools you need; activation applies to the following requests of this session.")
+		add("The request carries only the tools you usually need. Call tool_search with no arguments to list the rest (worktrees, code intelligence, scheduled reminders, MCP servers, …), filter with query, and pass activate to load the tools you need; activation applies to the following requests of this session.")
 	}
 	if names["spill_read"] {
 		add("When a tool result was replaced by a spilled summary with a `ref: <id>` line, call spill_read with that id to read it back (8 KiB per read); narrow the original command if you need the rest.")

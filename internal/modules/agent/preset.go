@@ -162,7 +162,8 @@ func (s *service) toolsForSession(sessionID string) []rig.Tool {
 // runtime capability rather than a capability the user chooses to grant (a
 // surface without spill_read leaves every spilled result unreadable).
 var runtimeCapabilityTools = map[string]bool{
-	"spill_read": true,
+	"spill_read":  true,
+	"tool_search": true,
 }
 
 // filterToolsByAllowlist keeps the named tools in registration order (trimmed

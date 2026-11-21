@@ -2754,7 +2754,7 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		Hooks:           s.turnHooks(workspaceRoot),
 		// Lazy discovery: the request carries the core surface plus whatever the
 		// session activated; tool_search loads the rest.
-		InitialActiveTools: s.initialActiveTools(sessionID),
+		InitialActiveTools: s.initialActiveTools(sessionID, runTools),
 	}
 	// Context safety default: the explicit chat.contextBudget when set, else a
 	// budget derived from the model's context window; a known budget also
@@ -2769,7 +2769,11 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// Context observability: the request-level snapshot of this run (model,
 	// window, rendered system-prompt size, exact tool catalog, history counts and
 	// injected prompt sources).
-	s.recordContextSnapshot(context.Background(), sessionID, s.contextSnapshotForRun(sessionID, cfg, runTools, promptSections))
+	// The snapshot describes the request the model actually sees: the active
+	// surface, not the full catalog (the tool directory and the estimated prompt
+	// tokens must match the request).
+	snapshotTools := activeRunTools(runTools, s.activeToolSet(sessionID, runTools))
+	s.recordContextSnapshot(context.Background(), sessionID, s.contextSnapshotForRun(sessionID, cfg, snapshotTools, promptSections))
 	s.appendEvent(ctx, sessionID, "run_start", map[string]any{"model": cfg.Model})
 	// workspaceRoot was resolved before the run (the session's project); every
 	// tool call of this turn records paths relative to that same root, so a

@@ -7,10 +7,14 @@ package agent
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 
 	rig "github.com/zeokeel/zeokeel-rig"
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
+	"github.com/zeokeel/zeokeel-rig/tools/lsp"
+	"github.com/zeokeel/zeokeel-rig/tools/schedule"
+	"github.com/zeokeel/zeokeel-rig/tools/worktree"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -68,8 +72,8 @@ func newDiscoveryService(t *testing.T) (*service, *rigtools.Registry, string) {
 // TestDiscoveryInitialActiveKeepsTheCoreSurface pins the starting set: frequent
 // coding tools are active, the long tail is not.
 func TestDiscoveryInitialActiveKeepsTheCoreSurface(t *testing.T) {
-	svc, _, sessionID := newDiscoveryService(t)
-	active := svc.initialActiveTools(sessionID)
+	svc, registry, sessionID := newDiscoveryService(t)
+	active := svc.initialActiveTools(sessionID, registry.Tools())
 	set := make(map[string]bool, len(active))
 	for _, name := range active {
 		set[name] = true
@@ -117,7 +121,7 @@ func TestDiscoveryListsOnlyHiddenTools(t *testing.T) {
 // TestDiscoveryActivationReachesTheRun pins activation: the live runner is asked,
 // the names are remembered for the session, and they disappear from the list.
 func TestDiscoveryActivationReachesTheRun(t *testing.T) {
-	svc, _, sessionID := newDiscoveryService(t)
+	svc, registry, sessionID := newDiscoveryService(t)
 	activator := &fakeActivator{}
 	svc.bindSessionRunner(sessionID, activator)
 
@@ -131,7 +135,7 @@ func TestDiscoveryActivationReachesTheRun(t *testing.T) {
 	if activator.sessionID != sessionID {
 		t.Fatalf("activation session = %q, want %q", activator.sessionID, sessionID)
 	}
-	if active := svc.initialActiveTools(sessionID); !discoveryHasName(active, "lsp_definition") {
+	if active := svc.initialActiveTools(sessionID, registry.Tools()); !discoveryHasName(active, "lsp_definition") {
 		t.Fatalf("activation not remembered: %v", active)
 	}
 	for _, item := range svc.discoverableToolsFor(sessionID) {
@@ -178,4 +182,176 @@ func discoveryHasName(names []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestDiscoveryTailCoversTheRegisteredFamilies pins the tail against the tools
+// the SDK actually registers: a family split across the tail and the active
+// surface (exit_worktree was) makes the prompt and the request disagree.
+func TestDiscoveryTailCoversTheRegisteredFamilies(t *testing.T) {
+	families := [][]rig.Tool{
+		worktree.Tools(nil),
+		lsp.Tools(nil, nil),
+		schedule.Tools(nil),
+	}
+	for _, tools := range families {
+		for _, tool := range tools {
+			if tool == nil {
+				continue
+			}
+			if name := tool.Name(); !isDiscoverableTail(name) {
+				t.Errorf("%q is registered by an SDK family but missing from discoveryTailTools", name)
+			}
+		}
+	}
+	for _, name := range []string{"mcp__server__echo", "mcp__other__search"} {
+		if !isDiscoverableTail(name) {
+			t.Errorf("MCP tool %q is not part of the tail", name)
+		}
+	}
+	if isDiscoverableTail("custom_tool") {
+		t.Error("unknown tool treated as a tail tool")
+	}
+}
+
+// TestDiscoveryPresetTailToolStaysActive pins the preset case: a preset that
+// names a tail tool must still get it active (skip_discovery), and tool_search
+// itself survives the allowlist.
+func TestDiscoveryPresetTailToolStaysActive(t *testing.T) {
+	registry := rigtools.NewRegistry(
+		&discoveryStubTool{name: "read_file", description: "Read one file."},
+		&discoveryStubTool{name: "lsp_definition", description: "Go to a symbol definition."},
+	)
+	settings := newFakeSettings(map[string]string{
+		contracts.SettingAgentPresets: `[{"id":"tail","name":"Tail","tools":["read_file","lsp_definition"]}]`,
+	})
+	svc := newService(Config{}, registry, contracts.SettingsService(settings), &fakeLogger{}, newFakeStore(), fakeApprovals{})
+	sessionID, err := svc.NewSession("preset")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := svc.SetSessionPreset(sessionID, "tail"); err != nil {
+		t.Fatalf("SetSessionPreset: %v", err)
+	}
+	if err := svc.registerDiscoveryTool(svc.newDiscoveryTool()); err != nil {
+		t.Fatalf("register tool_search: %v", err)
+	}
+	surface := svc.toolsForSession(sessionID)
+	active := svc.initialActiveTools(sessionID, surface)
+	if !discoveryHasName(active, "lsp_definition") {
+		t.Fatalf("preset-named tail tool not active: %v", active)
+	}
+	if !discoveryHasName(active, "tool_search") {
+		t.Fatalf("tool_search dropped by the preset allowlist: %v", active)
+	}
+}
+
+// discoveryProvider activates lsp_definition through tool_search on its first
+// call, then answers.
+type discoveryProvider struct {
+	mu       sync.Mutex
+	calls    int
+	requests []rig.Request
+}
+
+func (p *discoveryProvider) Name() string { return "discovery" }
+
+func (p *discoveryProvider) Stream(_ context.Context, request rig.Request) (rig.Stream, error) {
+	p.mu.Lock()
+	p.calls++
+	p.requests = append(p.requests, request)
+	call := p.calls
+	p.mu.Unlock()
+	if call == 1 {
+		return &scriptedStream{chunks: []rig.Chunk{
+			{ToolCalls: []rig.ToolCallDelta{{Index: 0, ID: "call-1", Name: "tool_search",
+				Arguments: `{"activate":["lsp_definition"]}`}}},
+			{FinishReason: "tool_calls"},
+		}}, nil
+	}
+	return &scriptedStream{chunks: []rig.Chunk{{Delta: "done"}, {FinishReason: "stop"}}}, nil
+}
+
+func (p *discoveryProvider) request(t *testing.T, n int) rig.Request {
+	t.Helper()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.requests) < n {
+		t.Fatalf("provider requests = %d, want at least %d", len(p.requests), n)
+	}
+	return p.requests[n-1]
+}
+
+// TestDiscoveryActivationEndToEnd drives a real run: the first request omits the
+// tail, tool_search appends it to the next request of the same run, the
+// following run remembers it, and the run releases its activator.
+func TestDiscoveryActivationEndToEnd(t *testing.T) {
+	svc, registry, sessionID := newDiscoveryService(t)
+	provider := &discoveryProvider{}
+	svc.providerFactory = func(contracts.ChatConfig) (rig.Provider, error) { return provider, nil }
+
+	if err := svc.Send(sessionID, "load the lsp tool"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	waitIdle(t, svc, sessionID)
+
+	first := provider.request(t, 1)
+	if hasToolNamed(first.Tools, "lsp_definition") {
+		t.Fatal("first request carried the discoverable tail")
+	}
+	if !hasToolNamed(first.Tools, "tool_search") {
+		t.Fatal("first request lost tool_search")
+	}
+	if system := systemTextOf(first); strings.Contains(system, "enter_worktree") {
+		t.Fatalf("system prompt describes a hidden tool: %q", system)
+	}
+	second := provider.request(t, 2)
+	if !hasToolNamed(second.Tools, "lsp_definition") {
+		t.Fatalf("activated tool missing from the next request: %v", toolNamesOf(second.Tools))
+	}
+	if got := toolNamesOf(second.Tools); len(got) == 0 || got[len(got)-1] != "lsp_definition" {
+		t.Fatalf("activation was not appended at the end (prefix cache): %v", got)
+	}
+	if runner := svc.sessionRunner(sessionID); runner != nil {
+		t.Fatal("run released its activator late (runner still bound)")
+	}
+
+	if err := svc.Send(sessionID, "again"); err != nil {
+		t.Fatalf("Send again: %v", err)
+	}
+	waitIdle(t, svc, sessionID)
+	if third := provider.request(t, 3); !hasToolNamed(third.Tools, "lsp_definition") {
+		t.Fatalf("activation not remembered for the next run: %v", toolNamesOf(third.Tools))
+	}
+	_ = registry
+}
+
+// systemTextOf joins the request's system messages.
+func systemTextOf(request rig.Request) string {
+	var parts []string
+	for _, message := range request.Messages {
+		if message.Role != rig.RoleSystem {
+			continue
+		}
+		for _, chunk := range message.Content {
+			parts = append(parts, chunk.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func hasToolNamed(tools []rig.ToolSpec, name string) bool {
+	for _, tool := range tools {
+		if tool.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func toolNamesOf(tools []rig.ToolSpec) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, tool.Name)
+	}
+	return names
 }

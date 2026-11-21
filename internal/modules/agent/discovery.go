@@ -1,10 +1,10 @@
 package agent
 
-// Lazy tool discovery (rig tools/discovery): the request only carries the tools
-// the model actually needs, and tool_search loads the rest on demand. The
-// product keeps a curated core surface always active; every other registered
-// tool (worktrees, web, jobs output, team/subagent orchestration, LSP, MCP
-// servers, ...) is discoverable by name/description.
+// Lazy tool discovery (rig tools/discovery): the request only carries the
+// frequently used tools, and tool_search loads the rest on demand. The hidden
+// tail is deliberate and small (worktrees, code intelligence, scheduling, every
+// MCP server); everything else — including tools this list does not know — stays
+// active so nothing silently disappears.
 
 import (
 	"context"
@@ -23,7 +23,7 @@ import (
 // just because the discovery list was not updated.
 var discoveryTailTools = []string{
 	// worktrees
-	"enter_worktree", "list_worktrees",
+	"enter_worktree", "exit_worktree", "list_worktrees",
 	// code intelligence
 	"lsp_definition", "lsp_diagnostics", "lsp_hover", "lsp_implementation",
 	"lsp_references", "lsp_symbols",
@@ -46,14 +46,15 @@ func isDiscoverableTail(name string) bool {
 	return false
 }
 
-// initialActiveTools is the run's starting active set: every registered tool
-// except the discoverable tail, plus whatever the session activated (activation
-// can load a tail tool, and a nil registry keeps everything active).
-func (s *service) initialActiveTools(sessionID string) []string {
-	if s == nil || s.registry == nil {
+// initialActiveTools is the run's starting active set over the session's
+// exposed surface (preset/mode already applied): every exposed tool except the
+// discoverable tail, plus whatever the session activated. Basing it on the
+// exposed surface keeps a tail tool the preset explicitly names active, and a
+// nil/empty surface keeps everything active.
+func (s *service) initialActiveTools(sessionID string, tools []rig.Tool) []string {
+	if s == nil {
 		return nil
 	}
-	tools := s.registry.Tools()
 	names := make([]string, 0, len(tools))
 	seen := make(map[string]bool, len(tools))
 	for _, tool := range tools {
@@ -66,6 +67,24 @@ func (s *service) initialActiveTools(sessionID string) []string {
 		}
 		seen[name] = true
 		names = append(names, name)
+	}
+	// A preset allowlist is an explicit user decision: a tail tool it names is
+	// active (hiding it would silently drop a capability the preset grants).
+	if preset, ok := s.agentPresetForSession(sessionID); ok {
+		present := make(map[string]bool, len(tools))
+		for _, tool := range tools {
+			if tool != nil {
+				present[strings.TrimSpace(tool.Name())] = true
+			}
+		}
+		for _, name := range preset.Tools {
+			name = strings.TrimSpace(name)
+			if name == "" || !present[name] || seen[name] {
+				continue
+			}
+			seen[name] = true
+			names = append(names, name)
+		}
 	}
 	s.mu.Lock()
 	if state := s.sessions[sessionID]; state != nil {
@@ -85,7 +104,7 @@ func (s *service) initialActiveTools(sessionID string) []string {
 // the request carries).
 func (s *service) activeToolSet(sessionID string, tools []rig.Tool) map[string]bool {
 	active := make(map[string]bool, len(tools))
-	for _, name := range s.initialActiveTools(sessionID) {
+	for _, name := range s.initialActiveTools(sessionID, tools) {
 		active[name] = true
 	}
 	// Tools the runtime always keeps active count as well.
@@ -229,7 +248,14 @@ func (s *service) registerDiscoveryTool(tool rig.Tool) error {
 	// A reloaded module can meet its own previous registration (the cleanup
 	// effect of the old instance may still be pending): replace it instead of
 	// failing the whole agent module on a duplicate name.
-	s.registry.Unregister(discovery.ToolSearch)
+	if existing := s.registry.Specs(); len(existing) > 0 {
+		for _, spec := range existing {
+			if spec.Name == discovery.ToolSearch {
+				s.registry.Unregister(discovery.ToolSearch)
+				break
+			}
+		}
+	}
 	if err := s.registry.Register(tool); err != nil {
 		return fmt.Errorf("register tool_search: %w", err)
 	}

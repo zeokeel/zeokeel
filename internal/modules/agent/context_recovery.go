@@ -108,11 +108,16 @@ func (s *service) retryContextOverflow(ctx context.Context, sessionID string, cf
 	// Keep the session tombstone guard: a deleted session must not accept the
 	// retried turn's history write.
 	retrySpec.History = s.guardedHistory(s.historyView())
+	// The retry is a new runner: rebind it for tool_search and give it the
+	// activations the session already carries (the failed attempt may have
+	// activated tools before the overflow).
+	retrySpec.InitialActiveTools = s.initialActiveTools(sessionID, retrySpec.Tools)
 	runner, err := rigagent.New(retrySpec)
 	if err != nil {
 		s.recordContextRecovery(ctx, sessionID, before, after, "failed", err)
 		return rig.RunResult{}, nil, false
 	}
+	s.bindSessionRunner(sessionID, runner)
 	retryResult, retryErr := runner.Run(ctx, rig.RunRequest{SessionID: sessionID, Emit: emit})
 	if retryErr != nil {
 		s.recordContextRecovery(ctx, sessionID, before, after, "failed", retryErr)

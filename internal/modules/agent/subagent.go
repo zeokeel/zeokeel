@@ -52,6 +52,10 @@ func subagentExcludedTools() []string {
 		subagentForkToolName,
 		"ralph",
 		"todo_write",
+		// Discovery is a main-session optimization: a child inherits a small
+		// surface already and has no runner activation path, so tool_search
+		// would list tools as hidden that the child actually carries.
+		"tool_search",
 	} {
 		add(name)
 	}
