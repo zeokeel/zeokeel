@@ -84,6 +84,10 @@ func patchFileList(patch string) []contracts.ToolCallFile {
 				add(lastUpdated, false, true)
 			}
 			lastUpdated = ""
+		case strings.HasPrefix(line, "rename from "):
+			add(strings.TrimPrefix(line, "rename from "), false, true)
+		case strings.HasPrefix(line, "rename to "):
+			add(strings.TrimPrefix(line, "rename to "), false, false)
 		case strings.HasPrefix(line, "--- ") && position+1 < len(lines) && strings.HasPrefix(lines[position+1], "+++ ") &&
 			diffHeaderBoundary(lines, position):
 			oldPath := stripDiffPrefix(strings.TrimPrefix(lines[position], "--- "))
@@ -106,15 +110,28 @@ func patchFileList(patch string) []contracts.ToolCallFile {
 }
 
 // diffHeaderBoundary reports whether a "--- " line can be a file header rather
-// than a hunk content line: a diff header is either the first line of the
-// patch or follows a blank line / another "diff --git" header. Inside a hunk a
-// removed line that happens to start with "-- " must not invent a file.
+// than a hunk content line: it is the first line of the patch, follows a blank
+// line (SDK's two-section example), or follows any line of git's diff metadata
+// (index..., new file mode, similarity index, rename from ...) — a real
+// `git diff` ALWAYS puts those between "diff --git" and "--- ".
 func diffHeaderBoundary(lines []string, position int) bool {
 	if position == 0 {
 		return true
 	}
 	previous := strings.TrimSpace(lines[position-1])
-	return previous == "" || strings.HasPrefix(previous, "diff --git ")
+	if previous == "" {
+		return true
+	}
+	for _, prefix := range []string{
+		"diff --git ", "index ", "new file mode ", "deleted file mode ",
+		"old mode ", "new mode ", "similarity index ", "dissimilarity index ",
+		"rename from ", "rename to ", "copy from ", "copy to ",
+	} {
+		if strings.HasPrefix(previous, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // stripDiffPrefix removes the a/ b/ prefix of a unified-diff path and trims the

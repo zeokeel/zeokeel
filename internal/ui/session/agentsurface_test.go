@@ -1676,3 +1676,27 @@ func TestGeneratedFileCardsIgnoreDryRunPatch(t *testing.T) {
 		t.Fatalf("dry-run patch produced file cards; texts = %v", tester.Texts())
 	}
 }
+
+// TestGeneratedFileCardsAddedThenDeleted pins the merge rule: a path both added
+// and deleted by one patch is reported as edited+deleted, not delivered.
+func TestGeneratedFileCardsAddedThenDeleted(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{
+		ID: "sess-adddel", Title: "增删回合",
+		Messages: []contracts.ChatMessage{
+			{ID: "u1", Role: contracts.ChatRoleUser, Text: "先建后删"},
+			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "完成。",
+				Tools: []contracts.ToolCall{{
+					ID: "t1", Name: "apply_patch", Status: "ok",
+					Generated: []contracts.ToolCallFile{{Path: "tmp/x.md", Added: true, Deleted: true}},
+				}}},
+		},
+	}, true)
+	h := newAgentSurfaceHarness(t, chat, agentServices{preview: &fakeFilePreview{}})
+	tester := h.tester()
+	tester.Frame()
+	h.assertTexts(tester, "已编辑 1 个文件", "x.md", "· 已删除")
+	if tester.HasText("交付文件") {
+		t.Fatalf("added-then-deleted file shown as delivered; texts = %v", tester.Texts())
+	}
+}
