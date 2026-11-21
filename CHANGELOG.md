@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **评估：能力上移 rig（SDK）的分层清单**（2026-11-21）：按"宿主无关/UI 无感/策略中性/可复用"四条标准评估了 17 个后端模块，给出 A 级（会话存储+解码检索、提示词分段/快照、上下文溢出恢复、审批队列、委派子会话，合计可减 4–5k 行）、B 级（模式白名单、发现尾部、jobs 读模型、工作区探测、模型目录、ACP）与 C 级（UI、产品契约、提示词内容、权限默认值——留产品）。结论：后端可做到约 7–10% 缩减，"只做接线"只对后端成立；UI 与契约层不变，短期总工作量是净增。详见 `docs/research/rig-upgrade-2026-11/SDK-UPSTREAM-PLAN.md`。
+
 - **评估：不使用 rig `kit` 替换 agent 装配**（2026-11-21）：`kit` 是"一站式 host SDK"（provider/提示词/工具集/审批/会话/压缩/发现/undo/后台任务/MCP/成本/Preflight 一次装配），实测可在本仓以注入 provider/工具跑通（事件与 `rig.Event` 同构）。但它的提示词与工具面在**构造期固定**、会话默认是 NDJSON 目录、审批/编排是另一套语义；整体替换会重写 agent 模块并丢掉上下文检查器、多会话工作区、产品审批与团队编排，收益仅"少维护装配"。结论：不引入、不替换；按需单点借鉴 `costmeter` 预算护栏与 `Preflight` 诊断。证据与矩阵见 `docs/research/rig-upgrade-2026-11/KIT-ASSESSMENT.md`。
 
 - **决策：会话存储不迁移到 rig `session/sqlite`**（2026-11-21）：本仓 `sessionstore` 已是 SQLite（modernc），而 rig 的替代实现缺 `RenameSession`、检索退化为对 JSON 载荷 `LIKE`（本仓用 `search_text` 解码列保证中文/引号内容不漏命中）、且是无正式 tag 的嵌套子模块（要求 sqlite 1.62.0）。净删约 600 行换来的是功能回退与数据迁移风险，故保留自研存储；理由、证据与"何时重新评估"见 `docs/research/rig-upgrade-2026-11/SESSION-SQLITE-DECISION.md`。
