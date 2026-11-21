@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **SDK 上移 A.5a：子会话记录存储进入 rig `session/children`**（2026-11-21）：子会话文档（原子写、排序、TTL/条数保留、损坏文件隔离、版本化 schema、重启恢复、完成收据"只投递一次"）下移；宿主通过 `Options` 提供路径、id 前缀、保留策略、normalize（截断/状态词表）与 `OnLoad`（"running 重启后即 interrupted"）。产品删除 442 行记录存储实现（加载/持久化/隔离/裁剪/ID/相等比较），保留团队/子代理状态映射、活动形状与 legacy sidecar 迁移，`child_sessions.go` 变成 SDK 适配器；原有 agent 测试不改断言全绿。`go.mod` 抬到 `v0.27.0-rc.10`（本地离线代理）。
+
 - **SDK 上移 A.1b 完成：会话存储切到 rig `session/sqlstore`**（2026-11-21）：产品 `sessionstore` 从 939 行实现缩成约 230 行接线（打开库/DSN/PRAGMA 仍在产品），schema、`rig.History/SessionLog/CheckpointStore`、检查点、事件日志、会话元数据/重命名/工作区绑定、解码列检索全部由 SDK 模块提供；`search.go`/`search_text.go` 删除。schema 与既有 `zeokeel.db` 兼容，**零数据拷贝**；产品原有 30 个存储测试未改断言（仅改一个内部字段名）全部通过。产品 `go.mod` 增加 `session/sqlstore v0.1.1`。净删约 1150 行。
 
 - **SDK 上移 A.1b（SDK 侧就绪）**：rig 新增嵌套模块 `session/sqlstore`（宿主传入 `*sql.DB`，包内建 schema 与旧列迁移、`rig.History/SessionLog/CheckpointStore`、会话元数据/重命名/作用域绑定、跨会话检索），schema 与现有 `zeokeel.db` 兼容，可零拷贝切换；`scripts/publish-rig-local.sh` 支持把嵌套模块发布到本地离线代理（`session/sqlstore/v0.1.1`）。产品侧切换与删除 `sessionstore` 实现留到下一轮（涉及 1.5k 行测试迁移）。

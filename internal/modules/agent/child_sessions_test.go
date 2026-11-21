@@ -340,7 +340,10 @@ func TestChildSessionStorePruneBounds(t *testing.T) {
 		ID: "child-stale", Kind: contracts.ChildAgentTeammate,
 		Status: contracts.ChildAgentCompleted, Updated: now.Add(-childSessionTTL - time.Hour),
 	})
-	document := childSessionFile{Version: childSessionVersion, Children: records}
+	document := struct {
+		Version  int                  `json:"version"`
+		Children []childSessionRecord `json:"children,omitempty"`
+	}{Version: childSessionVersion, Children: records}
 	data, err := json.Marshal(document)
 	if err != nil {
 		t.Fatalf("encode document: %v", err)

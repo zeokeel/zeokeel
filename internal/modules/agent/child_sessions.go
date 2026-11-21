@@ -1,27 +1,11 @@
 package agent
 
-// Durable child-session store.
-//
-// The DSH-aligned model this product follows has one identity for a delegated
-// agent: a teammate is a continuable child session, and a synchronous subagent
-// is a one-shot child session. The team member ID and the child-agent ID are
-// therefore the same value, and it is a child-session ID that survives the app
-// restart instead of a process-local manager reference. This store owns that
-// identity and the durable record behind it.
-//
-// One small JSON document keeps every child session of the process (bounded and
-// pruned by TTL): parent session, kind, display name, model, task prompt,
-// status, answer/error, timestamps, usage, bounded activity and the backend
-// reference (the rig manager member reference or subagent-registry ID) that only
-// the backend ever resolves. The live read models keep reading the same
-// contracts (ChildAgentService/TeamService): a live child is built from its
-// backend plus the child-session ID; after a restart the records come back as
-// historical, read-only rows with their IDs intact.
-//
-// The document is written atomically (temporary file + fsync + rename + directory
-// fsync), a corrupt document is quarantined next to the original, and the old
-// v1 history document (child-agents.json, from the first durable release) is
-// migrated on first load so existing users keep their finished runs.
+// Durable child sessions: teammates and synchronous subagents a parent session
+// spawned. The record document itself (atomic persistence, ordering, retention,
+// receipt flags, restart recovery) is the SDK's session/children store; this
+// file keeps the product's vocabulary (team/subagent status mapping, activity
+// shapes, the legacy sidecar migration) and adapts the store to the agent's
+// existing call sites.
 
 import (
 	"crypto/rand"
@@ -30,10 +14,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-	"sync"
 	"time"
+
+	rigchildren "github.com/zeokeel/zeokeel-rig/session/children"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -44,7 +28,8 @@ const (
 	childSessionFileName = "child-sessions.json"
 	// childSessionLegacyFileName is the v1 sidecar migrated on first load.
 	childSessionLegacyFileName = "child-agents.json"
-	// childSessionVersion is the document schema version.
+	// childSessionVersion is the document schema version (the SDK store writes
+	// and accepts exactly this one).
 	childSessionVersion = 2
 	// childSessionLegacyVersion is the version of the migrated document.
 	childSessionLegacyVersion = 1
@@ -61,117 +46,152 @@ const (
 	childSessionIDPrefix = "child-"
 )
 
-// childSessionFile is the persisted document.
-type childSessionFile struct {
-	Version  int                  `json:"version"`
-	Children []childSessionRecord `json:"children,omitempty"`
-}
+// childSessionRecord / childSessionActivity are the SDK document types; the
+// product code keeps its historical names so every call site stays unchanged.
+type childSessionRecord = rigchildren.Record
+type childSessionActivity = rigchildren.Activity
 
-// childSessionActivity is one persisted activity row.
-type childSessionActivity struct {
-	ID    string    `json:"id,omitempty"`
-	Kind  string    `json:"kind,omitempty"`
-	Text  string    `json:"text,omitempty"`
-	Time  time.Time `json:"time,omitempty"`
-	Error bool      `json:"error,omitempty"`
-}
-
-// childSessionRecord is one durable child session: a teammate or a synchronous
-// subagent. ID is the unified child-session identity; BackendRef is the
-// manager/registry reference only the backend resolves.
-type childSessionRecord struct {
-	ID              string `json:"id"`
-	ParentSessionID string `json:"parentSessionId,omitempty"`
-	BackendRef      string `json:"backendRef,omitempty"`
-	Kind            string `json:"kind,omitempty"`
-	Name            string `json:"name,omitempty"`
-	Model           string `json:"model,omitempty"`
-	Prompt          string `json:"prompt,omitempty"`
-	Status          string `json:"status,omitempty"`
-	Output          string `json:"output,omitempty"`
-	Error           string `json:"error,omitempty"`
-	Fork            bool   `json:"fork,omitempty"`
-	// Notified marks a finished child whose completion receipt was already
-	// injected into the parent model's context (one receipt per child).
-	Notified    bool                   `json:"notified,omitempty"`
-	Started     time.Time              `json:"started,omitempty"`
-	Finished    time.Time              `json:"finished,omitempty"`
-	Updated     time.Time              `json:"updated,omitempty"`
-	UsageTokens int                    `json:"usageTokens,omitempty"`
-	Iterations  int                    `json:"iterations,omitempty"`
-	Activity    []childSessionActivity `json:"activity,omitempty"`
-}
-
-// childSessionStore owns the durable child-session records and their document.
+// childSessionStore adapts the SDK child-session document to the agent module.
 type childSessionStore struct {
-	mu     sync.Mutex
-	path   string
+	inner  *rigchildren.Store
 	legacy string
 	logger contracts.Logger
-	items  []childSessionRecord
-	// closed stops further writes once the module is disposed: a late watcher
-	// run finishing during teardown must not touch the data directory after the
-	// process has moved on (and tests remove their temporary data directory).
-	closed bool
 }
 
-// newChildSessionStore returns the store for dataDir. An empty dataDir keeps
-// everything in memory (embedders and focused tests).
+// newChildSessionStore opens the store for dataDir (empty keeps it in memory)
+// and migrates the v1 sidecar on first use.
 func newChildSessionStore(dataDir string, logger contracts.Logger) *childSessionStore {
 	if logger == nil {
 		logger = discardLogger{}
 	}
 	store := &childSessionStore{logger: logger}
+	path := ""
 	if dir := strings.TrimSpace(dataDir); dir != "" {
-		store.path = filepath.Join(dir, childSessionFileName)
+		path = filepath.Join(dir, childSessionFileName)
 		store.legacy = filepath.Join(dir, childSessionLegacyFileName)
 	}
-	store.load()
+	store.inner = rigchildren.Open(rigchildren.Options{
+		Path:      path,
+		Logger:    store.logf,
+		IDPrefix:  childSessionIDPrefix,
+		Keep:      childSessionKeep,
+		TTL:       childSessionTTL,
+		Version:   childSessionVersion,
+		Normalize: store.normalize,
+		// A record still marked running cannot have survived the process: the
+		// app quit mid-run, so the child is honestly interrupted.
+		OnLoad: func(records []childSessionRecord) []childSessionRecord {
+			for index := range records {
+				if records[index].Status == contracts.ChildAgentRunning {
+					records[index].Status = contracts.ChildAgentInterrupted
+				}
+			}
+			return records
+		},
+	})
+	if store.legacy != "" {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			store.migrateLegacy()
+		}
+	}
 	return store
 }
 
-// load reads the document, migrating the v1 sidecar on first use. Every failure
-// degrades to an empty store (the agent module must still activate); an
-// unreadable OR corrupt document is quarantined (BE-09/VC-01, 2026-11 audit:
-// a read error left in place would be overwritten by the next upsert).
-func (s *childSessionStore) load() {
-	if s == nil || s.path == "" {
+// newID allocates one stable child-session identity.
+func (s *childSessionStore) newID() string {
+	if s == nil || s.inner == nil {
+		return childSessionIDPrefix + randomHex(4)
+	}
+	return s.inner.NewID()
+}
+
+// randomHex returns n random bytes as hex (fallback id when no store exists).
+func randomHex(n int) string {
+	buffer := make([]byte, n)
+	if _, err := rand.Read(buffer); err != nil {
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buffer)
+}
+
+// hasID reports whether the identity is already retained.
+func (s *childSessionStore) hasID(id string) bool {
+	return s != nil && s.inner != nil && s.inner.HasID(id)
+}
+
+// upsert stores one record and reports whether anything changed.
+func (s *childSessionStore) upsert(record childSessionRecord) bool {
+	return s != nil && s.inner != nil && s.inner.Upsert(record)
+}
+
+// markNotified flags a finished child as receipt-delivered.
+func (s *childSessionStore) markNotified(id string, finished time.Time) bool {
+	return s != nil && s.inner != nil && s.inner.MarkNotified(id, finished)
+}
+
+// records returns the retained records, newest first.
+func (s *childSessionStore) records() []childSessionRecord {
+	if s == nil || s.inner == nil {
+		return nil
+	}
+	return s.inner.Records()
+}
+
+// record returns one retained record by id.
+func (s *childSessionStore) record(id string) (childSessionRecord, bool) {
+	if s == nil || s.inner == nil {
+		return childSessionRecord{}, false
+	}
+	return s.inner.Record(id)
+}
+
+// byBackendRef resolves a live backend reference to its record.
+func (s *childSessionStore) byBackendRef(backendRef, sessionID, kind string) (childSessionRecord, bool) {
+	if s == nil || s.inner == nil {
+		return childSessionRecord{}, false
+	}
+	return s.inner.ByBackendRef(backendRef, sessionID, kind)
+}
+
+// clear drops every retained record and removes the document.
+func (s *childSessionStore) clear() {
+	if s != nil && s.inner != nil {
+		s.inner.Clear()
+	}
+}
+
+// prune applies the TTL/count bounds now.
+func (s *childSessionStore) prune(now time.Time) {
+	if s != nil && s.inner != nil {
+		s.inner.Prune(now)
+	}
+}
+
+// close stops further writes (module disposal).
+func (s *childSessionStore) close() {
+	if s != nil && s.inner != nil {
+		s.inner.Close()
+	}
+}
+
+// normalize applies the product's text bounds and status vocabulary.
+func (s *childSessionStore) normalize(record *childSessionRecord) {
+	if record == nil {
 		return
 	}
-	data, err := os.ReadFile(s.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			s.migrateLegacy()
-			return
-		}
-		s.quarantine(fmt.Sprintf("child-session document could not be read: %v", err))
+	record.Name = truncateTeamText(strings.TrimSpace(record.Name), childSessionNameRunes)
+	record.Prompt = collapseTeamText(record.Prompt, childSessionPromptRunes)
+	record.Output = truncateTeamText(strings.TrimSpace(record.Output), childSessionOutputRunes)
+	record.Error = truncateTeamText(strings.TrimSpace(record.Error), childSessionErrorRunes)
+	record.Status = normalizeChildStatus(record.Status, record.Kind)
+}
+
+// logf reports one store warning through the module logger.
+func (s *childSessionStore) logf(format string, args ...any) {
+	if s == nil || s.logger == nil {
 		return
 	}
-	if len(strings.TrimSpace(string(data))) == 0 {
-		return
-	}
-	var document childSessionFile
-	if err := json.Unmarshal(data, &document); err != nil {
-		s.quarantine("child-session document is not valid JSON: " + err.Error())
-		return
-	}
-	if document.Version != childSessionVersion {
-		s.quarantine(fmt.Sprintf("child-session document has unsupported version %d", document.Version))
-		return
-	}
-	records := document.Children
-	now := time.Now()
-	for index := range records {
-		// A record still marked running cannot have survived the process: the
-		// app quit mid-run, so the child is honestly interrupted.
-		if records[index].Status == contracts.ChildAgentRunning {
-			records[index].Status = contracts.ChildAgentInterrupted
-		}
-	}
-	s.mu.Lock()
-	s.items = records
-	s.pruneLocked(now)
-	s.mu.Unlock()
+	s.logger.Printf("[agent] "+format, args...)
 }
 
 // legacyDocument is the v1 sidecar schema migrated on first load.
@@ -273,339 +293,13 @@ func (s *childSessionStore) migrateLegacy() {
 		}
 		records = append(records, record)
 	}
-	s.mu.Lock()
-	s.items = records
-	s.pruneLocked(time.Now())
-	s.mu.Unlock()
-	if len(records) > 0 {
-		s.mu.Lock()
-		s.persistLocked()
-		s.mu.Unlock()
+	for _, record := range records {
+		s.upsert(record)
 	}
 	_ = os.Rename(s.legacy, s.legacy+".migrated")
 	if len(records) > 0 {
 		s.logf("migrated %d child-agent history records to child sessions", len(records))
 	}
-}
-
-// newID allocates one stable child-session identity. The value is persisted, so
-// it is the same after a restart and can be the row identity of both the team
-// member and the child-agent views.
-func (s *childSessionStore) newID() string {
-	for {
-		id := childSessionIDPrefix + randomHex(4)
-		if s == nil || !s.hasID(id) {
-			return id
-		}
-	}
-}
-
-// hasID reports whether the store already owns id.
-func (s *childSessionStore) hasID(id string) bool {
-	if s == nil {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, record := range s.items {
-		if record.ID == id {
-			return true
-		}
-	}
-	return false
-}
-
-// randomHex returns n random bytes as lowercase hex (falls back to the clock
-// when the platform random source is unavailable).
-func randomHex(n int) string {
-	buffer := make([]byte, n)
-	if _, err := rand.Read(buffer); err != nil {
-		return fmt.Sprintf("%013x", time.Now().UnixNano())[:2*n]
-	}
-	return hex.EncodeToString(buffer)
-}
-
-// upsert stores one record snapshot, preserving its ID and writing the document
-// only when something changed. It reports whether the document was updated.
-func (s *childSessionStore) upsert(record childSessionRecord) bool {
-	if s == nil {
-		return false
-	}
-	if strings.TrimSpace(record.ID) == "" {
-		return false
-	}
-	s.normalize(&record)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return false
-	}
-	for index := range s.items {
-		if s.items[index].ID != record.ID {
-			continue
-		}
-		// A later snapshot of the same finished child (Close, the shutdown
-		// archive, a repeat persist) is rebuilt with Notified=false; keep the
-		// already-consumed receipt flag so a restart cannot replay it. A new run
-		// has a different Finished time and starts unnotified again.
-		previous := s.items[index]
-		if previous.Notified && !record.Notified &&
-			record.Status == previous.Status && record.Finished.Equal(previous.Finished) {
-			record.Notified = true
-		}
-		if childSessionRecordEqual(s.items[index], record) {
-			return false
-		}
-		record.Updated = time.Now()
-		s.items[index] = record
-		s.pruneLocked(time.Now())
-		s.persistLocked()
-		return true
-	}
-	record.Updated = time.Now()
-	s.items = append(s.items, record)
-	s.pruneLocked(time.Now())
-	s.persistLocked()
-	return true
-}
-
-// markNotified flips the receipt flag of one finished record under the lock and
-// persists it. It refuses when the record was replaced by a newer run in the
-// meantime, so a receipt staged for the old run can never silence the new one.
-func (s *childSessionStore) markNotified(id string, finished time.Time) bool {
-	if s == nil || strings.TrimSpace(id) == "" {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return false
-	}
-	for index := range s.items {
-		if s.items[index].ID != id {
-			continue
-		}
-		if s.items[index].Notified || !s.items[index].Finished.Equal(finished) {
-			return false
-		}
-		s.items[index].Notified = true
-		s.persistLocked()
-		return true
-	}
-	return false
-}
-
-// normalize bounds the stored texts and folds run-state spellings onto the
-// child-agent status vocabulary.
-func (s *childSessionStore) normalize(record *childSessionRecord) {
-	if record == nil {
-		return
-	}
-	record.Name = truncateTeamText(strings.TrimSpace(record.Name), childSessionNameRunes)
-	record.Prompt = collapseTeamText(record.Prompt, childSessionPromptRunes)
-	record.Output = truncateTeamText(strings.TrimSpace(record.Output), childSessionOutputRunes)
-	record.Error = truncateTeamText(strings.TrimSpace(record.Error), childSessionErrorRunes)
-	record.Status = normalizeChildStatus(record.Status, record.Kind)
-}
-
-// records returns the retained records, newest first.
-func (s *childSessionStore) records() []childSessionRecord {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]childSessionRecord, len(s.items))
-	copy(out, s.items)
-	sort.SliceStable(out, func(i, j int) bool {
-		return historyRecordTime(out[i].Updated, out[i].Finished, out[i].Started).
-			After(historyRecordTime(out[j].Updated, out[j].Finished, out[j].Started))
-	})
-	return out
-}
-
-// record returns one retained record by its child-session ID.
-func (s *childSessionStore) record(id string) (childSessionRecord, bool) {
-	if s == nil {
-		return childSessionRecord{}, false
-	}
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return childSessionRecord{}, false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, record := range s.items {
-		if record.ID == id {
-			return record, true
-		}
-	}
-	return childSessionRecord{}, false
-}
-
-// byBackendRef returns the record a live backend reference belongs to, for one
-// parent session and kind ("" session matches any).
-func (s *childSessionStore) byBackendRef(backendRef, sessionID, kind string) (childSessionRecord, bool) {
-	if s == nil {
-		return childSessionRecord{}, false
-	}
-	backendRef = strings.TrimSpace(backendRef)
-	if backendRef == "" {
-		return childSessionRecord{}, false
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var fallback *childSessionRecord
-	for index := range s.items {
-		record := s.items[index]
-		if record.BackendRef != backendRef || record.Kind != kind {
-			continue
-		}
-		if sessionID == "" || record.ParentSessionID == "" || record.ParentSessionID == sessionID {
-			copied := record
-			if record.ParentSessionID == sessionID {
-				return copied, true
-			}
-			if fallback == nil {
-				fallback = &copied
-			}
-		}
-	}
-	if fallback != nil {
-		return *fallback, true
-	}
-	return childSessionRecord{}, false
-}
-
-// clear drops every retained record and removes the document (best effort).
-func (s *childSessionStore) clear() {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	s.items = nil
-	path := s.path
-	s.mu.Unlock()
-	if path != "" {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			s.logf("remove child-session document: %v", err)
-		}
-	}
-}
-
-// pruneLocked enforces the TTL and count bounds (the caller holds s.mu).
-func (s *childSessionStore) pruneLocked(now time.Time) {
-	cutoff := now.Add(-childSessionTTL)
-	kept := make([]childSessionRecord, 0, len(s.items))
-	for _, record := range s.items {
-		if historyRecordTime(record.Updated, record.Finished, record.Started).Before(cutoff) {
-			continue
-		}
-		kept = append(kept, record)
-	}
-	sort.SliceStable(kept, func(i, j int) bool {
-		return historyRecordTime(kept[i].Updated, kept[i].Finished, kept[i].Started).
-			After(historyRecordTime(kept[j].Updated, kept[j].Finished, kept[j].Started))
-	})
-	if len(kept) > childSessionKeep {
-		kept = kept[:childSessionKeep]
-	}
-	s.items = kept
-}
-
-// close stops all further writes (module disposal); the last persisted document
-// is authoritative.
-func (s *childSessionStore) close() {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	s.closed = true
-	s.mu.Unlock()
-}
-
-// persistLocked writes the document atomically (the caller holds s.mu).
-func (s *childSessionStore) persistLocked() {
-	if s.path == "" || s.closed {
-		return
-	}
-	directory := filepath.Dir(s.path)
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		s.logf("create child-session directory: %v", err)
-		return
-	}
-	document := childSessionFile{Version: childSessionVersion, Children: s.items}
-	data, err := json.MarshalIndent(document, "", "  ")
-	if err != nil {
-		s.logf("encode child-session document: %v", err)
-		return
-	}
-	temporary, err := os.CreateTemp(directory, ".child-sessions-*.tmp")
-	if err != nil {
-		s.logf("create temporary child-session document: %v", err)
-		return
-	}
-	temporaryPath := temporary.Name()
-	cleanup := func() {
-		_ = temporary.Close()
-		_ = os.Remove(temporaryPath)
-	}
-	if _, err := temporary.Write(data); err != nil {
-		cleanup()
-		s.logf("write temporary child-session document: %v", err)
-		return
-	}
-	if err := temporary.Sync(); err != nil {
-		cleanup()
-		s.logf("sync temporary child-session document: %v", err)
-		return
-	}
-	if err := temporary.Close(); err != nil {
-		_ = os.Remove(temporaryPath)
-		s.logf("close temporary child-session document: %v", err)
-		return
-	}
-	if err := os.Rename(temporaryPath, s.path); err != nil {
-		_ = os.Remove(temporaryPath)
-		s.logf("replace child-session document %q: %v", s.path, err)
-		return
-	}
-	if handle, err := os.Open(directory); err == nil {
-		_ = handle.Sync()
-		_ = handle.Close()
-	}
-}
-
-// quarantine moves an unusable document out of the way and logs why.
-func (s *childSessionStore) quarantine(reason string) {
-	backup := fmt.Sprintf("%s.corrupt-%d", s.path, time.Now().UTC().UnixNano())
-	message := reason
-	if err := os.Rename(s.path, backup); err != nil {
-		message += fmt.Sprintf(" (could not quarantine the file: %v)", err)
-	} else {
-		message += " (quarantined as " + backup + ")"
-	}
-	s.logf("%s; starting with an empty child-session store", message)
-}
-
-// logf reports one store warning through the module logger.
-func (s *childSessionStore) logf(format string, args ...any) {
-	if s == nil || s.logger == nil {
-		return
-	}
-	s.logger.Printf("[agent] "+format, args...)
-}
-
-// historyRecordTime is the timestamp a record is pruned/ordered by.
-func historyRecordTime(updated, finished, started time.Time) time.Time {
-	if !updated.IsZero() {
-		return updated
-	}
-	if !finished.IsZero() {
-		return finished
-	}
-	return started
 }
 
 // normalizeChildStatus keeps a value already in the child-agent vocabulary and
