@@ -10,12 +10,10 @@
 package acp
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -28,6 +26,8 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
 
+	rigacp "github.com/zeokeel/zeokeel-rig/acp"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
@@ -36,39 +36,36 @@ const (
 	ModuleID = "zeokeel/acp"
 	// Version is the module's semantic version.
 	Version = "1.0.0"
-	// JSONRPCVersion is the only JSON-RPC version the transport speaks.
-	JSONRPCVersion = "2.0"
-	// ProtocolVersion is the ACP protocol version advertised by initialize.
-	ProtocolVersion = 1
-	// maxFrameBytes bounds one JSON-RPC frame (16 MiB): a prompt image at the
-	// maxPromptImageBytes limit expands to ~13.3 MiB in base64 plus framing.
-	maxFrameBytes = 16 << 20
+
 	// maxPromptImageBytes bounds the decoded size of one prompt image (10 MiB).
 	maxPromptImageBytes = 10 << 20
 
-	// JSON-RPC 2.0 error codes.
-	CodeParseError     = -32700
-	CodeInvalidRequest = -32600
-	CodeMethodNotFound = -32601
-	CodeInvalidParams  = -32602
-	CodeInternalError  = -32603
-
-	// ACP method names.
-	MethodInitialize    = "initialize"
-	MethodSessionNew    = "session/new"
-	MethodSessionList   = "session/list"
-	MethodSessionLoad   = "session/load"
-	MethodSessionPrompt = "session/prompt"
-	MethodSessionCancel = "session/cancel"
-	MethodSessionUpdate = "session/update"
-
-	// ACP stop reasons.
-	StopReasonEndTurn   = "end_turn"
-	StopReasonCancelled = "cancelled"
-
 	// agentMessageChunk is the only session update kind this server emits.
 	UpdateAgentMessageChunk = "agent_message_chunk"
+
+	// Transport constants re-exported for the module's tests and call sites.
+	JSONRPCVersion     = rigacp.JSONRPCVersion
+	ProtocolVersion    = rigacp.ProtocolVersion
+	CodeParseError     = rigacp.CodeParseError
+	CodeInvalidRequest = rigacp.CodeInvalidRequest
+	CodeMethodNotFound = rigacp.CodeMethodNotFound
+	CodeInvalidParams  = rigacp.CodeInvalidParams
+	CodeInternalError  = rigacp.CodeInternalError
+
+	MethodInitialize    = rigacp.MethodInitialize
+	MethodSessionNew    = rigacp.MethodSessionNew
+	MethodSessionList   = rigacp.MethodSessionList
+	MethodSessionLoad   = rigacp.MethodSessionLoad
+	MethodSessionPrompt = rigacp.MethodSessionPrompt
+	MethodSessionCancel = rigacp.MethodSessionCancel
+	MethodSessionUpdate = rigacp.MethodSessionUpdate
+
+	StopReasonEndTurn   = rigacp.StopReasonEndTurn
+	StopReasonCancelled = rigacp.StopReasonCancelled
 )
+
+// RPCError is the transport's JSON-RPC error type.
+type RPCError = rigacp.Error
 
 // Config is the module's typed assembly config.
 type Config struct {
@@ -157,21 +154,7 @@ func newService(cfg Config, chat contracts.ChatService, logger contracts.Logger)
 	}
 }
 
-// --- JSON-RPC frames -------------------------------------------------------
-
-// RPCError is one JSON-RPC 2.0 error object.
-type RPCError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-// request is one decoded incoming frame.
-type request struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params"`
-}
+// --- ACP params ------------------------------------------------------------
 
 // contentBlock is one ACP prompt content block. Text blocks carry Text; image
 // blocks carry the base64 Data plus MimeType of ACP's image block shape.
@@ -203,217 +186,55 @@ type sessionNewParams struct {
 	MCPServers []json.RawMessage `json:"mcpServers"`
 }
 
-// frameWriter serializes protocol frames from the read loop and prompt
-// goroutines.
-type frameWriter struct {
-	mu     sync.Mutex
-	out    io.Writer
-	err    error
-	closed bool
-}
-
-func newFrameWriter(out io.Writer) *frameWriter { return &frameWriter{out: out} }
-
-func (w *frameWriter) write(value any) {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return
-	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.err != nil || w.closed {
-		return
-	}
-	_, w.err = w.out.Write(append(encoded, '\n'))
-}
-
-// close makes later frames from lingering callbacks no-ops, so Serve can return
-// without racing the caller reading the output stream.
-func (w *frameWriter) close() {
-	w.mu.Lock()
-	w.closed = true
-	w.mu.Unlock()
-}
-
-func (w *frameWriter) writeResult(id json.RawMessage, result any) {
-	w.write(map[string]any{"jsonrpc": JSONRPCVersion, "id": id, "result": result})
-}
-
-func (w *frameWriter) writeError(id json.RawMessage, rpcErr *RPCError) {
-	w.write(map[string]any{"jsonrpc": JSONRPCVersion, "id": id, "error": rpcErr})
-}
-
-func (w *frameWriter) writeNotification(method string, params any) {
-	w.write(map[string]any{"jsonrpc": JSONRPCVersion, "method": method, "params": params})
-}
-
-// hasID reports whether a request expects a response.
-func hasID(req request) bool {
-	return len(req.ID) > 0 && string(bytes.TrimSpace(req.ID)) != "null"
-}
-
-// --- Serve loop ------------------------------------------------------------
-
-// Serve implements contracts.ACPService.
+// Serve runs one ACP connection over in/out (stdio in production).
 func (s *service) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
-	if in == nil || out == nil {
-		return errors.New("acp: Serve requires non-nil input and output streams")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	serveCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	writer := newFrameWriter(out)
-	defer writer.close()
+	server := rigacp.NewServer(rigacp.Options{
+		Handler: s,
+		Capabilities: map[string]any{
+			"loadSession": true,
+			"promptCapabilities": map[string]any{
+				"image":           true,
+				"audio":           false,
+				"embeddedContext": false,
+			},
+		},
+	})
+	return server.Serve(ctx, in, out)
+}
 
-	lines := make(chan []byte, 16)
-	readErr := make(chan error, 1)
-	go func() {
-		scanner := bufio.NewScanner(in)
-		scanner.Buffer(make([]byte, 64*1024), maxFrameBytes)
-		for scanner.Scan() {
-			line := append([]byte(nil), scanner.Bytes()...)
-			select {
-			case lines <- line:
-			case <-serveCtx.Done():
-				readErr <- nil
-				close(lines)
-				return
-			}
+// Handle implements the transport's Handler: it maps one ACP method onto the
+// product's chat/workspace services. initialize is answered by the transport.
+func (s *service) Handle(ctx context.Context, method string, params json.RawMessage, emit rigacp.Emit) (any, error) {
+	switch method {
+	case MethodSessionNew:
+		workspaceID, rpcErr := s.prepareSessionWorkspace(params)
+		if rpcErr != nil {
+			return nil, rpcErr
 		}
-		readErr <- scanner.Err()
-		close(lines)
-	}()
-
-	var prompts sync.WaitGroup
-	var scanErr error
-readLoop:
-	for {
-		select {
-		case <-serveCtx.Done():
-			cancel()
-			prompts.Wait()
-			return nil
-		case line, ok := <-lines:
-			if !ok {
-				scanErr = <-readErr
-				break readLoop
-			}
-			trimmed := bytes.TrimSpace(line)
-			if len(trimmed) == 0 {
-				continue
-			}
-			var req request
-			if err := json.Unmarshal(trimmed, &req); err != nil {
-				writer.writeError(json.RawMessage("null"),
-					&RPCError{Code: CodeParseError, Message: "parse error: " + err.Error()})
-				continue
-			}
-			if req.JSONRPC != JSONRPCVersion {
-				if hasID(req) {
-					writer.writeError(req.ID, &RPCError{Code: CodeInvalidRequest, Message: `jsonrpc must be "2.0"`})
-				}
-				continue
-			}
-			if strings.TrimSpace(req.Method) == "" {
-				if hasID(req) {
-					writer.writeError(req.ID, &RPCError{Code: CodeInvalidRequest, Message: "missing method"})
-				}
-				continue
-			}
-			switch req.Method {
-			case MethodInitialize:
-				result := map[string]any{
-					"protocolVersion": ProtocolVersion,
-					"agentCapabilities": map[string]any{
-						"loadSession": true,
-						"promptCapabilities": map[string]any{
-							"image":           true,
-							"audio":           false,
-							"embeddedContext": false,
-						},
-					},
-				}
-				if hasID(req) {
-					writer.writeResult(req.ID, result)
-				}
-			case MethodSessionNew:
-				if !hasID(req) {
-					continue
-				}
-				workspaceID, rpcErr := s.prepareSessionWorkspace(req.Params)
-				if rpcErr != nil {
-					writer.writeError(req.ID, rpcErr)
-					continue
-				}
-				sessionID, err := s.chat.NewSession("")
-				if err != nil {
-					writer.writeError(req.ID, internalError("session/new: "+err.Error()))
-					continue
-				}
-				s.bindSessionWorkspace(sessionID, workspaceID)
-				writer.writeResult(req.ID, map[string]string{
-					"sessionId":   sessionID,
-					"model":       strings.TrimSpace(s.chat.Config().Model),
-					"workspaceId": workspaceID,
-				})
-			case MethodSessionList:
-				if !hasID(req) {
-					continue
-				}
-				result, rpcErr := s.handleSessionList(req.Params)
-				if rpcErr != nil {
-					writer.writeError(req.ID, rpcErr)
-					continue
-				}
-				writer.writeResult(req.ID, result)
-			case MethodSessionLoad:
-				if !hasID(req) {
-					continue
-				}
-				result, rpcErr := s.handleSessionLoad(req.Params)
-				if rpcErr != nil {
-					writer.writeError(req.ID, rpcErr)
-					continue
-				}
-				writer.writeResult(req.ID, result)
-			case MethodSessionPrompt:
-				if !hasID(req) {
-					continue
-				}
-				prompts.Add(1)
-				go func(req request) {
-					defer prompts.Done()
-					s.handlePrompt(serveCtx, writer, req)
-				}(req)
-			case MethodSessionCancel:
-				rpcErr := s.handleCancel(req.Params)
-				if rpcErr != nil {
-					if hasID(req) {
-						writer.writeError(req.ID, rpcErr)
-					}
-					continue
-				}
-				if hasID(req) {
-					writer.writeResult(req.ID, struct{}{})
-				}
-			default:
-				if hasID(req) {
-					writer.writeError(req.ID, &RPCError{Code: CodeMethodNotFound,
-						Message: fmt.Sprintf("method not found: %s", req.Method)})
-				}
-			}
+		sessionID, err := s.chat.NewSession("")
+		if err != nil {
+			return nil, internalError("session/new: " + err.Error())
 		}
+		s.bindSessionWorkspace(sessionID, workspaceID)
+		return map[string]string{
+			"sessionId":   sessionID,
+			"model":       strings.TrimSpace(s.chat.Config().Model),
+			"workspaceId": workspaceID,
+		}, nil
+	case MethodSessionList:
+		return s.handleSessionList(params)
+	case MethodSessionLoad:
+		return s.handleSessionLoad(params)
+	case MethodSessionPrompt:
+		return s.handlePrompt(ctx, params, emit)
+	case MethodSessionCancel:
+		if rpcErr := s.handleCancel(params); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return struct{}{}, nil
+	default:
+		return nil, rigacp.Errorf(CodeMethodNotFound, "method not found: %s", method)
 	}
-	// EOF: let in-flight prompts settle (they normally finish on their own),
-	// then stop the connection.
-	prompts.Wait()
-	cancel()
-	if scanErr != nil {
-		return fmt.Errorf("acp: read protocol stream: %w", scanErr)
-	}
-	return nil
 }
 
 // prepareSessionWorkspace resolves the editor's project root (session/new cwd)
@@ -421,7 +242,7 @@ readLoop:
 // tools operate on the project the user opened. A missing directory is an
 // invalid-params error; a workspace-registry failure only logs (the session can
 // still run conversation/read-only tools).
-func (s *service) prepareSessionWorkspace(raw json.RawMessage) (string, *RPCError) {
+func (s *service) prepareSessionWorkspace(raw json.RawMessage) (string, error) {
 	var params sessionNewParams
 	if len(bytes.TrimSpace(raw)) > 0 {
 		if err := json.Unmarshal(raw, &params); err != nil {
@@ -527,7 +348,7 @@ type sessionLister interface {
 
 // handleSessionList implements session/list: newest-updated first, stable for
 // zero/equal timestamps, with the chat service's own titles (no localization).
-func (s *service) handleSessionList(raw json.RawMessage) (any, *RPCError) {
+func (s *service) handleSessionList(raw json.RawMessage) (any, error) {
 	if len(bytes.TrimSpace(raw)) > 0 && string(bytes.TrimSpace(raw)) != "null" {
 		var params map[string]any
 		if err := json.Unmarshal(raw, &params); err != nil {
@@ -556,7 +377,7 @@ func (s *service) handleSessionList(raw json.RawMessage) (any, *RPCError) {
 // handleSessionLoad implements session/load: a read-only conversation replay for
 // editor clients. Tool/system messages are skipped; user and assistant text is
 // returned in order. It never changes the active session.
-func (s *service) handleSessionLoad(raw json.RawMessage) (any, *RPCError) {
+func (s *service) handleSessionLoad(raw json.RawMessage) (any, error) {
 	var params sessionLoadParams
 	if err := json.Unmarshal(raw, &params); err != nil {
 		return nil, invalidParams("session/load: " + err.Error())
@@ -595,34 +416,28 @@ func (s *service) handleSessionLoad(raw json.RawMessage) (any, *RPCError) {
 // handlePrompt implements session/prompt: subscribe to chat updates, send the
 // prompt, stream new assistant text as agent_message_chunk notifications and
 // settle with a stop reason.
-func (s *service) handlePrompt(ctx context.Context, writer *frameWriter, req request) {
+func (s *service) handlePrompt(ctx context.Context, raw json.RawMessage, emit rigacp.Emit) (any, error) {
 	var params promptParams
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		writer.writeError(req.ID, invalidParams("session/prompt: "+err.Error()))
-		return
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return nil, invalidParams("session/prompt: " + err.Error())
 	}
 	sessionID := strings.TrimSpace(params.SessionID)
 	if sessionID == "" {
-		writer.writeError(req.ID, invalidParams("session/prompt: sessionId is required"))
-		return
+		return nil, invalidParams("session/prompt: sessionId is required")
 	}
 	attachments, rpcErr := promptImages(params)
 	if rpcErr != nil {
-		writer.writeError(req.ID, rpcErr)
-		return
+		return nil, rpcErr
 	}
 	text := promptText(params)
 	if text == "" && len(attachments) == 0 {
-		writer.writeError(req.ID, invalidParams("session/prompt: prompt text or image content is required"))
-		return
+		return nil, invalidParams("session/prompt: prompt text or image content is required")
 	}
 	var attachmentSender contracts.AttachmentSender
 	if len(attachments) > 0 {
 		sender, ok := s.chat.(contracts.AttachmentSender)
 		if !ok {
-			writer.writeError(req.ID, internalError(
-				"session/prompt: chat backend does not support image attachments"))
-			return
+			return nil, internalError("session/prompt: chat backend does not support image attachments")
 		}
 		attachmentSender = sender
 	}
@@ -640,7 +455,7 @@ func (s *service) handlePrompt(ctx context.Context, writer *frameWriter, req req
 		state.seedToolState(snapshot)
 	}
 	emitTool := func(event toolEvent) {
-		s.writeToolEvent(writer, sessionID, event)
+		s.writeToolEvent(emit, sessionID, event)
 	}
 	unsubscribe, err := s.chat.Subscribe(func(changedSession string) {
 		if changedSession != sessionID {
@@ -651,7 +466,7 @@ func (s *service) handlePrompt(ctx context.Context, writer *frameWriter, req req
 			return
 		}
 		state.process(snapshot, func(delta string) {
-			writer.writeNotification(MethodSessionUpdate, map[string]any{
+			emit(MethodSessionUpdate, map[string]any{
 				"sessionId": sessionID,
 				"update": map[string]any{
 					"sessionUpdate": UpdateAgentMessageChunk,
@@ -661,8 +476,7 @@ func (s *service) handlePrompt(ctx context.Context, writer *frameWriter, req req
 		}, emitTool)
 	})
 	if err != nil {
-		writer.writeError(req.ID, internalError("session/prompt: subscribe: "+err.Error()))
-		return
+		return nil, internalError("session/prompt: subscribe: " + err.Error())
 	}
 	defer unsubscribe()
 	var sendErr error
@@ -672,13 +486,12 @@ func (s *service) handlePrompt(ctx context.Context, writer *frameWriter, req req
 		sendErr = attachmentSender.SendWithAttachments(sessionID, text, attachments)
 	}
 	if sendErr != nil {
-		writer.writeError(req.ID, internalError("session/prompt: send: "+sendErr.Error()))
-		return
+		return nil, internalError("session/prompt: send: " + sendErr.Error())
 	}
 	// The fake/agent may have completed synchronously without a notification.
 	if snapshot, ok := s.chat.Session(sessionID); ok {
 		state.process(snapshot, func(delta string) {
-			writer.writeNotification(MethodSessionUpdate, map[string]any{
+			emit(MethodSessionUpdate, map[string]any{
 				"sessionId": sessionID,
 				"update": map[string]any{
 					"sessionUpdate": UpdateAgentMessageChunk,
@@ -697,29 +510,26 @@ func (s *service) handlePrompt(ctx context.Context, writer *frameWriter, req req
 	case <-state.signal:
 	case <-ctx.Done():
 		_ = s.chat.Cancel(sessionID)
-		return
+		return nil, rigacp.ErrNoResponse
 	case <-timeout:
 		_ = s.chat.Cancel(sessionID)
-		writer.writeError(req.ID, internalError("session/prompt: timeout"))
-		return
+		return nil, internalError("session/prompt: timeout")
 	}
 	s.mu.Lock()
 	cancelled := s.cancelRequested[sessionID]
 	s.mu.Unlock()
 	if cancelled {
-		writer.writeResult(req.ID, map[string]string{"stopReason": StopReasonCancelled})
-		return
+		return map[string]string{"stopReason": StopReasonCancelled}, nil
 	}
 	// A run failure must not look like a successful empty turn to an ACP
 	// client: the chat read model carries the run error, so surface it as a
 	// JSON-RPC error (the turn result would otherwise always be end_turn).
 	if snapshot, ok := s.chat.Session(sessionID); ok {
 		if errText := strings.TrimSpace(snapshot.Error); errText != "" {
-			writer.writeError(req.ID, internalError("session/prompt: "+errText))
-			return
+			return nil, internalError("session/prompt: " + errText)
 		}
 	}
-	writer.writeResult(req.ID, map[string]string{"stopReason": StopReasonEndTurn})
+	return map[string]string{"stopReason": StopReasonEndTurn}, nil
 }
 
 // promptState tracks the streamed assistant text of one prompt.
@@ -776,7 +586,7 @@ func (state *promptState) process(snapshot contracts.ChatSession, emitText func(
 }
 
 // handleCancel implements session/cancel.
-func (s *service) handleCancel(raw json.RawMessage) *RPCError {
+func (s *service) handleCancel(raw json.RawMessage) error {
 	var params cancelParams
 	if err := json.Unmarshal(raw, &params); err != nil {
 		return invalidParams("session/cancel: " + err.Error())

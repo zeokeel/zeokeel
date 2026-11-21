@@ -121,7 +121,7 @@ GOPROXY=file://$PWD/.cache/rigproxy GOSUMDB=off go get github.com/zeokeel/zeokee
 | B.3 jobs 读模型 | 留产品 | 跨工作区合并是桌面 chip 的展示语义；`jobs.Manager` 已提供单任务快照 |
 | B.4 工作区注册表 | 留产品 | 工作区列表/当前绑定是产品 UI 域，不是宿主无关能力 |
 | B.5 模型目录 | 留产品 | 用户可编辑的模型/上下文/备注是产品设置与 UI；rig `modelprice` 是只读价格表，语义不同 |
-| B.6 ACP 服务端 | 按需 | 单一消费者（本产品）；若第二个宿主需要 ACP，再整体上移（协议宿主适配，不涉及策略） |
+| B.6 ACP 服务端 | ✅ 传输层已上移 | `acp` 包负责分帧/分发/并发/错误映射，产品只实现 `Handler`（会话/提示/通知）；剩余 ACP 方法映射是产品语义 |
 
 ## 4.8 迁移总览（A 级完成）
 
@@ -138,6 +138,7 @@ GOPROXY=file://$PWD/.cache/rigproxy GOSUMDB=off go get github.com/zeokeel/zeokee
 
 ## 4.9 发布状态（2026-11-21）
 
+- rig `v0.27.3`：B.6 传输层（`acp`）。
 - rig `v0.27.2`（`main` 合并后发布）：A.2/A.3/A.4/A.1a/A.5a + B.1/B.2 机制（`prompt`、`agent.ContextRecovery`、`gate.Queue`、`session/sqlsearch`、`session/children`、`tools/surface`、`discovery.Activation`）。
 - rig `session/sqlstore v0.2.2`：嵌套模块（A.1b），require 根模块 `v0.27.2`。
 - `v0.27.0`/`v0.27.1` 的 tag 因发布门禁（`version.go`、gofmt、tag 必须在 main）被拒绝；tag 不可移动，补丁版本 `v0.27.2` 在合并后的 main 上重新发布。

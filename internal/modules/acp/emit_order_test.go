@@ -20,6 +20,8 @@ import (
 	"sync"
 	"testing"
 
+	rigacp "github.com/zeokeel/zeokeel-rig/acp"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
@@ -70,13 +72,13 @@ func emittedText(t *testing.T, buf *bytes.Buffer) string {
 func emitOrderAttempt(t *testing.T, schedPoint bool) string {
 	t.Helper()
 	var buf bytes.Buffer
-	writer := newFrameWriter(&buf)
+	writer := rigacp.NewWriter(&buf)
 	state := emitOrderNewState()
 	emit := func(delta string) {
 		if schedPoint {
 			runtime.Gosched()
 		}
-		writer.writeNotification(MethodSessionUpdate, map[string]any{
+		writer.Notify(MethodSessionUpdate, map[string]any{
 			"sessionId": "s",
 			"update": map[string]any{
 				"sessionUpdate": UpdateAgentMessageChunk,
@@ -127,10 +129,10 @@ func TestPromptEmitOrderConcurrentRealWriter(t *testing.T) {
 func TestPromptEmitOrderSequentialControl(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		var buf bytes.Buffer
-		writer := newFrameWriter(&buf)
+		writer := rigacp.NewWriter(&buf)
 		state := emitOrderNewState()
 		emit := func(delta string) {
-			writer.writeNotification(MethodSessionUpdate, map[string]any{
+			writer.Notify(MethodSessionUpdate, map[string]any{
 				"sessionId": "s",
 				"update": map[string]any{
 					"sessionUpdate": UpdateAgentMessageChunk,

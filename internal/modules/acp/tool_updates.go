@@ -13,6 +13,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	rigacp "github.com/zeokeel/zeokeel-rig/acp"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
@@ -168,9 +170,9 @@ func truncateToolContent(content string) string {
 }
 
 // writeToolEvent writes one derived tool-call notification for a prompt.
-func (s *service) writeToolEvent(writer *frameWriter, sessionID string, event toolEvent) {
+func (s *service) writeToolEvent(emit rigacp.Emit, sessionID string, event toolEvent) {
 	if event.Started {
-		writer.writeNotification(MethodSessionUpdate, map[string]any{
+		emit(MethodSessionUpdate, map[string]any{
 			"sessionId": sessionID,
 			"update": map[string]any{
 				"sessionUpdate": UpdateToolCall,
@@ -207,7 +209,7 @@ func (s *service) writeToolEvent(writer *frameWriter, sessionID string, event to
 			"content": map[string]any{"type": "text", "text": content},
 		}}
 	}
-	writer.writeNotification(MethodSessionUpdate, map[string]any{
+	emit(MethodSessionUpdate, map[string]any{
 		"sessionId": sessionID,
 		"update":    update,
 	})
