@@ -91,7 +91,7 @@ GOPROXY=file://$PWD/.cache/rigproxy GOSUMDB=off go get github.com/zeokeel/zeokee
 | A.3 上下文溢出恢复 | ✅ 完成 | `rig.AgentSpec.ContextRecovery` + `rig.IsContextOverflowError` + agent 实现与测试 | 产品删除 `retryContextOverflow`/`isContextOverflowError` 与编排，仅留归档/事件钩子 |
 | A.4 审批队列 | ✅ 完成 | `gate.Queue`（Ask/AskTimeout/Pending/Resolve/Subscribe/EnqueueHook + 测试） | 产品删除 pending/resolved/subscribers/编号/幂等缓存/notify，仅留策略、文案、通知与映射 |
 | A.1a 检索文本/片段层 | ✅ 完成 | `session/sqlsearch`（MessageColumns/EventText/EscapeLike/Snippet + 测试） | 删除解码/片段/转义实现，保留 schema/SQL/扫描 |
-| A.1b 存储 schema/CRUD/RenameSession | 待做 | — | — |
+| A.1b 存储 schema/CRUD/RenameSession | ⏳ SDK 模块完成，产品切换待做 | 嵌套模块 `session/sqlstore`（`New(ctx,*sql.DB)`；schema/History/Checkpoint/Events/Meta/Rename/Scope/Search + 测试；tag `session/sqlstore/v0.1.1`） | 待切换后删除 `sessionstore` 实现 |
 | A.5 委派子会话 | 待做 | — | — |
 
 ## 4.6 A.1b 设计草案（下一轮）
@@ -101,6 +101,8 @@ GOPROXY=file://$PWD/.cache/rigproxy GOSUMDB=off go get github.com/zeokeel/zeokee
   - `rig.History`（Load/Append/Replace）、`rig.SessionLog`（Append/Events）、`rig.CheckpointStore`；
   - `RenameSession`、`Sessions/GetSessionMeta`、`DeleteSession`、`AppendEvent`；
   - `SearchMessages(ctx, query, limit) ([]Hit, error)`（`session/sqlsearch` 的文本/片段层，schema 用 `messages.search_text`/`events.text` 解码列）。
+
+**已落地**（`ec3f8a9` + `session/sqlstore/v0.1.1`）：schema 与产品库**逐字节兼容**（含 `workspace_id` 列与旧列迁移），因此产品可以指向既有 `zeokeel.db`、无需数据拷贝；`scripts/publish-rig-local.sh session/sqlstore v0.1.1` 已能发布嵌套模块（zip 只含子模块子树）。
 - **Schema**：`sessions / messages / events / checkpoints` 四表；产品特有的 `workspace_id` 用 `Options.ExtraSessionColumns` 或 `Meta` JSON 列承载（不逼 SDK 认识"工作区"）。
 - **迁移**：一次性 `MigrateFromLegacy(ctx, db)`（旧库四表 → 新库，按 session 分批 + 事务；失败回滚、旧库只读保留）；产品在装配启动时执行并记录事件。
 - **测试**：嵌套模块内用真实 SQLite 跑 CRUD/检索/迁移/并发/损坏 payload；产品保留"旧实现 ↔ 新实现"golden 对照（同一操作后导出对比）后才删 `sessionstore`。

@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **SDK 上移 A.1b（SDK 侧就绪）**：rig 新增嵌套模块 `session/sqlstore`（宿主传入 `*sql.DB`，包内建 schema 与旧列迁移、`rig.History/SessionLog/CheckpointStore`、会话元数据/重命名/作用域绑定、跨会话检索），schema 与现有 `zeokeel.db` 兼容，可零拷贝切换；`scripts/publish-rig-local.sh` 支持把嵌套模块发布到本地离线代理（`session/sqlstore/v0.1.1`）。产品侧切换与删除 `sessionstore` 实现留到下一轮（涉及 1.5k 行测试迁移）。
+
 - **SDK 上移 A.1a：会话检索的文本/片段层进入 rig `session/sqlsearch`**（2026-11-21）：`MessageColumns`（递归解码 tool 参数 JSON，引号/反斜杠是内容不是转义）、`EventText`、`EscapeLike`、`Snippet`/`PlainText`（rune 安全、去 Markdown 噪声）下移；产品删除 `search_text.go` 的解码实现与 `search.go` 的片段/转义实现，仅保留 schema、SQL 与扫描（`MessageSearchHit` 映射）。纯函数、无新依赖。`go.mod` 抬到 `v0.27.0-rc.8`（本地离线代理）。A.1 的第二半（schema/CRUD/RenameSession 整店上移）仍待做。
 
 - **SDK 上移 A.4：审批队列进入 rig `gate`**（2026-11-21）：新增 `gate.Queue`/`QueueRequest`/`Ask`/`AskTimeout`/`Pending`/`Resolve`/`Subscribe`——编号、等待、幂等回答、取消、订阅与可选超时全部下移；超时按"已拒绝"记录（迟到的 Resolve 仍幂等），订阅者 panic 被隔离。产品侧删除自研 `pending/resolved/subscribers/nextSeq` 队列机制与 `rememberAnswerLocked`/`notify`/`requestSequence`，只保留权限档策略、等待/超时文案、OS 通知与 decision 词表映射；`approvals` 的 Pending/Resolve/Subscribe 变成 SDK 队列适配。产品 `go.mod` 抬到 `v0.27.0-rc.7`（本地离线代理）。全量门禁通过。
