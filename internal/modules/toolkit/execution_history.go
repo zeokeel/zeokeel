@@ -17,11 +17,11 @@ package toolkit
 
 import (
 	"context"
-	"encoding/json"
-	"sort"
 	"strings"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+
+	rigexecution "github.com/zeokeel/zeokeel-rig/session/execution"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -52,156 +52,56 @@ type executionLiveness interface {
 
 // executionHistoryService is the toolkit's contracts.ExecutionHistoryService.
 type executionHistoryService struct {
-	store executionEventLog
-	live  executionLiveness
+	inner *rigexecution.Service
 }
 
 var _ contracts.ExecutionHistoryService = (*executionHistoryService)(nil)
 
 // newExecutionHistoryService builds the read model over an optional store and an
-// optional live resolver. Both may be nil: without a store the history is
-// empty, and without live managers every unclosed record is interrupted.
+// optional live resolver. Both may be nil.
 func newExecutionHistoryService(store executionEventLog, live executionLiveness) *executionHistoryService {
-	return &executionHistoryService{store: store, live: live}
+	var log rigexecution.EventLog
+	if store != nil {
+		log = store
+	}
+	return &executionHistoryService{inner: rigexecution.NewService(log, livenessAdapter{live: live})}
 }
 
 // ExecutionHistory implements contracts.ExecutionHistoryService: the newest
-// bounded records of one session, newest start first. A failed read yields no
-// rows (header chrome never fails the screen) and a host without a store has no
-// history to show.
+// bounded records of one session, newest start first.
 func (s *executionHistoryService) ExecutionHistory(sessionID string, limit int) []contracts.ExecutionRecord {
-	if s == nil || s.store == nil {
+	if s == nil || s.inner == nil {
 		return nil
 	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return nil
+	records := s.inner.History(sessionID, limit)
+	out := make([]contracts.ExecutionRecord, 0, len(records))
+	for _, record := range records {
+		out = append(out, contracts.ExecutionRecord{
+			ID:        record.ID,
+			SessionID: record.SessionID,
+			Kind:      record.Kind,
+			Command:   record.Command,
+			CWD:       record.CWD,
+			Root:      record.Root,
+			Mode:      record.Mode,
+			Transport: record.Transport,
+			Started:   record.Started,
+			Ended:     record.Ended,
+			State:     record.State,
+			Outcome:   record.Outcome,
+		})
 	}
-	events, err := s.store.Last(context.Background(), sessionID, executionHistoryEvents)
-	if err != nil {
-		return nil
-	}
-	records := foldExecutionHistory(events, sessionID, s.live)
-	if limit = executionHistoryLimit(limit); len(records) > limit {
-		records = records[:limit]
-	}
-	return records
+	return out
 }
 
-// executionHistoryLimit normalizes a caller's cap onto the read model's bounds.
-func executionHistoryLimit(limit int) int {
-	if limit <= 0 {
-		return executionHistoryDefaultLimit
-	}
-	if limit > executionHistoryLimitMax {
-		return executionHistoryLimitMax
-	}
-	return limit
-}
+// livenessAdapter bridges the toolkit's live resolver to the SDK interface.
+type livenessAdapter struct{ live executionLiveness }
 
-// executionStartedPayload is the durable payload of job_started and
-// terminal_opened (both write the routing details the UI can show).
-type executionStartedPayload struct {
-	ID        string `json:"id"`
-	Command   string `json:"command"`
-	CWD       string `json:"cwd"`
-	Root      string `json:"root"`
-	Mode      string `json:"mode"`
-	Transport string `json:"transport"`
-}
-
-// executionEndedPayload is the durable payload of job_finished and
-// terminal_closed (the terminal word, when the backend records one).
-type executionEndedPayload struct {
-	ID    string `json:"id"`
-	State string `json:"state"`
-}
-
-// foldExecutionHistory pairs the durable start/end events per resource id,
-// overlays the live managers and returns the records newest start first. A
-// finish/close without its start in the bounded window is dropped (the record's
-// beginning is unknowable), and an unreadable payload is skipped instead of
-// failing the whole read.
-func foldExecutionHistory(events []rig.SessionEvent, sessionID string, live executionLiveness) []contracts.ExecutionRecord {
-	records := make([]contracts.ExecutionRecord, 0, 8)
-	byID := make(map[string]int, 8)
-	for _, event := range events {
-		if event.SessionID != "" && event.SessionID != sessionID {
-			continue
-		}
-		switch event.Type {
-		case contracts.ExecutionJobStarted, contracts.ExecutionTerminalOpened:
-			var payload executionStartedPayload
-			if len(event.Payload) == 0 || json.Unmarshal(event.Payload, &payload) != nil {
-				continue
-			}
-			id := strings.TrimSpace(payload.ID)
-			if id == "" {
-				continue
-			}
-			if _, exists := byID[id]; exists {
-				// One resource starts once; a duplicate start is a replay, not a
-				// second record.
-				continue
-			}
-			record := contracts.ExecutionRecord{
-				ID:        id,
-				SessionID: sessionID,
-				Kind:      contracts.ExecutionKindJob,
-				Command:   payload.Command,
-				CWD:       payload.CWD,
-				Root:      payload.Root,
-				Mode:      payload.Mode,
-				Transport: payload.Transport,
-				Started:   event.Time,
-			}
-			if event.Type == contracts.ExecutionTerminalOpened {
-				record.Kind = contracts.ExecutionKindTerminal
-				record.Command = ""
-			}
-			byID[id] = len(records)
-			records = append(records, record)
-		case contracts.ExecutionJobFinished, contracts.ExecutionTerminalClosed:
-			var payload executionEndedPayload
-			if len(event.Payload) == 0 || json.Unmarshal(event.Payload, &payload) != nil {
-				continue
-			}
-			index, ok := byID[strings.TrimSpace(payload.ID)]
-			if !ok {
-				// Orphan end (its start is outside the bounded window).
-				continue
-			}
-			record := &records[index]
-			if !record.Ended.IsZero() {
-				// The first recorded end is the truth; a duplicate close is noise.
-				continue
-			}
-			record.Ended = event.Time
-			record.State = contracts.ExecutionStateFinished
-			if event.Type == contracts.ExecutionJobFinished {
-				record.Outcome = strings.TrimSpace(payload.State)
-			} else {
-				record.Outcome = "closed"
-			}
-		}
+func (a livenessAdapter) Running(kind, id string) bool {
+	if a.live == nil {
+		return false
 	}
-	for index := range records {
-		if records[index].State != "" {
-			continue
-		}
-		if live != nil && live.running(records[index].Kind, records[index].ID) {
-			records[index].State = contracts.ExecutionStateRunning
-			continue
-		}
-		records[index].State = contracts.ExecutionStateInterrupted
-	}
-	sort.SliceStable(records, func(i, j int) bool {
-		if records[i].Started.Equal(records[j].Started) {
-			return records[i].ID > records[j].ID
-		}
-		return records[i].Started.After(records[j].Started)
-	})
-	return records
+	return a.live.running(kind, id)
 }
 
 // groupExecutionLiveness resolves live ownership from the retained root-scoped

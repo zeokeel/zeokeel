@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/egoist/mygo v0.9.2
 	github.com/zeokeel/zeokeel-kernel v0.1.1
-	github.com/zeokeel/zeokeel-rig v0.28.3
+	github.com/zeokeel/zeokeel-rig v0.28.4
 	github.com/zeokeel/zeokeel-rig/session/sqlstore v0.2.3
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.43.0
