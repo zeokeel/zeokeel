@@ -1,9 +1,9 @@
 package agent
 
 // Tests for the raw session-log archive (contracts.SessionLogExporter): a ZIP
-// with session.jsonl (the raw durable events) and meta.json (identity and
-// export header), honest errors for an unknown session or a missing store, and
-// a bounded archive.
+// with events.jsonl (the raw durable events) and meta.json (identity and export
+// header), honest errors for an unknown session or a missing store, and a
+// bounded archive.
 
 import (
 	"archive/zip"
@@ -17,6 +17,7 @@ import (
 	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/session/export"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -62,7 +63,7 @@ func archiveEntries(t *testing.T, data []byte) map[string][]byte {
 	return entries
 }
 
-// logArchiveEvent is the JSON shape of one session.jsonl line.
+// logArchiveEvent is the JSON shape of one events.jsonl line.
 type logArchiveEvent struct {
 	Seq     int64           `json:"seq"`
 	Type    string          `json:"type"`
@@ -98,11 +99,11 @@ func TestSessionLogArchiveContainsRawEventsAndMeta(t *testing.T) {
 	}
 	entries := archiveEntries(t, data)
 	if len(entries) != 2 {
-		t.Fatalf("archive entries = %v, want session.jsonl + meta.json", entries)
+		t.Fatalf("archive entries = %v, want events.jsonl + meta.json", entries)
 	}
-	jsonl, ok := entries["session.jsonl"]
+	jsonl, ok := entries["events.jsonl"]
 	if !ok {
-		t.Fatalf("archive lacks session.jsonl: %v", entries)
+		t.Fatalf("archive lacks events.jsonl: %v", entries)
 	}
 	rawMeta, ok := entries["meta.json"]
 	if !ok {
@@ -111,7 +112,7 @@ func TestSessionLogArchiveContainsRawEventsAndMeta(t *testing.T) {
 
 	lines := strings.Split(strings.TrimSpace(string(jsonl)), "\n")
 	if len(lines) != 3 {
-		t.Fatalf("session.jsonl lines = %d, want one per event (3):\n%s", len(lines), jsonl)
+		t.Fatalf("events.jsonl lines = %d, want one per event (3):\n%s", len(lines), jsonl)
 	}
 	for index, line := range lines {
 		var event logArchiveEvent
@@ -165,8 +166,8 @@ func TestSessionLogArchiveEmptySession(t *testing.T) {
 		t.Fatalf("SessionLogArchive: %v", err)
 	}
 	entries := archiveEntries(t, data)
-	if len(entries["session.jsonl"]) != 0 {
-		t.Fatalf("empty session JSONL = %q, want empty", entries["session.jsonl"])
+	if len(entries["events.jsonl"]) != 0 {
+		t.Fatalf("empty session JSONL = %q, want empty", entries["events.jsonl"])
 	}
 	if !strings.Contains(string(entries["meta.json"]), `"sess-empty"`) {
 		t.Fatalf("meta.json does not name the session: %s", entries["meta.json"])
@@ -198,7 +199,7 @@ func TestSessionLogArchiveWithoutStore(t *testing.T) {
 // TestSessionLogArchiveIsBounded covers the bound: a log past the archive limit
 // errors instead of producing an unbounded archive.
 func TestSessionLogArchiveIsBounded(t *testing.T) {
-	events := make([]rig.SessionEvent, sessionLogArchiveMaxEvents+1)
+	events := make([]rig.SessionEvent, export.MaxEvents+1)
 	for index := range events {
 		events[index] = rig.SessionEvent{Seq: int64(index + 1), Type: "tool_call",
 			Payload: json.RawMessage(`{"tool":"bash"}`)}

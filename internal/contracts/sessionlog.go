@@ -15,7 +15,7 @@ import (
 // host without the capability shows no export entry.
 //
 // The archive is the product's honest audit artifact: the durable events are
-// exported verbatim (the archive's session.jsonl), plus an export header
+// exported verbatim (the archive's events.jsonl), plus an export header
 // (meta.json). It contains no model prompt injections, no rendered UI state and
 // no in-memory-only data.
 type SessionLogExporter interface {
