@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **5 项会话能力上移 SDK**（2026-11-22）：prompt inbox（`session/inbox`）、session 日志导出（`session/export`）、`@session` 引用展开（`session/references`）、tool timeline 回放（`session/timeline`）、context observability 折叠（`session/observability`）；产品只保留适配层，依赖 `rig v0.30.1`。
+
 - **记忆 v2 UI 接入**（2026-11-22）：新增 `zeokeel/memorystore` 模块（按工作区共享 v2 SQLite store）与 `contracts.MemoryService`；agent 改用共享 store；会话右栏「记忆」tab 改为 v2：搜索、类型过滤、紧凑列表、L0/L1/L2 详情、快速新建（默认 preferences）与删除；移除旧 `/memory` 命令与旧管理弹窗。
 
 - **memory 切换到 SDK v2（SQLite）**（2026-11-22）：产品删除旧 `zeokeel/memory` 模块、旧 memory 工具与设置页；agent 产品配置 `memory: true` 时按工作区打开 `rig/memoryv2` SQLite 后端（`<dataDir>/memory/<workspaceID>/memory.db`），挂 `memory.ToolsWithStore`，由 kit 负责自动召回与 Run 后捕获。旧 `memory.json` 不迁移，旧记忆管理页移除。
