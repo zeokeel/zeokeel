@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **workspace/insights/update 上移 SDK**（2026-11-22）：workspace 注册表与根内文件服务、insights 事件聚合、update GitHub 检查/校验下载分别使用 `rig/workspace`、`rig/session/insights`、`rig/update`；产品保留模块装配、契约映射、UI、git Changes、install/pending-restart 与价格/模型目录。依赖 `rig v0.31.0`。
+
 - **5 项会话能力上移 SDK**（2026-11-22）：prompt inbox（`session/inbox`）、session 日志导出（`session/export`）、`@session` 引用展开（`session/references`）、tool timeline 回放（`session/timeline`）、context observability 折叠（`session/observability`）；产品只保留适配层，依赖 `rig v0.30.1`。
 
 - **记忆 v2 UI 接入**（2026-11-22）：新增 `zeokeel/memorystore` 模块（按工作区共享 v2 SQLite store）与 `contracts.MemoryService`；agent 改用共享 store；会话右栏「记忆」tab 改为 v2：搜索、类型过滤、紧凑列表、L0/L1/L2 详情、快速新建（默认 preferences）与删除；移除旧 `/memory` 命令与旧管理弹窗。
