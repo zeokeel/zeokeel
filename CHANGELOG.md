@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **剩余差异收尾**（2026-11-22）：team 后续 send 的 `Track` 跟踪、快速 spawn 的完成结果、fork 身份；automation 降级状态契约与 UI 提示；MCP 重名 server 显示区分与 FileTokenStore 加密钩子。依赖 `rig v0.36.0`。
+
 - **收敛收尾**（2026-11-22）：文档最终归属与 v1 memory 死契约清理；team Coordinator.Adopt（模型工具 spawn 归 coordinator）；MCP `OnReconnect` 与重名 server `Server.Key` 命名空间；automation 跨进程注册表锁与降级模式。依赖 `rig v0.35.0`。
 
 - **MCP OAuth/刷新全部上移 SDK**（2026-11-22）：客户端缓存/指纹、授权/撤销、后台刷新循环、authorized 自动重连与文件型 TokenStore 使用 `rig/tools/mcp/auth` + manager 集成；产品只保留 settings TokenStore、契约映射与 UI。依赖 `rig v0.34.1`。
