@@ -298,7 +298,7 @@ func Module() *module.Descriptor[Config] {
 		for _, spec := range registry.Specs() {
 			known[spec.Name] = true
 		}
-		for _, tool := range newTeamTools(svc, teamManager) {
+		for _, tool := range newTeamTools(svc, teamManager, known) {
 			name := strings.TrimSpace(tool.Name())
 			if name == "" {
 				continue
