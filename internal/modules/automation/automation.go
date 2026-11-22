@@ -3,13 +3,21 @@
 // through the chat service into the task's bound conversation, and the optional
 // rig schedule_* tools bound to this durable scheduler. Every run is recorded as
 // delivered (the chat service accepted the prompt) and later settles to
-// success/failed/interrupted by subscribing to the chat session state.
+// success/failed/interrupted by reading the chat session state.
 //
 // It is a kernel backend module: it requires the product data directory, the
 // host logger and the chat service, and optionally consumes the Rig toolkit
 // registry to replace the toolkit's in-memory schedule tools with the durable
-// adapter. Tasks are stored as JSON and every mutation is written atomically;
-// the ticker goroutine is owned by the module effect and stops on unload.
+// adapter.
+//
+// The durable registry and the claim/deliver/settle state machine live in the
+// host-agnostic github.com/zeokeel/zeokeel-rig/session/automation package. This
+// module supplies the host half: the schedule parser (product contracts), chat
+// delivery, model/workspace/permission overrides, run notifications, session
+// provenance and the contracts.AutomationService read model. Product-only task
+// fields are carried through the registry via the SDK's opaque task host fields,
+// so an existing automations.json keeps its model/workspace/session/permission
+// values and remains readable.
 package automation
 
 import (
@@ -19,7 +27,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +34,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
 	rig "github.com/zeokeel/zeokeel-rig"
+	rigautomation "github.com/zeokeel/zeokeel-rig/session/automation"
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
 	rigschedule "github.com/zeokeel/zeokeel-rig/tools/schedule"
 
@@ -53,9 +61,7 @@ const (
 // ErrTaskNotFound reports an unknown automation task ID.
 var ErrTaskNotFound = errors.New("automation: task not found")
 
-// ErrClosed reports a RunNow after Close: the scheduler no longer starts runs
-// (BE-07 — the old path raced the teardown WaitGroup and delivered prompts
-// after Close returned).
+// ErrClosed reports a RunNow after Close: the scheduler no longer starts runs.
 var ErrClosed = errors.New("automation: service is closed")
 
 // Config is the module's typed assembly config.
@@ -84,15 +90,14 @@ func Module() *module.Descriptor[Config] {
 			return fmt.Errorf("%s: require chat service: %w", ModuleID, err)
 		}
 		// The settings store is optional: it only records the origin of the
-		// sessions the runs create, so a host without it still runs tasks (the
-		// session read model then reports no provenance).
+		// sessions the runs create, so a host without it still runs tasks.
 		settings, _ := ctx.Get(contracts.KeySettings)
 		service, err := newService(dataDir, cfg, logger, chat, settings)
 		if err != nil {
 			return fmt.Errorf("%s: open automation registry: %w", ModuleID, err)
 		}
-		// The notifier is optional: a host without it (headless/embedded) still
-		// settles runs, it only cannot reach the user outside the app.
+		// The notifier is optional: a host without it still settles runs, it
+		// only cannot reach the user outside the app.
 		if notifier, ok := ctx.Get(contracts.KeyNotifier); ok && notifier != nil {
 			service.notifier = notifier
 		}
@@ -133,95 +138,12 @@ func validateConfig(cfg Config) error {
 	return nil
 }
 
-// --- persistence document --------------------------------------------------
-
-// taskRecord is one task in the JSON registry.
-type taskRecord struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Prompt      string `json:"prompt"`
-	Schedule    string `json:"schedule"`
-	Model       string `json:"model,omitempty"`
-	WorkspaceID string `json:"workspaceId,omitempty"`
-	Permission  string `json:"permission,omitempty"`
-	// SessionID is the conversation subsequent runs are delivered to; the
-	// first run creates it and the service persists it here.
-	SessionID string `json:"sessionId,omitempty"`
-	// NewSessionPerRun starts every run in a fresh conversation.
-	NewSessionPerRun bool      `json:"newSessionPerRun,omitempty"`
-	Enabled          bool      `json:"enabled"`
-	CreatedAt        time.Time `json:"createdAt"`
-	UpdatedAt        time.Time `json:"updatedAt"`
-	LastRun          time.Time `json:"lastRun"`
-	NextRun          time.Time `json:"nextRun"`
-	LastError        string    `json:"lastError"`
-
-	// RunHistory is the persisted recent-run list (newest first).
-	RunHistory []contracts.AutomationRunRecord `json:"runHistory,omitempty"`
-}
-
-// registryDocument is the on-disk registry.
-type registryDocument struct {
-	Tasks []taskRecord `json:"tasks"`
-}
-
 // --- service ---------------------------------------------------------------
-
-// service is the contracts.AutomationService implementation.
-type service struct {
-	mu sync.Mutex
-
-	path   string
-	logger contracts.Logger
-	chat   contracts.ChatService
-	// settings is optional: it records the origin of the sessions the runs
-	// create, so the sidebar can hide automation-run conversations by explicit
-	// provenance instead of guessing from their title (audit F6).
-	settings contracts.SettingsService
-	// notifier is optional: the host bridge that mirrors a settled automation
-	// run outside the app (OS notification + in-app toast).
-	notifier contracts.Notifier
-
-	tasks    []contracts.AutomationTask
-	inFlight map[string]bool
-	nameSeq  int
-	runSeq   uint64
-
-	// pending tracks delivered runs whose chat session has not settled yet,
-	// keyed by run-record ID. Settlement writes the terminal status back into
-	// the task's RunHistory.
-	pending map[string]*pendingRun
-
-	// chatUnsub releases the chat-session subscription on Close.
-	chatUnsub func()
-	// closed stops new settlement goroutines after Close begins.
-	closed bool
-
-	subscribers    map[uint64]func()
-	nextSubscriber uint64
-
-	interval  time.Duration
-	stop      chan struct{}
-	done      chan struct{}
-	closeOnce sync.Once
-	// runs tracks in-flight executions so Close can wait for their writes.
-	runs sync.WaitGroup
-}
-
-var _ contracts.AutomationService = (*service)(nil)
 
 // discardLogger drops automation log lines.
 type discardLogger struct{}
 
 func (discardLogger) Printf(string, ...any) {}
-
-// pendingRun is one delivered run awaiting its chat session's terminal state.
-type pendingRun struct {
-	taskID      string
-	sessionID   string
-	startedAt   time.Time
-	deliveredAt time.Time
-}
 
 // runDelivery is one successful chat delivery of a task prompt.
 type runDelivery struct {
@@ -230,6 +152,40 @@ type runDelivery struct {
 	Summary     string
 	DeliveredAt time.Time
 }
+
+// service is the contracts.AutomationService implementation.
+type service struct {
+	mu sync.Mutex
+
+	path     string
+	logger   contracts.Logger
+	chat     contracts.ChatService
+	settings contracts.SettingsService
+	notifier contracts.Notifier
+
+	// store is the durable registry; scheduler owns claim/deliver/settle.
+	store     *rigautomation.Store
+	scheduler *rigautomation.Scheduler
+
+	// nameSeq numbers generated "自动化 N" names.
+	nameSeq int
+	// notified dedupes completion notifications per delivery.
+	notified map[string]bool
+
+	// chatUnsub releases the chat-session subscription on Close.
+	chatUnsub func()
+	// closed stops new runs after Close begins.
+	closed bool
+
+	subscribers    map[uint64]func()
+	nextSubscriber uint64
+
+	closeOnce sync.Once
+	// runs tracks in-flight RunNow/onChatChange work so Close waits for it.
+	runs sync.WaitGroup
+}
+
+var _ contracts.AutomationService = (*service)(nil)
 
 // newService loads the registry and starts the scheduler loop. settings is
 // optional (nil for embedded/headless use): it only carries the run-session
@@ -254,27 +210,48 @@ func newService(dataDir string, cfg Config, logger contracts.Logger, chat contra
 		logger:      logger,
 		chat:        chat,
 		settings:    settings,
-		inFlight:    map[string]bool{},
-		pending:     map[string]*pendingRun{},
-		subscribers: map[uint64]func(){},
-		interval:    tick,
-		stop:        make(chan struct{}),
-		done:        make(chan struct{}),
+		notified:    make(map[string]bool),
+		subscribers: make(map[uint64]func()),
 	}
-	if err := service.load(); err != nil {
+	// A corrupt or unreadable registry is quarantined by the SDK store; log the
+	// recovery with the product's wording (the SDK has no logger).
+	service.logRegistryRecovery()
+	store, err := rigautomation.OpenFile(path)
+	if err != nil {
 		return nil, err
 	}
+	service.store = store
+	service.scheduler = &rigautomation.Scheduler{
+		Store:    store,
+		Now:      func() time.Time { return time.Now().UTC() },
+		Deliver:  service.deliver,
+		Settle:   service.settle,
+		Next:     service.nextRun,
+		Interval: tick,
+		Logger: func(format string, args ...any) {
+			service.logger.Printf(format, args...)
+		},
+	}
+	// Settle runs that were delivered but never completed before the previous
+	// shutdown (the SDK rebuilds its pending set from the durable records).
+	service.adoptLegacyDeliveredRuns()
+	if err := service.scheduler.SettlePending(context.Background()); err != nil && !errors.Is(err, rigautomation.ErrSchedulerClosed) {
+		service.logger.Printf("%s: initialize scheduler: %v", ModuleID, err)
+	}
 	// The automation module subscribes to chat-session changes to settle its
-	// delivered runs. A host whose chat service cannot subscribe still runs
-	// tasks; their records then stay "delivered" (unknown outcome).
+	// delivered runs promptly. A host whose chat service cannot subscribe still
+	// runs tasks; settlement then happens on the ticker.
 	if unsubscribe, err := chat.Subscribe(service.onChatChange); err != nil {
 		service.logger.Printf("%s: subscribe chat session states: %v", ModuleID, err)
 	} else {
 		service.chatUnsub = unsubscribe
 	}
-	service.reconcileLoadedRuns()
-	go service.loop()
-	service.logger.Printf("%s: initialized with %d tasks (tick %s)", ModuleID, len(service.tasks), tick)
+	if err := service.scheduler.Start(); err != nil {
+		service.Close()
+		return nil, err
+	}
+	tasks, _ := store.List()
+	service.logger.Printf("%s: initialized with %d tasks (tick %s)", ModuleID, len(tasks), tick)
 	return service, nil
 }
 
@@ -297,137 +274,22 @@ func resolveRegistryPath(dataDir, requested string) (string, error) {
 	return filepath.Join(dataDir, filepath.FromSlash(requested)), nil
 }
 
-// load reads the registry, treating a missing file as empty. An unreadable or
-// malformed registry is quarantined (FR-06): the bad file is renamed to
-// <path>.corrupt-<ts>, a warning is logged and the scheduler starts with no
-// tasks instead of failing activation.
-func (s *service) load() error {
+// logRegistryRecovery reports a corrupt/unreadable registry before the SDK
+// quarantines it, keeping the product's recovery log lines and wording.
+func (s *service) logRegistryRecovery() {
 	data, err := os.ReadFile(s.path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
 	if err != nil {
-		// BE-09 (2026-11 audit): a non-NotExist READ error quarantines exactly
-		// like a decode error — an empty start with the entry left in place
-		// would let the next persist overwrite it and lose the original tasks.
-		s.quarantine(fmt.Sprintf("automation registry %q could not be read (%v)", s.path, err))
-		return nil
-	}
-	var document registryDocument
-	if err := json.Unmarshal(data, &document); err != nil {
-		s.quarantine(fmt.Sprintf("automation registry %q is corrupt (%v)", s.path, err))
-		return nil
-	}
-	tasks := make([]contracts.AutomationTask, 0, len(document.Tasks))
-	for _, record := range document.Tasks {
-		if strings.TrimSpace(record.ID) == "" {
-			continue
+		if !errors.Is(err, os.ErrNotExist) {
+			s.logger.Printf("%s: automation registry %q could not be read (%v); quarantine it and start with no tasks", ModuleID, s.path, err)
 		}
-		tasks = append(tasks, contracts.AutomationTask{
-			ID:               record.ID,
-			Name:             record.Name,
-			Prompt:           record.Prompt,
-			Schedule:         record.Schedule,
-			Enabled:          record.Enabled,
-			Model:            strings.TrimSpace(record.Model),
-			WorkspaceID:      strings.TrimSpace(record.WorkspaceID),
-			Permission:       strings.TrimSpace(record.Permission),
-			SessionID:        strings.TrimSpace(record.SessionID),
-			NewSessionPerRun: record.NewSessionPerRun,
-			CreatedAt:        record.CreatedAt.UTC(),
-			UpdatedAt:        record.UpdatedAt.UTC(),
-			LastRun:          record.LastRun.UTC(),
-			NextRun:          record.NextRun.UTC(),
-			LastError:        record.LastError,
-			RunHistory:       append([]contracts.AutomationRunRecord(nil), record.RunHistory...),
-		})
+		return
 	}
-	s.tasks = tasks
-	return nil
-}
-
-// quarantine renames the unusable registry out of the way, logs a warning and
-// lets the scheduler start empty.
-func (s *service) quarantine(reason string) {
-	backup := fmt.Sprintf("%s.corrupt-%d", s.path, time.Now().UTC().UnixNano())
-	message := reason + "; starting with no tasks"
-	if err := os.Rename(s.path, backup); err != nil {
-		message += fmt.Sprintf(" (could not quarantine the file: %v)", err)
-	} else {
-		message += fmt.Sprintf(" (quarantined as %s)", backup)
+	var document struct {
+		Tasks []rigautomation.Task `json:"tasks"`
 	}
-	s.logRecovery(message)
-}
-
-// logRecovery records a recovery warning through the host logger.
-func (s *service) logRecovery(message string) {
-	if s.logger != nil {
-		s.logger.Printf("%s: %s", ModuleID, message)
+	if err := json.Unmarshal(data, &document); err != nil {
+		s.logger.Printf("%s: automation registry %q is corrupt (%v); quarantine it and start with no tasks", ModuleID, s.path, err)
 	}
-}
-
-// persistLocked writes the registry atomically (temporary file + Sync +
-// rename). The caller holds s.mu.
-func (s *service) persistLocked() error {
-	directory := filepath.Dir(s.path)
-	if err := os.MkdirAll(directory, dirMode); err != nil {
-		return fmt.Errorf("%s: create registry directory %q: %w", ModuleID, directory, err)
-	}
-	document := registryDocument{Tasks: make([]taskRecord, 0, len(s.tasks))}
-	for _, task := range s.tasks {
-		document.Tasks = append(document.Tasks, taskRecord{
-			ID:               task.ID,
-			Name:             task.Name,
-			Prompt:           task.Prompt,
-			Schedule:         task.Schedule,
-			Enabled:          task.Enabled,
-			Model:            task.Model,
-			WorkspaceID:      task.WorkspaceID,
-			Permission:       task.Permission,
-			SessionID:        task.SessionID,
-			NewSessionPerRun: task.NewSessionPerRun,
-			CreatedAt:        task.CreatedAt.UTC(),
-			UpdatedAt:        task.UpdatedAt.UTC(),
-			LastRun:          task.LastRun.UTC(),
-			NextRun:          task.NextRun.UTC(),
-			LastError:        task.LastError,
-			RunHistory:       append([]contracts.AutomationRunRecord(nil), task.RunHistory...),
-		})
-	}
-	data, err := json.MarshalIndent(document, "", "  ")
-	if err != nil {
-		return fmt.Errorf("%s: encode registry: %w", ModuleID, err)
-	}
-	temporary, err := os.CreateTemp(directory, ".automations-*.tmp")
-	if err != nil {
-		return fmt.Errorf("%s: create temporary registry: %w", ModuleID, err)
-	}
-	temporaryPath := temporary.Name()
-	cleanup := func() {
-		_ = temporary.Close()
-		_ = os.Remove(temporaryPath)
-	}
-	if err := temporary.Chmod(fileMode); err != nil {
-		cleanup()
-		return fmt.Errorf("%s: chmod temporary registry: %w", ModuleID, err)
-	}
-	if _, err := temporary.Write(data); err != nil {
-		cleanup()
-		return fmt.Errorf("%s: write temporary registry: %w", ModuleID, err)
-	}
-	if err := temporary.Sync(); err != nil {
-		cleanup()
-		return fmt.Errorf("%s: sync temporary registry: %w", ModuleID, err)
-	}
-	if err := temporary.Close(); err != nil {
-		_ = os.Remove(temporaryPath)
-		return fmt.Errorf("%s: close temporary registry: %w", ModuleID, err)
-	}
-	if err := os.Rename(temporaryPath, s.path); err != nil {
-		_ = os.Remove(temporaryPath)
-		return fmt.Errorf("%s: replace registry %q: %w", ModuleID, s.path, err)
-	}
-	return nil
 }
 
 // Close stops the scheduler loop, releases the chat subscription, waits for the
@@ -443,81 +305,12 @@ func (s *service) Close() {
 		if unsubscribe != nil {
 			unsubscribe()
 		}
-		close(s.stop)
-		<-s.done
+		if s.scheduler != nil {
+			s.scheduler.Stop()
+		}
 		s.runs.Wait()
 		s.logger.Printf("%s: scheduler stopped", ModuleID)
 	})
-}
-
-// loop is the scheduler ticker goroutine.
-func (s *service) loop() {
-	defer close(s.done)
-	ticker := time.NewTicker(s.interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-s.stop:
-			return
-		case now := <-ticker.C:
-			s.tick(now.UTC())
-		}
-	}
-}
-
-// tick launches every enabled task whose NextRun is due. Execution happens on
-// goroutines; the in-flight guard prevents overlapping copies of one task.
-// Delivered runs whose session ended are settled first (outside the lock and on
-// a tracked goroutine: the ticker never waits for a run).
-func (s *service) tick(now time.Time) {
-	s.reconcilePending()
-	s.mu.Lock()
-	due := make([]string, 0, len(s.tasks))
-	for _, task := range s.tasks {
-		if !task.Enabled || task.NextRun.IsZero() || task.NextRun.After(now) || s.inFlight[task.ID] {
-			continue
-		}
-		due = append(due, task.ID)
-	}
-	s.mu.Unlock()
-	for _, id := range due {
-		s.startRun(id, false)
-	}
-}
-
-// prepareSchedule canonicalizes a draft schedule and computes its next firing.
-//
-// Disabled tasks keep an unparseable draft as typed (the UI shows the raw value
-// with a Fix action); enabled tasks must parse and have an upcoming occurrence.
-// A once-at schedule must also be in the future (DSH rejects past absolute
-// targets at creation).
-func prepareSchedule(spec string, enabled bool, now time.Time) (string, time.Time, error) {
-	canonical := strings.TrimSpace(spec)
-	if canonical == "" {
-		if !enabled {
-			return "", time.Time{}, nil
-		}
-		return "", time.Time{}, fmt.Errorf("%s: schedule is required for an enabled task", ModuleID)
-	}
-	parsed, err := Parse(canonical)
-	if err != nil {
-		if !enabled {
-			return canonical, time.Time{}, nil
-		}
-		return "", time.Time{}, err
-	}
-	canonical = parsed.String()
-	if !enabled {
-		return canonical, time.Time{}, nil
-	}
-	next := parsed.Next(now)
-	if next.IsZero() {
-		return "", time.Time{}, fmt.Errorf("%s: schedule %q has no upcoming occurrence", ModuleID, canonical)
-	}
-	if parsed.Kind() == KindAt && !next.After(now) {
-		return "", time.Time{}, fmt.Errorf("%s: schedule %q is in the past", ModuleID, canonical)
-	}
-	return canonical, next, nil
 }
 
 // --- CRUD ------------------------------------------------------------------
@@ -527,18 +320,14 @@ func (s *service) List(ctx context.Context) ([]contracts.AutomationTask, error) 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]contracts.AutomationTask, len(s.tasks))
-	for i, task := range s.tasks {
-		out[i] = copyTask(task)
+	cores, err := s.store.List()
+	if err != nil {
+		return nil, err
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
-			return out[i].CreatedAt.Before(out[j].CreatedAt)
-		}
-		return out[i].ID < out[j].ID
-	})
+	out := make([]contracts.AutomationTask, len(cores))
+	for index, core := range cores {
+		out[index] = s.contractTask(core)
+	}
 	return out, nil
 }
 
@@ -548,50 +337,40 @@ func (s *service) Create(ctx context.Context, task contracts.AutomationTask) (co
 		return contracts.AutomationTask{}, err
 	}
 	now := time.Now().UTC()
-	s.mu.Lock()
-
 	id := strings.TrimSpace(task.ID)
 	if id == "" {
-		id = s.newTaskIDLocked()
-	} else if s.indexLocked(id) >= 0 {
-		s.mu.Unlock()
+		id = s.newTaskID()
+	} else if _, ok := s.store.Get(id); ok {
 		return contracts.AutomationTask{}, fmt.Errorf("%s: task %q already exists", ModuleID, id)
 	}
 	name := strings.TrimSpace(task.Name)
 	if name == "" {
+		s.mu.Lock()
 		s.nameSeq++
 		name = fmt.Sprintf("自动化 %d", s.nameSeq)
+		s.mu.Unlock()
 	}
 	schedule, nextRun, err := prepareSchedule(task.Schedule, task.Enabled, now)
 	if err != nil {
-		s.mu.Unlock()
 		return contracts.AutomationTask{}, err
 	}
-	created := contracts.AutomationTask{
-		ID:               id,
-		Name:             name,
-		Prompt:           task.Prompt,
-		Schedule:         schedule,
-		Enabled:          task.Enabled,
-		Model:            strings.TrimSpace(task.Model),
-		WorkspaceID:      strings.TrimSpace(task.WorkspaceID),
-		Permission:       strings.TrimSpace(task.Permission),
-		SessionID:        strings.TrimSpace(task.SessionID),
-		NewSessionPerRun: task.NewSessionPerRun,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-		NextRun:          nextRun,
+	core := rigautomation.Task{
+		ID:        id,
+		Name:      name,
+		Prompt:    task.Prompt,
+		Schedule:  rigautomation.Schedule(schedule),
+		Enabled:   task.Enabled,
+		CreatedAt: now,
+		UpdatedAt: now,
+		NextRun:   nextRun,
 	}
-	previous := append([]contracts.AutomationTask(nil), s.tasks...)
-	s.tasks = append(s.tasks, created)
-	if err := s.persistLocked(); err != nil {
-		s.tasks = previous
-		s.mu.Unlock()
+	applyHostFields(&core, task)
+	created, err := s.store.Create(core)
+	if err != nil {
 		return contracts.AutomationTask{}, err
 	}
-	s.mu.Unlock()
 	s.notify()
-	return copyTask(created), nil
+	return s.contractTask(created), nil
 }
 
 // Update implements contracts.AutomationService.
@@ -603,21 +382,18 @@ func (s *service) Update(ctx context.Context, task contracts.AutomationTask) (co
 	if id == "" {
 		return contracts.AutomationTask{}, fmt.Errorf("%s: task id is required", ModuleID)
 	}
-	now := time.Now().UTC()
-	s.mu.Lock()
-	index := s.indexLocked(id)
-	if index < 0 {
-		s.mu.Unlock()
+	core, ok := s.store.Get(id)
+	if !ok {
 		return contracts.AutomationTask{}, fmt.Errorf("%w: %q", ErrTaskNotFound, id)
 	}
-	existing := s.tasks[index]
+	existing := s.contractTask(core)
 	name := strings.TrimSpace(task.Name)
 	if name == "" {
 		name = existing.Name
 	}
+	now := time.Now().UTC()
 	schedule, nextRun, err := prepareSchedule(task.Schedule, task.Enabled, now)
 	if err != nil {
-		s.mu.Unlock()
 		return contracts.AutomationTask{}, err
 	}
 	updated := existing
@@ -639,16 +415,23 @@ func (s *service) Update(ctx context.Context, task contracts.AutomationTask) (co
 	if existing.Schedule != schedule || existing.Enabled != task.Enabled {
 		updated.LastError = ""
 	}
-	previous := append([]contracts.AutomationTask(nil), s.tasks...)
-	s.tasks[index] = updated
-	if err := s.persistLocked(); err != nil {
-		s.tasks = previous
-		s.mu.Unlock()
+	core.Name = updated.Name
+	core.Prompt = updated.Prompt
+	core.Schedule = rigautomation.Schedule(updated.Schedule)
+	core.Enabled = updated.Enabled
+	core.NextRun = updated.NextRun
+	core.UpdatedAt = updated.UpdatedAt
+	core.LastError = updated.LastError
+	applyHostFields(&core, updated)
+	stored, err := s.store.Update(core)
+	if err != nil {
+		if errors.Is(err, rigautomation.ErrTaskNotFound) {
+			return contracts.AutomationTask{}, fmt.Errorf("%w: %q", ErrTaskNotFound, id)
+		}
 		return contracts.AutomationTask{}, err
 	}
-	s.mu.Unlock()
 	s.notify()
-	return copyTask(updated), nil
+	return s.contractTask(stored), nil
 }
 
 // Delete implements contracts.AutomationService; unknown IDs are a no-op.
@@ -657,67 +440,47 @@ func (s *service) Delete(ctx context.Context, id string) error {
 		return err
 	}
 	id = strings.TrimSpace(id)
-	s.mu.Lock()
-	index := s.indexLocked(id)
-	if index < 0 {
-		s.mu.Unlock()
+	if _, ok := s.store.Get(id); !ok {
 		return nil
 	}
-	previous := append([]contracts.AutomationTask(nil), s.tasks...)
-	s.tasks = append(s.tasks[:index], s.tasks[index+1:]...)
-	if err := s.persistLocked(); err != nil {
-		s.tasks = previous
-		s.mu.Unlock()
+	if err := s.store.Delete(id); err != nil {
 		return err
 	}
-	s.mu.Unlock()
 	s.notify()
 	return nil
 }
 
 // RunNow implements contracts.AutomationService: it starts the task execution
-// immediately (asynchronously, like a scheduled run) and returns unknown-task
-// and context errors to the caller. Execution failures land in LastError.
-// After Close it returns ErrClosed instead of racing the teardown WaitGroup
-// (BE-07).
+// immediately (even for a disabled task) and returns unknown-task/context/closed
+// errors. Execution failures land in LastError. After Close it returns ErrClosed.
 func (s *service) RunNow(ctx context.Context, id string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	id = strings.TrimSpace(id)
 	s.mu.Lock()
-	if s.indexLocked(id) < 0 {
+	if s.closed {
+		s.mu.Unlock()
+		return ErrClosed
+	}
+	if _, ok := s.store.Get(id); !ok {
 		s.mu.Unlock()
 		return fmt.Errorf("%w: %q", ErrTaskNotFound, id)
 	}
-	s.mu.Unlock()
-	if !s.startRun(id, true) {
-		return ErrClosed
-	}
-	return nil
-}
-
-// startRun launches one execution and accounts for it so Close waits for the
-// registry writes of in-flight runs. The Add happens UNDER s.mu with a closed
-// check (BE-07, 2026-11 audit): Close sets closed under the same lock before
-// runs.Wait, so an Add can never race a zero-counter Wait — the old
-// unconditional Add panicked ("WaitGroup reused before previous Wait has
-// returned") and, because the panic lands after the atomic increment, left a
-// permanent +1 that hung Close forever. Returns false when the service is
-// closed (no goroutine started).
-func (s *service) startRun(id string, manual bool) bool {
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return false
-	}
+	// Track accepted runs so Close waits for their registry writes (BE-07).
 	s.runs.Add(1)
 	s.mu.Unlock()
-	go func() {
-		defer s.runs.Done()
-		s.execute(id, manual)
-	}()
-	return true
+	defer s.runs.Done()
+
+	err := s.scheduler.RunNow(ctx, id)
+	switch {
+	case errors.Is(err, rigautomation.ErrTaskNotFound):
+		return fmt.Errorf("%w: %q", ErrTaskNotFound, id)
+	case errors.Is(err, rigautomation.ErrSchedulerClosed):
+		return ErrClosed
+	default:
+		return err
+	}
 }
 
 // Subscribe implements contracts.AutomationService.
@@ -763,183 +526,366 @@ func (s *service) notify() {
 	}
 }
 
-func (s *service) indexLocked(id string) int {
-	for index, task := range s.tasks {
-		if task.ID == id {
-			return index
-		}
-	}
-	return -1
-}
-
-func (s *service) newTaskIDLocked() string {
+// newTaskID allocates a free durable task ID.
+func (s *service) newTaskID() string {
 	for {
 		id := fmt.Sprintf("auto-%d", time.Now().UnixNano())
-		if s.indexLocked(id) < 0 {
+		if _, ok := s.store.Get(id); !ok {
 			return id
 		}
 	}
 }
 
-// --- execution -------------------------------------------------------------
+// --- host field mapping ----------------------------------------------------
 
-// execute delivers one task run through the chat service and updates its
-// scheduling state. force marks a RunNow execution (it runs even for disabled
-// tasks). Delivery happens on the caller's goroutine; completion is settled
-// later from the chat subscription (never from the ticker).
-func (s *service) execute(taskID string, force bool) {
-	task, ok := s.claimRun(taskID, force)
-	if !ok {
-		return
+// Host-field keys carried through the SDK's opaque task fields.
+const (
+	hostKeyModel            = "model"
+	hostKeyWorkspaceID      = "workspaceId"
+	hostKeyPermission       = "permission"
+	hostKeySessionID        = "sessionId"
+	hostKeyNewSessionPerRun = "newSessionPerRun"
+)
+
+// contractTask maps one durable SDK task onto the product read model.
+func (s *service) contractTask(core rigautomation.Task) contracts.AutomationTask {
+	task := contracts.AutomationTask{
+		ID:               core.ID,
+		Name:             core.Name,
+		Prompt:           core.Prompt,
+		Schedule:         string(core.Schedule),
+		Enabled:          core.Enabled,
+		CreatedAt:        core.CreatedAt,
+		UpdatedAt:        core.UpdatedAt,
+		LastRun:          core.LastRun,
+		NextRun:          core.NextRun,
+		LastError:        core.LastError,
+		Model:            hostString(core.Host, hostKeyModel),
+		WorkspaceID:      hostString(core.Host, hostKeyWorkspaceID),
+		Permission:       hostString(core.Host, hostKeyPermission),
+		SessionID:        hostString(core.Host, hostKeySessionID),
+		NewSessionPerRun: hostBool(core.Host, hostKeyNewSessionPerRun),
 	}
-	defer s.releaseRun(taskID)
-
-	// A trigger while the previous delivered run of this task is still running
-	// is folded (existing in-flight behavior). When that run already ended but
-	// its notification was missed, settle it first and deliver this trigger.
-	if s.hasPendingTask(taskID) {
-		s.settleTask(taskID)
-		if s.hasPendingTask(taskID) {
-			s.logger.Printf("%s: task %s still has a run in flight; folding this trigger", ModuleID, taskID)
-			return
+	if len(core.RunHistory) > 0 {
+		task.RunHistory = make([]contracts.AutomationRunRecord, len(core.RunHistory))
+		for index, run := range core.RunHistory {
+			task.RunHistory[index] = contractRun(run)
 		}
 	}
-
-	startedAt := time.Now().UTC()
-	delivery, deliveryErr := s.runTask(task)
-	recordStatus, recordError, settled := "", "", false
-	if deliveryErr == nil {
-		recordStatus, recordError, settled = s.runOutcome(delivery.SessionID)
-	}
-	now := time.Now().UTC()
-	notifySettled := false
-
-	s.mu.Lock()
-	recordID := s.newRunRecordIDLocked()
-	if index := s.indexLocked(taskID); index >= 0 {
-		current := s.tasks[index]
-		current.LastRun = now
-		current.UpdatedAt = now
-		if delivery.Created && !task.NewSessionPerRun {
-			// The first run remembers the conversation subsequent runs use.
-			current.SessionID = delivery.SessionID
-		}
-		record := contracts.AutomationRunRecord{
-			ID:        recordID,
-			StartedAt: startedAt,
-			SessionID: delivery.SessionID,
-			Summary:   truncateRunSummary(delivery.Summary),
-		}
-		switch {
-		case deliveryErr != nil:
-			record.Status = contracts.AutomationRunFailure
-			record.CompletedAt = now
-			record.Error = truncateRunSummary(deliveryErr.Error())
-			record.Summary = record.Error
-			record.DurationMS = now.Sub(startedAt).Milliseconds()
-			current.LastError = record.Error
-		case settled:
-			record.DeliveredAt = delivery.DeliveredAt
-			record.Status = recordStatus
-			record.Error = truncateRunSummary(recordError)
-			record.CompletedAt = now
-			record.DurationMS = runDuration(now, delivery.DeliveredAt, startedAt)
-			notifySettled = true
-			if recordStatus == contracts.AutomationRunFailure {
-				current.LastError = record.Error
-			} else {
-				current.LastError = ""
-			}
-		default:
-			record.DeliveredAt = delivery.DeliveredAt
-			record.Status = contracts.AutomationRunDelivered
-			current.LastError = ""
-			s.pending[recordID] = &pendingRun{
-				taskID: taskID, sessionID: delivery.SessionID,
-				startedAt: startedAt, deliveredAt: delivery.DeliveredAt,
-			}
-		}
-		current.RunHistory = append([]contracts.AutomationRunRecord{record}, current.RunHistory...)
-		if len(current.RunHistory) > maxRunHistory {
-			current.RunHistory = current.RunHistory[:maxRunHistory]
-		}
-		current.NextRun, current.Enabled = s.rescheduleLocked(current, now)
-		s.tasks[index] = current
-	}
-	if err := s.persistLocked(); err != nil {
-		s.logger.Printf("%s: persist run of %s: %v", ModuleID, taskID, err)
-	}
-	s.mu.Unlock()
-	s.notify()
-	if notifySettled {
-		s.notifyRunSettled(task.Name, delivery.SessionID, recordStatus, recordError)
-	}
-	if deliveryErr == nil && !settled {
-		// The session may have settled between the read above and the pending
-		// registration; its notification then found nothing to settle.
-		s.settleRecord(recordID)
-	}
-}
-
-// copyTask returns a task whose nested slices are independent of the store, so
-// a caller reading a List/Update/claim snapshot cannot race the background
-// settlement that rewrites RunHistory in place.
-func copyTask(task contracts.AutomationTask) contracts.AutomationTask {
-	task.RunHistory = append([]contracts.AutomationRunRecord(nil), task.RunHistory...)
 	return task
 }
 
-// claimRun takes the in-flight guard for one execution and snapshots the task.
-// No closed check here: an execution ACCEPTED before Close (startRun's guarded
-// Add) must still run and flush its record — Close's runs.Wait waits for it
-// (the regression contract "Close waits for in-flight RunNow"). Post-close
-// dispatch is prevented at the entry point instead: startRun refuses to Add
-// after closed, and Close only returns after every accepted run settled
-// (BE-07, 2026-11 audit).
-func (s *service) claimRun(taskID string, force bool) (contracts.AutomationTask, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	index := s.indexLocked(taskID)
-	if index < 0 || s.inFlight[taskID] {
-		return contracts.AutomationTask{}, false
+// contractRun maps one SDK run onto the product run record. New runs carry the
+// conversation as the delivery id; legacy records carry it in the preserved
+// host fields ("sessionId"/"summary", and "finishedAt" for the old completion
+// spelling).
+func contractRun(run rigautomation.Run) contracts.AutomationRunRecord {
+	record := contracts.AutomationRunRecord{
+		ID:          run.ID,
+		StartedAt:   run.StartedAt,
+		DeliveredAt: run.DeliveredAt,
+		CompletedAt: run.CompletedAt,
+		Status:      run.Status,
+		Error:       run.Error,
+		DurationMS:  run.DurationMS,
 	}
-	task := s.tasks[index]
-	if !force && !task.Enabled {
-		return contracts.AutomationTask{}, false
+	record.SessionID = hostString(run.Host, "sessionId")
+	if record.SessionID == "" {
+		record.SessionID = strings.TrimSpace(run.DeliveryID)
 	}
-	s.inFlight[taskID] = true
-	return copyTask(task), true
+	if summary := hostString(run.Host, "summary"); summary != "" {
+		record.Summary = summary
+	} else if record.SessionID != "" {
+		record.Summary = "ran in chat session " + record.SessionID
+	} else {
+		record.Summary = run.Error
+	}
+	if record.CompletedAt.IsZero() {
+		if legacy := hostString(run.Host, "finishedAt"); legacy != "" {
+			if parsed, err := time.Parse(time.RFC3339Nano, legacy); err == nil {
+				record.CompletedAt = parsed
+			}
+		}
+	}
+	return record
 }
 
-// releaseRun clears the in-flight guard of one execution.
-func (s *service) releaseRun(taskID string) {
+// adoptLegacyDeliveredRuns migrates pre-SDK registries: a delivered run there
+// identifies its conversation by "sessionId" (or the legacy summary) but has no
+// "deliveryId", which the SDK needs to settle it. Derive the delivery id once so
+// the startup settlement pass picks the run up.
+func (s *service) adoptLegacyDeliveredRuns() {
+	cores, err := s.store.List()
+	if err != nil {
+		return
+	}
+	for _, core := range cores {
+		changed := false
+		for index := range core.RunHistory {
+			run := &core.RunHistory[index]
+			if run.Status != rigautomation.StatusDelivered || strings.TrimSpace(run.DeliveryID) != "" {
+				continue
+			}
+			sessionID := hostString(run.Host, "sessionId")
+			if sessionID == "" {
+				sessionID = contracts.AutomationRunSessionID(hostString(run.Host, "summary"))
+			}
+			if sessionID == "" {
+				sessionID = hostString(core.Host, hostKeySessionID)
+			}
+			if sessionID == "" {
+				continue
+			}
+			run.DeliveryID = sessionID
+			changed = true
+		}
+		if !changed {
+			continue
+		}
+		if _, err := s.store.Update(core); err != nil {
+			s.logger.Printf("%s: adopt legacy delivered run of %s: %v", ModuleID, core.ID, err)
+		}
+	}
+}
+
+// applyHostFields writes the product-only task fields into the SDK task's
+// opaque host map (empty values remove the key, so a cleared override stays
+// cleared in the registry).
+func applyHostFields(core *rigautomation.Task, task contracts.AutomationTask) {
+	setHostString(core, hostKeyModel, strings.TrimSpace(task.Model))
+	setHostString(core, hostKeyWorkspaceID, strings.TrimSpace(task.WorkspaceID))
+	setHostString(core, hostKeyPermission, strings.TrimSpace(task.Permission))
+	setHostString(core, hostKeySessionID, strings.TrimSpace(task.SessionID))
+	setHostBool(core, hostKeyNewSessionPerRun, task.NewSessionPerRun)
+}
+
+// hostString reads one string host field ("" when absent or malformed).
+func hostString(host map[string]json.RawMessage, key string) string {
+	raw, ok := host[key]
+	if !ok {
+		return ""
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+// hostBool reads one bool host field (false when absent or malformed).
+func hostBool(host map[string]json.RawMessage, key string) bool {
+	raw, ok := host[key]
+	if !ok {
+		return false
+	}
+	var value bool
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false
+	}
+	return value
+}
+
+// setHostString writes (or removes) one string host field.
+func setHostString(core *rigautomation.Task, key, value string) {
+	if value == "" {
+		delete(core.Host, key)
+		return
+	}
+	if core.Host == nil {
+		core.Host = make(map[string]json.RawMessage, 5)
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return
+	}
+	core.Host[key] = encoded
+}
+
+// setHostBool writes a bool host field (false removes it, matching omitempty).
+func setHostBool(core *rigautomation.Task, key string, value bool) {
+	if !value {
+		delete(core.Host, key)
+		return
+	}
+	if core.Host == nil {
+		core.Host = make(map[string]json.RawMessage, 5)
+	}
+	core.Host[key] = json.RawMessage(`true`)
+}
+
+// --- schedule --------------------------------------------------------------
+
+// prepareSchedule canonicalizes a draft schedule and computes its next firing.
+//
+// Disabled tasks keep an unparseable draft as typed (the UI shows the raw value
+// with a Fix action); enabled tasks must parse and have an upcoming occurrence.
+// A once-at schedule must also be in the future (DSH rejects past absolute
+// targets at creation).
+func prepareSchedule(spec string, enabled bool, now time.Time) (string, time.Time, error) {
+	canonical := strings.TrimSpace(spec)
+	if canonical == "" {
+		if !enabled {
+			return "", time.Time{}, nil
+		}
+		return "", time.Time{}, fmt.Errorf("%s: schedule is required for an enabled task", ModuleID)
+	}
+	parsed, err := Parse(canonical)
+	if err != nil {
+		if !enabled {
+			return canonical, time.Time{}, nil
+		}
+		return "", time.Time{}, err
+	}
+	canonical = parsed.String()
+	if !enabled {
+		return canonical, time.Time{}, nil
+	}
+	next := parsed.Next(now)
+	if next.IsZero() {
+		return "", time.Time{}, fmt.Errorf("%s: schedule %q has no upcoming occurrence", ModuleID, canonical)
+	}
+	if parsed.Kind() == KindAt && !next.After(now) {
+		return "", time.Time{}, fmt.Errorf("%s: schedule %q is in the past", ModuleID, canonical)
+	}
+	return canonical, next, nil
+}
+
+// nextRun computes the SDK task's next firing after one run: one-shot schedules
+// end the task, a repeating schedule advances. It owns no schedule parsing; the
+// product contracts parser does.
+func (s *service) nextRun(core rigautomation.Task, after time.Time) (time.Time, bool) {
+	if !core.Enabled {
+		return time.Time{}, false
+	}
+	schedule, err := Parse(string(core.Schedule))
+	if err != nil {
+		s.logger.Printf("%s: task %s has an invalid schedule %q: %v", ModuleID, core.ID, core.Schedule, err)
+		return time.Time{}, false
+	}
+	if schedule.Kind() == KindAfter || schedule.Kind() == KindAt {
+		return time.Time{}, false
+	}
+	next := schedule.Next(after)
+	if next.IsZero() {
+		// A repeating rule with no future occurrence ends the task instead of
+		// leaving it enabled forever.
+		return time.Time{}, false
+	}
+	return next, true
+}
+
+// --- delivery --------------------------------------------------------------
+
+// deliver is the SDK Deliver callback: it resolves the product task, sends the
+// prompt through the chat service (reusing or creating the bound conversation,
+// applying model/workspace/permission overrides) and returns the conversation id
+// as the delivery id (the same id settles the run later).
+func (s *service) deliver(ctx context.Context, core rigautomation.Task) (string, error) {
+	task := s.contractTask(core)
+	delivery, err := s.runTask(task)
+	// The first successful session creation binds future runs to that
+	// conversation, even when the send itself failed.
+	if delivery.Created && !task.NewSessionPerRun {
+		s.rememberSession(core.ID, delivery.SessionID)
+	}
+	if err != nil {
+		return "", err
+	}
+	return delivery.SessionID, nil
+}
+
+// rememberSession persists the conversation subsequent runs deliver to.
+func (s *service) rememberSession(taskID, sessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	current, ok := s.store.Get(taskID)
+	if !ok {
+		return
+	}
+	setHostString(&current, hostKeySessionID, sessionID)
+	current.UpdatedAt = time.Now().UTC()
+	if _, err := s.store.Update(current); err != nil {
+		s.logger.Printf("%s: run %s: remember session %s: %v", ModuleID, taskID, sessionID, err)
+	}
+}
+
+// settle is the SDK Settle callback: the chat read model decides the run
+// outcome. Completion notifications fire once per delivery here (never on the
+// delivered state, never for a neutral interruption).
+func (s *service) settle(_ context.Context, core rigautomation.Task, deliveryID string) (string, string, bool) {
+	sessionID := strings.TrimSpace(deliveryID)
+	if sessionID == "" {
+		sessionID = hostString(core.Host, hostKeySessionID)
+	}
+	status, detail, settled := s.runOutcome(sessionID)
+	if settled && (status == contracts.AutomationRunSuccess || status == contracts.AutomationRunFailure) {
+		s.notifySettledOnce(deliveryID, core.Name, sessionID, status, detail)
+	}
+	return status, detail, settled
+}
+
+// notifySettledOnce reports one terminal run to the optional host notifier.
+func (s *service) notifySettledOnce(deliveryID, taskName, sessionID, status, detail string) {
+	key := strings.TrimSpace(deliveryID)
+	if key == "" {
+		key = strings.TrimSpace(sessionID)
+	}
+	if key == "" {
+		return
+	}
 	s.mu.Lock()
-	delete(s.inFlight, taskID)
+	if s.notified[key] {
+		s.mu.Unlock()
+		return
+	}
+	s.notified[key] = true
 	s.mu.Unlock()
+	s.notifyRunSettled(taskName, sessionID, status, detail)
 }
 
-// newRunRecordIDLocked allocates a stable record id for in-flight settlement.
-func (s *service) newRunRecordIDLocked() string {
-	s.runSeq++
-	return fmt.Sprintf("run-%d-%d", time.Now().UTC().UnixNano(), s.runSeq)
-}
-
-// runDuration returns the delivery-to-completion duration in milliseconds, or
-// the attempt duration when no delivery instant was recorded.
-func runDuration(completedAt, deliveredAt, startedAt time.Time) int64 {
-	if !deliveredAt.IsZero() {
-		return completedAt.Sub(deliveredAt).Milliseconds()
+// onChatChange is the ChatService subscription callback: when a session changed,
+// settle its automation runs by ticking the SDK scheduler (which retries every
+// delivered run). It only dispatches a tracked goroutine.
+func (s *service) onChatChange(sessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
 	}
-	if !startedAt.IsZero() {
-		return completedAt.Sub(startedAt).Milliseconds()
+	// The agent notifies on every streaming event; the cheap session list probe
+	// keeps a long run from ticking on each one.
+	if running, exists := s.chatSessionRunning(sessionID); exists && running {
+		return
 	}
-	return 0
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.runs.Add(1)
+	s.mu.Unlock()
+	go func() {
+		defer s.runs.Done()
+		if err := s.scheduler.SettlePending(context.Background()); err != nil && !errors.Is(err, rigautomation.ErrSchedulerClosed) {
+			s.logger.Printf("%s: settle on chat change: %v", ModuleID, err)
+		}
+	}()
 }
 
-// runTask delivers one run: it reuses the task's bound conversation (creating
-// and remembering one on the first run) or starts a fresh conversation when the
-// task asks for it, applies the task's workspace/permission/model overrides, and
-// sends the prompt. Persisting a remembered session id is the caller's job.
+// chatSessionRunning probes the chat read model for one session's run state
+// without materializing its message list.
+func (s *service) chatSessionRunning(sessionID string) (running, exists bool) {
+	for _, info := range s.chat.Sessions() {
+		if info.ID == sessionID {
+			return info.Running, true
+		}
+	}
+	return false, false
+}
+
+// runTask delivers one run through the chat service. The product handlers below
+// are unchanged from the pre-SDK implementation; the scheduler owns recording.
 func (s *service) runTask(task contracts.AutomationTask) (runDelivery, error) {
 	sessionID := strings.TrimSpace(task.SessionID)
 	created := false
@@ -953,8 +899,7 @@ func (s *service) runTask(task contracts.AutomationTask) (runDelivery, error) {
 		created = true
 		// Record the run session's provenance right after creation, before
 		// anything can fail: the sidebar hides the session by this explicit
-		// origin, not by its title (audit F6). A failed write only costs the
-		// filter.
+		// origin, not by its title (audit F6).
 		s.recordSessionOrigin(task.ID, sessionID)
 	}
 	if workspaceID := strings.TrimSpace(task.WorkspaceID); workspaceID != "" {
@@ -1009,171 +954,14 @@ func (s *service) chatSessionExists(sessionID string) bool {
 	return ok
 }
 
-// --- run settlement --------------------------------------------------------
-
-// onChatChange is the ChatService subscription callback: when a session changed,
-// settle any automation run delivered to it. It only dispatches a tracked
-// goroutine, so the agent's notification goroutine is never blocked by a
-// registry write.
-func (s *service) onChatChange(sessionID string) {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return
-	}
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return
-	}
-	recordIDs := make([]string, 0, 1)
-	for recordID, run := range s.pending {
-		if run.sessionID == sessionID {
-			recordIDs = append(recordIDs, recordID)
-		}
-	}
-	s.mu.Unlock()
-	if len(recordIDs) == 0 {
-		return
-	}
-	// The agent notifies on every streaming event; the cheap session list probe
-	// keeps a long run from copying the whole read model on each one.
-	if running, exists := s.chatSessionRunning(sessionID); exists && running {
-		return
-	}
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return
-	}
-	s.runs.Add(1)
-	s.mu.Unlock()
-	go func() {
-		defer s.runs.Done()
-		for _, recordID := range recordIDs {
-			s.settleRecord(recordID)
-		}
-	}()
-}
-
-// chatSessionRunning probes the chat read model for one session's run state
-// without materializing its message list.
-func (s *service) chatSessionRunning(sessionID string) (running, exists bool) {
-	for _, info := range s.chat.Sessions() {
-		if info.ID == sessionID {
-			return info.Running, true
-		}
-	}
-	return false, false
-}
-
-// reconcilePending settles every delivered run that can be settled now. The
-// ticker calls it so a missed terminal notification can never stall a task; the
-// work runs on a tracked goroutine so the ticker never waits for a run.
-func (s *service) reconcilePending() {
-	s.mu.Lock()
-	if s.closed || len(s.pending) == 0 {
-		s.mu.Unlock()
-		return
-	}
-	candidates := make([]string, 0, len(s.pending))
-	for recordID := range s.pending {
-		candidates = append(candidates, recordID)
-	}
-	s.mu.Unlock()
-	recordIDs := make([]string, 0, len(candidates))
-	for _, recordID := range candidates {
-		s.mu.Lock()
-		run := s.pending[recordID]
-		s.mu.Unlock()
-		if run == nil {
-			continue
-		}
-		if running, exists := s.chatSessionRunning(run.sessionID); exists && running {
-			continue
-		}
-		recordIDs = append(recordIDs, recordID)
-	}
-	if len(recordIDs) == 0 {
-		return
-	}
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return
-	}
-	s.runs.Add(1)
-	s.mu.Unlock()
-	go func() {
-		defer s.runs.Done()
-		for _, recordID := range recordIDs {
-			s.settleRecord(recordID)
-		}
-	}()
-}
-
-// reconcileLoadedRuns settles runs that were delivered but never completed
-// before the previous shutdown: the in-memory pending set is gone after a
-// restart, so the persisted "delivered" records are the only trace. Records
-// whose session is still running (or unknown) stay delivered (outcome unknown).
-func (s *service) reconcileLoadedRuns() {
-	s.mu.Lock()
-	recordIDs := make([]string, 0)
-	for _, task := range s.tasks {
-		for _, record := range task.RunHistory {
-			if record.Status != contracts.AutomationRunDelivered || record.ID == "" {
-				continue
-			}
-			sessionID := strings.TrimSpace(record.SessionID)
-			if sessionID == "" {
-				sessionID = contracts.AutomationRunSessionID(record.Summary)
-			}
-			if sessionID == "" {
-				continue
-			}
-			s.pending[record.ID] = &pendingRun{
-				taskID: task.ID, sessionID: sessionID,
-				startedAt: record.StartedAt, deliveredAt: record.DeliveredAt,
-			}
-			recordIDs = append(recordIDs, record.ID)
-		}
-	}
-	s.mu.Unlock()
-	for _, recordID := range recordIDs {
-		s.settleRecord(recordID)
-	}
-}
-
-// hasPendingTask reports whether the task has a delivered run awaiting its
-// session's terminal state.
-func (s *service) hasPendingTask(taskID string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, run := range s.pending {
-		if run.taskID == taskID {
-			return true
-		}
-	}
-	return false
-}
-
-// settleTask attempts to settle every pending run of one task.
-func (s *service) settleTask(taskID string) {
-	s.mu.Lock()
-	recordIDs := make([]string, 0, 1)
-	for recordID, run := range s.pending {
-		if run.taskID == taskID {
-			recordIDs = append(recordIDs, recordID)
-		}
-	}
-	s.mu.Unlock()
-	for _, recordID := range recordIDs {
-		s.settleRecord(recordID)
-	}
-}
+// --- run outcome -----------------------------------------------------------
 
 // runOutcome maps a chat session's read model onto a terminal run status,
 // reporting settled=false while the session is still running.
 func (s *service) runOutcome(sessionID string) (status, errText string, settled bool) {
+	if strings.TrimSpace(sessionID) == "" {
+		return contracts.AutomationRunInterrupted, "the chat session is no longer available", true
+	}
 	state, exists := s.chat.Session(sessionID)
 	if !exists {
 		return contracts.AutomationRunInterrupted, "the chat session is no longer available", true
@@ -1205,74 +993,9 @@ func (s *service) runOutcome(sessionID string) (status, errText string, settled 
 	return contracts.AutomationRunSuccess, "", true
 }
 
-// settleRecord writes one delivered run's terminal state back into its task's
-// run history. It is idempotent: an already-settled record is left alone.
-func (s *service) settleRecord(recordID string) {
-	if recordID == "" {
-		return
-	}
-	s.mu.Lock()
-	run := s.pending[recordID]
-	s.mu.Unlock()
-	if run == nil {
-		return
-	}
-	status, errText, settled := s.runOutcome(run.sessionID)
-	if !settled {
-		return
-	}
-	now := time.Now().UTC()
-	s.mu.Lock()
-	if s.pending[recordID] == nil {
-		s.mu.Unlock()
-		return
-	}
-	delete(s.pending, recordID)
-	taskName := run.taskID
-	settledNow := false
-	if index := s.indexLocked(run.taskID); index >= 0 {
-		task := &s.tasks[index]
-		taskName = task.Name
-		for historyIndex := range task.RunHistory {
-			record := &task.RunHistory[historyIndex]
-			if record.ID != recordID || record.Status != contracts.AutomationRunDelivered {
-				continue
-			}
-			record.Status = status
-			record.Error = truncateRunSummary(errText)
-			record.CompletedAt = now
-			record.DurationMS = runDuration(now, record.DeliveredAt, record.StartedAt)
-			settledNow = true
-			if historyIndex == 0 {
-				if status == contracts.AutomationRunFailure {
-					task.LastError = record.Error
-				} else {
-					task.LastError = ""
-				}
-			}
-			task.UpdatedAt = now
-			break
-		}
-	}
-	if err := s.persistLocked(); err != nil {
-		s.logger.Printf("%s: persist settled run %s: %v", ModuleID, recordID, err)
-	}
-	s.mu.Unlock()
-	s.notify()
-	if settledNow {
-		s.notifyRunSettled(taskName, run.sessionID, status, errText)
-	}
-}
-
 // notifyRunSettled reports one settled automation run to the optional host
-// notifier (a no-op without one). A delivered run never notifies: the prompt was
-// accepted but nothing finished. Interrupted runs stay silent too: the user
-// stopped them and the shared copy is success/failure only, so a neutral
-// interruption must not be reported as either.
-//
-// The run's conversation travels as the notification's session tag (not as
-// visible copy): a click on the OS notification opens that session, and the raw
-// session id never leaks into the toast/notification text.
+// notifier (a no-op without one). A delivered run never notifies; interrupted
+// runs stay silent too.
 func (s *service) notifyRunSettled(taskName, sessionID, status, errText string) {
 	if s.notifier == nil {
 		return
@@ -1295,11 +1018,7 @@ func (s *service) notifyRunSettled(taskName, sessionID, status, errText string) 
 	contracts.NotifyRunFinishedForSession(s.notifier, text, failed, strings.TrimSpace(sessionID))
 }
 
-// recordSessionOrigin persists the origin of one run session (best effort): the
-// settings store is the session-provenance transport shared with the chat read
-// model and the sidebar, so no session-store schema change is needed. A host
-// without a settings service, or a failing write, only costs the sidebar's
-// filter; the run itself must never be blocked by it.
+// recordSessionOrigin persists the origin of one run session (best effort).
 func (s *service) recordSessionOrigin(taskID, sessionID string) {
 	if s.settings == nil {
 		return
@@ -1313,9 +1032,6 @@ func (s *service) recordSessionOrigin(taskID, sessionID string) {
 	}
 }
 
-// maxRunHistory bounds the per-task run history.
-const maxRunHistory = 10
-
 // truncateRunSummary bounds one history summary to 200 runes.
 func truncateRunSummary(summary string) string {
 	const limit = 200
@@ -1324,29 +1040,6 @@ func truncateRunSummary(summary string) string {
 		return summary
 	}
 	return string(runes[:limit-1]) + "…"
-}
-
-// rescheduleLocked computes the next firing after one run: one-shot tasks
-// disable themselves, other enabled tasks get the next schedule instant.
-func (s *service) rescheduleLocked(task contracts.AutomationTask, from time.Time) (time.Time, bool) {
-	if !task.Enabled {
-		return time.Time{}, false
-	}
-	schedule, err := Parse(task.Schedule)
-	if err != nil {
-		s.logger.Printf("%s: task %s has an invalid schedule %q: %v", ModuleID, task.ID, task.Schedule, err)
-		return time.Time{}, false
-	}
-	if schedule.Kind() == KindAfter || schedule.Kind() == KindAt {
-		return time.Time{}, false
-	}
-	next := schedule.Next(from)
-	if next.IsZero() {
-		// A repeating rule with no future occurrence (an impossible calendar
-		// combination) ends the task instead of leaving it enabled forever.
-		return time.Time{}, false
-	}
-	return next, true
 }
 
 // --- optional Rig schedule tools -------------------------------------------
@@ -1442,9 +1135,7 @@ func (a *schedulerAdapter) mapTask(task contracts.AutomationTask) rig.ScheduledT
 }
 
 // registerScheduleTools replaces the toolkit's in-memory schedule_* tools with
-// the durable adapter. The toolkit module still registers schedule.Tools(nil)
-// for its own tests, so a duplicate name is unregistered and retried; the same
-// names are unregistered when the module unloads.
+// the durable adapter.
 func registerScheduleTools(ctx cordis.Context, registry *rigtools.Registry, service *service, logger contracts.Logger) {
 	adapter := &schedulerAdapter{service: service}
 	for _, tool := range rigschedule.Tools(adapter) {
