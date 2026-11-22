@@ -63,10 +63,30 @@ func memoryTypeValue(label string) string {
 }
 
 // memoryWorkspaceRoot resolves the current workspace root for the service call.
-func memoryWorkspaceRoot(ctx cordis.Context) string {
+func memoryWorkspaceRoot(ctx cordis.Context, chat contracts.ChatService, sessionID string) string {
 	workspace, ok := ctx.Get(contracts.KeyWorkspace)
 	if !ok || workspace == nil {
 		return ""
+	}
+	// Prefer the workspace the session is bound to; the Memory tab must not
+	// show another project's entries just because it is the current one.
+	if chat != nil && strings.TrimSpace(sessionID) != "" {
+		workspaceID := ""
+		for _, info := range chat.Sessions() {
+			if info.ID == sessionID {
+				workspaceID = strings.TrimSpace(info.WorkspaceID)
+				break
+			}
+		}
+		if workspaceID != "" {
+			if workspaces, listErr := workspace.List(context.Background()); listErr == nil {
+				for _, candidate := range workspaces {
+					if candidate.ID == workspaceID {
+						return strings.TrimSpace(candidate.Root)
+					}
+				}
+			}
+		}
 	}
 	current, ok, err := workspace.Current(context.Background())
 	if err != nil || !ok {
@@ -75,7 +95,7 @@ func memoryWorkspaceRoot(ctx cordis.Context) string {
 	return strings.TrimSpace(current.Root)
 }
 
-func startMemoryLoad(runtime contracts.UIRuntime, st *state, service contracts.MemoryService, query, typ string) {
+func startMemoryLoad(runtime contracts.UIRuntime, st *state, service contracts.MemoryService, query, typ string, chat contracts.ChatService, sessionID string) {
 	st.memoryRefresh = false
 	st.memoryPendingQuery = query
 	st.memoryPendingType = typ
@@ -85,7 +105,7 @@ func startMemoryLoad(runtime contracts.UIRuntime, st *state, service contracts.M
 	go func() {
 		var items []contracts.MemoryItem
 		var err error
-		root := memoryWorkspaceRoot(st.ctx)
+		root := memoryWorkspaceRoot(st.ctx, chat, sessionID)
 		if root == "" {
 			err = errNoWorkspace
 		} else {
@@ -145,7 +165,7 @@ func startMemoryDetail(runtime contracts.UIRuntime, st *state, service contracts
 }
 
 // buildMemoryPane renders the Memory tab.
-func buildMemoryPane(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+func buildMemoryPane(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, chat contracts.ChatService, sessionID string) {
 	service := st.memoryService
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
 		centered := func(children func(*ui.Context)) {
@@ -167,7 +187,7 @@ func buildMemoryPane(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 		}
 		query := strings.TrimSpace(st.memoryQuery)
 		if !st.memoryFresh || st.memoryRefresh {
-			startMemoryLoad(runtime, st, service, query, st.memoryType)
+			startMemoryLoad(runtime, st, service, query, st.memoryType, chat, sessionID)
 		} else if query != st.memoryPendingQuery || st.memoryType != st.memoryPendingType {
 			if st.memoryPendingQuery != query || st.memoryPendingType != st.memoryType {
 				st.memoryPendingQuery = query
@@ -176,7 +196,7 @@ func buildMemoryPane(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 				c.After(memorySearchDebounce)
 			}
 			if !c.Now().Before(st.memorySearchDue) {
-				startMemoryLoad(runtime, st, service, query, st.memoryType)
+				startMemoryLoad(runtime, st, service, query, st.memoryType, chat, sessionID)
 			}
 		}
 		centered(func(c *ui.Context) {
@@ -319,6 +339,35 @@ func buildMemoryDetail(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 			design.Apply(ui.Text(c, memoryTypeLabel(detail.Type)+" · "+memoryAge(st, detail.Updated)),
 				t.TextMuted(design.TypeXXS))
 			ui.Row(c).Grow(1)
+			edit := design.Apply(ui.Button(c, st.tr("编辑", "Edit")), t.SecondaryButton())
+			if edit.Clicked() {
+				st.memoryEditing = true
+				st.memoryEditTitle = detail.Title
+				st.memoryEditSummary = detail.Summary
+				st.memoryEditBody = detail.Content
+				st.memoryEditErr = ""
+			}
+			pinLabel := st.tr("置顶", "Pin")
+			if detail.Pinned {
+				pinLabel = st.tr("取消置顶", "Unpin")
+			}
+			pin := design.Apply(ui.Button(c, pinLabel), t.SecondaryButton())
+			if pin.Clicked() {
+				go func() {
+					_, err := service.Write(context.Background(), st.memoryRoot, contracts.MemoryDraft{
+						URI: detail.URI, Type: detail.Type, Title: detail.Title, Summary: detail.Summary,
+						Overview: detail.Overview, Content: detail.Content, Pinned: !detail.Pinned,
+					})
+					runtime.Post(func() {
+						if err != nil {
+							st.memoryErr = err.Error()
+							runtime.Invalidate()
+							return
+						}
+						startMemoryDetail(runtime, st, service, detail.URI)
+					})
+				}()
+			}
 			del := design.Apply(ui.Button(c, st.tr("删除", "Delete")), t.SecondaryButton())
 			if del.Clicked() {
 				st.memoryConfirmURI = detail.URI
@@ -330,19 +379,68 @@ func buildMemoryDetail(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 			design.Apply(ui.Text(c, detail.Summary), t.TextMuted(design.TypeBody))
 		}
 	})
-	ui.Scroll(c).FillWidth().Grow(1).Children(func() {
+	if st.memoryEditing {
 		centered(func(c *ui.Context) {
-			if detail.Overview != "" {
-				design.Apply(ui.Text(c, detail.Overview), t.Font(design.TypeXS))
-			}
-			if detail.Content != "" {
-				design.Apply(ui.Text(c, detail.Content), t.Font(design.TypeBody))
-			}
-			if detail.Overview == "" && detail.Content == "" && detail.Summary == "" {
-				uikit.EmptyStateBlock(c, st.tr("没有正文", "No content"), "", nil)
+			ui.Field(c, st.tr("标题", "Title"), func() {
+				ui.TextInput(c, &st.memoryEditTitle).Label(st.tr("标题", "Title")).FillWidth()
+			})
+			ui.Field(c, st.tr("摘要", "Summary"), func() {
+				ui.TextInput(c, &st.memoryEditSummary).Label(st.tr("摘要", "Summary")).FillWidth()
+			})
+			ui.Field(c, st.tr("正文", "Content"), func() {
+				ui.TextArea(c, &st.memoryEditBody).Label(st.tr("正文", "Content")).FillWidth().
+					MinHeight(design.Space8 * 6)
+			})
+			ui.Row(c).FillWidth().Gap(design.Space2).Children(func() {
+				save := uikit.DialogAction{Label: st.tr("保存", "Save")}
+				_ = save
+				saveButton := design.Apply(ui.Button(c, st.tr("保存", "Save")), t.PrimaryButton())
+				if saveButton.Clicked() {
+					draft := contracts.MemoryDraft{
+						URI: detail.URI, Type: detail.Type, Title: strings.TrimSpace(st.memoryEditTitle),
+						Summary: strings.TrimSpace(st.memoryEditSummary), Overview: detail.Overview,
+						Content: st.memoryEditBody, Pinned: detail.Pinned,
+					}
+					go func() {
+						_, err := service.Write(context.Background(), st.memoryRoot, draft)
+						runtime.Post(func() {
+							if err != nil {
+								st.memoryEditErr = err.Error()
+								runtime.Invalidate()
+								return
+							}
+							st.memoryEditing = false
+							st.memoryEditErr = ""
+							startMemoryDetail(runtime, st, service, detail.URI)
+						})
+					}()
+				}
+				cancel := design.Apply(ui.Button(c, st.tr("取消", "Cancel")), t.SecondaryButton())
+				if cancel.Clicked() {
+					st.memoryEditing = false
+					st.memoryEditErr = ""
+				}
+			})
+			if st.memoryEditErr != "" {
+				uikit.ErrorLine(c, st.tr("保存失败：", "Save failed: ")+st.memoryEditErr)
 			}
 		})
-	})
+	}
+	if !st.memoryEditing {
+		ui.Scroll(c).FillWidth().Grow(1).Children(func() {
+			centered(func(c *ui.Context) {
+				if detail.Overview != "" {
+					design.Apply(ui.Text(c, detail.Overview), t.Font(design.TypeXS))
+				}
+				if detail.Content != "" {
+					design.Apply(ui.Text(c, detail.Content), t.Font(design.TypeBody))
+				}
+				if detail.Overview == "" && detail.Content == "" && detail.Summary == "" {
+					uikit.EmptyStateBlock(c, st.tr("没有正文", "No content"), "", nil)
+				}
+			})
+		})
+	}
 	if st.memoryErr != "" {
 		centered(func(c *ui.Context) {
 			uikit.ErrorLine(c, st.tr("读取记忆失败：", "Failed to read memory: ")+st.memoryErr)
@@ -420,7 +518,7 @@ func buildMemoryQuickAdd(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 	})
 }
 
-func memoryWorkspaceRootCtx(ctx cordis.Context) string { return memoryWorkspaceRoot(ctx) }
+func memoryWorkspaceRootCtx(ctx cordis.Context) string { return memoryWorkspaceRoot(ctx, nil, "") }
 
 // requestMemoryRefresh asks the next Memory-tab frame to reload from the store.
 func requestMemoryRefresh(st *state) { st.memoryRefresh = true }

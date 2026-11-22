@@ -14,9 +14,11 @@ import (
 type fakeMemoryService struct {
 	items  []contracts.MemoryItem
 	writes []contracts.MemoryDraft
+	roots  []string
 }
 
-func (f *fakeMemoryService) List(context.Context, string, string, []string, int) ([]contracts.MemoryItem, error) {
+func (f *fakeMemoryService) List(_ context.Context, root, _ string, _ []string, _ int) ([]contracts.MemoryItem, error) {
+	f.roots = append(f.roots, root)
 	return f.items, nil
 }
 
@@ -31,7 +33,18 @@ func (f *fakeMemoryService) Get(_ context.Context, _, uri string) (contracts.Mem
 
 func (f *fakeMemoryService) Write(_ context.Context, _ string, draft contracts.MemoryDraft) (contracts.MemoryItem, error) {
 	f.writes = append(f.writes, draft)
-	item := contracts.MemoryItem{URI: "mem://user/self/memories/preferences/new", Type: draft.Type, Title: draft.Title, Summary: draft.Summary}
+	item := contracts.MemoryItem{URI: "mem://user/self/memories/preferences/new", Type: draft.Type, Title: draft.Title, Summary: draft.Summary, Pinned: draft.Pinned}
+	if draft.URI != "" {
+		item.URI = draft.URI
+		for index := range f.items {
+			if f.items[index].URI == draft.URI {
+				f.items[index].Pinned = draft.Pinned
+				f.items[index].Title = draft.Title
+				f.items[index].Summary = draft.Summary
+				return f.items[index], nil
+			}
+		}
+	}
 	f.items = append(f.items, item)
 	return item, nil
 }
@@ -66,7 +79,8 @@ func TestMemoryTabListsOpensDetailAndAdds(t *testing.T) {
 		{URI: "mem://user/self/memories/events/beta", Type: "events", Title: "Beta 事件", Summary: "修好了输入法"},
 	}}
 	h := newHarnessWithMemory(t, chat, service)
-	provide[contracts.WorkspaceService](t, h.ctx, contracts.KeyWorkspace, fakeMemoryWorkspace{root: t.TempDir()})
+	boundRoot := t.TempDir()
+	provide[contracts.WorkspaceService](t, h.ctx, contracts.KeyWorkspace, fakeMemoryWorkspace{root: boundRoot})
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "记忆")
@@ -86,6 +100,31 @@ func TestMemoryTabListsOpensDetailAndAdds(t *testing.T) {
 	tester.Frame()
 	if len(service.writes) != 1 || service.writes[0].Type != "preferences" || !strings.Contains(service.writes[0].Content, "新的记忆") {
 		t.Fatalf("writes = %+v", service.writes)
+	}
+	if len(service.roots) == 0 || service.roots[0] != boundRoot {
+		t.Fatalf("memory roots = %v, want the workspace root %q", service.roots, boundRoot)
+	}
+
+	// Detail actions: pin flips the flag; edit saves through the same URI.
+	h.click(tester, "Alpha 项目")
+	waitForText(t, tester, "content of Alpha 项目")
+	before := len(service.writes)
+	h.click(tester, "置顶")
+	waitForText(t, tester, "取消置顶")
+	if len(service.writes) <= before {
+		t.Fatalf("pin did not write")
+	}
+	last := service.writes[len(service.writes)-1]
+	if !last.Pinned || last.URI != service.items[0].URI {
+		t.Fatalf("pin write = %+v", last)
+	}
+	before = len(service.writes)
+	h.click(tester, "编辑")
+	tester.Frame()
+	h.click(tester, "保存")
+	waitForText(t, tester, "content of Alpha 项目")
+	if len(service.writes) <= before || service.writes[len(service.writes)-1].URI != last.URI {
+		t.Fatalf("edit writes = %+v", service.writes)
 	}
 }
 

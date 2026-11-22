@@ -192,7 +192,7 @@ func buildScreen(
 			case tabTrajectory:
 				buildTrajectoryPane(c, t, chatSession, hasSession, st)
 			case tabMemory:
-				buildMemoryPane(c, t, runtime, st)
+				buildMemoryPane(c, t, runtime, st, chat, activeID)
 			case tabContext:
 				buildContextPane(c, t, st, chatSession, hasSession)
 			default:

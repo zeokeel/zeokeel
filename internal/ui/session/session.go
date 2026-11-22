@@ -245,6 +245,11 @@ type state struct {
 	memorySelected     int
 	memoryConfirmOpen  bool
 	memoryConfirmURI   string
+	memoryEditing      bool
+	memoryEditTitle    string
+	memoryEditSummary  string
+	memoryEditBody     string
+	memoryEditErr      string
 
 	// @ suggestion cache: the workspace files the current query resolves to,
 	// refreshed only when the query changes. The frame builder never lists or
