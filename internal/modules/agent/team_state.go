@@ -27,6 +27,7 @@ import (
 	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	rigagentteam "github.com/zeokeel/zeokeel-rig/agent/team"
 	rigteam "github.com/zeokeel/zeokeel-rig/tools/team"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -52,14 +53,24 @@ const (
 // service (one process-wide team manager). sessions is the durable child-session
 // store the tracker writes run snapshots into (nil in focused unit tests).
 type teamTracker struct {
-	notify   func()
-	sessions *childSessionStore
+	notify    func()
+	sessions  *childSessionStore
+	managerFn func() *rigteam.Manager
+	// coord is the host-agnostic run state machine (rig agent/team); nil in
+	// focused unit tests that only exercise the activity fold.
+	coord *rigagentteam.Coordinator
 
 	mu      sync.Mutex
 	nextID  uint64
 	runs    []*trackedSubagent
 	claims  map[string]*trackedSubagent // member ID -> wrapped run
 	entries []activityEntry
+
+	// coordinator lane: child-session identity, prompt and last published status
+	// of the members the coordinator owns.
+	coordChildIDs map[string]string
+	coordPrompts  map[string]string
+	coordStatuses map[string]string
 }
 
 // activityEntry is one activity row; run is the wrapped run it belongs to (nil
@@ -73,9 +84,12 @@ type activityEntry struct {
 
 func newTeamTracker(notify func(), sessions *childSessionStore) *teamTracker {
 	return &teamTracker{
-		notify:   notify,
-		sessions: sessions,
-		claims:   make(map[string]*trackedSubagent),
+		notify:        notify,
+		sessions:      sessions,
+		claims:        make(map[string]*trackedSubagent),
+		coordChildIDs: make(map[string]string),
+		coordPrompts:  make(map[string]string),
+		coordStatuses: make(map[string]string),
 	}
 }
 
@@ -301,15 +315,19 @@ func (t *teamTracker) addActivity(run *trackedSubagent, memberID, kind, text str
 // keeps the newest teamActivityPerRunLimit rows of each run and the newest
 // teamActivityLimit rows overall.
 func (t *teamTracker) pruneLocked() {
-	counts := make(map[*trackedSubagent]int, len(t.entries))
+	counts := make(map[string]int, len(t.entries))
 	kept := make([]activityEntry, 0, len(t.entries))
 	for index := len(t.entries) - 1; index >= 0; index-- {
 		entry := t.entries[index]
+		key := entry.memberID
 		if entry.run != nil {
-			if counts[entry.run] >= teamActivityPerRunLimit {
+			key = fmt.Sprintf("run-%p", entry.run)
+		}
+		if key != "" {
+			if counts[key] >= teamActivityPerRunLimit {
 				continue
 			}
-			counts[entry.run]++
+			counts[key]++
 		}
 		kept = append(kept, entry)
 	}
@@ -347,6 +365,48 @@ func (t *teamTracker) activities() []contracts.TeamActivity {
 		out = append(out, activity)
 	}
 	return out
+}
+
+// addMemberActivity records one product activity row attributed to a manager
+// member reference (the coordinator lane has no wrapped run).
+func (t *teamTracker) addMemberActivity(memberID string, kind, text string, isError bool) {
+	if t == nil {
+		return
+	}
+	t.addActivity(nil, memberID, kind, text, isError)
+}
+
+// activityForMember returns the product activity rows attributed to one manager
+// member reference (used by the coordinator lane, which has no wrapped run).
+func (t *teamTracker) activityForMember(memberID string) []contracts.TeamActivity {
+	if t == nil {
+		return nil
+	}
+	memberID = strings.TrimSpace(memberID)
+	if memberID == "" {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	rows := make([]contracts.TeamActivity, 0, teamActivityPerRunLimit)
+	for _, entry := range t.entries {
+		owner := entry.memberID
+		if owner == "" {
+			owner = entry.activity.MemberID
+		}
+		if owner != memberID {
+			continue
+		}
+		activity := entry.activity
+		if activity.MemberID == "" {
+			activity.MemberID = memberID
+		}
+		rows = append(rows, activity)
+	}
+	if len(rows) > teamActivityPerRunLimit {
+		rows = rows[len(rows)-teamActivityPerRunLimit:]
+	}
+	return rows
 }
 
 // activityForRunLocked returns a copy of one run's bounded activity rows
@@ -527,13 +587,16 @@ func (t *teamTracker) childIDForMember(memberID string) string {
 	if t == nil {
 		return ""
 	}
-	run := t.claimRun(strings.TrimSpace(memberID))
-	if run == nil {
-		return ""
+	memberID = strings.TrimSpace(memberID)
+	if run := t.claimRun(memberID); run != nil {
+		run.mu.Lock()
+		defer run.mu.Unlock()
+		return run.childID
 	}
-	run.mu.Lock()
-	defer run.mu.Unlock()
-	return run.childID
+	t.mu.Lock()
+	childID := t.coordChildIDs[memberID]
+	t.mu.Unlock()
+	return childID
 }
 
 // memberIDForChild resolves a durable child-session ID to the live manager
@@ -562,6 +625,11 @@ func (t *teamTracker) memberForChild(childID string) string {
 		match := run.childID == childID
 		run.mu.Unlock()
 		if match {
+			return memberID
+		}
+	}
+	for memberID, id := range t.coordChildIDs {
+		if id == childID {
 			return memberID
 		}
 	}

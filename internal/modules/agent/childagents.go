@@ -436,8 +436,12 @@ func (t *teamTracker) memberPrompt(memberID string) string {
 		return ""
 	}
 	t.mu.Lock()
+	prompt := t.coordPrompts[memberID]
 	run := t.claims[memberID]
 	t.mu.Unlock()
+	if prompt != "" {
+		return prompt
+	}
 	if run == nil {
 		return ""
 	}
