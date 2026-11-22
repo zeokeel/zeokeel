@@ -194,6 +194,23 @@ func (t *teamTracker) coordinatorTeammate(ref string) (rigagentteam.Teammate, bo
 	return coordinator.Teammate(ref)
 }
 
+// coordinatorMemberID resolves one member reference (manager id, child-session
+// id or unique display name) to the coordinator-owned member id, so tool
+// activity can be attributed even when no legacy wrapped run exists.
+func (t *teamTracker) coordinatorMemberID(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	if memberID := t.memberForChild(ref); memberID != "" {
+		return memberID
+	}
+	if teammate, ok := t.coordinatorTeammate(ref); ok {
+		return teammate.ID
+	}
+	return ""
+}
+
 // coordinatorSnapshot returns the coordinator's read model (zero for a bare
 // tracker).
 func (t *teamTracker) coordinatorSnapshot() rigagentteam.TeamState {
