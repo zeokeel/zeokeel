@@ -2,16 +2,16 @@ package update
 
 // The download half of the update service: fetch the manifest's platform
 // asset, verify its SHA-256 and size and stage it under <dataDir>/updates.
+// Streaming, size/hash verification and atomic staging are delegated to the
+// rig update package; this file keeps the product data-directory layout, the
+// version-prefixed staged name and contracts.UpdateDownload.
 // Installing/replacing the running binary stays a separate host step (see
 // contracts.UpdateDownloader).
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	rigupdate "github.com/zeokeel/zeokeel-rig/update"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -80,9 +82,6 @@ func (s *service) Download(ctx context.Context) (contracts.UpdateDownload, error
 	}
 
 	stagedDir := filepath.Join(dataDir, updatesDirName)
-	if err := os.MkdirAll(stagedDir, 0o755); err != nil {
-		return contracts.UpdateDownload{}, fmt.Errorf("%w: create staging dir: %v", ErrDownload, err)
-	}
 	name := stagedFileName(info.LatestVersion, assetURL)
 	finalPath := filepath.Join(stagedDir, name)
 	// Defense in depth: stagedFileName only returns one safe path component,
@@ -91,71 +90,47 @@ func (s *service) Download(ctx context.Context) (contracts.UpdateDownload, error
 		return contracts.UpdateDownload{}, fmt.Errorf("%w: unsafe staged file name %q", ErrDownload, name)
 	}
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, assetURL, nil)
+	// The manifest client has a short JSON timeout; the SDK download is
+	// bounded by the caller's context and this longer client timeout instead.
+	client := &http.Client{Transport: s.client.Transport, Timeout: downloadTimeout}
+	result, err := rigupdate.Download(ctx, client, rigupdate.Asset{
+		Name:   name,
+		URL:    assetURL,
+		Size:   info.Size,
+		SHA256: expectedSHA,
+	}, stagedDir)
 	if err != nil {
-		return contracts.UpdateDownload{}, fmt.Errorf("%w: build asset request: %v", ErrDownload, err)
+		return contracts.UpdateDownload{}, translateDownloadError(err)
 	}
-	// The service's client has the manifest timeout (5s by default), which is
-	// right for JSON but would abort a multi-megabyte installer mid-stream.
-	// Downloads are bounded by the caller's context and the transport instead.
-	response, err := (&http.Client{Transport: s.client.Transport, Timeout: downloadTimeout}).Do(request)
-	if err != nil {
-		return contracts.UpdateDownload{}, fmt.Errorf("%w: fetch asset: %v", ErrDownload, err)
+	// The SDK sanitizes and stages the basename; re-check containment at the
+	// product boundary so a future SDK change cannot write outside updates/.
+	if filepath.Dir(result.Path) != filepath.Clean(stagedDir) {
+		return contracts.UpdateDownload{}, fmt.Errorf("%w: staged path %q is outside %q", ErrDownload, result.Path, stagedDir)
 	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return contracts.UpdateDownload{}, fmt.Errorf("%w: asset status %s", ErrDownload, response.Status)
-	}
-
-	tmp, err := os.CreateTemp(stagedDir, ".update-*.part")
-	if err != nil {
-		return contracts.UpdateDownload{}, fmt.Errorf("%w: create temp file: %v", ErrDownload, err)
-	}
-	tmpName := tmp.Name()
-	committed := false
-	defer func() {
-		if !committed {
-			_ = os.Remove(tmpName)
-		}
-	}()
-
-	hasher := sha256.New()
-	written, copyErr := io.Copy(io.MultiWriter(tmp, hasher), response.Body)
-	if copyErr != nil {
-		_ = tmp.Close()
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return contracts.UpdateDownload{}, ctxErr
-		}
-		return contracts.UpdateDownload{}, fmt.Errorf("%w: read asset: %v", ErrDownload, copyErr)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return contracts.UpdateDownload{}, fmt.Errorf("%w: sync download: %v", ErrDownload, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return contracts.UpdateDownload{}, fmt.Errorf("%w: close download: %v", ErrDownload, err)
-	}
-	if info.Size > 0 && written != info.Size {
-		return contracts.UpdateDownload{}, fmt.Errorf("%w: size %d, manifest says %d", ErrDownload, written, info.Size)
-	}
-	sum := hex.EncodeToString(hasher.Sum(nil))
-	if !strings.EqualFold(sum, expectedSHA) {
-		return contracts.UpdateDownload{}, fmt.Errorf("%w: want sha256 %s, got %s", ErrDownload, expectedSHA, sum)
-	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
-		return contracts.UpdateDownload{}, fmt.Errorf("%w: chmod staged file: %v", ErrDownload, err)
-	}
-	if err := replaceStagedFile(tmpName, finalPath); err != nil {
-		return contracts.UpdateDownload{}, fmt.Errorf("%w: %v", ErrDownload, err)
-	}
-	committed = true
-
 	return contracts.UpdateDownload{
 		Version: info.LatestVersion,
-		Path:    finalPath,
-		SHA256:  sum,
-		Size:    written,
+		Path:    result.Path,
+		SHA256:  result.SHA256,
+		Size:    result.Size,
 	}, nil
+}
+
+// translateDownloadError maps the SDK's download/verification errors onto
+// ErrDownload, preserving cancellation and the product URL-policy sentinel.
+func translateDownloadError(err error) error {
+	if err == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return err
+	case errors.Is(err, rigupdate.ErrInsecureURL):
+		return fmt.Errorf("%w: %w", ErrInsecureURL, err)
+	case errors.Is(err, rigupdate.ErrNoAsset):
+		return fmt.Errorf("%w: %w", ErrNoAsset, err)
+	default:
+		return fmt.Errorf("%w: %w", ErrDownload, err)
+	}
 }
 
 // stagedFileName derives one safe file name: <version>-<asset basename>. Both

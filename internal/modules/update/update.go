@@ -1,11 +1,15 @@
 // Package update implements ZeoKeel's update-check backend module: fetch a
-// release manifest, compare versions and select this platform's asset. It is
-// the "check" phase of the old shell's updater (no download or install).
+// release feed (or GitHub Releases), compare versions and select this
+// platform's asset. It is the "check" phase of the old shell's updater.
+//
+// Version comparison, release/asset/checksum resolution and the verified
+// download live in github.com/zeokeel/zeokeel-rig/update. This package keeps
+// the product surface: contracts.UpdateService wiring, the feedURL manifest
+// behavior, install-on-restart plans and the localized sentinel errors.
 package update
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,8 +22,9 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
 
+	rigupdate "github.com/zeokeel/zeokeel-rig/update"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
-	libversion "github.com/zeokeel/zeokeel/internal/lib/version"
 )
 
 const (
@@ -30,7 +35,7 @@ const (
 	// DefaultTimeout bounds one manifest request (5s).
 	DefaultTimeout = 5 * time.Second
 	// maxManifestBytes caps the release manifest body (1 MiB).
-	maxManifestBytes = 1 << 20
+	maxManifestBytes = rigupdate.MaxManifestBytes
 )
 
 // Sentinel errors callers classify with errors.Is.
@@ -67,21 +72,14 @@ type Config struct {
 	TimeoutMs int `json:"timeoutMs"`
 }
 
-// Manifest is the release feed document.
-type Manifest struct {
-	Version string  `json:"version"`
-	Notes   string  `json:"notes,omitempty"`
-	Assets  []Asset `json:"assets"`
-}
+// Manifest is the release feed document. The type is shared with the rig
+// update package so hosts and tests can build/parse it the same way.
+type Manifest = rigupdate.Manifest
 
-// Asset is one downloadable build inside a manifest.
-type Asset struct {
-	GOOS   string `json:"goos"`
-	GOARCH string `json:"goarch"`
-	URL    string `json:"url"`
-	SHA256 string `json:"sha256"`
-	Size   int64  `json:"size,omitempty"`
-}
+// Asset is one downloadable build inside a manifest. Shared with the rig
+// update package; Name/GOOS/GOARCH are both available for feed and GitHub
+// sources.
+type Asset = rigupdate.Asset
 
 // Module is the update backend descriptor. It provides contracts.KeyUpdate.
 func Module() *module.Descriptor[Config] {
@@ -208,9 +206,9 @@ func (s *service) Check(ctx context.Context) (contracts.UpdateInfo, error) {
 	return s.checkManifest(ctx)
 }
 
-// checkManifest is the feedURL half of Check (unchanged release-manifest
-// behavior): fetch the manifest, pick this platform's asset and compare
-// versions.
+// checkManifest is the feedURL half of Check: fetch the manifest, pick this
+// platform's asset and compare versions. The manifest parsing, asset match and
+// version comparison are delegated to the rig update package.
 func (s *service) checkManifest(ctx context.Context) (contracts.UpdateInfo, error) {
 	if s.feedURL == "" {
 		return contracts.UpdateInfo{}, fmt.Errorf("%w", ErrDisabled)
@@ -243,7 +241,7 @@ func (s *service) checkManifest(ctx context.Context) (contracts.UpdateInfo, erro
 	if err != nil {
 		return contracts.UpdateInfo{}, err
 	}
-	asset, ok := pickAsset(manifest.Assets, runtime.GOOS, runtime.GOARCH)
+	asset, ok := manifest.AssetFor(runtime.GOOS, runtime.GOARCH)
 	if !ok {
 		return contracts.UpdateInfo{}, fmt.Errorf("%w: %s/%s", ErrNoAsset, runtime.GOOS, runtime.GOARCH)
 	}
@@ -251,7 +249,7 @@ func (s *service) checkManifest(ctx context.Context) (contracts.UpdateInfo, erro
 		return contracts.UpdateInfo{}, err
 	}
 	currentDisplay, currentComparable := currentVersion(s.appInfo.Version)
-	comparison, err := libversion.CompareVersions(currentComparable, manifest.Version)
+	comparison, err := rigupdate.CompareVersions(currentComparable, manifest.Version)
 	if err != nil {
 		return contracts.UpdateInfo{}, fmt.Errorf("%w: version %q: %v", ErrManifest, manifest.Version, err)
 	}
@@ -297,33 +295,19 @@ func currentVersion(raw string) (display, comparable string) {
 	if raw == "" {
 		return "dev", "0.0.0"
 	}
-	if _, err := libversion.Parse(raw); err != nil {
+	if _, err := rigupdate.ParseVersion(raw); err != nil {
 		return raw, "0.0.0"
 	}
 	return raw, raw
 }
 
-// ParseManifest decodes and validates a release manifest document.
+// ParseManifest decodes and validates a release manifest document. The rig
+// package owns the schema validation; this wrapper keeps the product sentinel
+// so callers can classify the error as ErrManifest.
 func ParseManifest(data []byte) (Manifest, error) {
-	var manifest Manifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
+	manifest, err := rigupdate.ParseManifest(data)
+	if err != nil {
 		return Manifest{}, fmt.Errorf("%w: %v", ErrManifest, err)
 	}
-	if strings.TrimSpace(manifest.Version) == "" {
-		return Manifest{}, fmt.Errorf("%w: missing version", ErrManifest)
-	}
-	if _, err := libversion.Parse(manifest.Version); err != nil {
-		return Manifest{}, fmt.Errorf("%w: version %q: %v", ErrManifest, manifest.Version, err)
-	}
 	return manifest, nil
-}
-
-// pickAsset returns the asset matching goos/goarch (exact, case-insensitive).
-func pickAsset(assets []Asset, goos, goarch string) (Asset, bool) {
-	for _, asset := range assets {
-		if strings.EqualFold(asset.GOOS, goos) && strings.EqualFold(asset.GOARCH, goarch) {
-			return asset, true
-		}
-	}
-	return Asset{}, false
 }
