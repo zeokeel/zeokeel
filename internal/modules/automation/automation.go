@@ -64,6 +64,11 @@ var ErrTaskNotFound = errors.New("automation: task not found")
 // ErrClosed reports a RunNow after Close: the scheduler no longer starts runs.
 var ErrClosed = errors.New("automation: service is closed")
 
+// ErrSchedulerDisabled reports that this instance does not own the automation
+// registry lock, so scheduled and manual runs are disabled here while another
+// instance delivers them. CRUD and the read model keep working.
+var ErrSchedulerDisabled = errors.New("automation: scheduler is disabled (the registry is owned by another instance)")
+
 // Config is the module's typed assembly config.
 type Config struct {
 	// Path is the registry file: absolute, or relative to the product data
@@ -176,6 +181,9 @@ type service struct {
 	chatUnsub func()
 	// closed stops new runs after Close begins.
 	closed bool
+	// degradedErr is set when another instance owns the registry lock: this
+	// service stays usable for CRUD/read but never starts the scheduler.
+	degradedErr error
 
 	subscribers    map[uint64]func()
 	nextSubscriber uint64
@@ -216,7 +224,19 @@ func newService(dataDir string, cfg Config, logger contracts.Logger, chat contra
 	// A corrupt or unreadable registry is quarantined by the SDK store; log the
 	// recovery with the product's wording (the SDK has no logger).
 	service.logRegistryRecovery()
-	store, err := rigautomation.OpenFile(path)
+	// The registry is process-owned: the first instance acquires the directory
+	// lock and runs the scheduler. A second instance (another app window, a CLI
+	// next to the desktop app) must not fail startup and must never deliver the
+	// same task twice, so it degrades to a scheduler-less service: the read
+	// model and CRUD stay available, scheduled runs do not.
+	store, err := rigautomation.OpenFileLocked(path)
+	degraded := false
+	if errors.Is(err, rigautomation.ErrLocked) {
+		degraded = true
+		service.degradedErr = err
+		service.logger.Printf("%s: automation registry %q is locked by another running instance; scheduled runs are disabled in this window (only the owning instance delivers automations)", ModuleID, path)
+		store, err = rigautomation.OpenFile(path)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -232,26 +252,33 @@ func newService(dataDir string, cfg Config, logger contracts.Logger, chat contra
 			service.logger.Printf(format, args...)
 		},
 	}
-	// Settle runs that were delivered but never completed before the previous
-	// shutdown (the SDK rebuilds its pending set from the durable records).
-	service.adoptLegacyDeliveredRuns()
-	if err := service.scheduler.SettlePending(context.Background()); err != nil && !errors.Is(err, rigautomation.ErrSchedulerClosed) {
-		service.logger.Printf("%s: initialize scheduler: %v", ModuleID, err)
-	}
-	// The automation module subscribes to chat-session changes to settle its
-	// delivered runs promptly. A host whose chat service cannot subscribe still
-	// runs tasks; settlement then happens on the ticker.
-	if unsubscribe, err := chat.Subscribe(service.onChatChange); err != nil {
-		service.logger.Printf("%s: subscribe chat session states: %v", ModuleID, err)
-	} else {
-		service.chatUnsub = unsubscribe
-	}
-	if err := service.scheduler.Start(); err != nil {
-		service.Close()
-		return nil, err
+	if !degraded {
+		// Settle runs that were delivered but never completed before the
+		// previous shutdown (the SDK rebuilds its pending set from the durable
+		// records).
+		service.adoptLegacyDeliveredRuns()
+		if err := service.scheduler.SettlePending(context.Background()); err != nil && !errors.Is(err, rigautomation.ErrSchedulerClosed) {
+			service.logger.Printf("%s: initialize scheduler: %v", ModuleID, err)
+		}
+		// The automation module subscribes to chat-session changes to settle its
+		// delivered runs promptly. A host whose chat service cannot subscribe
+		// still runs tasks; settlement then happens on the ticker.
+		if unsubscribe, err := chat.Subscribe(service.onChatChange); err != nil {
+			service.logger.Printf("%s: subscribe chat session states: %v", ModuleID, err)
+		} else {
+			service.chatUnsub = unsubscribe
+		}
+		if err := service.scheduler.Start(); err != nil {
+			service.Close()
+			return nil, err
+		}
 	}
 	tasks, _ := store.List()
-	service.logger.Printf("%s: initialized with %d tasks (tick %s)", ModuleID, len(tasks), tick)
+	if degraded {
+		service.logger.Printf("%s: initialized in degraded mode with %d tasks (scheduler disabled)", ModuleID, len(tasks))
+	} else {
+		service.logger.Printf("%s: initialized with %d tasks (tick %s)", ModuleID, len(tasks), tick)
+	}
 	return service, nil
 }
 
@@ -309,6 +336,13 @@ func (s *service) Close() {
 			s.scheduler.Stop()
 		}
 		s.runs.Wait()
+		if s.store != nil {
+			// Release the cross-process registry lock so the next instance can
+			// take ownership (tests and host restarts rely on this).
+			if err := s.store.Close(); err != nil {
+				s.logger.Printf("%s: release automation registry lock: %v", ModuleID, err)
+			}
+		}
 		s.logger.Printf("%s: scheduler stopped", ModuleID)
 	})
 }
@@ -462,6 +496,11 @@ func (s *service) RunNow(ctx context.Context, id string) error {
 	if s.closed {
 		s.mu.Unlock()
 		return ErrClosed
+	}
+	if s.degradedErr != nil {
+		degradedErr := s.degradedErr
+		s.mu.Unlock()
+		return fmt.Errorf("%w: %v", ErrSchedulerDisabled, degradedErr)
 	}
 	if _, ok := s.store.Get(id); !ok {
 		s.mu.Unlock()
@@ -859,7 +898,7 @@ func (s *service) onChatChange(sessionID string) {
 		return
 	}
 	s.mu.Lock()
-	if s.closed {
+	if s.closed || s.degradedErr != nil {
 		s.mu.Unlock()
 		return
 	}
