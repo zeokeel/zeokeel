@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **最终可用性收尾**（2026-11-23）：team 失败 run 错误进入读模型、启动不再打印 subagent 重复注册；automation 降级横幅支持重试接管；全量 verify（含 -race、regression、desktop/headless/ACP smoke）通过。依赖 `rig v0.37.0`。
+
 - **剩余差异收尾**（2026-11-22）：team 后续 send 的 `Track` 跟踪、快速 spawn 的完成结果、fork 身份；automation 降级状态契约与 UI 提示；MCP 重名 server 显示区分与 FileTokenStore 加密钩子。依赖 `rig v0.36.0`。
 
 - **收敛收尾**（2026-11-22）：文档最终归属与 v1 memory 死契约清理；team Coordinator.Adopt（模型工具 spawn 归 coordinator）；MCP `OnReconnect` 与重名 server `Server.Key` 命名空间；automation 跨进程注册表锁与降级模式。依赖 `rig v0.35.0`。
