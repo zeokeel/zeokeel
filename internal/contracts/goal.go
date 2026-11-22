@@ -15,134 +15,45 @@ package contracts
 
 import (
 	"context"
-	"errors"
-	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
+	riggoal "github.com/zeokeel/zeokeel-rig/session/goal"
 )
 
-// GoalPhase is the DSH persistent lifecycle phase of a session goal.
-type GoalPhase string
-
-const (
-	// GoalPhaseActive is the working phase: the continuation driver may advance
-	// the goal.
-	GoalPhaseActive GoalPhase = "active"
-	// GoalPhasePaused is a user pause: visible, never advanced automatically.
-	GoalPhasePaused GoalPhase = "paused"
-	// GoalPhaseBlocked records that progress stopped for a concrete reason
-	// (model-reported or the round limit).
-	GoalPhaseBlocked GoalPhase = "blocked"
-	// GoalPhaseComplete is the terminal phase.
-	GoalPhaseComplete GoalPhase = "complete"
-)
-
-// GoalActivation is the DSH live continuation state. It is an observation of
-// this process, not persisted state.
-type GoalActivation string
-
-const (
-	// GoalActivationArmed means the continuation driver may advance the goal.
-	GoalActivationArmed GoalActivation = "armed"
-	// GoalActivationDisarmed means automatic continuation is off until a human
-	// resume (or a new goal) re-arms it.
-	GoalActivationDisarmed GoalActivation = "disarmed"
-)
-
-// GoalBlockedReason is the machine-routable and human-readable explanation
-// attached to a blocked goal.
-type GoalBlockedReason struct {
-	// Code is a stable lower-kebab-case category.
-	Code string `json:"code"`
-	// Message is the concrete explanation.
-	Message string `json:"message"`
-}
-
-// Stable blocked-reason codes.
-const (
-	// GoalBlockedCodeRoundLimit is written when automatic continuation reached
-	// the goal's round cap.
-	GoalBlockedCodeRoundLimit = "round-limit"
-	// GoalBlockedCodeModelReported is written when the model reported the
-	// blocking condition itself.
-	GoalBlockedCodeModelReported = "model-reported"
+// The goal value types come from the SDK goal service; these aliases keep the
+// contract names stable for the UI, agent and host tools.
+type (
+	GoalPhase         = riggoal.Phase
+	GoalActivation    = riggoal.Activation
+	GoalBlockedReason = riggoal.BlockedReason
+	Goal              = riggoal.Goal
+	GoalRef           = riggoal.Ref
+	GoalAction        = riggoal.Action
+	GoalUpdate        = riggoal.Update
 )
 
 const (
-	// DefaultMaxGoalRounds is the DSH default automatic continuation budget for
-	// one goal instance (create_goal may override it).
-	DefaultMaxGoalRounds = 256
-	// MinGoalBlockedRounds is the minimum number of started goal rounds before a
-	// model-reported blocked action from a goal-round turn is accepted (DSH
-	// requires the condition to persist across at least three rounds).
-	MinGoalBlockedRounds = 3
-	// GoalRoundLimitMessage is the blocked_reason message written when the round
-	// cap is reached.
-	GoalRoundLimitMessage = "the goal reached its automatic continuation round limit"
+	GoalPhaseActive   = riggoal.PhaseActive
+	GoalPhasePaused   = riggoal.PhasePaused
+	GoalPhaseBlocked  = riggoal.PhaseBlocked
+	GoalPhaseComplete = riggoal.PhaseComplete
+
+	GoalActivationArmed    = riggoal.ActivationArmed
+	GoalActivationDisarmed = riggoal.ActivationDisarmed
+
+	GoalBlockedCodeRoundLimit    = riggoal.BlockedCodeRoundLimit
+	GoalBlockedCodeModelReported = riggoal.BlockedCodeModelReported
+
+	DefaultMaxGoalRounds  = riggoal.DefaultMaxGoalRounds
+	MinGoalBlockedRounds  = riggoal.MinGoalBlockedRounds
+	GoalRoundLimitMessage = riggoal.RoundLimitMessage
+
+	GoalActionEdit     = riggoal.ActionEdit
+	GoalActionPause    = riggoal.ActionPause
+	GoalActionResume   = riggoal.ActionResume
+	GoalActionComplete = riggoal.ActionComplete
+	GoalActionBlocked  = riggoal.ActionBlocked
 )
-
-// Goal is the current goal of one chat session.
-type Goal struct {
-	// SessionID is the conversation that owns this goal.
-	SessionID string `json:"sessionId,omitempty"`
-	// ID identifies one goal instance; update_goal compare-and-set uses it.
-	ID string `json:"id"`
-	// Revision is the monotonic compare-and-set token of the persisted snapshot.
-	Revision int `json:"revision"`
-	// Objective is the concrete completion objective.
-	Objective string `json:"objective,omitempty"`
-	// Phase is the lifecycle phase.
-	Phase GoalPhase `json:"phase"`
-	// RoundsStarted counts automatic continuation rounds that started.
-	RoundsStarted int `json:"roundsStarted"`
-	// MaxGoalRounds is this goal's automatic continuation budget.
-	MaxGoalRounds int `json:"maxGoalRounds"`
-	// BlockedReason is set while Phase is GoalPhaseBlocked.
-	BlockedReason *GoalBlockedReason `json:"blockedReason,omitempty"`
-	// Activation reports whether the engine-side driver may continue the goal
-	// in this process.
-	Activation GoalActivation `json:"activation,omitempty"`
-	// UpdatedAt is when the persisted snapshot last changed.
-	UpdatedAt time.Time `json:"updatedAt,omitempty"`
-}
-
-// GoalRef is the exact compare-and-set identity update_goal requires.
-type GoalRef struct {
-	// ID must equal the current goal's ID.
-	ID string
-	// Revision must equal the current goal's Revision.
-	Revision int
-}
-
-// GoalAction is one validated goal lifecycle mutation.
-type GoalAction string
-
-const (
-	// GoalActionEdit replaces the objective and/or the round cap.
-	GoalActionEdit GoalAction = "edit"
-	// GoalActionPause moves an active goal to paused.
-	GoalActionPause GoalAction = "pause"
-	// GoalActionResume moves a paused/blocked goal back to active (human path).
-	GoalActionResume GoalAction = "resume"
-	// GoalActionComplete moves a non-terminal goal to complete.
-	GoalActionComplete GoalAction = "complete"
-	// GoalActionBlocked records a concrete blocking condition.
-	GoalActionBlocked GoalAction = "blocked"
-)
-
-// GoalUpdate is one validated goal mutation. Zero values mean "omitted":
-// Objective and MaxGoalRounds are only meaningful with GoalActionEdit, and
-// BlockedReason is required with GoalActionBlocked.
-type GoalUpdate struct {
-	// Action is the mutation to apply.
-	Action GoalAction
-	// Objective replaces the goal text (edit only).
-	Objective string
-	// MaxGoalRounds replaces the round cap (edit only; 0 = keep).
-	MaxGoalRounds int
-	// BlockedReason is the concrete blocking condition (blocked only).
-	BlockedReason string
-}
 
 // GoalRoundInfo marks a user message that the engine-side goal driver injected
 // as an automatic continuation round (nil for messages the human sent).
@@ -155,29 +66,17 @@ type GoalRoundInfo struct {
 	MaxGoalRounds int `json:"maxGoalRounds,omitempty"`
 }
 
-// Goal errors. Callers classify with errors.Is; the goal backend wraps these
-// sentinels with session/goal context.
+// Goal errors. Callers classify with errors.Is; the SDK sentinels carry the
+// same identities.
 var (
-	// ErrGoalNotFound means the session has no goal (or no goal service is
-	// wired into this product).
-	ErrGoalNotFound = errors.New("goal: no goal for this session")
-	// ErrGoalStaleRef means the caller's GoalRef no longer matches the current
-	// id/revision (another change landed first); nothing was overwritten.
-	ErrGoalStaleRef = errors.New("goal: stale goal reference")
-	// ErrGoalInvalidTransition means the phase does not allow the action.
-	ErrGoalInvalidTransition = errors.New("goal: invalid goal transition")
-	// ErrGoalRoundLimit means the automatic continuation budget is exhausted;
-	// the goal was persisted as blocked with code round-limit.
-	ErrGoalRoundLimit = errors.New("goal: goal round limit reached")
-	// ErrGoalConflict means a non-complete goal already exists in the session.
-	ErrGoalConflict = errors.New("goal: a goal already exists for this session")
-	// ErrGoalDirectHumanRequired means the caller is not a direct human turn
-	// (goal-round, automation or subagent run) and the action needs one.
-	ErrGoalDirectHumanRequired = errors.New("goal: this action requires a direct human turn")
+	ErrGoalNotFound            = riggoal.ErrGoalNotFound
+	ErrGoalStaleRef            = riggoal.ErrGoalStaleRef
+	ErrGoalInvalidTransition   = riggoal.ErrGoalInvalidTransition
+	ErrGoalRoundLimit          = riggoal.ErrGoalRoundLimit
+	ErrGoalConflict            = riggoal.ErrGoalConflict
+	ErrGoalDirectHumanRequired = riggoal.ErrGoalDirectHumanRequired
 )
 
-// GoalService is the per-session durable goal service provided by the goal
-// backend module (contracts.KeyGoal). It is safe for concurrent use.
 type GoalService interface {
 	// Goal returns the session's current goal; ok is false when none exists.
 	Goal(sessionID string) (Goal, bool)
