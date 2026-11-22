@@ -17,10 +17,22 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
 	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/tools/team/taskstore"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/hosttools"
 )
+
+// The durable document shape and its version now live in the SDK; these aliases
+// keep the migration fixtures readable.
+type taskBoardFile = taskstore.Document
+
+type taskBoardTask = rig.TeamTask
+
+const taskBoardVersion = taskstore.DocumentVersion
+
+// taskBoardFileName is the v1 process-wide board document.
+const taskBoardFileName = taskstore.LegacyFileName
 
 // bootTaskBoard activates the toolkit module with one explicit data directory so
 // a test can close it and activate a fresh instance to simulate a restart.
