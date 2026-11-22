@@ -201,11 +201,9 @@ func TestMCPAuthRuntimeAuthorizesPersistsAndConnects(t *testing.T) {
 	as := newOAuthFakeAS(t)
 	resource := newOAuthFakeMCP(t, as.server.URL)
 	settings := newAuthTestSettings()
-	runtime := newMCPAuthRuntime(settings, t.Logf)
-	defer runtime.close()
-
 	authorized := make(chan string, 1)
-	runtime.onAuthorized = func(name string) { authorized <- name }
+	runtime := newMCPAuthRuntime(settings, t.Logf, func(name string) { authorized <- name })
+	defer runtime.close()
 
 	cfg := contracts.MCPServerConfig{
 		Name: "files",
@@ -265,7 +263,7 @@ func TestMCPAuthRefreshDueRefreshesExpiringTokens(t *testing.T) {
 	as := newOAuthFakeAS(t)
 	resource := newOAuthFakeMCP(t, as.server.URL)
 	settings := newAuthTestSettings()
-	runtime := newMCPAuthRuntime(settings, t.Logf)
+	runtime := newMCPAuthRuntime(settings, t.Logf, nil)
 	defer runtime.close()
 
 	cfg := contracts.MCPServerConfig{
@@ -288,11 +286,11 @@ func TestMCPAuthRefreshDueRefreshesExpiringTokens(t *testing.T) {
 
 	// The fresh token is valid for an hour: a one-minute background window must
 	// not refresh it.
-	if refreshed := runtime.refreshDue(context.Background(), time.Minute); refreshed != 0 {
+	if refreshed := runtime.Runtime().RefreshDue(context.Background(), time.Minute); refreshed != 0 {
 		t.Fatalf("refreshDue(1m) refreshed %d token(s), want 0", refreshed)
 	}
 	// A wide window makes it due; the rotated tokens must be persisted.
-	if refreshed := runtime.refreshDue(context.Background(), 24*time.Hour); refreshed != 1 {
+	if refreshed := runtime.Runtime().RefreshDue(context.Background(), 24*time.Hour); refreshed != 1 {
 		t.Fatalf("refreshDue(24h) refreshed %d token(s), want 1", refreshed)
 	}
 	status := runtime.Status(cfg)

@@ -1,18 +1,20 @@
 package toolkit
 
-// MCP OAuth 2.1 adapter: the protocol lives in rig's tools/mcp package; this
-// file only wires it to the product (settings-backed TokenStore, the connector
-// config model, status mapping and reconnect-after-authorization).
+// MCP OAuth adapter: the protocol and refresh runtime live in rig's
+// tools/mcp/auth package; this file keeps only the product wiring — the
+// settings-backed mcp.TokenStore (stable settings key), the connector config
+// normalization and the contracts.MCPAuthService status/flow mapping. The
+// manager owns the OAuth clients (Server.OAuth) and the background refresh loop.
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/zeokeel/zeokeel-rig/tools/mcp"
+	"github.com/zeokeel/zeokeel-rig/tools/mcp/auth"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -64,36 +66,6 @@ func (s mcpOAuthTokenStore) Delete(_ context.Context, server string) error {
 	return s.settings.Set(contracts.MCPAuthSettingKey(s.serverName(server)), "")
 }
 
-// mcpAuthClientEntry is one cached rig OAuth client plus the configuration it
-// was built from (a changed URL/scope/client id rebuilds it).
-type mcpAuthClientEntry struct {
-	name        string
-	client      *mcp.OAuthClient
-	fingerprint string
-}
-
-// mcpAuthRuntime implements contracts.MCPAuthService and builds the OAuth
-// clients used by startHTTPMCP.
-type mcpAuthRuntime struct {
-	settings contracts.SettingsService
-	logf     func(string, ...any)
-
-	mu      sync.Mutex
-	clients map[string]*mcpAuthClientEntry
-	// onAuthorized reconnects the managed connection after a completed flow.
-	onAuthorized func(server string)
-}
-
-var _ contracts.MCPAuthService = (*mcpAuthRuntime)(nil)
-
-// newMCPAuthRuntime creates the adapter for one toolkit activation.
-func newMCPAuthRuntime(settings contracts.SettingsService, logf func(string, ...any)) *mcpAuthRuntime {
-	if logf == nil {
-		logf = func(string, ...any) {}
-	}
-	return &mcpAuthRuntime{settings: settings, logf: logf, clients: make(map[string]*mcpAuthClientEntry)}
-}
-
 // authOAuth2 reports whether the row opts into the OAuth flow.
 func authOAuth2(cfg contracts.MCPServerConfig) bool {
 	return cfg.Auth != nil && cfg.Auth.Mode == contracts.MCPAuthOAuth2
@@ -107,53 +79,79 @@ func authResource(cfg contracts.MCPServerConfig) string {
 	return strings.TrimSpace(cfg.URL)
 }
 
-// authFingerprint changes whenever a cached client must be rebuilt.
-func authFingerprint(cfg contracts.MCPServerConfig) string {
-	if cfg.Auth == nil {
-		return cfg.Name + "\x00" + cfg.URL
+// mcpAuthRuntime is the product adapter around auth.Runtime. It owns no client
+// cache or refresh loop of its own: the runtime caches clients, and the manager
+// (which receives this runtime through Config.Auth) builds the MCP clients from
+// Server.OAuth and runs the background refresh.
+type mcpAuthRuntime struct {
+	settings contracts.SettingsService
+	logf     func(string, ...any)
+	runtime  *auth.Runtime
+}
+
+var _ contracts.MCPAuthService = (*mcpAuthRuntime)(nil)
+
+// newMCPAuthRuntime creates the adapter for one toolkit activation. onAuthorized
+// is invoked asynchronously when an interactive flow completes, so the product
+// can reconnect the managed server.
+func newMCPAuthRuntime(settings contracts.SettingsService, logf func(string, ...any),
+	onAuthorized func(server string)) *mcpAuthRuntime {
+	if logf == nil {
+		logf = func(string, ...any) {}
 	}
-	return strings.Join([]string{
-		cfg.Name,
-		cfg.URL,
-		authResource(cfg),
-		cfg.Auth.ClientID,
-		cfg.Auth.AuthorizationServer,
-		strings.Join(cfg.Auth.Scopes, "\x00"),
-	}, "\x01")
+	return &mcpAuthRuntime{
+		settings: settings,
+		logf:     logf,
+		runtime: auth.New(
+			auth.WithLogger(logf),
+			auth.WithOnAuthorized(onAuthorized),
+		),
+	}
 }
 
-// clientForServer returns (building when needed) the rig OAuth client of one
-// configured server.
-func (a *mcpAuthRuntime) clientForServer(server MCPServer) (*mcp.OAuthClient, error) {
-	return a.clientForConfig(server.config())
+// Runtime returns the shared rig auth runtime handed to manager.Config.Auth.
+func (a *mcpAuthRuntime) Runtime() *auth.Runtime {
+	if a == nil {
+		return nil
+	}
+	return a.runtime
 }
 
-// clientForConfig returns (building when needed) the rig OAuth client for one
-// connector config.
-func (a *mcpAuthRuntime) clientForConfig(cfg contracts.MCPServerConfig) (*mcp.OAuthClient, error) {
+// start launches the runtime's background refresh loop.
+func (a *mcpAuthRuntime) start() {
+	if a == nil {
+		return
+	}
+	a.runtime.Start()
+}
+
+// close stops the loop and releases every cached OAuth client (module unload).
+func (a *mcpAuthRuntime) close() {
+	if a == nil {
+		return
+	}
+	a.runtime.Stop()
+	_ = a.runtime.Close()
+}
+
+// authConfig converts one connector config to the rig auth runtime config. The
+// settings-backed token store keeps the historical settings key.
+func (a *mcpAuthRuntime) authConfig(cfg contracts.MCPServerConfig) (auth.Config, error) {
 	if a == nil || a.settings == nil {
-		return nil, errors.New("the settings store is unavailable; OAuth cannot persist tokens")
+		return auth.Config{}, errors.New("the settings store is unavailable; OAuth cannot persist tokens")
 	}
 	if !authOAuth2(cfg) {
-		return nil, fmt.Errorf("connector %q is not configured for OAuth", cfg.Name)
+		return auth.Config{}, fmt.Errorf("connector %q is not configured for OAuth", cfg.Name)
 	}
 	name := strings.TrimSpace(cfg.Name)
 	if name == "" {
-		return nil, errors.New("the connector name is required for OAuth")
+		return auth.Config{}, errors.New("the connector name is required for OAuth")
 	}
 	resource := authResource(cfg)
 	if resource == "" {
-		return nil, fmt.Errorf("connector %q has no URL for OAuth", name)
+		return auth.Config{}, fmt.Errorf("connector %q has no URL for OAuth", name)
 	}
-	fingerprint := authFingerprint(cfg)
-	a.mu.Lock()
-	existing := a.clients[name]
-	a.mu.Unlock()
-	if existing != nil && existing.fingerprint == fingerprint {
-		return existing.client, nil
-	}
-
-	oauthConfig := mcp.OAuthConfig{
+	oauthConfig := auth.Config{
 		ServerName:          name,
 		Resource:            resource,
 		Scopes:              append([]string(nil), cfg.Auth.Scopes...),
@@ -165,93 +163,20 @@ func (a *mcpAuthRuntime) clientForConfig(cfg contracts.MCPServerConfig) (*mcp.OA
 	if cfg.TimeoutMs > 0 {
 		oauthConfig.Timeout = time.Duration(cfg.TimeoutMs) * time.Millisecond
 	}
-	created, err := mcp.NewOAuthClient(oauthConfig)
+	return oauthConfig, nil
+}
+
+// managerOAuthConfig returns the OAuth configuration to put on manager.Server,
+// or nil for a connector that does not use OAuth.
+func (a *mcpAuthRuntime) managerOAuthConfig(server MCPServer) (*auth.Config, error) {
+	if !authOAuth2(server.config()) {
+		return nil, nil
+	}
+	oauthConfig, err := a.authConfig(server.config())
 	if err != nil {
-		return nil, fmt.Errorf("connector %q OAuth: %w", name, err)
+		return nil, err
 	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if current := a.clients[name]; current != nil && current.fingerprint == fingerprint {
-		_ = created.Close()
-		return current.client, nil
-	}
-	old := a.clients[name]
-	a.clients[name] = &mcpAuthClientEntry{name: name, client: created, fingerprint: fingerprint}
-	if old != nil {
-		_ = old.client.Close()
-	}
-	return created, nil
-}
-
-// existingClient returns a cached client without building one (Cancel/cleanup).
-func (a *mcpAuthRuntime) existingClient(server string) *mcp.OAuthClient {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	entry := a.clients[strings.TrimSpace(server)]
-	if entry == nil {
-		return nil
-	}
-	return entry.client
-}
-
-// close releases every cached client (module unload).
-func (a *mcpAuthRuntime) close() {
-	a.mu.Lock()
-	clients := a.clients
-	a.clients = make(map[string]*mcpAuthClientEntry)
-	a.mu.Unlock()
-	for _, entry := range clients {
-		if entry != nil && entry.client != nil {
-			_ = entry.client.Close()
-		}
-	}
-}
-
-// Background refresh: Proactively rotate access tokens shortly before they
-// expire so a long-running session never hits a 401 mid-tool-call. rig's
-// transport still refreshes on demand (near-expiry and 401), but a background
-// pass keeps idle connectors healthy too.
-const (
-	mcpBackgroundRefreshInterval = 30 * time.Second
-	mcpBackgroundRefreshWindow   = 5 * time.Minute
-)
-
-// refreshDue refreshes every authorized client whose access token expires
-// within window. Calls are serialized by the caller (the controller loop) and
-// rig's refresh is single-flight, so a concurrent tool call shares the result.
-func (a *mcpAuthRuntime) refreshDue(ctx context.Context, window time.Duration) int {
-	if a == nil {
-		return 0
-	}
-	if window <= 0 {
-		window = mcpBackgroundRefreshWindow
-	}
-	a.mu.Lock()
-	entries := make([]*mcpAuthClientEntry, 0, len(a.clients))
-	for _, entry := range a.clients {
-		entries = append(entries, entry)
-	}
-	a.mu.Unlock()
-	refreshed := 0
-	for _, entry := range entries {
-		if entry == nil || entry.client == nil {
-			continue
-		}
-		status := entry.client.Status()
-		if status.State != mcp.OAuthStateAuthorized || status.ExpiresAt.IsZero() {
-			continue
-		}
-		if time.Until(status.ExpiresAt) > window {
-			continue
-		}
-		if _, err := entry.client.Refresh(ctx); err != nil {
-			a.logf("oauth %q: background refresh failed: %v", entry.name, err)
-			continue
-		}
-		refreshed++
-	}
-	return refreshed
+	return &oauthConfig, nil
 }
 
 // authStatusFromRig folds rig's status onto the product's UI vocabulary.
@@ -298,31 +223,26 @@ func (a *mcpAuthRuntime) failureStatus(server MCPServer) string {
 	}
 }
 
-// Status implements contracts.MCPAuthService. It is a pure read: it only
-// reports the cached client (built at activation or by Prepare/Wait). Building
-// or replacing a client here would close a live connection and violate the
-// UI-thread contract.
+// Status implements contracts.MCPAuthService. It is a pure read of the runtime's
+// cached client (no discovery and no token I/O).
 func (a *mcpAuthRuntime) Status(cfg contracts.MCPServerConfig) contracts.MCPAuthStatus {
-	if a == nil {
+	if a == nil || a.runtime == nil {
 		return contracts.MCPAuthStatus{State: contracts.MCPAuthStateNone}
 	}
-	name := strings.TrimSpace(cfg.Name)
-	a.mu.Lock()
-	entry := a.clients[name]
-	a.mu.Unlock()
-	if entry == nil || entry.fingerprint != authFingerprint(cfg) {
+	oauthConfig, err := a.authConfig(cfg)
+	if err != nil {
 		return contracts.MCPAuthStatus{State: contracts.MCPAuthStateNone}
 	}
-	return authStatusFromRig(entry.client.Status())
+	return authStatusFromRig(a.runtime.Status(oauthConfig))
 }
 
 // Prepare implements contracts.MCPAuthService.
 func (a *mcpAuthRuntime) Prepare(ctx context.Context, cfg contracts.MCPServerConfig) (contracts.MCPAuthFlow, error) {
-	client, err := a.clientForConfig(cfg)
+	oauthConfig, err := a.authConfig(cfg)
 	if err != nil {
 		return contracts.MCPAuthFlow{}, err
 	}
-	flow, err := client.Prepare(ctx)
+	flow, err := a.runtime.Prepare(ctx, oauthConfig)
 	if err != nil {
 		return contracts.MCPAuthFlow{}, err
 	}
@@ -335,36 +255,30 @@ func (a *mcpAuthRuntime) Prepare(ctx context.Context, cfg contracts.MCPServerCon
 	}, nil
 }
 
-// Wait implements contracts.MCPAuthService.
+// Wait implements contracts.MCPAuthService. The runtime invokes the authorized
+// callback (reconnect) itself after a successful flow.
 func (a *mcpAuthRuntime) Wait(ctx context.Context, cfg contracts.MCPServerConfig, flow contracts.MCPAuthFlow) (contracts.MCPAuthStatus, error) {
-	client, err := a.clientForConfig(cfg)
+	oauthConfig, err := a.authConfig(cfg)
 	if err != nil {
 		return contracts.MCPAuthStatus{}, err
 	}
-	status, err := client.Wait(ctx, mcp.OAuthFlow{
+	status, err := a.runtime.Wait(ctx, oauthConfig, mcp.OAuthFlow{
 		AuthURL:     flow.AuthURL,
 		RedirectURI: flow.RedirectURI,
 		Issuer:      flow.Issuer,
 		Scopes:      append([]string(nil), flow.Scopes...),
 		ExpiresAt:   flow.ExpiresAt,
 	})
-	if err != nil {
-		return authStatusFromRig(status), err
-	}
-	if a.onAuthorized != nil {
-		name := cfg.Name
-		go a.onAuthorized(name)
-	}
-	return authStatusFromRig(status), nil
+	return authStatusFromRig(status), err
 }
 
 // Cancel implements contracts.MCPAuthService.
 func (a *mcpAuthRuntime) Cancel(cfg contracts.MCPServerConfig, flow contracts.MCPAuthFlow) {
-	client := a.existingClient(cfg.Name)
-	if client == nil {
+	oauthConfig, err := a.authConfig(cfg)
+	if err != nil {
 		return
 	}
-	client.Cancel(mcp.OAuthFlow{
+	a.runtime.Cancel(oauthConfig, mcp.OAuthFlow{
 		AuthURL:     flow.AuthURL,
 		RedirectURI: flow.RedirectURI,
 		Issuer:      flow.Issuer,
@@ -375,11 +289,11 @@ func (a *mcpAuthRuntime) Cancel(cfg contracts.MCPServerConfig, flow contracts.MC
 
 // Revoke implements contracts.MCPAuthService.
 func (a *mcpAuthRuntime) Revoke(ctx context.Context, cfg contracts.MCPServerConfig) error {
-	client, err := a.clientForConfig(cfg)
+	oauthConfig, err := a.authConfig(cfg)
 	if err != nil {
 		return err
 	}
-	return client.Revoke(ctx)
+	return a.runtime.Revoke(ctx, oauthConfig)
 }
 
 // config converts one merged server row back to the contract config used by

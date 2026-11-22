@@ -267,8 +267,15 @@ func Module() *module.Descriptor[Config] {
 		// MCP starts after the built-in/LSP registry exists so a hot reload can
 		// register/unregister its tools against the same registry the agent uses.
 		plugins := newPluginsService(nil)
-		authRuntime := newMCPAuthRuntime(settingsService, logf)
-		controller := newMCPController(logf, registry, plugins, authRuntime, settingsService, cfg.MaxOutputBytes,
+		// The auth runtime is stable across reloads; its authorized callback
+		// resolves the live controller and reconnects that server.
+		var controller *mcpController
+		authRuntime := newMCPAuthRuntime(settingsService, logf, func(server string) {
+			if controller != nil {
+				controller.reconnectByName(server)
+			}
+		})
+		controller = newMCPController(logf, registry, plugins, authRuntime, settingsService, cfg.MaxOutputBytes,
 			func() ([]MCPServer, map[string]bool) {
 				return loadMCPServers(ctx, cfg, settingsService, hasSettings, logf)
 			})
