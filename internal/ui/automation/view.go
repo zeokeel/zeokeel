@@ -38,6 +38,9 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, navigator contracts
 	})
 
 	ui.Column(c).FillWidth().Grow(1).Gap(design.Space4).Children(func() {
+		if status, ok := automationStatus(service); ok && !status.Available {
+			buildAutomationStatusBanner(c, t, st, status)
+		}
 		if st.pageErr != "" {
 			uikit.ErrorLine(c, st.pageErr)
 		}
