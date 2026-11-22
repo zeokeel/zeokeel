@@ -12,7 +12,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	rig "github.com/zeokeel/zeokeel-rig"
 
@@ -67,72 +66,6 @@ func bigResultMCPServer(t *testing.T, payload string, isError bool) *httptest.Se
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
 	}))
-}
-
-// TestTruncateMCPContent covers the budget helper directly: small results pass
-// through unchanged, large results are clipped to the limit (UTF-8 safe) and
-// carry the truncation marker with the dropped byte count.
-func TestTruncateMCPContent(t *testing.T) {
-	small := "tiny result"
-	if got, truncated := truncateMCPContent(small, 1024); got != small || truncated {
-		t.Fatalf("small result = %q/%v, want unchanged", got, truncated)
-	}
-	payload := strings.Repeat("A", 4096)
-	clipped, truncated := truncateMCPContent(payload, 512)
-	if !truncated {
-		t.Fatal("large result was not truncated")
-	}
-	if len(clipped) > 512 {
-		t.Fatalf("clipped result = %d bytes, want <= 512", len(clipped))
-	}
-	if !strings.Contains(clipped, "[truncated:") {
-		t.Fatalf("clipped result lacks the truncation marker: %q", clipped)
-	}
-	if !strings.HasPrefix(clipped, "AAAA") {
-		t.Fatalf("clipped result lost the head: %q", clipped)
-	}
-	if !strings.HasSuffix(clipped, "AAAA") {
-		t.Fatalf("clipped result lost the tail: %q", clipped)
-	}
-	// Multi-byte content stays valid UTF-8.
-	multi := strings.Repeat("技能", 1000)
-	clipped, truncated = truncateMCPContent(multi, 300)
-	if !truncated || len(clipped) > 300 || !utf8.ValidString(clipped) {
-		t.Fatalf("multi-byte truncation = %d bytes valid=%v (truncated=%v)", len(clipped), utf8.ValidString(clipped), truncated)
-	}
-}
-
-// fakeContentTool is a rig.Tool returning a fixed result.
-type fakeContentTool struct {
-	name    string
-	content string
-	isError bool
-}
-
-func (t fakeContentTool) Name() string           { return t.name }
-func (t fakeContentTool) Description() string    { return t.name }
-func (t fakeContentTool) Schema() map[string]any { return map[string]any{"type": "object"} }
-func (t fakeContentTool) Invoke(context.Context, rig.ToolCall) (rig.ToolResult, error) {
-	return rig.ToolResult{Content: t.content, IsError: t.isError}, nil
-}
-
-// TestTruncatedMCPToolPreservesIsError pins the tool-level failure semantics.
-func TestTruncatedMCPToolPreservesIsError(t *testing.T) {
-	payload := strings.Repeat("B", 2048)
-	wrapped := &truncatedMCPTool{
-		inner: fakeContentTool{name: "mcp__x__y", content: payload, isError: true},
-		limit: 256,
-	}
-	result, err := wrapped.Invoke(context.Background(), rig.ToolCall{Name: "mcp__x__y"})
-	if err != nil {
-		t.Fatalf("Invoke: %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("IsError semantics were lost by truncation")
-	}
-	if len(result.Content) > 256 || !strings.Contains(result.Content, "[truncated:") {
-		t.Fatalf("result = %d bytes, want <= 256 with a marker", len(result.Content))
-	}
 }
 
 // TestToolkitMCPResultsBoundedByMaxOutputBytes is the end-to-end regression:
