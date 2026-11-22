@@ -17,6 +17,7 @@ import (
 
 	rig "github.com/zeokeel/zeokeel-rig"
 	rigagent "github.com/zeokeel/zeokeel-rig/agent"
+	rigagentteam "github.com/zeokeel/zeokeel-rig/agent/team"
 	rigteam "github.com/zeokeel/zeokeel-rig/tools/team"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -114,7 +115,9 @@ func (r *dynamicTeamRunner) Start(ctx context.Context, spec rig.SubagentSpec) (r
 	if err != nil {
 		return nil, err
 	}
-	if r.tracker == nil {
+	if r.tracker == nil || isCoordinatorSpawn(ctx) {
+		// The coordinator owns the run state of members it starts; the legacy
+		// external wrapper remains for spawns made directly by the team tools.
 		return subagent, nil
 	}
 	return r.tracker.track(subagent, spec, cfg.Model, active), nil
@@ -147,7 +150,13 @@ func (s *service) teamManagerLocked() *rigteam.Manager {
 // The caller holds s.mu.
 func (s *service) teamTrackerLocked() *teamTracker {
 	if s.teamTracker == nil {
-		s.teamTracker = newTeamTracker(s.notifyTeamChange, s.childSessions)
+		tracker := newTeamTracker(s.notifyTeamChange, s.childSessions)
+		tracker.managerFn = s.teamManagerService
+		tracker.coord = rigagentteam.New(&coordinatorHost{tracker: tracker}, rigagentteam.Options{
+			Store:  coordinatorStore{tracker: tracker},
+			Notify: s.notifyTeamChange,
+		})
+		s.teamTracker = tracker
 	}
 	return s.teamTracker
 }
@@ -233,9 +242,29 @@ func (t *teamService) Members() []contracts.TeamMember {
 		return nil
 	}
 	raw := manager.Members()
-	snapshots := t.teamTracker().reconcile(raw)
+	tracker := t.teamTracker()
+	snapshots := tracker.reconcile(raw)
 	members := make([]contracts.TeamMember, 0, len(raw))
 	for _, member := range raw {
+		if teammate, ok := tracker.coordinatorTeammate(member.ID); ok {
+			converted := tracker.teamMemberFromCoordinator(teammate)
+			converted.Status = member.Status
+			// The manager records the newest answer (including a queued SendAsync
+			// run the coordinator does not observe); it wins while the member is
+			// not reporting an in-flight run.
+			if member.Last != nil && strings.TrimSpace(member.Last.Output) != "" &&
+				converted.RunState != contracts.TeamRunRunning {
+				converted.Last = member.Last.Output
+			}
+			childID := converted.ID
+			for index := range converted.Activity {
+				if converted.Activity[index].MemberID == member.ID {
+					converted.Activity[index].MemberID = childID
+				}
+			}
+			members = append(members, converted)
+			continue
+		}
 		converted := teamMemberFromRig(member)
 		if snapshot, ok := snapshots[member.ID]; ok {
 			applyRunSnapshot(&converted, snapshot)
@@ -398,6 +427,18 @@ func (s *service) archiveTeamMembersOnShutdown() {
 		s.childSessions.upsert(childSessionFromTeamMember(
 			converted, converted.SessionID, tracker.memberPrompt(member.ID), childID, member.ID))
 	}
+	for _, teammate := range tracker.coordinatorSnapshot().Members {
+		if teammate.Status == rigagentteam.StatusClosed {
+			continue
+		}
+		override := ""
+		switch runStateFromCoordinator(teammate.Status) {
+		case contracts.TeamRunDone, contracts.TeamRunFailed:
+		default:
+			override = contracts.ChildAgentInterrupted
+		}
+		tracker.persistCoordinatorMember(teammate, override, true)
+	}
 }
 
 // resolveChildRef resolves a durable child-session ID to its live manager
@@ -473,20 +514,28 @@ func (t *teamService) Spawn(ctx context.Context, name, prompt, model string) (co
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	member, err := t.manager().Spawn(ctx, rig.SubagentSpec{
-		Name:   strings.TrimSpace(name),
-		Prompt: prompt,
-		Model:  strings.TrimSpace(model),
+	tracker := t.teamTracker()
+	coordinator := tracker.coordinator()
+	parentID := contracts.AgentSessionFromContext(ctx)
+	if parentID == "" && t.service != nil {
+		parentID = t.service.ActiveSession()
+	}
+	teammate, err := coordinator.Spawn(ctx, rigagentteam.SpawnSpec{
+		Name:     strings.TrimSpace(name),
+		Prompt:   prompt,
+		Model:    strings.TrimSpace(model),
+		ParentID: parentID,
 	})
 	if err != nil {
 		return contracts.TeamMember{}, err
 	}
-	converted := teamMemberFromRig(member)
-	if snapshot, ok := t.teamTracker().reconcile(t.manager().Members())[member.ID]; ok {
-		applyRunSnapshot(&converted, snapshot)
+	converted := tracker.teamMemberFromCoordinator(teammate)
+	for _, member := range t.manager().Members() {
+		if member.ID == teammate.ID {
+			converted.Status = member.Status
+			break
+		}
 	}
-	converted.ID = t.childIDForMember(member)
-	t.teamTracker().notifyChange()
 	return converted, nil
 }
 
@@ -519,6 +568,20 @@ func (t *teamService) Send(ctx context.Context, id, message string) (string, err
 	if record, ok := t.service.historicalTeamRecord(strings.TrimSpace(id)); ok {
 		return t.service.ColdResumeChild(ctx, record.ID, message)
 	}
+	tracker := t.teamTracker()
+	if teammate, ok := tracker.coordinatorTeammate(id); ok {
+		tracker.addMemberActivity(teammate.ID, contracts.TeamActivitySend,
+			fmt.Sprintf("发送消息给「%s」：%s", teammate.Name, collapseTeamText(message, 120)), false)
+		result, err := tracker.coordinator().Send(ctx, teammate.ID, message)
+		if err != nil {
+			return "", err
+		}
+		// After a queued SendAsync the manager may hold a newer answer.
+		if latest, ok, lastErr := t.manager().Last(teammate.ID); lastErr == nil && ok && latest.Output != "" {
+			return latest.Output, nil
+		}
+		return result.Output, nil
+	}
 	result, err := t.manager().Send(ctx, t.managerRef(id), message)
 	if err != nil {
 		return "", err
@@ -531,9 +594,22 @@ func (t *teamService) Wait(ctx context.Context, id string) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	tracker := t.teamTracker()
+	if teammate, ok := tracker.coordinatorTeammate(id); ok {
+		tracker.addMemberActivity(teammate.ID, contracts.TeamActivityWait,
+			fmt.Sprintf("等待「%s」的当前运行", teammate.Name), false)
+		result, err := tracker.coordinator().Wait(ctx, teammate.ID)
+		if err != nil {
+			return "", err
+		}
+		if latest, ok, lastErr := t.manager().Last(teammate.ID); lastErr == nil && ok && latest.Output != "" {
+			return latest.Output, nil
+		}
+		return result.Output, nil
+	}
 	memberID, name := t.resolveChildRef(id)
-	if run := t.teamTracker().runForRef(memberID); run != nil || name != "" {
-		t.teamTracker().addActivity(run, memberID, contracts.TeamActivityWait,
+	if run := tracker.runForRef(memberID); run != nil || name != "" {
+		tracker.addActivity(run, memberID, contracts.TeamActivityWait,
 			fmt.Sprintf("等待「%s」的当前运行", teamDisplayName(name, id)), false)
 	}
 	ref := t.managerRef(id)
@@ -551,6 +627,27 @@ func (t *teamService) Wait(ctx context.Context, id string) (string, error) {
 
 // Interrupt implements contracts.TeamService.
 func (t *teamService) Interrupt(id string) error {
+	tracker := t.teamTracker()
+	if teammate, ok := tracker.coordinatorTeammate(id); ok {
+		running := runStateFromCoordinator(teammate.Status) == contracts.TeamRunRunning
+		if running {
+			// Interrupt the coordinator run first: it stamps the truthful run
+			// state before the manager stops the subagent.
+			_ = tracker.coordinator().Cancel(context.Background(), teammate.ID)
+			_ = t.manager().Interrupt(t.managerRef(id))
+			tracker.notifyChange()
+			return nil
+		}
+		// An idle/finished member still reports the manager availability the
+		// inspector shows; the coordinator run state stays as it was.
+		err := t.manager().Interrupt(t.managerRef(id))
+		if err != nil {
+			tracker.addMemberActivity("", contracts.TeamActivityError,
+				"中断失败："+err.Error(), true)
+		}
+		tracker.notifyChange()
+		return err
+	}
 	err := t.manager().Interrupt(t.managerRef(id))
 	if err != nil {
 		t.teamTracker().addActivity(nil, "", contracts.TeamActivityError,
@@ -563,6 +660,35 @@ func (t *teamService) Interrupt(id string) error {
 
 // Close implements contracts.TeamService.
 func (t *teamService) Close(id string) error {
+	tracker := t.teamTracker()
+	if teammate, ok := tracker.coordinatorTeammate(id); ok {
+		if err := tracker.coordinator().Close(context.Background(), teammate.ID); err != nil {
+			tracker.addMemberActivity("", contracts.TeamActivityError,
+				"关闭失败："+err.Error(), true)
+			tracker.notifyChange()
+			return err
+		}
+		// A finished run keeps its outcome in the historical child record; only a
+		// run that was still in flight becomes interrupted.
+		override := contracts.ChildAgentInterrupted
+		switch runStateFromCoordinator(teammate.Status) {
+		case contracts.TeamRunDone:
+			override = contracts.ChildAgentCompleted
+		case contracts.TeamRunFailed:
+			override = contracts.ChildAgentFailed
+		}
+		if t.service != nil && t.service.childSessions != nil {
+			tracker.persistCoordinatorMember(teammate, override, teammate.Finished.IsZero())
+		}
+		// The manager owns the model-facing member list; a disposal may already
+		// have closed it, which the caller must see.
+		if err := t.manager().Close(teammate.ID); err != nil {
+			tracker.notifyChange()
+			return err
+		}
+		tracker.notifyChange()
+		return nil
+	}
 	memberID, name := t.resolveChildRef(id)
 	ref := t.managerRef(id)
 	run := t.teamTracker().runForRef(memberID)
