@@ -18,45 +18,54 @@ package agent
 //	spill             a tool result replaced by Rig's on-disk spill summary
 //	                  (path/bytes/preview parsed from the stable summary format).
 //
-// The folded view lives in memory per session (bounded: last 200 calls and last
-// 200 audit events) and is rebuilt from the durable events at restore, so a
-// restart keeps the timeline. UI modules read contracts.SessionContext and never
-// import Rig.
+// The four event types, their payload structs and the fold itself are the SDK's
+// (rig session/observability); this file keeps what is product-specific on top of
+// that fold:
+//
+//   - the contracts.ContextInspector read model (contracts.SessionContext);
+//   - per-call pricing from the user's model catalog (CostUSD and the totals);
+//   - the catalog context-window override;
+//   - the compact_archive / context_recovery audit events, which are product
+//     events the SDK fold deliberately does not know;
+//   - the live in-memory timeline (bounded: last 200 calls and last 200 audit
+//     events), rebuilt from the durable events at restore so a restart keeps the
+//     timeline. UI modules read contracts.SessionContext and never import Rig.
+//
+// Each durable event is folded through observability.FoldEvents (one event at a
+// time), so the live view and the restore replay share the SDK decoder and
+// semantics instead of a hand-written copy.
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	obs "github.com/zeokeel/zeokeel-rig/session/observability"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// Durable context event types.
+// Durable context event types. The canonical names live in the SDK fold, so the
+// product writer and the SDK reader can never drift.
 const (
-	contextSnapshotEvent = "context_snapshot"
-	modelCallEvent       = "model_call"
-	compactEvent         = "compact"
-	spillEvent           = "spill"
+	contextSnapshotEvent = obs.EventContextSnapshot
+	modelCallEvent       = obs.EventModelCall
+	compactEvent         = obs.EventCompact
+	spillEvent           = obs.EventSpill
 )
 
 const (
-	// contextTimelineRequests bounds the folded request list per session.
-	contextTimelineRequests = 200
-	// contextTimelineEvents bounds the folded audit event list per session.
-	contextTimelineEvents = 200
-	// autoCompactInferenceMinTokens is the smallest context that can trigger the
-	// inferred-auto-compaction heuristic (a drop on a tiny context is noise).
-	autoCompactInferenceMinTokens = 4096
-	// autoCompactInferenceDropPercent is the prompt-token drop (in percent of the
-	// previous count) that marks an inferred automatic compaction.
-	autoCompactInferenceDropPercent = 20
-	// spillPreviewRunes bounds the stored spill preview.
-	spillPreviewRunes = 240
+	// contextTimelineRequests bounds the folded request list per session; it
+	// mirrors the SDK fold's MaxCalls so the live overlay cannot grow past the
+	// durable replay bound.
+	contextTimelineRequests = obs.MaxCalls
+	// contextTimelineEvents bounds the folded audit event list per session. The
+	// SDK bound applies per audit list; the product keeps one combined list of
+	// compact/archive/spill/recovery entries.
+	contextTimelineEvents = obs.MaxEvents
 )
 
 // contextTimeline is the in-memory folded context view of one session.
@@ -71,64 +80,15 @@ type contextTimeline struct {
 	costSeen bool
 }
 
-// modelCallPayload is the durable model_call event payload.
-type modelCallPayload struct {
-	Iteration        int    `json:"iteration"`
-	Model            string `json:"model"`
-	PromptTokens     int    `json:"promptTokens"`
-	CachedTokens     int    `json:"cachedTokens,omitempty"`
-	CompletionTokens int    `json:"completionTokens"`
-	TotalTokens      int    `json:"totalTokens"`
-	ContextTokens    int    `json:"contextTokens"`
-}
-
-// contextSnapshotPayload is the durable context_snapshot event payload.
-type contextSnapshotPayload struct {
-	Model              string                     `json:"model"`
-	Window             int                        `json:"window"`
-	SystemPromptBytes  int                        `json:"systemPromptBytes"`
-	SystemPromptTokens int                        `json:"systemPromptTokens"`
-	Sections           []contracts.ContextSection `json:"sections,omitempty"`
-	Tools              []contextToolPayload       `json:"tools,omitempty"`
-	ToolCount          int                        `json:"toolCount"`
-	History            contracts.ContextHistory   `json:"history"`
-	Injected           contracts.ContextInjected  `json:"injected"`
-	EstimatedPrompt    int                        `json:"estimatedPrompt"`
-}
-
-// contextToolPayload is one tool in the snapshot payload.
-type contextToolPayload struct {
-	Name   string `json:"name"`
-	Group  string `json:"group,omitempty"`
-	Tokens int    `json:"tokens,omitempty"`
-}
-
-// compactPayload is the durable compact event payload.
-type compactPayload struct {
-	Kind     string `json:"kind"`
-	Before   int    `json:"before"`
-	After    int    `json:"after"`
-	Replaced int    `json:"replaced"`
-	Saved    int    `json:"saved"`
-	Inferred bool   `json:"inferred,omitempty"`
-	// Outcome is set when a product-side automatic compaction attempt failed to
-	// produce a usable reduction ("failed"/"no-reduction"/"archive-failed");
-	// empty means it succeeded (or was manual/inferred).
-	Outcome string `json:"outcome,omitempty"`
-}
-
-// spillPayload is the durable spill event payload.
-type spillPayload struct {
-	CallID string `json:"callId"`
-	Tool   string `json:"tool"`
-	// Path is the file-backed summary's location (empty with the store backend).
-	Path string `json:"path,omitempty"`
-	// Ref is the store handle from the summary's "ref:" line (empty with the
-	// file backend).
-	Ref     string `json:"ref,omitempty"`
-	Bytes   int    `json:"bytes"`
-	Preview string `json:"preview,omitempty"`
-}
+// The durable payload structs are the SDK's: one wire definition for the writer
+// and the reader, and payloads written before this migration (Go field names as
+// JSON keys, e.g. "Name" instead of "name") still decode through the fold.
+type (
+	modelCallPayload       = obs.ModelCallPayload
+	contextSnapshotPayload = obs.ContextSnapshotPayload
+	compactPayload         = obs.CompactPayload
+	spillPayload           = obs.SpillPayload
+)
 
 var _ contracts.ContextInspector = (*service)(nil)
 
@@ -165,16 +125,87 @@ func (s *service) recordContextSnapshot(ctx context.Context, sessionID string, s
 		Window:             snapshot.Window,
 		SystemPromptBytes:  snapshot.SystemPromptBytes,
 		SystemPromptTokens: snapshot.SystemPromptTokens,
-		Sections:           snapshot.Sections,
+		Sections:           contextSectionsToPayload(snapshot.Sections),
+		Tools:              contextToolsToPayload(snapshot.Tools),
 		ToolCount:          len(snapshot.Tools),
-		History:            snapshot.History,
-		Injected:           snapshot.Injected,
-		EstimatedPrompt:    snapshot.EstimatedPrompt,
-	}
-	for _, tool := range snapshot.Tools {
-		payload.Tools = append(payload.Tools, contextToolPayload{Name: tool.Name, Group: tool.Group, Tokens: tool.Tokens})
+		History: obs.History{
+			Messages:  snapshot.History.Messages,
+			User:      snapshot.History.User,
+			Assistant: snapshot.History.Assistant,
+			Tool:      snapshot.History.Tool,
+		},
+		Injected: obs.Injected{
+			AgentsMD: snapshot.Injected.AgentsMD,
+			Preset:   snapshot.Injected.Preset,
+			Memory:   snapshot.Injected.Memory,
+			Skills:   snapshot.Injected.Skills,
+		},
+		EstimatedPrompt: snapshot.EstimatedPrompt,
 	}
 	s.appendObservedEvent(ctx, sessionID, contextSnapshotEvent, payload)
+}
+
+// contextSectionsToPayload converts the contracts section model to the SDK
+// payload model used by the fold.
+func contextSectionsToPayload(sections []contracts.ContextSection) []obs.Section {
+	if len(sections) == 0 {
+		return nil
+	}
+	converted := make([]obs.Section, len(sections))
+	for index, section := range sections {
+		converted[index] = obs.Section{
+			ID:     section.ID,
+			Label:  section.Label,
+			Source: section.Source,
+			Bytes:  section.Bytes,
+			Tokens: section.Tokens,
+			Hash:   section.Hash,
+		}
+	}
+	return converted
+}
+
+// contextSectionsFromPayload converts a folded section list back to contracts.
+func contextSectionsFromPayload(sections []obs.Section) []contracts.ContextSection {
+	if len(sections) == 0 {
+		return nil
+	}
+	converted := make([]contracts.ContextSection, len(sections))
+	for index, section := range sections {
+		converted[index] = contracts.ContextSection{
+			ID:     section.ID,
+			Label:  section.Label,
+			Source: section.Source,
+			Bytes:  section.Bytes,
+			Tokens: section.Tokens,
+			Hash:   section.Hash,
+		}
+	}
+	return converted
+}
+
+// contextToolsToPayload converts the contracts tool catalog to the SDK payload.
+func contextToolsToPayload(tools []contracts.ContextTool) []obs.Tool {
+	if len(tools) == 0 {
+		return nil
+	}
+	converted := make([]obs.Tool, len(tools))
+	for index, tool := range tools {
+		converted[index] = obs.Tool{Name: tool.Name, Group: tool.Group, Tokens: tool.Tokens}
+	}
+	return converted
+}
+
+// contextToolsFromPayload converts a folded tool catalog back to contracts.
+func contextToolsFromPayload(tools []obs.Tool) []contracts.ContextTool {
+	if len(tools) == 0 {
+		return nil
+	}
+	converted := make([]contracts.ContextTool, len(tools))
+	for index, tool := range tools {
+		converted[index] = contracts.ContextTool{Name: tool.Name, Group: tool.Group, Tokens: tool.Tokens}
+	}
+	return converted
 }
 
 // recordModelCall appends one model_call event and folds it into the timeline.
@@ -201,7 +232,7 @@ func (s *service) recordCompactEvent(ctx context.Context, sessionID, kind string
 // recordSpillEvent appends one spill event and folds it.
 func (s *service) recordSpillEvent(ctx context.Context, sessionID string, spill spillPayload) {
 	if spill.Preview != "" {
-		spill.Preview = truncateRunes(spill.Preview, spillPreviewRunes)
+		spill.Preview = truncateRunes(spill.Preview, obs.MaxPreviewRunes)
 	}
 	s.appendObservedEvent(ctx, sessionID, spillEvent, spill)
 }
@@ -236,6 +267,12 @@ func (s *service) appendObservedEvent(ctx context.Context, sessionID, eventType 
 // UI can address backend reads by it (the compaction archive read-back asks for
 // the archive event by this sequence). Live appends whose sequence is not needed
 // pass 0.
+//
+// The four context event types are decoded and folded by the SDK
+// (observability.FoldEvents); this function maps the folded values onto the
+// contracts read model and adds catalog pricing. compact_archive and
+// context_recovery are product audit events the SDK fold does not know, so they
+// stay folded here.
 func (s *service) applyContextEvent(sessionID, eventType string, payload []byte, at time.Time, seq int64) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" || len(payload) == 0 {
@@ -251,63 +288,102 @@ func (s *service) applyContextEvent(sessionID, eventType string, payload []byte,
 		timeline = &contextTimeline{}
 		s.contextTimelines[sessionID] = timeline
 	}
-	timeline.revision++
 	now := at
 	if now.IsZero() {
 		now = time.Now()
 	}
+	if obs.ObservedEvent(eventType) {
+		// Fold exactly this event through the SDK read model. A malformed payload
+		// is skipped there (Revision stays 0), mirroring the old hand-written
+		// decoder: the timeline does not change and no revision is published.
+		folded := obs.FoldEvents([]rig.SessionEvent{{
+			SessionID: sessionID,
+			Type:      eventType,
+			Time:      now,
+			Seq:       seq,
+			Payload:   payload,
+		}}, sessionID)
+		if folded.Revision == 0 {
+			return
+		}
+		s.applyFoldedContextEvent(timeline, folded)
+		timeline.revision++
+		trimContextAuditEvents(timeline)
+		return
+	}
+	var folded bool
 	switch eventType {
-	case contextSnapshotEvent:
-		var decoded contextSnapshotPayload
-		if err := json.Unmarshal(payload, &decoded); err != nil {
-			timeline.revision--
-			return
-		}
+	case compactArchiveEventType:
+		folded = foldCompactArchiveEvent(timeline, payload, now, seq)
+	case contextRecoveryEventType:
+		folded = foldContextRecoveryEvent(timeline, payload, now, seq)
+	default:
+		return
+	}
+	if !folded {
+		return
+	}
+	timeline.revision++
+	trimContextAuditEvents(timeline)
+}
+
+// applyFoldedContextEvent maps one SDK-folded event onto the contracts read model.
+// applyContextEvent folds exactly one event per call, so at most one of the
+// snapshot/call/compaction/spill entries is new.
+func (s *service) applyFoldedContextEvent(timeline *contextTimeline, folded obs.Timeline) {
+	if folded.HasSnapshot {
+		snapshot := folded.Snapshot
 		timeline.snapshot = contracts.ContextSnapshot{
-			At:                 now,
-			Seq:                seq,
-			Model:              strings.TrimSpace(decoded.Model),
-			Window:             decoded.Window,
-			SystemPromptBytes:  decoded.SystemPromptBytes,
-			SystemPromptTokens: decoded.SystemPromptTokens,
-			Sections:           append([]contracts.ContextSection(nil), decoded.Sections...),
-			History:            decoded.History,
-			Injected:           decoded.Injected,
-			EstimatedPrompt:    decoded.EstimatedPrompt,
+			At:                 snapshot.At,
+			Seq:                snapshot.Seq,
+			Model:              snapshot.Model,
+			Window:             snapshot.Window,
+			SystemPromptBytes:  snapshot.SystemPromptBytes,
+			SystemPromptTokens: snapshot.SystemPromptTokens,
+			Sections:           contextSectionsFromPayload(snapshot.Sections),
+			Tools:              contextToolsFromPayload(snapshot.Tools),
+			History: contracts.ContextHistory{
+				Messages:  snapshot.History.Messages,
+				User:      snapshot.History.User,
+				Assistant: snapshot.History.Assistant,
+				Tool:      snapshot.History.Tool,
+			},
+			Injected: contracts.ContextInjected{
+				AgentsMD: snapshot.Injected.AgentsMD,
+				Preset:   snapshot.Injected.Preset,
+				Memory:   snapshot.Injected.Memory,
+				Skills:   snapshot.Injected.Skills,
+			},
+			EstimatedPrompt: snapshot.EstimatedPrompt,
 		}
-		for _, tool := range decoded.Tools {
-			timeline.snapshot.Tools = append(timeline.snapshot.Tools, contracts.ContextTool{
-				Name: tool.Name, Group: tool.Group, Tokens: tool.Tokens,
-			})
+		if snapshot.Window > 0 {
+			timeline.window = snapshot.Window
 		}
-		if decoded.Window > 0 {
-			timeline.window = decoded.Window
+		if len(timeline.requests) == 0 && snapshot.EstimatedPrompt > 0 {
+			timeline.used = snapshot.EstimatedPrompt
 		}
-		if len(timeline.requests) == 0 && decoded.EstimatedPrompt > 0 {
-			timeline.used = decoded.EstimatedPrompt
-		}
-	case modelCallEvent:
-		var decoded modelCallPayload
-		if err := json.Unmarshal(payload, &decoded); err != nil {
-			timeline.revision--
-			return
-		}
+		return
+	}
+	if len(folded.Calls) > 0 {
+		call := folded.Calls[0]
 		request := contracts.ContextRequest{
-			Seq:           seq,
-			Iteration:     decoded.Iteration,
-			At:            now,
-			Model:         strings.TrimSpace(decoded.Model),
-			Prompt:        decoded.PromptTokens,
-			Completion:    decoded.CompletionTokens,
-			Cached:        decoded.CachedTokens,
-			Total:         decoded.TotalTokens,
-			ContextTokens: decoded.ContextTokens,
+			Seq:           call.Seq,
+			Iteration:     call.Iteration,
+			At:            call.At,
+			Model:         call.Model,
+			Prompt:        call.Prompt,
+			Completion:    call.Completion,
+			Cached:        call.Cached,
+			Total:         call.Total,
+			ContextTokens: call.ContextTokens,
 		}
+		// The SDK fold intentionally has no model catalog: pricing and the
+		// catalog context window stay product concerns.
 		info := s.modelCatalogInfo(request.Model)
 		if info.ContextWindow > 0 {
 			timeline.window = info.ContextWindow
 		}
-		if cost, ok := info.Cost(decoded.PromptTokens, decoded.CachedTokens, decoded.CompletionTokens); ok {
+		if cost, ok := info.Cost(call.Prompt, call.Cached, call.Completion); ok {
 			request.CostUSD = cost
 			request.CostKnown = true
 			timeline.totalUSD += cost
@@ -317,105 +393,107 @@ func (s *service) applyContextEvent(sessionID, eventType string, payload []byte,
 		if len(timeline.requests) > contextTimelineRequests {
 			timeline.requests = append([]contracts.ContextRequest(nil), timeline.requests[len(timeline.requests)-contextTimelineRequests:]...)
 		}
-		if decoded.ContextTokens > 0 {
-			timeline.used = decoded.ContextTokens
+		if call.ContextTokens > 0 {
+			timeline.used = call.ContextTokens
 		}
-	case compactArchiveEventType:
-		var metadata struct {
-			Kind             string `json:"kind"`
-			MessageCount     int    `json:"messageCount"`
-			RetainedMessages int    `json:"retainedMessages"`
-			Bytes            int    `json:"bytes"`
-			Truncated        bool   `json:"truncated"`
-			OmittedMessages  int    `json:"omittedMessages"`
-			BeforeTokens     int    `json:"beforeTokens"`
-			AfterTokens      int    `json:"afterTokens"`
-		}
-		if err := json.Unmarshal(payload, &metadata); err != nil {
-			timeline.revision--
-			return
-		}
-		detail := fmt.Sprintf("%s archive: %d messages archived", metadata.Kind, metadata.RetainedMessages)
-		if metadata.Truncated {
-			detail += fmt.Sprintf(", %d omitted (truncated)", metadata.OmittedMessages)
-		}
+		return
+	}
+	if len(folded.Compactions) > 0 {
+		compaction := folded.Compactions[0]
 		timeline.events = append(timeline.events, contracts.ContextEvent{
-			Seq:              seq,
-			Kind:             contracts.ContextEventArchive,
-			At:               now,
-			Detail:           detail,
-			Before:           metadata.BeforeTokens,
-			After:            metadata.AfterTokens,
-			Replaced:         metadata.MessageCount,
-			Saved:            metadata.RetainedMessages,
-			ArchivedMessages: metadata.RetainedMessages,
-			ArchivedBytes:    metadata.Bytes,
-			Truncated:        metadata.Truncated,
-		})
-	case compactEvent:
-		var decoded compactPayload
-		if err := json.Unmarshal(payload, &decoded); err != nil {
-			timeline.revision--
-			return
-		}
-		detail := strings.TrimSpace(decoded.Kind)
-		if detail == "" {
-			detail = "manual"
-		}
-		timeline.events = append(timeline.events, contracts.ContextEvent{
-			Seq:      seq,
+			Seq:      compaction.Seq,
 			Kind:     contracts.ContextEventCompact,
-			At:       now,
-			Detail:   detail,
-			Before:   decoded.Before,
-			After:    decoded.After,
-			Replaced: decoded.Replaced,
-			Saved:    decoded.Saved,
-			Inferred: decoded.Inferred,
+			At:       compaction.At,
+			Detail:   compaction.Kind,
+			Before:   compaction.Before,
+			After:    compaction.After,
+			Replaced: compaction.Replaced,
+			Saved:    compaction.Saved,
+			Inferred: compaction.Inferred,
 			// The fold is used live and by restore replay; keep the automatic
 			// compaction outcome (failed/no-reduction/archive-failed/...) in the
 			// read model, not just in the durable payload.
-			Outcome: decoded.Outcome,
+			Outcome: compaction.Outcome,
 		})
-		if decoded.After > 0 {
-			timeline.used = decoded.After
+		if compaction.After > 0 {
+			timeline.used = compaction.After
 		}
-	case contextRecoveryEventType:
-		var decoded compactPayload
-		if err := json.Unmarshal(payload, &decoded); err != nil {
-			timeline.revision--
-			return
-		}
-		timeline.events = append(timeline.events, contracts.ContextEvent{
-			Seq:    seq,
-			Kind:   contracts.ContextEventRecovery,
-			At:     now,
-			Detail: decoded.Kind,
-			Before: decoded.Before,
-			After:  decoded.After,
-		})
-		if decoded.After > 0 {
-			timeline.used = decoded.After
-		}
-	case spillEvent:
-		var decoded spillPayload
-		if err := json.Unmarshal(payload, &decoded); err != nil {
-			timeline.revision--
-			return
-		}
-		timeline.events = append(timeline.events, contracts.ContextEvent{
-			Seq:    seq,
-			Kind:   contracts.ContextEventSpill,
-			At:     now,
-			Detail: strings.TrimSpace(decoded.Tool),
-			Ref:    decoded.Ref,
-			Path:   decoded.Path,
-			Bytes:  decoded.Bytes,
-		})
-	default:
-		timeline.revision--
 		return
 	}
+	if len(folded.Spills) > 0 {
+		spill := folded.Spills[0]
+		timeline.events = append(timeline.events, contracts.ContextEvent{
+			Seq:    spill.Seq,
+			Kind:   contracts.ContextEventSpill,
+			At:     spill.At,
+			Detail: spill.Tool,
+			Ref:    spill.Ref,
+			Path:   spill.Path,
+			Bytes:  spill.Bytes,
+		})
+	}
+}
+
+// foldCompactArchiveEvent folds the product's compact_archive audit event (raw
+// replaced history metadata); the SDK fold does not know this event type.
+func foldCompactArchiveEvent(timeline *contextTimeline, payload []byte, at time.Time, seq int64) bool {
+	var metadata struct {
+		Kind             string `json:"kind"`
+		MessageCount     int    `json:"messageCount"`
+		RetainedMessages int    `json:"retainedMessages"`
+		Bytes            int    `json:"bytes"`
+		Truncated        bool   `json:"truncated"`
+		OmittedMessages  int    `json:"omittedMessages"`
+		BeforeTokens     int    `json:"beforeTokens"`
+		AfterTokens      int    `json:"afterTokens"`
+	}
+	if err := json.Unmarshal(payload, &metadata); err != nil {
+		return false
+	}
+	detail := fmt.Sprintf("%s archive: %d messages archived", metadata.Kind, metadata.RetainedMessages)
+	if metadata.Truncated {
+		detail += fmt.Sprintf(", %d omitted (truncated)", metadata.OmittedMessages)
+	}
+	timeline.events = append(timeline.events, contracts.ContextEvent{
+		Seq:              seq,
+		Kind:             contracts.ContextEventArchive,
+		At:               at,
+		Detail:           detail,
+		Before:           metadata.BeforeTokens,
+		After:            metadata.AfterTokens,
+		Replaced:         metadata.MessageCount,
+		Saved:            metadata.RetainedMessages,
+		ArchivedMessages: metadata.RetainedMessages,
+		ArchivedBytes:    metadata.Bytes,
+		Truncated:        metadata.Truncated,
+	})
+	return true
+}
+
+// foldContextRecoveryEvent folds the product's context_recovery audit event;
+// the SDK fold does not know this event type.
+func foldContextRecoveryEvent(timeline *contextTimeline, payload []byte, at time.Time, seq int64) bool {
+	var decoded compactPayload
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return false
+	}
+	timeline.events = append(timeline.events, contracts.ContextEvent{
+		Seq:    seq,
+		Kind:   contracts.ContextEventRecovery,
+		At:     at,
+		Detail: decoded.Kind,
+		Before: decoded.Before,
+		After:  decoded.After,
+	})
+	if decoded.After > 0 {
+		timeline.used = decoded.After
+	}
+	return true
+}
+
+// trimContextAuditEvents bounds the combined audit list (compact + archive +
+// spill + recovery), mirroring the SDK fold's per-list audit bound.
+func trimContextAuditEvents(timeline *contextTimeline) {
 	if len(timeline.events) > contextTimelineEvents {
 		timeline.events = append([]contracts.ContextEvent(nil), timeline.events[len(timeline.events)-contextTimelineEvents:]...)
 	}
@@ -566,15 +644,15 @@ func (s *service) clearContextTimeline(sessionID string) {
 // session during restore (oldest first) so the timeline survives a restart.
 func (s *service) foldRestoredContextEvents(sessionID string, events []rig.SessionEvent) {
 	for _, event := range events {
-		switch event.Type {
-		case contextSnapshotEvent, modelCallEvent, compactEvent, compactArchiveEventType,
-			spillEvent, contextRecoveryEventType:
-			eventTime := event.Time
-			if eventTime.IsZero() {
-				eventTime = time.Now()
-			}
-			s.applyContextEvent(sessionID, event.Type, event.Payload, eventTime, event.Seq)
+		if !obs.ObservedEvent(event.Type) &&
+			event.Type != compactArchiveEventType && event.Type != contextRecoveryEventType {
+			continue
 		}
+		eventTime := event.Time
+		if eventTime.IsZero() {
+			eventTime = time.Now()
+		}
+		s.applyContextEvent(sessionID, event.Type, event.Payload, eventTime, event.Seq)
 	}
 }
 
@@ -585,42 +663,29 @@ func (s *service) foldRestoredContextEvents(sessionID string, events []rig.Sessi
 //	path: <path>      (file backend)  or  ref: <handle>  (store backend)
 //	bytes: <n>
 //	preview: <one line>
+//
+// The parsing itself is the SDK's (observability.ParseSpillSummary); this wrapper
+// keeps the product payload type the durable recorder expects.
 func parseSpillSummary(content string) (spillPayload, bool) {
-	if !rig.IsSpilledToolResult(content) {
+	parsed, ok := obs.ParseSpillSummary(content)
+	if !ok {
 		return spillPayload{}, false
 	}
-	var parsed spillPayload
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(line, "path:"):
-			parsed.Path = strings.TrimSpace(strings.TrimPrefix(line, "path:"))
-		case strings.HasPrefix(line, "ref:"):
-			parsed.Ref = strings.TrimSpace(strings.TrimPrefix(line, "ref:"))
-		case strings.HasPrefix(line, "bytes:"):
-			if value, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "bytes:"))); err == nil {
-				parsed.Bytes = value
-			}
-		case strings.HasPrefix(line, "preview:"):
-			parsed.Preview = strings.TrimSpace(strings.TrimPrefix(line, "preview:"))
-		}
-	}
-	if parsed.Path == "" && parsed.Ref == "" && parsed.Bytes == 0 {
-		return spillPayload{}, false
-	}
-	return parsed, true
+	return spillPayload{
+		Path:    parsed.Path,
+		Ref:     parsed.Ref,
+		Bytes:   parsed.Bytes,
+		Preview: parsed.Preview,
+	}, true
 }
 
 // autoCompactDropThreshold reports whether the prompt-token change between two
 // consecutive model calls of one run looks like an automatic compaction: a large
-// context shrank by at least autoCompactInferenceDropPercent. This is the only
-// observable signal (Rig performs automatic compaction internally), so the
-// recorded event is marked inferred.
+// context shrank by at least the SDK's drop threshold. The SDK owns the heuristic
+// (observability.AutoCompactDrop) because automatic compaction inside Rig is not
+// directly observable; the product only records the inferred event.
 func autoCompactDropThreshold(previous, current int) bool {
-	if previous < autoCompactInferenceMinTokens || current <= 0 || current >= previous {
-		return false
-	}
-	return (previous-current)*100 >= previous*autoCompactInferenceDropPercent
+	return obs.AutoCompactDrop(previous, current)
 }
 
 // contextRequestFromUsage builds the folded request record of one usage event.

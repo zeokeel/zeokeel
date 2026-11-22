@@ -11,6 +11,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
@@ -454,6 +455,62 @@ func TestContextInspectorUnknownAndDeletedSession(t *testing.T) {
 	}
 	if _, ok := svc.SessionContext(sessionID); ok {
 		t.Fatal("SessionContext still reports data for a deleted session")
+	}
+}
+
+// TestContextSnapshotLegacyPayloadCasing covers the upgrade path: context_snapshot
+// events written before the SDK fold migration used Go field names as JSON keys
+// ("ID", "Name", "Messages", "AgentsMD"). The SDK decoder must still fold them
+// into the same contracts read model.
+func TestContextSnapshotLegacyPayloadCasing(t *testing.T) {
+	svc := newQueueService(t, newFakeStore(), newFakeSettings(map[string]string{
+		contracts.SettingsChatModel: "legacy-model",
+	}), &captureProvider{})
+	sessionID, err := svc.NewSession("legacy snapshot")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	payload := []byte(`{"model":"legacy-model","window":64000,` +
+		`"systemPromptBytes":10,"systemPromptTokens":3,` +
+		`"sections":[{"ID":"system","Label":"system","Source":"system","Bytes":10,"Tokens":3,"Hash":"h"}],` +
+		`"tools":[{"Name":"echo","Group":"other","Tokens":7}],"toolCount":1,` +
+		`"history":{"Messages":3,"User":1,"Assistant":1,"Tool":1},` +
+		`"injected":{"AgentsMD":true,"Preset":false,"Memory":false,"Skills":false},` +
+		`"estimatedPrompt":900}`)
+	svc.applyContextEvent(sessionID, contextSnapshotEvent, payload, time.Now(), 42)
+	folded, ok := svc.SessionContext(sessionID)
+	if !ok {
+		t.Fatal("SessionContext reported no data for a legacy snapshot payload")
+	}
+	if folded.Snapshot.Model != "legacy-model" || folded.Snapshot.Window != 64000 || folded.Snapshot.Seq != 42 {
+		t.Fatalf("legacy snapshot = %+v, want model/window/seq", folded.Snapshot)
+	}
+	if len(folded.Snapshot.Sections) != 1 || folded.Snapshot.Sections[0].ID != "system" ||
+		folded.Snapshot.Sections[0].Hash != "h" {
+		t.Fatalf("legacy sections = %+v", folded.Snapshot.Sections)
+	}
+	if len(folded.Snapshot.Tools) != 1 || folded.Snapshot.Tools[0].Name != "echo" ||
+		folded.Snapshot.Tools[0].Tokens != 7 {
+		t.Fatalf("legacy tools = %+v", folded.Snapshot.Tools)
+	}
+	if folded.Snapshot.History.Messages != 3 || folded.Snapshot.History.Tool != 1 {
+		t.Fatalf("legacy history = %+v", folded.Snapshot.History)
+	}
+	if !folded.Snapshot.Injected.AgentsMD {
+		t.Fatalf("legacy injected = %+v", folded.Snapshot.Injected)
+	}
+	// The estimate seeds Used before the first call; the window comes from the
+	// snapshot because this model has no catalog row.
+	if folded.Used != 900 || folded.Window != 64000 {
+		t.Fatalf("legacy used/window = %d/%d, want 900/64000", folded.Used, folded.Window)
+	}
+	if folded.Revision != 1 {
+		t.Fatalf("legacy revision = %d, want 1", folded.Revision)
+	}
+	// A malformed context event is skipped without touching the timeline.
+	svc.applyContextEvent(sessionID, contextSnapshotEvent, []byte("{"), time.Now(), 43)
+	if again, _ := svc.SessionContext(sessionID); again.Revision != 1 || again.Snapshot.Model != "legacy-model" {
+		t.Fatalf("malformed event changed the timeline: %+v", again.Snapshot)
 	}
 }
 
