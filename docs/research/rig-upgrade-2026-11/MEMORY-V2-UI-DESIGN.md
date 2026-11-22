@@ -200,7 +200,15 @@ URI 命名：`mem://user/self/memories/<type>/<slug>-<hash8>`；slug 由标题�
 - `designlint --strict --baseline`、`scripts/design-check.sh`、`go tool mygo vet`；
 - 产品 `go test ./...` 与 `verify.sh --quick` 全绿。
 
-## 8. 需要确认的决策
+## 8. 确认与实现状态
+
+- 位置：只放会话右栏「记忆」tab（已确认）。
+- P0 范围：在浏览/搜索/详情/删除之上加类型过滤与新建（已确认）。
+- 新建默认类型：`preferences`（已确认）。
+- 已实现：共享 `memorystore` 模块 + `MemoryService`、列表/搜索/类型过滤、详情、快速新建、删除确认；
+  行内编辑、置顶、P2 高级动作未实现。
+- 已知限制：UI 目前按「当前工作区」解析 store；绑定到其他工作区的会话会看到当前工作区记忆（后续按 session WorkspaceID 精确解析）。
+
 
 1. 位置：只放会话右栏「记忆」tab，不恢复设置页（推荐）。
 2. 新建默认类型：`preferences`（推荐）还是 `events`。

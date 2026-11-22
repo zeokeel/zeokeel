@@ -208,6 +208,9 @@ func Module() *module.Descriptor[Config] {
 			// continuation, and the DSH goal tools report an unavailable backend.
 			svc.goalService = goalService
 		}
+		if memoryService, ok := ctx.Get(contracts.KeyMemoryService); ok && memoryService != nil {
+			svc.memoryService = memoryService
+		}
 		if skillsService, ok := ctx.Get(contracts.KeySkills); ok && skillsService != nil {
 			// Optional: the prompt then carries a bounded skill catalog. Without
 			// the backend the skill tool is still registered by the toolkit and the
@@ -432,6 +435,8 @@ type service struct {
 	// "always allow" tool set persisted in settings, so parallel tool calls
 	// cannot lose entries.
 	allowedToolsMu sync.Mutex
+	// memoryService is the optional shared v2 memory backend.
+	memoryService contracts.MemoryService
 	// skills is the optional skill backend: the prompt injects a bounded catalog
 	// (name + description) so the model knows which skills exist; the bodies are
 	// loaded on demand through the skill tool.
@@ -2747,19 +2752,22 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// the repository.
 	var memoryStore memoryvfs.Store
 	if s.cfg.Memory {
-		memoryRoot := workspaceRoot
-		if memoryRoot == "" {
-			memoryRoot = s.dataDir
+		if s.memoryService == nil {
+			s.finish(sessionID, ctx, fmt.Errorf("memory backend is not assembled"))
+			return
 		}
-		if memoryRoot == "" {
-			memoryRoot = os.TempDir()
+		storeProvider, ok := s.memoryService.(interface {
+			Store(workspaceRoot string) (memoryvfs.Store, error)
+		})
+		if !ok {
+			s.finish(sessionID, ctx, fmt.Errorf("memory backend does not expose a store"))
+			return
 		}
-		store, memoryErr := rigmemory.NewWorkspaceStore(filepath.Join(s.dataDir, "memory"), memoryRoot)
+		store, memoryErr := storeProvider.Store(workspaceRoot)
 		if memoryErr != nil {
 			s.finish(sessionID, ctx, fmt.Errorf("open memory store: %w", memoryErr))
 			return
 		}
-		defer store.Close()
 		memoryStore = store
 		if !surfaceHasTool(tools, "memory") {
 			tools = append(tools, rigmemory.ToolsWithStore(memoryStore)...)

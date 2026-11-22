@@ -142,7 +142,6 @@ func TestCommandFamilyRegisteredAndEnabled(t *testing.T) {
 	wanted := []struct{ id, title, hint string }{
 		{"zeokeel.session.goal", "设置目标", "为当前会话创建或编辑长期目标"},
 		{"zeokeel.session.plan", "审阅计划", "提交一份计划给用户批准"},
-		{"zeokeel.session.memory", "添加记忆", "保存一条全局记忆"},
 	}
 	for _, want := range wanted {
 		command := findSessionCommand(t, h, want.id)
@@ -163,8 +162,8 @@ func TestCommandFamilyRegisteredAndEnabled(t *testing.T) {
 			count++
 		}
 	}
-	if count != 14 {
-		t.Fatalf("session commands = %d, want 14", count)
+	if count != 13 {
+		t.Fatalf("session commands = %d, want 13", count)
 	}
 
 	// Without the optional backends the commands stay registered but disabled.
@@ -224,75 +223,4 @@ func TestPlanDialogErrorShown(t *testing.T) {
 	h.assertTexts(tester, "提交计划失败：plan busy")
 }
 
-// --- /memory ----------------------------------------------------------------
-
-func TestMemoryDialogAddsAndShowsBadge(t *testing.T) {
-	memory := &fakeMemory{}
-	h := newCommandDialogHarness(t, permissionChat(), "zh", nil, nil, memory)
-	tester := h.tester()
-
-	h.typeSlash(tester)
-	h.click(tester, "添加记忆")
-	h.assertTexts(tester, "添加记忆", "记忆内容", "添加", "取消")
-	focusDialogInput(t, tester, "记忆内容")
-	tester.Type("记住这次结论")
-	tester.Frame()
-	h.click(tester, "添加")
-
-	added := memory.addCalls()
-	if len(added) != 1 || added[0].Text != "记住这次结论" || added[0].Scope != "global" {
-		t.Fatalf("MemoryStore.Add calls = %+v, want global/记住这次结论", added)
-	}
-	h.assertNoTexts(tester, "取消")
-	// The add success is a transient toast, not a resident badge.
-	h.assertNoTexts(tester, "已添加")
-}
-
-func TestMemoryDialogErrorShown(t *testing.T) {
-	memory := &fakeMemory{addErr: errors.New("memory full")}
-	h := newCommandDialogHarness(t, permissionChat(), "zh", nil, nil, memory)
-	tester := h.tester()
-	h.typeSlash(tester)
-	h.click(tester, "添加记忆")
-	focusDialogInput(t, tester, "记忆内容")
-	tester.Type("记住")
-	tester.Frame()
-	h.click(tester, "添加")
-	h.assertTexts(tester, "添加记忆失败：memory full")
-}
-
-func TestMemoryDialogEmptyAddDisabled(t *testing.T) {
-	memory := &fakeMemory{}
-	h := newCommandDialogHarness(t, permissionChat(), "zh", nil, nil, memory)
-	tester := h.tester()
-	h.typeSlash(tester)
-	h.click(tester, "添加记忆")
-	h.click(tester, "添加")
-	if got := memory.addCalls(); len(got) != 0 {
-		t.Fatalf("empty memory was added: %v", got)
-	}
-}
-
 // --- i18n -------------------------------------------------------------------
-
-func TestCommandDialogsEnglishCopy(t *testing.T) {
-	goal := newFakeGoalService()
-	goal.seed("sess-1", "old goal")
-	h := newCommandDialogHarness(t, permissionChat(), "en", goal, &fakePlanBridger{}, &fakeMemory{})
-	tester := h.tester()
-	tester.Frame()
-
-	h.typeSlash(tester)
-	h.click(tester, "Set goal")
-	h.assertTexts(tester, "Goal", "Save", "Delete goal record", "Cancel")
-
-	h.click(tester, "Cancel")
-	h.typeSlash(tester)
-	h.click(tester, "Review plan")
-	h.assertTexts(tester, "Submit plan", "Plan content", "Submit review", "Cancel")
-
-	h.click(tester, "Cancel")
-	h.typeSlash(tester)
-	h.click(tester, "Add memory")
-	h.assertTexts(tester, "Add memory", "Memory text", "Add", "Cancel")
-}

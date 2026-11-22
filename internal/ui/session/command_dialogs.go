@@ -43,17 +43,6 @@ func openPlanDialog(st *state, runtime contracts.UIRuntime) {
 	runtime.Invalidate()
 }
 
-// openMemoryDialog opens the /memory modal with an empty draft.
-func openMemoryDialog(st *state, runtime contracts.UIRuntime) {
-	if st.memoryStore == nil {
-		return
-	}
-	st.memOpen = true
-	st.memDraft = ""
-	st.memErr = ""
-	runtime.Invalidate()
-}
-
 // buildGoalDialog renders the /goal modal: the objective input, the round-cap
 // editor while editing an existing goal, and the footer actions. Saving is the
 // primary action (rightmost, Enter); clearing is destructive and goes through
@@ -210,61 +199,6 @@ func buildPlanDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 				{Label: st.tr("提交审阅", "Submit review"), Primary: true,
 					Disabled: strings.TrimSpace(st.planDraft) == "",
 					OnClick:  submit},
-			})
-		})
-	})
-}
-
-// buildMemoryDialog renders the /memory modal: the memory input and the
-// cancel/add footer. A successful add is a transient toast.
-func buildMemoryDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
-	if !st.memOpen || st.memoryStore == nil {
-		return
-	}
-	add := func() {
-		text := strings.TrimSpace(st.memDraft)
-		if text == "" {
-			return
-		}
-		if _, err := st.memoryStore.Add(context.Background(), contracts.Memory{
-			Text:  text,
-			Scope: "global",
-		}); err != nil {
-			st.memErr = st.tr("添加记忆失败：", "Add memory failed: ") + err.Error()
-		} else {
-			st.memOpen = false
-			st.memErr = ""
-			st.memDraft = ""
-			st.toast(contracts.NotifySuccess, st.tr("已添加记忆", "Memory added"))
-		}
-		runtime.Invalidate()
-	}
-	ui.Modal(c, &st.memOpen, func() {
-		dialogEnter(c, add)
-		design.Apply(ui.Column(c).Width(design.DialogWidthM).Gap(design.Space4), func(el ui.Element) ui.Element {
-			return el.PaddingX(design.Space6).PaddingY(design.Space2)
-		}).Children(func() {
-			design.Apply(ui.Text(c, st.tr("添加记忆", "Add memory")), t.Font(design.TypeL)).
-				FontWeight(600).TextColor(t.LabelPrimary)
-			design.Apply(ui.Text(c, st.tr(
-				"保存一条全局记忆，后续会话都可以使用。",
-				"Save a global memory that later conversations can use.")),
-				t.TextMuted(design.TypeXS)).MaxLines(2)
-			ui.TextInput(c, &st.memDraft).Label(st.tr("记忆内容", "Memory text")).FillWidth().
-				OnTextKey(enterTo(add))
-			if st.memErr != "" {
-				buildDialogError(c, t, st.memErr)
-			}
-			ui.Divider(c)
-			uikit.DialogFooter(c, []uikit.DialogAction{
-				{Label: st.tr("取消", "Cancel"), OnClick: func() {
-					st.memOpen = false
-					st.memErr = ""
-					runtime.Invalidate()
-				}},
-				{Label: st.tr("添加", "Add"), Primary: true,
-					Disabled: strings.TrimSpace(st.memDraft) == "",
-					OnClick:  add},
 			})
 		})
 	})

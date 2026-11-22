@@ -226,34 +226,25 @@ type state struct {
 
 	scrollSession string
 
-	// Memory tab state: the search query, the add-input draft, the last store
-	// error shown in DangerText and the cached read model. The frame builder
-	// never reads the store: a query change schedules one debounced background
-	// read (memoryPendingQuery/memorySearchDue), the result is applied through
-	// UIRuntime.Post only while its sequence is still current, and mutations
-	// ask for an immediate re-read (memoryRefresh).
-	memoryQuery    string
-	memoryDraft    string
-	memoryError    string
-	memoryEditOpen bool
-	memoryEditID   string
-	memoryEditText string
-	memoryEditErr  string
-	memories       []contracts.Memory
-	memoriesErr    error
-	memoriesQuery  string
-	memoriesFresh  bool
-	memoryRefresh  bool
-	// memoryPendingQuery is the query whose debounced read is scheduled ("" =
-	// none); memorySearchDue is when that read may start (frame clock).
+	// Memory tab state: query/type filter, cached v2 list and the open detail.
+	memoryQuery        string
+	memoryType         string
+	memoryDraft        string
+	memoryErr          string
+	memoryItems        []contracts.MemoryItem
+	memoryDetail       *contracts.MemoryDetail
+	memoryDetailID     string
+	memoryRoot         string
+	memoryFresh        bool
+	memoryRefresh      bool
 	memoryPendingQuery string
+	memoryPendingType  string
 	memorySearchDue    time.Time
-	// memoryReading is true while a background read is in flight (the pane
-	// shows a quiet loading line and never starts a duplicate read).
-	memoryReading bool
-	// memorySeq drops stale results: a read applies only when its sequence is
-	// still the newest one asked for.
-	memorySeq int
+	memoryReading      bool
+	memorySeq          int
+	memorySelected     int
+	memoryConfirmOpen  bool
+	memoryConfirmURI   string
 
 	// @ suggestion cache: the workspace files the current query resolves to,
 	// refreshed only when the query changes. The frame builder never lists or
@@ -355,10 +346,10 @@ type state struct {
 	// composer's permission badge read/write contracts.SettingAgentPermission.
 	settings contracts.SettingsService
 
-	// Optional command-family backends: the /plan and /memory dialogs read
+	// Optional command-family backends: the /plan dialog reads
 	// these bridges (the goal bridge lives above with the header chip).
-	planReviewer contracts.PlanReviewer
-	memoryStore  contracts.MemoryStore
+	planReviewer  contracts.PlanReviewer
+	memoryService contracts.MemoryService
 
 	// notifier is the optional desktop toast bridge: transient successes and
 	// errors (export, stop, compaction, goal lifecycle, copied/footers) go
@@ -449,8 +440,7 @@ type state struct {
 	// Memory management state: the clear-all confirmation dialog and the
 	// destructive action waiting for its confirmation (the ID of the memory
 	// to delete, or "tidy" for the duplicate tidy).
-	memoryClearOpen bool
-	memoryConfirm   string
+	memoryConfirm string
 
 	// Command-dialog state (native Modals rendered by the session screen).
 	// goalCapText is the edit dialog's round-cap field (empty = keep the
@@ -565,7 +555,7 @@ func Module() *module.Descriptor[Config] {
 		locale, _ := ctx.Get(contracts.KeyLocale)
 		settings, _ := ctx.Get(contracts.KeySettings)
 		planReviewer, _ := ctx.Get(contracts.KeyPlanReviewer)
-		memoryStore, _ := ctx.Get(contracts.KeyMemory)
+		memoryService, _ := ctx.Get(contracts.KeyMemoryService)
 		notifier, _ := ctx.Get(contracts.KeyNotifier)
 		moduleState := &state{
 			locale:               locale,
@@ -574,7 +564,8 @@ func Module() *module.Descriptor[Config] {
 			navigator:            navigator,
 			settings:             settings,
 			planReviewer:         planReviewer,
-			memoryStore:          memoryStore,
+			memoryService:        memoryService,
+			memorySelected:       -1,
 			notifier:             notifier,
 			thinkOpen:            make(map[string]bool),
 			toolOpen:             make(map[string]bool),
@@ -1092,14 +1083,6 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 			Order:   61,
 			Enabled: func() bool { return st.planReviewer != nil && chat.ActiveSession() != "" },
 			Run:     func() error { openPlanDialog(st, runtime); return nil },
-		},
-		{
-			ID:      "zeokeel.session.memory",
-			Title:   st.tr("添加记忆", "Add memory"),
-			Hint:    st.tr("保存一条全局记忆", "Save a global memory"),
-			Order:   62,
-			Enabled: func() bool { return st.memoryStore != nil },
-			Run:     func() error { openMemoryDialog(st, runtime); return nil },
 		},
 		{
 			ID:      "zeokeel.session.permission",

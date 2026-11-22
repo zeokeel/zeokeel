@@ -61,7 +61,7 @@ func TestSessionI18nSwitchToEnglishAndBack(t *testing.T) {
 	h.click(tester, "Trajectory")
 	h.assertTexts(tester, "Conversation trajectory", "Reasoning", "Reply text")
 	h.click(tester, "Memory")
-	h.assertTexts(tester, "Memory backend not enabled")
+	h.assertTexts(tester, "Memory backend unavailable")
 	// The tab strip keeps the focus: Home returns to the first tab (clicking
 	// the tab label is ambiguous with the page title).
 	tester.Key(0, ui.KeyHome)

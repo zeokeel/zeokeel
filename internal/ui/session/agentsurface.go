@@ -541,7 +541,7 @@ func (st *state) anyOverlayOpen() bool {
 	return st.queueMenuOpen ||
 		st.draftOverwriteOpen || st.agents.teamOpen || st.agents.childOpen ||
 		st.agents.jobsOpen || st.agents.modelMenuOpen || st.agents.workbenchOpen ||
-		st.reminders.listOpen || st.reminders.createOpen || st.memoryEditOpen ||
+		st.reminders.listOpen || st.reminders.createOpen ||
 		st.agents.closeMember != ""
 }
 

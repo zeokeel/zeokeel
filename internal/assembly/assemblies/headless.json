@@ -60,6 +60,11 @@
       }
     },
     {
+      "id": "memorystore",
+      "module": "zeokeel/memorystore",
+      "config": {}
+    },
+    {
       "id": "agent",
       "module": "zeokeel/agent",
       "config": {

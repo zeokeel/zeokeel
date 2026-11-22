@@ -8,31 +8,9 @@ package session_test
 
 import (
 	"testing"
-	"time"
 
 	"github.com/egoist/mygo/ui"
-
-	"github.com/zeokeel/zeokeel/internal/contracts"
 )
-
-// TestMemoryBoundWorkspaceScopeLabel covers the scope label of a memory bound
-// to the workspace identity ("workspace:<id>"): the row says it is the current
-// project's workspace scope instead of printing the storage value.
-func TestMemoryBoundWorkspaceScopeLabel(t *testing.T) {
-	store := newFakeMemoryStore(contracts.Memory{
-		ID: "mem-1", Text: "发布前跑全量测试", Scope: "workspace:ws-a",
-		Created: time.Unix(1700000000, 0),
-	})
-	chat := newFakeChat()
-	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "绑定工作区"}, true)
-	h := newHarnessWithMemory(t, chat, store)
-	tester := h.tester()
-
-	h.click(tester, "记忆")
-	waitFor(t, tester, func() bool { return tester.HasText("发布前跑全量测试") }, "memory rows")
-	h.assertTexts(tester, "工作区（本会话项目）")
-	h.assertNoTexts(tester, "workspace:ws-a")
-}
 
 // TestModelChipNamesAssemblyDefault covers FR-26: with no model row configured
 // but an assembly-provided default model, the chip says the model is a default

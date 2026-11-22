@@ -216,8 +216,8 @@ func TestGoalCommandsRegisteredAndGated(t *testing.T) {
 			count++
 		}
 	}
-	if count != 14 {
-		t.Fatalf("session commands = %d, want 14", count)
+	if count != 13 {
+		t.Fatalf("session commands = %d, want 13", count)
 	}
 
 	// A complete goal disables complete; clear stays available; a product

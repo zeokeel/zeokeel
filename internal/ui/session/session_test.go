@@ -554,7 +554,7 @@ func newVerboseWorkStepsHarness(t *testing.T, chat *fakeChat) *harness {
 
 // newHarnessWithMemory is newHarness with an optional memory backend provided
 // as contracts.KeyMemory (nil means the session module runs without one).
-func newHarnessWithMemory(t *testing.T, chat *fakeChat, memory contracts.MemoryStore) *harness {
+func newHarnessWithMemory(t *testing.T, chat *fakeChat, memory contracts.MemoryService) *harness {
 	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
@@ -567,7 +567,7 @@ func newHarnessWithMemory(t *testing.T, chat *fakeChat, memory contracts.MemoryS
 	provide(t, ctx, contracts.KeyScreenLister, uiRoot.ScreenLister())
 	provide[contracts.ChatService](t, ctx, contracts.KeyChat, chat)
 	if memory != nil {
-		provide[contracts.MemoryStore](t, ctx, contracts.KeyMemory, memory)
+		provide[contracts.MemoryService](t, ctx, contracts.KeyMemoryService, memory)
 	}
 
 	activate(t, ctx, session.Module(), session.Config{})
@@ -894,7 +894,7 @@ func TestTabPlaceholdersAreNativeTabs(t *testing.T) {
 	h.assertNoTexts(tester, "第一条消息")
 
 	h.click(tester, "记忆")
-	h.assertTexts(tester, "记忆后端未启用")
+	h.assertTexts(tester, "记忆后端不可用")
 
 	// Return to the first tab: clicking "对话" is ambiguous (the sidebar also
 	// shows the screen title), so use the native tab keyboard navigation
