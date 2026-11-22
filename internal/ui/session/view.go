@@ -3103,31 +3103,6 @@ func formatTimestamp(locale contracts.LocaleService, value time.Time) string {
 	return uikit.FormatDateTime(locale, value)
 }
 
-// memoryScopeWorkspace is the scope the session panel writes; the store owns
-// the normalized value, this is the display fallback.
-const memoryScopeWorkspace = "workspace"
-
-// memoryScopeLabel renders a memory scope for the metadata line.
-func memoryScopeLabel(st *state, scope string) string {
-	trimmed := strings.TrimSpace(scope)
-	// A memory bound to one workspace persists as "workspace:<id>": show it as
-	// the current project's workspace scope, never the raw storage value
-	// (Wave 3; the settings page owns the cross-workspace label).
-	if strings.HasPrefix(strings.ToLower(trimmed), contracts.MemoryScopeWorkspacePrefix) {
-		return st.tr("工作区（本会话项目）", "Workspace (this project)")
-	}
-	switch strings.ToLower(trimmed) {
-	case "workspace", "工作区":
-		return st.tr("工作区", "Workspace")
-	case "global", "全局":
-		return st.tr("全局", "Global")
-	case "":
-		return ""
-	default:
-		return scope
-	}
-}
-
 // --- composer ---------------------------------------------------------------
 
 // buildComposer is the conversation composer: the shared ComposerShell owns the

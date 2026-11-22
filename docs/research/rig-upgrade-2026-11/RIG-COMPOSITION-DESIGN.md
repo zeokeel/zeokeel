@@ -1,6 +1,6 @@
 # rig 组合层设计：kit 作为 agent 编译器，产品作为薄壳
 
-> 状态：设计稿（2026-11-21）；P1（阶段钩子 + kit 透传）与 P2（Spec/Build/注册表/LoadFile + ExtraTools + 模块能力/生命周期）已落地；P3a 产品 hostbundle 缝已落地；P3c 完成：产品实现 `rig.ToolActivationStore`（单一 active-set 所有者），父回合与冷启动默认走 `kit.Build`（`agentbuild.ModeKit`），direct 保留为 `ZEOKEEL_DIRECT_AGENT=1` 逃生门；kit 路径通过产品全量 `verify.sh`。P4 完成：产品运行入口为 `kit.BuildConfig(Config, hostbundle.Module)`（父回合与冷启动）；动态能力经模块注入，声明式宿主仍走 `Spec/Build`。`v0.28.9` 已发布（memory 保留策略；`v0.28.5` tag 因覆盖门禁失败）（含 skills 包；`v0.28.0` 因 tool_search 所有权回归被发布门禁拒绝）；继续把 host-agnostic 能力从 toolkit/agent 上移：skills 发现/读取已上移（`rig/skills`）；子会话收据扫描已上移（`children.PendingReceipts/MarkReceipts`）。goal 状态机迁移已完成设计评估，但类型/测试耦合较大，暂缓。
+> 状态：已完成（2026-11-23，rig v0.34.1 / 产品 rig v0.34.1）。P1–P4 组合层已落地；产品运行入口为 `hostbundle + kit.BuildConfig`，无 `rig.AgentSpec` 直拼；kit 路径通过产品全量 `verify.sh`。本文件保留为组合层设计与最终归属记录；能力上移的最终清单见 §10。
 > 目标读者：维护 rig/kit 与 ZeoKeel 装配层的人。
 
 ## 0. 目标与非目标
@@ -188,11 +188,13 @@ func RegisterModule(name string, f Factory[Module])
 
 | 产品模块 | 归属 |
 |---|---|
-| `internal/ui/*`、`uiroot`、`uikit`、`design` | UI 壳（不动） |
-| `workspace` 注册表、`settings`、`modelcatalog` | 产品业务/设置 |
-| 团队命名/图标/团队 UI、`automation`、`insights`、`importer`、`update`、`appinfo` | 产品业务 |
-| ACP 入口（`cmd` 与 `acp` 的产品映射） | 产品宿主入口；传输已用 rig `acp` |
-| `agent` 的模型覆盖、产品 prompt 区段、事件桥、团队 runner | 变成 `hostbundle` 模块 |
+| `internal/ui/*`、`uiroot`、`uikit`、`design`、`brand`、`icons` | UI 壳（不动） |
+| `internal/contracts` 服务契约与 `hostbundle` 装配适配 | 产品契约/宿主映射 |
+| toolkit 多 root 执行路由（`execution_routing.go`/`rebind.go`） | 产品执行策略（不迁移） |
+| `settings`、`modelcatalog`、业务设置页 | 产品设置/业务策略 |
+| chat 投递与队列编排、child-session 持久化 | 产品会话语义 |
+| `update` 的 feedURL、安装计划与 pending-restart（`install.go`） | 产品宿主安装 |
+| `appinfo`、`importer` 服务层、团队命名/UI | 产品业务 |
 
 下移/已在 rig：
 
@@ -200,9 +202,18 @@ func RegisterModule(name string, f Factory[Module])
 |---|---|
 | agent 循环、prompt、gate、恢复、spill、checkpoint | `agent`、`prompt`、`gate`、`session/*` |
 | 工具集/发现/沙箱/审批/子会话/ACP 传输 | `tools/*`、`sandbox`、`session/children`、`acp` |
+| 工作区注册表与路径策略 | `workspace` |
+| 更新检查/下载机制 | `update` |
+| MCP 生命周期与 OAuth 刷新 | `tools/mcp/manager`、`tools/mcp/auth` |
+| 自动化存储与调度核心 | `session/automation`、`tools/schedule` |
+| 会话工具集 | `session/inbox`、`session/export`、`session/references`、`session/timeline`、`session/observability` |
+| 洞察/上下文读模型 | `session/insights`、`session/observability` |
+| 团队协调器与任务板持久化 | `agent/team`、`tools/team/taskstore` |
+| LSP 宿主生命周期 | `tools/lsp/host` |
+| ACP 服务端 | `acp/server` |
 | 会话存储 | `session/sqlstore`（产品只开库/DSN/Close） |
 
-新增产品包：`internal/hostbundle`——把现有 contracts 服务适配成 kit Host 接口，并注册为模块；`cmd/zeokeel` 只做 `kit.Build(spec)` + UI 启动。
+新增产品包：`internal/hostbundle`——把现有 contracts 服务适配成 kit Host 接口，并注册为模块；`cmd/zeokeel` 只做 `kit.BuildConfig(spec)` + UI 启动。
 
 ## 6. 迁移阶段与门禁
 
@@ -260,25 +271,48 @@ func RegisterModule(name string, f Factory[Module])
 
 结论：super agent 不是“一个更大的 agent 对象”，而是 **SDK 的编排机制 + 产品的一组能力模块 + 产品策略**。产品薄壳通过模块注册把钉钉这类业务工具注入，通过实现/配置 Runner 表达团队策略；rig 不吸收业务。
 
-## 完成状态（2026-11-22）
+## 10. 最终归属（2026-11-23，rig v0.34.1）
 
-- P1–P4 组合层已完成；产品运行入口为 `hostbundle + kit.BuildConfig`，无 `rig.AgentSpec` 直拼。
-- 已上移 SDK 的 host-agnostic 能力：prompt 阶段、context recovery、approvals、sqlstore、children 收据、
-  ACP transport、surface/tool discovery、skills（发现+编辑器）、execution 读模型、memory 文件持久化+保留策略、
-  DSH 导入（解析+发现+导入编排）。
-- 正式版本 `v0.28.14`；产品 `rig v0.28.14`，两仓 build/vet/test 全绿。
-- 明确留在产品侧：goal 状态机（contracts 类型/测试耦合需单独设计）、memory 完整 Store（scope/workspace 策略）、
-  toolkit 多 root 执行路由、UI/业务模块（workspace/settings/modelcatalog/team/automation/insights/importer 服务层/update/appinfo）。
-- 明确留后续：super agent 与钉钉等业务工具。
+### 10.1 已迁移到 SDK（产品保留薄适配）
 
-## 剩余项评估（2026-11-22，第二轮收敛）
+- **workspace**：`rig/workspace` 拥有注册表、`currentId`、根路径解析、搜索/读取边界与路径逃逸防护；
+  产品 `internal/modules/workspace` 只做 contracts 类型映射与设置/UI。
+- **insights / observability**：`session/insights` 折叠窗口内跨会话用量，`session/observability`
+  折叠上下文快照/model_call/compact/spill；产品只保留模型目录定价回调与设置页展示。
+- **update**：`rig/update` 拥有 semver、GitHub Releases、资产/校验和解析与校验下载；产品保留
+  feedURL、模块装配、安装计划/pending-restart（`install.go`）。
+- **MCP manager + auth/refresh**：`tools/mcp/manager` 拥有连接/重连/OAuth 状态，`tools/mcp/auth`
+  拥有刷新缓存、交互授权、撤销与后台刷新；产品 toolkit 只做设置/注册表接线。
+- **automation store/scheduler**：`session/automation` 拥有任务/运行记录的持久化核心，
+  `tools/schedule` 拥有调度工具；产品模块做 contracts 映射与设置。
+- **ACP server**：`acp/server` 拥有 JSON-RPC 服务端、prompt/工具更新/图片块；产品 `internal/modules/acp`
+  只做 chat/workspace/UI 适配。
+- **LSP host**：`tools/lsp/host` 拥有进程启动、initialize 握手、工具构造、重启/幂等关闭；
+  产品 toolkit 保留设置解析（lsp.servers/lsp.active、workspace 配置）、多 root 沙箱
+  `sandboxedLSPTool` 包装与日志。
+- **team coordinator + taskstore**：`agent/team` 拥有成员/活动折叠/协调机制，
+  `tools/team/taskstore` 拥有共享任务板持久化与迁移；产品保留团队命名、角色、UI 与策略。
+- **session utilities**：`session/inbox`（忙时提示队列）、`session/export`（事件日志 ZIP）、
+  `session/references`（@会话引用展开）、`session/timeline`（工具时间线回放）、
+  `session/observability`（上下文读模型）均已上移；产品只保留事件桥与 UI 读模型映射。
 
-- **memory 完整 Store**：由 rig memory/context v2 取代，不再迁移旧的扁平 `rig.MemoryStore`。产品已删除旧
-  `zeokeel/memory` 模块、旧工具与旧设置页；agent 按工作区打开 SQLite v2 后端并交给 kit 做召回/捕获。
-  旧 `memory.json` 不迁移。
-- **toolkit 多 root 执行路由**：评估后**不迁移**。`execution_routing.go` + `rebind.go` 约 1.3k 行，
-  直接依赖产品 workspace 根、sandbox 模式/policy、MCP/LSP 生命周期、`contracts` 与工具注册表；
-  SDK 已接管可复用的读模型（`session/execution`），而“按根重建工具实例 + 合并 job/terminal 列表”
-  是产品执行策略，抽到 SDK 会引入一层与产品沙箱/工作区同构的接口，收益低于耦合成本。
-- **session Memory tab**：仍使用旧 `contracts.KeyMemory` 投影（无后端时显示 disabled），属于产品 UI
-  改造，不在 SDK 收敛范围；后续可单独接 v2 或先隐藏。
+### 10.2 保留在产品（明确不迁移）
+
+- **toolkit 多 root 执行路由**（`execution_routing.go` + `rebind.go`）：依赖产品 workspace 根、
+  sandbox 模式/policy、MCP/LSP 生命周期与 contracts/工具注册表；“按根重建工具实例 + 合并
+  job/terminal 列表”是产品执行策略，SDK 只提供可复用读模型（`session/execution`）。
+- **settings/UI**：全部设置页、右栏/会话 UI、design token 与交互策略；SDK 不接管产品语义。
+- **chat 投递**：提示队列数据可由 `session/inbox` 持久化，但“何时接收/何时运行/如何展示”
+  仍是产品会话策略。
+- **install/pending-restart**：`rig/update` 只负责下载校验；安装计划、平台安装动作与下次启动
+  替换运行中的二进制由产品宿主拥有。
+- **child-session 持久化**：SDK 拥有子会话收据（`session/children`）与 runner 机制；子会话
+  历史/生命周期持久化仍归产品存储与 UI。
+- **contracts 映射**：`internal/contracts` 服务键、`hostbundle` 适配与产品事件桥是产品边界。
+
+### 10.3 明确不迁移的旧能力
+
+- **goal 状态机**：contracts 类型/测试耦合较大，保留产品实现；另立设计再评估。
+- **旧扁平 memory store**：由 rig memory/context v2 取代；产品已删除旧 `zeokeel/memory`
+  模块、旧工具与旧设置页，`memory.json` 不迁移（见 `MEMORY-V2-UI-DESIGN.md`）。
+- **super agent 业务工具**（钉钉等）：按 §9 判定留在产品/独立插件，不进 rig core。

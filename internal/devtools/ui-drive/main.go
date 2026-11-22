@@ -39,8 +39,6 @@ import (
 	// the same translations or framework chrome would stay English.
 	_ "github.com/egoist/mygo/locales/zh-Hans"
 	cordis "github.com/zeokeel/zeokeel-kernel"
-	rig "github.com/zeokeel/zeokeel-rig"
-
 	"github.com/zeokeel/zeokeel/internal/assembly"
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
@@ -263,9 +261,13 @@ func (d *drive) seed() error {
 			Name: "每日构建检查", Prompt: "检查构建是否通过并总结", Schedule: "*/30 * * * *", Enabled: true,
 		})
 	}
-	if memory, err := d.root.Require(contracts.KeyMemory); err == nil {
-		_, _ = memory.Add(context.Background(), rig.Memory{Text: "偏好：界面使用中文，回答尽量简洁", Scope: "global"})
-		_, _ = memory.Add(context.Background(), rig.Memory{Text: "项目根目录是 /data/mygo", Scope: "workspace"})
+	if memory, err := d.root.Require(contracts.KeyMemoryService); err == nil {
+		for _, draft := range []contracts.MemoryDraft{
+			{Type: "preferences", Title: "偏好：界面使用中文", Summary: "界面使用中文，回答尽量简洁"},
+			{Type: "preferences", Title: "项目根目录", Summary: "项目根目录是 /data/mygo"},
+		} {
+			_, _ = memory.Write(context.Background(), workspaceRoot, draft)
+		}
 	}
 	if board, err := d.root.Require(contracts.KeyTaskBoard); err == nil {
 		// Seed through the driven conversation's board (DSH per-session board):

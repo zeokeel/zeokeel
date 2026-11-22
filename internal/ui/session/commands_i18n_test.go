@@ -26,7 +26,7 @@ func focusEnglishComposer(t *testing.T, tester *ui.Tester) {
 }
 
 func TestSessionCommandsFollowLocale(t *testing.T) {
-	h := newCommandDialogHarness(t, permissionChat(), "zh", nil, nil, nil)
+	h := newCommandDialogHarness(t, permissionChat(), "zh", nil, nil)
 	tester := h.tester()
 	tester.Frame()
 
@@ -68,7 +68,7 @@ func TestSessionCommandsFollowLocale(t *testing.T) {
 }
 
 func TestHelpModalEnglishCommandTitles(t *testing.T) {
-	h := newCommandDialogHarness(t, permissionChat(), "en", nil, nil, nil)
+	h := newCommandDialogHarness(t, permissionChat(), "en", nil, nil)
 	tester := h.tester()
 	tester.Frame()
 	help := findSessionCommand(t, h, "zeokeel.session.help")

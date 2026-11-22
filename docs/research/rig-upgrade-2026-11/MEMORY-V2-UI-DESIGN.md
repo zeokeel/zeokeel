@@ -145,7 +145,6 @@ type MemoryService interface {
     Get(ctx context.Context, workspaceRoot, uri string) (MemoryDetail, error)
     Write(ctx context.Context, workspaceRoot string, draft MemoryDraft) (MemoryItem, error)
     Delete(ctx context.Context, workspaceRoot, uri string) error
-    SetPinned(ctx context.Context, workspaceRoot, uri string, pinned bool) error
 }
 ```
 
@@ -156,7 +155,9 @@ type MemoryService interface {
   `kit.Config.MemoryStore`；memory 工具由 agent 用同一 store 构造。这样：
   - 同工作区 UI 与 agent 共享一个 store，避免多连接与“UI 看不到刚写入”的错觉；
   - store 生命周期归宿主模块，kit 不关闭注入的 store。
-- 旧 `contracts.KeyMemory`/`MemoryStore` 从 session UI 移除；迁移完成后删除死接口。
+- 旧 `contracts.KeyMemory`/`MemoryStore`/`MemoryUpdater`/`MemoryPolicy`/
+  `MemoryConsolidationReport` 已从 session UI 移除并删除（2026-11-23 wrap-up）；
+  session 只通过 `contracts.KeyMemoryService` 读取 v2 视图。
 
 ### 5.2 UI 数据流
 
@@ -189,9 +190,9 @@ URI 命名：`mem://user/self/memories/<type>/<slug>-<hash8>`；slug 由标题�
 
 ## 6. 分期
 
-- **P0（先做）**：列表 + 搜索 + 详情 + 删除 + 空/错/加载态；只读为主。
-- **P1**：新建/编辑、置顶、类型过滤、计数；键盘完整。
-- **P2**：会话归档、规则、快照/恢复、统计与导入导出（可复用 `memory` 工具动作）。
+- **P0（已完成）**：列表 + 搜索 + 详情 + 删除 + 空/错/加载态；只读为主。
+- **P1（已完成）**：新建/编辑、置顶、类型过滤、计数；键盘完整。
+- **P2（未做）**：会话归档、规则、快照/恢复、统计与导入导出（可复用 `memory` 工具动作）。
 
 ## 7. 验收
 
@@ -200,16 +201,18 @@ URI 命名：`mem://user/self/memories/<type>/<slug>-<hash8>`；slug 由标题�
 - `designlint --strict --baseline`、`scripts/design-check.sh`、`go tool mygo vet`；
 - 产品 `go test ./...` 与 `verify.sh --quick` 全绿。
 
-## 8. 确认与实现状态
+## 8. 确认与实现状态（最终，2026-11-23）
 
-- 位置：只放会话右栏「记忆」tab（已确认）。
-- P0 范围：在浏览/搜索/详情/删除之上加类型过滤与新建（已确认）。
-- 新建默认类型：`preferences`（已确认）。
-- 已实现：共享 `memorystore` 模块 + `MemoryService`、列表/搜索/类型过滤、详情、快速新建、删除确认；
-  行内编辑、置顶、P2 高级动作未实现。
-- 已知限制：UI 目前按「当前工作区」解析 store；绑定到其他工作区的会话会看到当前工作区记忆（后续按 session WorkspaceID 精确解析）。
-
-
-1. 位置：只放会话右栏「记忆」tab，不恢复设置页（推荐）。
-2. 新建默认类型：`preferences`（推荐）还是 `events`。
-3. 是否 P0 就支持编辑/置顶，或先只读浏览+删除。
+- 位置：只放会话右栏「记忆」tab，不恢复设置页（已确认）。
+- P0/P1 范围：浏览/搜索/类型过滤/详情/删除 + 快速新建/编辑/置顶（已确认并实现）。
+- 新建默认类型：`preferences`（已确认并实现）。
+- 已实现：共享 `memorystore` 模块 + `contracts.MemoryService`、列表/搜索/类型过滤、
+  详情、快速新建、行内编辑、置顶（Get→改 `Pinned`→Write）、删除确认。
+- 工作区定位：`memoryWorkspaceRoot` 优先使用会话的 `WorkspaceID`（经 workspace
+  服务解析到根），其次才回退到当前工作区；绑定到其他工作区的会话不再看到当前
+  工作区的记忆。
+- 未实现（P2）：会话归档、规则编译、快照/恢复、统计与导入导出。保留 `memory`
+  工具与后续页面承接，不在本期 UI 中做。
+- 旧 `memory.json` 不迁移（已确认决策）；v1 扁平存储的 `KeyMemory`/
+  `MemoryStore`/`MemoryUpdater`/`MemoryPolicy`/`MemoryConsolidationReport`
+  契约已删除。

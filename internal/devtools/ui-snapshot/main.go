@@ -349,15 +349,6 @@ func main() {
 		}
 	}
 
-	// Seed the durable memory backend and render the Memory tab.
-	if memory, err := a.root.Require(contracts.KeyMemory); err == nil {
-		_, _ = memory.Add(context.Background(), contracts.Memory{Text: "偏好：界面使用中文，回答尽量简洁", Scope: "global"})
-		_, _ = memory.Add(context.Background(), contracts.Memory{Text: "项目根目录是 /data/mygo", Scope: "workspace"})
-		// Duplicates for the Memory tab's tidy action screenshot.
-		_, _ = memory.Add(context.Background(), contracts.Memory{Text: "  项目根目录是   /data/mygo ", Scope: "workspace"})
-		_, _ = memory.Add(context.Background(), contracts.Memory{Text: "PREFER: concise answers", Scope: "global"})
-		_, _ = memory.Add(context.Background(), contracts.Memory{Text: "prefer: concise answers", Scope: "global"})
-	}
 	a.render(outDir + "/p1-chat.png")
 	// The attachment strip lives in the conversation's composer, so the frame
 	// returns to the 对话 tab first (the previous scenario leaves 上下文 open).
@@ -403,13 +394,6 @@ func main() {
 		}
 	}
 	a.tester.Frame()
-	if err := a.tester.Click("记忆"); err != nil {
-		fmt.Println("click memory tab:", err)
-	}
-	a.renderRest(outDir + "/p2-memory.png")
-	if err := a.tester.Click("对话"); err != nil {
-		fmt.Println("click chat tab:", err)
-	}
 	a.render(outDir + "/p1-chat.png")
 
 	// Density pass evidence (A+B): a fresh single-turn conversation (so the
@@ -885,6 +869,23 @@ func main() {
 		a.render(outDir + "/p2-workspace-tree.png")
 		a.tester.Move(10, 10)
 		a.tester.Frame()
+		// Seed the workspace-scoped v2 memory backend and render the Memory tab.
+		if memory, memErr := a.root.Require(contracts.KeyMemoryService); memErr == nil {
+			for _, draft := range []contracts.MemoryDraft{
+				{Type: "preferences", Title: "偏好：界面使用中文", Summary: "界面使用中文，回答尽量简洁"},
+				{Type: "preferences", Title: "项目根目录", Summary: "项目根目录是 /data/mygo"},
+				{Type: "events", Title: "修复 macOS 输入法闪烁", Summary: "关闭自动切换输入法后消失"},
+			} {
+				_, _ = memory.Write(context.Background(), mygo.Root, draft)
+			}
+		}
+		if err := a.tester.Click("记忆"); err != nil {
+			fmt.Println("click memory tab:", err)
+		}
+		a.renderRest(outDir + "/p2-memory.png")
+		if err := a.tester.Click("对话"); err != nil {
+			fmt.Println("click chat tab:", err)
+		}
 	}
 
 	// P2: the right sidebar's 开始 guide (a single 工作区文件 card). The
