@@ -33,3 +33,5 @@ require (
 )
 
 tool github.com/egoist/mygo/cmd/mygo
+
+replace github.com/zeokeel/zeokeel-rig => /data/zeokeel-rig
