@@ -20,6 +20,8 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
 
+	rigupdate "github.com/zeokeel/zeokeel-rig/update"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
@@ -65,19 +67,24 @@ func githubReleaseServer(t *testing.T, release githubTestRelease) *httptest.Serv
 				_, _ = io.WriteString(w, release.Body)
 				return
 			}
-			payload := githubRelease{TagName: release.Tag, Body: release.Notes}
+			payload := map[string]any{
+				"tag_name": release.Tag,
+				"body":     release.Notes,
+			}
+			assets := make([]map[string]any, 0, len(release.Assets))
 			for _, asset := range release.Assets {
 				size := asset.Size
 				if size == 0 {
 					size = int64(len(asset.Data))
 				}
-				payload.Assets = append(payload.Assets, githubReleaseAsset{
-					Name:               asset.Name,
-					BrowserDownloadURL: server.URL + "/files/" + url.PathEscape(asset.Name),
-					Size:               size,
-					Digest:             asset.Digest,
+				assets = append(assets, map[string]any{
+					"name":                 asset.Name,
+					"browser_download_url": server.URL + "/files/" + url.PathEscape(asset.Name),
+					"size":                 size,
+					"digest":               asset.Digest,
 				})
 			}
+			payload["assets"] = assets
 			encoded, err := json.Marshal(payload)
 			if err != nil {
 				t.Errorf("marshal fake release: %v", err)
@@ -251,10 +258,10 @@ func TestCheckGitHubUpToDateWithoutAsset(t *testing.T) {
 }
 
 func TestGitHubAssetSelection(t *testing.T) {
-	asset := func(names ...string) []githubReleaseAsset {
-		assets := make([]githubReleaseAsset, 0, len(names))
+	asset := func(names ...string) []rigupdate.Asset {
+		assets := make([]rigupdate.Asset, 0, len(names))
 		for _, name := range names {
-			assets = append(assets, githubReleaseAsset{Name: name})
+			assets = append(assets, rigupdate.Asset{Name: name})
 		}
 		return assets
 	}
@@ -262,7 +269,7 @@ func TestGitHubAssetSelection(t *testing.T) {
 		name   string
 		goos   string
 		goarch string
-		assets []githubReleaseAsset
+		assets []rigupdate.Asset
 		want   string
 		wantOK bool
 	}{
@@ -357,12 +364,15 @@ func TestGitHubAssetSelection(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			got, ok := pickGitHubAsset(testCase.assets, testCase.goos, testCase.goarch)
+			got, ok := rigupdate.SelectAsset(
+				rigupdate.Release{Version: "1.0.0", Assets: testCase.assets},
+				rigupdate.DefaultPlatform(testCase.goos, testCase.goarch),
+			)
 			if ok != testCase.wantOK {
-				t.Fatalf("pickGitHubAsset(%s/%s) = %+v/%v, want ok=%v", testCase.goos, testCase.goarch, got, ok, testCase.wantOK)
+				t.Fatalf("SelectAsset(%s/%s) = %+v/%v, want ok=%v", testCase.goos, testCase.goarch, got, ok, testCase.wantOK)
 			}
 			if ok && got.Name != testCase.want {
-				t.Fatalf("pickGitHubAsset(%s/%s) = %q, want %q", testCase.goos, testCase.goarch, got.Name, testCase.want)
+				t.Fatalf("SelectAsset(%s/%s) = %q, want %q", testCase.goos, testCase.goarch, got.Name, testCase.want)
 			}
 		})
 	}
@@ -417,18 +427,18 @@ func TestGitHubChecksumParsing(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			got, err := parseChecksums([]byte(testCase.body), testCase.asset)
+			got, err := rigupdate.ParseChecksums([]byte(testCase.body), testCase.asset)
 			if testCase.wantErr {
 				if err == nil {
-					t.Fatalf("parseChecksums(%q) = %q, want an error", testCase.body, got)
+					t.Fatalf("ParseChecksums(%q) = %q, want an error", testCase.body, got)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("parseChecksums(%q): %v", testCase.body, err)
+				t.Fatalf("ParseChecksums(%q): %v", testCase.body, err)
 			}
 			if got != testCase.want {
-				t.Fatalf("parseChecksums(%q) = %q, want %q", testCase.body, got, testCase.want)
+				t.Fatalf("ParseChecksums(%q) = %q, want %q", testCase.body, got, testCase.want)
 			}
 		})
 	}
@@ -574,7 +584,7 @@ func TestCheckGitHubErrors(t *testing.T) {
 		release := valid
 		release.Assets = []githubTestAsset{
 			{Name: assetName, Data: []byte("bytes")},
-			{Name: "SHA256SUMS.txt", Data: []byte(strings.Repeat(" ", maxChecksumsBytes+1))},
+			{Name: "SHA256SUMS.txt", Data: []byte(strings.Repeat(" ", rigupdate.MaxChecksumsBytes+1))},
 		}
 		service := githubService(t, githubReleaseServer(t, release), "1.0.0")
 		if _, err := service.Check(context.Background()); !errors.Is(err, ErrManifest) {
@@ -645,27 +655,29 @@ func TestGitHubDigestParsing(t *testing.T) {
 		"":                                   "",
 		sum:                                  "",
 	}
+	source, err := rigupdate.NewGitHubSource(rigupdate.GitHubConfig{Repo: "zeokeel/zeokeel"})
+	if err != nil {
+		t.Fatalf("NewGitHubSource: %v", err)
+	}
 	for digest, want := range cases {
-		if got := githubDigestSHA256(digest); got != want {
-			t.Fatalf("githubDigestSHA256(%q) = %q, want %q", digest, got, want)
+		got, err := source.SHA256For(context.Background(), rigupdate.Release{}, rigupdate.Asset{Name: "app.bin", Digest: digest})
+		if want == "" {
+			if err == nil {
+				t.Fatalf("SHA256For(digest %q) = %q, want an error", digest, got)
+			}
+			continue
+		}
+		if err != nil || got != want {
+			t.Fatalf("SHA256For(digest %q) = %q/%v, want %q", digest, got, err, want)
 		}
 	}
 }
 
-func TestGitHubLatestReleaseURL(t *testing.T) {
-	service := newService(Config{GitHubRepo: "zeokeel/zeokeel", APIBaseURL: "https://api.github.com/"}, contracts.AppInfo{Version: "1.0.0"}, nil)
-	endpoint, err := service.githubLatestReleaseURL()
-	if err != nil {
-		t.Fatalf("githubLatestReleaseURL: %v", err)
-	}
-	if endpoint != "https://api.github.com/repos/zeokeel/zeokeel/releases/latest" {
-		t.Fatalf("endpoint = %q", endpoint)
-	}
-	invalid := []string{"", "zeokeel", "/zeokeel", "zeokeel/", "a/b/c"}
-	for _, repo := range invalid {
+func TestGitHubRepoValidation(t *testing.T) {
+	for _, repo := range []string{"zeokeel", "/zeokeel", "zeokeel/", "a/b/c"} {
 		bad := newService(Config{GitHubRepo: repo}, contracts.AppInfo{}, nil)
-		if _, err := bad.githubLatestReleaseURL(); err == nil {
-			t.Fatalf("githubLatestReleaseURL(%q) accepted an invalid repo", repo)
+		if _, err := bad.Check(context.Background()); !errors.Is(err, ErrManifest) {
+			t.Fatalf("Check(repo %q) = %v, want ErrManifest", repo, err)
 		}
 	}
 }
@@ -675,16 +687,19 @@ func TestGitHubInsecureChecksumURLIsPolicyError(t *testing.T) {
 	// URL must surface ErrInsecureURL even when the release asset carries a
 	// usable GitHub digest (no silent downgrade).
 	sum := strings.Repeat("ab", 32)
-	service := newService(Config{
-		GitHubRepo: "zeokeel/zeokeel",
-		APIBaseURL: "https://api.github.com",
-	}, contracts.AppInfo{Version: "1.0.0"}, nil)
-	assets := []githubReleaseAsset{{
-		Name:               "SHA256SUMS.txt",
-		BrowserDownloadURL: "http://insecure.example/SHA256SUMS.txt",
-	}}
-	chosen := githubReleaseAsset{Name: "zeokeel-2.0.0-linux-amd64.tar.gz", Digest: "sha256:" + sum}
-	if _, err := service.resolveGitHubSHA256(context.Background(), assets, chosen); !errors.Is(err, ErrInsecureURL) {
-		t.Fatalf("resolveGitHubSHA256(insecure checksums) = %v, want ErrInsecureURL", err)
+	source, err := rigupdate.NewGitHubSource(rigupdate.GitHubConfig{
+		Repo:    "zeokeel/zeokeel",
+		BaseURL: "https://api.github.com",
+	})
+	if err != nil {
+		t.Fatalf("NewGitHubSource: %v", err)
+	}
+	release := rigupdate.Release{Assets: []rigupdate.Asset{{
+		Name: "SHA256SUMS.txt",
+		URL:  "http://insecure.example/SHA256SUMS.txt",
+	}}}
+	chosen := rigupdate.Asset{Name: "zeokeel-2.0.0-linux-amd64.tar.gz", Digest: "sha256:" + sum}
+	if _, err := source.SHA256For(context.Background(), release, chosen); !errors.Is(err, rigupdate.ErrInsecureURL) {
+		t.Fatalf("SHA256For(insecure checksums) = %v, want rig ErrInsecureURL", err)
 	}
 }
