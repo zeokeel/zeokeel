@@ -1191,7 +1191,7 @@ func buildConnectorToolList(c *ui.Context, t *design.Tokens, st *state, p *conne
 	if catalog == nil || card.ConfigIndex < 0 {
 		return
 	}
-	tools := catalog.Tools(card.Name)
+	tools := catalog.Tools(card.ConfigName)
 	if len(tools) == 0 {
 		return
 	}
@@ -1225,7 +1225,7 @@ func buildConnectorToolList(c *ui.Context, t *design.Tokens, st *state, p *conne
 						box.Tooltip(description)
 					}
 					if box.Changed() && !p.toolBusy {
-						p.toggleMCPTool(st, catalog, card.Name, tool.Name, enabled)
+						p.toggleMCPTool(st, catalog, card.ConfigName, tool.Name, enabled)
 						c.Invalidate()
 					}
 				}
