@@ -270,3 +270,15 @@ func RegisterModule(name string, f Factory[Module])
 - 明确留在产品侧：goal 状态机（contracts 类型/测试耦合需单独设计）、memory 完整 Store（scope/workspace 策略）、
   toolkit 多 root 执行路由、UI/业务模块（workspace/settings/modelcatalog/team/automation/insights/importer 服务层/update/appinfo）。
 - 明确留后续：super agent 与钉钉等业务工具。
+
+## 剩余项评估（2026-11-22，第二轮收敛）
+
+- **memory 完整 Store**：由 rig memory/context v2 取代，不再迁移旧的扁平 `rig.MemoryStore`。产品已删除旧
+  `zeokeel/memory` 模块、旧工具与旧设置页；agent 按工作区打开 SQLite v2 后端并交给 kit 做召回/捕获。
+  旧 `memory.json` 不迁移。
+- **toolkit 多 root 执行路由**：评估后**不迁移**。`execution_routing.go` + `rebind.go` 约 1.3k 行，
+  直接依赖产品 workspace 根、sandbox 模式/policy、MCP/LSP 生命周期、`contracts` 与工具注册表；
+  SDK 已接管可复用的读模型（`session/execution`），而“按根重建工具实例 + 合并 job/terminal 列表”
+  是产品执行策略，抽到 SDK 会引入一层与产品沙箱/工作区同构的接口，收益低于耦合成本。
+- **session Memory tab**：仍使用旧 `contracts.KeyMemory` 投影（无后端时显示 disabled），属于产品 UI
+  改造，不在 SDK 收敛范围；后续可单独接 v2 或先隐藏。
