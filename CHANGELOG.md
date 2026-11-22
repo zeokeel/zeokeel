@@ -24,6 +24,9 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **memory v2 UI 收尾**（2026-11-22）：记忆 tab 按 session 的 WorkspaceID 选 store（不再误用当前项目）；详情支持编辑与置顶/取消置顶。
+- **durable 任务板上移 SDK**（2026-11-22）：使用 `rig/tools/team/taskstore` 的原子持久化、按会话文档、id/顺序重放、tombstone 与 v1 迁移；产品保留 v1 journal、缓存优先读模型和工具分发。依赖 `rig v0.32.0`。
+
 - **workspace/insights/update 上移 SDK**（2026-11-22）：workspace 注册表与根内文件服务、insights 事件聚合、update GitHub 检查/校验下载分别使用 `rig/workspace`、`rig/session/insights`、`rig/update`；产品保留模块装配、契约映射、UI、git Changes、install/pending-restart 与价格/模型目录。依赖 `rig v0.31.0`。
 
 - **5 项会话能力上移 SDK**（2026-11-22）：prompt inbox（`session/inbox`）、session 日志导出（`session/export`）、`@session` 引用展开（`session/references`）、tool timeline 回放（`session/timeline`）、context observability 折叠（`session/observability`）；产品只保留适配层，依赖 `rig v0.30.1`。
