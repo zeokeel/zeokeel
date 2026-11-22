@@ -598,7 +598,6 @@ func TestSettingsSearchKeepsMigratedAliases(t *testing.T) {
 		{query: "密钥", want: "模型列表"},
 		{query: "沙箱", want: "系统沙箱"},
 		{query: "proxy", want: "代理配置"},
-		{query: "去重", want: "未启用记忆后端"},
 		{query: "语言服务", want: "语言服务器"},
 	}
 	for _, tc := range cases {
@@ -789,7 +788,7 @@ func TestSettingsGroupingMergedPagesAndAliases(t *testing.T) {
 		}
 	}
 	// Ten pages: everything is reachable without opening a collapsed group.
-	for _, page := range []string{"模型", "行为与限额", "外观", "通知", "网络与搜索", "LSP", "记忆", "归档", "数据与隐私", "关于"} {
+	for _, page := range []string{"模型", "行为与限额", "外观", "通知", "网络与搜索", "LSP", "归档", "数据与隐私", "关于"} {
 		if _, ok := tester.Find(page); !ok {
 			t.Fatalf("settings page %q is missing from the navigation; texts = %v", page, tester.Texts())
 		}
@@ -839,7 +838,7 @@ func TestSettingsGroupingAndSaveEnglish(t *testing.T) {
 			t.Fatalf("retired English settings nav item %q is still in the sidebar; texts = %v", retired, tester.Texts())
 		}
 	}
-	for _, page := range []string{"Model", "Behavior & limits", "Appearance", "Notifications", "Network & search", "LSP", "Memory", "Archived", "Data & privacy", "About"} {
+	for _, page := range []string{"Model", "Behavior & limits", "Appearance", "Notifications", "Network & search", "LSP", "Archived", "Data & privacy", "About"} {
 		if _, ok := tester.Find(page); !ok {
 			t.Fatalf("English settings page %q is missing from the navigation; texts = %v", page, tester.Texts())
 		}

@@ -63,7 +63,6 @@ const (
 
 	// Order inside 数据.
 	notificationsOrderInData = 10
-	memoryOrderInData        = 20
 	archiveOrderInData       = 30
 	dataPrivacyOrderInData   = 40
 )
@@ -697,7 +696,6 @@ func Module() *module.Descriptor[Config] {
 		lsp := &lspState{sel: -1}
 		notifications := &notificationsState{}
 		behavior := &behaviorState{}
-		memoryPage := &memoryPageState{sel: -1}
 		network := newNetworkState()
 		capabilities := newCapabilitiesState()
 		dataPrivacy := newDataPrivacyState()
@@ -914,46 +912,6 @@ func Module() *module.Descriptor[Config] {
 				Dirty: func() bool { return lspDraftDirty(lsp) },
 				Discard: func() {
 					discardLSPDraft(lsp)
-				},
-			},
-			{
-				ID: MemoryPageID, Section: "数据", Order: memoryOrderInData,
-				zhTitle: "记忆", enTitle: "Memory",
-				keywords: memoryPageKeywords,
-				Build: func(c *ui.Context) {
-					syncer.sync()
-					buildMemoryPage(c, design.Of(c), ctx, memoryPage, store, locale)
-				},
-				// The consolidation steppers are the page's explicit-save draft;
-				// their Save lives in the host's fixed footer (rule 14), so the
-				// submit never scrolls out of sight. Adding a memory and running
-				// a consolidation stay section actions (they apply at once).
-				// Without a consolidator the page has no draft and the footer
-				// builds nothing.
-				Footer: func(c *ui.Context) {
-					memoryStore, ok := ctx.Get(contracts.KeyMemory)
-					if !ok || memoryStore == nil {
-						return
-					}
-					if _, ok := memoryStore.(contracts.MemoryConsolidator); !ok {
-						return
-					}
-					uikit.PageFooter(c, uikit.PageFooterOptions{
-						Key: "settings.footer.memory",
-						Primary: uikit.DialogAction{
-							Label:    localized(locale, "保存", "Save"),
-							Disabled: !memoryPolicyDirty(memoryPage, store),
-							OnClick: func() {
-								saveMemoryPolicy(c, store, memoryPage, locale)
-							},
-						},
-					})
-				},
-				Dirty: func() bool {
-					return memoryDraftDirty(memoryPage) || memoryPolicyDirty(memoryPage, store)
-				},
-				Discard: func() {
-					discardMemoryDraft(memoryPage)
 				},
 			},
 			{

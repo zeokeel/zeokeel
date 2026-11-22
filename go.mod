@@ -5,11 +5,11 @@ go 1.27.3
 require (
 	github.com/egoist/mygo v0.9.2
 	github.com/zeokeel/zeokeel-kernel v0.1.1
-	github.com/zeokeel/zeokeel-rig v0.28.15
+	github.com/zeokeel/zeokeel-rig v0.29.0
 	github.com/zeokeel/zeokeel-rig/session/sqlstore v0.2.3
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.43.0
-	modernc.org/sqlite v1.61.1
+	modernc.org/sqlite v1.62.0
 )
 
 require (
@@ -26,7 +26,7 @@ require (
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/image v0.46.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
-	modernc.org/libc v1.79.0 // indirect
+	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 	mvdan.cc/sh/v3 v3.14.1 // indirect

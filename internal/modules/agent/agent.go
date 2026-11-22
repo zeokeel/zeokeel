@@ -33,9 +33,11 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/memoryvfs"
 	"github.com/zeokeel/zeokeel-rig/provider/openai"
 	"github.com/zeokeel/zeokeel-rig/session"
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
+	rigmemory "github.com/zeokeel/zeokeel-rig/tools/memory"
 	rigsession "github.com/zeokeel/zeokeel-rig/tools/session"
 	rigteam "github.com/zeokeel/zeokeel-rig/tools/team"
 
@@ -149,6 +151,10 @@ type Config struct {
 	// kept only because shipped assemblies still set it — it no longer changes
 	// the policy.
 	RequireFinishReason bool `json:"requireFinishReason"`
+	// Memory enables the v2 memory/context backend for product runs (memory
+	// tool, automatic recall and run capture). Off keeps tests and stripped
+	// builds free of the SQLite backend.
+	Memory bool `json:"memory"`
 }
 
 // Module is the agent backend descriptor. It provides contracts.KeyChat.
@@ -201,12 +207,6 @@ func Module() *module.Descriptor[Config] {
 			// Optional: without the goal backend there is no engine-side
 			// continuation, and the DSH goal tools report an unavailable backend.
 			svc.goalService = goalService
-		}
-		if memoryStore, ok := ctx.Get(contracts.KeyMemory); ok && memoryStore != nil {
-			svc.memoryStore = memoryStore
-			if _, err := ctx.Provide(contracts.KeyMemoryExtractor, contracts.MemoryExtractionService(svc)); err != nil {
-				return fmt.Errorf("agent: provide memory extractor: %w", err)
-			}
 		}
 		if skillsService, ok := ctx.Get(contracts.KeySkills); ok && skillsService != nil {
 			// Optional: the prompt then carries a bounded skill catalog. Without
@@ -366,7 +366,6 @@ func Module() *module.Descriptor[Config] {
 			module.Provides(contracts.KeySubagents),
 			module.Provides(contracts.KeyTeam),
 			module.Provides(contracts.KeyChildAgents),
-			module.Provides(contracts.KeyMemoryExtractor),
 			module.Provides(contracts.KeySessionLogExporter),
 		).
 		AddRequires(module.Requires(hosttools.KeyRegistry)).
@@ -433,10 +432,6 @@ type service struct {
 	// "always allow" tool set persisted in settings, so parallel tool calls
 	// cannot lose entries.
 	allowedToolsMu sync.Mutex
-	// memoryStore is the optional durable memory backend used by model-driven
-	// extraction; extracting is its single-flight guard.
-	memoryStore contracts.MemoryStore
-	extracting  atomic.Bool
 	// skills is the optional skill backend: the prompt injects a bounded catalog
 	// (name + description) so the model knows which skills exist; the bodies are
 	// loaded on demand through the skill tool.
@@ -2740,12 +2735,38 @@ func (s *service) nextMessageIDLocked() string {
 // initial input messages.
 func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatConfig, input []rig.Message,
 	history rig.History, thinking map[string]any, origin string) {
-	tools := s.toolsForSession(sessionID)
+	tools := s.enabledRegistryTools()
 	// The run's tool root is the session's project, not whichever workspace is
 	// current: concurrent sessions (and automation runs) may belong to different
 	// projects. The same root drives the prompt's working-directory line, the
 	// AGENTS.md lookup and the toolkit's root-scoped tools.
 	workspaceRoot := s.sessionWorkspaceRoot(sessionID)
+	// The memory backend is the v2 context database (SQLite, per workspace).
+	// Hosting it here means the model tool, automatic recall and run capture all
+	// share one store; the DB lives under the product data directory, never in
+	// the repository.
+	var memoryStore memoryvfs.Store
+	if s.cfg.Memory {
+		memoryRoot := workspaceRoot
+		if memoryRoot == "" {
+			memoryRoot = s.dataDir
+		}
+		if memoryRoot == "" {
+			memoryRoot = os.TempDir()
+		}
+		store, memoryErr := rigmemory.NewWorkspaceStore(filepath.Join(s.dataDir, "memory"), memoryRoot)
+		if memoryErr != nil {
+			s.finish(sessionID, ctx, fmt.Errorf("open memory store: %w", memoryErr))
+			return
+		}
+		defer store.Close()
+		memoryStore = store
+		if !surfaceHasTool(tools, "memory") {
+			tools = append(tools, rigmemory.ToolsWithStore(memoryStore)...)
+		}
+	}
+	tools = s.filterSessionTools(sessionID, tools)
+	sort.SliceStable(tools, func(i, j int) bool { return tools[i].Name() < tools[j].Name() })
 	// Rebuild the complete model-facing prompt for this run: identity +
 	// environment first (OS, shell, tool root, approval policy), then the
 	// configured prompt with the workspace instructions and preset, then
@@ -2802,6 +2823,7 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		TopP:          generation.TopP,
 		MaxTokens:     generation.MaxTokens,
 		Tools:         runTools,
+		MemoryStore:   memoryStore,
 		Logger:        s.logger,
 		Hooks:         s.turnHooks(workspaceRoot),
 		// Lazy discovery: the request carries the core surface plus whatever the

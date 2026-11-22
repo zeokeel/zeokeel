@@ -157,60 +157,6 @@ func inkDistance(a, b ui.Color) float64 {
 // visible without scrolling at 720 DIP; Save persists the policy without
 // running a consolidation, while the section's 按策略整理 action saves and
 // consolidates at once.
-func TestMemoryFooterSaveVisibleAtShortWindow(t *testing.T) {
-	consolidator := newFakeMemoryConsolidator()
-	store := newFakeSettings(map[string]string{
-		contracts.SettingMemoryMaxEntries: "20",
-		contracts.SettingMemoryMaxAgeDays: "30",
-	})
-	h := newHarness(t, &fakeChat{}, store, settings.Config{})
-	provide[contracts.MemoryStore](t, h.ctx, contracts.KeyMemory, consolidator)
-	tester := shortWindowTester(h)
-	tester.Frame()
-	h.click(tester, "记忆")
-
-	// The footer primary exists, is disabled while the policy is clean, and
-	// sits inside the short window without any scrolling.
-	requireFooterDisabled(t, tester, "保存", true, "memory policy clean")
-	assertInsideWindow(t, tester, "保存", 720)
-	// Exactly one "保存": PageFooter draws one primary and (after the 2026-11-17
-	// label dedupe, matching DialogFooter) registers one text node for it. A
-	// stray in-section submit would add a second.
-	if got := exactTextCount(tester.Texts(), "保存"); got != 1 {
-		t.Fatalf("保存 labels = %d, want the footer's one primary; texts = %v", got, tester.Texts())
-	}
-	// The instant verbs are section actions, not mid-page primaries.
-	h.assertTexts(tester, "按策略整理", "添加记忆")
-
-	// Edit a stepper (the body scrolls like a user would), then submit from
-	// the footer without scrolling back: the footer never moved.
-	shortWindowTypeNumberInput(t, tester, "最大条目数", "12")
-	tester.Frame()
-	if !tester.HasText("整理策略") {
-		t.Fatal("settings dismissed while scrolling to the stepper")
-	}
-	requireFooterDisabled(t, tester, "保存", false, "memory policy dirty")
-	if err := tester.Click("保存"); err != nil {
-		t.Fatalf("click footer Save without scrolling: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	if got := store.get(contracts.SettingMemoryMaxEntries); got != "12" {
-		t.Fatalf("%s = %q, want 12", contracts.SettingMemoryMaxEntries, got)
-	}
-	if policies := consolidator.policies(); len(policies) != 0 {
-		t.Fatalf("footer Save ran a consolidation: %+v, want save-only", policies)
-	}
-	h.assertTexts(tester, "已保存")
-	requireFooterDisabled(t, tester, "保存", true, "memory policy saved")
-
-	// The section action still saves and consolidates at once.
-	h.click(tester, "按策略整理")
-	policies := consolidator.policies()
-	if len(policies) != 1 || policies[0].MaxEntries != 12 {
-		t.Fatalf("consolidate policies = %+v, want one MaxEntries 12", policies)
-	}
-}
-
 // TestLSPFooterAddVisibleAtShortWindow pins the LSP page's submit落点: the add
 // form's one primary lives in the host footer (no in-section submit), visible
 // without scrolling at 720 DIP even after the body scrolled to the fields.
@@ -453,37 +399,8 @@ func TestModelSectionTitleNamesContentOnly(t *testing.T) {
 // TestMemoryPolicyUnlimitedDisclosedOnce pins the single disclosure of the
 // unlimited rule: the section helper says "0/empty = unlimited" once; the two
 // stepper descriptions explain only what their value does.
-func TestMemoryPolicyUnlimitedDisclosedOnce(t *testing.T) {
-	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
-	provide[contracts.MemoryStore](t, h.ctx, contracts.KeyMemory, newFakeMemoryConsolidator())
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "记忆")
-	h.assertTexts(tester, "0 或留空表示不限制；点「按策略整理」保存并立即整理。",
-		"超过后删除最旧的记忆。", "早于该天数的记忆会被删除。")
-	h.assertNoTexts(tester, "0 表示不限")
-}
-
 // TestMemoryAddPlaceholderExemplifies pins the add-memory placeholder: it
 // exemplifies an entry instead of repeating the field label.
-func TestMemoryAddPlaceholderExemplifies(t *testing.T) {
-	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
-	provide[contracts.MemoryStore](t, h.ctx, contracts.KeyMemory, newFakeMemoryStore())
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "记忆")
-	// The placeholder is the input's accessible Placeholder (not a text node):
-	// it exemplifies an entry instead of repeating the field label.
-	info, ok := tester.AccessByRole(ui.RoleTextField, "记忆内容 输入")
-	if !ok || info.Placeholder != "例如：发布前先跑 go test ./..." {
-		t.Fatalf("add-memory placeholder = %q (ok=%v), want the example entry",
-			info.Placeholder, ok)
-	}
-	if info.Placeholder == "记忆内容" {
-		t.Fatal("the placeholder must not repeat the field label")
-	}
-}
-
 // TestDataPrivacySectionActionsAtTitle pins the unified section-action
 // placement: open/export/clear sit on their section title rows (SectionAction),
 // while the inline copy stays on the path value row below the title.

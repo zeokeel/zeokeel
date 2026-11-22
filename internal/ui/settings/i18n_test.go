@@ -57,7 +57,7 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 	h.assertTexts(tester, "Common", "Model", "Behavior & limits",
 		"Interface & notifications", "Appearance", "Notifications",
 		"Connections", "Network & search", "LSP",
-		"Data", "Memory", "Archived", "Data & privacy", "About")
+		"Data", "Archived", "Data & privacy", "About")
 	h.assertNoTexts(tester, "模型", "外观", "技能", "快捷键", "诊断", "更新", "导入",
 		"高级", "Data & notifications")
 
@@ -100,7 +100,7 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "设置", "常用", "模型", "行为与限额", "界面与通知",
 		"外观", "通知", "连接", "网络与搜索", "LSP",
-		"数据", "记忆", "归档", "数据与隐私", "关于")
+		"数据", "归档", "数据与隐私", "关于")
 	// The module-declared group's title follows the language switch with the
 	// page titles; the English value must not linger.
 	h.assertNoTexts(tester, "Settings", "Common", "Behavior & limits",

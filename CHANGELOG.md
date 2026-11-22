@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **memory 切换到 SDK v2（SQLite）**（2026-11-22）：产品删除旧 `zeokeel/memory` 模块、旧 memory 工具与设置页；agent 产品配置 `memory: true` 时按工作区打开 `rig/memoryv2` SQLite 后端（`<dataDir>/memory/<workspaceID>/memory.db`），挂 `memory.ToolsWithStore`，由 kit 负责自动召回与 Run 后捕获。旧 `memory.json` 不迁移，旧记忆管理页移除。
+
 - **SDK 上移：goal 状态机**（2026-11-22）：rig `session/goal` 承接 snapshot 回放、CAS、轮次预算、blocked/clear/copy/activation/订阅；产品 `contracts.Goal*` 改为类型别名，`goal` 模块缩成适配器 + 模块装配（service.go 941 → 约 100 行），原有 goal 测试全部通过。
 
 - **SDK 上移：importer 会话发现**（2026-11-22）：rig `importer.Discover` 负责扫描/解析/跳过/预览计数；产品 `scan` 只做 preview 与 scanned 映射，删除 walk 实现（约 100 行）。

@@ -79,58 +79,6 @@ func pressFocusedKey(t *testing.T, tester *ui.Tester, key ui.Key) {
 
 // --- memory page ------------------------------------------------------------
 
-func TestMemoryListSemanticsAndKeyboard(t *testing.T) {
-	store := newFakeMemoryStore(
-		memoryEntry("mem-1", "Alpha 计划"),
-		memoryEntry("mem-2", "Beta 计划"),
-	)
-	h := memoryPageHarness(t, store)
-	tester := h.tester()
-
-	requireList(t, tester, "记忆列表")
-	if first := requireListItem(t, tester, "Alpha 计划"); first.PosInSet != 1 || first.SetSize != 2 {
-		t.Fatalf("first row position = %d of %d, want 1 of 2", first.PosInSet, first.SetSize)
-	}
-	requireListItem(t, tester, "Beta 计划")
-
-	// A click chooses the row; Down moves the List's selection.
-	chooseListItem(t, h, tester, "Alpha 计划")
-	if !requireListItem(t, tester, "Alpha 计划").Selected {
-		t.Fatalf("clicked memory row is not selected")
-	}
-	pressFocusedKey(t, tester, ui.KeyDown)
-	if !requireListItem(t, tester, "Beta 计划").Selected {
-		t.Fatalf("Down did not move the memory selection; texts = %v", tester.Texts())
-	}
-	if requireListItem(t, tester, "Alpha 计划").Selected {
-		t.Fatalf("previous memory row stayed selected after Down")
-	}
-	// Enter invents no row action: the edit dialog stays closed.
-	pressFocusedKey(t, tester, ui.KeyEnter)
-	if tester.HasText("编辑记忆") {
-		t.Fatalf("Enter on a memory row opened an action the pre-migration row did not have")
-	}
-	// The row's ⋯ menu still works.
-	h.click(tester, "记忆操作：Alpha 计划")
-	h.click(tester, "删除记忆")
-	h.assertTexts(tester, "删除记忆")
-	h.click(tester, "取消")
-
-	// Filtering keeps the choice on its item: choose Beta, then narrow the list
-	// to Beta; the row keeps its key and stays chosen.
-	chooseListItem(t, h, tester, "Beta 计划")
-	h.focusInput(tester, "搜索记忆")
-	tester.Type("Beta")
-	tester.Frame()
-	requireList(t, tester, "记忆列表")
-	if !requireListItem(t, tester, "Beta 计划").Selected {
-		t.Fatalf("filtered memory list lost the chosen row; texts = %v", tester.Texts())
-	}
-	if tester.HasText("Alpha 计划") {
-		t.Fatalf("search filter did not narrow the list; texts = %v", tester.Texts())
-	}
-}
-
 // --- model catalog ----------------------------------------------------------
 
 func TestModelCatalogListSemanticsAndKeyboard(t *testing.T) {

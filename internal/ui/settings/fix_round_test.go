@@ -65,23 +65,6 @@ func TestLSPDraftGuardOnClose(t *testing.T) {
 }
 
 // TestMemoryDraftGuardOnClose covers ST-02 for the 添加记忆 input.
-func TestMemoryDraftGuardOnClose(t *testing.T) {
-	h := memoryPageHarness(t, newFakeMemoryStore())
-	tester := h.tester()
-	tester.Frame()
-	h.focusInput(tester, "记忆内容 输入")
-	tester.Type("要添加的记忆")
-	tester.Frame()
-	assertCloseGuard(t, h, tester)
-	h.click(tester, "放弃修改")
-	tester.Frame()
-	reopenSettings(h, tester)
-	h.click(tester, "记忆")
-	if got := inputValue(t, tester, "记忆内容 输入"); got != "" {
-		t.Fatalf("the discarded memory draft survived: %q", got)
-	}
-}
-
 // TestBehaviorDraftGuardOnlyWithDraft covers ST-02's "only when a real draft
 // exists" rule for the workspace instruction file: the field lives behind the
 // collapsed 更多对话设置 disclosure, so it only has a draft once that is open; a

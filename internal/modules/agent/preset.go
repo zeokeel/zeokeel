@@ -152,7 +152,12 @@ func (s *service) agentPresetForSession(sessionID string) (contracts.AgentPreset
 // (subagent/team) start from the same surface before excluding orchestration
 // tools, so a preset allowlist applies everywhere.
 func (s *service) toolsForSession(sessionID string) []rig.Tool {
-	tools := s.enabledRegistryTools()
+	return s.filterSessionTools(sessionID, s.enabledRegistryTools())
+}
+
+// filterSessionTools applies the session preset allowlist and the runtime mode
+// to a tool set.
+func (s *service) filterSessionTools(sessionID string, tools []rig.Tool) []rig.Tool {
 	if preset, ok := s.agentPresetForSession(sessionID); ok && len(preset.Tools) > 0 {
 		tools = filterToolsByAllowlist(tools, preset.Tools)
 	}

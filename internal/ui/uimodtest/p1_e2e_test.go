@@ -403,35 +403,6 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 	tester.Frame()
 
-	// The durable memory backend is wired into the product: entries persist and
-	// the session Memory tab renders them.
-	memory, err := root.Require(contracts.KeyMemory)
-	if err != nil {
-		t.Fatalf("require memory: %v", err)
-	}
-	if _, err := memory.Add(context.Background(), contracts.Memory{Text: "记住：用中文回复", Scope: "global"}); err != nil {
-		t.Fatalf("add memory: %v", err)
-	}
-	if err := tester.Click("记忆"); err != nil {
-		t.Fatalf("click memory tab: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	if !tester.HasText("记住：用中文回复") {
-		t.Fatalf("memory tab does not show the entry; texts = %v", tester.Texts())
-	}
-	// H25: the tab label is the only 「记忆」 title; the body no longer repeats
-	// it as a big heading.
-	memoryLabels := 0
-	for _, text := range tester.Texts() {
-		if text == "记忆" {
-			memoryLabels++
-		}
-	}
-	if memoryLabels > 2 {
-		t.Fatalf("memory tab repeats its body title (%d exact 「记忆」labels); texts = %v",
-			memoryLabels, tester.Texts())
-	}
-
 	// The chrome shortcuts are configurable through the host settings: an
 	// override applies on the next frame, and restoring the default switches
 	// the binding back.
@@ -1020,15 +991,6 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	if !hasAssistantText(restored, "已读取工作目录") {
 		t.Fatalf("restored assistant text missing: %+v", restored.Messages)
 	}
-	memory2, err := root2.Require(contracts.KeyMemory)
-	if err != nil {
-		t.Fatalf("require memory after restart: %v", err)
-	}
-	entries, err := memory2.List(context.Background())
-	if err != nil || len(entries) != 1 || entries[0].Text != "记住：用中文回复" {
-		t.Fatalf("restored memories = %+v (err %v)", entries, err)
-	}
-
 	if err := uiRoot2.Navigator().Push("session"); err != nil {
 		t.Fatalf("Push(session) after restart: %v", err)
 	}

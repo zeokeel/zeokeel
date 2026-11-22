@@ -33,7 +33,6 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/hosttools"
-	"github.com/zeokeel/zeokeel/internal/memorytools"
 	"github.com/zeokeel/zeokeel/internal/websearch"
 )
 
@@ -190,15 +189,6 @@ func Module() *module.Descriptor[Config] {
 		// per-session; the contract and the UI say so instead of faking scoping.
 		todoStore := misc.NewTodoStore()
 		tools = append(tools, misc.NewTodoTool(todoStore))
-		if memoryStore, ok := ctx.Get(contracts.KeyMemory); ok {
-			// The memory backend provides the durable rig.MemoryStore; without
-			// it the memory tools fall back to their in-memory default. The
-			// product wrapper keeps the stable "memory" tool name and adds the
-			// update action over the store's MemoryUpdater half.
-			tools = append(tools, memorytools.Tools(memoryStore)...)
-		} else {
-			tools = append(tools, memorytools.Tools(nil)...)
-		}
 		tools = append(tools, schedule.Tools(nil)...)
 		if skillStore, ok := ctx.Get(contracts.KeySkills); ok {
 			// The skills backend discovers SKILL.md files from the data dir and

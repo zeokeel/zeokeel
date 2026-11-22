@@ -100,10 +100,11 @@ type fixBlockingCompactor struct {
 	entered chan struct{}
 	release chan struct{}
 	result  []rig.Message
+	once    sync.Once
 }
 
 func (c *fixBlockingCompactor) Compact(ctx context.Context, _ string, _ []rig.Message, _ int) ([]rig.Message, error) {
-	close(c.entered)
+	c.once.Do(func() { close(c.entered) })
 	select {
 	case <-c.release:
 		return c.result, nil

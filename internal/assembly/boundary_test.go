@@ -105,7 +105,7 @@ func uiModuleAllowed(imp string) bool {
 func backendModuleAllowed(imp string) bool {
 	switch imp {
 	case "internal/contracts", "internal/uikit", "internal/design",
-		"internal/hosttools", "internal/memorytools", "internal/websearch":
+		"internal/hosttools", "internal/websearch":
 		return true
 	}
 	return strings.HasPrefix(imp, "internal/lib/")

@@ -203,11 +203,6 @@ func archivePageKeywords() []string {
 	return []string{"归档", "archive", "恢复", "restore", "已归档", "会话", "session"}
 }
 
-// memoryPageKeywords covers the memory page.
-func memoryPageKeywords() []string {
-	return []string{"记忆", "memory", "提取", "extract", "去重", "tidy", "全局", "global", "整理", "consolidate"}
-}
-
 // lspPageKeywords covers the language-server page.
 func lspPageKeywords() []string {
 	return []string{"lsp", "语言服务", "language server", "补全", "completion", "诊断", "diagnostics"}
