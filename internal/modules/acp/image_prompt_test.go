@@ -254,13 +254,20 @@ func TestPromptImageWithoutAttachmentSender(t *testing.T) {
 
 func TestPromptImageSizeLimit(t *testing.T) {
 	oversized := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x7f}, maxPromptImageBytes+1))
-	attachments, rpcErr := promptImages(promptParams{Prompt: []contentBlock{
-		{Type: "image", Data: oversized, MimeType: "image/png"},
-	}})
-	if rpcErr == nil || rpcErr.Code != CodeInvalidParams {
-		t.Fatalf("promptImages(oversized) = %+v/%+v, want -32602", attachments, rpcErr)
+	chat := newFakeChat()
+	service := newService(Config{}, chat, &fakeLogger{})
+	frames := serveLines(t, service, blocksPromptLine(1, "sess-1", imageBlockLine(oversized, "image/png")))
+	if len(frames) != 1 {
+		t.Fatalf("frames = %+v, want one error response", frames)
 	}
-	if !strings.Contains(rpcErr.Message, "10 MiB") || !strings.Contains(rpcErr.Message, "limit") {
-		t.Fatalf("size-limit message = %q", rpcErr.Message)
+	frame := frames[0]
+	if frame.Error == nil || frame.Error.Code != CodeInvalidParams {
+		t.Fatalf("frame = %+v, want invalid params", frame)
+	}
+	if !strings.Contains(frame.Error.Message, "10 MiB") || !strings.Contains(frame.Error.Message, "limit") {
+		t.Fatalf("size-limit message = %q", frame.Error.Message)
+	}
+	if len(chat.sendCalls) != 0 {
+		t.Fatalf("oversized image still sent: %+v", chat.sendCalls)
 	}
 }
