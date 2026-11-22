@@ -94,7 +94,34 @@ func (t *trackedTeamTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.To
 		t.adoptSpawned(ctx, call, before)
 	}
 	t.record(call, result, err)
+	// A send_message to a coordinator-owned member starts a follow-up run the
+	// coordinator did not create; arm its watcher now that the run is queued.
+	if !adoptSpawn && isTeamSendToolName(t.Name()) && err == nil && !result.IsError {
+		t.trackFollowUp(ctx, call)
+	}
 	return result, err
+}
+
+// trackFollowUp starts watching the coordinator member's next run after an
+// asynchronous send. The coordinator records that run's result exactly once.
+func (t *trackedTeamTool) trackFollowUp(ctx context.Context, call rig.ToolCall) {
+	if t == nil || t.tracker == nil {
+		return
+	}
+	coordinator := t.tracker.coordinator()
+	if coordinator == nil {
+		return
+	}
+	ref, _ := teamSendTargetAndMessage(call.Arguments)
+	memberID := t.tracker.coordinatorMemberID(ref)
+	if memberID == "" {
+		return
+	}
+	if _, err := coordinator.Track(ctx, memberID); err != nil {
+		t.tracker.addMemberActivity(memberID, contracts.TeamActivityError,
+			"跟踪后续运行失败："+err.Error(), true)
+		t.tracker.notifyChange()
+	}
 }
 
 // isAdoptableSpawnTool reports whether this tool starts a manager member.
@@ -167,6 +194,10 @@ func (t *trackedTeamTool) adoptSpawned(ctx context.Context, call rig.ToolCall, b
 		Prompt:   prompt,
 		Model:    teamArgString(args, "model"),
 		ParentID: contracts.AgentSessionFromContext(ctx),
+	}
+	if t.Name() == rigteam.ToolSubagentFork {
+		spec.Fork = true
+		spec.ForkedFrom = spec.ParentID
 	}
 	// Bind the durable child identity before Adopt publishes (its persist pass
 	// needs the child-session id).

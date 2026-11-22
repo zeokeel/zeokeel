@@ -73,6 +73,7 @@ func (h *coordinatorHost) Spawn(ctx context.Context, spec rigagentteam.SpawnSpec
 	spawnCtx := context.WithValue(ctx, coordinatorSpawnKey{}, true)
 	member, err := manager.Spawn(spawnCtx, rig.SubagentSpec{
 		Name: strings.TrimSpace(spec.Name), Prompt: spec.Prompt, Model: strings.TrimSpace(spec.Model),
+		Fork: spec.Fork,
 	})
 	if err != nil {
 		return "", err
@@ -120,9 +121,20 @@ func (h *coordinatorHost) Snapshot(_ context.Context, id string) (rigagentteam.M
 		if member.ID != id {
 			continue
 		}
-		return rigagentteam.MemberSnapshot{
-			Status: member.Status, Running: member.Status == rigteam.StatusActive,
-		}, true
+		snapshot := rigagentteam.MemberSnapshot{Status: member.Status}
+		// A completed run is authoritative: a fast tool spawn may have finished
+		// before the coordinator adopted it, and adopting it as running would
+		// leave the answer unrecorded. Without a recorded result the member is
+		// still on its first run.
+		if member.Last != nil {
+			snapshot.Finished = true
+			snapshot.Output = member.Last.Output
+			snapshot.UsageTokens = member.Last.Usage.TotalTokens
+			snapshot.Iterations = member.Last.Iterations
+		} else if member.Status == rigteam.StatusActive {
+			snapshot.Running = true
+		}
+		return snapshot, true
 	}
 	return rigagentteam.MemberSnapshot{}, false
 }
