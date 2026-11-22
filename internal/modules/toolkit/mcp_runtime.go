@@ -84,14 +84,20 @@ func prepareMCPServerPlans(servers []MCPServer, logf func(string, ...any)) []mcp
 // name); the manager requires unique identities, so later duplicates get a
 // stable "#n" suffix while the Plugins row keeps the user's name.
 func mcpManagerKey(server MCPServer, index int, used map[string]int) string {
-	base := strings.TrimSpace(server.Name)
-	if base == "" {
-		base = fmt.Sprintf("server-%d", index+1)
-	}
+	base := mcpBaseName(server, index)
 	count := used[base]
 	used[base] = count + 1
 	if count == 0 {
 		return base
 	}
 	return fmt.Sprintf("%s#%d", base, count+1)
+}
+
+// mcpBaseName is the unsuffixed manager identity of one configured row: the
+// configured name, or a generated fallback for an unnamed row.
+func mcpBaseName(server MCPServer, index int) string {
+	if base := strings.TrimSpace(server.Name); base != "" {
+		return base
+	}
+	return fmt.Sprintf("server-%d", index+1)
 }
