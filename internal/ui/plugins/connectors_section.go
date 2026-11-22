@@ -43,8 +43,14 @@ type connectorCard struct {
 	// Key is the card's stable grid identity: the stored name (plus the address
 	// when two stored rows share a name), or the live server identity.
 	Key string
-	// Name is the connector's display name.
+	// Name is the connector's display label. Duplicate names are suffixed
+	// ("name · #2") for this frame only; it is never written to settings or
+	// used as a token key.
 	Name string
+	// ConfigName is the stored/server identity (settings row name or live
+	// server name). It stays undecorated: enable switches, auth token keys and
+	// the tool catalog all address this value.
+	ConfigName string
 	// Transport is connectorTransportHTTP or connectorTransportStdio.
 	Transport string
 	// Address is the URL for HTTP rows or "command args" for stdio rows.
@@ -455,7 +461,33 @@ func (p *connectorsState) connectorCards(st *state, service contracts.PluginsSer
 	for index, plugin := range liveOnly {
 		cards = append(cards, buildLiveConnectorCard(st, plugin, index))
 	}
+	disambiguateConnectorNames(cards)
 	return cards
+}
+
+// disambiguateConnectorNames makes duplicate display labels distinguishable
+// without touching ConfigName/Key/ConfigIndex: the first occurrence keeps the
+// plain label, later occurrences get " · #N" in grid order. Matching is
+// case-insensitive and whitespace-trimmed, like the connector identity rules.
+func disambiguateConnectorNames(cards []connectorCard) {
+	if len(cards) < 2 {
+		return
+	}
+	totals := make(map[string]int, len(cards))
+	keys := make([]string, len(cards))
+	for index := range cards {
+		key := strings.ToLower(strings.TrimSpace(cards[index].Name))
+		keys[index] = key
+		totals[key]++
+	}
+	seen := make(map[string]int, len(totals))
+	for index := range cards {
+		key := keys[index]
+		seen[key]++
+		if totals[key] > 1 && seen[key] > 1 {
+			cards[index].Name = fmt.Sprintf("%s · #%d", cards[index].Name, seen[key])
+		}
+	}
 }
 
 // buildStoredConnectorCard builds the card of one settings row merged with its
@@ -469,6 +501,7 @@ func buildStoredConnectorCard(st *state, row contracts.MCPServerConfig, index in
 	card := connectorCard{
 		Key:         connectorStoredKey(name, address, nameCounts),
 		Name:        textutil.FirstNonEmptyTrimmed(name, st.tr("未命名连接器", "Untitled connector")),
+		ConfigName:  name,
 		Transport:   transport,
 		Address:     address,
 		ConfigIndex: index,
@@ -517,7 +550,7 @@ func buildStoredConnectorCard(st *state, row contracts.MCPServerConfig, index in
 		card.StatusKind = uikit.StatusIdle
 		card.StatusLabel = st.tr("正在连接…", "Connecting…")
 		card.StatusTooltip = st.tr("保存后自动连接，无需重启", "Connects automatically after saving")
-	case st.pendingEnabled(name):
+	case st.pendingEnabled(card.ConfigName):
 		card.StatusKind = uikit.StatusIdle
 		card.StatusLabel = st.tr("待重启", "Restart needed")
 		card.StatusTooltip = st.tr("已启用（重启后连接）", "Enabled (connects after restart)")
@@ -584,8 +617,9 @@ func applyConnectorAuthStatus(st *state, card *connectorCard, row contracts.MCPS
 // buildLiveConnectorCard builds a read-only card for a live-only assembly or
 // workspace server: it has no settings row, so edit/remove stay unavailable.
 func buildLiveConnectorCard(st *state, plugin contracts.MCPPlugin, index int) connectorCard {
-	name := textutil.FirstNonEmptyTrimmed(plugin.Name, plugin.ServerName, plugin.URL,
-		st.tr("未命名连接器", "Untitled connector"))
+	identity := textutil.FirstNonEmptyTrimmed(plugin.Name, plugin.ServerName, plugin.URL)
+	name := textutil.FirstNonEmptyTrimmed(identity, st.tr("未命名连接器", "Untitled connector"))
+	configName := textutil.FirstNonEmptyTrimmed(identity, name)
 	transport := connectorTransportHTTP
 	if strings.TrimSpace(plugin.URL) == "" {
 		transport = connectorTransportStdio
@@ -593,10 +627,11 @@ func buildLiveConnectorCard(st *state, plugin contracts.MCPPlugin, index int) co
 	card := connectorCard{
 		Key:         "live:" + mcpServerKey(plugin, index),
 		Name:        name,
+		ConfigName:  configName,
 		Transport:   transport,
 		Address:     strings.TrimSpace(plugin.URL),
 		ConfigIndex: -1,
-		Enabled:     !st.serverDisabled(name),
+		Enabled:     !st.serverDisabled(configName),
 		Tools:       plugin.Tools,
 		RawStatus:   plugin.Status,
 		ServerName:  plugin.ServerName,
@@ -767,7 +802,7 @@ func (p *connectorsState) buildCard(c *ui.Context, t *design.Tokens, st *state,
 			sw := ui.Switch(c, &enabled)
 			sw.Label(st.tr("启用连接器 ", "Enable connector ") + card.Name)
 			if sw.Changed() {
-				st.setServerEnabled(card.Name, enabled, settings)
+				st.setServerEnabled(card.ConfigName, enabled, settings)
 				c.Invalidate()
 			}
 		})
