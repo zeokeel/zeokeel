@@ -1,60 +1,104 @@
 package agent
 
-// Durable per-session prompt inbox (DSH inbox parity).
+// Durable per-session prompt inbox (DSH inbox parity), backed by the rig
+// session/inbox package.
 //
 // A human prompt submitted while the session is running used to be rejected by
 // Send (ErrSessionRunning) and the desktop UI kept its own in-memory queue for
 // the "queued send" affordance — invisible to headless products, lost on a
-// restart, and racing the engine-side goal continuation. The backend now owns
-// that queue:
+// restart, and racing the engine-side goal continuation. The backend owns that
+// queue, and since the SDK ships the same inbox this module no longer keeps a
+// private copy of it:
 //
 //   - contracts.PromptQueue is implemented by the chat service (type-asserted by
 //     hosts, like the other optional chat halves): EnqueuePrompt appends one
 //     prompt, QueuedPrompts reads the inbox oldest-first, RemoveQueuedPrompt
 //     deletes one entry idempotently;
-//   - the queue is durable through a `queue/change` session event carrying the
-//     complete snapshot (sparse: one event per mutation), and restore replays
-//     the latest one;
-//   - settle order is DSH's: after a run ends the oldest queued prompt starts
-//     first (durable dequeue, then sendWithOptions origin=user); only an EMPTY
-//     inbox lets the goal continuation driver admit a round;
-//   - a user Stop keeps the inbox intact (Cancel never clears it) and a deleted
-//     session drops it (the durable session/events are deleted with it).
+//   - queue durability, replay (the latest `queue/change` snapshot wins, never
+//     folded deltas) and entry ids belong to inbox.Inbox. The durable payload
+//     shape is unchanged — {"prompts":[{"id","text","createdAt"}]} — so a queue
+//     written by an older build replays into this one and vice versa;
+//   - the service keeps what the SDK package deliberately does not know: whether
+//     the session exists and is idle, the immediate start of a prompt on an idle
+//     session, host notification, and the DSH settle order (after a run ends the
+//     oldest queued prompt starts first; only an EMPTY inbox lets the goal
+//     continuation driver admit a round);
+//   - a user Stop keeps the inbox intact (Cancel never clears it; the inbox
+//     pending marker parks it until the next human gesture) and a deleted
+//     session drops it.
 //
 // EnqueuePrompt also starts the first prompt immediately when the session is
 // idle, so a host needs one code path for "submit a prompt".
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
-	"time"
+
+	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/session/inbox"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
 // queueEventType is the durable session event type of a prompt-inbox snapshot.
-const queueEventType = "queue/change"
-
-// maxQueuedPromptEntries bounds one session's inbox: it only holds prompts a
-// human sent during a running turn, so an unbounded queue would be a bug (or a
-// runaway automation loop). Excess prompts are rejected with a readable error.
-const maxQueuedPromptEntries = 200
+// It aliases inbox.EventType so the durable shape stays one contract.
+const queueEventType = inbox.EventType
 
 var _ contracts.PromptQueue = (*service)(nil)
 
-// queuedPromptPayload is the durable shape of one inbox entry.
-type queuedPromptPayload struct {
-	ID        string    `json:"id"`
-	Text      string    `json:"text"`
-	CreatedAt time.Time `json:"createdAt"`
+// inboxEventLog adapts the product store to the slice of a session log the
+// durable inbox needs. Replay is bounded by the same window restore uses
+// everywhere else (restoreMetadataEventWindow): an inbox snapshot is recent by
+// nature, so the product does not scan a whole session log for it. A caller
+// asking explicitly for a sequence range is passed through unchanged.
+type inboxEventLog struct {
+	store contracts.Store
 }
 
-// queuedPromptsPayload is the durable `queue/change` payload: the complete
-// inbox snapshot, so replay never folds add/remove deltas.
-type queuedPromptsPayload struct {
-	Prompts []queuedPromptPayload `json:"prompts"`
+// Events returns the session events with from <= seq <= to (to <= 0 means until
+// the end). With from <= 0 the newest restore window is returned; the inbox
+// only replays the highest seq, so a bounded scan is sufficient.
+func (l inboxEventLog) Events(ctx context.Context, sessionID string, from, to int64) ([]rig.SessionEvent, error) {
+	if l.store == nil {
+		return nil, nil
+	}
+	if from > 0 {
+		return l.store.Events(ctx, sessionID, from, to)
+	}
+	events, err := l.store.Last(ctx, sessionID, restoreMetadataEventWindow)
+	if err != nil {
+		return nil, err
+	}
+	if to <= 0 {
+		return events, nil
+	}
+	bounded := make([]rig.SessionEvent, 0, len(events))
+	for _, event := range events {
+		if event.Seq <= to {
+			bounded = append(bounded, event)
+		}
+	}
+	return bounded, nil
+}
+
+// AppendEvent records one event (an inbox snapshot).
+func (l inboxEventLog) AppendEvent(ctx context.Context, event rig.SessionEvent) error {
+	if l.store == nil {
+		return errors.New("agent: prompt inbox has no session log")
+	}
+	return l.store.AppendEvent(ctx, event)
+}
+
+// queuedPrompt maps one inbox entry onto the host contract type.
+func queuedPrompt(sessionID string, entry inbox.Entry) contracts.QueuedPrompt {
+	return contracts.QueuedPrompt{
+		ID:        entry.ID,
+		SessionID: sessionID,
+		Text:      entry.Text,
+		CreatedAt: entry.Created,
+	}
 }
 
 // EnqueuePrompt implements contracts.PromptQueue: it validates the session and
@@ -85,25 +129,19 @@ func (s *service) EnqueuePrompt(ctx context.Context, sessionID, prompt string) (
 	// new prompt joins the tail: human input order is preserved and the queue
 	// never stays stuck until a later run.
 	s.resumePendingIdleDrain(sessionID)
-	entry := contracts.QueuedPrompt{
-		ID:        s.newQueuedPromptID(),
-		SessionID: sessionID,
-		Text:      prompt,
-		CreatedAt: time.Now(),
+	entry, err := s.inbox.Enqueue(ctx, sessionID, prompt)
+	if err != nil {
+		if errors.Is(err, inbox.ErrInboxFull) {
+			// Keep the previous host-facing wording for a full inbox.
+			return contracts.QueuedPrompt{}, fmt.Errorf("agent: session %q inbox is full (%d prompts)", sessionID, inbox.MaxEntries)
+		}
+		return contracts.QueuedPrompt{}, err
 	}
-	s.queueMu.Lock()
-	if len(s.queues[sessionID]) >= maxQueuedPromptEntries {
-		s.queueMu.Unlock()
-		return contracts.QueuedPrompt{}, fmt.Errorf("agent: session %q inbox is full (%d prompts)", sessionID, maxQueuedPromptEntries)
-	}
-	s.queues[sessionID] = append(s.queues[sessionID], entry)
-	s.persistQueuedPromptsLocked(sessionID)
-	s.queueMu.Unlock()
 	s.notify(sessionID)
 	// An idle session starts the prompt at once; a running one keeps it queued
 	// and settleRun drains it after the current run.
 	s.drainQueuedPrompt(sessionID)
-	return entry, nil
+	return queuedPrompt(sessionID, entry), nil
 }
 
 // QueuedPrompts implements contracts.PromptQueue: the session inbox in send
@@ -113,10 +151,19 @@ func (s *service) QueuedPrompts(sessionID string) []contracts.QueuedPrompt {
 	if sessionID == "" {
 		return nil
 	}
-	s.queueMu.Lock()
-	defer s.queueMu.Unlock()
-	queue := s.queues[sessionID]
-	return append([]contracts.QueuedPrompt(nil), queue...)
+	entries, err := s.inbox.List(context.Background(), sessionID)
+	if err != nil {
+		s.logger.Printf("[agent] session %s: read prompt inbox: %v", sessionID, err)
+		return nil
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	prompts := make([]contracts.QueuedPrompt, 0, len(entries))
+	for _, entry := range entries {
+		prompts = append(prompts, queuedPrompt(sessionID, entry))
+	}
+	return prompts
 }
 
 // RemoveQueuedPrompt implements contracts.PromptQueue: it removes one entry by
@@ -133,95 +180,67 @@ func (s *service) RemoveQueuedPrompt(ctx context.Context, sessionID, id string) 
 	if sessionID == "" || id == "" {
 		return nil
 	}
-	s.queueMu.Lock()
-	queue := s.queues[sessionID]
+	// A removal is the only event worth notifying, so remember whether the id
+	// was queued (Remove itself is an idempotent no-op for an unknown id).
 	removed := false
-	for index, entry := range queue {
+	entries, err := s.inbox.List(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
 		if entry.ID == id {
-			next := make([]contracts.QueuedPrompt, 0, len(queue)-1)
-			next = append(next, queue[:index]...)
-			next = append(next, queue[index+1:]...)
-			if len(next) == 0 {
-				delete(s.queues, sessionID)
-			} else {
-				s.queues[sessionID] = next
-			}
 			removed = true
 			break
 		}
 	}
-	if removed {
-		s.persistQueuedPromptsLocked(sessionID)
+	// Removing the last waiting prompt also clears a Stop-pending marker; the
+	// inbox owns that rule.
+	if err := s.inbox.Remove(ctx, sessionID, id); err != nil {
+		return err
 	}
-	s.queueMu.Unlock()
 	if removed {
-		if s.queuedPromptCount(sessionID) == 0 {
-			// Removing the last waiting prompt also clears a Stop-pending marker.
-			s.clearPendingIdleDrain(sessionID)
-		}
 		s.notify(sessionID)
 	}
 	return nil
 }
 
-// queuedPromptCount reports how many prompts wait in the session inbox.
+// queuedPromptCount reports how many prompts wait in the session inbox. A
+// durable read failure is logged and reported as empty (the previous in-memory
+// queue could not fail); it never blocks a drain attempt.
 func (s *service) queuedPromptCount(sessionID string) int {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return 0
 	}
-	s.queueMu.Lock()
-	defer s.queueMu.Unlock()
-	return len(s.queues[sessionID])
-}
-
-// newQueuedPromptID returns a durable inbox entry id (unique per process and
-// stable across restarts, unlike a slice index).
-func (s *service) newQueuedPromptID() string {
-	return fmt.Sprintf("prompt-%d-%d", time.Now().UnixNano(), s.nextQueuedSeq.Add(1))
-}
-
-// persistQueuedPromptsLocked appends the durable inbox snapshot. The caller
-// holds queueMu; the append serializes with the in-memory mutation so a durable
-// dequeue can never be reordered behind a later enqueue.
-func (s *service) persistQueuedPromptsLocked(sessionID string) {
-	queue := s.queues[sessionID]
-	prompts := make([]queuedPromptPayload, 0, len(queue))
-	for _, entry := range queue {
-		prompts = append(prompts, queuedPromptPayload{ID: entry.ID, Text: entry.Text, CreatedAt: entry.CreatedAt})
+	count, err := s.inbox.Count(context.Background(), sessionID)
+	if err != nil {
+		s.logger.Printf("[agent] session %s: count prompt inbox: %v", sessionID, err)
+		return 0
 	}
-	s.appendEvent(context.Background(), sessionID, queueEventType, map[string]any{"prompts": prompts})
+	return count
 }
 
-// drainQueuedPrompt starts the oldest queued prompt when the session is idle. It
-// dequeues durably FIRST and only then starts the run, so a crash cannot replay a
-// prompt that already ran (the opposite failure — losing the prompt after the
-// durable dequeue but before the send — is the accepted DSH trade-off). It
-// returns true only when a run actually started.
+// drainQueuedPrompt starts the oldest queued prompt when the session is idle. The
+// inbox dequeues durably FIRST and only then starts the run, so a crash cannot
+// replay a prompt that already ran (the opposite failure — losing the prompt
+// after the durable dequeue but before the send — is the accepted DSH
+// trade-off). It returns true only when a run actually started.
 func (s *service) drainQueuedPrompt(sessionID string) bool {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" || s.sessionDeleted(sessionID) {
 		return false
 	}
-	s.queueMu.Lock()
 	if !s.sessionIdle(sessionID) {
-		s.queueMu.Unlock()
 		return false
 	}
-	queue := s.queues[sessionID]
-	if len(queue) == 0 {
-		s.queueMu.Unlock()
+	entry, ok, err := s.inbox.Take(context.Background(), sessionID)
+	if err != nil {
+		s.logger.Printf("[agent] session %s: dequeue queued prompt: %v", sessionID, err)
 		return false
 	}
-	entry := queue[0]
-	if len(queue) == 1 {
-		delete(s.queues, sessionID)
-	} else {
-		s.queues[sessionID] = append([]contracts.QueuedPrompt(nil), queue[1:]...)
+	if !ok {
+		return false
 	}
-	s.persistQueuedPromptsLocked(sessionID)
-	s.queueMu.Unlock()
-
 	if err := s.sendWithOptions(sessionID, entry.Text, nil, runOptions{origin: contracts.AgentRunOriginUser}); err != nil {
 		s.logger.Printf("[agent] session %s: send queued prompt %s: %v", sessionID, entry.ID, err)
 		// Put the prompt back at the front so a transient failure (a model not
@@ -239,19 +258,13 @@ func (s *service) drainQueuedPrompt(sessionID string) bool {
 // requeueQueuedPrompt puts one prompt back at the front of the inbox (a drain
 // that could not start its run). A deleted session drops it: the durable
 // session/events are gone and the tombstone must win.
-func (s *service) requeueQueuedPrompt(sessionID string, entry contracts.QueuedPrompt) {
-	s.queueMu.Lock()
+func (s *service) requeueQueuedPrompt(sessionID string, entry inbox.Entry) {
 	if s.sessionDeleted(sessionID) {
-		s.queueMu.Unlock()
 		return
 	}
-	queue := s.queues[sessionID]
-	next := make([]contracts.QueuedPrompt, 0, len(queue)+1)
-	next = append(next, entry)
-	next = append(next, queue...)
-	s.queues[sessionID] = next
-	s.persistQueuedPromptsLocked(sessionID)
-	s.queueMu.Unlock()
+	if err := s.inbox.Requeue(context.Background(), sessionID, entry); err != nil {
+		s.logger.Printf("[agent] session %s: requeue prompt %s: %v", sessionID, entry.ID, err)
+	}
 }
 
 // markPendingIdleDrain records that a session's cancelled run left queued
@@ -262,12 +275,7 @@ func (s *service) markPendingIdleDrain(sessionID string) {
 	if sessionID == "" {
 		return
 	}
-	s.queueMu.Lock()
-	if s.pendingIdleDrain == nil {
-		s.pendingIdleDrain = make(map[string]bool)
-	}
-	s.pendingIdleDrain[sessionID] = true
-	s.queueMu.Unlock()
+	s.inbox.MarkPending(sessionID)
 }
 
 // hasPendingIdleDrain reports whether a session's inbox waits for a human
@@ -277,9 +285,7 @@ func (s *service) hasPendingIdleDrain(sessionID string) bool {
 	if sessionID == "" {
 		return false
 	}
-	s.queueMu.Lock()
-	defer s.queueMu.Unlock()
-	return s.pendingIdleDrain[sessionID]
+	return s.inbox.Pending(sessionID)
 }
 
 // clearPendingIdleDrain drops the marker once the inbox resumed.
@@ -288,9 +294,7 @@ func (s *service) clearPendingIdleDrain(sessionID string) {
 	if sessionID == "" {
 		return
 	}
-	s.queueMu.Lock()
-	delete(s.pendingIdleDrain, sessionID)
-	s.queueMu.Unlock()
+	s.inbox.ClearPending(sessionID)
 }
 
 // resumePendingIdleDrain drains the oldest queued prompt of a stopped session
@@ -314,30 +318,15 @@ func (s *service) resumePendingIdleDrain(sessionID string) bool {
 	return false
 }
 
-// clearQueuedPrompts drops a session's inbox in memory (DeleteSession). The
-// durable events are deleted with the session row, and the deleted-session
-// tombstone keeps any late drain from re-creating it, so no queue event is
-// appended here.
+// clearQueuedPrompts drops a session's inbox (DeleteSession). The durable events
+// are deleted with the session row, and the inbox tombstone keeps any late drain
+// from re-creating it, so no queue event is appended here.
 func (s *service) clearQueuedPrompts(sessionID string) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return
 	}
-	s.queueMu.Lock()
-	delete(s.queues, sessionID)
-	delete(s.pendingIdleDrain, sessionID)
-	s.queueMu.Unlock()
-}
-
-// restoreQueuedPrompts installs one replayed durable inbox snapshot.
-func (s *service) restoreQueuedPrompts(sessionID string, prompts []contracts.QueuedPrompt) {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" || len(prompts) == 0 {
-		return
-	}
-	s.queueMu.Lock()
-	s.queues[sessionID] = append([]contracts.QueuedPrompt(nil), prompts...)
-	s.queueMu.Unlock()
+	s.inbox.Drop(sessionID)
 }
 
 // settleRun applies the DSH settle order after one run: the human inbox drains
@@ -366,35 +355,4 @@ func (s *service) settleRun(sessionID, origin string, runErr error, runCtx conte
 		s.notify(sessionID)
 	}
 	s.continueGoalAfterRun(sessionID, origin, runErr, runCtx)
-}
-
-// decodeQueuedPrompts parses one durable inbox snapshot, dropping malformed
-// entries (a corrupt event must not fail the restore).
-func decodeQueuedPrompts(payload []byte) ([]contracts.QueuedPrompt, bool) {
-	if len(payload) == 0 {
-		return nil, false
-	}
-	var decoded queuedPromptsPayload
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		return nil, false
-	}
-	prompts := make([]contracts.QueuedPrompt, 0, len(decoded.Prompts))
-	seen := make(map[string]bool, len(decoded.Prompts))
-	for _, entry := range decoded.Prompts {
-		id := strings.TrimSpace(entry.ID)
-		text := strings.TrimSpace(entry.Text)
-		if id == "" || text == "" || seen[id] {
-			continue
-		}
-		seen[id] = true
-		prompts = append(prompts, contracts.QueuedPrompt{
-			ID:        id,
-			Text:      text,
-			CreatedAt: entry.CreatedAt,
-		})
-		if len(prompts) >= maxQueuedPromptEntries {
-			break
-		}
-	}
-	return prompts, true
 }
