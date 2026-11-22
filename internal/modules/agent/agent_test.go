@@ -437,12 +437,18 @@ func TestEventMappingToolsReasoningAndErrors(t *testing.T) {
 	if eventErr != nil {
 		t.Fatalf("Events: %v", eventErr)
 	}
-	var durableCall *toolCallEvent
+	// The durable payload is owned by rig's session/timeline fold; this test
+	// only asserts the live writer persisted the text offset.
+	var durableCall *struct {
+		TextOffset *int `json:"text_offset"`
+	}
 	for index := range events {
 		if events[index].Type != "tool_call" {
 			continue
 		}
-		var payload toolCallEvent
+		var payload struct {
+			TextOffset *int `json:"text_offset"`
+		}
 		if err := json.Unmarshal(events[index].Payload, &payload); err != nil {
 			t.Fatalf("decode tool_call event %d: %v", index, err)
 		}
