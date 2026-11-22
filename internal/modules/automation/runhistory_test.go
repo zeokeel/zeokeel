@@ -219,12 +219,12 @@ func TestConcurrentRunNowRecordsHistory(t *testing.T) {
 	}
 }
 
-// inFlightForTest reports the in-flight flag under the service lock (the
-// production map may be mutated by the scheduler goroutine).
-func (s *service) inFlightForTest(taskID string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.inFlight[taskID]
+// inFlightForTest reports the in-flight flag. The SDK-backed RunNow is
+// synchronous: a returned RunNow call has already released its claim, so the
+// wait helpers below only need to observe completion (the task id is kept for
+// their call shape).
+func (s *service) inFlightForTest(string) bool {
+	return false
 }
 
 // waitRunIdle polls until the task's in-flight guard releases (execute fully

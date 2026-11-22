@@ -18,6 +18,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
 	rig "github.com/zeokeel/zeokeel-rig"
+	rigautomation "github.com/zeokeel/zeokeel-rig/session/automation"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/hosttools"
@@ -350,15 +351,16 @@ func TestListSnapshotsDoNotAliasRunHistory(t *testing.T) {
 	created := mustCreate(t, service, contracts.AutomationTask{
 		Name: "snapshot", Prompt: "run", Schedule: "every 60s",
 	})
-	service.mu.Lock()
-	for index := range service.tasks {
-		if service.tasks[index].ID == created.ID {
-			service.tasks[index].RunHistory = []contracts.AutomationRunRecord{{
-				ID: "run-1", Status: contracts.AutomationRunSuccess,
-			}}
-		}
+	core, ok := service.store.Get(created.ID)
+	if !ok {
+		t.Fatalf("task %q missing from the durable store", created.ID)
 	}
-	service.mu.Unlock()
+	core.RunHistory = []rigautomation.Run{{
+		ID: "run-1", Status: rigautomation.StatusSuccess,
+	}}
+	if _, err := service.store.Update(core); err != nil {
+		t.Fatalf("seed run history: %v", err)
+	}
 
 	snapshot, err := service.List(context.Background())
 	if err != nil {
