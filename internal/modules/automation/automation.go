@@ -194,6 +194,7 @@ type service struct {
 }
 
 var _ contracts.AutomationService = (*service)(nil)
+var _ contracts.AutomationStatusProvider = (*service)(nil)
 
 // newService loads the registry and starts the scheduler loop. settings is
 // optional (nil for embedded/headless use): it only carries the run-session
@@ -280,6 +281,37 @@ func newService(dataDir string, cfg Config, logger contracts.Logger, chat contra
 		service.logger.Printf("%s: initialized with %d tasks (tick %s)", ModuleID, len(tasks), tick)
 	}
 	return service, nil
+}
+
+// Status implements contracts.AutomationStatusProvider: the service is
+// degraded (unavailable) when another instance owns the registry lock. The read
+// is cheap and lock-state based; it never probes the other process.
+func (s *service) Status(ctx context.Context) contracts.AutomationStatus {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return contracts.AutomationStatus{Available: false, Reason: err.Error()}
+		}
+	}
+	if s == nil {
+		return contracts.AutomationStatus{Available: false, Reason: "automation service is unavailable"}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.degradedErr != nil {
+		lockedBy := ""
+		if s.path != "" {
+			lockedBy = filepath.Join(filepath.Dir(s.path), rigautomation.LockFileName)
+		}
+		return contracts.AutomationStatus{
+			Available: false,
+			Reason:    "another instance owns the automation registry",
+			LockedBy:  lockedBy,
+		}
+	}
+	if s.closed {
+		return contracts.AutomationStatus{Available: false, Reason: "automation service is closed"}
+	}
+	return contracts.AutomationStatus{Available: true}
 }
 
 // resolveRegistryPath resolves Config.Path against the product data directory.

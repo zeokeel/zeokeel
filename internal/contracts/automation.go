@@ -217,6 +217,32 @@ type AutomationService interface {
 // the Automation screen (and the toolkit's schedule_* tools).
 var KeyAutomation = cordis.NewServiceKey[AutomationService]("zeokeel/automation")
 
+// AutomationStatus is the automation backend's optional runtime health. A host
+// that only needs CRUD can ignore it; a screen shows a degraded banner when
+// Available is false. Reason is a host-facing diagnostic (English, not UI copy)
+// and LockedBy names the resource another instance holds (for registry lock
+// contention: the lock file path).
+type AutomationStatus struct {
+	// Available reports whether this process owns the automation scheduler and
+	// can run tasks (scheduled or Run now).
+	Available bool
+	// Reason is a short diagnostic explaining why the backend is degraded
+	// ("" when available). Callers localize their own banner copy.
+	Reason string
+	// LockedBy is the resource held elsewhere, when known (for lock contention
+	// this is the automation registry lock file path).
+	LockedBy string
+}
+
+// AutomationStatusProvider is an optional capability of the automation backend.
+// The screen type-asserts AutomationService to it; a backend that does not
+// implement it is assumed healthy (older versions, alternate hosts).
+type AutomationStatusProvider interface {
+	// Status returns the backend's runtime health. It is a cheap read (no I/O)
+	// and safe to call from any goroutine.
+	Status(ctx context.Context) AutomationStatus
+}
+
 // AutomationScheduleKind is the shape of a parsed automation schedule.
 type AutomationScheduleKind int
 
