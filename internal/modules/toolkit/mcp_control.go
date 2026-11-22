@@ -35,9 +35,13 @@ type mcpRow struct {
 	index      int
 	plan       mcpStartPlan
 	managerKey string
-	client     *mcp.Client
-	tools      int
-	startErr   error
+	// namespace is the model-visible tool namespace override (Server.Key) used
+	// when the configured display name is shared by another row; empty keeps
+	// today's client.ServerName() naming.
+	namespace string
+	client    *mcp.Client
+	tools     int
+	startErr  error
 }
 
 // mcpController owns the current manager.Manager and can rebuild it from
@@ -95,7 +99,8 @@ func (c *mcpController) Tools(server string) []contracts.MCPTool {
 	managerNow := c.manager
 	var target *mcpRow
 	for _, row := range c.rows {
-		if strings.EqualFold(strings.TrimSpace(row.plan.server.Name), server) {
+		if strings.EqualFold(strings.TrimSpace(row.plan.server.Name), server) ||
+			strings.EqualFold(row.managerKey, server) {
 			target = row
 			break
 		}
@@ -105,7 +110,7 @@ func (c *mcpController) Tools(server string) []contracts.MCPTool {
 	if managerNow == nil || target == nil || target.client == nil {
 		return nil
 	}
-	prefix := mcpToolPrefix(target.client)
+	prefix := mcpToolPrefix(target)
 	var tools []contracts.MCPTool
 	for _, tool := range managerNow.Tools() {
 		name := tool.Name()
@@ -195,12 +200,16 @@ func (c *mcpController) reload(ctx context.Context) ([]contracts.MCPPlugin, erro
 	}
 	sort.Strings(disabledNames)
 
+	var mgr *manager.Manager
 	managerConfig := manager.Config{
 		StartupTimeout: mcpStartupOverallTimeout,
 		MaxOutputBytes: c.maxOutput,
 		Resources:      true,
 		Logger:         c.logf,
 		Auth:           c.auth.Runtime(),
+		// A transparent/explicit/authorized reconnect must refresh the Plugins
+		// row (identity, tool count, status) right away, not on the next reload.
+		OnReconnect: func(key string) { c.onManagerReconnect(mgr, key) },
 	}
 	usedNames := make(map[string]int, len(plans))
 	rows := make([]*mcpRow, 0, len(plans))
@@ -225,16 +234,24 @@ func (c *mcpController) reload(ctx context.Context) ([]contracts.MCPPlugin, erro
 			rows = append(rows, row)
 			continue
 		}
-		managerConfig.Servers = append(managerConfig.Servers, manager.Server{
+		managerServer := manager.Server{
 			Name:          row.managerKey,
 			Config:        clientConfig,
 			OAuth:         oauthConfig,
 			DisabledTools: disabledNames,
-		})
+		}
+		// A duplicate display name keeps its row name, but the manager needs a
+		// distinct tool namespace/auth identity: pass the stable unique manager
+		// key. Unique names keep today's Name-based namespace.
+		if base := mcpBaseName(plan.server, index); row.managerKey != base {
+			managerServer.Key = row.managerKey
+			row.namespace = row.managerKey
+		}
+		managerConfig.Servers = append(managerConfig.Servers, managerServer)
 		rows = append(rows, row)
 	}
 
-	mgr := manager.New(managerConfig)
+	mgr = manager.New(managerConfig)
 	c.manager = mgr
 	if err := mgr.Start(ctx); err != nil {
 		_ = mgr.Close()
@@ -346,7 +363,7 @@ func (c *mcpController) ownerOfToolLocked(name string) *mcpRow {
 		if row.client == nil {
 			continue
 		}
-		if strings.HasPrefix(name, mcpToolPrefix(row.client)) {
+		if strings.HasPrefix(name, mcpToolPrefix(row)) {
 			return row
 		}
 	}
@@ -356,23 +373,35 @@ func (c *mcpController) ownerOfToolLocked(name string) *mcpRow {
 // isResourceToolLocked reports whether name is one of the row's resource/prompt
 // helpers (the Plugins count only includes tools/list tools).
 func (c *mcpController) isResourceToolLocked(row *mcpRow, name string) bool {
-	if row == nil || row.client == nil {
+	prefix := mcpToolPrefix(row)
+	if prefix == "" {
 		return false
 	}
-	for _, resourceName := range mcp.ResourceToolNames(row.client, mcp.DefaultPrefix) {
-		if resourceName == name {
+	for _, base := range []string{
+		mcp.ToolListResources, mcp.ToolReadResource, mcp.ToolListResourceTemplates,
+		mcp.ToolListPrompts, mcp.ToolGetPrompt,
+	} {
+		if prefix+base == name {
 			return true
 		}
 	}
 	return false
 }
 
-// mcpToolPrefix is the model-visible namespace of one connection's tools.
-func mcpToolPrefix(client *mcp.Client) string {
-	if client == nil {
+// mcpToolPrefix is the model-visible namespace of one row's tools: the Server.Key
+// override for a duplicate display name, else the connection's server name.
+func mcpToolPrefix(row *mcpRow) string {
+	if row == nil {
 		return ""
 	}
-	return mcp.DefaultPrefix + mcp.SanitizeName(client.ServerName()) + "__"
+	namespace := strings.TrimSpace(row.namespace)
+	if namespace == "" && row.client != nil {
+		namespace = row.client.ServerName()
+	}
+	if namespace == "" {
+		return ""
+	}
+	return mcp.DefaultPrefix + mcp.SanitizeName(namespace) + "__"
 }
 
 // buildEntriesLocked freezes the Plugins read model for the current manager.
@@ -449,6 +478,38 @@ func (c *mcpController) rowByPluginIndexLocked(index int) *mcpRow {
 	return nil
 }
 
+// onManagerReconnect refreshes the Plugins row behind a successful manager
+// reconnect (transparent, explicit or after authorization) immediately: the
+// handshake identity, registered tool count and status stop being stale until
+// the next reload. A callback from a replaced manager is ignored (a hot reload
+// during the handshake owns the new read model).
+func (c *mcpController) onManagerReconnect(mgr *manager.Manager, key string) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed || c.manager == nil || c.manager != mgr {
+		return
+	}
+	var row *mcpRow
+	for _, candidate := range c.rows {
+		if strings.EqualFold(candidate.managerKey, key) {
+			row = candidate
+			break
+		}
+	}
+	if row == nil {
+		return
+	}
+	c.syncRuntimeLocked()
+	if row.client == nil {
+		return
+	}
+	c.plugins.setConnected(row.index, row.client, statusConnected, row.tools)
+}
+
 // reconnectPlugin rebuilds one Plugins row's connection and refreshes its status
 // and tool registrations. It reports whether the row is usable again.
 func (c *mcpController) reconnectPlugin(index int) bool {
@@ -505,7 +566,8 @@ func (c *mcpController) reconnectByName(name string) {
 	c.mu.Lock()
 	var target *mcpRow
 	for _, row := range c.rows {
-		if strings.EqualFold(strings.TrimSpace(row.plan.server.Name), name) {
+		if strings.EqualFold(strings.TrimSpace(row.plan.server.Name), name) ||
+			strings.EqualFold(row.managerKey, name) {
 			target = row
 			break
 		}

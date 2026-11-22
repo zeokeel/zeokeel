@@ -31,6 +31,7 @@ import (
 type expiringMCPHTTPServer struct {
 	server     *httptest.Server
 	initCalls  atomic.Int64
+	extraTools atomic.Bool
 	mu         sync.Mutex
 	sessionSeq int
 	valid      map[string]bool
@@ -84,7 +85,11 @@ func newExpiringMCPHTTPServer(t *testing.T) *expiringMCPHTTPServer {
 				"serverInfo":      map[string]any{"name": "flaky", "version": "1.0.0"},
 			}
 		case "tools/list":
-			result = map[string]any{"tools": []any{oneTool("echo")}}
+			tools := []any{oneTool("echo")}
+			if fake.extraTools.Load() {
+				tools = append(tools, oneTool("extra"))
+			}
+			result = map[string]any{"tools": tools}
 		case "ping":
 			result = map[string]any{}
 		case "tools/call":
@@ -133,6 +138,45 @@ func TestToolkitMCPHTTPReconnectsAfterSessionExpiry(t *testing.T) {
 	}
 	if status := plugins.MCP()[0].Status; !strings.Contains(status, "已连接") {
 		t.Fatalf("plugin status after reconnect = %q, want 已连接", status)
+	}
+}
+
+// TestToolkitMCPReconnectRefreshesPluginsRowImmediately covers Config.OnReconnect:
+// a transparent reconnect that changes the server's tool set refreshes the
+// Plugins row's tool count immediately (no explicit Plugins refresh or reload).
+func TestToolkitMCPReconnectRefreshesPluginsRowImmediately(t *testing.T) {
+	fake := newExpiringMCPHTTPServer(t)
+	settings := newMutableSettings(map[string]string{
+		contracts.SettingMCPServers: `[{"name":"flaky","url":"` + fake.server.URL + `"}]`,
+	})
+	tools, plugins := activateMCPToolkit(t, map[string]any{"root": "."}, settings, nil)
+	entries := plugins.MCP()
+	if len(entries) != 1 || entries[0].Tools != 1 {
+		t.Fatalf("initial plugins = %+v, want one row with 1 tool", entries)
+	}
+
+	if _, err := tools.Invoke(context.Background(), rig.ToolCall{Name: "mcp__flaky__echo", Arguments: "{}"}); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	fake.extraTools.Store(true)
+	fake.expire()
+	if _, err := tools.Invoke(context.Background(), rig.ToolCall{Name: "mcp__flaky__echo", Arguments: "{}"}); err != nil {
+		t.Fatalf("second call after session expiry: %v", err)
+	}
+
+	// OnReconnect refreshed the row during the transparent reconnect.
+	if got := plugins.MCP()[0].Tools; got != 2 {
+		t.Fatalf("plugins tool count after reconnect = %d, want 2 without an explicit Refresh", got)
+	}
+	found := false
+	for _, spec := range tools.Specs() {
+		if spec.Name == "mcp__flaky__extra" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("reconnected server's new tool was not registered: %v", tools.Specs())
 	}
 }
 

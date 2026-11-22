@@ -155,10 +155,11 @@ func TestToolkitMCPDuplicateSanitizedNameSkipped(t *testing.T) {
 	}
 }
 
-// TestToolkitMCPTwoServersSameNameSkipped covers two different endpoints that
-// share one configured name: both connect, but the second server's tool set is
-// skipped (duplicate names) instead of panicking activation.
-func TestToolkitMCPTwoServersSameNameSkipped(t *testing.T) {
+// TestToolkitMCPTwoServersSameNameKeyedNamespaces covers two different endpoints
+// that share one configured name: both connect under stable unique manager keys,
+// so their tool namespaces stay distinct (mcp__dup__shared and
+// mcp__dup_2__shared) instead of the second server's tool set being skipped.
+func TestToolkitMCPTwoServersSameNameKeyedNamespaces(t *testing.T) {
 	first := testMCPToolListServer(t, []map[string]any{oneTool("shared")})
 	defer first.Close()
 	second := testMCPToolListServer(t, []map[string]any{oneTool("shared")})
@@ -169,20 +170,26 @@ func TestToolkitMCPTwoServersSameNameSkipped(t *testing.T) {
 	})
 	logger := &captureLogger{}
 	tools, plugins := activateMCPToolkit(t, map[string]any{"root": "."}, settings, logger)
-	if got := len(plugins.MCP()); got != 2 {
+	entries := plugins.MCP()
+	if got := len(entries); got != 2 {
 		t.Fatalf("MCP entries = %d, want both configured servers", got)
 	}
-	seen := 0
+	seen := map[string]int{}
 	for _, spec := range tools.Specs() {
-		if spec.Name == "mcp__dup__shared" {
-			seen++
+		seen[spec.Name]++
+	}
+	for _, want := range []string{"mcp__dup__shared", "mcp__dup_2__shared"} {
+		if seen[want] != 1 {
+			t.Fatalf("%s registered %d times, want exactly once (have %v)", want, seen[want], seen)
 		}
 	}
-	if seen != 1 {
-		t.Fatalf("mcp__dup__shared registered %d times, want exactly once", seen)
+	for _, entry := range entries {
+		if entry.Tools != 1 {
+			t.Fatalf("plugin row %+v tool count = %d, want 1", entry, entry.Tools)
+		}
 	}
-	if !logger.contains("skip duplicate tool") {
-		t.Fatalf("duplicate registration was not logged: %v", logger.lines)
+	if logger.contains("skip duplicate tool") {
+		t.Fatalf("keyed duplicate names should not be skipped: %v", logger.lines)
 	}
 }
 
