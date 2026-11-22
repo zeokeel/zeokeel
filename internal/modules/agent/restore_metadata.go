@@ -58,27 +58,14 @@ func (s *service) restoreSessionMetadata(ctx context.Context, sessionID string, 
 	)
 	for _, event := range events {
 		switch {
-<<<<<<< HEAD
 		case event.Type == inbox.EventType:
 			// The latest snapshot wins at replay time and the inbox decodes it
 			// itself (dropping a corrupt payload), so restore only needs the
 			// fact that a queue exists to drain it after publishing the
 			// session.
 			hasInbox = true
-		case event.Type == modelCallEvent, event.Type == contextSnapshotEvent,
-			event.Type == compactEvent, event.Type == compactArchiveEventType,
-			event.Type == spillEvent, event.Type == contextRecoveryEventType:
-=======
-		case event.Type == queueEventType:
-			prompts, ok := decodeQueuedPrompts(event.Payload)
-			if !ok {
-				continue
-			}
-			hasQueueRow = true
-			queued = prompts
 		case obs.ObservedEvent(event.Type), event.Type == compactArchiveEventType,
 			event.Type == contextRecoveryEventType:
->>>>>>> feat/prod-obs
 			observability = append(observability, event)
 		case event.Type == restoreUserMessageEvent:
 			var payload struct {
