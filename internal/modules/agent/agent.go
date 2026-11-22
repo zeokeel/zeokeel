@@ -36,6 +36,7 @@ import (
 	"github.com/zeokeel/zeokeel-rig/memoryvfs"
 	"github.com/zeokeel/zeokeel-rig/provider/openai"
 	"github.com/zeokeel/zeokeel-rig/session"
+	"github.com/zeokeel/zeokeel-rig/session/inbox"
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
 	rigmemory "github.com/zeokeel/zeokeel-rig/tools/memory"
 	rigsession "github.com/zeokeel/zeokeel-rig/tools/session"
@@ -494,20 +495,12 @@ type service struct {
 	// engine-side continuation driver advances an armed active session goal
 	// after a successful run (DSH goal rounds). nil disables continuation.
 	goalService contracts.GoalService
-	// queueMu guards the durable per-session prompt inbox (queues) and its
-	// queue/change snapshot writes. It is never held while a run is started, and
-	// no other code takes s.mu before it.
-	queueMu sync.Mutex
-	// queues is the in-memory prompt inbox per session (durable through
-	// queue/change events; replayed by restore).
-	queues map[string][]contracts.QueuedPrompt
-	// pendingIdleDrain marks a session whose cancelled run left prompts in the
-	// inbox: the oldest prompt is drained on the next human gesture (switching to
-	// the session, a new Send or a new EnqueuePrompt), never by a background
-	// timer, so Stop stays an explicit stop.
-	pendingIdleDrain map[string]bool
-	// nextQueuedSeq names durable inbox entries.
-	nextQueuedSeq atomic.Uint64
+	// inbox is the durable per-session prompt inbox (DSH inbox parity), the SDK
+	// inbox.Inbox: it owns the queue/change snapshots, their replay and the
+	// Stop-pending marker. The service keeps only the scheduling around it (host
+	// notification and the settle drain). It has its own lock, is never held
+	// while a run is started, and no other code takes s.mu before it.
+	inbox *inbox.Inbox
 	// notifier is the optional host toast/OS-notification bridge used for
 	// background run completion (nil in headless products).
 	notifier contracts.Notifier
@@ -624,6 +617,12 @@ func newService(cfg Config, registry *rigtools.Registry, settings contracts.Sett
 	if logger == nil {
 		logger = discardLogger{}
 	}
+	// The prompt inbox is durable through the session event log; without a store
+	// it stays in memory only (a headless boot with no persistence, tests).
+	var inboxLog inbox.EventLog
+	if store != nil {
+		inboxLog = inboxEventLog{store: store}
+	}
 	return &service{
 		cfg:                cfg,
 		registry:           registry,
@@ -636,8 +635,7 @@ func newService(cfg Config, registry *rigtools.Registry, settings contracts.Sett
 		sessionPermissions: make(map[string]string),
 		sessionPresets:     make(map[string]string),
 		deletedSessions:    make(map[string]struct{}),
-		queues:             make(map[string][]contracts.QueuedPrompt),
-		pendingIdleDrain:   make(map[string]bool),
+		inbox:              inbox.New(inboxLog),
 		contextTimelines:   make(map[string]*contextTimeline),
 		coldResumes:        make(map[string]*coldResumeState),
 	}
@@ -1182,6 +1180,7 @@ func (s *service) restore(ctx context.Context) {
 		runEnd      runEndSummary
 		hasRun      bool
 		interrupted bool
+		hasInbox    bool
 	}
 	restored := make([]restoredSession, 0, len(metas))
 	for _, meta := range metas {
@@ -1213,13 +1212,14 @@ func (s *service) restore(ctx context.Context) {
 			}
 		}
 		// Durable inbox + goal-round markers + interrupted-run hint.
-		s.restoreSessionMetadata(ctx, meta.ID, state)
+		hasInbox := s.restoreSessionMetadata(ctx, meta.ID, state)
 		runEnd, hasRun := s.lastRunEnd(ctx, meta.ID)
 		restored = append(restored, restoredSession{
 			state:       state,
 			runEnd:      runEnd,
 			hasRun:      hasRun,
 			interrupted: s.restoredInterrupted(ctx, meta.ID),
+			hasInbox:    hasInbox,
 		})
 	}
 	s.mu.Lock()
@@ -1256,18 +1256,22 @@ func (s *service) restore(ctx context.Context) {
 	if len(restored) > 0 {
 		s.active = restored[0].state.id
 	}
-	sessionIDs := make([]string, 0, len(s.sessions))
-	for sessionID := range s.sessions {
-		sessionIDs = append(sessionIDs, sessionID)
+	// Sessions whose durable log holds a queue/change snapshot: only those need
+	// the inbox touched at all, so a restart does not replay the event log of
+	// every session a second time.
+	drainInboxIDs := make([]string, 0, len(restored))
+	for _, session := range restored {
+		if session.hasInbox {
+			drainInboxIDs = append(drainInboxIDs, session.state.id)
+		}
 	}
 	s.mu.Unlock()
 
 	// DSH inbox: an idle restored session with queued prompts starts its first
 	// prompt immediately (it was waiting for the run that the restart killed).
-	for _, sessionID := range sessionIDs {
-		if s.queuedPromptCount(sessionID) > 0 {
-			s.drainQueuedPrompt(sessionID)
-		}
+	// Reading the inbox replays its latest durable snapshot lazily.
+	for _, sessionID := range drainInboxIDs {
+		s.drainQueuedPrompt(sessionID)
 	}
 }
 

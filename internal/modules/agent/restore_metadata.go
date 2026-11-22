@@ -2,8 +2,9 @@ package agent
 
 // Restore-only metadata hydration for the DSH long-task surfaces:
 //
-//   - the durable prompt inbox (queue/change snapshots) is replayed so a
-//     restart keeps prompts that were waiting for a running session;
+//   - the durable prompt inbox (queue/change snapshots) is detected so restore
+//     can drain it once the session is published — the inbox.Inbox replays its
+//     own latest snapshot (see promptqueue.go, inboxEventLog);
 //   - the goal-round marker of restored user messages is recovered from the
 //     durable user_message events (the Rig history has no such field), matched
 //     in order and only when the texts agree, so a rewound/compacted history
@@ -22,6 +23,7 @@ import (
 	"strings"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/session/inbox"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -35,35 +37,32 @@ type restoredGoalRound struct {
 	round *contracts.GoalRoundInfo
 }
 
-// restoreSessionMetadata replays the durable prompt inbox and the goal-round
-// markers onto one freshly restored session. It runs during restore, before the
-// state is published into s.sessions, so it needs no session lock (the queue
-// map has its own lock).
-func (s *service) restoreSessionMetadata(ctx context.Context, sessionID string, state *sessionState) {
+// restoreSessionMetadata replays the goal-round markers onto one freshly
+// restored session and reports hasInbox when the session's durable log holds a
+// prompt-inbox snapshot. Restore runs before the state is published into
+// s.sessions, so it needs no session lock (the inbox has its own lock).
+func (s *service) restoreSessionMetadata(ctx context.Context, sessionID string, state *sessionState) (hasInbox bool) {
 	if s.store == nil || state == nil {
-		return
+		return false
 	}
 	events, err := s.store.Last(ctx, sessionID, restoreMetadataEventWindow)
 	if err != nil {
 		s.logger.Printf("[agent] restore: recent events of %s: %v", sessionID, err)
-		return
+		return false
 	}
 	var (
-		queued        []contracts.QueuedPrompt
 		rounds        []restoredGoalRound
 		turns         []restoredTurnTime
 		observability []rig.SessionEvent
-		hasQueueRow   bool
 	)
 	for _, event := range events {
 		switch {
-		case event.Type == queueEventType:
-			prompts, ok := decodeQueuedPrompts(event.Payload)
-			if !ok {
-				continue
-			}
-			hasQueueRow = true
-			queued = prompts
+		case event.Type == inbox.EventType:
+			// The latest snapshot wins at replay time and the inbox decodes it
+			// itself (dropping a corrupt payload), so restore only needs the
+			// fact that a queue exists to drain it after publishing the
+			// session.
+			hasInbox = true
 		case event.Type == modelCallEvent, event.Type == contextSnapshotEvent,
 			event.Type == compactEvent, event.Type == compactArchiveEventType,
 			event.Type == spillEvent, event.Type == contextRecoveryEventType:
@@ -88,12 +87,10 @@ func (s *service) restoreSessionMetadata(ctx context.Context, sessionID string, 
 			}
 		}
 	}
-	if hasQueueRow && len(queued) > 0 {
-		s.restoreQueuedPrompts(sessionID, queued)
-	}
 	s.foldRestoredContextEvents(sessionID, observability)
 	hydrateGoalRoundsLocked(state, rounds)
 	hydrateRestoredTimes(state, turns)
+	return hasInbox
 }
 
 // hydrateGoalRoundsLocked applies the durable goal-round markers to the restored

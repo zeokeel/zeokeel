@@ -5,6 +5,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -509,5 +510,90 @@ func TestStopWithEmptyInboxSetsNoPendingMarker(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	if users := userMessages(mustSession(t, svc, sessionID)); len(users) != 1 {
 		t.Fatalf("user messages = %d, want no run after resuming an empty inbox", len(users))
+	}
+}
+
+// TestQueuedPromptSnapshotKeepsTheDurableShape pins the queue/change payload the
+// SDK inbox writes: the product hosts and older builds read
+// {"prompts":[{"id","text","createdAt"}]} and nothing more.
+func TestQueuedPromptSnapshotKeepsTheDurableShape(t *testing.T) {
+	store := newFakeStore()
+	svc := newQueueService(t, store, nil, &captureProvider{})
+	sessionID, err := svc.NewSession("snapshot shape")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	// Keep the session busy so the prompt stays queued (no run to settle).
+	svc.mu.Lock()
+	svc.sessions[sessionID].running = true
+	svc.mu.Unlock()
+	entry, err := svc.EnqueuePrompt(context.Background(), sessionID, "  spaced  ")
+	if err != nil {
+		t.Fatalf("EnqueuePrompt: %v", err)
+	}
+	events, err := store.Events(context.Background(), sessionID, 0, 0)
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	var payload []byte
+	for _, event := range events {
+		if event.Type == queueEventType {
+			payload = event.Payload
+		}
+	}
+	if payload == nil {
+		t.Fatalf("no %s event was written", queueEventType)
+	}
+	var decoded struct {
+		Prompts []struct {
+			ID        string    `json:"id"`
+			Text      string    `json:"text"`
+			CreatedAt time.Time `json:"createdAt"`
+		} `json:"prompts"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("queue/change payload is not the legacy shape: %v (%s)", err, payload)
+	}
+	if len(decoded.Prompts) != 1 {
+		t.Fatalf("payload prompts = %+v, want one entry", decoded.Prompts)
+	}
+	got := decoded.Prompts[0]
+	if got.ID != entry.ID || got.Text != "spaced" || !got.CreatedAt.Equal(entry.CreatedAt) {
+		t.Fatalf("payload entry = %+v, want the returned entry %+v", got, entry)
+	}
+}
+
+// TestPromptInboxReplaysALegacySnapshot covers the migration boundary: a queue
+// written by the previous implementation (raw queue/change payload, no product
+// generation code involved) still replays through the SDK inbox.
+func TestPromptInboxReplaysALegacySnapshot(t *testing.T) {
+	store := newFakeStore()
+	const sessionID = "sess-legacy-inbox"
+	legacy := []byte(`{"prompts":[` +
+		`{"id":"prompt-1-1","text":"legacy one","createdAt":"2026-01-02T03:04:05Z"},` +
+		`{"id":"prompt-1-2","text":"legacy two","createdAt":"2026-01-02T03:04:06Z"},` +
+		`{"id":"","text":"malformed","createdAt":"2026-01-02T03:04:07Z"}]}`)
+	if err := store.AppendEvent(context.Background(), rig.SessionEvent{
+		SessionID: sessionID,
+		Type:      queueEventType,
+		Time:      time.Now(),
+		Payload:   legacy,
+	}); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	svc := newQueueService(t, store, nil, &captureProvider{})
+	queued := svc.QueuedPrompts(sessionID)
+	if len(queued) != 2 {
+		t.Fatalf("replayed inbox = %+v, want the two well-formed legacy entries", queued)
+	}
+	if queued[0].ID != "prompt-1-1" || queued[0].Text != "legacy one" ||
+		queued[1].ID != "prompt-1-2" || queued[1].Text != "legacy two" {
+		t.Fatalf("replayed inbox = %+v, want send order", queued)
+	}
+	if queued[0].SessionID != sessionID {
+		t.Fatalf("replayed entry session = %q, want %q", queued[0].SessionID, sessionID)
+	}
+	if !queued[0].CreatedAt.Equal(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)) {
+		t.Fatalf("replayed entry CreatedAt = %v", queued[0].CreatedAt)
 	}
 }
