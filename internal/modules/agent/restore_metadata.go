@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	obs "github.com/zeokeel/zeokeel-rig/session/observability"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -64,9 +65,8 @@ func (s *service) restoreSessionMetadata(ctx context.Context, sessionID string, 
 			}
 			hasQueueRow = true
 			queued = prompts
-		case event.Type == modelCallEvent, event.Type == contextSnapshotEvent,
-			event.Type == compactEvent, event.Type == compactArchiveEventType,
-			event.Type == spillEvent, event.Type == contextRecoveryEventType:
+		case obs.ObservedEvent(event.Type), event.Type == compactArchiveEventType,
+			event.Type == contextRecoveryEventType:
 			observability = append(observability, event)
 		case event.Type == restoreUserMessageEvent:
 			var payload struct {
