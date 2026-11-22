@@ -1,6 +1,6 @@
 # rig 组合层设计：kit 作为 agent 编译器，产品作为薄壳
 
-> 状态：已完成（2026-11-23，rig v0.34.1 / 产品 rig v0.34.1）。P1–P4 组合层已落地；产品运行入口为 `hostbundle + kit.BuildConfig`，无 `rig.AgentSpec` 直拼；kit 路径通过产品全量 `verify.sh`。本文件保留为组合层设计与最终归属记录；能力上移的最终清单见 §10。
+> 状态：已完成（2026-11-23，rig v0.37.0 / 产品 rig v0.37.0）。P1–P4 组合层已落地；产品运行入口为 `hostbundle + kit.BuildConfig`，无 `rig.AgentSpec` 直拼；kit 路径通过产品全量 `verify.sh`。本文件保留为组合层设计与最终归属记录；能力上移的最终清单见 §10。
 > 目标读者：维护 rig/kit 与 ZeoKeel 装配层的人。
 
 ## 0. 目标与非目标
@@ -271,7 +271,7 @@ func RegisterModule(name string, f Factory[Module])
 
 结论：super agent 不是“一个更大的 agent 对象”，而是 **SDK 的编排机制 + 产品的一组能力模块 + 产品策略**。产品薄壳通过模块注册把钉钉这类业务工具注入，通过实现/配置 Runner 表达团队策略；rig 不吸收业务。
 
-## 10. 最终归属（2026-11-23，rig v0.34.1）
+## 10. 最终归属（2026-11-23，rig v0.37.0）
 
 ### 10.1 已迁移到 SDK（产品保留薄适配）
 
