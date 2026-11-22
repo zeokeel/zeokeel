@@ -10,73 +10,36 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	rig "github.com/zeokeel/zeokeel-rig"
 	"github.com/zeokeel/zeokeel-rig/sandbox"
-	"github.com/zeokeel/zeokeel-rig/tools/lsp"
+	lspHost "github.com/zeokeel/zeokeel-rig/tools/lsp/host"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// lspSession is the started-server handle the toolkit needs: the protocol
-// handshake, the rig tool set for its client and the close hook. Tests inject it
-// through lspStartFunc.
-type lspSession interface {
-	// Initialize performs the LSP initialize/initialized handshake. A real rig
-	// client requires it before any document request (rig tools/lsp client.go).
-	Initialize(ctx context.Context) error
-	Tools(filePathToURI func(string) (string, error)) []rig.Tool
+// lspHostHandle is the lifecycle surface toolkit needs from an optional LSP
+// server. It is a seam so tests can exercise registration/ownership without a
+// real language server process; production uses lsp/host.Host.
+type lspHostHandle interface {
+	// Start launches the server and completes the initialize handshake. It is
+	// non-fatal: failures are logged and Tools stays empty.
+	Start(ctx context.Context)
+	// Tools returns the server's rig tools (empty when start failed).
+	Tools() []rig.Tool
+	// Close tears the server down; it is idempotent.
 	Close() error
 }
 
-// lspClientSession adapts one rig *lsp.Client to lspSession. policy is the
-// sandbox path policy installed on the rig tools as a second defense line (the
-// toolkit also rewrites/validates paths in sandboxedLSPTool).
-type lspClientSession struct {
-	client *lsp.Client
-	policy *sandbox.Policy
+// lspNewHostFunc builds the LSP host. Tests replace it to inject a fake host.
+var lspNewHostFunc = func(cfg lspHost.Config) (lspHostHandle, error) {
+	return lspHost.New(cfg)
 }
-
-// Initialize implements lspSession.
-func (s lspClientSession) Initialize(ctx context.Context) error {
-	return s.client.Initialize(ctx)
-}
-
-// Tools implements lspSession.
-func (s lspClientSession) Tools(filePathToURI func(string) (string, error)) []rig.Tool {
-	options := make([]lsp.ToolOption, 0, 1)
-	if s.policy != nil {
-		options = append(options, lsp.WithPathPolicy(func(path string) error {
-			_, err := s.policy.ResolvePath(path)
-			return err
-		}))
-	}
-	return lsp.Tools(s.client, filePathToURI, options...)
-}
-
-// Close implements lspSession.
-func (s lspClientSession) Close() error { return s.client.Close() }
-
-// lspStartFunc starts the language server. It is a package seam so tests can
-// exercise the registration/ownership paths without a real server process.
-var lspStartFunc = func(ctx context.Context, cfg lsp.Config, policy *sandbox.Policy) (lspSession, error) {
-	client, err := lsp.Start(ctx, cfg)
-	if err != nil {
-		return nil, err
-	}
-	return lspClientSession{client: client, policy: policy}, nil
-}
-
-// lspInitializeTimeout bounds the initialize handshake so a broken language
-// server cannot stall activation.
-const lspInitializeTimeout = 15 * time.Second
 
 // startLSPTools reads the optional multi-server LSP settings rows (lsp.servers +
 // lsp.active, falling back to the legacy lsp.server row), starts the ACTIVE
@@ -132,29 +95,39 @@ func startLSPTools(
 	}
 	logf("toolkit: lsp: starting server %q (command %q, %d configured; sources %s)",
 		cfg.Name, cfg.Command, len(servers), strings.Join(sources, ","))
-	session, err := lspStartFunc(ctx, lsp.Config{
-		Command:    cfg.Command,
-		Args:       cfg.Args,
-		Env:        cfg.Env,
-		Dir:        cfg.Dir,
-		RootURI:    cfg.RootURI,
-		LanguageID: cfg.LanguageID,
-	}, sandboxPolicy)
+	// The host owns process start, the initialize handshake, tool construction
+	// and close. Its Logger is prefixed with the toolkit's diagnostic channel so
+	// activation logs stay recognizable. host.Config has no LanguageID field;
+	// rig then uses its documented "plaintext" default for didOpen.
+	server, err := lspNewHostFunc(lspHost.Config{
+		Command: cfg.Command,
+		Args:    cfg.Args,
+		Env:     cfg.Env,
+		Dir:     cfg.Dir,
+		RootURI: cfg.RootURI,
+		Logger: func(format string, args ...any) {
+			// The host prefixes its diagnostics with "lsp host: "; the toolkit
+			// already names the subsystem, so strip it and keep the existing
+			// "toolkit: lsp: ..." log contract.
+			logf("toolkit: lsp: "+strings.TrimPrefix(format, "lsp host: "), args...)
+		},
+	})
 	if err != nil {
 		logf("toolkit: lsp: start %q: %v", cfg.Command, err)
 		return nil, noop
 	}
-	// The rig client only starts the protocol pump: the caller must run the
-	// initialize handshake before any document request can succeed. A server
-	// that never completes it is a degraded optional feature, not an activation
-	// failure: warn, close and register no tools.
-	initCtx, cancelInit := context.WithTimeout(ctx, lspInitializeTimeout)
-	initErr := session.Initialize(initCtx)
-	cancelInit()
-	if initErr != nil {
-		logf("toolkit: lsp: initialize %q: %v", cfg.Command, initErr)
-		if closeErr := session.Close(); closeErr != nil {
-			logf("toolkit: lsp: close after failed initialize: %v", closeErr)
+	if server == nil {
+		logf("toolkit: lsp: start %q: host unavailable", cfg.Command)
+		return nil, noop
+	}
+	server.Start(ctx)
+	candidates := server.Tools()
+	if len(candidates) == 0 {
+		// Start is non-fatal and logs its own reason; add the product-level
+		// activation line callers/tests use to see that LSP stayed degraded.
+		logf("toolkit: lsp: start %q: no tools registered", cfg.Command)
+		if closeErr := server.Close(); closeErr != nil {
+			logf("toolkit: lsp: close after failed start: %v", closeErr)
 		}
 		return nil, noop
 	}
@@ -165,7 +138,6 @@ func startLSPTools(
 			names[tool.Name()] = true
 		}
 	}
-	candidates := session.Tools(filePathToURI)
 	kept := make([]rig.Tool, 0, len(candidates))
 	for _, tool := range candidates {
 		if tool == nil {
@@ -185,14 +157,14 @@ func startLSPTools(
 	}
 
 	var once sync.Once
-	closeSession := func() {
+	closeServer := func() {
 		once.Do(func() {
-			if err := session.Close(); err != nil {
+			if err := server.Close(); err != nil {
 				logf("toolkit: lsp: close: %v", err)
 			}
 		})
 	}
-	return kept, closeSession
+	return kept, closeServer
 }
 
 // loadWorkspaceLSPServers reads <workspace root>/.zeokeel/lsp.json, but only
@@ -260,16 +232,6 @@ func mergeLSPServers(primary, secondary []contracts.LSPServerConfig) []contracts
 		merged = append(merged, cfg)
 	}
 	return merged
-}
-
-// filePathToURI converts a workspace file path into the file:// URI the LSP
-// tools send to the server.
-func filePathToURI(path string) (string, error) {
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(absolute)}).String(), nil
 }
 
 // sandboxedLSPTool is the product-side registry entry of one rig lsp_* tool. It

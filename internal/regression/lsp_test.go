@@ -18,45 +18,40 @@ import (
 
 	rig "github.com/zeokeel/zeokeel-rig"
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
-	"github.com/zeokeel/zeokeel-rig/tools/lsp"
+	lspHost "github.com/zeokeel/zeokeel-rig/tools/lsp/host"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/hosttools"
 	"github.com/zeokeel/zeokeel/internal/modules/toolkit"
 )
 
-// lspSessionAlias mirrors toolkit.lspSession. The Initialize handshake is part
-// of the contract: the toolkit refuses to register a server's tools before it.
-type lspSessionAlias interface {
-	Initialize(ctx context.Context) error
-	Tools(filePathToURI func(string) (string, error)) []rig.Tool
+// lspHostAlias mirrors toolkit.lspHostHandle: the host lifecycle surface the
+// toolkit consumes. Start performs the initialize handshake internally.
+type lspHostAlias interface {
+	Start(ctx context.Context)
+	Tools() []rig.Tool
 	Close() error
 }
 
-// toolkitLSPStartFunc is toolkit.lspStartFunc reached by linkname so the
+// toolkitLSPNewHost is toolkit.lspNewHostFunc reached by linkname so the
 // registration/close ownership path can be exercised without a real process.
 //
-//go:linkname toolkitLSPStartFunc github.com/zeokeel/zeokeel/internal/modules/toolkit.lspStartFunc
-var toolkitLSPStartFunc func(ctx context.Context, cfg lsp.Config) (lspSessionAlias, error)
+//go:linkname toolkitLSPNewHost github.com/zeokeel/zeokeel/internal/modules/toolkit.lspNewHostFunc
+var toolkitLSPNewHost func(cfg lspHost.Config) (lspHostAlias, error)
 
-// lspFakeSession is the fake started server.
-type lspFakeSession struct {
-	tools      []rig.Tool
-	closed     atomic.Int32
-	closeErr   error
-	initErr    error
-	initialize atomic.Int32
+// lspFakeHost is the fake LSP lifecycle handle.
+type lspFakeHost struct {
+	tools    []rig.Tool
+	starts   atomic.Int32
+	closed   atomic.Int32
+	closeErr error
 }
 
-func (s *lspFakeSession) Initialize(context.Context) error {
-	s.initialize.Add(1)
-	return s.initErr
-}
-
-func (s *lspFakeSession) Tools(func(string) (string, error)) []rig.Tool { return s.tools }
-func (s *lspFakeSession) Close() error {
-	s.closed.Add(1)
-	return s.closeErr
+func (h *lspFakeHost) Start(context.Context) { h.starts.Add(1) }
+func (h *lspFakeHost) Tools() []rig.Tool     { return h.tools }
+func (h *lspFakeHost) Close() error {
+	h.closed.Add(1)
+	return h.closeErr
 }
 
 // lspFakeTool is one tool contributed by the fake session.
@@ -222,29 +217,29 @@ func TestToolkitLSPBadConfigDoesNotBlockActivation(t *testing.T) {
 	}
 }
 
-// TestToolkitLSPToolsCloseOnUnload covers the ownership path through the start
-// seam: a started server contributes its lsp_* tools, a duplicate name is
-// skipped, and module disposal closes the session exactly once.
+// TestToolkitLSPToolsCloseOnUnload covers the ownership path through the host
+// factory seam: a started host contributes its lsp_* tools, a duplicate name is
+// skipped, and module disposal closes the host exactly once.
 func TestToolkitLSPToolsCloseOnUnload(t *testing.T) {
-	previous := toolkitLSPStartFunc
-	t.Cleanup(func() { toolkitLSPStartFunc = previous })
+	previous := toolkitLSPNewHost
+	t.Cleanup(func() { toolkitLSPNewHost = previous })
 
 	h := newBareHarness(t)
 	if err := h.settings.Set(contracts.SettingLSPServer, `{"command":"fake-lsp"}`); err != nil {
 		t.Fatalf("set lsp.server: %v", err)
 	}
-	session := &lspFakeSession{tools: []rig.Tool{
+	host := &lspFakeHost{tools: []rig.Tool{
 		lspFakeTool{name: "lsp_hover"},
 		lspFakeTool{name: "lsp_definition"},
 		lspFakeTool{name: "read_file"}, // conflicts with the built-in tool
 	}}
-	var starts atomic.Int32
-	toolkitLSPStartFunc = func(_ context.Context, cfg lsp.Config) (lspSessionAlias, error) {
+	var creations atomic.Int32
+	toolkitLSPNewHost = func(cfg lspHost.Config) (lspHostAlias, error) {
 		if cfg.Command != "fake-lsp" {
-			t.Fatalf("lsp start command = %q, want fake-lsp", cfg.Command)
+			t.Fatalf("lsp host command = %q, want fake-lsp", cfg.Command)
 		}
-		starts.Add(1)
-		return session, nil
+		creations.Add(1)
+		return host, nil
 	}
 	activate(t, h.ctx, toolkit.Module(), toolkit.Config{})
 	registry := requireService(t, h.ctx, hosttools.KeyRegistry)
@@ -262,14 +257,14 @@ func TestToolkitLSPToolsCloseOnUnload(t *testing.T) {
 	if !h.logger.contains("skipping") {
 		t.Fatalf("duplicate LSP tool was not logged; logs = %v", h.logger.lines)
 	}
-	if starts.Load() != 1 {
-		t.Fatalf("start seam calls = %d, want 1", starts.Load())
+	if creations.Load() != 1 || host.starts.Load() != 1 {
+		t.Fatalf("host factory/start calls = %d/%d, want 1/1", creations.Load(), host.starts.Load())
 	}
 
 	if err := h.ctx.DisposeAll(); err != nil {
 		t.Fatalf("DisposeAll: %v", err)
 	}
-	if got := session.closed.Load(); got != 1 {
-		t.Fatalf("LSP session Close calls = %d after unload, want 1", got)
+	if got := host.closed.Load(); got != 1 {
+		t.Fatalf("LSP host Close calls = %d after unload, want 1", got)
 	}
 }
