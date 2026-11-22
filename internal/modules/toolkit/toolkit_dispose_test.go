@@ -77,7 +77,8 @@ func startMarkerJob(t *testing.T, root cordis.Context, marker string) string {
 func countRefreshLoopGoroutines() int {
 	buf := make([]byte, 1<<20)
 	n := runtime.Stack(buf, true)
-	return strings.Count(string(buf[:n]), "refreshLoop")
+	stack := string(buf[:n])
+	return strings.Count(stack, "refreshLoop") + strings.Count(stack, "mcp/auth.(*Runtime).Start")
 }
 
 // disposeToolkit runs the same teardown sequence as the process host's
@@ -122,11 +123,6 @@ func TestToolkitDisposeKillsJobsAndStopsLoops(t *testing.T) {
 	controller.mu.Unlock()
 	if !closed {
 		t.Errorf("controller.closed=false after dispose: the success path never registered controller.close")
-	}
-	select {
-	case <-controller.refreshStop:
-	default:
-		t.Errorf("refreshStop still open after dispose: the refresh loop can never exit")
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for countRefreshLoopGoroutines() > baseline && time.Now().Before(deadline) {

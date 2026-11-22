@@ -162,19 +162,22 @@ func TestMCPAuthStatusMapping(t *testing.T) {
 	if status.Code != string(mcp.OAuthErrRefresh) || status.Issuer != "https://auth.example.com" {
 		t.Fatalf("status = %+v", status)
 	}
-	// Ensure the adapter's fingerprint changes when the server moves.
-	base := contracts.MCPServerConfig{Name: "files", URL: "https://a.example/mcp",
+	// The manager-facing OAuth config carries the connector identity/resource.
+	server := MCPServer{Name: "files", URL: "https://a.example/mcp",
 		Auth: &contracts.MCPAuthConfig{Mode: contracts.MCPAuthOAuth2}}
-	if authFingerprint(base) == authFingerprint(contracts.MCPServerConfig{
-		Name: "files", URL: "https://b.example/mcp",
-		Auth: &contracts.MCPAuthConfig{Mode: contracts.MCPAuthOAuth2},
-	}) {
-		t.Fatal("fingerprint ignores the URL")
+	runtime := newMCPAuthRuntime(newAuthTestSettings(), nil, nil)
+	oauthConfig, err := runtime.managerOAuthConfig(server)
+	if err != nil || oauthConfig == nil {
+		t.Fatalf("managerOAuthConfig = %+v/%v", oauthConfig, err)
+	}
+	if oauthConfig.ServerName != "files" || oauthConfig.Resource != "https://a.example/mcp" {
+		t.Fatalf("oauth config = %+v", oauthConfig)
 	}
 	// The config conversion keeps the auth pointer (startup path).
-	server := MCPServer{Name: "files", URL: "https://a.example/mcp", Headers: map[string]string{"X": "1"}, Auth: base.Auth}
+	server = MCPServer{Name: "files", URL: "https://a.example/mcp", Headers: map[string]string{"X": "1"},
+		Auth: &contracts.MCPAuthConfig{Mode: contracts.MCPAuthOAuth2}}
 	converted := server.config()
-	if converted.Auth != base.Auth || converted.Headers["X"] != "1" {
+	if converted.Auth == nil || converted.Auth.Mode != contracts.MCPAuthOAuth2 || converted.Headers["X"] != "1" {
 		t.Fatalf("config = %+v", converted)
 	}
 	_, _ = json.Marshal(converted)

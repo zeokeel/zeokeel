@@ -8,9 +8,9 @@ package toolkit
 //
 // Connection supervision (startup fan-out, per-server isolation, tool binding,
 // transparent reconnect and close) is the Rig SDK tools/mcp/manager; this file
-// owns the product around it: settings merge and disabled filters, the OAuth
-// token adapter/refresh loop, the Plugins status read model, the per-tool
-// enabled catalog and the workspace mcp.json rows.
+// owns the product around it: settings merge and disabled filters, the shared
+// auth runtime lifecycle and settings-backed token store, the Plugins status
+// read model, the per-tool enabled catalog and the workspace mcp.json rows.
 
 import (
 	"context"
@@ -19,7 +19,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	rigtool "github.com/zeokeel/zeokeel-rig/tools"
@@ -52,14 +51,12 @@ type mcpController struct {
 	maxOutput int
 	load      func() ([]MCPServer, map[string]bool)
 
-	mu          sync.Mutex
-	manager     *manager.Manager
-	plans       []mcpStartPlan
-	rows        []*mcpRow
-	registered  []string
-	closed      bool
-	refreshStop chan struct{}
-	closeOnce   sync.Once
+	mu         sync.Mutex
+	manager    *manager.Manager
+	plans      []mcpStartPlan
+	rows       []*mcpRow
+	registered []string
+	closed     bool
 }
 
 var _ contracts.MCPReloader = (*mcpController)(nil)
@@ -72,12 +69,11 @@ func newMCPController(logf func(string, ...any), registry *rigtool.Registry,
 	}
 	controller := &mcpController{
 		logf: logf, registry: registry, plugins: plugins, auth: auth,
-		settings: settings, maxOutput: maxOutput, load: load, refreshStop: make(chan struct{}),
+		settings: settings, maxOutput: maxOutput, load: load,
 	}
-	// The adapter is stable across reloads; the callback resolves the current
-	// manager under the controller lock.
-	auth.onAuthorized = func(name string) { controller.reconnectByName(name) }
-	go controller.refreshLoop()
+	// The auth runtime's authorized callback (installed at construction) calls
+	// controller.reconnectByName; its background refresh loop runs here.
+	auth.start()
 	return controller
 }
 
@@ -188,20 +184,9 @@ func (c *mcpController) reload(ctx context.Context) ([]contracts.MCPPlugin, erro
 	servers, disabled := c.load()
 
 	// Drop the previous connections and their registry entries first: a stale
-	// tool would otherwise shadow the rebuilt one.
+	// tool would otherwise shadow the rebuilt one. The shared auth runtime (and
+	// its cached clients/tokens) survives the rebuild.
 	c.teardownLocked()
-	c.auth.close()
-
-	// OAuth clients must exist before startup for OAuth rows, including rows
-	// whose startup fails (the client is what later runs the browser flow).
-	for _, server := range servers {
-		if !authOAuth2(server.config()) {
-			continue
-		}
-		if _, err := c.auth.clientForServer(server); err != nil {
-			c.logf("[toolkit] mcp %q: OAuth setup: %v", server.Name, err)
-		}
-	}
 
 	plans := prepareMCPServerPlans(servers, c.logf)
 	disabledNames := make([]string, 0, len(disabled))
@@ -215,6 +200,7 @@ func (c *mcpController) reload(ctx context.Context) ([]contracts.MCPPlugin, erro
 		MaxOutputBytes: c.maxOutput,
 		Resources:      true,
 		Logger:         c.logf,
+		Auth:           c.auth.Runtime(),
 	}
 	usedNames := make(map[string]int, len(plans))
 	rows := make([]*mcpRow, 0, len(plans))
@@ -227,7 +213,13 @@ func (c *mcpController) reload(ctx context.Context) ([]contracts.MCPPlugin, erro
 			plan:       plan,
 			managerKey: mcpManagerKey(plan.server, index, usedNames),
 		}
-		clientConfig, err := mcpClientConfig(plan.server, c.auth)
+		clientConfig, err := mcpClientConfig(plan.server)
+		if err != nil {
+			row.startErr = err
+			rows = append(rows, row)
+			continue
+		}
+		oauthConfig, err := c.auth.managerOAuthConfig(plan.server)
 		if err != nil {
 			row.startErr = err
 			rows = append(rows, row)
@@ -236,6 +228,7 @@ func (c *mcpController) reload(ctx context.Context) ([]contracts.MCPPlugin, erro
 		managerConfig.Servers = append(managerConfig.Servers, manager.Server{
 			Name:          row.managerKey,
 			Config:        clientConfig,
+			OAuth:         oauthConfig,
 			DisabledTools: disabledNames,
 		})
 		rows = append(rows, row)
@@ -523,30 +516,8 @@ func (c *mcpController) reconnectByName(name string) {
 	}
 }
 
-// refreshLoop proactively refreshes OAuth tokens shortly before expiry so a
-// long-running tool session does not fall into a 401/re-authorize cycle.
-func (c *mcpController) refreshLoop() {
-	ticker := time.NewTicker(mcpBackgroundRefreshInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-c.refreshStop:
-			return
-		case <-ticker.C:
-			c.mu.Lock()
-			closed := c.closed
-			c.mu.Unlock()
-			if closed {
-				return
-			}
-			if refreshed := c.auth.refreshDue(context.Background(), mcpBackgroundRefreshWindow); refreshed > 0 {
-				c.logf("[toolkit] mcp: background-refreshed %d OAuth token(s)", refreshed)
-			}
-		}
-	}
-}
-
-// close releases the current manager and stops the refresh loop (module unload).
+// close releases the current manager, the shared auth runtime and its refresh
+// loop (module unload).
 func (c *mcpController) close() {
 	c.mu.Lock()
 	if c.closed {
@@ -560,7 +531,6 @@ func (c *mcpController) close() {
 	c.rows = nil
 	c.registered = nil
 	c.mu.Unlock()
-	c.closeOnce.Do(func() { close(c.refreshStop) })
 	if mgr != nil {
 		_ = mgr.Close()
 	}
