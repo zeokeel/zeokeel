@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	rigagentteam "github.com/zeokeel/zeokeel-rig/agent/team"
 	rigteam "github.com/zeokeel/zeokeel-rig/tools/team"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -77,9 +78,104 @@ func (t *trackedTeamTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.To
 			}
 		}
 	}
+	// Model-tool spawns are adopted by the coordinator after the inner call:
+	// mark the context first so the dynamic runner leaves the run to the
+	// coordinator instead of the legacy external tracker (one lane, not two).
+	adoptSpawn := t.isAdoptableSpawnTool()
+	var before map[string]bool
+	if adoptSpawn {
+		if coordinator := t.tracker.coordinator(); coordinator != nil && t.manager != nil {
+			before = t.memberIDSet()
+			ctx = context.WithValue(ctx, coordinatorSpawnKey{}, true)
+		}
+	}
 	result, err := t.inner.Invoke(ctx, call)
+	if adoptSpawn && before != nil && err == nil && !result.IsError {
+		t.adoptSpawned(ctx, call, before)
+	}
 	t.record(call, result, err)
 	return result, err
+}
+
+// isAdoptableSpawnTool reports whether this tool starts a manager member.
+func (t *trackedTeamTool) isAdoptableSpawnTool() bool {
+	if t == nil {
+		return false
+	}
+	switch t.Name() {
+	case rigteam.ToolSpawnTeammate, rigteam.ToolSpawn, rigteam.ToolSubagent, rigteam.ToolSubagentFork:
+		return true
+	default:
+		return false
+	}
+}
+
+// memberIDSet snapshots the manager's member ids before a spawn tool call.
+func (t *trackedTeamTool) memberIDSet() map[string]bool {
+	if t.manager == nil {
+		return nil
+	}
+	members := t.manager.Members()
+	ids := make(map[string]bool, len(members))
+	for _, member := range members {
+		ids[member.ID] = true
+	}
+	return ids
+}
+
+// adoptSpawned hands the member a model-facing spawn tool just created to the
+// coordinator, so its run lifecycle, activity and durable child record are
+// owned by the same state machine as coordinator-lane spawns.
+func (t *trackedTeamTool) adoptSpawned(ctx context.Context, call rig.ToolCall, before map[string]bool) {
+	if t == nil || t.tracker == nil || t.manager == nil || before == nil {
+		return
+	}
+	coordinator := t.tracker.coordinator()
+	if coordinator == nil {
+		return
+	}
+	args := teamToolArgs(call.Arguments)
+	name := teamArgString(args, "name")
+	var member rigteam.Member
+	for _, candidate := range t.manager.Members() {
+		if before[candidate.ID] {
+			continue
+		}
+		if name != "" && candidate.Name == name {
+			member = candidate
+			break
+		}
+		if member.ID == "" {
+			member = candidate
+		}
+	}
+	if member.ID == "" {
+		return
+	}
+	if name == "" {
+		name = member.Name
+	}
+	prompt := teamArgString(args, "prompt")
+	if prompt == "" {
+		prompt = teamArgString(args, "task")
+	}
+	if prompt == "" {
+		prompt = teamArgString(args, "description")
+	}
+	spec := rigagentteam.SpawnSpec{
+		Name:     name,
+		Prompt:   prompt,
+		Model:    teamArgString(args, "model"),
+		ParentID: contracts.AgentSessionFromContext(ctx),
+	}
+	// Bind the durable child identity before Adopt publishes (its persist pass
+	// needs the child-session id).
+	t.tracker.bindCoordinatorMember(member.ID, spec)
+	if _, err := coordinator.Adopt(ctx, member.ID, spec); err != nil {
+		t.tracker.addMemberActivity(member.ID, contracts.TeamActivityError,
+			"接管队友失败："+err.Error(), true)
+		t.tracker.notifyChange()
+	}
 }
 
 // isTeamSendToolName reports whether a team tool delivers a message to a member.
@@ -139,6 +235,11 @@ func (t *trackedTeamTool) record(call rig.ToolCall, result rig.ToolResult, err e
 	}
 	run := t.tracker.runForRef(ref)
 	memberID := t.tracker.claimMemberID(run)
+	if memberID == "" {
+		// Coordinator-owned members (including adopted tool spawns) have no
+		// wrapped legacy run; attribute the tool activity to the member instead.
+		memberID = t.tracker.coordinatorMemberID(ref)
+	}
 	t.tracker.addActivity(run, memberID, kind, text, failed)
 }
 
