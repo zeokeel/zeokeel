@@ -764,9 +764,13 @@ func teamDisplayName(values ...string) string {
 // interrupt_agent controls. Legacy and native aliases are intentionally not
 // registered. Each tool is wrapped so its invocation lands in the bounded team
 // activity read model (the run lifecycle itself is tracked in team_state.go).
-func newTeamTools(svc *service, manager *rigteam.Manager) []rig.Tool {
+func newTeamTools(svc *service, manager *rigteam.Manager, skip ...map[string]bool) []rig.Tool {
 	if manager == nil {
 		return nil
+	}
+	var known map[string]bool
+	if len(skip) > 0 {
+		known = skip[0]
 	}
 	tools := rigteam.DSHTools(manager)
 	// DSH's canonical team surface reuses send_message and interrupt_agent from
@@ -791,6 +795,15 @@ func newTeamTools(svc *service, manager *rigteam.Manager) []rig.Tool {
 	for _, tool := range tools {
 		if tool == nil {
 			continue
+		}
+		// The synchronous subagent tools own these two names in the shared
+		// registry. Dropping the manager duplicates here keeps startup quiet
+		// (no "duplicate registry name" skips) and leaves exactly one tool.
+		switch strings.TrimSpace(tool.Name()) {
+		case rigteam.ToolSubagent, rigteam.ToolSubagentFork:
+			if known[strings.TrimSpace(tool.Name())] {
+				continue
+			}
 		}
 		wrapper := &trackedTeamTool{inner: tool, tracker: tracker, manager: manager}
 		if svc != nil {
