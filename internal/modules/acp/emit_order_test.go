@@ -1,50 +1,61 @@
 package acp
 
-// BE-06 (2026-11 audit): promptState.process computed the text delta under its
-// mutex but emitted AFTER unlocking, so two concurrent process calls (the run
-// goroutine's chat subscription and the prompt goroutine's direct post-Send
-// call) could write their frames in the wrong order — the client saw "BBBAAA"
-// instead of "AAABBB". Emission now happens inside the same critical section
-// that assigned the delta. The emit callbacks only take the frameWriter leaf
-// lock, so holding state.mu across them cannot deadlock.
+// BE-06 (2026-11 audit): assistant text deltas used to be computed under a
+// mutex but emitted after unlocking, so two concurrent snapshot callbacks (the
+// run goroutine's chat subscription and the prompt goroutine's direct post-Send
+// snapshot) could write their frames in the wrong order — the client saw
+// "BBBAAA" instead of "AAABBB".
 //
-// The scheduling-point variant widens the unlock→emit window with a Gosched
-// (the production equivalents are json.Marshal, writer-lock contention and
-// preemption); the real-writer variant uses no artificial scheduling at all.
+// The streaming state now lives in the rig acp/server package, which emits
+// inside the critical section that assigned the delta. This wire-level
+// regression drives two racing snapshots through the product server and asserts
+// the client always sees the stable concatenation.
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
-
-	rigacp "github.com/zeokeel/zeokeel-rig/acp"
-
-	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-func emitOrderSnapshot(text string) contracts.ChatSession {
-	return contracts.ChatSession{
-		Running:  true,
-		Messages: []contracts.ChatMessage{{Role: contracts.ChatRoleAssistant, Text: text}},
-	}
-}
-
-func emitOrderNewState() *promptState {
-	return &promptState{
-		signal:     make(chan struct{}),
-		toolStates: map[string]string{},
-		toolIDs:    map[string]string{},
+func TestPromptEmitOrderConcurrentNotifications(t *testing.T) {
+	for attempt := 0; attempt < 50; attempt++ {
+		chat := newFakeChat()
+		chat.sendHook = func(c *fakeChat, sessionID, prompt string) {
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				c.setAssistantText(sessionID, "AAA", true)
+			}()
+			go func() {
+				defer wg.Done()
+				c.setAssistantText(sessionID, "AAABBB", true)
+			}()
+			wg.Wait()
+			c.setAssistantText(sessionID, "AAABBB", false)
+		}
+		service := newService(Config{}, chat, &fakeLogger{})
+		var output bytes.Buffer
+		if err := service.Serve(context.Background(), strings.NewReader(promptLine(1, "sess-1", "go")+"\n"), &output); err != nil {
+			t.Fatalf("Serve: %v", err)
+		}
+		if got := emittedText(t, output.Bytes()); got != "AAABBB" {
+			t.Fatalf("attempt %d: chunks = %q, want AAABBB", attempt, got)
+		}
+		if !strings.Contains(output.String(), StopReasonEndTurn) {
+			t.Fatalf("attempt %d: missing end_turn response: %s", attempt, output.String())
+		}
 	}
 }
 
 // emittedText concatenates the agent_message_chunk texts in write order.
-func emittedText(t *testing.T, buf *bytes.Buffer) string {
+func emittedText(t *testing.T, data []byte) string {
 	t.Helper()
 	var out strings.Builder
-	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		if line == "" {
 			continue
 		}
@@ -67,83 +78,4 @@ func emittedText(t *testing.T, buf *bytes.Buffer) string {
 		}
 	}
 	return out.String()
-}
-
-func emitOrderAttempt(t *testing.T, schedPoint bool) string {
-	t.Helper()
-	var buf bytes.Buffer
-	writer := rigacp.NewWriter(&buf)
-	state := emitOrderNewState()
-	emit := func(delta string) {
-		if schedPoint {
-			runtime.Gosched()
-		}
-		writer.Notify(MethodSessionUpdate, map[string]any{
-			"sessionId": "s",
-			"update": map[string]any{
-				"sessionUpdate": UpdateAgentMessageChunk,
-				"content":       map[string]any{"type": "text", "text": delta},
-			},
-		})
-	}
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); state.process(emitOrderSnapshot("AAA"), emit, nil) }()
-	go func() { defer wg.Done(); state.process(emitOrderSnapshot("AAABBB"), emit, nil) }()
-	wg.Wait()
-	return emittedText(t, &buf)
-}
-
-func TestPromptEmitOrderConcurrentSchedPoint(t *testing.T) {
-	bad := 0
-	for i := 0; i < 200; i++ {
-		if got := emitOrderAttempt(t, true); got != "AAABBB" {
-			bad++
-			if bad <= 3 {
-				t.Logf("attempt %d: emitted %q (want AAABBB)", i, got)
-			}
-		}
-	}
-	if bad > 0 {
-		t.Fatalf("BE-06: %d/200 concurrent attempts emitted out of order or lost text (unlock-before-emit race)", bad)
-	}
-}
-
-func TestPromptEmitOrderConcurrentRealWriter(t *testing.T) {
-	bad := 0
-	for i := 0; i < 500; i++ {
-		if got := emitOrderAttempt(t, false); got != "AAABBB" {
-			bad++
-			if bad <= 3 {
-				t.Logf("attempt %d: emitted %q (want AAABBB)", i, got)
-			}
-		}
-	}
-	if bad > 0 {
-		t.Fatalf("BE-06: %d/500 real-writer attempts emitted out of order or lost text", bad)
-	}
-}
-
-// Control: sequential process calls must always emit in order (the method
-// works when there is no concurrency; the defect is the race alone).
-func TestPromptEmitOrderSequentialControl(t *testing.T) {
-	for i := 0; i < 50; i++ {
-		var buf bytes.Buffer
-		writer := rigacp.NewWriter(&buf)
-		state := emitOrderNewState()
-		emit := func(delta string) {
-			writer.Notify(MethodSessionUpdate, map[string]any{
-				"sessionId": "s",
-				"update": map[string]any{
-					"sessionUpdate": UpdateAgentMessageChunk,
-					"content":       map[string]any{"type": "text", "text": delta},
-				},
-			})
-		}
-		state.process(emitOrderSnapshot("AAA"), emit, nil)
-		state.process(emitOrderSnapshot("AAABBB"), emit, nil)
-		if got := emittedText(t, &buf); got != "AAABBB" {
-			t.Fatalf("sequential attempt %d emitted %q, want AAABBB", i, got)
-		}
-	}
 }

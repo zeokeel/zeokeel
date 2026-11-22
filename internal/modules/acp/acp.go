@@ -2,17 +2,17 @@
 // a newline-framed JSON-RPC 2.0 server over stdio that drives the product's
 // ChatService for editor clients such as Zed.
 //
-// The ported surface is deliberately small: initialize, session/new,
-// session/prompt (streaming agent_message_chunk notifications, with image
-// prompt blocks forwarded to the chat backend as attachments) and
-// session/cancel. Protocol frames are the only bytes written to out;
-// diagnostics go through the host logger.
+// The JSON-RPC transport, JSON-RPC method mapping and the prompt streaming
+// engine (agent_message_chunk deltas plus tool_call/tool_call_update updates,
+// image prompt blocks, cancel) live in the rig acp/server package. This module
+// keeps the product pieces: the stdio module descriptor, session/new's cwd ->
+// workspace binding, session/list, session/load and the Chat adapter over
+// contracts.ChatService.
 package acp
 
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,13 +20,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	rigacp "github.com/zeokeel/zeokeel-rig/acp"
+	rigserver "github.com/zeokeel/zeokeel-rig/acp/server"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -38,10 +38,14 @@ const (
 	Version = "1.0.0"
 
 	// maxPromptImageBytes bounds the decoded size of one prompt image (10 MiB).
-	maxPromptImageBytes = 10 << 20
+	// The SDK owns the value and the validation; the alias keeps product tests
+	// and call sites reading the same bound.
+	maxPromptImageBytes = rigserver.MaxPromptImageBytes
 
-	// agentMessageChunk is the only session update kind this server emits.
-	UpdateAgentMessageChunk = "agent_message_chunk"
+	// Session update kinds, re-exported from the SDK mapping.
+	UpdateAgentMessageChunk = rigserver.UpdateAgentMessageChunk
+	UpdateToolCall          = rigserver.UpdateToolCall
+	UpdateToolCallUpdate    = rigserver.UpdateToolCallUpdate
 
 	// Transport constants re-exported for the module's tests and call sites.
 	JSONRPCVersion     = rigacp.JSONRPCVersion
@@ -117,17 +121,14 @@ func validateConfig(cfg Config) error {
 
 // service is the contracts.ACPService implementation.
 type service struct {
-	chat    contracts.ChatService
-	logger  contracts.Logger
-	timeout time.Duration
-
+	chat   contracts.ChatService
+	logger contracts.Logger
 	// workspace is optional: when the product provides it, session/new uses
 	// the client's cwd to register/open the project root so the agent's tools
 	// run in the editor's project.
 	workspace contracts.WorkspaceService
-
-	mu              sync.Mutex
-	cancelRequested map[string]bool
+	// mapper is the SDK ACP server: prompt/cancel method mapping and streaming.
+	mapper *rigserver.Server
 }
 
 var _ contracts.ACPService = (*service)(nil)
@@ -142,53 +143,24 @@ func newService(cfg Config, chat contracts.ChatService, logger contracts.Logger)
 	if logger == nil {
 		logger = discardLogger{}
 	}
+	service := &service{chat: chat, logger: logger}
 	var timeout time.Duration
 	if cfg.TimeoutMs > 0 {
 		timeout = time.Duration(cfg.TimeoutMs) * time.Millisecond
 	}
-	return &service{
-		chat:            chat,
-		logger:          logger,
-		timeout:         timeout,
-		cancelRequested: map[string]bool{},
-	}
+	service.mapper = rigserver.New(
+		&chatAdapter{chat: chat},
+		rigserver.WithTimeout(timeout),
+	)
+	return service
 }
 
-// --- ACP params ------------------------------------------------------------
-
-// contentBlock is one ACP prompt content block. Text blocks carry Text; image
-// blocks carry the base64 Data plus MimeType of ACP's image block shape.
-type contentBlock struct {
-	Type     string `json:"type"`
-	Text     string `json:"text"`
-	Data     string `json:"data"`
-	MimeType string `json:"mimeType"`
-}
-
-// promptParams is the params of session/prompt. Content is accepted as a
-// fallback for clients that use it instead of prompt.
-type promptParams struct {
-	SessionID string         `json:"sessionId"`
-	Prompt    []contentBlock `json:"prompt"`
-	Content   []contentBlock `json:"content"`
-}
-
-// cancelParams is the params of session/cancel.
-type cancelParams struct {
-	SessionID string `json:"sessionId"`
-}
-
-// sessionNewParams is the params of session/new. cwd is the editor's project
-// root; mcpServers is accepted by the protocol but not consumed yet (configured
-// servers come from the shared product settings).
-type sessionNewParams struct {
-	CWD        string            `json:"cwd"`
-	MCPServers []json.RawMessage `json:"mcpServers"`
-}
-
-// Serve runs one ACP connection over in/out (stdio in production).
+// Serve runs one ACP connection over in/out (stdio in production). The
+// transport drives this module's Handle, which delegates the mapped methods to
+// the SDK server and keeps the product-only methods (session/new workspace
+// binding, session/list, session/load).
 func (s *service) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
-	server := rigacp.NewServer(rigacp.Options{
+	transport := rigacp.NewServer(rigacp.Options{
 		Handler: s,
 		Capabilities: map[string]any{
 			"loadSession": true,
@@ -199,42 +171,50 @@ func (s *service) Serve(ctx context.Context, in io.Reader, out io.Writer) error 
 			},
 		},
 	})
-	return server.Serve(ctx, in, out)
+	return transport.Serve(ctx, in, out)
 }
 
-// Handle implements the transport's Handler: it maps one ACP method onto the
-// product's chat/workspace services. initialize is answered by the transport.
+// Handle delegates the mapped methods to the SDK server and keeps the
+// product-only methods (session/new workspace binding, session/list,
+// session/load) here.
 func (s *service) Handle(ctx context.Context, method string, params json.RawMessage, emit rigacp.Emit) (any, error) {
 	switch method {
 	case MethodSessionNew:
-		workspaceID, rpcErr := s.prepareSessionWorkspace(params)
-		if rpcErr != nil {
-			return nil, rpcErr
-		}
-		sessionID, err := s.chat.NewSession("")
-		if err != nil {
-			return nil, internalError("session/new: " + err.Error())
-		}
-		s.bindSessionWorkspace(sessionID, workspaceID)
-		return map[string]string{
-			"sessionId":   sessionID,
-			"model":       strings.TrimSpace(s.chat.Config().Model),
-			"workspaceId": workspaceID,
-		}, nil
+		return s.handleSessionNew(params)
 	case MethodSessionList:
 		return s.handleSessionList(params)
 	case MethodSessionLoad:
 		return s.handleSessionLoad(params)
-	case MethodSessionPrompt:
-		return s.handlePrompt(ctx, params, emit)
-	case MethodSessionCancel:
-		if rpcErr := s.handleCancel(params); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return struct{}{}, nil
 	default:
-		return nil, rigacp.Errorf(CodeMethodNotFound, "method not found: %s", method)
+		return s.mapper.Handle(ctx, method, params, emit)
 	}
+}
+
+// handleSessionNew implements session/new: resolve the editor's project root,
+// create the session and bind it to the workspace.
+func (s *service) handleSessionNew(raw json.RawMessage) (any, error) {
+	workspaceID, rpcErr := s.prepareSessionWorkspace(raw)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	sessionID, err := s.chat.NewSession("")
+	if err != nil {
+		return nil, internalError("session/new: " + err.Error())
+	}
+	s.bindSessionWorkspace(sessionID, workspaceID)
+	return map[string]string{
+		"sessionId":   sessionID,
+		"model":       strings.TrimSpace(s.chat.Config().Model),
+		"workspaceId": workspaceID,
+	}, nil
+}
+
+// sessionNewParams is the params of session/new. cwd is the editor's project
+// root; mcpServers is accepted by the protocol but not consumed yet (configured
+// servers come from the shared product settings).
+type sessionNewParams struct {
+	CWD        string            `json:"cwd"`
+	MCPServers []json.RawMessage `json:"mcpServers"`
 }
 
 // prepareSessionWorkspace resolves the editor's project root (session/new cwd)
@@ -411,308 +391,6 @@ func (s *service) handleSessionLoad(raw json.RawMessage) (any, error) {
 		"model":     model,
 		"messages":  messages,
 	}, nil
-}
-
-// handlePrompt implements session/prompt: subscribe to chat updates, send the
-// prompt, stream new assistant text as agent_message_chunk notifications and
-// settle with a stop reason.
-func (s *service) handlePrompt(ctx context.Context, raw json.RawMessage, emit rigacp.Emit) (any, error) {
-	var params promptParams
-	if err := json.Unmarshal(raw, &params); err != nil {
-		return nil, invalidParams("session/prompt: " + err.Error())
-	}
-	sessionID := strings.TrimSpace(params.SessionID)
-	if sessionID == "" {
-		return nil, invalidParams("session/prompt: sessionId is required")
-	}
-	attachments, rpcErr := promptImages(params)
-	if rpcErr != nil {
-		return nil, rpcErr
-	}
-	text := promptText(params)
-	if text == "" && len(attachments) == 0 {
-		return nil, invalidParams("session/prompt: prompt text or image content is required")
-	}
-	var attachmentSender contracts.AttachmentSender
-	if len(attachments) > 0 {
-		sender, ok := s.chat.(contracts.AttachmentSender)
-		if !ok {
-			return nil, internalError("session/prompt: chat backend does not support image attachments")
-		}
-		attachmentSender = sender
-	}
-	s.mu.Lock()
-	s.cancelRequested[sessionID] = false
-	s.mu.Unlock()
-
-	state := &promptState{
-		signal:     make(chan struct{}),
-		toolStates: map[string]string{},
-		toolIDs:    map[string]string{},
-	}
-	if snapshot, ok := s.chat.Session(sessionID); ok {
-		state.lastText = assistantText(snapshot)
-		state.seedToolState(snapshot)
-	}
-	emitTool := func(event toolEvent) {
-		s.writeToolEvent(emit, sessionID, event)
-	}
-	unsubscribe, err := s.chat.Subscribe(func(changedSession string) {
-		if changedSession != sessionID {
-			return
-		}
-		snapshot, ok := s.chat.Session(sessionID)
-		if !ok {
-			return
-		}
-		state.process(snapshot, func(delta string) {
-			emit(MethodSessionUpdate, map[string]any{
-				"sessionId": sessionID,
-				"update": map[string]any{
-					"sessionUpdate": UpdateAgentMessageChunk,
-					"content":       map[string]any{"type": "text", "text": delta},
-				},
-			})
-		}, emitTool)
-	})
-	if err != nil {
-		return nil, internalError("session/prompt: subscribe: " + err.Error())
-	}
-	defer unsubscribe()
-	var sendErr error
-	if len(attachments) == 0 {
-		sendErr = s.chat.Send(sessionID, text)
-	} else {
-		sendErr = attachmentSender.SendWithAttachments(sessionID, text, attachments)
-	}
-	if sendErr != nil {
-		return nil, internalError("session/prompt: send: " + sendErr.Error())
-	}
-	// The fake/agent may have completed synchronously without a notification.
-	if snapshot, ok := s.chat.Session(sessionID); ok {
-		state.process(snapshot, func(delta string) {
-			emit(MethodSessionUpdate, map[string]any{
-				"sessionId": sessionID,
-				"update": map[string]any{
-					"sessionUpdate": UpdateAgentMessageChunk,
-					"content":       map[string]any{"type": "text", "text": delta},
-				},
-			})
-		}, emitTool)
-	}
-	var timeout <-chan time.Time
-	if s.timeout > 0 {
-		timer := time.NewTimer(s.timeout)
-		defer timer.Stop()
-		timeout = timer.C
-	}
-	select {
-	case <-state.signal:
-	case <-ctx.Done():
-		_ = s.chat.Cancel(sessionID)
-		return nil, rigacp.ErrNoResponse
-	case <-timeout:
-		_ = s.chat.Cancel(sessionID)
-		return nil, internalError("session/prompt: timeout")
-	}
-	s.mu.Lock()
-	cancelled := s.cancelRequested[sessionID]
-	s.mu.Unlock()
-	if cancelled {
-		return map[string]string{"stopReason": StopReasonCancelled}, nil
-	}
-	// A run failure must not look like a successful empty turn to an ACP
-	// client: the chat read model carries the run error, so surface it as a
-	// JSON-RPC error (the turn result would otherwise always be end_turn).
-	if snapshot, ok := s.chat.Session(sessionID); ok {
-		if errText := strings.TrimSpace(snapshot.Error); errText != "" {
-			return nil, internalError("session/prompt: " + errText)
-		}
-	}
-	return map[string]string{"stopReason": StopReasonEndTurn}, nil
-}
-
-// promptState tracks the streamed assistant text of one prompt.
-type promptState struct {
-	mu       sync.Mutex
-	lastText string
-	finished bool
-	signal   chan struct{}
-
-	// Tool-call streaming state: the last status per tool call (keyed by the
-	// stable id or read-model position), the emitted id for empty ids and the
-	// generated-id counter.
-	toolStates map[string]string
-	toolIDs    map[string]string
-	generated  int
-}
-
-// process emits the new assistant text delta and the new/changed tool-call
-// events of one snapshot, then closes signal when the session is no longer
-// running. Events are emitted in snapshot order: text first, then tools.
-//
-// BE-06 (2026-11 audit): the emission runs INSIDE the same critical section
-// that assigned the delta. Two goroutines call process concurrently (the run
-// goroutine's chat subscription and the prompt goroutine's direct post-Send
-// call); unlocking before emitting let them write frames in the wrong order.
-// The emit callbacks only take the frameWriter leaf lock (never the service
-// lock or this mutex), so holding state.mu across them cannot deadlock.
-func (state *promptState) process(snapshot contracts.ChatSession, emitText func(string), emitTool func(toolEvent)) {
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	if state.finished {
-		return
-	}
-	text := assistantText(snapshot)
-	delta := ""
-	if len(text) > len(state.lastText) {
-		delta = text[len(state.lastText):]
-		state.lastText = text
-	}
-	toolEvents := state.observeToolEventsLocked(snapshot)
-	running := snapshot.Running
-	if delta != "" {
-		emitText(delta)
-	}
-	if emitTool != nil {
-		for _, event := range toolEvents {
-			emitTool(event)
-		}
-	}
-	if !running && !state.finished {
-		state.finished = true
-		close(state.signal)
-	}
-}
-
-// handleCancel implements session/cancel.
-func (s *service) handleCancel(raw json.RawMessage) error {
-	var params cancelParams
-	if err := json.Unmarshal(raw, &params); err != nil {
-		return invalidParams("session/cancel: " + err.Error())
-	}
-	sessionID := strings.TrimSpace(params.SessionID)
-	if sessionID == "" {
-		return invalidParams("session/cancel: sessionId is required")
-	}
-	s.mu.Lock()
-	s.cancelRequested[sessionID] = true
-	s.mu.Unlock()
-	_ = s.chat.Cancel(sessionID)
-	return nil
-}
-
-// promptBlocks returns the block list of a prompt request. Content is accepted
-// as a fallback for clients that use it instead of prompt.
-func promptBlocks(params promptParams) []contentBlock {
-	if len(params.Prompt) > 0 {
-		return params.Prompt
-	}
-	return params.Content
-}
-
-// promptImages decodes the image blocks of a prompt request into attachments.
-// Each image block must carry an image/* mimeType and a non-empty, decodable
-// base64 payload no larger than maxPromptImageBytes; violations are -32602.
-func promptImages(params promptParams) ([]contracts.Attachment, *RPCError) {
-	var attachments []contracts.Attachment
-	for index, block := range promptBlocks(params) {
-		if !strings.EqualFold(strings.TrimSpace(block.Type), "image") {
-			continue
-		}
-		position := index + 1
-		mimeType := strings.TrimSpace(block.MimeType)
-		if mimeType == "" {
-			return nil, invalidParams(fmt.Sprintf(
-				"session/prompt: image block %d: mimeType is required", position))
-		}
-		if !strings.HasPrefix(strings.ToLower(mimeType), "image/") {
-			return nil, invalidParams(fmt.Sprintf(
-				"session/prompt: image block %d: mimeType %q must be an image/* type", position, mimeType))
-		}
-		data := strings.TrimSpace(block.Data)
-		if data == "" {
-			return nil, invalidParams(fmt.Sprintf(
-				"session/prompt: image block %d: data (base64) is required", position))
-		}
-		decoded, err := decodePromptImage(data)
-		if err != nil {
-			return nil, invalidParams(fmt.Sprintf(
-				"session/prompt: image block %d: invalid base64 data: %v", position, err))
-		}
-		if len(decoded) == 0 {
-			return nil, invalidParams(fmt.Sprintf(
-				"session/prompt: image block %d: decoded image data is empty", position))
-		}
-		if len(decoded) > maxPromptImageBytes {
-			return nil, invalidParams(fmt.Sprintf(
-				"session/prompt: image block %d: decoded image is %d bytes, over the %d MiB limit",
-				position, len(decoded), maxPromptImageBytes>>20))
-		}
-		ordinal := len(attachments) + 1
-		attachments = append(attachments, contracts.Attachment{
-			ID:   fmt.Sprintf("acp-image-%d", ordinal),
-			Name: fmt.Sprintf("image-%d.%s", ordinal, imageExtension(mimeType)),
-			MIME: mimeType,
-			Data: decoded,
-		})
-	}
-	return attachments, nil
-}
-
-// decodePromptImage decodes ACP image data as standard base64, tolerating the
-// unpadded encoding some clients emit.
-func decodePromptImage(data string) ([]byte, error) {
-	if decoded, err := base64.StdEncoding.DecodeString(data); err == nil {
-		return decoded, nil
-	}
-	return base64.RawStdEncoding.DecodeString(data)
-}
-
-// imageExtension derives a safe file-name suffix from an image MIME type: the
-// subtype without parameters or structured-syntax suffixes ("image/png" ->
-// "png", "image/svg+xml" -> "svg"), else "img".
-func imageExtension(mimeType string) string {
-	subtype := strings.ToLower(strings.TrimSpace(mimeType))
-	if slash := strings.IndexByte(subtype, '/'); slash >= 0 {
-		subtype = subtype[slash+1:]
-	}
-	if plus := strings.IndexByte(subtype, '+'); plus >= 0 {
-		subtype = subtype[:plus]
-	}
-	var builder strings.Builder
-	for _, char := range subtype {
-		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') {
-			builder.WriteRune(char)
-		}
-	}
-	if builder.Len() == 0 {
-		return "img"
-	}
-	return builder.String()
-}
-
-// promptText concatenates the text blocks of a prompt request.
-func promptText(params promptParams) string {
-	var builder strings.Builder
-	for _, block := range promptBlocks(params) {
-		if !strings.EqualFold(strings.TrimSpace(block.Type), "text") {
-			continue
-		}
-		builder.WriteString(block.Text)
-	}
-	return strings.TrimSpace(builder.String())
-}
-
-// assistantText concatenates the assistant message text of a session.
-func assistantText(session contracts.ChatSession) string {
-	var builder strings.Builder
-	for _, message := range session.Messages {
-		if message.Role == contracts.ChatRoleAssistant {
-			builder.WriteString(message.Text)
-		}
-	}
-	return builder.String()
 }
 
 // invalidParams builds a -32602 error.
