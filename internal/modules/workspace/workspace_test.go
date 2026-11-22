@@ -22,6 +22,22 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
+// registryDocument is the on-disk registry shape the persistence assertions
+// decode. The durable document itself is owned by the Rig SDK now; these test
+// types keep the assertions independent of SDK internals.
+type registryDocument struct {
+	Workspaces []workspaceRecord `json:"workspaces"`
+	CurrentID  string            `json:"currentId,omitempty"`
+}
+
+// workspaceRecord is one workspace in the JSON registry.
+type workspaceRecord struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Root      string    `json:"root"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 // testLogger is a goroutine-safe contracts.Logger test double.
 type testLogger struct {
 	mu    sync.Mutex
