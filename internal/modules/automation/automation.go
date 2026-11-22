@@ -171,6 +171,9 @@ type service struct {
 	// store is the durable registry; scheduler owns claim/deliver/settle.
 	store     *rigautomation.Store
 	scheduler *rigautomation.Scheduler
+	// interval is the configured scheduler tick, reused when Retry builds a
+	// replacement scheduler after a lock takeover.
+	interval time.Duration
 
 	// nameSeq numbers generated "自动化 N" names.
 	nameSeq int
@@ -195,6 +198,7 @@ type service struct {
 
 var _ contracts.AutomationService = (*service)(nil)
 var _ contracts.AutomationStatusProvider = (*service)(nil)
+var _ contracts.AutomationRecovery = (*service)(nil)
 
 // newService loads the registry and starts the scheduler loop. settings is
 // optional (nil for embedded/headless use): it only carries the run-session
@@ -242,6 +246,7 @@ func newService(dataDir string, cfg Config, logger contracts.Logger, chat contra
 		return nil, err
 	}
 	service.store = store
+	service.interval = tick
 	service.scheduler = &rigautomation.Scheduler{
 		Store:    store,
 		Now:      func() time.Time { return time.Now().UTC() },
@@ -257,7 +262,7 @@ func newService(dataDir string, cfg Config, logger contracts.Logger, chat contra
 		// Settle runs that were delivered but never completed before the
 		// previous shutdown (the SDK rebuilds its pending set from the durable
 		// records).
-		service.adoptLegacyDeliveredRuns()
+		service.adoptLegacyDeliveredRuns(store)
 		if err := service.scheduler.SettlePending(context.Background()); err != nil && !errors.Is(err, rigautomation.ErrSchedulerClosed) {
 			service.logger.Printf("%s: initialize scheduler: %v", ModuleID, err)
 		}
@@ -298,20 +303,142 @@ func (s *service) Status(ctx context.Context) contracts.AutomationStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.degradedErr != nil {
-		lockedBy := ""
-		if s.path != "" {
-			lockedBy = filepath.Join(filepath.Dir(s.path), rigautomation.LockFileName)
+		if errors.Is(s.degradedErr, rigautomation.ErrLocked) {
+			lockedBy := ""
+			if s.path != "" {
+				lockedBy = filepath.Join(filepath.Dir(s.path), rigautomation.LockFileName)
+			}
+			return contracts.AutomationStatus{
+				Available: false,
+				Reason:    "another instance owns the automation registry",
+				LockedBy:  lockedBy,
+			}
 		}
-		return contracts.AutomationStatus{
-			Available: false,
-			Reason:    "another instance owns the automation registry",
-			LockedBy:  lockedBy,
-		}
+		return contracts.AutomationStatus{Available: false, Reason: s.degradedErr.Error()}
 	}
 	if s.closed {
 		return contracts.AutomationStatus{Available: false, Reason: "automation service is closed"}
 	}
 	return contracts.AutomationStatus{Available: true}
+}
+
+// registry returns the current durable store (it changes after a successful
+// Retry lock takeover).
+func (s *service) registry() *rigautomation.Store {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.store
+}
+
+// Retry implements contracts.AutomationRecovery: while degraded it tries to
+// take over the registry lock again. On success it swaps in a freshly opened
+// locked store and a new scheduler, settles runs delivered by the previous
+// owner, subscribes to chat changes and starts the ticker. On lock contention
+// it stays degraded and reports contracts.ErrAutomationLocked.
+func (s *service) Retry(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s == nil {
+		return ErrClosed
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return ErrClosed
+	}
+	if s.degradedErr == nil {
+		// Already available: Retry is a no-op.
+		s.mu.Unlock()
+		return nil
+	}
+	path := s.path
+	interval := s.interval
+	s.mu.Unlock()
+
+	store, err := rigautomation.OpenFileLocked(path)
+	if err != nil {
+		if errors.Is(err, rigautomation.ErrLocked) {
+			s.mu.Lock()
+			if s.degradedErr != nil {
+				s.degradedErr = err
+			}
+			s.mu.Unlock()
+			return fmt.Errorf("%w: %v", contracts.ErrAutomationLocked, err)
+		}
+		s.mu.Lock()
+		if s.degradedErr != nil {
+			s.degradedErr = err
+		}
+		s.mu.Unlock()
+		return err
+	}
+	scheduler := &rigautomation.Scheduler{
+		Store:    store,
+		Now:      func() time.Time { return time.Now().UTC() },
+		Deliver:  s.deliver,
+		Settle:   s.settle,
+		Next:     s.nextRun,
+		Interval: interval,
+		Logger: func(format string, args ...any) {
+			s.logger.Printf(format, args...)
+		},
+	}
+	// Settle whatever the previous owner delivered while this instance was
+	// degraded (legacy records need their delivery id adopted first).
+	s.adoptLegacyDeliveredRuns(store)
+	if err := scheduler.SettlePending(ctx); err != nil && !errors.Is(err, rigautomation.ErrSchedulerClosed) {
+		s.logger.Printf("%s: retry: settle pending runs: %v", ModuleID, err)
+	}
+
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		_ = store.Close()
+		return ErrClosed
+	}
+	oldStore := s.store
+	s.store = store
+	s.scheduler = scheduler
+	s.degradedErr = nil
+	needSubscribe := s.chatUnsub == nil
+	s.mu.Unlock()
+	if oldStore != nil {
+		// The degraded store was opened without the lock; closing it only
+		// releases a lock if one was lazily acquired (normally none).
+		_ = oldStore.Close()
+	}
+	if needSubscribe {
+		if unsubscribe, err := s.chat.Subscribe(s.onChatChange); err != nil {
+			s.logger.Printf("%s: retry: subscribe chat session states: %v", ModuleID, err)
+		} else {
+			s.mu.Lock()
+			if s.closed {
+				s.mu.Unlock()
+				unsubscribe()
+			} else {
+				s.chatUnsub = unsubscribe
+				s.mu.Unlock()
+			}
+		}
+	}
+	if err := scheduler.Start(); err != nil {
+		s.mu.Lock()
+		s.degradedErr = err
+		s.mu.Unlock()
+		// Do not sit degraded while holding the registry lock: release it so
+		// another instance (or the next Retry) can take over.
+		_ = store.Close()
+		s.logger.Printf("%s: retry: start scheduler: %v", ModuleID, err)
+		s.notify()
+		return err
+	}
+	s.logger.Printf("%s: automation registry recovered; scheduler started", ModuleID)
+	s.notify()
+	return nil
 }
 
 // resolveRegistryPath resolves Config.Path against the product data directory.
@@ -360,18 +487,20 @@ func (s *service) Close() {
 		s.closed = true
 		unsubscribe := s.chatUnsub
 		s.chatUnsub = nil
+		scheduler := s.scheduler
+		store := s.store
 		s.mu.Unlock()
 		if unsubscribe != nil {
 			unsubscribe()
 		}
-		if s.scheduler != nil {
-			s.scheduler.Stop()
+		if scheduler != nil {
+			scheduler.Stop()
 		}
 		s.runs.Wait()
-		if s.store != nil {
+		if store != nil {
 			// Release the cross-process registry lock so the next instance can
 			// take ownership (tests and host restarts rely on this).
-			if err := s.store.Close(); err != nil {
+			if err := store.Close(); err != nil {
 				s.logger.Printf("%s: release automation registry lock: %v", ModuleID, err)
 			}
 		}
@@ -386,7 +515,7 @@ func (s *service) List(ctx context.Context) ([]contracts.AutomationTask, error) 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	cores, err := s.store.List()
+	cores, err := s.registry().List()
 	if err != nil {
 		return nil, err
 	}
@@ -403,10 +532,11 @@ func (s *service) Create(ctx context.Context, task contracts.AutomationTask) (co
 		return contracts.AutomationTask{}, err
 	}
 	now := time.Now().UTC()
+	store := s.registry()
 	id := strings.TrimSpace(task.ID)
 	if id == "" {
 		id = s.newTaskID()
-	} else if _, ok := s.store.Get(id); ok {
+	} else if _, ok := store.Get(id); ok {
 		return contracts.AutomationTask{}, fmt.Errorf("%s: task %q already exists", ModuleID, id)
 	}
 	name := strings.TrimSpace(task.Name)
@@ -431,7 +561,7 @@ func (s *service) Create(ctx context.Context, task contracts.AutomationTask) (co
 		NextRun:   nextRun,
 	}
 	applyHostFields(&core, task)
-	created, err := s.store.Create(core)
+	created, err := store.Create(core)
 	if err != nil {
 		return contracts.AutomationTask{}, err
 	}
@@ -448,7 +578,8 @@ func (s *service) Update(ctx context.Context, task contracts.AutomationTask) (co
 	if id == "" {
 		return contracts.AutomationTask{}, fmt.Errorf("%s: task id is required", ModuleID)
 	}
-	core, ok := s.store.Get(id)
+	store := s.registry()
+	core, ok := store.Get(id)
 	if !ok {
 		return contracts.AutomationTask{}, fmt.Errorf("%w: %q", ErrTaskNotFound, id)
 	}
@@ -489,7 +620,7 @@ func (s *service) Update(ctx context.Context, task contracts.AutomationTask) (co
 	core.UpdatedAt = updated.UpdatedAt
 	core.LastError = updated.LastError
 	applyHostFields(&core, updated)
-	stored, err := s.store.Update(core)
+	stored, err := store.Update(core)
 	if err != nil {
 		if errors.Is(err, rigautomation.ErrTaskNotFound) {
 			return contracts.AutomationTask{}, fmt.Errorf("%w: %q", ErrTaskNotFound, id)
@@ -506,10 +637,11 @@ func (s *service) Delete(ctx context.Context, id string) error {
 		return err
 	}
 	id = strings.TrimSpace(id)
-	if _, ok := s.store.Get(id); !ok {
+	store := s.registry()
+	if _, ok := store.Get(id); !ok {
 		return nil
 	}
-	if err := s.store.Delete(id); err != nil {
+	if err := store.Delete(id); err != nil {
 		return err
 	}
 	s.notify()
@@ -538,12 +670,16 @@ func (s *service) RunNow(ctx context.Context, id string) error {
 		s.mu.Unlock()
 		return fmt.Errorf("%w: %q", ErrTaskNotFound, id)
 	}
+	scheduler := s.scheduler
 	// Track accepted runs so Close waits for their registry writes (BE-07).
 	s.runs.Add(1)
 	s.mu.Unlock()
 	defer s.runs.Done()
+	if scheduler == nil {
+		return fmt.Errorf("%w: scheduler is unavailable", ErrSchedulerDisabled)
+	}
 
-	err := s.scheduler.RunNow(ctx, id)
+	err := scheduler.RunNow(ctx, id)
 	switch {
 	case errors.Is(err, rigautomation.ErrTaskNotFound):
 		return fmt.Errorf("%w: %q", ErrTaskNotFound, id)
@@ -685,8 +821,8 @@ func contractRun(run rigautomation.Run) contracts.AutomationRunRecord {
 // identifies its conversation by "sessionId" (or the legacy summary) but has no
 // "deliveryId", which the SDK needs to settle it. Derive the delivery id once so
 // the startup settlement pass picks the run up.
-func (s *service) adoptLegacyDeliveredRuns() {
-	cores, err := s.store.List()
+func (s *service) adoptLegacyDeliveredRuns(store *rigautomation.Store) {
+	cores, err := store.List()
 	if err != nil {
 		return
 	}
@@ -713,7 +849,7 @@ func (s *service) adoptLegacyDeliveredRuns() {
 		if !changed {
 			continue
 		}
-		if _, err := s.store.Update(core); err != nil {
+		if _, err := store.Update(core); err != nil {
 			s.logger.Printf("%s: adopt legacy delivered run of %s: %v", ModuleID, core.ID, err)
 		}
 	}
@@ -871,13 +1007,14 @@ func (s *service) rememberSession(taskID, sessionID string) {
 	if sessionID == "" {
 		return
 	}
-	current, ok := s.store.Get(taskID)
+	store := s.registry()
+	current, ok := store.Get(taskID)
 	if !ok {
 		return
 	}
 	setHostString(&current, hostKeySessionID, sessionID)
 	current.UpdatedAt = time.Now().UTC()
-	if _, err := s.store.Update(current); err != nil {
+	if _, err := store.Update(current); err != nil {
 		s.logger.Printf("%s: run %s: remember session %s: %v", ModuleID, taskID, sessionID, err)
 	}
 }
@@ -934,11 +1071,16 @@ func (s *service) onChatChange(sessionID string) {
 		s.mu.Unlock()
 		return
 	}
+	scheduler := s.scheduler
 	s.runs.Add(1)
 	s.mu.Unlock()
+	if scheduler == nil {
+		s.runs.Done()
+		return
+	}
 	go func() {
 		defer s.runs.Done()
-		if err := s.scheduler.SettlePending(context.Background()); err != nil && !errors.Is(err, rigautomation.ErrSchedulerClosed) {
+		if err := scheduler.SettlePending(context.Background()); err != nil && !errors.Is(err, rigautomation.ErrSchedulerClosed) {
 			s.logger.Printf("%s: settle on chat change: %v", ModuleID, err)
 		}
 	}()

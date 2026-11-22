@@ -6,6 +6,7 @@ package automation
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -65,5 +66,56 @@ func TestAutomationStatusDegradedWhenLocked(t *testing.T) {
 	}
 	if status := owner.Status(ctx); !status.Available {
 		t.Fatalf("owner status changed to %+v", status)
+	}
+}
+
+func TestAutomationRetryTakesOverAfterOwnerCloses(t *testing.T) {
+	dir := t.TempDir()
+	owner := newTestService(t, dir, Config{TickMs: 3_600_000}, newFakeChat())
+	chat := newFakeChat()
+	second := newTestService(t, dir, Config{TickMs: 10}, chat)
+	ctx := context.Background()
+
+	// While the owner is alive the retry keeps the degraded state.
+	if err := second.Retry(ctx); !errors.Is(err, contracts.ErrAutomationLocked) {
+		t.Fatalf("Retry while locked = %v, want contracts.ErrAutomationLocked", err)
+	}
+	if status := second.Status(ctx); status.Available {
+		t.Fatalf("status after failed retry = %+v, want degraded", status)
+	}
+
+	// Releasing the owner lets the degraded instance take over.
+	owner.Close()
+	if err := second.Retry(ctx); err != nil {
+		t.Fatalf("Retry after owner close: %v", err)
+	}
+	status := second.Status(ctx)
+	if !status.Available || status.Reason != "" || status.LockedBy != "" {
+		t.Fatalf("status after takeover = %+v, want available", status)
+	}
+	// The restarted scheduler delivers a manual run.
+	created, err := second.Create(ctx, contracts.AutomationTask{
+		Name: "after-retry", Prompt: "run", Schedule: "every 3600s", Enabled: false,
+	})
+	if err != nil {
+		t.Fatalf("Create after takeover: %v", err)
+	}
+	if err := second.RunNow(ctx, created.ID); err != nil {
+		t.Fatalf("RunNow after takeover: %v", err)
+	}
+	if call := waitCall(t, chat); call.Prompt != "run" {
+		t.Fatalf("delivered prompt = %q, want run", call.Prompt)
+	}
+	// Retry is idempotent once available.
+	if err := second.Retry(ctx); err != nil {
+		t.Fatalf("Retry when already available: %v", err)
+	}
+}
+
+func TestAutomationRetryAfterCloseIsRejected(t *testing.T) {
+	service := newTestService(t, t.TempDir(), Config{TickMs: 3_600_000}, newFakeChat())
+	service.Close()
+	if err := service.Retry(context.Background()); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Retry after Close = %v, want ErrClosed", err)
 	}
 }

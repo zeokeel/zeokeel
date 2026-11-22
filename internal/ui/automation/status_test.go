@@ -7,6 +7,7 @@ package automation_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -22,6 +23,21 @@ type statusAutomation struct {
 
 func (s *statusAutomation) Status(context.Context) contracts.AutomationStatus {
 	return s.status
+}
+
+// recoveringAutomation adds the optional recovery half: Retry is scripted by
+// the test (default: the lock became free and the backend is available).
+type recoveringAutomation struct {
+	*statusAutomation
+	retry func(context.Context) error
+}
+
+func (r *recoveringAutomation) Retry(ctx context.Context) error {
+	if r.retry != nil {
+		return r.retry(ctx)
+	}
+	r.status.Available = true
+	return nil
 }
 
 func statusTask() contracts.AutomationTask {
@@ -50,7 +66,7 @@ func TestDegradedStatusShowsLocalizedBanner(t *testing.T) {
 	h.assertTexts(tester, "Nightly check", "已降级",
 		"计划任务已暂停，立即运行也不可用；本窗口仍可查看和编辑任务。",
 		"锁文件："+lockPath)
-	h.assertNoTexts(tester, "Degraded", "Lock file:")
+	h.assertNoTexts(tester, "Degraded", "Lock file:", "重试", "Retry")
 
 	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
@@ -94,4 +110,68 @@ func TestDegradedStatusWithoutLockPathOmitsIt(t *testing.T) {
 
 	h.assertTexts(tester, "已降级", "计划任务已暂停")
 	h.assertNoTexts(tester, "锁文件：")
+}
+
+func TestDegradedStatusRetryButtonSucceeds(t *testing.T) {
+	service := &recoveringAutomation{statusAutomation: &statusAutomation{
+		fakeAutomation: newFakeAutomation(statusTask()),
+		status: contracts.AutomationStatus{
+			Available: false,
+			Reason:    "another instance owns the automation registry",
+			LockedBy:  "/tmp/zeokeel-data/.automations.lock",
+		},
+	}}
+	h := newHarness(t, service, automation.Config{})
+	tester := h.tester()
+
+	h.assertTexts(tester, "已降级", "重试", "Nightly check")
+	h.click(tester, "重试")
+	h.assertTexts(tester, "Nightly check")
+	h.assertNoTexts(tester, "已降级", "重试", "锁文件：")
+	if service.status.Available != true {
+		t.Fatal("Retry did not take over the backend")
+	}
+}
+
+func TestDegradedStatusRetryFailureKeepsBanner(t *testing.T) {
+	service := &recoveringAutomation{
+		statusAutomation: &statusAutomation{
+			fakeAutomation: newFakeAutomation(statusTask()),
+			status: contracts.AutomationStatus{
+				Available: false,
+				Reason:    "another instance owns the automation registry",
+				LockedBy:  "/tmp/zeokeel-data/.automations.lock",
+			},
+		},
+		retry: func(context.Context) error {
+			return fmt.Errorf("%w: another instance owns the registry lock", contracts.ErrAutomationLocked)
+		},
+	}
+	h := newHarness(t, service, automation.Config{})
+	tester := h.tester()
+
+	h.click(tester, "重试")
+	h.assertTexts(tester, "已降级", "重试",
+		"重试失败：另一个实例仍在运行，请稍后再试。",
+		"锁文件：/tmp/zeokeel-data/.automations.lock")
+
+	h.uiRoot.Locale().SetLanguage("en")
+	tester.Frame()
+	h.assertTexts(tester, "Degraded", "Retry")
+	h.click(tester, "Retry")
+	h.assertTexts(tester, "Degraded", "Retry",
+		"Retry failed: another instance still owns the automation registry; try again shortly.")
+	h.assertNoTexts(tester, "重试失败：")
+}
+
+func TestDegradedStatusWithoutRecoveryShowsNoRetryButton(t *testing.T) {
+	service := &statusAutomation{
+		fakeAutomation: newFakeAutomation(statusTask()),
+		status:         contracts.AutomationStatus{Available: false, Reason: "scheduler unavailable"},
+	}
+	h := newHarness(t, service, automation.Config{})
+	tester := h.tester()
+
+	h.assertTexts(tester, "已降级")
+	h.assertNoTexts(tester, "重试", "Retry")
 }

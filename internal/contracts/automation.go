@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -242,6 +243,21 @@ type AutomationStatusProvider interface {
 	// and safe to call from any goroutine.
 	Status(ctx context.Context) AutomationStatus
 }
+
+// AutomationRecovery is the optional recovery half of the automation backend: it
+// lets a degraded instance try to take over the registry lock again (for
+// example after the owning window closed).
+type AutomationRecovery interface {
+	// Retry attempts to acquire the registry and start the scheduler. It returns
+	// nil when the backend is available (already healthy or recovered),
+	// ErrAutomationLocked while another instance still owns the registry, and
+	// other store/start failures as-is.
+	Retry(ctx context.Context) error
+}
+
+// ErrAutomationLocked reports that another instance still owns the automation
+// registry, so this instance cannot take over the scheduler.
+var ErrAutomationLocked = errors.New("automation: another instance owns the registry")
 
 // AutomationScheduleKind is the shape of a parsed automation schedule.
 type AutomationScheduleKind int
