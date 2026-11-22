@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **MCP/automation/ACP/LSP/team 上移 SDK**（2026-11-22）：MCP server supervision（`rig/tools/mcp/manager`）、automation 持久调度（`rig/session/automation`）、ACP server（`rig/acp/server`）、LSP 生命周期（`rig/tools/lsp/host`）、team 编排（`rig/agent/team`）；产品保留设置/UI/投递/子会话持久化与契约映射。依赖 `rig v0.33.1`。
+
 - **memory v2 UI 收尾**（2026-11-22）：记忆 tab 按 session 的 WorkspaceID 选 store（不再误用当前项目）；详情支持编辑与置顶/取消置顶。
 - **durable 任务板上移 SDK**（2026-11-22）：使用 `rig/tools/team/taskstore` 的原子持久化、按会话文档、id/顺序重放、tombstone 与 v1 迁移；产品保留 v1 journal、缓存优先读模型和工具分发。依赖 `rig v0.32.0`。
 
