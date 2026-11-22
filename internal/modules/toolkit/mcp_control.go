@@ -5,6 +5,12 @@ package toolkit
 // the MCP half without restarting the app. The shared registry (hosttools.KeyRegistry)
 // and the Plugins read model keep their pointers; only the connections and their
 // tool registrations are replaced.
+//
+// Connection supervision (startup fan-out, per-server isolation, tool binding,
+// transparent reconnect and close) is the Rig SDK tools/mcp/manager; this file
+// owns the product around it: settings merge and disabled filters, the OAuth
+// token adapter/refresh loop, the Plugins status read model, the per-tool
+// enabled catalog and the workspace mcp.json rows.
 
 import (
 	"context"
@@ -17,11 +23,26 @@ import (
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	rigtool "github.com/zeokeel/zeokeel-rig/tools"
+	"github.com/zeokeel/zeokeel-rig/tools/mcp"
+	"github.com/zeokeel/zeokeel-rig/tools/mcp/manager"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// mcpController owns the current MCP runtime and can rebuild it from settings.
+// mcpRow is the product-side state of one configured server: its plan/Plugins
+// index, the manager identity it was started under and the number of its
+// tools/list tools that actually reached the registry.
+type mcpRow struct {
+	index      int
+	plan       mcpStartPlan
+	managerKey string
+	client     *mcp.Client
+	tools      int
+	startErr   error
+}
+
+// mcpController owns the current manager.Manager and can rebuild it from
+// settings.
 type mcpController struct {
 	logf      func(string, ...any)
 	registry  *rigtool.Registry
@@ -32,7 +53,10 @@ type mcpController struct {
 	load      func() ([]MCPServer, map[string]bool)
 
 	mu          sync.Mutex
-	runtime     *mcpRuntime
+	manager     *manager.Manager
+	plans       []mcpStartPlan
+	rows        []*mcpRow
+	registered  []string
 	closed      bool
 	refreshStop chan struct{}
 	closeOnce   sync.Once
@@ -51,7 +75,7 @@ func newMCPController(logf func(string, ...any), registry *rigtool.Registry,
 		settings: settings, maxOutput: maxOutput, load: load, refreshStop: make(chan struct{}),
 	}
 	// The adapter is stable across reloads; the callback resolves the current
-	// runtime under the controller lock.
+	// manager under the controller lock.
 	auth.onAuthorized = func(name string) { controller.reconnectByName(name) }
 	go controller.refreshLoop()
 	return controller
@@ -72,32 +96,33 @@ func (c *mcpController) Tools(server string) []contracts.MCPTool {
 		return nil
 	}
 	c.mu.Lock()
-	runtime := c.runtime
-	c.mu.Unlock()
-	if runtime == nil {
-		return nil
+	managerNow := c.manager
+	var target *mcpRow
+	for _, row := range c.rows {
+		if strings.EqualFold(strings.TrimSpace(row.plan.server.Name), server) {
+			target = row
+			break
+		}
 	}
 	disabled := loadDisabledTools(c.settings, c.settings != nil, c.logf)
-	runtime.mu.Lock()
-	servers := append([]*managedMCPServer(nil), runtime.servers...)
-	runtime.mu.Unlock()
-	for _, managed := range servers {
-		if !strings.EqualFold(strings.TrimSpace(managed.plan.server.Name), server) {
+	c.mu.Unlock()
+	if managerNow == nil || target == nil || target.client == nil {
+		return nil
+	}
+	prefix := mcpToolPrefix(target.client)
+	var tools []contracts.MCPTool
+	for _, tool := range managerNow.Tools() {
+		name := tool.Name()
+		if !strings.HasPrefix(name, prefix) {
 			continue
 		}
-		managed.mu.Lock()
-		tools := make([]contracts.MCPTool, 0, len(managed.inner))
-		for name, tool := range managed.inner {
-			tools = append(tools, contracts.MCPTool{
-				Name: name, Description: strings.TrimSpace(tool.Description()),
-				Enabled: !disabled[name],
-			})
-		}
-		managed.mu.Unlock()
-		sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
-		return tools
+		tools = append(tools, contracts.MCPTool{
+			Name: name, Description: strings.TrimSpace(tool.Description()),
+			Enabled: !disabled[name],
+		})
 	}
-	return nil
+	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
+	return tools
 }
 
 // SetToolEnabled implements contracts.MCPToolCatalog: persist the tool into
@@ -164,10 +189,7 @@ func (c *mcpController) reload(ctx context.Context) ([]contracts.MCPPlugin, erro
 
 	// Drop the previous connections and their registry entries first: a stale
 	// tool would otherwise shadow the rebuilt one.
-	if c.runtime != nil {
-		c.runtime.stop(c.registry)
-		c.runtime = nil
-	}
+	c.teardownLocked()
 	c.auth.close()
 
 	// OAuth clients must exist before startup for OAuth rows, including rows
@@ -181,71 +203,323 @@ func (c *mcpController) reload(ctx context.Context) ([]contracts.MCPPlugin, erro
 		}
 	}
 
-	runtime := newMCPRuntime(c.logf, disabled, c.maxOutput, c.auth)
 	plans := prepareMCPServerPlans(servers, c.logf)
-	outcomes := runtime.startMCPServers(ctx, plans)
-	entries := make([]pluginEntry, 0, len(plans))
-	seen := make(map[string]bool)
+	disabledNames := make([]string, 0, len(disabled))
+	for name := range disabled {
+		disabledNames = append(disabledNames, name)
+	}
+	sort.Strings(disabledNames)
+
+	managerConfig := manager.Config{
+		StartupTimeout: mcpStartupOverallTimeout,
+		MaxOutputBytes: c.maxOutput,
+		Resources:      true,
+		Logger:         c.logf,
+	}
+	usedNames := make(map[string]int, len(plans))
+	rows := make([]*mcpRow, 0, len(plans))
 	for index, plan := range plans {
+		if plan.invalid {
+			continue
+		}
+		row := &mcpRow{
+			index:      index,
+			plan:       plan,
+			managerKey: mcpManagerKey(plan.server, index, usedNames),
+		}
+		clientConfig, err := mcpClientConfig(plan.server, c.auth)
+		if err != nil {
+			row.startErr = err
+			rows = append(rows, row)
+			continue
+		}
+		managerConfig.Servers = append(managerConfig.Servers, manager.Server{
+			Name:          row.managerKey,
+			Config:        clientConfig,
+			DisabledTools: disabledNames,
+		})
+		rows = append(rows, row)
+	}
+
+	mgr := manager.New(managerConfig)
+	c.manager = mgr
+	if err := mgr.Start(ctx); err != nil {
+		_ = mgr.Close()
+		c.manager = nil
+		c.plans = plans
+		c.rows = rows
+		return c.plugins.MCP(), err
+	}
+	c.plans = plans
+	c.rows = rows
+	c.syncRuntimeLocked()
+
+	entries := c.buildEntriesLocked()
+	c.bindPluginsLocked()
+	c.plugins.replace(entries)
+	for _, row := range c.rows {
+		if row.startErr != nil {
+			c.logf("[toolkit] mcp %q: connect failed: %v", pluginDisplayName(row.plan.server.Name, nil), row.startErr)
+			continue
+		}
+		if row.client != nil {
+			c.logf("[toolkit] mcp %q connected: %d tool(s), protocol %s",
+				pluginDisplayName(row.plan.server.Name, row.client), row.tools, row.client.ProtocolVersion())
+		}
+	}
+	return c.plugins.MCP(), nil
+}
+
+// teardownLocked unregisters the current manager's tools and closes it. The
+// caller holds the controller lock.
+func (c *mcpController) teardownLocked() {
+	for _, name := range c.registered {
+		c.registry.Unregister(name)
+	}
+	c.registered = nil
+	if c.manager != nil {
+		_ = c.manager.Close()
+		c.manager = nil
+	}
+	c.plans = nil
+	c.rows = nil
+}
+
+// syncRuntimeLocked reconciles the registry with the current manager's tools and
+// recomputes each row's registered regular-tool count. Proxies keep working
+// across a transparent reconnect; this only adds/removes tools whose set
+// changed and refreshes the per-row client pointers. The caller holds the lock.
+func (c *mcpController) syncRuntimeLocked() {
+	if c.manager == nil {
+		return
+	}
+	clients := c.manager.Clients()
+	errs := c.manager.Errors()
+	for _, row := range c.rows {
+		if client := clients[row.managerKey]; client != nil {
+			row.client = client
+			row.startErr = nil
+			continue
+		}
+		if err := errs[row.managerKey]; err != nil {
+			row.startErr = err
+		}
+	}
+	tools := c.manager.Tools()
+	owners := make([]*mcpRow, len(tools))
+	current := make(map[string]bool, len(tools))
+	for index, tool := range tools {
+		name := tool.Name()
+		current[name] = true
+		owners[index] = c.ownerOfToolLocked(name)
+	}
+	for _, name := range c.registered {
+		if !current[name] {
+			c.registry.Unregister(name)
+		}
+	}
+	existing := make(map[string]bool, len(c.registered))
+	for _, name := range c.registered {
+		existing[name] = true
+	}
+	registered := make([]string, 0, len(tools))
+	counts := make(map[*mcpRow]int, len(c.rows))
+	for index, tool := range tools {
+		name := tool.Name()
+		row := owners[index]
+		if !existing[name] {
+			if err := c.registry.Register(tool); err != nil {
+				// A registry-level collision is not a model-visible tool: do not
+				// track or count it (the Plugins row counts registered tools).
+				c.logf("[toolkit] mcp: skip tool %q: %v", name, err)
+				continue
+			}
+		}
+		registered = append(registered, name)
+		if row != nil && !c.isResourceToolLocked(row, name) {
+			counts[row]++
+		}
+	}
+	c.registered = registered
+	for _, row := range c.rows {
+		row.tools = counts[row]
+	}
+}
+
+// ownerOfToolLocked attributes one model-visible tool to the first configured
+// row whose server namespace matches it (duplicate names keep the first row).
+func (c *mcpController) ownerOfToolLocked(name string) *mcpRow {
+	for _, row := range c.rows {
+		if row.client == nil {
+			continue
+		}
+		if strings.HasPrefix(name, mcpToolPrefix(row.client)) {
+			return row
+		}
+	}
+	return nil
+}
+
+// isResourceToolLocked reports whether name is one of the row's resource/prompt
+// helpers (the Plugins count only includes tools/list tools).
+func (c *mcpController) isResourceToolLocked(row *mcpRow, name string) bool {
+	if row == nil || row.client == nil {
+		return false
+	}
+	for _, resourceName := range mcp.ResourceToolNames(row.client, mcp.DefaultPrefix) {
+		if resourceName == name {
+			return true
+		}
+	}
+	return false
+}
+
+// mcpToolPrefix is the model-visible namespace of one connection's tools.
+func mcpToolPrefix(client *mcp.Client) string {
+	if client == nil {
+		return ""
+	}
+	return mcp.DefaultPrefix + mcp.SanitizeName(client.ServerName()) + "__"
+}
+
+// buildEntriesLocked freezes the Plugins read model for the current manager.
+func (c *mcpController) buildEntriesLocked() []pluginEntry {
+	byIndex := make(map[int]*mcpRow, len(c.rows))
+	for _, row := range c.rows {
+		byIndex[row.index] = row
+	}
+	entries := make([]pluginEntry, 0, len(c.plans))
+	for index, plan := range c.plans {
 		entry := plan.entry
 		if plan.invalid {
 			entries = append(entries, entry)
 			continue
 		}
-		managed := runtime.registerServer(plan, index)
-		outcome := outcomes[index]
-		if outcome.err != nil {
-			entry.plugin.Status = statusConnectFailed + outcome.err.Error()
-			if authStatus := c.auth.failureStatus(plan.server); authStatus != "" {
+		row := byIndex[index]
+		if row == nil || row.client == nil {
+			err := errors.New("connection unavailable")
+			if row != nil && row.startErr != nil {
+				err = row.startErr
+			}
+			entry.plugin.Status = statusConnectFailed + err.Error()
+			if authStatus := c.auth.failureStatus(rowPlanServer(row)); authStatus != "" {
 				entry.plugin.Status = authStatus
 			}
 			entries = append(entries, entry)
-			c.logf("[toolkit] mcp %q: connect failed: %v", entry.plugin.Name, outcome.err)
 			continue
 		}
-		entry.client = outcome.client
-		entry.plugin.Name = pluginDisplayName(plan.server.Name, outcome.client)
-		entry.plugin.ServerName = outcome.serverName
-		entry.plugin.Version = outcome.serverVer
-		entry.plugin.Protocol = outcome.protocolVer
+		entry.client = row.client
+		entry.plugin.Name = pluginDisplayName(plan.server.Name, row.client)
+		entry.plugin.ServerName = row.client.ServerName()
+		entry.plugin.Version = row.client.ServerVersion()
+		entry.plugin.Protocol = row.client.ProtocolVersion()
 		entry.plugin.Status = statusConnected
-		wrapped, _ := runtime.attachOutcome(managed, outcome, seen)
-		registered := 0
-		for _, tool := range wrapped {
-			if err := c.registry.Register(tool); err != nil {
-				c.logf("[toolkit] mcp %q: skip tool %q: %v", entry.plugin.Name, tool.Name(), err)
-				managed.mu.Lock()
-				delete(managed.registered, tool.Name())
-				delete(managed.inner, tool.Name())
-				managed.mu.Unlock()
-				continue
-			}
-			if outcome.regular[tool.Name()] {
-				registered++
-			}
-		}
-		managed.mu.Lock()
-		managed.regularRegistered = registered
-		managed.mu.Unlock()
-		entry.plugin.Tools = registered
+		entry.plugin.Tools = row.tools
 		entries = append(entries, entry)
-		c.logf("[toolkit] mcp %q connected: %d tool(s), protocol %s",
-			entry.plugin.Name, registered, entry.plugin.Protocol)
 	}
-	runtime.bindRegistry(c.registry)
-	runtime.bindPlugins(c.plugins)
-	c.plugins.replace(entries)
-	c.runtime = runtime
-	return c.plugins.MCP(), nil
+	return entries
 }
 
-// reconnectByName rebuilds one connection after an OAuth authorization.
-func (c *mcpController) reconnectByName(name string) {
+// rowPlanServer tolerates a missing row when formatting an auth failure status.
+func rowPlanServer(row *mcpRow) MCPServer {
+	if row == nil {
+		return MCPServer{}
+	}
+	return row.plan.server
+}
+
+// bindPluginsLocked connects the Plugins read model's Reconnect/Refresh hooks to
+// the current manager.
+func (c *mcpController) bindPluginsLocked() {
+	c.plugins.bindReconnect(func(index int) bool {
+		return c.reconnectPlugin(index)
+	})
+	c.plugins.bindToolCounter(func(index int) (int, bool) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		for _, row := range c.rows {
+			if row.index == index {
+				return row.tools, true
+			}
+		}
+		return 0, false
+	})
+}
+
+// rowByPluginIndexLocked returns the row behind one Plugins index.
+func (c *mcpController) rowByPluginIndexLocked(index int) *mcpRow {
+	for _, row := range c.rows {
+		if row.index == index {
+			return row
+		}
+	}
+	return nil
+}
+
+// reconnectPlugin rebuilds one Plugins row's connection and refreshes its status
+// and tool registrations. It reports whether the row is usable again.
+func (c *mcpController) reconnectPlugin(index int) bool {
 	c.mu.Lock()
-	runtime := c.runtime
+	if c.closed || c.manager == nil {
+		c.mu.Unlock()
+		return false
+	}
+	row := c.rowByPluginIndexLocked(index)
+	if row == nil {
+		c.mu.Unlock()
+		return false
+	}
+	mgr := c.manager
+	key := row.managerKey
 	c.mu.Unlock()
-	if runtime != nil {
-		runtime.reconnectByName(name)
+
+	ctx, cancel := context.WithTimeout(context.Background(), mcpStartupOverallTimeout)
+	defer cancel()
+	err := mgr.Reconnect(ctx, key)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// A reload that landed during the handshake owns the new manager; never
+	// write this stale result into its read model.
+	if c.manager != mgr || c.closed {
+		return false
+	}
+	row = c.rowByPluginIndexLocked(index)
+	if row == nil {
+		return false
+	}
+	if err != nil {
+		status := statusConnectFailed + err.Error()
+		if authStatus := c.auth.failureStatus(row.plan.server); authStatus != "" {
+			status = authStatus
+		}
+		c.plugins.setStatus(index, status)
+		c.logf("[toolkit] mcp %q: reconnect failed: %v", pluginDisplayName(row.plan.server.Name, nil), err)
+		return false
+	}
+	c.syncRuntimeLocked()
+	c.plugins.setConnected(index, row.client, statusConnected, row.tools)
+	return true
+}
+
+// reconnectByName rebuilds the connection whose configured name matches (the
+// OAuth adapter calls it after a completed authorization).
+func (c *mcpController) reconnectByName(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	c.mu.Lock()
+	var target *mcpRow
+	for _, row := range c.rows {
+		if strings.EqualFold(strings.TrimSpace(row.plan.server.Name), name) {
+			target = row
+			break
+		}
+	}
+	c.mu.Unlock()
+	if target != nil {
+		_ = c.reconnectPlugin(target.index)
 	}
 }
 
@@ -272,7 +546,7 @@ func (c *mcpController) refreshLoop() {
 	}
 }
 
-// close releases the current runtime and stops the refresh loop (module unload).
+// close releases the current manager and stops the refresh loop (module unload).
 func (c *mcpController) close() {
 	c.mu.Lock()
 	if c.closed {
@@ -280,13 +554,17 @@ func (c *mcpController) close() {
 		return
 	}
 	c.closed = true
-	runtime := c.runtime
-	c.runtime = nil
+	mgr := c.manager
+	c.manager = nil
+	c.plans = nil
+	c.rows = nil
+	c.registered = nil
 	c.mu.Unlock()
 	c.closeOnce.Do(func() { close(c.refreshStop) })
-	if runtime != nil {
-		runtime.close()
+	if mgr != nil {
+		_ = mgr.Close()
 	}
+	c.auth.close()
 }
 
 // loadMCPServers rebuilds the merged server list from the assembly, settings,

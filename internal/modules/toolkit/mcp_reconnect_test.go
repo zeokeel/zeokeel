@@ -7,7 +7,6 @@ package toolkit
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,7 +20,6 @@ import (
 	"testing"
 
 	rig "github.com/zeokeel/zeokeel-rig"
-	"github.com/zeokeel/zeokeel-rig/tools/mcp"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -211,27 +209,5 @@ func TestToolkitMCPStdioRestartsAfterProcessExit(t *testing.T) {
 	}
 	if status := plugins.MCP()[0].Status; !strings.Contains(status, "已连接") {
 		t.Fatalf("plugin status after stdio restart = %q, want 已连接", status)
-	}
-}
-
-// TestIsRetryableMCPError pins which transport errors trigger a reconnect.
-func TestIsRetryableMCPError(t *testing.T) {
-	cases := []struct {
-		err  error
-		want bool
-	}{
-		{nil, false},
-		{errors.New("mcp: unknown tool"), false},
-		{mcp.ErrClosed, true},
-		{mcp.ErrSessionExpired, true},
-		{errors.Join(errors.New("context"), mcp.ErrSessionExpired), true},
-		{errors.New("mcp: server process exited: exit status 1"), true},
-		{errors.New("mcp: server closed its stdout"), true},
-		{errors.New("mcp: write to server: broken pipe"), true},
-	}
-	for _, tc := range cases {
-		if got := isRetryableMCPError(tc.err); got != tc.want {
-			t.Fatalf("isRetryableMCPError(%v) = %v, want %v", tc.err, got, tc.want)
-		}
 	}
 }
