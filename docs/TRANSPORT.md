@@ -287,6 +287,8 @@ SIGINT/SIGTERM（signals_unix.go:11）
 
 - `params`：字段名来自各 `xxxParams` struct 的 **json tag**；**不带 `,omitempty` = 必填**
   （handler 会拒绝空值的那一类）。所以"必填"不是另写一份清单，而是 tag 本身的事实。
+  **副作用（调用方须知）**：可空值字段会被记为**可选**——`settings.set` 的 `value` 就是这样
+  （空串 = 清除该行，服务端照写不误）。空值代表什么由调用方决定，服务端不会拒绝它。
 - `capabilities.static` 与本节上表**同源**（`serverCapabilities`），`conditional[].when` 是
   **机器可读标记**（`KeyContext` / `KeyTaskBoard` / `SessionRegenerator`），人话说明在 §4.2.1。
 - **谁读它**：web 侧的三处替身（`dev/ws-params.mjs`、`dev/mock-server.mjs`、
