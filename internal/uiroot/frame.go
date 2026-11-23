@@ -117,6 +117,16 @@ func (r *Root) view(c *ui.Context) {
 
 	root := ui.Row(c).Key("zeokeel.root." + strconv.Itoa(r.themeGen)).Fill().Background(tokens.BgBase)
 	root.Children(func() {
+		// Permanent workspace rail (Discord-style): one 64 DIP column left of
+		// the sidebar when the assembly provides the workspace backend. It is
+		// independent of the sidebar collapse: switching a folder stays one
+		// click away even in the icon-rail state.
+		if _, ok := r.kernelContext.Get(contracts.KeyWorkspace); ok {
+			ui.Column(c).Width(design.WorkspaceRailWidth).FillHeight().
+				Background(tokens.BgBase).Children(func() {
+				r.slot(c, contracts.SlotWorkspaceRail)
+			})
+		}
 		if r.effectiveSidebarCollapsed(c) {
 			r.sidebarRail(c)
 			r.contentArea(c)
@@ -786,7 +796,19 @@ func (r *Root) inspectorNeedsRail(c *ui.Context) bool {
 // inspector. Closing the inspector or widening the window drops the temporary
 // part automatically, because it is derived from the layout every frame.
 func (r *Root) effectiveSidebarCollapsed(c *ui.Context) bool {
+	if r.workspaceRailVisible() {
+		if width, _ := c.Size(); width < design.WorkspaceRailWidth+design.SidebarWidth+design.ContentMinWidth {
+			return true
+		}
+	}
 	return r.sidebarCollapsed || r.inspectorNeedsRail(c)
+}
+
+// workspaceRailVisible reports whether the assembly provided the workspace
+// backend (the rail's only dependency).
+func (r *Root) workspaceRailVisible() bool {
+	_, ok := r.kernelContext.Get(contracts.KeyWorkspace)
+	return ok
 }
 
 // effectiveSidebarWidth is the width this frame's sidebar takes: the rail when

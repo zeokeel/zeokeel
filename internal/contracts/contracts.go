@@ -202,6 +202,9 @@ const (
 	// Window top bar.
 
 	// Main sidebar.
+	// SlotWorkspaceRail is the permanent left workspace rail (Discord-style):
+	// one item per registered workspace plus the add action.
+	SlotWorkspaceRail  = "workspace.rail"
 	SlotSidebarPrimary = "sidebar.primary"
 	SlotSidebarNav     = "sidebar.nav"
 	SlotSidebarTree    = "sidebar.tree"

@@ -384,6 +384,33 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 
+		workspaceRail := contracts.SlotItem{
+			Slot:  contracts.SlotWorkspaceRail,
+			ID:    "sidebar.workspace.rail",
+			Order: 10,
+			Build: func(c *ui.Context) {
+				buildWorkspaceRail(c, design.Of(c), runtime, state)
+			},
+		}
+		workspaceHeader := contracts.SlotItem{
+			Slot:  contracts.SlotSidebarPrimary,
+			ID:    "sidebar.primary.workspace",
+			Order: 5,
+			Build: func(c *ui.Context) {
+				workspace, ok := state.ctx.Get(contracts.KeyWorkspace)
+				if !ok || workspace == nil {
+					return
+				}
+				if _, err := workspace.List(context.Background()); err != nil {
+					return
+				}
+				current, hasCurrent := contracts.Workspace{}, false
+				if opened, found, err := workspace.Current(context.Background()); err == nil && found {
+					current, hasCurrent = opened, true
+				}
+				buildWorkspaceHeader(c, design.Of(c), runtime, state, current, hasCurrent)
+			},
+		}
 		primary := contracts.SlotItem{
 			Slot:  contracts.SlotSidebarPrimary,
 			ID:    "sidebar.primary.new-chat",
@@ -444,7 +471,7 @@ func Module() *module.Descriptor[Config] {
 			},
 		}
 
-		for _, item := range []contracts.SlotItem{primary, navSlot, footer, renameDialog, workspaceSwitchDialog, workspaceRenameDialog, workspaceDialog} {
+		for _, item := range []contracts.SlotItem{workspaceRail, workspaceHeader, primary, navSlot, footer, renameDialog, workspaceSwitchDialog, workspaceRenameDialog, workspaceDialog} {
 			if err := own(ctx, func() (func(), error) { return runtime.RegisterSlotItem(item) }); err != nil {
 				return err
 			}
@@ -531,24 +558,6 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 			// the home screen is intentionally not a destination) gets one native
 			// navigation item, so a new screen module (for example
 			// ui/automation) appears without a sidebar edit.
-			if state.screens != nil {
-				for _, id := range state.screens.Screens() {
-					if id == "home" || id == "session" || strings.TrimSpace(id) == "" {
-						continue
-					}
-					item := ui.SidebarItem(c, id, screenNavIcon(id), state.screenNavLabel(id))
-					screenID := id
-					item.OnClick(func() {
-						if err := nav.Push(screenID); err == nil {
-							runtime.Invalidate()
-						}
-					})
-				}
-			}
-			// The old UI separated the destinations from the conversation list
-			// with one empty line before the section label.
-			ui.Box(c).Height(design.Space2)
-
 			// The workspace backend is optional: without it (or when its list
 			// fails) the sidebar keeps the flat list it always had. With it, the
 			// header names the one open folder and the list shows only that
@@ -568,12 +577,29 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 				if opened, ok, err := workspace.Current(context.Background()); err == nil && ok {
 					current, hasCurrent = opened, true
 				}
-				buildWorkspaceHeader(c, t, runtime, state, current, hasCurrent)
 			} else {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 					design.Apply(ui.Text(c, title), t.SectionLabel())
 				})
 			}
+			if state.screens != nil {
+				for _, id := range state.screens.Screens() {
+					if id == "home" || id == "session" || strings.TrimSpace(id) == "" {
+						continue
+					}
+					item := ui.SidebarItem(c, id, screenNavIcon(id), state.screenNavLabel(id))
+					screenID := id
+					item.OnClick(func() {
+						if err := nav.Push(screenID); err == nil {
+							runtime.Invalidate()
+						}
+					})
+				}
+			}
+			// The old UI separated the destinations from the conversation list
+			// with one empty line before the section label.
+			ui.Box(c).Height(design.Space2)
+
 			ui.Row(c).FillWidth().Padding(design.Space0, design.Space1, design.Space0, design.Space1).
 				Children(func() {
 					// The English name has to survive the 242 DIP the sidebar

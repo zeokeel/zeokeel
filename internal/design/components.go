@@ -68,6 +68,10 @@ const (
 
 	// SidebarWidth is the expanded source column.
 	SidebarWidth float32 = 280
+	// WorkspaceRailWidth is the permanent workspace rail left of the sidebar.
+	WorkspaceRailWidth float32 = 64
+	// WorkspaceRailItem is one workspace button in that rail.
+	WorkspaceRailItem float32 = 40
 	// SidebarRailWidth is the collapsed icon rail.
 	SidebarRailWidth float32 = 64
 	// InspectorWidth is the right inspector's preferred width.
