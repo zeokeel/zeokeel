@@ -152,6 +152,9 @@ export function SettingsScreen() {
   );
 }
 
+/** Listed in full up to this many; the rest is announced, never silently cut. */
+const UNMAPPED_LIMIT = 40;
+
 function SettingsPageForm({
   page,
   rows,
@@ -302,14 +305,23 @@ function SettingsPageForm({
         {extraRows.length > 0 ? (
           <section className="zk-settings__section">
             <h2 className="zk-settings__section-title">{t('settings.unmapped')}</h2>
+            {/* Raw keys on purpose: this is the "the gateway has a row we do not
+                render" report, so it must show exactly what the gateway holds.
+                Truncation is disclosed — a silent slice would be the same class
+                of bug as the gap this section exists to expose. */}
             <ul className="zk-settings__unmapped">
-              {extraRows.slice(0, 40).map((key) => (
+              {extraRows.slice(0, UNMAPPED_LIMIT).map((key) => (
                 <li key={key}>
                   <code>{key}</code>
                   <span>{rows[key]}</span>
                 </li>
               ))}
             </ul>
+            {extraRows.length > UNMAPPED_LIMIT ? (
+              <Typography.Text type="secondary">
+                {t('settings.unmappedMore', { count: extraRows.length - UNMAPPED_LIMIT })}
+              </Typography.Text>
+            ) : null}
           </section>
         ) : null}
       </div>

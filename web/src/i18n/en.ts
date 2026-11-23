@@ -416,6 +416,7 @@ export const en: Catalog = {
   'settings.ia.shortcutPalette': 'Command palette shortcut',
   'settings.ia.shortcutSidebar': 'Toggle sidebar shortcut',
   'settings.ia.lspActive': 'Enable the language server',
+  'settings.unmappedMore': '{count} more not listed (stored by the gateway, not wired yet)',
   'toast.dismiss': 'Close',
 
   // -------------------------------------------------------------- actions --

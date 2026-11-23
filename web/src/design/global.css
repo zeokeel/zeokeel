@@ -1455,3 +1455,31 @@ body {
 .zk-context__cost {
   align-self: flex-start;
 }
+
+/* Rows the gateway stores that no page renders (B5): shown raw and readable —
+ * this section exists so a missing control is visible, never styled away. */
+.zk-settings__unmapped {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--zk-space-1);
+  color: var(--zk-text-secondary);
+}
+
+.zk-settings__unmapped li {
+  display: flex;
+  gap: var(--zk-space-3);
+  align-items: baseline;
+}
+
+.zk-settings__unmapped code {
+  font-variant-numeric: tabular-nums;
+  color: var(--zk-text-primary);
+}
+
+.zk-settings__unmapped span {
+  color: var(--zk-text-secondary);
+  overflow-wrap: anywhere;
+}

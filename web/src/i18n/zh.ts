@@ -420,6 +420,7 @@ export const zh = {
   'settings.ia.shortcutPalette': '命令面板快捷键',
   'settings.ia.shortcutSidebar': '折叠侧栏快捷键',
   'settings.ia.lspActive': '启用语言服务器',
+  'settings.unmappedMore': '还有 {count} 项未列出（网关有、界面未接线）',
   'toast.dismiss': '关闭',
 
   // -------------------------------------------------------------- actions --

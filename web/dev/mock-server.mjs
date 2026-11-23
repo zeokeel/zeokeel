@@ -281,6 +281,18 @@ const contextView = (sessionId) => {
   return view;
 };
 
+/** Push a whole-history reset (`msg.reset`, §6.6) for one session. */
+const broadcastSessionReset = (session) => {
+  if (!session) return;
+  const rev = (session.rev = (session.rev ?? 0) + 1);
+  wsNotify('session.delta', {
+    sessionId: session.id,
+    baseRev: rev - 1,
+    rev,
+    ops: [{ op: 'msg.reset', messages: session.messages.slice() }],
+  });
+};
+
 // ---------------------------------------------------------------- tasks --
 /**
  * Task boards: the process-wide one (`''`) and one per session. `added` in
@@ -808,25 +820,65 @@ async function handleRun(req, res) {
     return sendJson(res, 400, { error: 'invalid json' });
   }
 
-  const { sessionId, text, regenerate } = body ?? {};
+  const { sessionId, text, regenerate, editMessageId } = body ?? {};
   // §4.6: regenerate is a *mode* of this endpoint. `text` must be absent — the
   // gateway reruns the user message it already holds, and a stray text here is
   // exactly the invalid_params the real gateway answers with.
   if (!sessionId) return sendJson(res, 400, { error: 'sessionId is required' });
+  // §4.6 (edit mode, 2026-11-23): the two rewrites are mutually exclusive.
+  if (regenerate === true && editMessageId !== undefined && editMessageId !== '') {
+    return sendJson(res, 400, {
+      // Same shape as run.go: the field is named, no `data.name` sentinel.
+      error: { code: 'invalid_params', data: { field: 'editMessageId' } },
+      message: 'editMessageId is mutually exclusive with regenerate',
+    });
+  }
   if (regenerate === true && text !== undefined) {
     return sendJson(res, 400, {
       error: { code: 'invalid_params', data: { field: 'text' } },
       message: 'regenerate must not carry text',
     });
   }
-  if (regenerate !== true && (typeof text !== 'string' || text.trim() === '')) {
+  if (editMessageId !== undefined && editMessageId !== '') {
+    // The edit's text IS the new content; empty would mean "delete", which the
+    // protocol does not offer.
+    if (typeof text !== 'string' || text.trim() === '') {
+      return sendJson(res, 400, {
+        error: { code: 'invalid_params', data: { field: 'text' } },
+        message: 'text is required when editMessageId is set',
+      });
+    }
+  } else if (regenerate !== true && (typeof text !== 'string' || text.trim() === '')) {
     return sendJson(res, 400, { error: 'text is required' });
   }
   const target = sessions.get(sessionId);
   if (!target) return sendJson(res, 404, { error: 'unknown session' });
 
   const turnId = shortId('t');
-  if (regenerate === true) {
+  if (editMessageId !== undefined && editMessageId !== '') {
+    // Edit = replace that user message's text and drop everything after it, then
+    // rerun. The refusals mirror `editRefusal` in run.go.
+    const editIndex = target.messages.findIndex((message) => message.id === editMessageId);
+    const refuse = (name, reason) =>
+      sendJson(res, 400, {
+        error: { code: 'invalid_params', data: { field: 'editMessageId', name } },
+        message: reason,
+      });
+    if (editIndex < 0) {
+      return refuse('edit_target_not_found', 'no such user message in this session');
+    }
+    const row = target.messages[editIndex];
+    if (row.role !== 'user') return refuse('edit_target_not_user', 'only user messages can be edited');
+    if (Array.isArray(row.attachments) && row.attachments.length > 0) {
+      return refuse('edit_target_has_attachments', 'messages with attachments cannot be edited');
+    }
+    if (!row.durable) return refuse('edit_target_compacted', 'the message is no longer in the durable history window');
+    if (row.moved) return refuse('edit_target_moved', 'the conversation changed while the edit was being applied');
+    // Replace the text and truncate the tail: the edit rewrites history.
+    row.text = text;
+    target.messages.splice(editIndex + 1);
+    broadcastSessionReset(target.messages);
+  } else if (regenerate === true) {
     // Roll the tail back exactly like SessionRegenerator: drop the trailing
     // assistant reply and the user message it answered, then rerun that prompt.
     const lastAssistant = [...target.messages].reverse().findIndex((m) => m.role === 'assistant');
@@ -834,13 +886,7 @@ async function handleRun(req, res) {
     const lastUser = [...target.messages].reverse().findIndex((m) => m.role === 'user');
     if (lastUser >= 0) target.messages.splice(target.messages.length - 1 - lastUser, 1);
     target.messages.push(msg('user', target.lastPrompt ?? '（重生成）'));
-    const rev = (target.rev = (target.rev ?? 0) + 1);
-    wsNotify('session.delta', {
-      sessionId,
-      baseRev: rev - 1,
-      rev,
-      ops: [{ op: 'msg.reset', messages: target.messages.slice() }],
-    });
+    broadcastSessionReset(null);
   } else {
     target.messages.push(msg('user', text));
     target.lastPrompt = text;
@@ -1140,6 +1186,12 @@ const cookieToken = (req) => {
 
 const authorized = (req) => {
   if (cookieToken(req) === AUTH_TOKEN) return true;
+  // §3.1 allows non-browser clients to authenticate out of band. A browser
+  // cannot set headers on a WebSocket handshake, so scripts pass `?token=`;
+  // this mirrors the Bearer rule rather than adding a second credential type.
+  const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`);
+  const queryToken = url.searchParams.get('token');
+  if (queryToken !== null && queryToken === AUTH_TOKEN) return true;
   // §3.1: non-browser clients (tests, curl, scripts) use a Bearer token.
   const header = String(req.headers.authorization ?? '');
   return header.toLowerCase().startsWith('bearer ') && header.slice(7).trim() === AUTH_TOKEN;
