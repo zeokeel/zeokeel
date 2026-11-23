@@ -17,6 +17,16 @@ import { notifyAction, subscribeToasts, type ToastEvent } from '@/api/gateway';
  * An action button (撤销/查看) sends `notify.action {id, actionId}` — the
  * gateway keeps the closure, the client never runs it locally.
  */
+/**
+ * How long a toast stays: 4 seconds for a receipt, forever for an error.
+ *
+ * Exported because "does a failure disappear on its own?" is the whole point of
+ * this surface, and it must be assertable without waiting on a real clock.
+ */
+export function toastDuration(level: string): number {
+  return level === 'error' ? 0 : 4;
+}
+
 export function Toasts({ children }: { children: React.ReactNode }) {
   const [api, contextHolder] = notification.useNotification();
   // Notifications are keyed by the gateway's id so a repeat cannot stack.
@@ -28,7 +38,6 @@ export function Toasts({ children }: { children: React.ReactNode }) {
         if (opened.current.has(toast.id)) return;
         opened.current.add(toast.id);
 
-        const sticky = toast.level === 'error';
         const key = `toast-${toast.id}`;
         const type =
           toast.level === 'error' ? 'error' : toast.level === 'warning' ? 'warning' : 'info';
@@ -38,7 +47,7 @@ export function Toasts({ children }: { children: React.ReactNode }) {
           type,
           message: toast.text,
           // 4 seconds for a receipt; an error waits for the user.
-          duration: sticky ? 0 : 4,
+          duration: toastDuration(toast.level),
           // Top-right: bottom-right is where the composer and its send button
           // live, and a toast must never sit on the thing you are typing into.
           placement: 'topRight',

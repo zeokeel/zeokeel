@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '@/app';
+import { toastDuration } from '@/features/toasts/toasts';
 import { defaultState, installFakeGateway, type FakeGatewayHandle } from '@/test/fake-gateway';
 
 /**
@@ -81,18 +82,32 @@ describe('B14 — toast.posted', () => {
     await waitFor(() => expect(screen.getAllByText('同一个回执')).toHaveLength(1));
   });
 
-  it('keeps an error on screen instead of letting it vanish', async () => {
+  // Time behaviour is asserted on the rule itself, never by sleeping: a real
+  // 4.6s wait is the classic flake when the machine is busy (Go `-race` beside).
+  it('gives a receipt 4 seconds and an error no deadline at all', () => {
+    expect(toastDuration('info')).toBe(4);
+    expect(toastDuration('warning')).toBe(4);
+    expect(toastDuration('error')).toBe(0);
+  });
+
+  it('keeps an error on screen past the receipt lifetime', async () => {
     renderApp();
     await screen.findByRole('textbox');
+    vi.useFakeTimers();
 
     gateway.gateway.notify(
       'toast.posted',
       toast({ id: 'toast-err', level: 'error', text: '模型服务不可用' }),
     );
-    expect(await screen.findByText('模型服务不可用')).toBeInTheDocument();
-
-    // Wait past the 4s receipt lifetime; the error must still be there.
-    await new Promise((resolve) => setTimeout(resolve, 4600));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
     expect(screen.getByText('模型服务不可用')).toBeInTheDocument();
-  }, 15_000);
+
+    // Well past the 4s receipt lifetime: an error waits for the user.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(screen.getByText('模型服务不可用')).toBeInTheDocument();
+  });
 });

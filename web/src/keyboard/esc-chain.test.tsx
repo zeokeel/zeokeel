@@ -304,7 +304,9 @@ describe('E1–E9 layered Escape arbiter', () => {
     await waitForApprovalCard();
 
     pressEscape({ repeat: true });
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The arbiter drops repeats synchronously, so a microtask flush is enough —
+    // no real sleep (that is what makes a negative assertion flaky).
+    await Promise.resolve();
     expect(harness.resolved).toHaveLength(0);
 
     // A real press after the repeat still works.

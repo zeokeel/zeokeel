@@ -105,16 +105,29 @@ describe('B3 — the settings search locates a field', () => {
 
 describe('C1 — double-clicking 新建会话 creates one session', () => {
   it('treats two clicks inside 600ms as one action', async () => {
+    // The window is proven against a controlled clock, not against wall time:
+    // two `user.click`s can straddle 600ms on a loaded machine, which is exactly
+    // the "real time proving time behaviour" flake this avoids.
+    let now = 1_000;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+
     const user = renderAt('/');
     const button = await screen.findByRole('button', { name: '新建会话' });
 
     await user.click(button);
+    now += 120; // a fast second click, well inside the window
     await user.click(button);
 
-    await waitFor(() => {
-      const creates = gateway.gateway.methodsCalled().filter((name) => name === 'session.create');
-      expect(creates).toHaveLength(1);
-    });
+    const creates = () =>
+      gateway.gateway.methodsCalled().filter((name) => name === 'session.create');
+    await waitFor(() => expect(creates()).toHaveLength(1));
+
+    // Past the window the guard releases: the next click creates again.
+    now += 600;
+    await user.click(button);
+    await waitFor(() => expect(creates()).toHaveLength(2));
+
+    clock.mockRestore();
   });
 });
 
