@@ -13,16 +13,62 @@
 //
 //   npm run e2e:cold                  # the command to copy
 //   E2E_COLD_KEEP=1 npm run e2e:cold  # keep the data dir for inspection
-import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(here, '..');
 const repoRoot = resolve(webRoot, '..');
 const fixture = resolve(repoRoot, 'scripts/acceptance/serve-with-fake-model.sh');
+
+/**
+ * The gateway serves the **embedded** bundle, and this script does not rebuild it
+ * — so a stale `dist` makes the run test two-hour-old code. That cuts both ways:
+ * it can fail for a reason that has nothing to do with the change, and it can
+ * **pass** while the change is not in the bundle at all. Green has to be earned
+ * on the code we just wrote, so the bundle is checked (and rebuilt) first.
+ */
+function newestSourceMtime(root) {
+  let newest = 0;
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else newest = Math.max(newest, statSync(full).mtimeMs);
+    }
+  };
+  walk(root);
+  return newest;
+}
+
+function ensureFreshBundle() {
+  const distInfo = resolve(repoRoot, 'internal/gateway/webclient/dist/BUNDLE_INFO');
+  const sourceRoot = resolve(webRoot, 'src');
+  let builtAt = 0;
+  try {
+    const info = readFileSync(distInfo, 'utf8');
+    const stamp = /builtAt (\S+)/.exec(info)?.[1] ?? '';
+    builtAt = Date.parse(stamp);
+  } catch {
+    builtAt = 0;
+  }
+  const sourceAt = newestSourceMtime(sourceRoot);
+  if (builtAt && builtAt >= sourceAt) {
+    log(`bundle: fresh (built ${new Date(builtAt).toISOString()})`);
+    return;
+  }
+  log('bundle: stale — rebuilding the embedded client');
+  execFileSync('npm', ['run', 'build'], { cwd: webRoot, stdio: 'inherit' });
+  execFileSync('bash', [resolve(repoRoot, 'scripts/build-web-client.sh')], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+  });
+  log('bundle: rebuilt');
+}
 
 const dataDir = mkdtempSync(join(tmpdir(), 'zk-e2e-cold-'));
 const port = 9986 + Math.floor(Math.random() * 40);
@@ -77,6 +123,7 @@ async function waitForGateway(timeoutMs = 120_000) {
 async function main() {
   let exitCode = 1;
   try {
+    ensureFreshBundle();
     log('starting the acceptance fixture on a fresh data directory');
     const { port: gatewayPort, token } = await waitForGateway();
     log(`gateway up on 127.0.0.1:${gatewayPort}`);
