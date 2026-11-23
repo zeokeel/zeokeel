@@ -132,6 +132,7 @@ export const zh = {
   'composer.placeholder.approval': '先处理上面的审批…',
   'composer.hint.idle': 'Enter 或 Cmd/Ctrl+Enter 发送 · Shift+Enter 换行 · Esc 清空草稿',
   'composer.hint.running': 'Enter 排队发送 · Esc 停止本轮 · Shift+Enter 换行',
+  'composer.hint.connecting': '正在连接模型…',
   'composer.hint.commands': ' · / 命令',
   'composer.slash': '斜杠命令',
   'composer.inputLabel': '消息输入框',

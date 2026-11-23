@@ -17,6 +17,12 @@ interface ComposerProps {
   onSubmit: () => void;
   onStop?: () => void;
   running?: boolean;
+  /**
+   * `connecting` is the window between submitting and the **first frame** of any
+   * kind (a tool call counts, not just the first token): in v0.3.0 a 30 s network
+   * blackhole showed the idle hint the whole time, as if nothing had started.
+   */
+  phase?: 'idle' | 'connecting' | 'running';
   disabled?: boolean;
   placeholder?: string;
   /** Slash commands for this screen; omitted means no slash menu. */
@@ -35,12 +41,30 @@ interface ComposerProps {
  *  - Esc reaches the arbiter only: it closes the slash menu (keeping the draft,
  *    A16) at the overlay level, and otherwise clears the draft (L6).
  */
+/**
+ * The composer's three states, derived from the run and from whether **any** frame
+ * of the new turn has arrived yet.
+ *
+ * A tool call counts as a frame: waiting for the first *token* would leave the
+ * hint saying "connecting" long after the run had visibly started.
+ */
+export function resolveComposerPhase(
+  isRequesting: boolean,
+  last?: { text?: string; reasoning?: string; steps?: unknown[] },
+): 'idle' | 'connecting' | 'running' {
+  if (!isRequesting) return 'idle';
+  const anyFrame =
+    (last?.text ?? '') !== '' || (last?.reasoning ?? '') !== '' || (last?.steps?.length ?? 0) > 0;
+  return anyFrame ? 'running' : 'connecting';
+}
+
 export function Composer({
   value,
   onChange,
   onSubmit,
   onStop,
   running = false,
+  phase,
   disabled = false,
   placeholder,
   commands,
@@ -54,6 +78,10 @@ export function Composer({
 
   const slashQuery = parseSlashDraft(value);
   const matches = slashQuery === null ? [] : filterSlashCommands(commands ?? [], slashQuery);
+  // `phase` wins when given; the legacy `running` prop still maps to `running`.
+  const resolvedPhase: 'idle' | 'connecting' | 'running' =
+    phase ?? (running ? 'running' : 'idle');
+
   const menuOpen = slashQuery !== null && matches.length > 0 && dismissedQuery !== slashQuery;
 
   // @file candidates (A17): loaded once per composer, filtered as the user types.
@@ -267,9 +295,11 @@ export function Composer({
         {...{ 'aria-label': t('composer.inputLabel'), 'data-testid': 'composer-input' }}
       />
       <div className="zk-composer__hint" data-testid="composer-hint">
-        {running
-          ? t('composer.hint.running')
-          : t('composer.hint.idle')}
+        {resolvedPhase === 'connecting'
+          ? t('composer.hint.connecting')
+          : resolvedPhase === 'running'
+            ? t('composer.hint.running')
+            : t('composer.hint.idle')}
         {commands && commands.length > 0 ? t('composer.hint.commands') : ''}
       </div>
     </div>
