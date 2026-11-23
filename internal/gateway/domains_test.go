@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -294,8 +295,11 @@ type domainTestRig struct {
 // startDomainGateway starts a gateway with the small-domain backends.
 func startDomainGateway(t *testing.T) *domainTestRig {
 	t.Helper()
-	chat := newFakeChat()
-	chat.addSession("s1", "First", "hello")
+	// scriptedChat only adds the regenerate half (and a script that is nil
+	// unless a test sets one); the domain rigs stay deterministic.
+	scripted := newScriptedChat()
+	scripted.addSession("s1", "First", "hello")
+	chat := scripted.fakeChat
 	settings := newFakeSettings(map[string]string{contracts.SettingAgentPermission: contracts.PermissionWorkspace})
 	approvals := newFakeApprovals(contracts.PermissionWorkspace)
 	approvals.settings = settings
@@ -303,7 +307,7 @@ func startDomainGateway(t *testing.T) *domainTestRig {
 	board := newFakeTaskBoard()
 	inspector := newFakeContextInspector()
 
-	root := cordisRootFor(t, chat, approvals, settings, workspace, board, inspector)
+	root := cordisRootFor(t, scripted, approvals, settings, workspace, board, inspector)
 	gateway, err := New(root, Options{DataDir: t.TempDir(), Port: -1, Logger: testLogger{t: t}, Out: discardWriter{}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -454,6 +458,35 @@ func (f *fakeContextInspector) record(sessionID string, promptTokens int) {
 	view.Used = promptTokens
 	view.Window = 200000
 	f.views[sessionID] = view
+}
+
+// awaitDelta reads domain notifications until one matches, then returns its
+// params. A domain may legitimately emit more than one delta for a sequence of
+// mutations (the poll coalesces or splits them), so a test that wants "the delta
+// that describes X" must not assume it is the very next frame.
+func awaitDelta(t *testing.T, conn *testWSConn, method string, match func(params map[string]any) bool) map[string]any {
+	t.Helper()
+	for attempt := 0; attempt < 8; attempt++ {
+		frame := conn.receive(func(candidate string) bool { return candidate == method })
+		params, _ := frame["params"].(map[string]any)
+		if match(params) {
+			return params
+		}
+	}
+	t.Fatalf("no %s matching the condition within 8 frames", method)
+	return nil
+}
+
+// itemWithID returns the first entry of a list whose id matches.
+func itemWithID(list any, id string) map[string]any {
+	items, _ := list.([]any)
+	for _, item := range items {
+		row, _ := item.(map[string]any)
+		if row["id"] == id {
+			return row
+		}
+	}
+	return nil
 }
 
 // --- delta appliers (client-side) ------------------------------------------
@@ -701,29 +734,29 @@ func TestWorkspaceListSnapshotDeltaReplay(t *testing.T) {
 		t.Fatalf("workspace delta baseRev = %v, want %d", addParams["baseRev"], rev)
 	}
 
-	// Recolor: a "changed" delta.
+	// Recolor: eventually a "changed" delta carrying the new color.
 	rig.workspace.setColor(created.ID, "violet")
-	changeDelta := conn.receive(func(method string) bool { return method == "workspace.list.delta" })
-	changeParams, _ := changeDelta["params"].(map[string]any)
-	changed, _ := changeParams["changed"].([]any)
-	if len(changed) != 1 {
-		t.Fatalf("workspace change delta = %v", changeParams)
-	}
-	item, _ := changed[0].(map[string]any)
-	if item["color"] != "violet" {
-		t.Fatalf("changed item = %v", item)
+	changeParams := awaitDelta(t, conn, "workspace.list.delta", func(params map[string]any) bool {
+		row := itemWithID(params["changed"], created.ID)
+		return row != nil && row["color"] == "violet"
+	})
+	if uint64(changeParams["rev"].(float64)) <= rev {
+		t.Fatalf("workspace change delta rev = %v, want > %d", changeParams["rev"], rev)
 	}
 
 	// Delete: a removed delta, and the snapshot agrees.
 	if err := rig.workspace.Delete(context.Background(), created.ID); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	removeDelta := conn.receive(func(method string) bool { return method == "workspace.list.delta" })
-	removeParams, _ := removeDelta["params"].(map[string]any)
-	removed, _ := removeParams["removed"].([]any)
-	if len(removed) != 1 || removed[0] != created.ID {
-		t.Fatalf("workspace remove delta = %v", removeParams)
-	}
+	awaitDelta(t, conn, "workspace.list.delta", func(params map[string]any) bool {
+		removed, _ := params["removed"].([]any)
+		for _, id := range removed {
+			if id == created.ID {
+				return true
+			}
+		}
+		return false
+	})
 	after := resultOf(t, conn.call("workspace.list.snapshot", nil))
 	if items, _ := after["workspaces"].([]any); len(items) != 0 {
 		t.Fatalf("workspace.list.snapshot after delete = %v", after["workspaces"])
@@ -1111,12 +1144,20 @@ func TestContextSnapshotRequiresSession(t *testing.T) {
 	}
 }
 
-// TestInitializeAdvertisesTheContextCapability pins the capability contract the
-// browser uses to decide whether the Context tab exists: never a probe method,
-// always the handshake list — and the list follows the assembly (a backend
-// without contracts.KeyContext does not advertise it).
-func TestInitializeAdvertisesTheContextCapability(t *testing.T) {
-	capabilities := func(rig *domainTestRig) []string {
+// TestInitializeAdvertisesCapabilities pins the handshake's capability list.
+//
+// Two things are asserted:
+//   - the static set is exactly what §4.2.1 documents (so a capability cannot be
+//     added or dropped silently);
+//   - the assembly-dependent entries appear only when the backend half exists —
+//     context (KeyContext), regenerate (SessionRegenerator) and tasks
+//     (KeyTaskBoard) — because the client decides whether to render the Context
+//     tab, the regenerate menu entry and the background-task chip from this list,
+//     never by trying and failing.
+//
+// Run with -v to see the exact JSON the browser receives.
+func TestInitializeAdvertisesCapabilities(t *testing.T) {
+	initialize := func(rig *domainTestRig) []string {
 		t.Helper()
 		conn := dialTestWS(t, rig.address, map[string]string{
 			"Origin":        rig.info.Origin(),
@@ -1131,18 +1172,47 @@ func TestInitializeAdvertisesTheContextCapability(t *testing.T) {
 				out = append(out, name)
 			}
 		}
+		encoded, _ := json.Marshal(list)
+		t.Logf("initialize capabilities = %s", encoded)
 		return out
 	}
 
-	withContext := startDomainGateway(t)
-	defer withContext.stop(t)
-	if list := capabilities(withContext); !containsString(list, "context") {
-		t.Fatalf("initialize capabilities = %v, want it to contain context", list)
+	// The full assembly: every conditional capability is present.
+	full := startDomainGateway(t)
+	defer full.stop(t)
+	caps := initialize(full)
+	for _, want := range []string{
+		"session.list", "session.snapshot", "session.delta", "session.subscribe",
+		"session.create", "run.cancel", "approvals", "ask", "plan", "artifacts",
+		"settings", "settings.set", "workspace", "prompts", "notify", "foreground",
+		"context", "regenerate", "tasks",
+	} {
+		if !containsString(caps, want) {
+			t.Fatalf("capabilities = %v, want it to contain %q", caps, want)
+		}
+	}
+	if len(caps) != len(serverCapabilities)+3 {
+		t.Fatalf("capabilities = %v, want %d static + 3 conditional entries", caps, len(serverCapabilities))
 	}
 
-	// The same gateway without the inspector: the capability must disappear, so
-	// the client hides the tab instead of calling a method that cannot work.
-	chat := newFakeChat()
+	// The static set is what the document lists: a capability added to (or
+	// dropped from) the code without touching §4.2.1 fails here.
+	wantStatic := []string{
+		"session.list", "session.snapshot", "session.delta", "session.subscribe",
+		"session.create", "run.cancel", "approvals", "ask", "plan", "artifacts",
+		"settings", "settings.set", "workspace", "prompts", "notify", "foreground",
+	}
+	sortedStatic := append([]string(nil), serverCapabilities...)
+	sort.Strings(sortedStatic)
+	wantSorted := append([]string(nil), wantStatic...)
+	sort.Strings(wantSorted)
+	if !slices.Equal(sortedStatic, wantSorted) {
+		t.Fatalf("serverCapabilities = %v, want %v (§4.2.1)", sortedStatic, wantSorted)
+	}
+
+	// A bare gateway (chat present, but no KeyContext/KeyTaskBoard and a chat
+	// that cannot regenerate) must advertise the static set only.
+	chat := &fakeChatOnly{newFakeChat()}
 	settings := newFakeSettings(nil)
 	root := cordisRootFor(t, chat, nil, settings, nil, nil, nil)
 	gateway, err := New(root, Options{DataDir: t.TempDir(), Port: -1, Logger: testLogger{t: t}, Out: discardWriter{}})
@@ -1154,7 +1224,13 @@ func TestInitializeAdvertisesTheContextCapability(t *testing.T) {
 	}
 	bare := &domainTestRig{runningGateway: serveGateway(t, gateway)}
 	defer bare.stop(t)
-	if list := capabilities(bare); containsString(list, "context") {
-		t.Fatalf("initialize advertised context without a KeyContext backend: %v", list)
+	bareCaps := initialize(bare)
+	for _, absent := range []string{"context", "regenerate", "tasks"} {
+		if containsString(bareCaps, absent) {
+			t.Fatalf("a bare assembly advertised %q: %v", absent, bareCaps)
+		}
+	}
+	if len(bareCaps) != len(serverCapabilities) {
+		t.Fatalf("bare capabilities = %v, want the %d static entries", bareCaps, len(serverCapabilities))
 	}
 }

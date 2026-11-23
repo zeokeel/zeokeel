@@ -229,7 +229,46 @@ SIGINT/SIGTERM（signals_unix.go:11）
 |---|---|
 | `initialize` 必须第一个发 | 之前只允许 `ping` |
 | `protocolVersion` 不符 | 服务端回 `error.code=1021 unsupported_protocol` 并附自身版本，**关闭连接** |
-| `capabilities` 双向 | 服务端列出它支持的可选半（§1.3 的 15 个），客户端列出它认识的 UI schema 版本。缺失能力 → 相关 UI 入口不渲染（对齐现有"键缺失即隐藏"逻辑，如 `workspace.go:72-75`） |
+| `capabilities` 双向 | 服务端列出它支持的可选半（清单见 §4.2.1），客户端列出它认识的 UI schema 版本。缺失能力 → 相关 UI 入口不渲染（对齐现有"键缺失即隐藏"逻辑，如 `workspace.go:72-75`） |
+
+#### 4.2.1 能力清单（服务端 `initialize.capabilities`）
+
+**规则**：每个**会改变 UI 渲染**的域或运行模式，都必须在能力表里有条目。否则客户端只有两条
+烂路——总是猜测（能力不存在也渲染，运行时才炸），或者试错（点一次、失败再禁用）。能力探测
+**只走这张表**，不新增探测方法。
+
+**静态项**（`serverCapabilities`，每个网关都报）：
+
+| 能力 | 门控的 UI / 行为 |
+|---|---|
+| `session.list` / `session.snapshot` / `session.delta` / `session.subscribe` | 会话侧栏与对话页（读模型） |
+| `session.create` | 「新建会话」入口（客户端据此禁用按钮） |
+| `run.cancel` | 运行中的「停止」 |
+| `approvals` | 审批卡（`approvals.snapshot/subscribe`、`approval.resolve`） |
+| `ask` | 提问卡与回答 |
+| `plan` | 计划审阅卡与 `plan.exit` |
+| `artifacts` | 产物面板（`present` 的落点） |
+| `settings` / `settings.set` | 设置页；**`settings.set` 决定表单是否可写**（缺失时页面显示只读并禁用输入） |
+| `workspace` | 工作区列表与切换 |
+| `prompts` | 提示队列（发送队列、队首/取消） |
+| `notify` | 应用内 toast 与 `notify.action` |
+| `foreground` | 前台会话上报（后台完成是否静音的判断依据） |
+
+**条件项**（装配真的提供对应后端时才出现；缺失即相关入口不渲染）：
+
+| 能力 | 出现条件 | 门控的 UI |
+|---|---|---|
+| `context` | 装配提供 `contracts.KeyContext` | 「上下文」Tab（`context.snapshot/subscribe`，§5.1.8） |
+| `regenerate` | 聊天后端实现 `contracts.SessionRegenerator` | 「⋯」菜单里的「重新生成」（§4.6 regenerate 模式） |
+| `tasks` | 装配提供 `contracts.KeyTaskBoard` | 后台任务 chip（`tasks.snapshot/subscribe`、`task.status/delete`，§5.1.8） |
+
+> 能力名**全小写、无前缀**，与 `context`/`plan`/`ask` 同风格。`regenerate` 是**运行模式**而不是
+> 方法名——客户端读它决定菜单项的禁用态与 tooltip（文案 `thread.regenerateUnsupported`），
+> 而不是靠"点一次看它是否返回 `regenerate_not_supported`"。
+>
+> 客户端已用到的两项：`session.create`（新建按钮）、`settings.set`（设置可写）。新增能力时
+> 先在这张表登记，再让客户端读——`TestInitializeAdvertisesCapabilities` 会同时钉住静态清单
+> 与三个条件项的双向行为。
 | `epoch` | 客户端记录；重连后 `epoch` 变 → 丢弃全部本地状态（§6.2） |
 | 多标签页 | 每个标签页 = 一条 WS = 一个 `clientId`。网关不做跨标签页状态同步（各自 `session.subscribe`），但**读模型共享**（同一个 rev 序列） |
 

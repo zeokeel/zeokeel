@@ -22,10 +22,12 @@ var serverCapabilities = []string{
 	"session.subscribe",
 	"session.create",
 	"run.cancel",
+	"approvals",
 	"ask",
 	"plan",
 	"artifacts",
 	"settings",
+	"settings.set",
 	"workspace",
 	"prompts",
 	"notify",
@@ -33,14 +35,29 @@ var serverCapabilities = []string{
 }
 
 // gatewayCapabilities is the handshake's capability list for this gateway
-// instance: the static set above, plus "context" when the assembly actually
-// provides contracts.KeyContext. The client uses this list (never a probe
-// method) to decide whether to render the Context tab — the browser counterpart
-// of the desktop rule "missing service key ⇒ hidden surface".
+// instance: the static set above, plus the capabilities whose existence depends
+// on the assembly. The client uses this list — never a probe method — to decide
+// whether to render an entry (docs/TRANSPORT.md §4.2.1, the browser counterpart
+// of the desktop rule "missing service key ⇒ hidden surface").
+//
+// The rule this encodes: **every domain or run mode that changes what the UI
+// renders needs an entry here.** Otherwise the client's only options are to
+// guess always-on, or to try and disable after a failure — i.e. to demote
+// capability detection into trial and error.
 func (g *Gateway) gatewayCapabilities() []string {
 	caps := append([]string(nil), serverCapabilities...)
 	if inspector, ok := g.root.Get(contracts.KeyContext); ok && inspector != nil {
 		caps = append(caps, "context")
+	}
+	if chat, err := g.chatService(); err == nil {
+		if _, ok := chat.(contracts.SessionRegenerator); ok {
+			// The "retry the last turn" menu entry (§4.6 regenerate mode).
+			caps = append(caps, "regenerate")
+		}
+	}
+	if board, ok := g.root.Get(contracts.KeyTaskBoard); ok && board != nil {
+		// The background-task chip (§5.1.8).
+		caps = append(caps, "tasks")
 	}
 	return caps
 }
