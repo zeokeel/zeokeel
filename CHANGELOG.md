@@ -4,6 +4,13 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-11-24
+
+### Fixed
+
+- **模型失败不再原样贴报文**：v0.3.0 把模型客户端的英文 JSON 连内部错误码（`-32603`）直接放进对话流。现在首行是建议——「未配置模型或密钥无效」/「模型密钥无效或已过期」/「连接模型服务失败（网络不可达）」——前两种带「打开设置」按钮；原始报文收进可展开的「详情」，认不出类型的失败仍完整显示原文（不吞错误）。
+- **发送后不再 30 秒静默**：新增「正在连接模型…」态，从发出请求到收到第一帧（文本、推理或工具步骤任一）之间显示；第一帧到达即转为运行态。
+
 ## [Unreleased]
 
 ## [0.3.0] - 2026-11-24
