@@ -58,7 +58,19 @@ npm run test       # vitest run（E1–E9、SSE 集成、520 条虚拟化、整�
 npm run build      # tsc + vite build → dist/（由 go:embed 打进二进制）
 npm run gen:tokens # 从 internal/{brand,design} 重新生成 tokens.css 与 antd-theme.ts
 npm run gen:icons  # 从 internal/icons/svg 重新生成 src/design/icons.tsx（34 个）
+
+# 端到端（真浏览器，headless chromium）
+npm run mock       # 一个终端：mock 网关（127.0.0.1:8788，token 固定 dev-token）
+npm run dev        # 另一个终端：vite（127.0.0.1:5178，代理 /api /auth /ws）
+npm run e2e        # 默认打 mock：新建会话 → 发一轮 → 审批 → 完成 → 刷新恢复
+
+# 打真网关时两个变量是必须的：
+#   E2E_BASE=http://127.0.0.1:9932 E2E_TOKEN=<启动行里的 token> npm run e2e
 ```
+
+`npm run e2e` 只依赖界面文本/角色（不依赖任何 fixture），失败会写
+`.cache/ui-review/smoke-failed.png` 与 `smoke-report.json`。mock 专用的大盘脚本
+（600 条虚拟化 + 帧率）是 `node dev/browser-check.mjs`，它依赖 mock fixture，别指向真网关。
 
 ## 目录
 

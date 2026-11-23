@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "mock": "node dev/mock-server.mjs",
+    "e2e": "node dev/e2e-smoke.mjs",
     "gen:tokens": "node scripts/gen-tokens.mjs",
     "gen:icons": "node scripts/gen-icons.mjs",
     "gen:settings-keys": "node scripts/gen-settings-keys.mjs",

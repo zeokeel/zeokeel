@@ -6,7 +6,8 @@
 // It works against the mock and against a real `--product serve` gateway, and it
 // never assumes a particular session title, id or message text from a fixture.
 //
-//   node dev/e2e-smoke.mjs                       # against http://127.0.0.1:5178
+//   npm run e2e                                  # mock + dev server (dev-token)
+//   node dev/e2e-smoke.mjs                       # same thing without npm
 //   E2E_BASE=http://127.0.0.1:9932 E2E_TOKEN=<token> node dev/e2e-smoke.mjs
 //
 // `E2E_TOKEN` is the process token from the gateway's startup line
@@ -23,6 +24,10 @@ const require = createRequire(import.meta.url);
 const { chromium } = require('/data/mygo/.cache/pw/node_modules/playwright');
 
 const BASE = process.env.E2E_BASE ?? 'http://127.0.0.1:5178';
+// `npm run e2e` out of the box targets the mock (`npm run mock` + `npm run dev`),
+// whose dev token is `dev-token`. A real gateway prints its own token in the
+// startup line and it must be passed in `E2E_TOKEN`.
+const DEFAULT_TOKEN = BASE === 'http://127.0.0.1:5178' ? 'dev-token' : '';
 const OUT = process.env.E2E_OUT ?? '/data/mygo/.cache/ui-review';
 const PROMPT = process.env.E2E_PROMPT ?? '你好，用一句话介绍这个工作区。';
 
@@ -52,7 +57,7 @@ async function main() {
 
   // 1. Open the app and wait for a live control plane. The fragment token is
   //    what the client exchanges for the session cookie before connecting.
-  const token = process.env.E2E_TOKEN?.trim();
+  const token = (process.env.E2E_TOKEN ?? DEFAULT_TOKEN).trim();
   const startUrl = token ? `${BASE}/#token=${token}` : `${BASE}/`;
   await page.goto(startUrl, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('.zk-sidebar', { timeout: 20_000 });

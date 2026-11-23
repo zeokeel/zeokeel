@@ -135,7 +135,8 @@
 4. 需要深度 a11y 的个别组件（树、多选）可单独用 `-b aria` 那套补齐。
 
 **反对 / 纪律**
-- Tailwind v4 的 `@theme` 只允许映射 `internal/design` 生成的 token；禁止默认调色板与任意值（`bg-[#...]`、`text-[13px]`），用 `npm run design-check` 扫。
+- Tailwind v4 的 `@theme` 只允许映射 `internal/design` 生成的 token；禁止默认调色板与任意值（`bg-[#...]`、`text-[13px]`）——颜色字面量由 `npm run lint` 拦，
+生成链上游改动由 `npm run gen:verify` 校验。
 - vendor 进 `web/src/ui/` 后视为自研，升级手动 diff。
 - 不提供数据组件。
 
@@ -235,7 +236,7 @@ shadcn 已经把它们的组件源码备好了，裸用没有理由。
 **两条硬规则**
 
 1. **不用 `compactAlgorithm`。** 我们的 5 个控件高度是**设计过的离散档位**，不是等比缩放；用 compact 会被比例算法改回去。显式赋 `controlHeight*` 三个档位 + 组件级覆盖其余两档。
-2. **`token` 里只许出现本表的值。** 生成方式：`npm run tokens` 从 `internal/design` + `internal/brand` 生成 `web/src/design/antd-theme.ts`，**手改即违规**；`npm run design-check` 断言 `theme.token` 的每个键都在白名单内、且源码中无颜色字面量。
+2. **`token` 里只许出现本表的值。** 生成方式：`npm run gen:tokens` 从 `internal/design` + `internal/brand` 生成 `web/src/design/antd-theme.ts`，**手改即违规**；`npm run lint` 断言源码中无颜色字面量，`npm run gen:verify` 断言生成物与基线一致。
 
 ---
 
