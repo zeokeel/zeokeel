@@ -48,13 +48,35 @@ interface ComposerProps {
  * A tool call counts as a frame: waiting for the first *token* would leave the
  * hint saying "connecting" long after the run had visibly started.
  */
+export interface ComposerFrame {
+  role: 'user' | 'assistant';
+  text?: string;
+  reasoning?: string;
+  steps?: unknown[];
+}
+
+/**
+ * Takes the whole turn list, not "the last message": sending appends the user's
+ * echo first, so a last-message reading marks a frame as arrived the instant the
+ * composer is cleared and `connecting` never shows. Only the assistant frame of
+ * the turn says whether the backend has produced anything yet.
+ */
 export function resolveComposerPhase(
   isRequesting: boolean,
-  last?: { text?: string; reasoning?: string; steps?: unknown[] },
+  messages: readonly ComposerFrame[] = [],
 ): 'idle' | 'connecting' | 'running' {
   if (!isRequesting) return 'idle';
+  let frame: ComposerFrame | undefined;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === 'assistant') {
+      frame = messages[i];
+      break;
+    }
+  }
   const anyFrame =
-    (last?.text ?? '') !== '' || (last?.reasoning ?? '') !== '' || (last?.steps?.length ?? 0) > 0;
+    (frame?.text ?? '') !== '' ||
+    (frame?.reasoning ?? '') !== '' ||
+    (frame?.steps?.length ?? 0) > 0;
   return anyFrame ? 'running' : 'connecting';
 }
 

@@ -235,9 +235,10 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
       : [];
 
   const cursor = matchIndexes.length === 0 ? 0 : findCursor % matchIndexes.length;
-  // The turn being streamed is the last message; "has it produced any frame yet"
-  // decides connecting vs running.
-  const lastMessage = chat.messages.at(-1)?.message;
+  // The turn list decides connecting vs running: the function picks the
+  // assistant frame itself, because the user's echo arrives first and a
+  // "last message" reading would skip `connecting` entirely.
+  const turnFrames = chat.messages.map((entry) => entry.message);
   const empty = chat.messages.length === 0 && !chat.isDefaultMessagesRequesting;
 
   return (
@@ -316,7 +317,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
         // Three states: idle → connecting (submitted, no frame yet) → running.
         // The 30 s blackhole in v0.3.0 sat in "connecting" silently showing the
         // idle hint; now it says so.
-        phase={resolveComposerPhase(chat.isRequesting, lastMessage)}
+        phase={resolveComposerPhase(chat.isRequesting, turnFrames)}
         disabled={approvals.length > 0}
         placeholder={approvals.length > 0 ? t('composer.placeholder.approval') : undefined}
         commands={commands}
