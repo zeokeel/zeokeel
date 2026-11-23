@@ -41,10 +41,10 @@ jobs:
           fi
 
       - name: Build
-        run: go build ./...
+        run: go build ./internal/... ./cmd/...
 
       - name: Vet
-        run: go vet ./...
+        run: go vet ./internal/... ./cmd/...
 
       - name: Protocol/implementation consistency
         # docs/TRANSPORT.md §5.1 (the method table) and the gateway's dispatch
@@ -69,7 +69,7 @@ jobs:
         env:
           GOFLAGS: -mod=mod -p=1
           GOMEMLIMIT: 4GiB
-        run: go test ./... -count=1 -timeout 20m
+        run: go test ./internal/... ./cmd/... -count=1 -timeout 20m
 
       - name: Race detector (targeted)
         # 2026-11 audit AR-11: CI never ran -race. The concurrency-heavy

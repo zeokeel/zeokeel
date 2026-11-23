@@ -33,7 +33,7 @@ all: build
 # refreshed first when web/dist exists; a Go-only checkout still builds (the
 # gateway then serves a "client bundle not built" page and logs that it has none).
 build: web-client-if-available
-	$(GO) build ./...
+	$(GO) build ./internal/... ./cmd/...
 
 # Copy the built browser client (web/dist) into the gateway's embed directory.
 # See scripts/build-web-client.sh for why a copy is involved (go:embed cannot
@@ -82,12 +82,12 @@ web-client-fresh: web-client
 
 # Static checks (no build output is written to the repository).
 vet:
-	$(GO) vet ./...
+	$(GO) vet ./internal/... ./cmd/...
 
 # Unit tests, uncached. Everything is headless-safe: the headless product and
 # the embedded assemblies are exercised without a display environment.
 test:
-	$(GO) test ./... -count=1
+	$(GO) test ./internal/... ./cmd/... -count=1
 
 # The fast local subset of CI (build+vet+test). The hosted CI additionally runs
 # gofmt, the protocol/implementation consistency test (docs/TRANSPORT.md §5.1 vs

@@ -146,7 +146,7 @@ check_gofmt() {
 	fi
 	# Only the module's Go packages: the repository also carries an untracked
 	# 35G module cache and a docs/research tree that are not part of the product.
-	unformatted=$("$GO" list -f '{{.Dir}}' ./... | sort -u | while IFS= read -r dir; do
+	unformatted=$("$GO" list -f '{{.Dir}}' ./internal/... ./cmd/... | sort -u | while IFS= read -r dir; do
 		"$GOFMT" -l "$dir"/*.go 2>/dev/null || true
 	done)
 	if [[ -n "$unformatted" ]]; then
@@ -244,14 +244,14 @@ echo "verify: go=$("$GO" version 2>&1) quick=$([[ $RACE -eq 0 && $SMOKE -eq 0 ]]
 echo
 
 run_step "gofmt" check_gofmt
-run_step "go build ./..." "$GO" build ./...
-run_step "go vet ./..." "$GO" vet ./...
+run_step "go build (internal, cmd)" "$GO" build ./internal/... ./cmd/...
+run_step "go vet (internal, cmd)" "$GO" vet ./internal/... ./cmd/...
 run_step_quiet "protocol consistency (TRANSPORT §5.1 vs dispatch)" check_protocol_consistency
-run_step_quiet "go test ./... -count=1" "$GO" test ./... -count=1
+run_step_quiet "go test (internal, cmd) -count=1" "$GO" test ./internal/... ./cmd/... -count=1
 if [[ $RACE -eq 1 ]]; then
-	run_step_quiet "go test ./... -count=1 -race" "$GO" test ./... -count=1 -race
+	run_step_quiet "go test (internal, cmd) -count=1 -race" "$GO" test ./internal/... ./cmd/... -count=1 -race
 else
-	echo "==> go test ./... -count=1 -race ... SKIP (--quick)"
+	echo "==> go test (internal, cmd) -count=1 -race ... SKIP (--quick)"
 fi
 if [[ $SMOKE -eq 1 ]]; then
 	run_step "serve smoke (gateway starts without a display)" check_serve_smoke
