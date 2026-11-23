@@ -1,11 +1,14 @@
 package host
 
-// Desktop notification integration: the UI root's notifier mirrors
+// OS notification delivery: the gateway's notifier mirrors
 // contracts.SystemNotifier notifications (background run completions/failures,
-// approval waits) to the OS once mygo is ready. This file is the mygo half: the
-// platform sink the root installs and the click-to-front handler. It is best
-// effort — a platform without notification support keeps the in-app toast only,
-// and the settings page shows the switch disabled.
+// approval waits) to the OS once mygo is ready. This file is the mygo half — the
+// platform sink the tray shell installs. It is best effort: a platform without
+// notification support keeps the in-app toast only.
+//
+// There is no click-to-front handler any more: the browser client is the window,
+// so a click opens the client URL through the tray shell's client opener instead
+// of surfacing a native window (the removed notification_click.go assumed one).
 
 import (
 	"context"
@@ -33,17 +36,4 @@ func mygoOSNotifier() func(id, title, body string) error {
 			Body:  body,
 		}).ShowContext(ctx)
 	}
-}
-
-// notifyWindowFront brings the main window to the front when the user clicks
-// an OS notification. Notifications carry the app-level message only, so any
-// click (also one on a notification of an earlier run, whose click launched
-// this instance) simply surfaces the window.
-func notifyWindowFront(window *mygo.Window) {
-	if window == nil || window.IsDestroyed() {
-		return
-	}
-	window.Show()
-	window.Restore()
-	window.Focus()
 }
