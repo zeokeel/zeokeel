@@ -48,7 +48,6 @@ export const UNIMPLEMENTED_PARAMS: Record<string, Record<string, string>> = {
  * "the client starts using it" fails here instead of degrading silently.
  */
 export const UNIMPLEMENTED_METHODS: Record<string, string> = {
-  'session.active.get': '未实现：客户端尚未使用',
 };
 
 /**
@@ -147,7 +146,9 @@ describe('registration lists stay honest', () => {
     // 9 → 8 → 4: `notify.action` (with the delete/undo loop) and the four global
     // subscribes are implemented; each removal is forced by the "handled methods
     // must not stay registered" assertion below.
-    expect(Object.keys(UNIMPLEMENTED_METHODS).length).toBeLessThanOrEqual(1);
+    // Empty: every method the client sends is implemented by the fake. Growth is
+    // still blocked — a new entry has to justify itself and update the README.
+    expect(Object.keys(UNIMPLEMENTED_METHODS).length).toBeLessThanOrEqual(0);
   });
 });
 

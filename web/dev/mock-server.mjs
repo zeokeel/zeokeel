@@ -28,6 +28,9 @@ const HOST = process.env.HOST ?? '127.0.0.1';
 
 const nowIso = () => new Date().toISOString();
 
+/** Which session the client is looking at (`session.active.get`). */
+let activeSessionId = null;
+
 /** Toast actions the mock can actually run (keyed by toast id, like the gateway). */
 const toastActions = new Map();
 let toastSequence = 0;
@@ -1482,7 +1485,13 @@ const wsDispatch = (client, message) => {
       });
     }
     case 'session.subscribe':
-      return reply({ epoch: WS_EPOCH, rev: wsRevs.list, resync: false });
+      // Subscribing is how the client says which session it is looking at, so
+      // that is what `session.active.get` must report (no invented method).
+      activeSessionId = params.sessionId === undefined ? null : String(params.sessionId);
+      // `sinceRev` decides whether a replay is needed; the mock keeps no buffer,
+      // so it answers resync:false only when the client is already current.
+      const since = params.sinceRev === undefined ? wsRevs.list : Number(params.sinceRev);
+      return reply({ epoch: WS_EPOCH, rev: wsRevs.list, resync: since < wsRevs.list });
     case 'session.unsubscribe':
       return reply({});
     case 'session.create': {
@@ -1628,8 +1637,9 @@ const wsDispatch = (client, message) => {
     case 'foreground.set':
       return reply({});
     case 'session.active.get': {
-      const active = [...sessions.values()][0];
-      return reply({ sessionId: active?.id ?? '' });
+      // The client tells the gateway which session it is looking at; the answer
+      // must follow that, not a constant or "the first session in the map".
+      return reply({ sessionId: activeSessionId ?? '' });
     }
     case 'approvals.subscribe':
     case 'ask.subscribe':

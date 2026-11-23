@@ -68,6 +68,8 @@ export interface FakeState {
   approvalMode: string;
   settings: Record<string, string>;
   ask: { id: string; text: string; options?: string[]; answer?: string } | null;
+  /** The session the client is looking at; `session.active.get` reports it. */
+  activeSessionId?: string | null;
   plan: { state: string; content: string };
   artifacts: Array<{ id: string; title: string; body: string }>;
   workspaces: Array<{ id: string; name: string; root: string }>;
@@ -569,6 +571,12 @@ export class FakeGateway {
       this.toastActions.delete(toastId);
       entry.run();
       reply({});
+      return;
+    }
+    if (method === 'session.active.get') {
+      // C group: the active session is real state, not a constant — switching the
+      // selection must change this answer.
+      reply({ sessionId: this.state.activeSessionId ?? null });
       return;
     }
     if (method === 'foreground.set') {
