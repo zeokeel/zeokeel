@@ -31,6 +31,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # The web client is gitignored, so the embed directory only carries `.keep`
+      # in a fresh checkout. Build it before anything compiles: `go build` would
+      # otherwise succeed and every later assertion (smoke, packaging) would be
+      # exercising a binary with no client inside.
+      - uses: ./.github/actions/web-client
+
       - name: gofmt
         run: |
           unformatted=$(gofmt -l cmd internal scripts 2>/dev/null || true)

@@ -80,6 +80,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # The web client bundle is gitignored, so a fresh checkout embeds only
+      # `.keep`. Build it before any binary is compiled: the resulting release
+      # must actually carry the browser client (the release guard checks the
+      # bundle is real and refuses a placeholder tree).
+      - uses: ./.github/actions/web-client
+
       - name: Install librsvg (icon derivation)
         run: |
           sudo apt-get update
@@ -243,6 +249,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # The web client bundle is gitignored, so a fresh checkout embeds only
+      # `.keep`. Build it before any binary is compiled: the resulting release
+      # must actually carry the browser client (the release guard checks the
+      # bundle is real and refuses a placeholder tree).
+      - uses: ./.github/actions/web-client
+
       - name: Install NSIS and librsvg
         run: |
           sudo apt-get update
@@ -281,6 +293,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      # The web client bundle is gitignored, so a fresh checkout embeds only
+      # `.keep`. Build it before any binary is compiled: the resulting release
+      # must actually carry the browser client (the release guard checks the
+      # bundle is real and refuses a placeholder tree).
+      - uses: ./.github/actions/web-client
 
       - name: Install the AppImage toolchain
         run: |

@@ -1,0 +1,45 @@
+name: Build the web client
+description: >-
+  Builds web/dist, copies it into the go:embed directory, and proves the embedded
+  bundle is real. The bundle is gitignored (`internal/gateway/webclient/dist/*`),
+  so every job that compiles or packages a binary has to run this first: without
+  it `go build` still succeeds (the embed falls back to `.keep`) and the release
+  would ship a gateway that serves a "client not built" page. One definition used
+  by CI and by all three release platforms keeps the two pipelines from drifting.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        # LTS. web/ declares no engines constraint; pin here so the release and CI
+        # build the client with the same toolchain.
+        node-version: "22"
+        cache: npm
+        cache-dependency-path: web/package-lock.json
+
+    - name: Install the client dependencies
+      shell: bash
+      run: npm --prefix web ci --no-audit --no-fund
+
+    - name: Build the client
+      shell: bash
+      run: npm --prefix web run build
+
+    - name: Copy the bundle into the go:embed directory
+      shell: bash
+      run: ./scripts/build-web-client.sh
+
+    - name: Assert the embedded bundle is real
+      shell: bash
+      run: |
+        set -eu
+        bundle=internal/gateway/webclient/dist
+        test -s "$bundle/index.html" || { echo "::error::$bundle/index.html is missing"; exit 1; }
+        test -n "$(find "$bundle/assets" -name '*.js' -print -quit)" \
+          || { echo "::error::no JS emitted under $bundle/assets"; exit 1; }
+        # A bundle that embeds but does not boot is still a broken release; the
+        # index must be the built document, not the .keep placeholder tree.
+        grep -q 'ZeoKeel' "$bundle/index.html" \
+          || { echo "::error::$bundle/index.html does not look like the built client"; exit 1; }
+        cat "$bundle/BUNDLE_INFO"
