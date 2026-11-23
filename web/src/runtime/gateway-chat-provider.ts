@@ -35,6 +35,15 @@ export class GatewayChatProvider extends AbstractChatProvider<ZeoMessage, RunReq
   ): RunRequest {
     const merged = { ...(options.params ?? {}), ...requestParams };
     if (!merged.sessionId) throw new Error('chat run requires a sessionId');
+    if (merged.regenerate) {
+      // §4.6: `text` must be absent here — the gateway reruns the user message
+      // it already holds, and a stray `text` is rejected with invalid_params.
+      return {
+        sessionId: merged.sessionId,
+        clientRunId: merged.clientRunId ?? newClientRunId(),
+        regenerate: true,
+      };
+    }
     if (!merged.text) throw new Error('chat run requires text');
     return {
       sessionId: merged.sessionId,
@@ -46,8 +55,14 @@ export class GatewayChatProvider extends AbstractChatProvider<ZeoMessage, RunReq
     };
   }
 
-  /** What the user just said, shown immediately as the end-aligned bubble. */
+  /**
+   * What the user just said, shown immediately as the end-aligned bubble.
+   *
+   * A regenerate has no user turn: it produces an assistant row that streams the
+   * new answer, so an empty user bubble would be a lie about the transcript.
+   */
   transformLocalMessage(requestParams: Partial<RunRequest>): ZeoMessage {
+    if (requestParams.regenerate) return assistantMessage();
     return { ...assistantMessage(), role: 'user', text: requestParams.text ?? '' };
   }
 
@@ -68,6 +83,16 @@ export class GatewayChatProvider extends AbstractChatProvider<ZeoMessage, RunReq
     if (chunk) return applyChunk(base, chunk);
     return chunks.reduce<ZeoMessage>((acc, item) => applyChunk(acc, item), base);
   }
+}
+
+/**
+ * `1023 capability_unsupported` with `data.name = "regenerate_not_supported"`
+ * (§4.6). The client answers by disabling the menu entry — not by showing the
+ * user a failed request they cannot do anything about.
+ */
+export function isRegenerateUnsupported(error: { message?: string }): boolean {
+  const message = error.message ?? '';
+  return message.includes('regenerate_not_supported') || message.includes('capability_unsupported');
 }
 
 export function applyChunk(base: ZeoMessage, chunk: SSEOutput): ZeoMessage {

@@ -1378,3 +1378,18 @@ body {
 .zk-inspector__crumb-sep {
   color: var(--zk-text-tertiary);
 }
+
+/* Message actions (B11): quiet until the row is hovered or focused. */
+.zk-msg-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--zk-space-1);
+  margin-top: var(--zk-space-1);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.zk-transcript__row:hover .zk-msg-actions,
+.zk-msg-actions:focus-within {
+  opacity: 1;
+}

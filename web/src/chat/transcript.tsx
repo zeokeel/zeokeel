@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import type { MessageInfo } from '@ant-design/x-sdk';
 import { Bubble } from '@ant-design/x';
 import { AssistantBody } from './assistant-body';
+import { MessageActions } from './message-actions';
 import {
   indexAtOffset,
   loadAnchor,
@@ -48,12 +49,18 @@ export function Transcript({
   messages,
   sessionId,
   focusIndex,
+  onRegenerate,
+  regenerateDisabled,
 }: {
   messages: MessageInfo<ZeoMessage>[];
   /** Needed for per-session restoration; omitted where a test does not care. */
   sessionId?: string;
   /** Scroll target requested by the find bar. */
   focusIndex?: number;
+  /** B11: retry the last turn through the single run endpoint. */
+  onRegenerate?: () => void;
+  /** Set once the gateway has answered "regenerate is not supported". */
+  regenerateDisabled?: boolean;
 }) {
   const t = useT();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -223,11 +230,24 @@ export function Transcript({
                   variant={isUser ? 'filled' : 'borderless'}
                   content={info.message}
                   loading={info.status === 'loading'}
+                  // The actions live inside `contentRender`: when that prop is
+                  // set, Bubble renders it in place of its own slot tree, so a
+                  // `footer` prop would be silently dropped.
                   contentRender={(content) =>
                     isUser ? (
                       <span className="zk-user-text">{(content as ZeoMessage).text}</span>
                     ) : (
-                      <AssistantBody message={content as ZeoMessage} status={info.status} />
+                      <>
+                        <AssistantBody message={content as ZeoMessage} status={info.status} />
+                        {info.status === 'loading' ? null : (
+                          <MessageActions
+                            text={(content as ZeoMessage).text}
+                            onRegenerate={onRegenerate}
+                            regenerateDisabled={regenerateDisabled}
+                            regenerateHint={t('thread.regenerateUnsupported')}
+                          />
+                        )}
+                      </>
                     )
                   }
                 />

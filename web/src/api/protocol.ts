@@ -19,9 +19,19 @@ export type RunEventName = (typeof RUN_EVENTS)[number];
 
 export interface RunRequest {
   sessionId: string;
-  text: string;
+  /**
+   * The turn's text. **Omitted** in regenerate mode: sending it would append a
+   * second user prompt on top of the one the gateway already holds (§4.6).
+   */
+  text?: string;
   attachments?: string[];
   clientRunId: string;
+  /**
+   * Retry the last turn: the gateway rolls the tail back and reruns it, in one
+   * request. There is deliberately no second send path (`message.regenerate`
+   * was removed for exactly that reason).
+   */
+  regenerate?: boolean;
 }
 
 export interface MessageDeltaData {

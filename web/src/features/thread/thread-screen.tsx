@@ -37,6 +37,10 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   const { reload, create } = useSessions();
   const { approvals } = useApprovals();
   const queue = usePromptQueue(sessionId);
+  // B11: the menu item is enabled unless the gateway says otherwise — either by
+  // advertising no `regenerate` capability, or by answering 1023 on the first
+  // attempt (a build whose backend lacks `SessionRegenerator`).
+  const [regenerateUnsupported, setRegenerateUnsupported] = useState(false);
   const [draft, setDraft] = useState('');
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [findOpen, setFindOpen] = useState(false);
@@ -46,6 +50,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   const chat = useGatewayChat(sessionId, {
     onSnapshotError: (cause) =>
       setSnapshotError(cause instanceof Error ? cause.message : t('thread.loadFailed')),
+    onRegenerateUnsupported: () => setRegenerateUnsupported(true),
   });
 
   // Set while the current run is being stopped on purpose, so the settle
@@ -139,6 +144,15 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- settle runs once per transition
   }, [chat.isRequesting, reload]);
 
+  /**
+   * B11: regenerate goes through the same run endpoint with `regenerate:true`
+   * and no text (§4.6) — never a second send path. One retry at a time.
+   */
+  const regenerate = () => {
+    if (chat.isRequesting) return;
+    chat.onRequest({ sessionId, regenerate: true });
+  };
+
   const send = () => {
     const text = draft.trim();
     if (!text) return;
@@ -230,6 +244,8 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
             messages={chat.parsedMessages}
             sessionId={sessionId}
             focusIndex={matchIndexes.length > 0 ? matchIndexes[cursor] : undefined}
+            onRegenerate={regenerate}
+            regenerateDisabled={regenerateUnsupported}
           />
         )}
       </div>

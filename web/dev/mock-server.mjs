@@ -696,16 +696,44 @@ async function handleRun(req, res) {
     return sendJson(res, 400, { error: 'invalid json' });
   }
 
-  const { sessionId, text } = body ?? {};
-  if (!sessionId || typeof text !== 'string' || text.trim() === '') {
-    return sendJson(res, 400, { error: 'sessionId and text are required' });
+  const { sessionId, text, regenerate } = body ?? {};
+  // §4.6: regenerate is a *mode* of this endpoint. `text` must be absent — the
+  // gateway reruns the user message it already holds, and a stray text here is
+  // exactly the invalid_params the real gateway answers with.
+  if (!sessionId) return sendJson(res, 400, { error: 'sessionId is required' });
+  if (regenerate === true && text !== undefined) {
+    return sendJson(res, 400, {
+      error: { code: 'invalid_params', data: { field: 'text' } },
+      message: 'regenerate must not carry text',
+    });
+  }
+  if (regenerate !== true && (typeof text !== 'string' || text.trim() === '')) {
+    return sendJson(res, 400, { error: 'text is required' });
   }
   const target = sessions.get(sessionId);
   if (!target) return sendJson(res, 404, { error: 'unknown session' });
 
   const turnId = shortId('t');
-  target.messages.push(msg('user', text));
-  if (target.title === '新会话') target.title = text.trim().slice(0, 24);
+  if (regenerate === true) {
+    // Roll the tail back exactly like SessionRegenerator: drop the trailing
+    // assistant reply and the user message it answered, then rerun that prompt.
+    const lastAssistant = [...target.messages].reverse().findIndex((m) => m.role === 'assistant');
+    if (lastAssistant >= 0) target.messages.splice(target.messages.length - 1 - lastAssistant, 1);
+    const lastUser = [...target.messages].reverse().findIndex((m) => m.role === 'user');
+    if (lastUser >= 0) target.messages.splice(target.messages.length - 1 - lastUser, 1);
+    target.messages.push(msg('user', target.lastPrompt ?? '（重生成）'));
+    const rev = (target.rev = (target.rev ?? 0) + 1);
+    wsNotify('session.delta', {
+      sessionId,
+      baseRev: rev - 1,
+      rev,
+      ops: [{ op: 'msg.reset', messages: target.messages.slice() }],
+    });
+  } else {
+    target.messages.push(msg('user', text));
+    target.lastPrompt = text;
+  }
+  if (target.title === '新会话' && typeof text === 'string') target.title = text.trim().slice(0, 24);
   target.updatedAt = nowIso();
 
   res.writeHead(200, {

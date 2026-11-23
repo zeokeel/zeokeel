@@ -4,7 +4,7 @@ import type { DefaultMessageInfo, SSEOutput } from '@ant-design/x-sdk';
 import { loadSnapshot } from '@/api/gateway';
 import type { RunRequest } from '@/api/protocol';
 import { assistantMessage, type ToolStepStatus, type ZeoMessage } from '@/chat/types';
-import { GatewayChatProvider } from './gateway-chat-provider';
+import { GatewayChatProvider, isRegenerateUnsupported } from './gateway-chat-provider';
 
 /**
  * The conversation runtime: x-sdk's `useXChat` with our provider
@@ -15,10 +15,15 @@ import { GatewayChatProvider } from './gateway-chat-provider';
  */
 export function useGatewayChat(
   sessionId: string,
-  options: { onSnapshotError?: (error: unknown) => void } = {},
+  options: {
+    onSnapshotError?: (error: unknown) => void;
+    /** The gateway answered "regenerate is not supported" (§4.6). */
+    onRegenerateUnsupported?: () => void;
+  } = {},
 ) {
   const provider = useMemo(() => new GatewayChatProvider(), []);
   const reportSnapshotError = options.onSnapshotError;
+  const reportRegenerateUnsupported = options.onRegenerateUnsupported;
 
   return useXChat<ZeoMessage, ZeoMessage, RunRequest, SSEOutput>({
     provider,
@@ -71,6 +76,12 @@ export function useGatewayChat(
     requestFallback: (_params, { error, messageInfo }) => {
       const partial = messageInfo?.message ?? assistantMessage();
       if (error.name === 'AbortError') {
+        return { ...partial, stopReason: 'aborted' };
+      }
+      if (isRegenerateUnsupported(error)) {
+        // Not a failure: the build simply lacks the half. Report it so the menu
+        // entry disables itself, and keep the transcript neutral.
+        reportRegenerateUnsupported?.();
         return { ...partial, stopReason: 'aborted' };
       }
       return {
