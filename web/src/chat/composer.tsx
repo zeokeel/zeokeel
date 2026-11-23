@@ -204,7 +204,9 @@ export function Composer({
   };
 
   return (
-    <div className="zk-composer">
+    // `data-testid="composer"` marks the **input area boundary**, not the input:
+    // the textarea is reached by role inside it (task-37 #1, decision (b)).
+    <div className="zk-composer" data-testid="composer">
       {menuOpen ? (
         <div className="zk-slash" role="listbox" aria-label={t('composer.slash')}>
           {matches.map((command, index) => (
