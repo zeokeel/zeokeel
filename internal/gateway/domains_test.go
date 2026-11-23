@@ -288,6 +288,7 @@ type domainTestRig struct {
 	settings  *fakeSettings
 	workspace *fakeWorkspace
 	tasks     *fakeTaskBoard
+	context   *fakeContextInspector
 }
 
 // startDomainGateway starts a gateway with the small-domain backends.
@@ -300,8 +301,9 @@ func startDomainGateway(t *testing.T) *domainTestRig {
 	approvals.settings = settings
 	workspace := newFakeWorkspace()
 	board := newFakeTaskBoard()
+	inspector := newFakeContextInspector()
 
-	root := cordisRootFor(t, chat, approvals, settings, workspace, board)
+	root := cordisRootFor(t, chat, approvals, settings, workspace, board, inspector)
 	gateway, err := New(root, Options{DataDir: t.TempDir(), Port: -1, Logger: testLogger{t: t}, Out: discardWriter{}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -312,7 +314,7 @@ func startDomainGateway(t *testing.T) *domainTestRig {
 	}
 	served := serveGateway(t, gateway)
 	return &domainTestRig{runningGateway: served, chat: chat, approvals: approvals,
-		settings: settings, workspace: workspace, tasks: board}
+		settings: settings, workspace: workspace, tasks: board, context: inspector}
 }
 
 // connect opens an authenticated control-plane connection.
@@ -399,6 +401,59 @@ func (f *fakeTaskBoard) seed(subject, status string) contracts.BoardTask {
 		task, _ = f.SetStatus(context.Background(), task.ID, status)
 	}
 	return task
+}
+
+// --- context inspector fake ------------------------------------------------
+
+// fakeContextInspector is an in-memory contracts.ContextInspector: a test bumps
+// the revision to simulate the agent folding a new event.
+type fakeContextInspector struct {
+	mu      sync.Mutex
+	views   map[string]contracts.SessionContext
+	missing map[string]bool
+}
+
+// newFakeContextInspector returns an inspector with no recorded sessions.
+func newFakeContextInspector() *fakeContextInspector {
+	return &fakeContextInspector{views: map[string]contracts.SessionContext{}, missing: map[string]bool{}}
+}
+
+// SessionContext implements contracts.ContextInspector.
+func (f *fakeContextInspector) SessionContext(sessionID string) (contracts.SessionContext, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.missing[sessionID] {
+		return contracts.SessionContext{}, false
+	}
+	view, ok := f.views[sessionID]
+	if !ok {
+		return contracts.SessionContext{}, false
+	}
+	return view, true
+}
+
+// record folds one provider call into the fake view: it bumps the revision and
+// appends a request, exactly the shape the agent produces.
+func (f *fakeContextInspector) record(sessionID string, promptTokens int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	view := f.views[sessionID]
+	view.Revision++
+	view.Snapshot = contracts.ContextSnapshot{
+		Model: "test-model", Window: 200000,
+		SystemPromptTokens: 1200, SystemPromptBytes: 5200,
+		History:         contracts.ContextHistory{Messages: 3, User: 1, Assistant: 2},
+		Injected:        contracts.ContextInjected{AgentsMD: true},
+		EstimatedPrompt: promptTokens,
+	}
+	view.Requests = append(view.Requests, contracts.ContextRequest{
+		Seq: int64(view.Revision), Iteration: len(view.Requests) + 1,
+		Model: "test-model", Prompt: promptTokens, Total: promptTokens + 20,
+		ContextTokens: promptTokens,
+	})
+	view.Used = promptTokens
+	view.Window = 200000
+	f.views[sessionID] = view
 }
 
 // --- delta appliers (client-side) ------------------------------------------
@@ -974,5 +1029,132 @@ func TestTaskCommandsDriveTheBoard(t *testing.T) {
 	protocolErr := errorOf(t, conn.call("task.status", map[string]any{"id": task.ID, "status": "done"}))
 	if protocolErr["message"] == "" {
 		t.Fatalf("task.status unknown status error = %v, want a message", protocolErr)
+	}
+}
+
+// TestContextDomainReplayMatchesNextSnapshot is the per-domain replay law for the
+// context timeline (§5.1.8): because the backend re-folds the whole view and only
+// exposes a Revision, the delta is a whole replacement — so "apply the delta,
+// then compare with the next snapshot" must hold trivially, and it is exactly
+// what the client does.
+func TestContextDomainReplayMatchesNextSnapshot(t *testing.T) {
+	rig := startDomainGateway(t)
+	defer rig.stop(t)
+	conn := rig.connect(t)
+
+	// A cold conversation has no recorded context: found=false, no numbers.
+	cold := resultOf(t, conn.call("context.snapshot", map[string]any{"sessionId": "s1"}))
+	if cold["found"] != false {
+		t.Fatalf("cold context.snapshot = %v, want found=false", cold)
+	}
+	if _, ok := cold["context"]; ok {
+		t.Fatalf("cold context.snapshot carries a context object: %v", cold)
+	}
+	beforeRev := uint64(cold["rev"].(float64))
+	subscribed := resultOf(t, conn.call("context.subscribe", map[string]any{"sessionId": "s1", "sinceRev": beforeRev}))
+	if subscribed["resync"] != false {
+		t.Fatalf("context.subscribe from a warm rev = %v, want no resync", subscribed)
+	}
+
+	// The agent folds a provider call: the revision moves.
+	rig.context.record("s1", 1234)
+	delta := conn.receive(func(method string) bool { return method == "context.delta" })
+	params, _ := delta["params"].(map[string]any)
+	if params["found"] != true {
+		t.Fatalf("context.delta = %v, want found=true", params)
+	}
+	if uint64(params["baseRev"].(float64)) != beforeRev {
+		t.Fatalf("context.delta baseRev = %v, want %d", params["baseRev"], beforeRev)
+	}
+	deltaContext, _ := params["context"].(map[string]any)
+	if deltaContext["used"] != float64(1234) {
+		t.Fatalf("context.delta used = %v, want 1234", deltaContext["used"])
+	}
+
+	// Applying the delta means replacing the local view with it verbatim.
+	after := resultOf(t, conn.call("context.snapshot", map[string]any{"sessionId": "s1"}))
+	if after["found"] != true {
+		t.Fatalf("context.snapshot after a fold = %v", after)
+	}
+	snapshotContext, _ := after["context"].(map[string]any)
+	if fmt.Sprint(snapshotContext) != fmt.Sprint(deltaContext) {
+		t.Fatalf("replayed view differs from the snapshot:\n replay=%v\n snapshot=%v", deltaContext, snapshotContext)
+	}
+	if uint64(after["rev"].(float64)) != uint64(params["rev"].(float64)) {
+		t.Fatalf("rev mismatch: snapshot %v, delta %v", after["rev"], params["rev"])
+	}
+
+	// An unchanged revision must not move the domain again.
+	rig.context.record("s1", 1234) // bumps revision, so this one does move
+	second := conn.receive(func(method string) bool { return method == "context.delta" })
+	secondParams, _ := second["params"].(map[string]any)
+	if uint64(secondParams["rev"].(float64)) <= uint64(params["rev"].(float64)) {
+		t.Fatalf("a second fold did not bump the domain rev: %v", secondParams)
+	}
+}
+
+// TestContextSnapshotRequiresSession pins the parameter contract: the domain is
+// per-conversation, so a missing sessionId is a parameter error (not an empty
+// timeline that would render as "this conversation has no context").
+func TestContextSnapshotRequiresSession(t *testing.T) {
+	rig := startDomainGateway(t)
+	defer rig.stop(t)
+	conn := rig.connect(t)
+
+	protocolErr := errorOf(t, conn.call("context.snapshot", map[string]any{}))
+	if protocolErr["message"] == "" {
+		t.Fatalf("context.snapshot without sessionId = %v, want an error", protocolErr)
+	}
+	protocolErr = errorOf(t, conn.call("context.subscribe", map[string]any{"sinceRev": 0}))
+	if protocolErr["message"] == "" {
+		t.Fatalf("context.subscribe without sessionId = %v, want an error", protocolErr)
+	}
+}
+
+// TestInitializeAdvertisesTheContextCapability pins the capability contract the
+// browser uses to decide whether the Context tab exists: never a probe method,
+// always the handshake list — and the list follows the assembly (a backend
+// without contracts.KeyContext does not advertise it).
+func TestInitializeAdvertisesTheContextCapability(t *testing.T) {
+	capabilities := func(rig *domainTestRig) []string {
+		t.Helper()
+		conn := dialTestWS(t, rig.address, map[string]string{
+			"Origin":        rig.info.Origin(),
+			"Authorization": "Bearer " + rig.info.Token,
+		})
+		t.Cleanup(conn.close)
+		result := resultOf(t, conn.call("initialize", map[string]any{"protocolVersion": ProtocolVersion}))
+		list, _ := result["capabilities"].([]any)
+		out := make([]string, 0, len(list))
+		for _, capability := range list {
+			if name, ok := capability.(string); ok {
+				out = append(out, name)
+			}
+		}
+		return out
+	}
+
+	withContext := startDomainGateway(t)
+	defer withContext.stop(t)
+	if list := capabilities(withContext); !containsString(list, "context") {
+		t.Fatalf("initialize capabilities = %v, want it to contain context", list)
+	}
+
+	// The same gateway without the inspector: the capability must disappear, so
+	// the client hides the tab instead of calling a method that cannot work.
+	chat := newFakeChat()
+	settings := newFakeSettings(nil)
+	root := cordisRootFor(t, chat, nil, settings, nil, nil, nil)
+	gateway, err := New(root, Options{DataDir: t.TempDir(), Port: -1, Logger: testLogger{t: t}, Out: discardWriter{}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := gateway.Provide(root); err != nil {
+		t.Fatalf("Provide: %v", err)
+	}
+	bare := &domainTestRig{runningGateway: serveGateway(t, gateway)}
+	defer bare.stop(t)
+	if list := capabilities(bare); containsString(list, "context") {
+		t.Fatalf("initialize advertised context without a KeyContext backend: %v", list)
 	}
 }

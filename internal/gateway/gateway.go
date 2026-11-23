@@ -433,6 +433,10 @@ func (g *Gateway) refreshPolledDomains() {
 	// watching one: the backend drains the queue itself (a run settling starts
 	// the next prompt), so the inbox can change without any gateway write.
 	g.hub.refreshWatchedPrompts()
+	// The context timeline has no change notification either: the agent folds it
+	// from the durable event log on read. Only subscribed conversations are
+	// re-read (same ceiling as the prompt inbox: 2s).
+	g.hub.refreshWatchedPrefix(domainContextPrefix)
 	// The approval mode is a settings row, so a permission change must reach the
 	// approvals snapshot even when the pending set did not move.
 	g.hub.markDomainDirty(domainApprovals)

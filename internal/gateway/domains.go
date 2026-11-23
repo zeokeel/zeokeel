@@ -37,11 +37,28 @@ const (
 	domainSettings  = "settings"
 	domainWorkspace = "workspace.list"
 	domainTasks     = "tasks"
+	domainContext   = "context"
 	// domainPromptsPrefix names one conversation's prompt inbox
 	// ("prompts:<sessionID>"): queued prompts belong to a session, so the domain
 	// is per-session, not global.
 	domainPromptsPrefix = "prompts:"
 )
+
+// domainContextPrefix names one conversation's folded context timeline
+// ("context:<sessionID>") — the browser's Context tab reads it.
+const domainContextPrefix = "context:"
+
+// contextKey is the domain key of one conversation's context timeline.
+func contextKey(sessionID string) string { return domainContextPrefix + sessionID }
+
+// contextSessionID reports whether key addresses a context timeline and returns
+// its conversation.
+func contextSessionID(key string) (string, bool) {
+	if strings.HasPrefix(key, domainContextPrefix) {
+		return strings.TrimPrefix(key, domainContextPrefix), true
+	}
+	return "", false
+}
 
 // domainTasksPrefix names one conversation's task board ("tasks:<sessionID>"):
 // the board is process-wide, but a backend that scopes it by session
@@ -235,6 +252,175 @@ func (t taskDTO) domainID() string { return t.ID }
 type tasksSnapshot struct {
 	SessionID string    `json:"sessionId,omitempty"`
 	Tasks     []taskDTO `json:"tasks"`
+}
+
+// --- context timeline ------------------------------------------------------
+
+// The context domain is the browser's Context tab: the folded view of what the
+// model actually saw (contracts.SessionContext, contextinspect.go:246). The
+// backend recomputes it from the durable event log on every read and carries its
+// own Revision for "unchanged" detection, so the delta is a whole replacement:
+// there is no per-item change log to diff against, and the lists are already
+// bounded (200 requests + 200 audit events).
+
+// contextSectionDTO is one labelled part of the request context.
+type contextSectionDTO struct {
+	ID     string `json:"id"`
+	Label  string `json:"label,omitempty"`
+	Source string `json:"source,omitempty"`
+	Bytes  int    `json:"bytes"`
+	Tokens int    `json:"tokens"`
+	Hash   string `json:"hash,omitempty"`
+}
+
+// contextToolDTO is one tool in the request catalog.
+type contextToolDTO struct {
+	Name   string `json:"name"`
+	Group  string `json:"group,omitempty"`
+	Tokens int    `json:"tokens"`
+}
+
+// contextHistoryDTO is the message-count breakdown at run start.
+type contextHistoryDTO struct {
+	Messages  int `json:"messages"`
+	User      int `json:"user"`
+	Assistant int `json:"assistant"`
+	Tool      int `json:"tool"`
+}
+
+// contextInjectedDTO records which optional prompt injections were present.
+type contextInjectedDTO struct {
+	AgentsMD bool `json:"agentsMd,omitempty"`
+	Preset   bool `json:"preset,omitempty"`
+	Memory   bool `json:"memory,omitempty"`
+	Skills   bool `json:"skills,omitempty"`
+}
+
+// contextSnapshotDTO is the request-level snapshot of the latest run.
+type contextSnapshotDTO struct {
+	At                 *time.Time          `json:"at,omitempty"`
+	Seq                int64               `json:"seq,omitempty"`
+	Model              string              `json:"model,omitempty"`
+	Window             int                 `json:"window,omitempty"`
+	SystemPromptBytes  int                 `json:"systemPromptBytes"`
+	SystemPromptTokens int                 `json:"systemPromptTokens"`
+	Sections           []contextSectionDTO `json:"sections,omitempty"`
+	Tools              []contextToolDTO    `json:"tools,omitempty"`
+	History            contextHistoryDTO   `json:"history"`
+	Injected           contextInjectedDTO  `json:"injected"`
+	EstimatedPrompt    int                 `json:"estimatedPrompt"`
+}
+
+// contextRequestDTO is one provider call of the run.
+type contextRequestDTO struct {
+	Seq           int64      `json:"seq"`
+	Iteration     int        `json:"iteration"`
+	At            *time.Time `json:"at,omitempty"`
+	Model         string     `json:"model,omitempty"`
+	Prompt        int        `json:"prompt"`
+	Completion    int        `json:"completion"`
+	Cached        int        `json:"cached,omitempty"`
+	Total         int        `json:"total"`
+	ContextTokens int        `json:"contextTokens"`
+	CostUSD       float64    `json:"costUsd,omitempty"`
+	CostKnown     bool       `json:"costKnown,omitempty"`
+}
+
+// contextEventDTO is one audit entry of the timeline (compaction/spill/…).
+type contextEventDTO struct {
+	Seq              int64      `json:"seq"`
+	Kind             string     `json:"kind"`
+	At               *time.Time `json:"at,omitempty"`
+	Detail           string     `json:"detail,omitempty"`
+	Ref              string     `json:"ref,omitempty"`
+	Before           int        `json:"before,omitempty"`
+	After            int        `json:"after,omitempty"`
+	Replaced         int        `json:"replaced,omitempty"`
+	Saved            int        `json:"saved,omitempty"`
+	Path             string     `json:"path,omitempty"`
+	Bytes            int        `json:"bytes,omitempty"`
+	Inferred         bool       `json:"inferred,omitempty"`
+	ArchivedMessages int        `json:"archivedMessages,omitempty"`
+	ArchivedBytes    int        `json:"archivedBytes,omitempty"`
+	Truncated        bool       `json:"truncated,omitempty"`
+	Outcome          string     `json:"outcome,omitempty"`
+}
+
+// contextDTO is the folded context view of one session.
+type contextDTO struct {
+	Revision     uint64              `json:"revision"`
+	Snapshot     contextSnapshotDTO  `json:"snapshot"`
+	Requests     []contextRequestDTO `json:"requests"`
+	Events       []contextEventDTO   `json:"events"`
+	Used         int                 `json:"used"`
+	Window       int                 `json:"window"`
+	TotalCostUSD float64             `json:"totalCostUsd,omitempty"`
+	CostKnown    bool                `json:"costKnown,omitempty"`
+}
+
+// contextSnapshotPayload is the domain's cached snapshot. Found is false for a
+// session with no recorded context data (cold/never run), which the UI renders
+// as an empty state instead of inventing numbers.
+type contextSnapshotPayload struct {
+	SessionID string      `json:"sessionId"`
+	Found     bool        `json:"found"`
+	Context   *contextDTO `json:"context,omitempty"`
+}
+
+// contextDelta replaces the whole folded view. Why not a field-level diff: the
+// backend re-derives the view from the durable event log and only exposes a
+// Revision (contextinspect.go:246), and its lists are append-plus-trim windows
+// (200 requests / 200 audit events), so "the newest whole object wins" is both
+// exact and cheaper than reconstructing per-item edits.
+type contextDelta struct {
+	SessionID string      `json:"sessionId"`
+	BaseRev   uint64      `json:"baseRev"`
+	Rev       uint64      `json:"rev"`
+	Found     bool        `json:"found"`
+	Context   *contextDTO `json:"context,omitempty"`
+	Resync    bool        `json:"resync,omitempty"`
+}
+
+// notification implements deltaPayload.
+func (d *contextDelta) notification() string { return "context.delta" }
+
+// revs implements deltaPayload.
+func (d *contextDelta) revs() (uint64, uint64) { return d.BaseRev, d.Rev }
+
+// setRevs implements deltaPayload.
+func (d *contextDelta) setRevs(base, rev uint64) { d.BaseRev, d.Rev = base, rev }
+
+// isResync implements deltaPayload.
+func (d *contextDelta) isResync() bool { return d.Resync }
+
+// retainBytes implements deltaPayload.
+func (d *contextDelta) retainBytes() int {
+	if d.Context == nil {
+		return 32
+	}
+	total := 128 + 64*len(d.Context.Requests) + 96*len(d.Context.Events)
+	for _, section := range d.Context.Snapshot.Sections {
+		total += len(section.Label) + 48
+	}
+	for _, request := range d.Context.Requests {
+		total += len(request.Model) + 48
+	}
+	for _, event := range d.Context.Events {
+		total += len(event.Detail) + len(event.Path) + 64
+	}
+	return total
+}
+
+// merge implements deltaPayload: the newest whole view wins.
+func (d *contextDelta) merge(next deltaPayload) deltaPayload {
+	other, ok := next.(*contextDelta)
+	if !ok || other.Rev <= d.Rev {
+		return d
+	}
+	merged := *other
+	merged.BaseRev = d.BaseRev
+	merged.Resync = d.Resync || other.Resync
+	return &merged
 }
 
 // promptsDelta is the prompt inbox delta: appended prompts, removed ids, and —
@@ -727,6 +913,9 @@ func (s *domainSources) build(key string) (any, error) {
 	if sessionID, ok := tasksSessionID(key); ok {
 		return g.buildTasks(context.Background(), sessionID)
 	}
+	if sessionID, ok := contextSessionID(key); ok {
+		return g.buildContext(sessionID)
+	}
 	if sessionID, ok := promptsSessionID(key); ok {
 		return g.buildPrompts(context.Background(), sessionID)
 	}
@@ -830,6 +1019,17 @@ func (h *hub) diffDomain(key string, previous, next any) deltaPayload {
 		}
 		return nil
 	}
+	if _, ok := contextSessionID(key); ok {
+		old, oldOK := previous.(contextSnapshotPayload)
+		fresh, freshOK := next.(contextSnapshotPayload)
+		if !oldOK || !freshOK {
+			return nil
+		}
+		if delta := diffContext(old, fresh); delta != nil {
+			return delta
+		}
+		return nil
+	}
 	if _, ok := tasksSessionID(key); ok {
 		old, oldOK := previous.(tasksSnapshot)
 		fresh, freshOK := next.(tasksSnapshot)
@@ -881,6 +1081,9 @@ func (h *hub) resyncDelta(domain *domainState, base, rev uint64) deltaPayload {
 	}
 	if _, ok := tasksSessionID(domain.key); ok {
 		return &itemSetDelta{method: "tasks.delta", BaseRev: base, Rev: rev, Resync: true}
+	}
+	if sessionID, ok := contextSessionID(domain.key); ok {
+		return &contextDelta{SessionID: sessionID, BaseRev: base, Rev: rev, Resync: true}
 	}
 	if sessionID, ok := promptsSessionID(domain.key); ok {
 		return &promptsDelta{SessionID: sessionID, BaseRev: base, Rev: rev, Resync: true}
@@ -1061,6 +1264,110 @@ func (g *Gateway) buildTasks(ctx context.Context, sessionID string) (any, error)
 		})
 	}
 	return snapshot, nil
+}
+
+// buildContext reads one conversation's folded context timeline.
+//
+// The service is optional: an assembly without the agent module answers
+// found=false, which is the same empty state the Context tab shows for a
+// conversation that never ran.
+func (g *Gateway) buildContext(sessionID string) (any, error) {
+	payload := contextSnapshotPayload{SessionID: sessionID}
+	inspector, ok := g.root.Get(contracts.KeyContext)
+	if !ok || inspector == nil {
+		return payload, nil
+	}
+	view, found := inspector.SessionContext(sessionID)
+	if !found {
+		return payload, nil
+	}
+	payload.Found = true
+	payload.Context = contextViewDTO(view)
+	return payload, nil
+}
+
+// contextViewDTO maps the contract's folded view onto the wire shape.
+func contextViewDTO(view contracts.SessionContext) *contextDTO {
+	out := &contextDTO{
+		Revision:     view.Revision,
+		Snapshot:     contextSnapshotDTO{History: contextHistoryDTO{}},
+		Requests:     make([]contextRequestDTO, 0, len(view.Requests)),
+		Events:       make([]contextEventDTO, 0, len(view.Events)),
+		Used:         view.Used,
+		Window:       view.Window,
+		TotalCostUSD: view.TotalCostUSD,
+		CostKnown:    view.CostKnown,
+	}
+	snapshot := view.Snapshot
+	out.Snapshot = contextSnapshotDTO{
+		At:                 timePointer(snapshot.At),
+		Seq:                snapshot.Seq,
+		Model:              snapshot.Model,
+		Window:             snapshot.Window,
+		SystemPromptBytes:  snapshot.SystemPromptBytes,
+		SystemPromptTokens: snapshot.SystemPromptTokens,
+		History: contextHistoryDTO{
+			Messages:  snapshot.History.Messages,
+			User:      snapshot.History.User,
+			Assistant: snapshot.History.Assistant,
+			Tool:      snapshot.History.Tool,
+		},
+		Injected: contextInjectedDTO{
+			AgentsMD: snapshot.Injected.AgentsMD,
+			Preset:   snapshot.Injected.Preset,
+			Memory:   snapshot.Injected.Memory,
+			Skills:   snapshot.Injected.Skills,
+		},
+		EstimatedPrompt: snapshot.EstimatedPrompt,
+	}
+	for _, section := range snapshot.Sections {
+		out.Snapshot.Sections = append(out.Snapshot.Sections, contextSectionDTO{
+			ID: section.ID, Label: section.Label, Source: section.Source,
+			Bytes: section.Bytes, Tokens: section.Tokens, Hash: section.Hash,
+		})
+	}
+	for _, tool := range snapshot.Tools {
+		out.Snapshot.Tools = append(out.Snapshot.Tools, contextToolDTO{
+			Name: tool.Name, Group: tool.Group, Tokens: tool.Tokens,
+		})
+	}
+	for _, request := range view.Requests {
+		out.Requests = append(out.Requests, contextRequestDTO{
+			Seq: request.Seq, Iteration: request.Iteration, At: timePointer(request.At),
+			Model: request.Model, Prompt: request.Prompt, Completion: request.Completion,
+			Cached: request.Cached, Total: request.Total, ContextTokens: request.ContextTokens,
+			CostUSD: request.CostUSD, CostKnown: request.CostKnown,
+		})
+	}
+	for _, event := range view.Events {
+		out.Events = append(out.Events, contextEventDTO{
+			Seq: event.Seq, Kind: string(event.Kind), At: timePointer(event.At),
+			Detail: event.Detail, Ref: event.Ref, Before: event.Before, After: event.After,
+			Replaced: event.Replaced, Saved: event.Saved, Path: event.Path, Bytes: event.Bytes,
+			Inferred: event.Inferred, ArchivedMessages: event.ArchivedMessages,
+			ArchivedBytes: event.ArchivedBytes, Truncated: event.Truncated, Outcome: event.Outcome,
+		})
+	}
+	return out
+}
+
+// diffContext compares two folded views. The backend's Revision is the change
+// signal: same revision (or both "not found") means nothing a client can see
+// moved. When it moved, the delta carries the whole view — see contextDelta.
+func diffContext(previous, next contextSnapshotPayload) *contextDelta {
+	if previous.Found == next.Found {
+		if !next.Found {
+			return nil
+		}
+		if previous.Context != nil && next.Context != nil && previous.Context.Revision == next.Context.Revision {
+			return nil
+		}
+	}
+	return &contextDelta{
+		SessionID: next.SessionID,
+		Found:     next.Found,
+		Context:   next.Context,
+	}
 }
 
 // diffTasks compares two board snapshots as an upsert set: the board has mutable

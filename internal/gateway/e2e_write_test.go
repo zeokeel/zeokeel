@@ -19,7 +19,7 @@ import (
 func startWriteGateway(t *testing.T, chat contracts.ChatService, pollInterval time.Duration) (*runningGateway, *fakeSettings) {
 	t.Helper()
 	settings := newFakeSettings(nil)
-	root := cordisRootFor(t, chat, nil, settings, nil, nil)
+	root := cordisRootFor(t, chat, nil, settings, nil, nil, nil)
 	gateway, err := New(root, Options{DataDir: t.TempDir(), Port: -1, Logger: testLogger{t: t}, Out: discardWriter{}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -39,7 +39,7 @@ func startWriteGateway(t *testing.T, chat contracts.ChatService, pollInterval ti
 func TestRefreshNowIsNotReentrant(t *testing.T) {
 	chat := newFakeChat()
 	settings := newFakeSettings(nil)
-	root := cordisRootFor(t, chat, nil, settings, nil, nil)
+	root := cordisRootFor(t, chat, nil, settings, nil, nil, nil)
 	gateway, err := New(root, Options{DataDir: t.TempDir(), Port: -1, Logger: testLogger{t: t}, Out: discardWriter{}})
 	if err != nil {
 		t.Fatalf("New: %v", err)

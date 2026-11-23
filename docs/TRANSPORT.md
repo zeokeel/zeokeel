@@ -494,6 +494,32 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 
 > `foreground.set` 是唯一"客户端→服务端的状态上报"。用途见契约注释：后台 run 完成时，只有"用户正看着的那个会话"才静音（`foreground.go:7-19`）。不实现它，所有后台完成通知都会响。
 
+#### 5.1.8 上下文时间线（context，§6.3 降级）
+
+| 方法 / 通知 | 参数 | 返回 | 幂等 | 契约 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| `context.snapshot` | `{sessionId}` | `{epoch,rev,sessionId,found,context?}` | Y | `ContextInspector.SessionContext` `contextinspect.go:256` | ✅ 已实现 |
+| `context.subscribe` | `{sessionId, sinceRev}` | `{epoch,rev,resync}` | Y | 同域机制（§6.5） | ✅ 已实现 |
+| ↳ 通知 `context.delta` | `{sessionId, baseRev, rev, found, context?}` | — | — | **整段替换**（见下） | — |
+| `context.archive` | `{sessionId,seq}` | `{messages[],truncated}` | Y | `ContextArchiveService` `contextinspect.go:270+` | 延后 |
+
+> **域是每会话的**：`context:<sessionId>`。`context?` 与 `found` 一起读：`found:false` 表示
+> 该会话还没有任何上下文记录（冷会话/从未运行），客户端显示空态，**不要编造数字**。
+>
+> **delta 是整段替换，不是字段级 diff**：后端每次读取都从 durable 事件日志**重新折叠**整个视图
+> （`contracts.SessionContext`），只暴露一个 `Revision`（"内容没变就别重读"），而 `requests`/
+> `events` 是"追加 + 截断"的有界窗口（各 200 条）。所以 delta 直接带**完整的 `context` 对象**，
+> 客户端整体替换；变化判定用后端的 `Revision`——两者都为 `found:false`，或 `Revision` 未变，
+> 就不发 delta。最坏情况（200 请求 + 200 审计条目）约几十 KB，仍在 `deltaRingBytes` 预算内，
+> 超出时走既有 `resync` 机制。
+>
+> **能力探测走 `initialize` 的 capabilities**：装配里没有 `KeyContext` 时，`initialize` 的
+> capabilities **不含** `context`，客户端据此隐藏「上下文」Tab。**不要**自己发明探测方法。
+>
+> **延迟上限 2s（降级，不是推送）**：`ContextInspector` 没有变更通知。网关只对**已订阅**的
+> 会话轮询（`refreshWatchedPrefix("context:")`），无人看的会话零成本。客户端不能假设"运行中
+> 上下文读数实时刷新"——它在一次 run 期间会随 `model_call` 事件变化，但到达延迟上限是 2s。
+
 #### 5.1.8 任务板（taskboard，§6.3 降级）
 
 | 方法 / 通知 | 参数 | 返回 | 幂等 | 契约 | 状态 |
@@ -663,6 +689,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `toasts` | 无 rev（单向事件，不重放） | — | `notifier.SetHandler` `toasts.go:222` |
 | `settings` | `{rows}` | 任一行写入 | **无订阅**（§6.3 需新增） |
 | `tasks` / `tasks:<id>` | `{tasks:[Task]}`（进程级 / 按会话） | 看板内容真的变了（网关写路径立即、其余靠轮询） | **无订阅**（`tasks.go`，§6.3 降级，延迟上限 2s） |
+| `context:<id>` | `{found, context}`（折叠的上下文时间线） | 后端的 `Revision` 变了 | **无订阅**（`contextinspect.go`，只轮询已订阅会话，延迟上限 2s） |
 | `workspace.list` | `[]Workspace` + `currentId` | 增删改/切换 | **无订阅**（按需快照 + 客户端显式 invalidate） |
 | 其余（team/tasks/todo/jobs/plugins/insights/skills/memory） | 各自列表 | 网关在每次写方法成功后 +1；读模型本身无订阅 | 请求—响应 + 懒快照 |
 
@@ -722,7 +749,7 @@ onServiceChange(domain):
 > 幂等（成功）。原 web mock 里自造的 REST `/api/sessions/:id/prompts` 不是网关路由，
 > 客户端应改用本域。
 
-> **实现状态（S1c，internal/gateway）**：`settings` 与 `workspace.list` 两个域按"轮询 + 差值"落地，**没有假装是推送**：网关每 2s 读一次 `SettingsService.All()` / `WorkspaceService.List()+Current()`，内容真的变了才 +1 该域 `rev` 并广播 `settings.delta` / `workspace.list.delta`；不变则零流量。因此这两域的**延迟上限是 2s**，客户端不能假设一次设置写入会立刻回声——这是契约没有通知能力的直接后果，不是实现偷懒。副作用是**用户手改 `settings.json` 也能在 2s 内被看到**（比上面"不感知"的原始限制更强）。`approvals` 走真推送（`Approvals.Subscribe`），另外每 2s 也刷新一次，因为审批模式（`mode`）来自 settings 行：模式变化会让该域发 `resync`，客户端重新取快照。**任务板（`tasks`）同样按"轮询 + 内容变才 bump"落地**：`task.status`/`task.delete` 这类网关写路径立即刷新并回带新 rev，其余改动（agent 的 `team_task_*` 工具、第二个客户端）延迟上限 **2s**。
+> **实现状态（S1c，internal/gateway）**：`settings` 与 `workspace.list` 两个域按"轮询 + 差值"落地，**没有假装是推送**：网关每 2s 读一次 `SettingsService.All()` / `WorkspaceService.List()+Current()`，内容真的变了才 +1 该域 `rev` 并广播 `settings.delta` / `workspace.list.delta`；不变则零流量。因此这两域的**延迟上限是 2s**，客户端不能假设一次设置写入会立刻回声——这是契约没有通知能力的直接后果，不是实现偷懒。副作用是**用户手改 `settings.json` 也能在 2s 内被看到**（比上面"不感知"的原始限制更强）。`approvals` 走真推送（`Approvals.Subscribe`），另外每 2s 也刷新一次，因为审批模式（`mode`）来自 settings 行：模式变化会让该域发 `resync`，客户端重新取快照。**上下文时间线（`context:<id>`）也是轮询**：`ContextInspector` 无通知，网关对已订阅会话每 2s 重读一次折叠视图，用后端 `Revision` 判断是否真的变了（不变则零流量）。**任务板（`tasks`）同样按"轮询 + 内容变才 bump"落地**：`task.status`/`task.delete` 这类网关写路径立即刷新并回带新 rev，其余改动（agent 的 `team_task_*` 工具、第二个客户端）延迟上限 **2s**。
 
 ### 6.4 长会话与大数据：分页与裁剪【提案】
 

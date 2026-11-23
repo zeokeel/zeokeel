@@ -32,6 +32,19 @@ var serverCapabilities = []string{
 	"foreground",
 }
 
+// gatewayCapabilities is the handshake's capability list for this gateway
+// instance: the static set above, plus "context" when the assembly actually
+// provides contracts.KeyContext. The client uses this list (never a probe
+// method) to decide whether to render the Context tab — the browser counterpart
+// of the desktop rule "missing service key ⇒ hidden surface".
+func (g *Gateway) gatewayCapabilities() []string {
+	caps := append([]string(nil), serverCapabilities...)
+	if inspector, ok := g.root.Get(contracts.KeyContext); ok && inspector != nil {
+		caps = append(caps, "context")
+	}
+	return caps
+}
+
 // limitsDTO is the initialize result's limits block (§4.2).
 type limitsDTO struct {
 	MaxFrameBytes       int `json:"maxFrameBytes"`
@@ -222,6 +235,12 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"prompts.remove": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.promptsRemove(request.Params)
 		},
+		"context.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.contextSnapshot(ctx, request.Params)
+		},
+		"context.subscribe": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.contextSubscribe(ctx, c, request.Params)
+		},
 		"tasks.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.tasksSnapshot(ctx, request.Params)
 		},
@@ -312,7 +331,7 @@ func (g *Gateway) initialize(c *client, raw json.RawMessage) (any, *protocolErro
 		Epoch:           g.epoch,
 		ProtocolVersion: ProtocolVersion,
 		ServerVersion:   g.serverVersion(),
-		Capabilities:    serverCapabilities,
+		Capabilities:    g.gatewayCapabilities(),
 		Limits: limitsDTO{
 			MaxFrameBytes:       MaxFrameBytes,
 			MaxAttachmentBytes:  MaxAttachmentBytes,
@@ -911,6 +930,65 @@ func (g *Gateway) setSetting(ctx context.Context, raw json.RawMessage) (any, *pr
 		rev = snapshot.rev
 	}
 	return settingsSetResult{Epoch: g.epoch, Rev: rev}, nil
+}
+
+// --- context timeline ------------------------------------------------------
+
+// contextSnapshotResult is the context.snapshot answer.
+type contextSnapshotResult struct {
+	Epoch     string      `json:"epoch"`
+	Rev       uint64      `json:"rev"`
+	SessionID string      `json:"sessionId"`
+	Found     bool        `json:"found"`
+	Context   *contextDTO `json:"context,omitempty"`
+}
+
+// contextSessionParams is the body of context.snapshot / context.subscribe.
+type contextSessionParams struct {
+	SessionID string `json:"sessionId"`
+	SinceRev  uint64 `json:"sinceRev"`
+}
+
+// contextSnapshot serves one conversation's folded context timeline.
+func (g *Gateway) contextSnapshot(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	var params contextSessionParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	sessionID := strings.TrimSpace(params.SessionID)
+	if sessionID == "" {
+		return nil, errInvalidParams("sessionId", "is required")
+	}
+	key := contextKey(sessionID)
+	snapshot, err := g.hub.snapshotDomain(ctx, key)
+	if err != nil {
+		return nil, internalError(err)
+	}
+	payload, ok := snapshot.payload.(contextSnapshotPayload)
+	if !ok {
+		return nil, internalError(errors.New("gateway: context snapshot has an unexpected type"))
+	}
+	return contextSnapshotResult{
+		Epoch:     g.epoch,
+		Rev:       snapshot.rev,
+		SessionID: payload.SessionID,
+		Found:     payload.Found,
+		Context:   payload.Context,
+	}, nil
+}
+
+// contextSubscribe registers the client on one conversation's context domain
+// and replays its ring.
+func (g *Gateway) contextSubscribe(ctx context.Context, c *client, raw json.RawMessage) (any, *protocolError) {
+	var params contextSessionParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	sessionID := strings.TrimSpace(params.SessionID)
+	if sessionID == "" {
+		return nil, errInvalidParams("sessionId", "is required")
+	}
+	return g.domainSubscribe(ctx, c, contextKey(sessionID), raw)
 }
 
 // --- task board ------------------------------------------------------------

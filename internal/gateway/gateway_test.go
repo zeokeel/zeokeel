@@ -357,7 +357,8 @@ func (discardWriter) Write(p []byte) (int, error) { return len(p), nil }
 // Every optional service is provided only when the caller passes one, mirroring
 // the real products (a nil backend means "that domain has nothing to read").
 func cordisRootFor(t *testing.T, chat contracts.ChatService, approvals *fakeApprovals,
-	settings *fakeSettings, workspace *fakeWorkspace, board *fakeTaskBoard) cordis.Context {
+	settings *fakeSettings, workspace *fakeWorkspace, board *fakeTaskBoard,
+	inspector *fakeContextInspector) cordis.Context {
 	t.Helper()
 	root := cordis.Root()
 	t.Cleanup(func() { _ = root.DisposeAll() })
@@ -384,6 +385,11 @@ func cordisRootFor(t *testing.T, chat contracts.ChatService, approvals *fakeAppr
 	if board != nil {
 		if _, err := root.Provide(contracts.KeyTaskBoard, contracts.TaskBoard(board)); err != nil {
 			t.Fatalf("provide task board: %v", err)
+		}
+	}
+	if inspector != nil {
+		if _, err := root.Provide(contracts.KeyContext, contracts.ContextInspector(inspector)); err != nil {
+			t.Fatalf("provide context inspector: %v", err)
 		}
 	}
 	return root

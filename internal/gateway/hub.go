@@ -202,13 +202,21 @@ func (h *hub) markDomainDirty(key string) {
 // comment). Only h.pending is mutex-protected, because external goroutines write
 // it.
 func (h *hub) refreshWatchedPrompts() {
+	h.refreshWatchedPrefix(domainPromptsPrefix)
+}
+
+// refreshWatchedPrefix marks every watched domain whose key starts with prefix
+// dirty. It is the pull half of the per-session domains that have no change
+// notification (prompts, context): only subscribed domains are re-read, so an
+// idle gateway costs nothing for conversations nobody is looking at.
+func (h *hub) refreshWatchedPrefix(prefix string) {
 	if !h.isRunning() {
 		return
 	}
 	marked, err := hubCall(context.Background(), h, func(hh *hub) (int, error) {
 		count := 0
 		for key, domain := range hh.domains {
-			if _, ok := promptsSessionID(key); !ok || len(domain.subs) == 0 {
+			if !strings.HasPrefix(key, prefix) || len(domain.subs) == 0 {
 				continue
 			}
 			hh.pending[key] = true
