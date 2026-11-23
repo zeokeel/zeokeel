@@ -1,3 +1,6 @@
+import { Button } from 'antd';
+import { useNavigate } from 'react-router';
+import { classifyProviderFailure } from '@/features/provider-error';
 import { MarkdownBody } from './markdown';
 import { useT } from '@/i18n';
 import { ThoughtSteps } from './thought-steps';
@@ -26,15 +29,60 @@ export function AssistantBody({
     <>
       <ThoughtSteps reasoning={message.reasoning} steps={message.steps} streaming={streaming} />
       {message.text ? <MarkdownBody text={message.text} streaming={streaming} /> : null}
-      {message.error ? (
-        <div className="zk-msg-error" role="alert">
-          {message.error.message}
-          {message.error.code ? `（${message.error.code}）` : ''}
-        </div>
-      ) : null}
+      {message.error ? <ProviderErrorRow error={message.error} /> : null}
       {stopped ? <div className="zk-msg-stopped">{t('thread.stopped')}</div> : null}
       <MessageMeta message={message} status={status} />
     </>
+  );
+}
+
+/**
+ * A provider failure, in the user's words, with the original one click away.
+ *
+ * v0.3.0 put the model client's report inline: an English JSON body inside a
+ * Chinese conversation, with our internal code glued to the end. The first line
+ * now says what to do (and offers the one action that helps), while the raw text
+ * stays available — an unclassified error is still shown verbatim, because hiding
+ * an error we do not understand is worse than showing it.
+ */
+function ProviderErrorRow({ error }: { error: { code: string; message: string } }) {
+  const t = useT();
+  const navigate = useNavigate();
+  const failure = classifyProviderFailure(error.message);
+  const sentence =
+    failure.kind === 'noCredential'
+      ? t('thread.providerError.noCredential')
+      : failure.kind === 'unauthorized'
+        ? t('thread.providerError.unauthorized')
+        : failure.kind === 'unreachable'
+          ? t('thread.providerError.unreachable')
+          : null;
+  const action =
+    failure.kind === 'noCredential' || failure.kind === 'unauthorized' ? (
+      <Button size="small" onClick={() => navigate('/settings')}>
+        {t('thread.providerError.openSettings')}
+      </Button>
+    ) : null;
+
+  return (
+    <div className="zk-msg-error" role="alert">
+      {sentence ? (
+        <>
+          <div className="zk-msg-error__sentence">{sentence}</div>
+          {action}
+        </>
+      ) : (
+        // Unknown: the raw text *is* the message.
+        <div className="zk-msg-error__sentence">{failure.detail}</div>
+      )}
+      <details className="zk-msg-error__details">
+        <summary>{t('thread.providerError.details')}</summary>
+        <pre className="zk-msg-error__raw">
+          {failure.provider ? `provider: ${failure.provider}\n` : ''}
+          {failure.detail}
+        </pre>
+      </details>
+    </div>
   );
 }
 
