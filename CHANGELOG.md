@@ -4,6 +4,13 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.2] - 2026-11-24
+
+### Fixed
+
+- **用户消息不再作为回答正文重复出现**：`/api/chat/run` 的流把「发送时追加的用户消息」当成正文增量（`message.delta`）推给客户端，于是助手气泡里出现了用户自己的话。现在只有 assistant 消息进入该流（含其后续 delta / 工具更新 / 补丁）。
+- **「正在连接模型…」现在真的会出现**：v0.3.1 引入的三态因上一条而永远停在运行态；接上第一帧的正确判据后，从发送到首个正文/推理/工具帧之间显示连接态。
+
 ## [0.3.1] - 2026-11-24
 
 ### Fixed
