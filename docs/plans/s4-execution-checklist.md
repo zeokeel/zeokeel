@@ -88,6 +88,15 @@ Go+docs 632 文件 +1,364/−163,027。
 | 协议级端到端 | 3 条 acceptance（真 WS + 真 SSE，fakemodel + gwprobe） |
 | 测试代码量 | 269 文件 / 66,415 行（pre-s4 为 701 文件；删除的 10.4 万行测试：ui 59,083 + uiroot 8,685 + uikit 8,278 + regression 17,337 + conform 592） |
 
+**已知验收盲区（S9 之后发现，补记；不改历史勾选）**
+`settings.set` 的能力条目缺失让设置页在真网关下**永远只读**（客户端 `hasCapability('settings.set')`
+精确匹配，服务端只报 `settings`），而 **24 条 P0 验收里没有一条走"改一项设置并保存"的端到端**：
+B1（设置脏守卫）只在 jsdom + fake 里验过，而 `web/src/test/fake-gateway.ts:99` **手写了**
+`'settings.set'`——替身有、真网关没有，两边各自自洽。所以这条 bug 能躲过 171 条测试＋全部人工验收。
+修复：`2248be9` 在静态能力表补 `settings.set`（并补 `approvals`）；根治见 task-17（能力清单与参数
+契约从 Go 侧生成，**禁止任何替身手写 capabilities**）。
+**盲区本身要记住**：设置写路径目前仍无真环境端到端，下一次动设置相关的服务端能力时补一条。
+
 **覆盖净变化（必须记录的损失）**
 `internal/modules/hosttools/bridges_test.go` 已删除：它断言的是 **uiroot 实现**的
 artifact/plan 桥（present 经宿主桥到渲染器、plan_review 状态机、interactive=false 时
@@ -480,11 +489,27 @@ P1/P2 的最终数字由 web 轨接完三笔后确定（web 轨排队：i18n、B
 | **S8.5** | 勾选行说把 `s4-retirement-inventory.md` 与本清单移到 `docs/archive/`。 | **没有移**：两者仍在 `docs/plans/`。理由可以理解（它们仍在被引用），但记录与事实不符。 |
 | **S9.10** | 勾选行写"提交 `S9: post-retirement verification` + 打 tag `post-s4`"。 | 实际是 `38da7f2` + `9b28015`（没有单独的 S9 提交），tag 名由 Lead 定为 **`post-migration`**（打在 `9b28015`）。 |
 
+### 复盘得到的判断（写给后来的人）
+
+**一、机器断言的价值不在"证明代码对"，而在"发现没人报的错"。**
+例子：web 轨的路由自匹配断言上线当天就抓出 `/c/:id/files` 被解析成 R9/R10（预览）而不是
+R8（文件树）——因为 splat 能匹配空尾巴而排序只看长度；界面看不出来（两条标题相同），语义已错。
+同类投资：S6 的四条引擎边界断言（当天抓出 `internal/icons` 也 import 了 mygo）、
+`TestTransportMethodsMatchDispatch`（两次抓出"文档声明了、实现没做"）。
+
+**二、凡是被替身（mock / fake / 桩）顶替的地方，都必须有一个真环境的最小验证。**
+否则替身的自洽会掩盖真实的缺失——这是本轮第 9 次"替身比生产宽松"。最贵的例子：
+`web/src/test/fake-gateway.ts:99` 手写了 `'settings.set'`，而真网关的 `serverCapabilities`
+没有它，于是 171 条测试全绿、设置页在真网关下永远只读。**"让 mock 更严格"不足以根治**：
+替身手里的清单本身就是抄来的，抄漏一项整条链就失效——所以清单必须**从 Go 侧生成**
+（task-17），并断言"替身的 capabilities 里不允许出现契约之外的名字"。
+
 ### 附注（不是清单条目）
 
 - **S9.8 的 `make acceptance-tool` 是交互式目标**（起网关 + 假模型后等 Ctrl-C），没有通过/失败
   判定；S9 实际跑的是 `acceptance-check`/`acceptance-approval`/`acceptance-slow` 三条探针。
 - **S9.9 的 web 生成链**由 web 轨验证（`gen:verify` 绿），Go 轨未代跑（不动 `web/`）。
-- **发现一处死代码**：`internal/host/notification_click.go` 与 `notify.go:notifyWindowFront` 现在
-  只有测试在用——托盘壳走 tray 菜单，不再接 `App.OnNotificationClick`。带测试所以不红，但是
-  桌面路径删除后的残留，可作为后续清理项。
+- **发现一处死代码（已删，`1031e88`）**：`internal/host/notification_click.go` 与
+  `notify.go:notifyWindowFront` 只有测试在用——托盘壳走 tray 菜单，不再接 `App.OnNotificationClick`。
+  带测试所以不红，但它**暗示了一条不存在的链路**（读到 `notificationClicker` 的人会以为通知点击
+  还接在那条链上），因此删除而不是留着。
