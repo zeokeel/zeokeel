@@ -6,6 +6,14 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.56] - 2026-11-23
+
+### Changed
+
+- **单工作区体验**：启动时始终显示工作文件夹选择页（上次默认、Enter 继续、可选文件夹）；侧栏改为当前工作区会话的平铺列表，移除工作区树/分组。
+- **永久工作区 rail**：左侧 Discord 式 64px rail，一键切换工作区；底部固定“管理工作文件夹”和“添加工作文件夹”；每个工作区支持颜色（默认/蓝/绿/黄/红），色条显示在 rail 上。
+- 桌面 host 通过 `EnableWorkspaceGate` 开启启动页；headless/ACP 不受影响。
+
 ### Added
 
 - **系统提示词改为 SDK 每 run 渲染 + 日期行**：`AgentSpec.SystemPrompt` 换成 `SystemPromptFunc`（在 `BeforeRun` 之后、读历史之前渲染），环境段新增 `date` 小节（`Today's date is 2026-11-21 (Saturday).`，来源 `builtin`，零值时钟时省略），并作为 `PromptSectionDate` 进入上下文快照的提示词来源；日期位于提示词最前的环境组，本地日期翻转后每会话每天最多失效一次前缀缓存；溢出恢复的压缩预算也改为按渲染后的提示词预留。
