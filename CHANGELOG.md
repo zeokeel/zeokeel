@@ -6,6 +6,14 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.58] - 2026-11-23
+
+### Changed
+
+- **技能按工作区隔离**：打开工作区时只发现该工作区的 `skills` / `.agents/skills` / `.zeokeel/skills`；新建/修改/删除写入工作区 `.zeokeel/skills`；全局技能仅在没有打开工作区时可见，技能页有范围提示。
+- **连接器按工作区隔离**：MCP 配置行带 WorkspaceID，连接器页只显示当前工作区；旧全局行首次打开页面时归入当前工作区；禁用服务器/工具按工作区作用域；启动页、rail、切换对话框和工作区切换都会触发 MCP 重载。
+- 记忆沿用每工作区 root 独立 SQLite store。
+
 ## [0.2.57] - 2026-11-23
 
 ### Fixed
