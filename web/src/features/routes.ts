@@ -35,7 +35,7 @@ export const ROUTES: RouteMeta[] = [
   { path: '/c/:sessionId/context', ref: 'R6', titleKey: 'thread.tabs.context', deferral: 'thread.contextUnavailable' },
   { path: '/c/:sessionId/child/:childId', ref: 'R7', titleKey: 'thread.untitled' },
   { path: '/c/:sessionId/files', ref: 'R8', titleKey: 'thread.untitled' },
-  { path: '/c/:sessionId/files/*path', ref: 'R9/R10', titleKey: 'thread.untitled' },
+  { path: '/c/:sessionId/files/*', ref: 'R9/R10', titleKey: 'thread.untitled' },
   { path: '/c/:sessionId/guide', ref: 'R11', titleKey: 'thread.untitled' },
   { path: '/settings/:page', ref: 'R13–R21', titleKey: 'settings.title' },
   { path: '/automation', ref: 'R22', titleKey: 'shell.automation' },

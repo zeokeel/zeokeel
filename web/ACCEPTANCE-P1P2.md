@@ -20,7 +20,7 @@
 | B10 | 工具失败行 + 可展开 stderr | 完成 | 本轮补：`tool-card.tsx` 渲染 `step.error`（`role="alert"`），与卡片同级、展开可见；状态行显示「失败」 |
 | B11 | 消息 `⋯` 菜单（复制/编辑/重生成） | 未做 | 无消息操作菜单组件；且「编辑/重生成」需要网关方法（`message.regenerate` 未实现，TRANSPORT §5.1 无 `message.edit`）。只做「复制」会给出不完整菜单，按「不做未请求的半截功能」暂缺 |
 | B12 | 后台任务 chip → 浮层 → 停止 | 未做 | **后端无域**：`internal/gateway` 没有 jobs/tasks 域或方法（`grep 'jobs\|task\.'` 无命中）。用 mock 数据假装会违反"不发明协议" |
-| B13 | 队列弹层可查看并取消 | 部分 | 功能齐备但不是弹层：`prompt-queue-panel.tsx` 在 composer 上方常显「N 条待发送」+ 单条取消 + 空闲时「发送队首」，数据走 WS `prompts:*` 域（真网关实测：enqueue→delta→取消）。**缺**：浮层形态（把同一组件挂到 `Popover` 即可，属打磨） |
+| B13 | 队列弹层可查看并取消 | 完成 | 已改成 antd `Popover`：收起态只有一个「N 条待发送」chip（`thread.queue.count`），点开是行列表 + 单条取消 + 空闲时「发送队首」；数据仍走 WS `prompts:*`。测试：`queue-and-breadcrumb.test.tsx`「shows the count on the chip and reveals the rows only when opened」「keeps the send-head affordance inside the popover when idle」，`prompt-queue.test.tsx` 三条回归（排队/取消/中止保留）全绿 |
 | B14 | toast（带撤销）4s 消失、错误粘滞 | 完成 | 已接：`features/toasts/toasts.tsx` 订阅 WS `toast.posted {id, level, text, sessionId?, actionLabel?, actionId?}`（§6.3 形状），antd `notification` 渲染；带 action 时按钮回 `notify.action {id, actionId}`；回执 `duration: 4`、`level=error` `duration: 0` 粘滞；同 id 不堆叠。测试：`toasts.test.tsx`（渲染/回执 action/去重/error 熬过 4s 仍在）；浏览器实测（`.cache/ui-review/toast.png`）：`这一轮已完成 + 查看会话` 出现在右上 `x 872 y 24`，5s 后回执计数 0（错误级别不消失由单测覆盖） |
 | B15 | 危险确认默认焦点在取消、Enter 不执行 | 完成 | `ui/confirm-danger.tsx`：取消按钮 `autoFocus`，危险动作为 danger 且非默认；`esc-chain` E5/E7 与 `ConfirmDanger` 单测覆盖 |
 | B16 | `Mod+B` 折叠侧栏、展开后状态不丢 | 完成 | 本轮补：`app-shell.tsx` `useShortcut(mod+'b')` + `COLLAPSED_WIDTH`，折叠为图标栏（导航 `inlineCollapsed`、会话变圆点且当前项高亮），宽度存 `expandedWidth`；`acceptance-p1p2.test.tsx`「collapses to a rail and restores the active session」 |
@@ -28,7 +28,7 @@
 | C2 | 当前行 tint 比 hover 更浓 | 完成 | `tokens.css`：亮色 hover `rgba(15,17,21,.045)` vs selected `rgba(13,68,246,.09)`；暗色 `rgba(255,255,255,.06)` vs `rgba(55,231,254,.13)` — 选择态更浓且带色相 |
 | C3 | 命令面板能搜到每条命令 | 完成 | `command-palette.tsx` 按标题过滤；`acceptance-p1p2.test.tsx`「reaches each command by typing its title」逐条验证（新建会话 / 前往 收件箱 / 前往 设置） |
 | C4 | 文件树 ↑↓ 改当前项并出预览 | 完成 | `inspector-panel.tsx` 用 antd `Tree`（内置 ↑↓/Home/End 键盘导航）+ `onSelect` → `/c/:id/files/<path>` → 预览/`diff` 分段；`files.test.ts` 覆盖树构建与路径 |
-| C5 | 面包屑「工作区根目录」回树、不关页签 | 部分 | 树/预览是同一路由组，返回树 = 导航到 `/c/:id/files`，页签不关。**缺**：没有显式的「工作区根目录」面包屑按钮（只有预览头里的路径文本） |
+| C5 | 面包屑「工作区根目录」回树、不关页签 | 完成 | 已在预览头加面包屑：`工作区根目录 / <path>`，根可点击 → `/c/:id/files`，面板不卸载（不关页签），替换了原来重复的「返回树」按钮。测试：`queue-and-breadcrumb.test.tsx`「navigates to the tree and keeps the inspector mounted」；浏览器实测 `{crumb:"Workspace root", path:"src/chat/composer.tsx"} → click → url=/c/s-7071d368/files, inspectorAlive=true, pathGone=true`（`.cache/ui-review/breadcrumb.png`）。**顺带修掉一个真 bug**：文件路由注册成 `*path`，react-router 只认 `*` 作 splat，导致**所有文件深链都落到 NotFound**、检查器根本进不去；改成 `*` 并加回归测试「renders the inspector for /c/:id/files/<path>」 |
 | C6 | 团队/子代理入口零值常显、不显示 0 | 完成 | 已接：侧栏常显「团队」（`sidebar-nav.tsx`），入口无任何计数徽章；`/team` → `TeamScreen` 零值显示空态「还没有队友或子任务」。域未投影时形态不变，`team.*` 落地后只填数据。测试：`team-entry.test.tsx`（常显、无 0、空态、选中态）；浏览器实测（`.cache/ui-review/team-empty.png`）：侧栏 `收件箱/能力/自动化/洞察/团队/设置`，`/team` 显示「还没有队友或子任务」 |
 
 ## 汇总
@@ -41,10 +41,8 @@
 - **B11 消息菜单**：`message.regenerate` 在 TRANSPORT §5.1 状态为"延后"，且没有编辑方法；只做复制等于半截菜单。
 - **B12 后台任务 chip**：`contracts/tasks.go` 有 5 个类型，但网关未投影 `tasks` 域 → 未投影，不是不存在。
 
-部分的 3 条：
+部分的 2 条：
 - **B6** 三 Tab 完成、「上下文」按能力隐藏（已知等价性缺口，需 Go 侧 `context.*`）；
-- **B13** 队列查看/取消可用，形态是常显面板而非弹层（打磨项）；
-- **C5** 回树可用，缺显式「工作区根目录」面包屑。
 
 ## 附：本轮为补齐而改的代码
 

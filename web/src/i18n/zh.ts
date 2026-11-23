@@ -195,6 +195,21 @@ export const zh = {
   'team.back': '回到现在',
 
   // --------------------------------------------------------------- toasts --
+  'inspector.loadFailed': '文件树加载失败',
+  'inspector.fileLoadFailed': '文件加载失败',
+  'inspector.guideTab': '开始',
+  'inspector.filesTab': '文件',
+  'inspector.title': '检查器',
+  'inspector.pages': '检查器页面',
+  'inspector.changed': '已改动',
+  'inspector.guide.title': '检查器用来查看 agent 改了什么：左边是工作区树，右边是文件内容或逐文件 diff。',
+  'inspector.guide.hint': '选择「文件」页开始；改动过的文件在树上有标记。',
+  'inspector.pickFile': '选择一个文件查看内容。',
+  'inspector.preview': '预览',
+  'inspector.diff': '改动',
+  'inspector.noDiff': '没有改动。',
+  'inspector.unpreviewable': '无法预览该文件。',
+  'inspector.workspaceRoot': '工作区根目录',
   'toast.dismiss': '关闭',
 
   // -------------------------------------------------------------- actions --

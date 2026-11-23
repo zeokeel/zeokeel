@@ -135,7 +135,9 @@ describe('prompt queue while a run is active', () => {
     await waitFor(() => expect(harness.requested).toEqual(['A']));
     await user.keyboard('B{Enter}');
     await user.keyboard('C{Enter}');
-    expect(await screen.findByText('2 条待发送')).toBeInTheDocument();
+    // B13: the queue is a collapsed chip; opening it reveals the rows.
+    await user.click(await screen.findByRole('button', { name: '2 条待发送' }));
+    expect(await screen.findByText('#1')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '取消待发送：B' }));
     await waitFor(() => expect(screen.getByText('1 条待发送')).toBeInTheDocument());
@@ -167,8 +169,9 @@ describe('prompt queue while a run is active', () => {
     expect(await screen.findByText('1 条待发送')).toBeInTheDocument();
     expect(harness.requested).toEqual(['正在跑']);
 
-    // The explicit "发送队首" affordance resumes it.
-    await user.click(screen.getByRole('button', { name: '发送队首' }));
+    // The explicit "发送队首" affordance resumes it (inside the chip).
+    await user.click(await screen.findByRole('button', { name: '1 条待发送' }));
+    await user.click(await screen.findByRole('button', { name: '发送队首' }));
     await waitFor(() => expect(harness.requested).toEqual(['正在跑', '稍后再发']));
   }, 20_000);
 });

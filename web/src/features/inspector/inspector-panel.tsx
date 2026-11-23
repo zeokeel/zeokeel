@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Segmented, Spin, Tree, Typography } from 'antd';
+import { Segmented, Spin, Tree, Typography } from 'antd';
 import type { TreeDataNode } from 'antd';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import {
@@ -10,9 +10,10 @@ import {
 } from '@/api/files';
 import { DiffBlock } from '@/chat/tools/sections';
 import { ZkIcon } from '@/design/icons';
+import { useT } from '@/i18n';
 
 /** Flat `a/b/c.ts` paths → antd Tree nodes, directories created as needed. */
-export function buildFileTree(nodes: FileNode[]): TreeDataNode[] {
+export function buildFileTree(nodes: FileNode[], changedLabel = ''): TreeDataNode[] {
   type Dir = { children: Map<string, Dir>; node?: TreeDataNode };
   const root: Dir = { children: new Map() };
 
@@ -28,7 +29,9 @@ export function buildFileTree(nodes: FileNode[]): TreeDataNode[] {
           key: node.path,
           title: part,
           isLeaf: node.isLeaf,
-          ...(node.changed ? { icon: <span className="zk-tree-changed" aria-label="已改动" /> } : {}),
+          ...(node.changed
+            ? { icon: <span className="zk-tree-changed" aria-label={changedLabel} /> }
+            : {}),
         };
       }
       cursor = next;
@@ -56,6 +59,7 @@ export function buildFileTree(nodes: FileNode[]): TreeDataNode[] {
  * are written only for a user's own navigation.
  */
 export function InspectorPanel() {
+  const t = useT();
   const { sessionId } = useParams<{ sessionId: string; '*': string }>();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -76,7 +80,7 @@ export function InspectorPanel() {
         const tree = await loadFileTree();
         if (!cancelled) setNodes(tree.nodes);
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : '文件树加载失败');
+        if (!cancelled) setError(cause instanceof Error ? cause.message : t('inspector.loadFailed'));
       }
     })();
     return () => {
@@ -104,7 +108,7 @@ export function InspectorPanel() {
           }
         }
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : '文件加载失败');
+        if (!cancelled) setError(cause instanceof Error ? cause.message : t('inspector.fileLoadFailed'));
       } finally {
         if (!cancelled) setLoadingFile(false);
       }
@@ -114,12 +118,12 @@ export function InspectorPanel() {
     };
   }, [selected, view]);
 
-  const treeData = useMemo(() => buildFileTree(nodes ?? []), [nodes]);
+  const treeData = useMemo(() => buildFileTree(nodes ?? [], t('inspector.changed')), [nodes, t]);
   const guide = relative === '' && !searchParams.get('view');
 
   return (
-    <aside className="zk-inspector" aria-label="检查器">
-      <div className="zk-inspector__tabs" role="tablist" aria-label="检查器页面">
+    <aside className="zk-inspector" aria-label={t('inspector.title')}>
+      <div className="zk-inspector__tabs" role="tablist" aria-label={t('inspector.pages')}>
         <button
           type="button"
           role="tab"
@@ -127,7 +131,7 @@ export function InspectorPanel() {
           className={`zk-inspector__tab${guide ? ' zk-inspector__tab--active' : ''}`}
           onClick={() => sessionId && navigate(`/c/${sessionId}/guide`)}
         >
-          开始
+          {t('inspector.guideTab')}
         </button>
         <button
           type="button"
@@ -136,17 +140,17 @@ export function InspectorPanel() {
           className={`zk-inspector__tab${!guide ? ' zk-inspector__tab--active' : ''}`}
           onClick={() => sessionId && navigate(`/c/${sessionId}/files`)}
         >
-          文件
+          {t('inspector.filesTab')}
         </button>
       </div>
 
       {guide ? (
         <div className="zk-inspector__body">
           <Typography.Paragraph>
-            检查器用来查看 agent 改了什么：左边是工作区树，右边是文件内容或逐文件 diff。
+            {t('inspector.guide.title')}
           </Typography.Paragraph>
           <Typography.Paragraph type="secondary">
-            选择「文件」页开始；改动过的文件在树上有标记。
+            {t('inspector.guide.hint')}
           </Typography.Paragraph>
         </div>
       ) : (
@@ -171,10 +175,20 @@ export function InspectorPanel() {
           </div>
           <div className="zk-inspector__preview">
             {selected === '' ? (
-              <Typography.Text type="secondary">选择一个文件查看内容。</Typography.Text>
+              <Typography.Text type="secondary">{t('inspector.pickFile')}</Typography.Text>
             ) : (
               <>
                 <div className="zk-inspector__preview-header">
+                  {/* C5: the root crumb goes back to the tree and keeps this
+                      tab open — losing the preview would lose the user's place. */}
+                  <button
+                    type="button"
+                    className="zk-inspector__crumb"
+                    onClick={() => navigate(`/c/${sessionId}/files`)}
+                  >
+                    {t('inspector.workspaceRoot')}
+                  </button>
+                  <span className="zk-inspector__crumb-sep">/</span>
                   <ZkIcon name="file" />
                   <span className="zk-inspector__path">{selected}</span>
                   <Segmented
@@ -187,26 +201,19 @@ export function InspectorPanel() {
                       setSearchParams(params, { replace: true });
                     }}
                     options={[
-                      { label: '预览', value: 'preview' },
-                      { label: '改动', value: 'diff' },
+                      { label: t('inspector.preview'), value: 'preview' },
+                      { label: t('inspector.diff'), value: 'diff' },
                     ]}
                   />
-                  <Button
-                    size="small"
-                    type="text"
-                    onClick={() => sessionId && navigate(`/c/${sessionId}/files`)}
-                  >
-                    返回树
-                  </Button>
                 </div>
                 {loadingFile ? (
                   <Spin size="small" />
                 ) : view === 'diff' ? (
-                  diff ? <DiffBlock unified={diff} /> : <Typography.Text type="secondary">没有改动。</Typography.Text>
+                  diff ? <DiffBlock unified={diff} /> : <Typography.Text type="secondary">{t('inspector.noDiff')}</Typography.Text>
                 ) : content !== null ? (
                   <pre className="zk-inspector__content">{content}</pre>
                 ) : (
-                  <Typography.Text type="secondary">无法预览该文件。</Typography.Text>
+                  <Typography.Text type="secondary">{t('inspector.unpreviewable')}</Typography.Text>
                 )}
               </>
             )}

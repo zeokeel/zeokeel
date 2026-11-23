@@ -191,6 +191,21 @@ export const en: Catalog = {
   'team.back': 'Back to Now',
 
   // --------------------------------------------------------------- toasts --
+  'inspector.loadFailed': 'Could not load the file tree',
+  'inspector.fileLoadFailed': 'Could not load the file',
+  'inspector.guideTab': 'Start',
+  'inspector.filesTab': 'Files',
+  'inspector.title': 'Inspector',
+  'inspector.pages': 'Inspector pages',
+  'inspector.changed': 'Changed',
+  'inspector.guide.title': 'The inspector shows what the agent changed: the workspace tree on the left, file contents or a per-file diff on the right.',
+  'inspector.guide.hint': 'Start from the Files tab; changed files are marked in the tree.',
+  'inspector.pickFile': 'Pick a file to see its contents.',
+  'inspector.preview': 'Preview',
+  'inspector.diff': 'Changes',
+  'inspector.noDiff': 'No changes.',
+  'inspector.unpreviewable': 'This file cannot be previewed.',
+  'inspector.workspaceRoot': 'Workspace root',
   'toast.dismiss': 'Close',
 
   // -------------------------------------------------------------- actions --

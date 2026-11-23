@@ -67,7 +67,9 @@ export function AppRoutes() {
       />
       <Route path="/c/:sessionId/child/:childId" element={<ChildSessionScreen />} />
       <Route path="/c/:sessionId/files" element={<ThreadRoute />} />
-      <Route path="/c/:sessionId/files/*path" element={<ThreadRoute />} />
+      {/* Splat, not `*path`: react-router only accepts `*` as the splat segment,
+          and a literal `*path` silently stops matching every file URL. */}
+      <Route path="/c/:sessionId/files/*" element={<ThreadRoute />} />
       <Route path="/c/:sessionId/guide" element={<ThreadRoute />} />
       <Route path="/settings" element={<SettingsScreen />} />
       <Route path="/settings/:page" element={<SettingsScreen />} />

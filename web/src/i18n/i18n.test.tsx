@@ -114,12 +114,10 @@ const PENDING_CONVERSION = new Set([
   'features/automation/automation-screen.tsx',
   'features/capabilities/capabilities-screen.tsx',
   'features/insights/insights-screen.tsx',
-  'features/inspector/inspector-panel.tsx',
   'features/palette/command-palette.tsx',
   'features/settings/settings-screen.tsx',
   'features/thread/child-session-screen.tsx',
   'features/thread/memory-screen.tsx',
-  'features/thread/prompt-queue-panel.tsx',
   // Diagnostics, not copy: these strings surface only when something is already
   // broken, and translating them would hide the cause from a bug report.
   'api/gateway.ts',

@@ -1313,3 +1313,68 @@ body {
 .ant-notification {
   z-index: var(--zk-z-overlay, 40);
 }
+
+/* Queue chip (B13): collapsed by default, count on the trigger. */
+.zk-queue-chip {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 var(--zk-space-4) var(--zk-space-1);
+}
+
+.zk-queue {
+  min-width: 260px;
+  max-width: 420px;
+}
+
+.zk-queue__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--zk-space-1);
+}
+
+.zk-queue__row {
+  display: flex;
+  align-items: center;
+  gap: var(--zk-space-2);
+}
+
+.zk-queue__index {
+  color: var(--zk-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.zk-queue__text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zk-queue__footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--zk-space-1);
+  border-top: 1px solid var(--zk-border-l2);
+}
+
+/* C5: the workspace-root breadcrumb in the inspector header. */
+.zk-inspector__crumb {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--zk-text-secondary);
+  cursor: pointer;
+}
+
+.zk-inspector__crumb:hover {
+  color: var(--zk-accent);
+  text-decoration: underline;
+}
+
+.zk-inspector__crumb-sep {
+  color: var(--zk-text-tertiary);
+}
