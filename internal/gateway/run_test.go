@@ -26,6 +26,35 @@ type scriptedChat struct {
 	script    func(*fakeChat)
 	sent      []string
 	cancelled int
+	// regenerated counts message.regenerate-class calls (the run endpoint's
+	// regenerate mode), and regenerateErr lets a test make the backend refuse.
+	regenerated   int
+	regenerateErr error
+}
+
+// Regenerate implements contracts.SessionRegenerator: the run endpoint's
+// regenerate mode calls it instead of Send. Like the real agent it rewinds and
+// runs, so the script drives the fake session the same way Send does.
+func (c *scriptedChat) Regenerate(sessionID string) error {
+	c.mu.Lock()
+	c.regenerated++
+	err := c.regenerateErr
+	script := c.script
+	c.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if script != nil {
+		go script(c.fakeChat)
+	}
+	return nil
+}
+
+// regenerateCount reports how many regenerate calls the backend saw.
+func (c *scriptedChat) regenerateCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.regenerated
 }
 
 func newScriptedChat() *scriptedChat {
@@ -700,4 +729,106 @@ func TestChatRunErrorEventIsTerminal(t *testing.T) {
 	if containsString(eventNames(frames), sseDone) {
 		t.Fatal("a failed run must not also send done")
 	}
+}
+
+// TestChatRunRegenerateModeIsTheSameSendPath pins §4.6's decision: "retry the
+// last turn" is a *mode* of POST /api/chat/run, not a second WS method. The
+// endpoint must call the backend's Regenerate (never Send), stream the same
+// events, and stay idempotent per clientRunId — a repeat must not rewind the
+// history a second time.
+func TestChatRunRegenerateModeIsTheSameSendPath(t *testing.T) {
+	chat := newScriptedChat()
+	chat.addSession("s1", "First", "hello")
+	finished := make(chan struct{})
+	chat.script = fullRunScript(finished)
+	gw := startTestGateway(t, chat)
+	defer gw.stop(t)
+
+	response := openRun(t, gw, runRequest{SessionID: "s1", ClientRunID: "run-regen", Regenerate: true})
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("regenerate status = %d, want 200", response.StatusCode)
+	}
+	names := eventNames(readFrames(t, response.Body, true))
+	if !containsString(names, sseDone) {
+		t.Fatalf("regenerate stream is missing done: %v", names)
+	}
+	if got := chat.regenerateCount(); got != 1 {
+		t.Fatalf("regenerate calls = %d, want 1", got)
+	}
+	chat.mu.Lock()
+	sent := len(chat.sent)
+	chat.mu.Unlock()
+	if sent != 0 {
+		t.Fatalf("regenerate mode called Send %d times, want 0 (the last prompt is re-run in place)", sent)
+	}
+
+	// The same clientRunId replays the finished stream instead of retrying again.
+	replay := openRun(t, gw, runRequest{SessionID: "s1", ClientRunID: "run-regen", Regenerate: true})
+	defer func() { _ = replay.Body.Close() }()
+	if replay.StatusCode != http.StatusOK {
+		t.Fatalf("replay status = %d, want 200", replay.StatusCode)
+	}
+	_ = readFrames(t, replay.Body, true)
+	if got := chat.regenerateCount(); got != 1 {
+		t.Fatalf("a replayed clientRunId regenerated again (%d calls, want 1)", got)
+	}
+}
+
+// TestChatRunRegenerateRejectsText: the mode re-runs the prompt the backend
+// already holds, so a body that also carries text would append a second prompt.
+func TestChatRunRegenerateRejectsText(t *testing.T) {
+	chat := newScriptedChat()
+	chat.addSession("s1", "First", "hello")
+	gw := startTestGateway(t, chat)
+	defer gw.stop(t)
+
+	response := openRun(t, gw, runRequest{SessionID: "s1", ClientRunID: "run-regen", Regenerate: true, Text: "extra"})
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("regenerate with text status = %d, want 400", response.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	errObject, _ := body["error"].(map[string]any)
+	data, _ := errObject["data"].(map[string]any)
+	if data["field"] != "text" {
+		t.Fatalf("regenerate with text error = %v", body)
+	}
+	if got := chat.regenerateCount(); got != 0 {
+		t.Fatalf("a rejected regenerate still reached the backend (%d calls)", got)
+	}
+}
+
+// TestChatRunRegenerateNeedsTheBackendHalf: a backend that cannot regenerate
+// answers a capability error, not a 500 — the client can tell "this build cannot
+// do it" from "something broke".
+func TestChatRunRegenerateNeedsTheBackendHalf(t *testing.T) {
+	chat := &fakeChatOnly{newFakeChat()}
+	chat.addSession("s1", "First", "hello")
+	gw := startTestGateway(t, chat)
+	defer gw.stop(t)
+
+	response := openRun(t, gw, runRequest{SessionID: "s1", ClientRunID: "run-regen", Regenerate: true})
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusBadRequest && response.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("unsupported regenerate status = %d, want 400/501", response.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	errObject, _ := body["error"].(map[string]any)
+	data, _ := errObject["data"].(map[string]any)
+	if data["name"] != "regenerate_not_supported" {
+		t.Fatalf("unsupported regenerate error = %v", body)
+	}
+}
+
+// fakeChatOnly embeds fakeChat without adding the regenerate half, so the
+// capability test has a backend that genuinely lacks it.
+type fakeChatOnly struct {
+	*fakeChat
 }

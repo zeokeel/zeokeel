@@ -83,11 +83,20 @@ func (e runEvent) size() int {
 }
 
 // runRequest is the POST /api/chat/run body.
+//
+// Regenerate turns the same endpoint into the "retry the last turn" mode: the
+// backend rewinds the last exchange (dropping the trailing assistant reply and
+// its user message) and runs the user message again. It exists as a *mode* of
+// the one send path rather than as a WS method on purpose — see
+// docs/TRANSPORT.md §4.6: a two-step "reset over WS, then run" protocol leaves
+// a rewound-but-not-running session behind whenever the second step is missed.
+// Text is not sent in this mode (the backend already has the prompt).
 type runRequest struct {
 	SessionID   string   `json:"sessionId"`
 	Text        string   `json:"text"`
 	Attachments []string `json:"attachments"`
 	ClientRunID string   `json:"clientRunId"`
+	Regenerate  bool     `json:"regenerate"`
 }
 
 // runStream is one run: the events it produced, and the listeners reading them.
@@ -135,7 +144,15 @@ func (g *Gateway) handleChatRun(w http.ResponseWriter, r *http.Request) {
 		writeProtocolError(w, http.StatusBadRequest, errInvalidParams("sessionId", "is required"))
 		return
 	}
-	if strings.TrimSpace(body.Text) == "" {
+	if body.Regenerate {
+		// The backend re-runs the last user message it already holds; sending
+		// text as well would silently append a second prompt.
+		if strings.TrimSpace(body.Text) != "" {
+			writeProtocolError(w, http.StatusBadRequest,
+				errInvalidParams("text", "must be empty when regenerate is true"))
+			return
+		}
+	} else if strings.TrimSpace(body.Text) == "" {
 		writeProtocolError(w, http.StatusBadRequest, errInvalidParams("text", "is required"))
 		return
 	}
@@ -149,6 +166,8 @@ func (g *Gateway) handleChatRun(w http.ResponseWriter, r *http.Request) {
 	if len(body.Attachments) > 0 {
 		// Attachments travel as blob ids; the blob endpoints are not part of
 		// this stage (§6.4). Refuse instead of silently dropping the files.
+		// (Regenerate cannot carry attachments either: the retried turn reuses
+		// the attachments the original message already had.)
 		writeProtocolError(w, http.StatusBadRequest, appError(codeCapabilityUnsupported, "attachments_not_supported", false))
 		return
 	}
@@ -229,7 +248,10 @@ func (g *Gateway) beginRun(ctx context.Context, body runRequest) (stream *runStr
 	}
 	stream.stopObserving = stop
 
-	if err := chat.Send(body.SessionID, body.Text); err != nil {
+	// The observer is attached before the backend starts the turn: Regenerate
+	// rewinds and spawns the run goroutine itself, so attaching afterwards would
+	// drop the opening events (§4.6).
+	if err := g.startTurn(chat, body); err != nil {
 		stream.stopObserving()
 		stream.emit(runEvent{name: sseError, data: map[string]any{
 			"code":    codeSessionRunning,
@@ -239,10 +261,31 @@ func (g *Gateway) beginRun(ctx context.Context, body runRequest) (stream *runStr
 		if errors.Is(err, contracts.ErrSessionRunning) || errors.Is(err, contracts.ErrChatCompacting) {
 			return nil, false, appError(codeSessionRunning, "session_running", true)
 		}
+		if errors.Is(err, errRegenerateUnsupported) {
+			// A build whose backend lacks the regenerate half: tell the client
+			// to disable the action instead of reporting a failure.
+			return nil, false, appError(codeCapabilityUnsupported, "regenerate_not_supported", false)
+		}
 		return nil, false, internalError(err)
 	}
 	return stream, false, nil
 }
+
+// startTurn starts the turn a run request describes: a normal send, or a
+// regenerate of the last exchange (docs/TRANSPORT.md §4.6).
+func (g *Gateway) startTurn(chat contracts.ChatService, body runRequest) error {
+	if !body.Regenerate {
+		return chat.Send(body.SessionID, body.Text)
+	}
+	regenerator, ok := chat.(contracts.SessionRegenerator)
+	if !ok {
+		return errRegenerateUnsupported
+	}
+	return regenerator.Regenerate(body.SessionID)
+}
+
+// errRegenerateUnsupported reports a backend without the regenerate half.
+var errRegenerateUnsupported = errors.New("gateway: the chat backend cannot regenerate")
 
 // dropRun forgets one run that never lived.
 func (g *Gateway) dropRun(stream *runStream) {

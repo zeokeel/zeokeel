@@ -308,6 +308,21 @@ Accept: text/event-stream
 
 响应 `200 text/event-stream`。`clientRunId` 由客户端生成，用于把 SSE 与 WS 上同一轮的状态变更对齐（幂等重试时复用同一个 id）。
 
+#### 重新生成（`regenerate` 模式，2026-11-23）
+
+"重试上一轮"是**同一个端点的模式**，不是第二条发送路径：
+
+```json
+{ "sessionId": "<id>", "clientRunId": "<uuid>", "regenerate": true }
+```
+
+- `text` 必须为空（带上 `text` → `invalid_params {field:"text"}`）：后端重跑的是它**已经持有的**最后一条用户消息，客户端再发一遍就等于追加第二条 prompt。
+- 后端语义（`SessionRegenerator.Regenerate`，`chat.go:480`）：**回退最后一轮**（丢掉尾部助手回复与其用户消息）**并立刻重跑**——所以它不是"先重置、再自己发一轮"的两步式。
+- 事件流、`clientRunId` 幂等、断连≠停止，全部与普通 run 相同：网关先挂 SSE 观察器再调 `Regenerate`，因此 `tool.start`/审批/用量/`done` 一个都不缺。
+- 后端不支持该半边（旧装配）→ `1023 capability_unsupported`，`data.name = "regenerate_not_supported"`；客户端据此禁用菜单项，而不是显示"请求失败"。
+- 与历史的交互：回退会整体替换历史，`session:<id>` 域据此发 `msg.reset`（§6.6）；客户端不需要额外做什么，但**要以 WS 的 rev 为准**（§4.6 上一节）。
+- **为什么不做一个独立的 `message.regenerate` WS 方法**：那样协议里会出现"WS 先重置 + SSE 再发送"的两步式，客户端漏发一次就留下"历史已回退、但没有 run"的半状态；而 `message.send` 当初正是因为第二条发送路径被删除的（见 §5.1）。发送路径只有一条：`POST /api/chat/run`。
+
 #### 事件类型
 
 | event | data | 说明 |
@@ -376,7 +391,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `session.permission.set` | `{sessionId,mode}` | `{}` | Y | `SessionPermissionSwitcher` `automation.go:73` | 延后 |
 | `session.workspace.set` | `{sessionId,workspaceId}` | `{}` | Y | `SessionWorkspaceSwitcher` `automation.go:67` | 延后 |
 | ~~`message.send`~~ | — | — | — | **已移除（2026-11-23）**：与 §4.6 的 `POST /api/chat/run` 完全重复（后者已带 text + attachments 且是流式入口）。两条发送路径并存必然漂移，只保留 SSE 那一条。原实现参考 `ChatService.Send` `chat.go:572`。 | 已移除 |
-| `message.regenerate` | `{sessionId}` | `{}` | N | `SessionRegenerator` `chat.go:480` | 延后 |
+| ~~`message.regenerate`~~ | — | — | — | **已移除（2026-11-23）**：改为 `POST /api/chat/run` 的 `regenerate:true` 模式（§4.6），保持单一发送路径。后端仍是 `SessionRegenerator` `chat.go:480`。 | 已移除 |
 | `run.cancel` | `{sessionId}` | `{}` | Y | `chat.go:574` | ✅ 已实现 |
 | `session.compact` | `{sessionId}` | `CompactResult` | N | `SessionCompactor` `chat.go:284` | 延后 |
 | `session.allowedTools` | `{sessionId}` | `{tools:[]}` | Y | `SessionToolPermissions` `chat.go:534` | 延后 |

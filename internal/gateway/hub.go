@@ -195,23 +195,31 @@ func (h *hub) markDomainDirty(key string) {
 // refreshWatchedPrompts marks the inbox domains that have a subscriber dirty.
 // It is the pull half of the prompts domain: the backend (contracts.PromptQueue)
 // has no change notification, so the poller re-reads subscribed inboxes.
+//
+// The scan runs on the hub goroutine: h.domains is owned by it (builds insert
+// domains without taking h.mu), so a poller reading the map directly is a data
+// race — the -race build caught exactly that (§ "h.domains owner" in the hub
+// comment). Only h.pending is mutex-protected, because external goroutines write
+// it.
 func (h *hub) refreshWatchedPrompts() {
 	if !h.isRunning() {
 		return
 	}
-	h.mu.Lock()
-	pending := make([]string, 0, len(h.domains))
-	for key, domain := range h.domains {
-		if _, ok := promptsSessionID(key); !ok || len(domain.subs) == 0 {
-			continue
+	marked, err := hubCall(context.Background(), h, func(hh *hub) (int, error) {
+		count := 0
+		for key, domain := range hh.domains {
+			if _, ok := promptsSessionID(key); !ok || len(domain.subs) == 0 {
+				continue
+			}
+			hh.pending[key] = true
+			count++
 		}
-		pending = append(pending, key)
+		return count, nil
+	})
+	if err != nil {
+		return
 	}
-	for _, key := range pending {
-		h.pending[key] = true
-	}
-	h.mu.Unlock()
-	if len(pending) > 0 {
+	if marked > 0 {
 		h.poke()
 	}
 }
