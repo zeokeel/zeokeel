@@ -42,6 +42,61 @@
 - [x] **S1.7** 提交 `S1: serve runs the gateway before the tray; tray opens the browser`。
   - 回退点检查：`git revert <S1>` 后 `go build ./...` 应恢复原状（此时 UI 包从未被动过，必然通过）。
 
+
+### S9 收口记录（2026-11-23）
+
+**验收命令**（在 `d484644` 上真跑）
+
+| 命令 | 结果 |
+|---|---|
+| `gofmt -l internal cmd` | 空 |
+| `go build ./internal/... ./cmd/...` | OK |
+| `go vet ./internal/... ./cmd/...` | OK |
+| `go test ./internal/... ./cmd/... -count=1` | 1467 个顶层测试；唯一 FAIL = `internal/lib/hostbundle`（环境性，见下） |
+| `go list -deps ./internal/{contracts,gateway,modules/...} \| grep -c egoist/mygo` | 0 / 0 / 0 |
+| `./zeokeel --list-products` | `headless`、`serve` |
+| `./zeokeel --product desktop` | exit=1，提示改用 serve |
+| `serve --no-tray --port 9967` | `GET /`=200、`/settings`=200、`/api/ws`（无 token）=401 |
+| `make acceptance-check / -approval / -slow` | 三条 PASSED（plain / approval / slow） |
+| CI `-race`（21 包） | 0 FAIL |
+| headless / ACP smoke | 正常（165/ACP 帧含 protocolVersion:1） |
+
+**净变化**：`pre-s4..HEAD` 649 文件 **+2,231 / −163,300**；`web/` 17 文件 +867/−273，
+Go+docs 632 文件 +1,364/−163,027。
+
+**测试规模（迁移后剩下的保护网）**
+
+| 层 | 规模 |
+|---|---|
+| 顶层测试总数 | **1,467**（`internal/**` + `cmd/**`） |
+| `internal/modules/agent` | 482 |
+| `internal/modules/toolkit` | 260 |
+| `internal/host` | 132 |
+| `internal/gateway` | **69**，其中 **15 条 `TestE2E*`**（run 生命周期/取消/断连存活/用量/审批 allow·deny·非法 verdict/plan mode/plan review 全链/队列排空·移除/automation/模型覆盖/ACP 两轮） |
+| `internal/contracts` | 57 |
+| `internal/assembly` | 17（含 5 个边界断言函数） |
+| 协议级端到端 | 3 条 acceptance（真 WS + 真 SSE，fakemodel + gwprobe） |
+| 测试代码量 | 269 文件 / 66,415 行（pre-s4 为 701 文件；删除的 10.4 万行测试：ui 59,083 + uiroot 8,685 + uikit 8,278 + regression 17,337 + conform 592） |
+
+**覆盖净变化（必须记录的损失）**
+`internal/modules/hosttools/bridges_test.go` 已删除：它断言的是 **uiroot 实现**的
+artifact/plan 桥（present 经宿主桥到渲染器、plan_review 状态机、interactive=false 时
+保留 artifact 桥隐藏 plan 工具），uiroot 删除后无法原地保留，造假实现等于"测自己的假件"。
+等价覆盖：`gateway/services_test.go`（artifact/plan/ask 服务本体）+
+`TestE2EPlanReviewOverTheProtocol` + `TestE2EApprovalAllowRunsTheTool`。
+**净损失**：Go 侧不再覆盖"渲染侧"（谁把 artifact 画出来）——那现在归 web 端测试。
+
+**本沙箱永久红的一条**
+`internal/lib/hostbundle` 的 `TestHostBundleCompilesIntoKit`：`sqlite: pragma: unable to
+open database file (14)`，因沙箱 `$HOME` 只读。**迁移前的 pristine HEAD 上同样失败**，
+非迁移引入；可写 HOME 的环境下通过。在此沙箱跑 CI 请直接跳过这一条。
+
+**`go tool mygo vet` 移除说明**
+S5 之后产品里已无 `ui.Element` 帧循环（托盘只有 App + Tray + 菜单），该工具在当前树上
+`exit=0`、零输出——**空过**，比没有检查更糟。`go.mod` 的 tool 指令保留。**恢复条件**：
+托盘壳若重新长出 element/部件代码（多窗口、自定义托盘弹层），把它加回 `Makefile vet`
+与 `ci.yml`，并对 `internal/host` 跑一次确认非空过。
+
 ### S8 执行记录（2026-11-23）
 
 - `AGENTS.md` 整体重写：§0 改为"迁移已完成"（网关 + web + 托盘壳三块及各自规则），§1 目录与**两档引擎边界**（5 包允许清单 + 后端传递为 0 + test 档单列），§2 必读顺序换成 WEB-CLIENT/TRANSPORT/DESIGN/APPROVAL-SURFACES/ARCHITECTURE，§3 规则改为 web 客户端 + 托盘壳两套，§4 命令改为 `./internal/... ./cmd/...` 并补 `make acceptance-*` 与 web 生成器命令，§5 改为"Web 改动固定流程"，§6 同步义务表重写，§7 硬边界改为引擎隔离/不自造协议/不绕过 api 层，§9 速查表更新。
