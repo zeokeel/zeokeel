@@ -344,3 +344,124 @@ S3 唯一能独立绿的部分（`usesUIServices`/`declareUIServices`）也无�
 | 7 | `S7: CI and local verification without the native UI tooling` | 恢复旧 CI |
 | 8 | `S8: documentation for the browser-first product` | 恢复旧文档 |
 | 9 | `S9: post-retirement verification` + tag `post-s4` | — |
+
+---
+
+## S9 之后新增的 T2 投影（2026-11-23）
+
+S9 收口时的 P1/P2 账上还剩三条卡在 Go 侧。这三笔把它们投影成网关能力，**形态与既有域一致**
+（hub 的 epoch/rev/快照缓存/重放环/合并，没有另起一套）。每笔记"改了什么 / 不变量 / 谁验证"。
+
+### 1. `47fc194` — tasks 域（解锁 B12 后台任务 chip）
+
+**改了什么**：`tasks`（进程级）与 `tasks:<sessionId>`（后端实现 `contracts.SessionTaskBoard`
+时按会话隔离，否则回落）两个域；方法 `tasks.snapshot {sessionId?}`、`tasks.subscribe`、
+`task.status {id,status,sessionId?}`、`task.delete {id,sessionId?}`。**没做** `task.create`/
+`task.assign`（TE 表里仍标延后）。
+
+**不变量**
+- **delta 是 upsert 而非字段级 diff**：看板的 `status`/`owner`/`updatedAt` 就地变，而后端没有
+  字段级变更日志 → 变了的任务**整行**进 `added`，客户端按 `id` upsert；消失的 id 进 `removed`。
+  这样 "snapshot → 逐个应用 delta == 下一个快照" 仍然成立。
+- **降级且不假装推送**：`TaskBoard` 无通知。网关写路径（status/delete）成功即 `refreshNow` +
+  bump rev（调用方即刻回声）；别处的改动（agent 的 `team_task_*`、第二个客户端）靠 2s 轮询，
+  **延迟上限 2s** 写进 §5.1.8/§6.3。
+- **状态语汇取契约常量**，未知值 → `invalid_params`（不是静默 no-op）。
+
+**谁验证**：`TestTasksDomainReplayMatchesNextSnapshot`（等轮询真发的 delta，upsert 回快照后与
+下一次 snapshot 逐行 + rev 对齐）、`TestTaskCommandsDriveTheBoard`、`TestTransportMethodsMatchDispatch`
+（先红后绿——新增 4 个方法未记录，补文档而不是改断言）。Lead 复核通过。
+
+### 2. `2edadf1` — regenerate 作为 SSE 的一种模式（解锁 B11 重生成）
+
+**改了什么**：`POST /api/chat/run` 增 `regenerate:true`；`startTurn` 在**挂好 SSE 观察器之后**
+调 `chat.Regenerate`。WS 上的 `message.regenerate` **从协议移除**（§5.1 用删除线 + "已移除 →
+见 §4.6 regenerate 模式"）。
+
+**不变量**
+- **发送路径只有一条**。两步式（WS 先重置、客户端再 POST run）会留下"历史已回退但没有 run"的
+  半状态——`message.send` 当初正是因此被删。所以 regenerate 是 run 的**模式**，不是第二个方法。
+- **顺序不能反**：`Regenerate` 自己 `startRunGoroutine` 起跑，观察器必须先在，否则丢开头事件。
+- `text` 在该模式下必须为空（带 text → `invalid_params {field:"text"}`）：后端重跑的是它已经持有的
+  最后一条用户消息，客户端再发一遍等于追加第二条 prompt。
+- **`clientRunId` 幂等对 regenerate 同样生效**：重复 id 返回同一条流，**不会二次回退历史**。
+- 后端缺该半边 → `1023 capability_unsupported` + `data.name="regenerate_not_supported"`，
+  客户端据此禁用菜单项，而不是报"请求失败"。
+- **顺带修掉的潜伏竞态**：`hub.refreshWatchedPrompts` 曾在 poller goroutine 直接读 `h.domains`，
+  而该 map 归 hub goroutine 独占（`applyBuild` 插入新域不持锁）。在 `d484644` 上不触发是因为
+  "建域 + 扫描"重叠不够频繁；tasks 的轮询把它顶了出来。修法：扫描改到 hub goroutine（`hubCall`），
+  只有 `h.pending` 留给互斥量。**这类"被新功能暴露的旧竞态"只会出现在集成时。**
+
+**谁验证**：`TestChatRunRegenerateModeIsTheSameSendPath`（全事件流 + 只调 Regenerate 不调 Send +
+同 id 不二次回退）、`TestChatRunRegenerateRejectsText`、`TestChatRunRegenerateNeedsTheBackendHalf`、
+`TestTransportMethodsMatchDispatch`/`TestTransportDeferredRowsStayHonest` 双绿、
+`go test ./internal/gateway -race -count=1` 44.9s / 0 DATA RACE。Lead 复核通过。
+
+### 3. `1c7fade` — context 域（B6 上下文 Tab）
+
+**改了什么**：`context:<sessionId>` 域；`context.snapshot {sessionId}`、
+`context.subscribe {sessionId, sinceRev}`。能力探测走 `initialize` 的 capabilities（新增
+`gatewayCapabilities()`：装配里有 `KeyContext` 才追加 `"context"`）。`context.archive` 标延后。
+
+**不变量**
+- **`sessionId` 必填**。缺省返回一条空时间线会把"参数 bug"伪装成"这个会话没有上下文"——假空态
+  与假绿同类。
+- **delta 是整段替换**：`SessionContext` 每次读取都从 durable 事件日志重新折叠，只暴露 `Revision`
+  （"没变就别重读"），`requests`/`events` 是"追加+截断"的有界窗口（各 200 条）——没有字段级变更
+  日志可 diff。变化判定用后端 `Revision`；两者都 `found:false`、或 revision 未变 → 不发 delta。
+- **`found:false` 是诚实空态**（冷会话/从未运行），不编造数字。
+- **能力探测只用 capabilities**，不新增探测方法；没有 `KeyContext` 的装配不 advertise，客户端隐藏 Tab。
+- 只对**已订阅**会话轮询（`hub.refreshWatchedPrefix`，与 prompts 共用），延迟上限 2s。
+
+**谁验证**：`TestContextDomainReplayMatchesNextSnapshot`（冷会话 → 订阅 → 折叠 → 应用 delta →
+与下一次 snapshot 逐字段 + rev 一致）、`TestContextSnapshotRequiresSession`、
+`TestInitializeAdvertisesTheContextCapability`（有/无 inspector 双向）、
+`go test ./internal/gateway -race -count=1` 50.4s / 0 DATA RACE、红线
+`go list -deps ./internal/gateway | grep -c egoist/mygo` = 0。Lead 复核通过。
+
+### 总账
+
+Go 侧这三笔让 **B6 解锁**（context 域 + capability）、**B12 解锁**（tasks 域）、
+**B11 变成"部分"**（复制 + 重生成可用；**"编辑"仍无协议方法**，不要写成完成）。
+P1/P2 的最终数字由 web 轨接完三笔后确定（web 轨排队：i18n、B13/C5、B11/B12 接线、B6 接线）。
+
+---
+
+## 复盘核对（2026-11-23，只读核对；**不改动上面的历史记录**）
+
+核对方法：对 S1–S9 的每个 `[x]`，回到提交、代码现状或实测输出找支撑。**结论：42 条有支撑，
+6 条口径对不上**（下表）。这里的记录保持原样，问题列在这里，处置由 Lead 决定。
+
+### 有明确支撑（抽查通过，示例）
+
+| 项 | 支撑 |
+|---|---|
+| S1.1/S1.2/S1.3/S1.7 | `internal/host/serve.go` 里 `trayEnabled`(4 处) + `runServeWithTray`；`tray_shell.go` 存在；`519740c S1` |
+| S2.1–S2.7 | `runDesktop` 0 处引用；`provideServices` 无 uiRoot 参数；`persistPreferences` 已删；`update_command.go` 已删；`dcb560a S2`（12 文件、0 个 web 文件） |
+| S4.1/S4.3 | `contracts.Language` 存在；`6544558 S4pre` 改了 contracts + approvals + checklist |
+| S5.1–S5.4/S5.7 | 三包已删；`git show --stat 3a6c14b` 586 文件 / −160,955 |
+| S6.1–S6.5/S6.7 | `boundary_test.go` 五个断言函数；`uinative` 已删；`780b997 S6` |
+| S6.6 | 两次注入（模块里 import mygo → 直查+传递双红；allowlist 删 brand → 红），恢复后复绿，记录在 S6 执行记录 |
+| S7.1–S7.6/S7.8 | `ci.yml` 无 designlint/mygo vet，`-race` 名单含 contracts；`verify.sh` 五函数已删；`Makefile` 目标已删；两个设计工具在 `docs/archive/`；`mygo.json` 保留 |
+| S8.1–S8.4/S8.6 | AGENTS 重写；ARCHITECTURE §3/§8 改写；DESIGN 加适用范围头；17 份文档在 `docs/archive/`；`d484644 S8` |
+| S9.1–S9.7 | 本会话实测：gofmt 空、build/vet OK、34 包全 ok（hostbundle 修复后）、`--list-products`=headless/serve、`--product desktop` exit=1、四目标交叉编译、泄漏检查 0 |
+
+### 口径对不上的六条（需处置，未擅自修改）
+
+| 项 | 问题 | 事实 |
+|---|---|---|
+| **S3.5** | 勾选行写着"提交 `S3: collapse the assembly layer to headless products`"，但**这个提交不存在**（`git log --all` 无匹配）。S3 已并入 S5。 | S3.1–S3.4 的工作确实做了，在 `3a6c14b` 里；错的是那句提交记录。 |
+| **S1.5 / S1.6** | 同一件事两处记账：line 31 已勾"S1.4–S1.6（改法调整）"，但 35/38 行仍留着未勾的同名条目。且 S1.5 的字面要求（`hotkey/notify/notification_click` 换成 `clientOpener`）**没有按字面发生**：仍是 `hotkeyWindow` 接口 + `BrowserWindow` 适配器（行为上等价：适配器的 Show/Restore/Focus 会打开客户端）。 | 行为覆盖成立，字面未执行；两处重复条目需要合并。 |
+| **S4.2** | 勾选行说把 `hosttools/{bridges_test.go,goal_dsh_test.go}` 的 uiroot import 改成假实现。 | `6544558` **只改了 contracts + approvals**；`bridges_test.go` 是 S5 **删除**的，`goal_dsh_test.go` 的自带 loader 也是 S5 补的。S4pre 当时没动这两个文件。 |
+| **S5.6** | 勾选行说"清扫残留（grep 为空）"。 | S5 当时 grep **不为零**：还剩 3 处代码注释（`toolkit/settings_tools.go`、`agent/child_notices.go`、`design/registry.go`），直到 `7932b1c`（S9 之后）才清零。当时的准确表述应是"只剩注释级的陈旧引用"。 |
+| **S8.5** | 勾选行说把 `s4-retirement-inventory.md` 与本清单移到 `docs/archive/`。 | **没有移**：两者仍在 `docs/plans/`。理由可以理解（它们仍在被引用），但记录与事实不符。 |
+| **S9.10** | 勾选行写"提交 `S9: post-retirement verification` + 打 tag `post-s4`"。 | 实际是 `38da7f2` + `9b28015`（没有单独的 S9 提交），tag 名由 Lead 定为 **`post-migration`**（打在 `9b28015`）。 |
+
+### 附注（不是清单条目）
+
+- **S9.8 的 `make acceptance-tool` 是交互式目标**（起网关 + 假模型后等 Ctrl-C），没有通过/失败
+  判定；S9 实际跑的是 `acceptance-check`/`acceptance-approval`/`acceptance-slow` 三条探针。
+- **S9.9 的 web 生成链**由 web 轨验证（`gen:verify` 绿），Go 轨未代跑（不动 `web/`）。
+- **发现一处死代码**：`internal/host/notification_click.go` 与 `notify.go:notifyWindowFront` 现在
+  只有测试在用——托盘壳走 tray 菜单，不再接 `App.OnNotificationClick`。带测试所以不红，但是
+  桌面路径删除后的残留，可作为后续清理项。
