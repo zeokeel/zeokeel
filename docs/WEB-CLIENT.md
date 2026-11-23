@@ -2,7 +2,7 @@
 
 > 浏览器客户端（`web/`）的设计契约：信息架构、屏面等价映射、键盘/焦点、拖放、流式、验收。
 > 状态：**草案**（2026-11-23）。栈已定 React + TypeScript + Vite；**组件库未定**，本文所有涉及组件库的段落只写行为要求，库名待 `docs/plans/web-ui-framework.md`。
-> 配套：[docs/TRANSPORT.md](TRANSPORT.md)（线协议）、[docs/ARCHITECTURE.md](ARCHITECTURE.md)（Go 侧边界）、[docs/AGENT-SURFACES.md](AGENT-SURFACES.md)（surface 行为规格）、[docs/DESIGN.md](DESIGN.md)。
+> 配套：[docs/TRANSPORT.md](TRANSPORT.md)（线协议）、[docs/ARCHITECTURE.md](ARCHITECTURE.md)（Go 侧边界）、[docs/APPROVAL-SURFACES.md](APPROVAL-SURFACES.md)（审批面行为）、[docs/DESIGN.md](DESIGN.md)。
 > 依据：`.cache/pivot/native-ui-inventory.md`（原生 UI 清点）、`.cache/pivot/contracts-projection.md`（契约投影）。
 > 标注：**[新增]** = 原生无此行为；**[设计建议]** = 本文提出、尚未验证；**[占用]** = 语义已定、实现待逐页填充。
 

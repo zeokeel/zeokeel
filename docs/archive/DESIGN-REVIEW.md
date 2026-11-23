@@ -1,3 +1,9 @@
+> **已归档（2026-11-23，随原生 UI 退役）。** 本文描述的是原生 UI 设计审计（2026-11-08），
+> 相关代码已在 `S5: retire the native UI` 删除（见 `pre-s4` tag）。
+> 浏览器客户端的现状文档：[WEB-CLIENT.md](../WEB-CLIENT.md)、[DESIGN.md](../DESIGN.md)、
+> [TRANSPORT.md](../TRANSPORT.md)、[APPROVAL-SURFACES.md](../APPROVAL-SURFACES.md)。
+> 归档索引与理由：[README.md](README.md)。
+
 # ZeoKeel UI/UX 设计审查报告
 
 > 审查日期：2026-11-08 · HEAD `e977b12` · 依据：`design-guide` + `mygo-maintenance` 两个技能

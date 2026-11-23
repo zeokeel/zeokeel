@@ -1,3 +1,9 @@
+> **已归档（2026-11-23，随原生 UI 退役）。** 本文描述的是原生 UI 风格方向，
+> 相关代码已在 `S5: retire the native UI` 删除（见 `pre-s4` tag）。
+> 浏览器客户端的现状文档：[WEB-CLIENT.md](../WEB-CLIENT.md)、[DESIGN.md](../DESIGN.md)、
+> [TRANSPORT.md](../TRANSPORT.md)、[APPROVAL-SURFACES.md](../APPROVAL-SURFACES.md)。
+> 归档索引与理由：[README.md](README.md)。
+
 # ZeoKeel 风格方向评审（2026-11-11）
 
 > 与 [UI-AUDIT-2026-11-11.md](UI-AUDIT-2026-11-11.md) 配套：那份报告回答“哪里不健壮/不统一”，这份回答“**要不要大改风格、AI Agent 适合什么风格、ZeoKeel 该选哪一种**”。

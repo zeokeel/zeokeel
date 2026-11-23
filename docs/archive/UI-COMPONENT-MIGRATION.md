@@ -1,3 +1,9 @@
+> **已归档（2026-11-23，随原生 UI 退役）。** 本文描述的是自绘组件保留清单（原生期），
+> 相关代码已在 `S5: retire the native UI` 删除（见 `pre-s4` tag）。
+> 浏览器客户端的现状文档：[WEB-CLIENT.md](../WEB-CLIENT.md)、[DESIGN.md](../DESIGN.md)、
+> [TRANSPORT.md](../TRANSPORT.md)、[APPROVAL-SURFACES.md](../APPROVAL-SURFACES.md)。
+> 归档索引与理由：[README.md](README.md)。
+
 # 官方组件迁移清单（mygo v0.9.2）
 
 > 目标：把 ZeoKeel 中「官方已有标准件却仍自绘/手搓」的 UI 逐项替换为

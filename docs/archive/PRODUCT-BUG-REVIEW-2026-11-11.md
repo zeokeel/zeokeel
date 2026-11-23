@@ -1,3 +1,9 @@
+> **已归档（2026-11-23，随原生 UI 退役）。** 本文描述的是产品缺陷评审（原生期），
+> 相关代码已在 `S5: retire the native UI` 删除（见 `pre-s4` tag）。
+> 浏览器客户端的现状文档：[WEB-CLIENT.md](../WEB-CLIENT.md)、[DESIGN.md](../DESIGN.md)、
+> [TRANSPORT.md](../TRANSPORT.md)、[APPROVAL-SURFACES.md](../APPROVAL-SURFACES.md)。
+> 归档索引与理由：[README.md](README.md)。
+
 # ZeoKeel v0.2.23 全链路产品缺陷评审（2026-11-11）
 
 > **评审基线**：`56da072`（v0.2.23），工作区干净。

@@ -1,3 +1,9 @@
+> **已归档（2026-11-23，随原生 UI 退役）。** 本文描述的是mygo 官方组件速查与帧测试流程，
+> 相关代码已在 `S5: retire the native UI` 删除（见 `pre-s4` tag）。
+> 浏览器客户端的现状文档：[WEB-CLIENT.md](../WEB-CLIENT.md)、[DESIGN.md](../DESIGN.md)、
+> [TRANSPORT.md](../TRANSPORT.md)、[APPROVAL-SURFACES.md](../APPROVAL-SURFACES.md)。
+> 归档索引与理由：[README.md](README.md)。
+
 # UI 官方一致性清单（mygo v0.9.2）
 
 这份清单把 `design-guide` 与 mygo v0.9.2 的官方能力映射到本仓库的用法，目的是让

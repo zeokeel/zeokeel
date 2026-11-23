@@ -1,10 +1,16 @@
+> **已归档（2026-11-23，随原生 UI 退役）。** 本文描述的是原生 UI UX 升级记录，
+> 相关代码已在 `S5: retire the native UI` 删除（见 `pre-s4` tag）。
+> 浏览器客户端的现状文档：[WEB-CLIENT.md](../WEB-CLIENT.md)、[DESIGN.md](../DESIGN.md)、
+> [TRANSPORT.md](../TRANSPORT.md)、[APPROVAL-SURFACES.md](../APPROVAL-SURFACES.md)。
+> 归档索引与理由：[README.md](README.md)。
+
 # UI/UX 升级空间评估（v0.2.40 · 2026-11-15）
 
 > **问题**：按照当前功能规划（长任务 DSH 对齐、Goal v2、PromptQueue/inbox、Context、Insights、冷恢复、系统通知），UI/UX 还有哪些升级空间？
 >
 > **口径**：只谈「功能已经存在、体验尚未闭环」的升级，不重做 2026-11-11 已拍板的 **Quiet Cockpit** 风格，不引入依赖/第二套设计系统，不为了「显得完整」加功能。
 >
-> **证据**：三份只读审计（[会话/Agent 表面](research/ui-ux-upgrade/01-conversation-surface.md)、[壳层/IA/设置](research/ui-ux-upgrade/02-shell-ia-settings.md)、[设计系统/跨屏质量](research/ui-ux-upgrade/03-system-quality.md)）+ 120 张评审帧（`.cache/ux-review/shots/`，HEAD `1f66af3`，2026-11-15 04:15）+ 2 张实现标本（`.cache/impl-shots/`）+ 静态代码/像素采样。
+> **证据**：三份只读审计（[会话/Agent 表面](../research/ui-ux-upgrade/01-conversation-surface.md)、[壳层/IA/设置](../research/ui-ux-upgrade/02-shell-ia-settings.md)、[设计系统/跨屏质量](../research/ui-ux-upgrade/03-system-quality.md)）+ 120 张评审帧（`.cache/ux-review/shots/`，HEAD `1f66af3`，2026-11-15 04:15）+ 2 张实现标本（`.cache/impl-shots/`）+ 静态代码/像素采样。
 >
 > **边界**：本文未改代码、未运行 build/test/designlint（只读评审）。标「推算」「待复现」的结论需实现前补帧/补测试确认。
 
@@ -291,6 +297,6 @@
 **先修「挡住/够不到/看不见选中」，再补「不可逆决策与控制」，最后收口共享层与证据债。** 视觉方向不变；把长任务从「聊天里的附属状态」升级为「有一致入口、可控制、可回看、可通知」的运行台，是这一轮最大的 UX 增量。
 
 > 子报告（实现时按它们展开）：
-> - [01 · 会话/Agent 表面](research/ui-ux-upgrade/01-conversation-surface.md)
-> - [02 · 壳层/IA/设置](research/ui-ux-upgrade/02-shell-ia-settings.md)
-> - [03 · 设计系统/跨屏质量](research/ui-ux-upgrade/03-system-quality.md)
+> - [01 · 会话/Agent 表面](../research/ui-ux-upgrade/01-conversation-surface.md)
+> - [02 · 壳层/IA/设置](../research/ui-ux-upgrade/02-shell-ia-settings.md)
+> - [03 · 设计系统/跨屏质量](../research/ui-ux-upgrade/03-system-quality.md)

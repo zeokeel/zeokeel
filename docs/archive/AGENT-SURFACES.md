@@ -1,8 +1,19 @@
+# AGENT-SURFACES（已归档 2026-11-23，随原生 UI 退役）
+
+> **归档文档，不是契约。** 本文描述的是原生 UI 的 12 个 surface
+> （SessionThread / ReasoningTrace / ToolRow / ApprovalDialog / PlanReviewDialog /
+> AskDialog / Composer / RunStatus / agent surface / ContextInspector / Insights /
+> 单工作区侧栏），这些界面已随 `S5: retire the native UI` 删除（代码见 `pre-s4`
+> tag）。浏览器客户端用自己的文档：[WEB-CLIENT.md](../WEB-CLIENT.md)、
+> [DESIGN.md](../DESIGN.md)、[TRANSPORT.md](../TRANSPORT.md)。
+>
+> **唯一仍生效的部分已抽成 [APPROVAL-SURFACES.md](../APPROVAL-SURFACES.md)**
+> （"哪些工具会停审批"及其机器可读清单）——要改审批行为先读那一份。
 # Agent 客户端入口组件规格（AGENT-SURFACES.md）
 
-> 本文是 [DESIGN.md](DESIGN.md) §2「场景 → 组件硬映射」的展开规格：**Agent 客户端 9 个 surface 的入口组件契约**。
+> 本文是 [DESIGN.md](../DESIGN.md) §2「场景 → 组件硬映射」的展开规格：**Agent 客户端 9 个 surface 的入口组件契约**。
 > **当前状态（2026-11 审计修复后）：S1–S9 全部已有入口实现；S9 从右侧栏 TeamSurface 改为会话内的 agent surface（PopoverBase 团队浮层 + 主栏子会话视图）。** 2026-11 多角色审计修复补充了 US-01 分段交错、US-03/04 呈现保真、UX-02 dock 预算、UX-06 stopping、UX-18 草稿持久化、UX-19 播报、RG-09 旧权限提示、US-11 todo 披露等规格（各节「2026-11 审计」段）。每节保留目标 API 草案（作为契约）、最终实现位置、迁移步骤与验收（迁移步骤仅作历史记录）。
-> 落地顺序与 lint 规则见 [DESIGN-LINT.md](DESIGN-LINT.md)；token/预设见 [DESIGN.md](DESIGN.md) §5/§6。
+> 落地顺序与 lint 规则见 [DESIGN-LINT.md](DESIGN-LINT.md)；token/预设见 [DESIGN.md](../DESIGN.md) §5/§6。
 
 ---
 
@@ -270,33 +281,6 @@ func ApprovalDialog(c *ui.Context, o ApprovalDialogOptions)
 
 ---
 
-#### S4.1 哪些工具会停审批（批准卡的真实触发面）
-
-> 结论先行：**审批卡的出现频率远低于直觉**。`serve`/`desktop` 装配里 sandbox 模块在场时，命令执行家族被 `gate.AllowSandboxedCommands` 判定"已被 OS 沙箱约束"而**自动放行**——用户点了"发送"却看不到卡，这不是审批坏了。判断顺序（`internal/modules/agent/plan_mode.go:253-360`）：
-
-| 优先级 | 层 | 命中即 | 条件 | 来源 |
-|---|---|---|---|---|
-| 1 | plan / minimal / creator 模式的工具白名单 | allow 或 **deny**（不给审批机会） | 模式开启时 | `plan_mode.go` 门 `agentModePlan()` / `chatMode()` |
-| 2 | 会话级 permission 覆盖 | full=全部 allow；read-only/workspace 走各自的自动放行集 | 会话设置了 `session.permission.set` | `contracts.ReadOnlyAutoAllowedTools` / `WorkspaceAutoAllowedTools` |
-| 3 | **OS 沙箱豁免** | allow（**不弹卡**） | sandbox 模块 active + runner 报告真实约束 + policy ≠ danger-full-access | `internal/modules/agent/sandbox.go:26-51` → `gate.AllowSandboxedCommands` |
-| 4 | 交互工具 | allow（它们自己的 overlay 才是交互） | 见下方 interaction 清单 | `plan_mode.go` `interactionTools` |
-| 5 | 记住的「本会话允许」 | allow | 用户曾点过"始终允许" | `session.allowedTools` |
-| 6 | 以上都没命中 | **弹审批卡**（`approvals.Request` 阻塞） | 默认 workspace 模式 | `internal/modules/approvals` |
-
-**机器可读清单**（测试 `internal/modules/agent/approval_surface_test.go` 逐条对照代码，改规则不改文档会红）：
-
-<!-- approval-exemptions:begin -->
-sandbox-shell: bash, pwsh
-workspace-auto: apply_patch, edit_file, glob, grep, inspect, job_list, job_output, job_wait, list_dir, lsp_definition, lsp_diagnostics, lsp_hover, lsp_implementation, lsp_references, lsp_symbols, memory, read_file, read_image, sandbox_status, search, session_event_read, session_event_search, session_event_trace, session_search, session_trace, skill, spill_read, str_replace_editor, team_task_get, team_task_list, terminal_list, terminal_read, todo_write, tool_search, undo, working_directory, write_file
-interaction: ask_user, present, plan_review, exit_plan_mode, get_goal, create_goal, update_goal
-parks: web_fetch, web_search, settings_set, mcp__
-<!-- approval-exemptions:end -->
-
-- `sandbox-shell` 是**会免审批的命令执行面**（`sandboxShellTools`）；沙箱不可用（无 runner / policy 为 danger-full-access）时它退回第 6 层，照常弹卡。
-- `workspace-auto` 是 workspace 模式自动放行集（`contracts.WorkspaceAutoAllowedTools`，含只读子集与 `memory` 等应用状态工具）。
-- `interaction` 不弹审批，因为工具本身就是一次用户交互（DTO 形状见 S5/S6）。
-- `parks` 是**保证会停审批**的家族：网络工具、设置写入、以及所有 MCP 工具（`mcp__*`）——浏览器验收里的"审批停住 → 允许 → 流式完成"就该用它们。
-
 ### S5 PlanReviewDialog（计划审阅）
 
 **职责**：Agent 提交计划后，让用户**批准 / 继续规划（带反馈）/ 取消计划**。核心语义：**Esc 不取消计划**（取消是不可逆决定，必须显式点击）。
@@ -432,7 +416,7 @@ func ComposerShell(c *ui.Context, o ComposerOptions)
 
 **禁止**：两个 composer 各自维护宽度/发送样式；把发送藏进 Toolbar 溢出；在 build 里做 I/O；每帧 `input.Focus()` 对抗失焦（用 `c.Key`/FocusBind）；伪造"已发送"；给附件留手动路径输入（选择文件器 + 拖入/粘贴即可）。
 
-**当前实现**：会话 `internal/ui/session/view.go` `buildComposer`（含 queue/stop/slash/@/Enter 语义）；首页 `internal/ui/home/composer.go`。共用 `design.Tokens.Composer()`。差异清单见 [DESIGN.md](DESIGN.md) §1.3 与 ui-inventory 报告 §C6。
+**当前实现**：会话 `internal/ui/session/view.go` `buildComposer`（含 queue/stop/slash/@/Enter 语义）；首页 `internal/ui/home/composer.go`。共用 `design.Tokens.Composer()`。差异清单见 [DESIGN.md](../DESIGN.md) §1.3 与 ui-inventory 报告 §C6。
 
 **草稿持久化（2026-11 审计 UX-18）**：per-session 草稿**文本**落 settings 存储（`sessionDraftSettingKey(sessionID)` 行），重启后恢复；只持久化文本（附件/引用不持久化）。切换会话保存/恢复草稿的既有语义不变；编辑消息/hero 示例对非空草稿的保护见 UX-05。
 
@@ -737,7 +721,7 @@ Agent 客户端的界面不是一次性输出：用户对界面的操作要作�
 | S8 | RunStatus | session 状态/队列/用量 + toasts | — | 不伪造进度/重试/用量 | `run-status.png` |
 | S9 | TeamSurface | rightpanel agents/tasks | 团队语义（已有测试） | RunState 真实/指派/确认 | `team.png` |
 
-**完成定义**：每个表面迁移后，旧实现删除或只保留数据/业务逻辑；现有测试全绿；新增入口测试 + 快照；[DESIGN.md](DESIGN.md) §6.3 状态从「待建」改「已有」；[DESIGN-LINT.md](DESIGN-LINT.md) 对应 DS-04 白名单更新。
+**完成定义**：每个表面迁移后，旧实现删除或只保留数据/业务逻辑；现有测试全绿；新增入口测试 + 快照；[DESIGN.md](../DESIGN.md) §6.3 状态从「待建」改「已有」；[DESIGN-LINT.md](DESIGN-LINT.md) 对应 DS-04 白名单更新。
 
 **OS 沙箱的「已隔离即免问」由 SDK 判定（2026-11-20，rig v0.26.1；同日改为个人客户端口径）**：shell 调用能否跳过审批不再由产品自己判断「runner 可用 + 工具名是 bash/pwsh」，而是把**当前 run 的 runner 与策略**交给 SDK 的 `gate.AllowSandboxedCommands`：它要求「shell 类工具 + runner 自报的强制程度不是 none + 策略不是 danger-full-access」，满足才免问。产品只提供两个事实（`contracts.SandboxService.Runner()` 与 toolkit 提供的 `contracts.ToolPolicy.PolicyFor(root)`，后者按**本次 run 绑定的工作区根**取那次构建的 `sandbox.Policy`——不是"当前工作区"那份，避免多工作区下判定与执行用的是两份策略），不再加自家模式规则：**全局只读预设按 SDK 语义执行**——挂了 runner 时命令照跑（写由 runner 围栏），没有 runner 时策略直接拒绝（工具报 `shell commands are disabled in read-only mode`）；**会话/自动化级的只读覆盖仍是硬拒绝**（不弹窗、直接 deny，由 `plan_mode.go` 的会话覆盖分支负责，见权限双层披露）。宿主没有可用 runner 时 `Runner()` 返回 **nil**（个人客户端"尽力而为"，不以启动失败或全量命令失败作为代价），命令以宿主权限运行、只受应用层策略与审批约束；设置页状态行如实说明这一点。`never` 档仍然一律拒绝（headless 显式 deny-all），plan/minimal/creator 白名单与会话级权限覆盖仍在最前。测试：`agent/sandbox_gate_test.go`（enforcement=none / 无策略 / danger-full-access 都必须回到审批；只读 + runner 免问、只读无 runner 询问）。
 

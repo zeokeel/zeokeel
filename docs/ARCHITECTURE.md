@@ -1,6 +1,7 @@
 # ZeoKeel 架构（v2 · 编译期模块化）
 
-> 产品名：**ZeoKeel**。UI 是 mygo 原生控件（无浏览器/webview）。旧工程的重建已完成，归档代码已从仓库移除（历史设计记录保留在 `docs/research/`）
+> 产品名：**ZeoKeel**。UI 是浏览器客户端（`web/`），网关承载后端能力，原生只剩托盘壳
+> （2026-11-23 起；原生 UI 的架构描述已随代码删除，见 `pre-s4` tag）。旧工程的重建已完成，归档代码已从仓库移除（历史设计记录保留在 `docs/research/`）
 > （独立 Go module，仅参考，不参与构建），新根工程按本文件重组。
 > 相关调研与决策依据：[docs/research/kernel-split/00-report.md](research/kernel-split/00-report.md)。
 
@@ -9,50 +10,65 @@
 | 名词 | 含义 |
 | --- | --- |
 | **模块 module** | 一个 Go 包 + 一个 `module.Descriptor`；编译期注册、随二进制一起编入；启动时由 assembly 选择是否激活 |
-| **UI 总入口 uiroot** | 宿主里唯一的 mygo 帧入口（`ui.View`）：持有布局容器、导航、overlay/toast、主题/语言，并持有五张贡献点注册表 |
-| **进程宿主 host** | 窗口/托盘/单实例/设置存储/日志/退出等进程能力；**不是** UI 布局层 |
+| **网关 gateway** | `--product serve` 的传输层：WS 控制面（域快照+差值+通知）、SSE 运行流、静态资源托管、token/Origin 校验、端口协商 |
+| **Web 客户端 web** | React + TypeScript 浏览器客户端；只经 `web/src/api/` 与网关对话 |
+| **进程宿主 host** | 托盘/热键/通知/单实例/设置存储/日志/退出等进程能力；**不拥有**任何业务逻辑 |
 | **装配根 assembly** | 显式编译期 registry + 内嵌 assembly.json + 启动预检；薄 `cmd` 只调用它 |
-| **注入点 / 槽位 slot** | UI 的扩展点：宿主在布局里预留的具名位置，模块按 `Order` 向其中贡献内容 |
-| **区域 region** | 一组槽位的布局容器（如主侧栏、对话页、设置页），布局归宿主 |
+| **域 domain** | 网关的同步单元（sessions/messages/approvals/plans/tasks/team/settings/prompts…）；每个域有版本号与可重放的差值环 |
+| **快照 / 差值** | 客户端订阅后先取 `.snapshot`，之后只收增量；**域的第一帧不发差值** |
 | **契约 contracts** | 服务键 + 接口 + 贡献值类型；模块唯一共享面 |
 
 ## 2. 目录
 
 ```
 cmd/zeokeel/            薄 main（≤30 行）→ host.Main
-internal/host/          进程宿主：窗口/托盘/单实例/设置存储/日志/退出
-internal/uiroot/        UI 总入口：帧根、布局区域、导航、overlay/toast、主题/语言、注册表
+internal/host/          进程宿主：托盘/热键/通知/单实例/设置存储/日志/退出
+internal/gateway/       serve 产品的传输层：WS 控制面、SSE 运行流、静态资源、端口协商
+web/                    浏览器客户端（React + TS + antd 6 + antd X）
 internal/assembly/      装配根：编译期 registry、assembly.json、预检、按产品装配
 internal/contracts/     契约（本文件 §5/§6 的接口与枚举）
-internal/modules/*      后端模块（appinfo/store/session/tools/...）
-internal/ui/*           UI 模块（home/session/settings/...）
-internal/uikit/         共享 UI 库：优先封装 mygo 原生控件，不手搓控件
-internal/design/        设计 tokens（颜色/间距，从 mygo Theme 派生）
+internal/modules/*      后端模块（18 个：appinfo/store/session/tools/agent/acp/...）
+internal/design/        设计 tokens（→ web/src/design/tokens.css）
+internal/brand/         品牌层：唯一 hex 来源
+internal/icons/         34 个 SVG 图标（→ web 图标组件）
+internal/devtools/      开发夹具（fakemodel / gwprobe），不进产品二进制
+docs/plans/             迁移决策与执行记录　docs/archive 已退役文档
 ```
 
 ## 3. 三层边界（谁拥有什么）
 
 ```
-cmd (30 行) → host (进程) → assembly (装配) → kernel root
-                                  │
-                                  ├─ 后端模块 provides 服务（store/session/appinfo/...）
-                                  └─ uiroot provides UI 服务 + 渲染注册表
-                                        └─ UI 模块 requires uiroot 服务/后端服务，注册贡献
+cmd (≈30 行) → host (进程：托盘/设置/日志/退出) → assembly (装配) → kernel root
+                                                    │
+                                                    └─ 后端模块 provides 服务（store/session/appinfo/...）
+
+web (浏览器) ⇄ gateway (serve 产品) → 同一套 kernel root + 后端模块
 ```
 
-- **owner 原则**：帧循环/窗口/`*ui.Context` 只归 uiroot；模块只贡献 builder
-  （`func(c *ui.Context)`）。模块不持帧、不建根 overlay/toast、不改根主题。
-- **状态原则**：UI 状态归模块实例 struct；禁止包级可变状态；跨线程只 `UIRuntime.Post`。
-- **locale 分工**：产品文案归 `contracts.LocaleService`（uiroot）；mygo 框架自己的控件/菜单/无障碍文案归 `mygo.App.SetLocale`。host 在启动时与 `uiroot.Config.OnLanguageChange` 回调里把产品语言镜像给框架（`internal/host/framework_locale.go`）；uiroot/模块不得直接调用 `App.SetLocale`。
-- **生命周期**：模块在装配期（主线程）激活并注册贡献；注销函数交给 `ctx.Effect`，kernel
-  dispose 逆序撤销。配置变更 = 重启进程。
-- **依赖方向**：UI 模块只能 import `internal/contracts`、`internal/uikit`、`internal/design`、
-  `internal/icons`、`internal/brand`（资产层 logo）、`internal/lib/*`、第三方；后端模块可 import
-  `internal/contracts`、`internal/uikit`、`internal/design`、`internal/lib/*`、共享库
-  `internal/{hosttools,memorytools,websearch}`、第三方；禁止 import 其他模块实现、`internal/uiroot`、
-  `internal/host`；`host` 不得直连 `internal/modules/*`（共享代码移 `internal/lib`，如
-  `lib/version.CompareVersions`）。CI 用 `go list` import 边界断言机器执行
-  （`internal/assembly/boundary_test.go` `TestImportBoundaries`，2026-11 审计 AR-07/AR-08 落地）。
+**形态（2026-11-23 起）**：网关进程 + 浏览器客户端 + 极小托盘壳。原生 UI 宿主
+（`internal/uiroot`）与其模块已删除，代码在 `pre-s4` tag；退役记录见
+[plans/s4-execution-checklist.md](plans/s4-execution-checklist.md)。
+
+- **网关拥有传输**：WS 控制面（快照/差值/通知）、SSE 运行流、静态资源、token/Origin 校验、
+  端口协商（`gateway.json`）。协议事实见 [TRANSPORT.md](TRANSPORT.md)。
+- **host 拥有进程**：单实例、数据目录、设置存储、日志、退出信号，以及**尽力而为**的
+  托盘/热键/通知。「网关先起、托盘后起」：托盘失败只警告，绝不取消网关
+  （`internal/host/serve.go`）。
+- **模块拥有能力**：18 个后端模块，全部与 UI 无关；它们只认 `contracts` 的服务键。
+- **状态原则**：模块状态归模块实例，禁止包级可变状态；后台结果不得直接回调 UI。
+- **生命周期**：模块在装配期激活并把注销函数交给 `ctx.Effect`，kernel dispose 逆序撤销；
+  配置变更 = 重启进程。
+- **依赖方向**：`contracts ← modules ← gateway ←（WS）← web`。
+- **边界（机器断言，`internal/assembly/boundary_test.go`）**：
+  - 后端模块可 import `contracts`、`design`、`lib/*`、共享库 `internal/{hosttools,memorytools,websearch}`；
+    禁止 import 其他模块实现、`host`、`assembly`。
+  - `host` 不得直连 `internal/modules/*`（共享代码移 `internal/lib`，如 `lib/version`）。
+  - **原生引擎隔离**：`github.com/egoist/mygo` 只允许出现在 `internal/host`、
+    `internal/lib/{openpath,openurl}`、`internal/brand`、`internal/design` 这 5 个包
+    （`TestEngineIsQuarantinedToTheShell`）；`gateway`/`contracts`/`modules` 的**传递**依赖
+    必须为 0（`TestBackendIsTransitivelyEngineFree`）。
+  - **test 档单列**：`gateway` 的 e2e 允许并鼓励拖进 `internal/modules/*`（真模块才有价值），
+    但同样不得拖进 mygo（`TestTestDependenciesStayEngineFree`）。
 
 ## 4. 注入点模型（灵活扩展的核心）
 
@@ -79,8 +95,10 @@ cmd (30 行) → host (进程) → assembly (装配) → kernel root
 
 ## 5. 框架注入点清单（保留槽位）
 
-> 「现状」= 宿主/示范模块是否已渲染；其余槽位随对应 UI 模块迁入时接管。所有槽位现在就可以
-> 注册（`RegisterSlotItem`），不会因为宿主暂未渲染而报错。
+> **本节属原生 UI（已删除），保留作历史记录。** 浏览器客户端的扩展点不是槽位，而是
+> **路由 + 域订阅**：页面在 `web/src/pages`，数据来自 `web/src/api` 的域快照/差值，
+> 工具卡/审批卡/计划卡由 `@ant-design/x` 组件渲染（见 [WEB-CLIENT.md](WEB-CLIENT.md)）。
+> 原生期「现状」= 宿主/示范模块是否已渲染；槽位已随 `internal/uiroot` 删除。
 
 ### 5.1 窗口与通用
 
@@ -159,112 +177,52 @@ if _, err := ctx.Effect(func() cordis.Effect {
 }); err != nil { unregister(); return err }
 ```
 
-服务键：`KeyUIRuntime`、`KeyNavigator`、`KeyTheme`、`KeyLocale`、`KeySettings`、
-`KeyAppInfo`、`KeyLogger`、`KeyScreenLister`；可选服务还包括 `KeyForegroundSession`
-（uiroot 提供，供后台完成通知判断当前前台会话）、`KeyExecutionHistory`（toolkit 提供，只读
-durable 执行域历史）与 `KeySessionFocus`（session 模块提供，侧栏搜索命中交接过话到消息定位；
-sidebar 消费，无服务时仅打开会话）、`KeyToastAnchor`（uiroot 提供，toasts 模块可选消费：
-宿主按 chrome 几何与浮层开态锚定通知栈——modal/palette/rail popover/drawer/模块
-`ReportOverlay` 期间让位窗口右下，否则 header band 之下、主内容列右缘；无服务时模块
-回退默认右上。2026-11-17 审查 P1/P2：toast 不得压页头动作/检查器头行/打开的浮层）。
+服务键（**网关/host 提供**）：`KeySettings`、`KeyAppInfo`、`KeyLogger`、`KeyDataDir`；
+传输层转接的宿主能力：`KeyUserInteraction`、`KeyArtifactPresenter`、`KeyPlanReviewer`、
+`KeyNotifier`、`KeyForegroundSession`（`gateway.Provide` 提供，后台完成通知据此判断当前前台会话）。
+可选服务：`KeyExecutionHistory`（toolkit 提供，只读 durable 执行域历史）、
+`KeySessionFocus`（session 模块提供，侧栏搜索命中交接过话到消息定位）、
+`KeyToastAnchor`（原生期由 uiroot 提供、toasts 模块消费；浏览器端通知栈由客户端布局决定，
+该键在 web 形态下不再是注入点）。
 
 ## 7. 装配
 
 ```json
 {"version":1,"entries":[
   {"id":"appinfo","module":"zeokeel/appinfo","config":{"name":"ZeoKeel"}},
-  {"id":"ui","module":"zeokeel/host/group","children":[
-    {"id":"home","module":"zeokeel-ui/home"},
-    {"id":"settings","module":"zeokeel-ui/settings"}
-  ]}
+  {"id":"sessionstore","module":"zeokeel/sessionstore"},
+  {"id":"agent","module":"zeokeel/agent"}
 ]}
 ```
 
-- 产品 = `internal/assembly/assemblies/<product>.json`；同一 registry 可多产品复用
-  （desktop 有 UI 组，headless 没有）。
-- `module.Load` 在 `mygo.App.WhenReady`（主线程）里调用；UI 模块注册因此都在 UI 线程。
-- kernel 预检拒绝「required 服务无 enabled provider」：UI 与后端必须在同一份 assembly。
+- 内嵌装配只剩 `internal/assembly/assemblies/headless.json`（15 个后端 entry）。
+  `serve` 复用它的 entries，并在加载后叠加传输层覆盖（例如 approvals 跟随实时权限、
+  hosttools 打开交互档）——见 `assembly.ServeEntries()`。
+- 产品清单：`Products()` = `[headless]`（有内嵌 JSON 的），`AllProducts()` = `[headless, serve]`；
+  `--product` 默认 `serve`，`--product desktop` 已被删除并给出可读错误。
+- `module.Load` 由每个产品自己的入口调用（headless/ACP 在 `main` goroutine，serve 在网关启动前，
+  托盘壳在 `mygo.App.WhenReady` 之后）。
+- kernel 预检拒绝「required 服务无 enabled provider」：传输层服务（interaction/artifacts/plans/…）
+  由 `gateway.Provide` 在加载前提供，不再声明为 loader builtin。
 
-## 8. 当前状态（Stage 0 骨架：已可运行）
+## 8. 当前状态（2026-11-23：浏览器客户端 + 网关 + 托盘壳）
 
-- ✅ 新根工程独立构建；旧工程归档已移除，历史调研保留在 `docs/research/`
-- ✅ contracts / uiroot（帧根 + 五注册表 + Post 队列 + 导航 + 设置面 + 槽位渲染；
-  `slot` 模型含保留槽位与模块自定义槽位 `RenderSlot`；`RenderTool` 工具卡注入）
-- ✅ assembly（编译期 registry + 内嵌 desktop/headless 装配 + 预检 + 级联卸载）
-- ✅ host（窗口/设置存储/日志/信号/退出顺序）+ 薄 `cmd/zeokeel`（17 行）+ Makefile
-- ✅ 工具集：`internal/modules/toolkit` 把 **ZeoKeel Rig v0.18.1**（sandbox 策略 + 内置
-  fs/shell/pwsh/editor/image、真实 PTY terminal、后台 jobs、memory/schedule/worktree、
-  settings（宿主注入）、skill、team 任务板、working_directory/todo、可选 web_fetch 与
-  远程 MCP over Streamable HTTP）组装成 `zeokeel/toolkit` 服务；Rig 侧
-  `TestToolCatalogCoverage` + `TestModernToolSurface` 保证旧 agent 61 个工具名与
-  现代工具面 61 个名称不缺失；`internal/modules/hosttools` 再把产品侧 host 工具（ask_user/present/
-  plan_review/exit_plan_mode/goal/team）注册进同一注册表，证明产品「只做组装」
-- ✅ Phase-1 聊天产品：`internal/modules/agent`（ChatService：rig provider/agent/工具/历史 + 流式
-  事件读模型）、`internal/ui/session`（对话页，mygo 原生控件）、`internal/ui/sidebar`（会话侧栏）、
-  `internal/ui/settings`（模型设置页）
-- ✅ P1 持久化/审批：`internal/modules/sessionstore`（SQLite History/SessionLog/CheckpointStore）、
-  `internal/modules/approvals` + `internal/ui/approval`（审批队列与 native Modal）、
-  `internal/ui/toolcards` 真实工具卡、`ui/session` 轨迹时间线；desktop 29 实例 / headless 15 实例
-  （`internal/assembly/assemblies/*.json` 实测计数，含组容器与 UI 子组）
-- ✅ P2 第一批：`ui/home` 真实最近会话 + 新对话；`ui/settings` 外观页（主题/语言，native Toggle/Select，
-  持久化 host 键）与模型列表（每模型独立服务商连接、思考强度与生成参数）
-- ✅ 品牌设计体系：`internal/brand`（palette/theme/mark）、`internal/design`（tokens/字阶/间距/组件样式、
-  TypeRole、motion）、`internal/icons`（SVG 图标）；uiroot chrome 使用品牌侧栏/brand row/顶栏，
-  `ui/{home,session,sidebar,settings,approval,toolcards}` 全部品牌化（native 控件 + design 样式）
-- ✅ 会话归档：settings archive flag + sidebar 视图开关/排序
-- ✅ 会话置顶：settings pin flag + sidebar 置顶排序/菜单
-- ✅ 可配置 chrome 快捷键（settings `ui.shortcut.*` → 宿主每帧 OnShortcut）
-- ✅ goal 跟踪：GoalTracker 桥 + 会话 header 目标显示/清除
-- ✅ 会话导出：Markdown + JSONL（原生 Save seam）
-- ✅ MCP 连接器：`mcp.servers` / `mcp.disabledServers` / 工作区 `mcp.json` opt-in + toolkit 合并 +
-  能力页「连接器」Tab（添加/编辑/测试连接/移除/启停/失败重试；设置「MCP」页已删除）
-- ✅ present/plan review 宿主桥 + interaction overlay（工件预览、计划批准）
-- ✅ ask_user 交互桥：UserInteraction + hosttools Asker + overlay.dialogs 原生 Modal
-- ✅ Web search：internal/websearch + 动态 web_search（设置「搜索」页）
-- ✅ 模型配置（设置「模型」页：模型列表 = 每模型独立服务商/Base URL/API Key/思考强度/生成参数 + 默认模型，
-  无内置默认模型；旧 chat.* 单连接启动时一次性迁移为列表行）+ per-session 模型切换（composer 菜单）+
-  每模型思考强度（composer 模型菜单，会话菜单可覆盖且默认跟随模型）
-- ✅ composer slash 命令 + 会话重新生成（SessionRegenerator）
-- ✅ 覆盖矩阵：docs/COVERAGE.md（旧功能面 vs 产品）
-- ✅ i18n：uikit.T；sidebar/session/home/settings/about/rightpanel/automation/plugins/toolcards/approval
-  en/zh 动态切换（host chrome/dialog 标题/后端数据仍中文）
-- ✅ 设置：10 页 5 组——常用（模型/行为与限额）、界面（外观（含快捷键）/通知）、连接（网络与搜索/LSP）、
-  数据（记忆/归档/数据与隐私（含导入/文件隐藏））、关于（关于 hub：构建信息/更新/诊断/架构）；
-  技能/MCP 两页已删除并迁入能力页，预设页已按用户要求删除（后端 presets 保留），设置搜索不再命中技能/MCP。
-- ✅ ACP 模式：`internal/modules/acp` + host `--acp`（stdio JSON-RPC，编辑器接入）
-- ✅ DSH 导入：`internal/modules/importer`（session.v4.jsonl → store）+ 设置导入页
-- ✅ 拖放附件：window.OnFileDrop → KeyFileDrop → composer 附件
-- ✅ 更新检查：`internal/modules/update`（manifest/semver/asset）+ 设置更新页
-- ✅ 诊断页：设置「诊断」（运行时/存储/工具/设置键，只读 + 复制）
-- ✅ 命令面板：host Cmd/Ctrl+K palette（UIRuntime.Commands）
-- ✅ 全文搜索：sessionstore `MessageSearcher` + sidebar 消息搜索区
-- ✅ 能力：toolkit `KeyPlugins`（MCP 状态）+ `ui/plugins` 能力页（页级 Tabs：技能｜连接器，未来工作流为
-  第三 Tab；每个 Tab = 3 列 `ui.GridView` 卡片；页底保留内置模块清单/扩展设置（已接线设置）；无工具目录/工具开关）
-- ✅ 自动化：`internal/modules/automation`（cron/every/after + 持久化 + 执行）+ `ui/automation` 页面
-- ✅ 会话 fork/导出：`SessionForker` + 侧栏创建副本 + 头部原生保存对话框导出 Markdown
-- ✅ 技能：`internal/modules/skills`（多根 SKILL.md 发现）+ toolkit skill 工具 + 能力页「技能」Tab
-  （从设置迁入：扫描根/`skills.dirs`/新建编辑删除/Markdown 内容预览）
-- ✅ 会话↔工作区：sessionstore `workspace_id` 迁移 + agent 记录 + sidebar workspace→session 树
-- ✅ 工作区变更：`WorkspaceDiffer`（git status/diff）→ `ui/rightpanel` 文件标签内折叠的 diff
-- ✅ 工作区：`internal/modules/workspace`（注册表 + 沙箱 Files/ReadFile/Search）；`ui/rightpanel` 文件页
-  （打开文件夹/目录浏览/预览）
-- ✅ 附件/图片：`contracts.Attachment` + 可选 `AttachmentSender`；agent 转 rig image content part；
-  composer 原生 picker/缩略图/chips；用户气泡附件展示
-- ✅ 记忆与 Markdown：`internal/modules/memory`（JSON 持久化 rig.MemoryStore + memory 工具）、
-  `ui/session` 记忆 Tab 真实面板、助手正文 mygo `ui/markdown`（原生渲染器）
-- ✅ 老 UI 布局对齐：无全局顶栏，屏幕自带头部；侧栏模块化导航（首页/会话/搜索/重命名/删除）；
-  `ui/rightpanel` 提供窗口级 docked 右侧栏（默认收起；多标签：开始/文件/打开的文件；侧边栏终端已于 0.2.41 删除），宿主右上角开关；composer slash 命令；
-  composer 工具栏（模型 chip / 命令入口 / 附件占位）与 Home 初始设置卡对照 old 实现；
-  （日志面已随多标签右栏收敛删除；持久化事件仍由 KeyStore/SessionLog 提供）
-- ✅ 示范模块：`appinfo`（服务）、`ui/home`（screen+command+槽位组合）、
-  `ui/settings`（settings pages：模型/行为与限额/外观/通知/网络与搜索/LSP/记忆/归档/数据与隐私/关于）、
-  `ui/welcome`（home.hero + command；**编译期 registry 已注册，desktop/headless 装配均未启用**——纯示范模块）、
-  `ui/toolcards`（ToolRenderer）、`uikit`（共享控件封装）
-- ✅ 测试：uiroot 180 个 headless 测试函数（含注入点区域/Post/生命周期/多窗串行）、
-  assembly/host 装配与宿主测试（含 `TestImportBoundaries` import 边界断言）、ui 模块集成测试（真实 assembly.Load + Root.View）；`-race` 绿
-- ✅ 验证：`make ci` 全绿；headless 产品可运行并优雅退出；Xvfb 下 desktop 真窗口冒烟通过
-- ✅ 逐模块迁移完成：后端 17 个 + UI 13 个（另有 test-only `ui/uimodtest`），全部在编译期 registry 注册
-- ✅ session 读模型 + ui/session 模块（接管 `session.*` 槽位，含轨迹与轨迹旁横条；2026-11 审计 US-01 后轨迹含思考分段与正文）
+- ✅ **网关**（`internal/gateway`，`--product serve`）：WS 控制面 8 个域
+  （sessions/messages/approvals/plans/tasks/team/settings/prompts），快照+差值+通知，
+  SSE 运行流 7 事件（`done|error` 必为最后一条、`tool.start` 先于 `tool.result`、
+  断连 ≠ 停止），`clientRunId` 幂等，token/Origin 校验，端口协商写 `gateway.json`，
+  静态资源托管（`go:embed`，`scripts/build-web-client.sh` 从 `web/dist` 复制）。
+- ✅ **浏览器客户端**（`web/`）：路由 `/`、`/inbox`、`/c/:id`、`/settings`；antd 6 + antd X 2.0；
+  token/图标由 Go 侧生成（`gen:tokens` / `gen:icons`），`gen:verify` 守住生成链。
+- ✅ **后端**：18 个模块（appinfo/store/session/tools/agent/acp/…）全部保留，行为未变；
+  Rig toolkit + hosttools 的工具面完整（serve 交互档 8 个 host 工具，headless 5 个）。
+- ✅ **装配**：编译期 registry + 内嵌 assembly（`headless.json`；`serve` 复用其 entries 并加传输覆盖）；
+  `Products()` = `[headless]`、`AllProducts()` = `[headless, serve]`；`--product` 默认 `serve`。
+- ✅ **托盘壳**（`internal/host`）：托盘/热键/通知尽力而为；网关先起、托盘后起，托盘失败只警告。
+- ✅ **验证**：`internal/gateway` 15 条 `TestE2E*` + 协议一致性；`make acceptance-{check,approval,slow}`
+  三条协议级端到端；两档引擎边界断言；`scripts/verify.sh`。
+- ❌ **已退役**：`internal/{ui,uiroot,uikit,regression}`、原生 desktop 产品、designlint/design-check、
+  `go tool mygo vet`（空过）。历史见 [plans/s4-execution-checklist.md](plans/s4-execution-checklist.md)。
 
 ## 9. 硬规则（review checklist）
 
@@ -273,6 +231,6 @@ sidebar 消费，无服务时仅打开会话）、`KeyToastAnchor`（uiroot 提�
 2. UI 只在帧内构建；帧内无副作用；跨线程走 `UIRuntime.Post`。
 3. 状态归模块实例；禁止包级可变状态。
 4. 注册/注销必须走 `ctx.Effect`（裸注册无法回滚）。
-5. 模块不 import 其他模块实现 / uiroot / host；跨模块行为依赖只走 contracts 服务（import 白名单见 §3，CI 边界断言执行）。
+5. 模块不 import 其他模块实现 / host / assembly；跨模块行为依赖只走 contracts 服务（白名单见 §3，`boundary_test.go` 机器断言）。
 6. 配置变更 = 重启；无运行时模块安装/热更新。
 7. 每个 UI 模块带 headless 测试（`ui.NewTester` 或假 frame），覆盖「注册→渲染→卸载」。

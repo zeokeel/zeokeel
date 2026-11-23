@@ -2,7 +2,7 @@ package agent
 
 // The approval surface is user-visible behaviour that is easy to get wrong on
 // paper: most command tools do NOT park on a card, because the OS sandbox
-// already confines them (gate.AllowSandboxedCommands). docs/AGENT-SURFACES.md
+// already confines them (gate.AllowSandboxedCommands). docs/APPROVAL-SURFACES.md
 // §S4.1 states which families are exempt, and this test keeps that statement
 // true: change a rule without updating the document (or the reverse) and CI
 // fails instead of a user concluding "approvals are broken".
@@ -19,7 +19,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// documentedExemptions is the machine-readable block of AGENT-SURFACES.md §S4.1.
+// documentedExemptions is the machine-readable block of APPROVAL-SURFACES.md §S4.1.
 type documentedExemptions struct {
 	SandboxShell []string
 	Workspace    []string
@@ -30,7 +30,7 @@ type documentedExemptions struct {
 // parseExemptions reads the approval-exemptions block.
 func parseExemptions(t *testing.T) documentedExemptions {
 	t.Helper()
-	path := filepath.Join("..", "..", "..", "docs", "AGENT-SURFACES.md")
+	path := filepath.Join("..", "..", "..", "docs", "APPROVAL-SURFACES.md")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -89,7 +89,7 @@ func sameSet(t *testing.T, what string, documented, actual []string) {
 	want := sortedCopy(documented)
 	got := sortedCopy(actual)
 	if strings.Join(want, ",") != strings.Join(got, ",") {
-		t.Fatalf("%s drifted from docs/AGENT-SURFACES.md §S4.1:\n  documented: %v\n  actual:     %v\n"+
+		t.Fatalf("%s drifted from docs/APPROVAL-SURFACES.md §S4.1:\n  documented: %v\n  actual:     %v\n"+
 			"update the document block (or the rule) in the same change", what, want, got)
 	}
 }

@@ -1,3 +1,9 @@
+> **已归档（2026-11-23，随原生 UI 退役）。** 本文描述的是原生 UI 时期的覆盖报告，
+> 相关代码已在 `S5: retire the native UI` 删除（见 `pre-s4` tag）。
+> 浏览器客户端的现状文档：[WEB-CLIENT.md](../WEB-CLIENT.md)、[DESIGN.md](../DESIGN.md)、
+> [TRANSPORT.md](../TRANSPORT.md)、[APPROVAL-SURFACES.md](../APPROVAL-SURFACES.md)。
+> 归档索引与理由：[README.md](README.md)。
+
 # 功能覆盖审计（旧产品 → 当前产品，复核版）
 
 > 复核：2026-11-08（P7）。范围：旧产品 `internal` + `internal/shell` 对照当前（旧工程归档已移除，路径保留作历史审计记录）

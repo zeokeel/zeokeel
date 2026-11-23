@@ -71,16 +71,16 @@ publishes the GitHub release with `SHA256SUMS.txt` and a download table.
 > 消息用量 footer/逐条复制、计划模式 + keep-planning、自动化运行历史、
 > Memory 整理/清空、技能新建/删除、工件下载、系统托盘/关闭到托盘、全局热键、LSP 工具、聊天模式后端（普通/计划/精简/创作；composer 选择已移除）、
 > Home 真实 composer、/停止 /附加文件 /帮助、数据与隐私页、通知开关、侧栏添加工作区、能力页 MCP 连接器详情；
-> 反证审计共 283 PASS / 0 SKIP（含最新审计补充），4×P2+4×P3 全部修复。详情：[docs/ADVERSARIAL-AUDIT.md](docs/ADVERSARIAL-AUDIT.md)。
+> 反证审计共 283 PASS / 0 SKIP（含最新审计补充），4×P2+4×P3 全部修复。详情：[docs/ADVERSARIAL-AUDIT.md](docs/archive/ADVERSARIAL-AUDIT.md)。
 >
 > **最终验证（2026-11-08，Round 8 · HEAD a7fe576）**：`./scripts/verify.sh` 全量 **10/10 PASS（128s）**；
 > 桌面（xvfb，托盘+全局热键）/headless/ACP 冒烟通过，xfvb 日志确认 **27 module instances、NO_PANIC**；
 > regression **283 PASS / 0 SKIP**（含工作树第十六轮审计）；UI 快照 66 步 / 64 张 PNG。
 > 新功能单测：memory extract **7+8 项**、presets **4+2 项**、spill **8+4 项**、compact **5 项**、
 > goal lifecycle **2 项**、i18n 错误 **3+3 项**、扩展设置 **8+1 项**；ACP `session/list`/`session/load`
-> 真实帧已验证。旧功能覆盖矩阵见 [docs/COVERAGE.md](docs/COVERAGE.md)
+> 真实帧已验证。旧功能覆盖矩阵见 [docs/COVERAGE.md](docs/archive/COVERAGE.md)
 > （62 项：✅61 / 🟡0 / ❌1（winproc 平台非目标）——旧功能覆盖清单全部关闭）。
-> 验证证据：[docs/VERIFICATION.md](docs/VERIFICATION.md)。
+> 验证证据：[docs/VERIFICATION.md](docs/archive/VERIFICATION.md)。
 
 编译期模块化的 Go 桌面 AI agent：**薄总入口 + 内核装配 + 模块贡献点**。
 UI 是 mygo 原生控件（无浏览器/webview）；所有模块一起编译进同一二进制，`assembly.json`
@@ -275,7 +275,7 @@ go test ./...
   截图 `p2-english-automation.png`、`p2-english-settings.png`
 - ✅ P4 host chrome i18n：命令面板（Command palette/Search commands/Esc 提示）、打开/收起右侧栏、展开侧边栏；
   E2E en 断言
-- 📋 旧功能覆盖审计：[docs/COVERAGE.md](docs/COVERAGE.md)（✅48 / 🟡13 / ❌1，附深度限制与非目标分类）
+- 📋 旧功能覆盖审计：[docs/COVERAGE.md](docs/archive/COVERAGE.md)（✅48 / 🟡13 / ❌1，附深度限制与非目标分类）
 - ✅ P5 Composer 深度（第一切片）：slash 命令「新会话/创建副本/导出对话/打开设置」（UIRuntime.Commands，
   `/` 菜单与 Cmd/Ctrl+K 共用）+ 最后一条 assistant 的「重新生成」（agent SessionRegenerator：截断旧回复、
   复用运行管线、持久化回滚）；截图 `p2-slash.png`
@@ -300,7 +300,7 @@ go test ./...
   非法行 warning）
 - ✅ 会话 JSONL 导出：header 更多菜单「导出 JSONL」（session 头 + 每条 message 一行，含 reasoning/error/tools
   扁平化），独立 native Save 对话框 seam；单测覆盖内容/行数/状态
-- 📊 覆盖审计（最新）：[docs/COVERAGE.md](docs/COVERAGE.md)（✅26 / 🟡27 / ❌9；核心+多数高级 UI 可用，
+- 📊 覆盖审计（最新）：[docs/COVERAGE.md](docs/archive/COVERAGE.md)（✅26 / 🟡27 / ❌9；核心+多数高级 UI 可用，
   剩余集中在编排执行/composer 深度/presets/桌面集成/管理深度）
 - ✅ P5 goal v2（v0.2.36 起严格对齐 DSH）：`zeokeel/goal` 会话级 durable 目标（`goal/change` 事件源、
   revision CAS、active/paused/blocked/complete、默认 256 轮、clear tombstone、重启 disarmed）；
@@ -320,7 +320,7 @@ go test ./...
 干净 checkout 可构建）；执行域 job/terminal
   跨工作区/权限重建稳定存活（按 ID 路由 + durable 生命周期事件，跨应用重启不重连）。
 - 🔁 后续版本变更见 [CHANGELOG.md](CHANGELOG.md)；当前能力与验证方式见
-  [docs/COVERAGE.md](docs/COVERAGE.md) / [docs/VERIFICATION.md](docs/VERIFICATION.md)
+  [docs/COVERAGE.md](docs/archive/COVERAGE.md) / [docs/VERIFICATION.md](docs/archive/VERIFICATION.md)
 - 📦 安装包（Windows 安装器 / Linux AppImage / macOS 签名公证 dmg）与无密钥
   自动更新流程见 [docs/RELEASE.md](docs/RELEASE.md)
 - ✅ `make ci` 全绿；uiroot 29 个 headless 测试（覆盖率 99.3%）；desktop/headless 装配集成测试；
@@ -340,4 +340,4 @@ make release       # 本地按 VERSION 构建发布包（可选）
 ```
 
 注入点清单与灵活性规则：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §4/§5；
-已接线的模块清单：[docs/INJECTION-POINTS.md](docs/INJECTION-POINTS.md)。
+已接线的模块清单：[docs/INJECTION-POINTS.md](docs/archive/INJECTION-POINTS.md)。

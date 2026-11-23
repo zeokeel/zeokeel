@@ -1,8 +1,14 @@
+> **已归档（2026-11-23，随原生 UI 退役）。** 本文描述的是designlint 规则 ID 与 baseline 机制，
+> 相关代码已在 `S5: retire the native UI` 删除（见 `pre-s4` tag）。
+> 浏览器客户端的现状文档：[WEB-CLIENT.md](../WEB-CLIENT.md)、[DESIGN.md](../DESIGN.md)、
+> [TRANSPORT.md](../TRANSPORT.md)、[APPROVAL-SURFACES.md](../APPROVAL-SURFACES.md)。
+> 归档索引与理由：[README.md](README.md)。
+
 # DESIGN-LINT 确定性检查规格（设计契约的执行层）
 
-> 本文是 [DESIGN.md](DESIGN.md) 的执行层规格：把「设计契约」变成 AI 每次写文件时**必定撞上**的确定性反馈。
+> 本文是 [DESIGN.md](../DESIGN.md) 的执行层规格：把「设计契约」变成 AI 每次写文件时**必定撞上**的确定性反馈。
 > **当前状态：Phase 1a 已落地（2026-11-09）**：`internal/design/conform` 规则库、`internal/devtools/designlint` CLI、`internal/design/registry.json`、`.design-baseline.json`、`internal/design/conformance_test.go`、`scripts/design-check.sh`，已接入 verify/CI/Makefile 与 `go tool mygo vet`。DS-02/04/05/09 与 DS-06 的 Base 扩展、DS-08 完整文档镜像仍待 Phase 2/3。
-> 分工：本文 = 规则/检测/接入/基线；[DESIGN.md](DESIGN.md) = 契约本身；[AGENT-SURFACES.md](AGENT-SURFACES.md) = 表面语义；[UI-CONFORMANCE.md](UI-CONFORMANCE.md) = 官方 API 事实。
+> 分工：本文 = 规则/检测/接入/基线；[DESIGN.md](../DESIGN.md) = 契约本身；[AGENT-SURFACES.md](AGENT-SURFACES.md) = 表面语义；[UI-CONFORMANCE.md](UI-CONFORMANCE.md) = 官方 API 事实。
 
 ---
 
@@ -27,7 +33,7 @@
 1. **可判定**：规则必须能给出 `file:line:col` 与修复建议；判不了的交给帧测试，不要写成"建议检查"。
 2. **低误报**：用 AST + type info，不用纯正则（正则版仅作 Phase 0 过渡，见附录 B）。
 3. **只对新增强制**：存量进 baseline；`--diff` 模式只查改动文件，避免一次 100+ 报错淹没 AI。
-4. **同源**：规则从 `internal/design/registry.json`（[DESIGN.md](DESIGN.md) 附录 A；离线环境载体为 JSON）读取组件/场景/白名单，不硬编码在代码里。
+4. **同源**：规则从 `internal/design/registry.json`（[DESIGN.md](../DESIGN.md) 附录 A；离线环境载体为 JSON）读取组件/场景/白名单，不硬编码在代码里。
 5. **可退出**：规则有生命周期（warn → enforce → 退役）与误报统计。
 
 ---
@@ -236,7 +242,7 @@ ui.Column(c).Gap(design.Space2).Padding(design.Space6)
 
 ### 3.4 DS-04 Agent surface 绕过入口
 
-**目标**：Agent 场景只能从 [DESIGN.md](DESIGN.md) §2.1 的入口函数进入；禁止在业务模块里另起一套渲染。
+**目标**：Agent 场景只能从 [DESIGN.md](../DESIGN.md) §2.1 的入口函数进入；禁止在业务模块里另起一套渲染。
 
 **检测（registry 驱动）**：
 
@@ -268,7 +274,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{ /* tool fields */ })
 
 ### 3.6 DS-06 未登记自绘
 
-**目标**：自绘只能出现在 [DESIGN-LINT 白名单]（`internal/design/registry.json` 的 `allowlist`）与 [DESIGN.md](DESIGN.md) §7.1；并保留官方交互语义。
+**目标**：自绘只能出现在 [DESIGN-LINT 白名单]（`internal/design/registry.json` 的 `allowlist`）与 [DESIGN.md](../DESIGN.md) §7.1；并保留官方交互语义。
 
 **检测**：
 1. `ui.ButtonBase(` / `ui.DialogBase(` / `ui.CollapsibleBase(` 等 base 调用点，按 **文件 + 符号/文本锚点** 匹配 allowlist（2026-11 审计 UD-11 落地站点级）：条目可选 `symbol`（ enclosing 函数/方法名，方法不带 receiver）与 `text`（归一化源码片段子串）；两者都设时须同时满足；**纯 paths 条目保持历史文件级行为**（向后兼容）。富行条目按符号锚定（`command-palette.rows`→`palette`、`uiroot.rail-session-rows`→`railSessionRow`），不再以文件前缀误豁免同文件其他站点；`chrome.file-picker-seam` 已收窄到实际 seam 文件列表（不再整目录豁免 uiroot）；
@@ -302,10 +308,10 @@ if b.Hovered() { b.Background(t.BgHover) }
 **目标**：文档、registry、白名单、规则 ID 同源，防止"文档一套、代码一套"。
 
 **检测（`go test`，不是 analyzer）**：
-1. `internal/design/registry.json` 中每个 `components[].id` 在 [DESIGN.md](DESIGN.md) §1.2/§6.3 有对应行，反之亦然；
+1. `internal/design/registry.json` 中每个 `components[].id` 在 [DESIGN.md](../DESIGN.md) §1.2/§6.3 有对应行，反之亦然；
 2. `scenarios[].id` 与 §2.1 行一致；`anti_patterns[].id` 与 §3.1 一致；
 3. allowlist 每条有 owner/until/reason，且 `until` 未过期；
-4. 源码中出现 [DESIGN.md](DESIGN.md) §7.4 的禁用 API（`ui.DialogFooter` 等）→ error（防虚构 API）。
+4. 源码中出现 [DESIGN.md](../DESIGN.md) §7.4 的禁用 API（`ui.DialogFooter` 等）→ error（防虚构 API）。
 
 ### 3.9 DS-09 状态映射重复 / 语义降级
 
@@ -405,7 +411,7 @@ go run ./internal/devtools/designlint --strict --baseline .design-baseline.json 
     go tool mygo vet .
 ```
 
-[../scripts/verify.sh](../scripts/verify.sh) 对应步骤：`designlint (--strict)`、`design-check (phase 0 grep)`、`go tool mygo vet`（均在 test 之前）。
+[../scripts/verify.sh](../../scripts/verify.sh) 对应步骤：`designlint (--strict)`、`design-check (phase 0 grep)`、`go tool mygo vet`（均在 test 之前）。
 
 ### 5.4 写后 hook（agent 侧）
 

@@ -1,7 +1,7 @@
 # TRANSPORT：网关 ↔ 浏览器 控制面协议
 
 > 状态：**Stage 0 草案**。本文件定义 `--product serve` 网关与浏览器客户端之间的线协议。
-> 决策记录：[docs/plans/web-client-pivot.md](plans/web-client-pivot.md)；客户端规范：[docs/WEB-CLIENT.md](WEB-CLIENT.md)。
+> 决策记录：[plans/web-ui-framework.md](plans/web-ui-framework.md)；客户端规范：[docs/WEB-CLIENT.md](WEB-CLIENT.md)。
 > 盘点依据：`.cache/pivot/contracts-projection.md`（51 个服务键 / ~194 接口方法 / 7,085 行非测试契约）。
 > 约定：`【决策】`= 已定，不再讨论；`【提案】`= 本文提出、待评审；`【估算】`= 未实测。
 

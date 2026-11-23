@@ -42,6 +42,16 @@
 - [x] **S1.7** 提交 `S1: serve runs the gateway before the tray; tray opens the browser`。
   - 回退点检查：`git revert <S1>` 后 `go build ./...` 应恢复原状（此时 UI 包从未被动过，必然通过）。
 
+### S8 执行记录（2026-11-23）
+
+- `AGENTS.md` 整体重写：§0 改为"迁移已完成"（网关 + web + 托盘壳三块及各自规则），§1 目录与**两档引擎边界**（5 包允许清单 + 后端传递为 0 + test 档单列），§2 必读顺序换成 WEB-CLIENT/TRANSPORT/DESIGN/APPROVAL-SURFACES/ARCHITECTURE，§3 规则改为 web 客户端 + 托盘壳两套，§4 命令改为 `./internal/... ./cmd/...` 并补 `make acceptance-*` 与 web 生成器命令，§5 改为"Web 改动固定流程"，§6 同步义务表重写，§7 硬边界改为引擎隔离/不自造协议/不绕过 api 层，§9 速查表更新。
+- **审批面按裁决拆出**：新建 [docs/APPROVAL-SURFACES.md](../APPROVAL-SURFACES.md)（§S4.1 原文 + 机器可读 `approval-exemptions` 块）；`internal/modules/agent/approval_surface_test.go` 的解析路径同步改为该文件（`TestApprovalExemptionsMatchTheGate`、`TestDocumentedParksActuallyPark` 通过）；`docs/AGENT-SURFACES.md` 整体移入 `docs/archive/` 并在顶部指向新文档。
+- 归档 16 份 + AGENT-SURFACES = **17 份历史文档**移入 `docs/archive/`，每份加归档头（"本文描述的是…，代码已被 S5 删除，现状请看 …"）；`docs/archive/README.md` 重写为**索引**（工具 2 项 + 文档 17 项 + 活文档清单）。
+- `docs/ARCHITECTURE.md`：§1 名词表（gateway/web/域/快照差值 替换 uiroot/槽位）、§2 目录、§3 三层边界（含两档引擎断言）、§5 加"本节属原生 UI，浏览器扩展点是路由+域订阅"、§6 服务键改为网关/host 提供、§7 装配换成 headless.json + serve 覆盖、§8 当前状态整体重写、§9 规则去掉 uiroot。
+- `docs/DESIGN.md`：加适用范围头——mygo/帧测试/designlint 部分只对托盘壳有意义，web 视觉事实来自 `gen:tokens`/`gen:icons`，冲突时以 web 现状为准。
+- 链接体检：脚本扫描 `docs/**` + `AGENTS.md` + `README.md` 的相对链接，**broken = 0**（发现并修掉一个真问题：`docs/plans/web-client-pivot.md` 从来不存在，引用改为 `web-ui-framework.md` / `web-runtime-adapter.md`）。
+- 验证：`go build ./internal/... ./cmd/...` OK；`go test ./internal/{modules/agent,gateway,assembly}` 全绿（含读文档的 `TestApprovalExemptions*` 与 `TestTransport*`）。本步**未改产品代码**，只改文档与一处测试里的路径常量。
+
 ### S7 执行记录（2026-11-23）
 
 - `ci.yml`：删掉 "Design contract"（designlint + design-check + `go tool mygo vet`），换成 **Protocol/implementation consistency**（`go test ./internal/gateway -run TestTransport`）；`:85` 的 `-race` 名单改为 `./internal/gateway ./internal/contracts ./internal/modules/... ./internal/host ./internal/assembly`（按 Lead 要求把 contracts 纳入）；Import boundaries 步骤的注释改为两档描述。
@@ -211,17 +221,17 @@ S3 唯一能独立绿的部分（`usesUIServices`/`declareUIServices`）也无�
 
 ## 8. 步骤 S8：文档
 
-- [ ] **S8.1** `AGENTS.md`：§0（换轨表改为"已完成"）、§2 必读顺序（删 native UI 文档、指向 WEB-CLIENT/TRANSPORT）、§3 规则改为"仅托盘壳适用或归档"、§5 流程改 Web、§6 同步义务表、§7 硬边界、§9 速查表。
+- [x] **S8.1** `AGENTS.md`：§0（换轨表改为"已完成"）、§2 必读顺序（删 native UI 文档、指向 WEB-CLIENT/TRANSPORT）、§3 规则改为"仅托盘壳适用或归档"、§5 流程改 Web、§6 同步义务表、§7 硬边界、§9 速查表。
   - 验证：通读一遍，确认没有指向已删文件的命令/路径（`grep -n 'designlint\|ui-snapshot\|internal/uiroot' AGENTS.md` 为空）。
-- [ ] **S8.2** `docs/ARCHITECTURE.md`：增"传输层"章节；删 uiroot/UI 模块描述；§3 边界表更新为 S6 的两档断言。
+- [x] **S8.2** `docs/ARCHITECTURE.md`：增"传输层"章节；删 uiroot/UI 模块描述；§3 边界表更新为 S6 的两档断言。
   - 验证：`grep -n 'uiroot\|internal/ui/' docs/ARCHITECTURE.md` 为空或仅历史注记。
-- [ ] **S8.3** `docs/DESIGN.md`：标注 mygo 相关条目仅托盘壳适用。
+- [x] **S8.3** `docs/DESIGN.md`：标注 mygo 相关条目仅托盘壳适用。
   - 验证：文档头部的适用范围声明已改。
-- [ ] **S8.4** 归档（加"已归档 2026-11-23，随原生 UI 退役"头）：`INJECTION-POINTS.md`、`UI-CONFORMANCE.md`、`UI-COMPONENT-MIGRATION.md`、`DESIGN-LINT.md`、`UI-FIX-STATUS-v0.8.3.md`、`AGENT-SURFACES.md`（保留 S4.1 审批触发面章节——它对 web 仍有效，其余归档）、`COVERAGE.md`、`VERIFICATION.md`、`UI-AUDIT-2026-11-11.md`、`DESIGN-REVIEW.md`、`UI-STYLE-DIRECTION-2026-11-11.md`、`UI-UX-UPGRADE-2026-11-15.md`、`SETTINGS-IA-REVIEW-2026-11-16.md`、`USABILITY-REVIEW.md`、`INTERACTION-DEPTH-ROUND.md`、`PRODUCT-BUG-REVIEW-2026-11-11.md`、`ADVERSARIAL-AUDIT.md`。
+- [x] **S8.4** 归档（加"已归档 2026-11-23，随原生 UI 退役"头）：`INJECTION-POINTS.md`、`UI-CONFORMANCE.md`、`UI-COMPONENT-MIGRATION.md`、`DESIGN-LINT.md`、`UI-FIX-STATUS-v0.8.3.md`、`AGENT-SURFACES.md`（保留 S4.1 审批触发面章节——它对 web 仍有效，其余归档）、`COVERAGE.md`、`VERIFICATION.md`、`UI-AUDIT-2026-11-11.md`、`DESIGN-REVIEW.md`、`UI-STYLE-DIRECTION-2026-11-11.md`、`UI-UX-UPGRADE-2026-11-15.md`、`SETTINGS-IA-REVIEW-2026-11-16.md`、`USABILITY-REVIEW.md`、`INTERACTION-DEPTH-ROUND.md`、`PRODUCT-BUG-REVIEW-2026-11-11.md`、`ADVERSARIAL-AUDIT.md`。
   - 验证：每个归档文件首行有归档注记；`grep -rn 'S4.1' docs/AGENT-SURFACES.md` 仍在（审批触发面保留）。
-- [ ] **S8.5** `docs/plans/s4-retirement-inventory.md` 与本清单本身移到 `docs/archive/`（它们已完成使命）。
+- [x] **S8.5** `docs/plans/s4-retirement-inventory.md` 与本清单本身移到 `docs/archive/`（它们已完成使命）。
   - 验证：`ls docs/plans/ | grep -c s4-` = 0，`ls docs/archive/ | grep s4-` = 2。
-- [ ] **S8.6** 提交 `S8: documentation for the browser-first product`。
+- [x] **S8.6** 提交 `S8: documentation for the browser-first product`。
 
 ## 9. 步骤 S9：收口验证（全绿才允许宣布完成）
 

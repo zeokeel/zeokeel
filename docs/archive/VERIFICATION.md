@@ -1,3 +1,9 @@
+> **已归档（2026-11-23，随原生 UI 退役）。** 本文描述的是原生 UI 时期的验证流程，
+> 相关代码已在 `S5: retire the native UI` 删除（见 `pre-s4` tag）。
+> 浏览器客户端的现状文档：[WEB-CLIENT.md](../WEB-CLIENT.md)、[DESIGN.md](../DESIGN.md)、
+> [TRANSPORT.md](../TRANSPORT.md)、[APPROVAL-SURFACES.md](../APPROVAL-SURFACES.md)。
+> 归档索引与理由：[README.md](README.md)。
+
 # Verification log (final)
 
 ## 0.2.53 — 2026-11-18（状态条按 DSH 重做）
@@ -1331,8 +1337,8 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
 
 ## 0.2.36（2026-11-15：长时任务严格对齐 DSH + Windows 沙盒并发修复 + 执行域持久化）
 
-- **Goal v2 / 上下文 / 自动化 / 审批 / 通知**：会话级 durable goal（三件套 + revision CAS + blocked + 256 轮 + 引擎续跑 + UI/headless/ACP）；按模型窗口推导预算、默认压缩、run 前 exact 压缩 + archive + Outcome、溢出单次压缩重试；自动化同会话/delivered+completed/weekly+cron+durable 补跑；无人值守审批 fail-closed、通知点击直达会话。详见 [CHANGELOG](../CHANGELOG.md) 与 [04-implementation-status](research/long-task/04-implementation-status.md)。
-- **可观测性**：Context tab（逐调用/事件/成本/系统提示分段/recovery/archive）、跨会话 Insights 洞察页、模型价格编辑 UI；独立审计见 [05-final-parity-audit](research/long-task/05-final-parity-audit.md)（六条 5 PASS + ⑥ 可接受 PARTIAL）。
+- **Goal v2 / 上下文 / 自动化 / 审批 / 通知**：会话级 durable goal（三件套 + revision CAS + blocked + 256 轮 + 引擎续跑 + UI/headless/ACP）；按模型窗口推导预算、默认压缩、run 前 exact 压缩 + archive + Outcome、溢出单次压缩重试；自动化同会话/delivered+completed/weekly+cron+durable 补跑；无人值守审批 fail-closed、通知点击直达会话。详见 [CHANGELOG](../../CHANGELOG.md) 与 [04-implementation-status](../research/long-task/04-implementation-status.md)。
+- **可观测性**：Context tab（逐调用/事件/成本/系统提示分段/recovery/archive）、跨会话 Insights 洞察页、模型价格编辑 UI；独立审计见 [05-final-parity-audit](../research/long-task/05-final-parity-audit.md)（六条 5 PASS + ⑥ 可接受 PARTIAL）。
 - **执行域持久化**：job/terminal 不再因工作区/权限/沙盒重建被 CloseAll；按 ID 跨 build 路由，job_list/terminal_list 合并同 root，完成通知跨 build drain；durable `execution/*` 生命周期事件。
 - **Windows 沙盒并发写修复（rig v0.16.3）**：跨进程命名 mutex + per-grant marker + per-workspace 状态文件协调 ACL grant/restore；并发 helper 只加/撤自己的 capability ACE，最后一个恢复原始 descriptor，崩溃 grant 自愈；read-only 不改 workspace ACL。产品以 `third_party/zeokeel-rig` 内树 fork + replace 消费，保持干净 checkout 构建；rig tag `v0.16.3` 已推送 GitHub，goproxy.cn 尚未索引。
 - **验证**：`gofmt` 空；`go build ./...`、`go vet ./...`、`go tool mygo vet .`、`go mod verify` 通过；`go test ./... -count=1` 46 包全绿；`GOOS=windows GOARCH=amd64 go build/vet ./...` 通过；干净目录（无 sibling）`-mod=readonly` 构建通过；`designlint --strict --baseline` 480 files 0 new；`scripts/design-check.sh` 6/6；`ui-drive` 93/93 PASS；`ui-snapshot` 120 PNG 人工复核。

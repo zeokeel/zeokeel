@@ -1,6 +1,12 @@
+> **已归档（2026-11-23，随原生 UI 退役）。** 本文描述的是原生 UI 的注入点/壳层导航规格，
+> 相关代码已在 `S5: retire the native UI` 删除（见 `pre-s4` tag）。
+> 浏览器客户端的现状文档：[WEB-CLIENT.md](../WEB-CLIENT.md)、[DESIGN.md](../DESIGN.md)、
+> [TRANSPORT.md](../TRANSPORT.md)、[APPROVAL-SURFACES.md](../APPROVAL-SURFACES.md)。
+> 归档索引与理由：[README.md](README.md)。
+
 # ZeoKeel UI 注入点与模块注册清单
 
-> 注入点模型与保留槽位全表见 [ARCHITECTURE.md §4/§5](ARCHITECTURE.md)。本文件是「当前已接线」
+> 注入点模型与保留槽位全表见 [ARCHITECTURE.md §4/§5](../ARCHITECTURE.md)。本文件是「当前已接线」
 > 的落地清单（模块 → 注入点 → assembly 注册），随模块迁入持续更新。
 >
 > 当前状态（2026-11 审计修复后）：`welcome` / `toolcards` 已接入 `internal/assembly/registry.go`；

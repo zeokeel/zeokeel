@@ -1,16 +1,28 @@
 # ZeoKeel 设计契约（DESIGN.md）
 
+> **适用范围（2026-11-23 起）**：本文描述的是**原生 mygo 期的设计契约**。原生桌面 UI 已随
+> `S5: retire the native UI` 删除，**其中与 `ui.*` / `internal/uikit` / 帧测试 / `designlint`
+> 相关的一切只对仍在的托盘壳（`internal/host` 约 1.5k 行）有意义**。
+>
+> **浏览器客户端的视觉事实**来自别处：`internal/design` + `internal/brand` 经
+> `npm run gen:tokens` 生成 `web/src/design/tokens.css` 与 `antd-theme.ts`（antd 6 seed token），
+> 图标由 `npm run gen:icons` 从 `internal/icons/svg` 生成。规则见
+> [WEB-CLIENT.md](WEB-CLIENT.md) 与根 [AGENTS.md](../AGENTS.md) §3。
+>
+> 本文保留的价值：token 的**取值与语义**（§5）、状态语义/反模式（§2/§3）、
+> 强调色预算等跨实现仍需遵守的判断。**遇到与 web 现状冲突的表述，以 web 现状为准。**
+
 > **给 AI coding agent 与 reviewer 的可执行设计契约。** 本文件不是设计原则散文，而是「写 UI 前必须查表、写完后必须能被检查」的硬约束集合。
 >
 > **版本锚定**：`github.com/egoist/mygo v0.9.2`（见 [../go.mod](../go.mod)）。本文的组件目录、API 签名与规则都以该版本源码 + `docs/ui/*.md` 实测为准；升级 mygo 时按 §8.4 重核。
 >
 > **文件分工**：
 > - 本文 = 唯一契约入口（组件目录 / 场景映射 / 反模式 / 最小示例 / token / 入口组件 / 白名单 / 维护）。
-> - [DESIGN-LINT.md](DESIGN-LINT.md) = 执行层：每条约束对应的确定性检查（规则 ID、接入点、基线）。
-> - [AGENT-SURFACES.md](AGENT-SURFACES.md) = Agent 客户端 9 类 surface 的入口组件完整规格（状态矩阵 / API 草案 / 迁移）。
-> - [UI-CONFORMANCE.md](UI-CONFORMANCE.md) = 官方 API 速查与写 UI 固定流程（逐条维护）。
-> - [UI-COMPONENT-MIGRATION.md](UI-COMPONENT-MIGRATION.md) = 自绘保留清单与理由、官方化历史。
-> - [DESIGN-REVIEW.md](DESIGN-REVIEW.md) = 2026-11-08 / mygo v0.7.4 的历史审计报告，**只作证据，不作现状依据**。
+> - [DESIGN-LINT.md](archive/DESIGN-LINT.md) = 执行层：每条约束对应的确定性检查（规则 ID、接入点、基线）。
+> - [AGENT-SURFACES.md](archive/AGENT-SURFACES.md) = Agent 客户端 9 类 surface 的入口组件完整规格（状态矩阵 / API 草案 / 迁移）。
+> - [UI-CONFORMANCE.md](archive/UI-CONFORMANCE.md) = 官方 API 速查与写 UI 固定流程（逐条维护）。
+> - [UI-COMPONENT-MIGRATION.md](archive/UI-COMPONENT-MIGRATION.md) = 自绘保留清单与理由、官方化历史。
+> - [DESIGN-REVIEW.md](archive/DESIGN-REVIEW.md) = 2026-11-08 / mygo v0.7.4 的历史审计报告，**只作证据，不作现状依据**。
 > - 根 [AGENTS.md](../AGENTS.md) = AI 每次任务开头必读的 10 条常驻规则 + 工作流。
 
 ---
@@ -32,7 +44,7 @@
 1. 用户在当前对话中的明确指令；
 2. 根 [AGENTS.md](../AGENTS.md)；
 3. 本文件（DESIGN.md）；
-4. [UI-CONFORMANCE.md](UI-CONFORMANCE.md)（官方 API 事实）；
+4. [UI-CONFORMANCE.md](archive/UI-CONFORMANCE.md)（官方 API 事实）；
 5. `.agents/skills/` 的两个技能（design-guide / mygo-maintenance，通用方法论）；
 6. 现有代码习惯（**现状不等于规范**；以本文为准）。
 
@@ -41,7 +53,7 @@
 ### 0.3 阅读路径
 
 - **第一次改 UI**：§0.4 → §2（找场景）→ §3（避开反模式）→ §4（抄默认写法）→ §5（取 token）。
-- **改 Agent 客户端表面**：§2 + [AGENT-SURFACES.md](AGENT-SURFACES.md) 对应表面 → 迁移步骤。
+- **改 Agent 客户端表面**：§2 + [AGENT-SURFACES.md](archive/AGENT-SURFACES.md) 对应表面 → 迁移步骤。
 - **新增组件/自绘**：§1.4（决策顺序）→ §6（预设/入口）→ §7（白名单流程）→ §8.3（同步义务）。
 
 ### 0.4 版本锚定
@@ -58,7 +70,7 @@
 | 最短调用（本项目版 ZeroOptions） | 只传必需参数、不做额外 fluent 配置的构造调用。v0.9.2 的 widget 默认取主题外观，**最短调用即设计默认** |
 | token | `internal/design` 的语义颜色/字号/间距/圆角/阴影/布局度量；唯一 hex 来源是 `internal/brand` |
 | 预设 | `internal/design/components.go` 的组件样式（PrimaryButton/SecondaryButton/DangerButton/Panel/Composer/Badge/…） |
-| 入口组件 | 对官方件的薄组合，锁定某类 Agent surface 的语义/状态/骨架；见 §6.3 与 [AGENT-SURFACES.md](AGENT-SURFACES.md) |
+| 入口组件 | 对官方件的薄组合，锁定某类 Agent surface 的语义/状态/骨架；见 §6.3 与 [AGENT-SURFACES.md](archive/AGENT-SURFACES.md) |
 | surface | Agent 客户端的一类界面表面：会话线程、工具调用、推理、审批、计划审阅、提问、composer、运行态、团队/分支 |
 | 自绘 | 用 `*Base`/`ButtonBase`/`Box` 等自行绘制的控件外观；必须登记白名单并在代码里写理由 |
 
@@ -241,7 +253,7 @@
 1. 用户此刻是在**读**（线程/推理/工具结果）、**决定**（审批/计划/提问）、还是**操作**（composer/停止/重试）？
 2. 这个内容会**流式增长**吗？→ SessionThread/ReasoningTrace + FollowEnd，几何稳定。
 3. 这个动作**不可逆**吗？→ 危险动作非 Default、必须有确认或撤销。
-4. 这个信息**影响 Agent 下一步**吗？→ 必须产生结构化事件（见 [AGENT-SURFACES.md](AGENT-SURFACES.md) §2 双向上下文契约），不能只是展示。
+4. 这个信息**影响 Agent 下一步**吗？→ 必须产生结构化事件（见 [AGENT-SURFACES.md](archive/AGENT-SURFACES.md) §2 双向上下文契约），不能只是展示。
 
 ### 2.3 非 Agent 场景速查
 
@@ -262,7 +274,7 @@
 
 ## 3. 反模式拒绝清单
 
-> 编号 AP-xx 与 [DESIGN-LINT.md](DESIGN-LINT.md) 的规则 ID 对应；新增反模式必须同时新增检查或说明为何只能人工评审。
+> 编号 AP-xx 与 [DESIGN-LINT.md](archive/DESIGN-LINT.md) 的规则 ID 对应；新增反模式必须同时新增检查或说明为何只能人工评审。
 
 ### 3.1 拒绝清单
 
@@ -296,7 +308,7 @@
 
 ### 3.2 现状违规证据（2026-11-09，Phase 1a/1b 后）
 
-> 旧 [DESIGN-REVIEW.md](DESIGN-REVIEW.md) 是 v0.7.4 历史报告，多数 P0/P1 已修复；下表为 Phase 1 实施后的**现状**，剩余存量进 `.design-baseline.json`。
+> 旧 [DESIGN-REVIEW.md](archive/DESIGN-REVIEW.md) 是 v0.7.4 历史报告，多数 P0/P1 已修复；下表为 Phase 1 实施后的**现状**，剩余存量进 `.design-baseline.json`。
 
 | 类别 | 计数 | 位置示例 | 目标 |
 |---|---|---|---|
@@ -310,7 +322,7 @@
 | 工具卡渲染路径 | **2**（Phase 2c） | `uikit.ToolRow`（紧凑行）+ `uikit.ToolCallCard`（完整卡：决策/轨迹/plan/demo） | 保持 2；新增工具只注册渲染器 |
 | 裸数值圆角 | 0 | — | 保持零（已 100% token 化） |
 
-> 基线复算命令与完整清单见 [DESIGN-LINT.md](DESIGN-LINT.md) 附录 A。
+> 基线复算命令与完整清单见 [DESIGN-LINT.md](archive/DESIGN-LINT.md) 附录 A。
 
 ---
 
@@ -437,11 +449,11 @@ design.Apply(ui.Text(c, "加载失败"), t.Font(design.TypeXS)).TextColor(t.Dang
     Role(ui.RoleAlert).Selectable()
 ```
 
-> 更多官方用法见 [UI-CONFORMANCE.md](UI-CONFORMANCE.md) §1 与 mygo `docs/ui/*.md`。
+> 更多官方用法见 [UI-CONFORMANCE.md](archive/UI-CONFORMANCE.md) §1 与 mygo `docs/ui/*.md`。
 
 ### 4.3 本项目入口组件用法（目标 API 草案，尚未实现）
 
-> 草案仅定契约；实现时以 [AGENT-SURFACES.md](AGENT-SURFACES.md) 的签名/状态矩阵为准。
+> 草案仅定契约；实现时以 [AGENT-SURFACES.md](archive/AGENT-SURFACES.md) 的签名/状态矩阵为准。
 
 ```go
 // 会话线程：虚拟化 + 流式跟随 + 空态 hero + 回到最新，都由入口负责
@@ -590,7 +602,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 4. 阴影只从预设取；浮层/菜单/抽屉用 `ShadowOverlay`；卡片与 composer 不加阴影。
 5. **强调色预算**：每屏 ≤2 个 Accent 填充块、≤1 个 primary 按钮、≤2 个红色元素；页面主操作只有两个落点（页头右 / 固定页脚右下），分节动作走 `SectionAction`。
 6. **状态徽章**：只用 `uikit.StatusBadge`（success 8%/warning/danger 12% tint + `*Text` AA 文字 + 必填标签）；禁止 `t.Badge()+TextColor(t.DangerText)` 这类中性底 + 状态字拼法（AP-21）。
-7. 对应检查：DS-01/DS-02/DS-03/DS-11..DS-16（见 [DESIGN-LINT.md](DESIGN-LINT.md)）。
+7. 对应检查：DS-01/DS-02/DS-03/DS-11..DS-16（见 [DESIGN-LINT.md](archive/DESIGN-LINT.md)）。
 
 ---
 
@@ -641,7 +653,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 代码围栏 | `uikit.MarkdownCodeBlock` | 会话/推理/检查器 Markdown 的统一代码块：填充 `BgStrong`、无边框、`RadiusSM`；只有语言真实命名时才显示语言标签（不再把 `text` 当成标题）；官方 Copy 按钮保留复制反馈；流式/高亮/横向滚动沿用官方 `CodeBlockView` |
 | accent 行徽章 | `uikit.OnAccentBadge` | **仅**在 Accent 填充的瞬态行（palette/菜单选中项）使用；持久导航改为 tint + 普通 `uikit.Badge`（AP-19） |
 
-### 6.3 Agent 入口组件（目标；规格见 [AGENT-SURFACES.md](AGENT-SURFACES.md)）
+### 6.3 Agent 入口组件（目标；规格见 [AGENT-SURFACES.md](archive/AGENT-SURFACES.md)）
 
 | 入口 | 状态 | 说明 |
 |---|---|---|
@@ -712,7 +724,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 
 1. **先查**：官方 v0.9.2 是否有组件/`*Base`？本项目是否有预设/入口？→ 有则禁止自绘。
 2. **写理由**：在代码注释里写清「官方为什么不够」（可访问性/交互语义/布局约束），引用官方文档路径。
-3. **登记**：同 PR 更新本文 §7.1、[UI-COMPONENT-MIGRATION.md](UI-COMPONENT-MIGRATION.md) §3 与 [DESIGN-LINT.md](DESIGN-LINT.md) 的 `design-allowlist`（lint 白名单）。
+3. **登记**：同 PR 更新本文 §7.1、[UI-COMPONENT-MIGRATION.md](archive/UI-COMPONENT-MIGRATION.md) §3 与 [DESIGN-LINT.md](archive/DESIGN-LINT.md) 的 `design-allowlist`（lint 白名单）。
 4. **补测试**：帧测试覆盖键盘/焦点/状态/role；新视觉有快照。
 5. **评审**：reviewer 按 §8.5 检查；未登记的自绘 = DS-06 违规。
 
@@ -787,7 +799,7 @@ go run ./internal/devtools/ui-snapshot .cache/ui-conformance   # 生成 PNG 并�
 
 | 规则 | 名称 | 文档 |
 |---|---|---|
-| DS-01 | 颜色字面量禁止 | [DESIGN-LINT.md](DESIGN-LINT.md) §3 |
+| DS-01 | 颜色字面量禁止 | [DESIGN-LINT.md](archive/DESIGN-LINT.md) §3 |
 | DS-02 | 主题/状态色覆写、状态语义 | 同上 |
 | DS-03 | 裸数值度量 | 同上 |
 | DS-04 | Agent surface 绕过入口 | 同上 |
@@ -808,23 +820,23 @@ go run ./internal/devtools/ui-snapshot .cache/ui-conformance   # 生成 PNG 并�
 
 **任何 UI 改动必须同 PR 更新**：
 
-1. 新增组件/预设/入口 → §1.2/§6 + 附录 A registry + [AGENT-SURFACES.md](AGENT-SURFACES.md)（若是 surface）。
+1. 新增组件/预设/入口 → §1.2/§6 + 附录 A registry + [AGENT-SURFACES.md](archive/AGENT-SURFACES.md)（若是 surface）。
 2. 新增 Agent 场景 → §2.1 + registry scenarios + 对应入口迁移行。
-3. 新增反模式/规则 → §3 + [DESIGN-LINT.md](DESIGN-LINT.md) 规则 ID + 检查实现（或说明只能人工评审）。
-4. 新增自绘 → §7.1 + [UI-COMPONENT-MIGRATION.md](UI-COMPONENT-MIGRATION.md) + lint 白名单。
-5. 改动官方用法 → [UI-CONFORMANCE.md](UI-CONFORMANCE.md) §1/§1.1。
+3. 新增反模式/规则 → §3 + [DESIGN-LINT.md](archive/DESIGN-LINT.md) 规则 ID + 检查实现（或说明只能人工评审）。
+4. 新增自绘 → §7.1 + [UI-COMPONENT-MIGRATION.md](archive/UI-COMPONENT-MIGRATION.md) + lint 白名单。
+5. 改动官方用法 → [UI-CONFORMANCE.md](archive/UI-CONFORMANCE.md) §1/§1.1。
 
 **已知文档漂移（勿作依据，修复后删除本节条目）**：
 
-- [DESIGN-REVIEW.md](DESIGN-REVIEW.md) 是 2026-11-08 / mygo v0.7.4 的历史报告，其中 P0/P1 多数已修复（硬编码色、uikit 未接 design、Toggle 当开关、toast 自绘等）。现状以本文件 + 代码 + 测试为准。
-- [UI-FIX-STATUS-v0.8.3.md](UI-FIX-STATUS-v0.8.3.md) §1 的「Approval DialogFooter（Deny 默认焦点/Enter=拒绝）」与现状不符：现行审批**没有默认动作**（真实事故修订，见 `internal/ui/approval` 注释与 `TestApprovalFooterHasNoDefaultAction`）；transcript 也早已是 `ui.List` 虚拟化，不是 200 条有界窗口。
+- [DESIGN-REVIEW.md](archive/DESIGN-REVIEW.md) 是 2026-11-08 / mygo v0.7.4 的历史报告，其中 P0/P1 多数已修复（硬编码色、uikit 未接 design、Toggle 当开关、toast 自绘等）。现状以本文件 + 代码 + 测试为准。
+- [UI-FIX-STATUS-v0.8.3.md](archive/UI-FIX-STATUS-v0.8.3.md) §1 的「Approval DialogFooter（Deny 默认焦点/Enter=拒绝）」与现状不符：现行审批**没有默认动作**（真实事故修订，见 `internal/ui/approval` 注释与 `TestApprovalFooterHasNoDefaultAction`）；transcript 也早已是 `ui.List` 虚拟化，不是 200 条有界窗口。
 
 ### 8.4 mygo 升级流程（v0.9.x → 新版本）
 
 1. 读新版本 mygo 模块内的 `docs/ui/migration.md` 与 release notes；`go get github.com/egoist/mygo@<version>`。
 2. `go tool mygo migrate-ui .` 预览 → `-write` 应用（Go 1.24+ tool 指令；go.mod 已声明 `tool github.com/egoist/mygo/cmd/mygo`，见 DESIGN-LINT §5.2）。
 3. 逐项复核迁移改动：stateful 泛型 parts、派生值回写（`Changed/Submitted`）、key 迁移到 `Context.Key`。
-4. 重跑 §8.1 全链；更新 [UI-CONFORMANCE.md](UI-CONFORMANCE.md) 的版本号与 §1 表。
+4. 重跑 §8.1 全链；更新 [UI-CONFORMANCE.md](archive/UI-CONFORMANCE.md) 的版本号与 §1 表。
 5. 重核本文 §1.2 的组件目录与 §7.4 的缺口；更新附录 A `version` 字段。
 6. 若官方新增了 `DialogFooter`/`Default` 等能力，按「官方优先」替换本仓库的对应封装（保留入口 API 不变）。
 
@@ -904,7 +916,7 @@ go run ./internal/devtools/ui-snapshot .cache/ui-conformance   # 生成 PNG 并�
 | 测试 | 全仓 **3,421** 个 `func Test`；`internal/regression` **75 文件 / 286 测试**；ui+uiroot **298** 测试文件；uiroot 180 测试函数 |
 | 验证资产 | `scripts/verify.sh`（含 designlint/design-check/mygo-vet）、`scripts/design-check.sh`（阈值 metric 21 / ButtonBase 11）、`ui-snapshot`、`ui-drive`、快照 PNG；CI 含 import 边界断言与定向 -race |
 
-> 复算命令见 [DESIGN-LINT.md](DESIGN-LINT.md) 附录 A；数字随工作区演进，以命令输出为准。
+> 复算命令见 [DESIGN-LINT.md](archive/DESIGN-LINT.md) 附录 A；数字随工作区演进，以命令输出为准。
 
 ## 附录 D：决策记录
 
