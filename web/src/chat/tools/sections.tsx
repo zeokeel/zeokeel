@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Descriptions } from 'antd';
 import { CodeHighlighter } from '@ant-design/x';
 import { parseUnifiedDiff, type DiffLine } from '@/api/files';
 import { useT } from '@/i18n';
@@ -27,15 +28,21 @@ export function KeyValueRows({
   rows: Array<{ labelKey: MessageKey; text: string }>;
 }) {
   const t = useT();
+  // antd owns the label/value pairing, the column layout and the a11y of the
+  // pairing; the card around it stays ours (it is one of the six surfaces antd X
+  // does not provide — docs/plans/antd-x-component-map.md §4).
   return (
-    <dl className="zk-kv">
-      {rows.map((row) => (
-        <div key={row.labelKey} className="zk-kv__row">
-          <dt className="zk-kv__key">{t(row.labelKey)}</dt>
-          <dd className="zk-kv__value">{row.text}</dd>
-        </div>
-      ))}
-    </dl>
+    <Descriptions
+      className="zk-kv"
+      size="small"
+      column={1}
+      colon={false}
+      items={rows.map((row) => ({
+        key: row.labelKey,
+        label: t(row.labelKey),
+        children: row.text,
+      }))}
+    />
   );
 }
 
