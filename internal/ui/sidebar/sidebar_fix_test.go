@@ -159,7 +159,7 @@ func TestSidebarWorkspaceMoreHitTarget(t *testing.T) {
 		withCurrent(contracts.Workspace{ID: "w1", Name: "项目一", Root: "/work/one"})
 	h := newHarnessWithWorkspace(t, &fakeChat{}, sidebar.Config{}, workspace)
 	tester := h.tester()
-	if err := tester.Click("切换工作文件夹"); err != nil {
+	if err := tester.Click("管理工作文件夹"); err != nil {
 		t.Fatalf("open the switch dialog: %v", err)
 	}
 	tester.Frame()
@@ -182,7 +182,7 @@ func TestSidebarWorkspaceMoreHitTarget(t *testing.T) {
 func TestSidebarWorkspaceEmptyHintNotMicroType(t *testing.T) {
 	h := newHarnessWithWorkspace(t, &fakeChat{}, sidebar.Config{}, newFakeWorkspace())
 	tester := h.tester()
-	if err := tester.Click("切换工作文件夹"); err != nil {
+	if err := tester.Click("管理工作文件夹"); err != nil {
 		t.Fatalf("open the switch dialog: %v", err)
 	}
 	tester.Frame()

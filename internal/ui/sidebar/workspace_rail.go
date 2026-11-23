@@ -36,6 +36,18 @@ func buildWorkspaceRail(c *ui.Context, t *design.Tokens, runtime contracts.UIRun
 		for _, item := range workspaces {
 			buildWorkspaceRailItem(c, t, workspace, runtime, state, item, hasCurrent && item.ID == current.ID)
 		}
+		ui.Spacer(c).Grow(1)
+		uikit.IconButton(c, uikit.IconButtonOptions{
+			Key:   "sidebar.workspace.manage",
+			Label: state.T("管理工作文件夹", "Manage workspace folders"),
+			Icon:  icons.Sliders(),
+			Size:  design.IconSizeS,
+			OnClick: func() {
+				state.switchOpen = true
+				state.switchFocus = true
+				runtime.Invalidate()
+			},
+		})
 		uikit.IconButton(c, uikit.IconButtonOptions{
 			Key:   "sidebar.workspace.add",
 			Label: state.T("添加工作文件夹", "Add workspace folder"),
@@ -43,7 +55,6 @@ func buildWorkspaceRail(c *ui.Context, t *design.Tokens, runtime contracts.UIRun
 			Size:  design.IconSizeS,
 			OnClick: func() {
 				if _, ok := addWorkspace(state, workspace, runtime); ok {
-					state.switchOpen = false
 					runtime.Invalidate()
 				}
 			},
@@ -61,16 +72,37 @@ func buildWorkspaceRailItem(c *ui.Context, t *design.Tokens, workspace contracts
 	if letter == utf8.RuneError || letter == 0 {
 		letter = '?'
 	}
-	row := design.Apply(ui.Button(c, string(letter)), t.SecondaryButton()).
-		Width(design.WorkspaceRailItem).Height(design.WorkspaceRailItem).
-		Label(state.T("切换工作文件夹：", "Switch workspace: ") + label)
-	if active {
-		row = row.Background(t.BgSelected)
-	}
-	if row.Clicked() {
-		if _, err := workspace.Open(context.Background(), item.ID); err == nil {
-			state.switchOpen = false
-			runtime.Invalidate()
+	ui.Row(c).FillWidth().Gap(design.Space1).AlignItems(ui.Center).Children(func() {
+		ui.Box(c).Width(design.Space1).Height(design.Space5).
+			Background(workspaceColor(t, item.Color))
+		row := design.Apply(ui.Button(c, string(letter)), t.SecondaryButton()).
+			Width(design.WorkspaceRailItem).Height(design.WorkspaceRailItem).
+			Label(state.T("切换工作文件夹：", "Switch workspace: ") + label)
+		if active {
+			row = row.Background(t.BgSelected)
 		}
+		if row.Clicked() {
+			if _, err := workspace.Open(context.Background(), item.ID); err == nil {
+				state.switchOpen = false
+				runtime.Invalidate()
+			}
+		}
+	})
+}
+
+// workspaceColor maps the stored palette id to a design token. Unknown or
+// empty ids use the neutral secondary label color.
+func workspaceColor(t *design.Tokens, id string) ui.Color {
+	switch strings.ToLower(strings.TrimSpace(id)) {
+	case "blue":
+		return t.Accent
+	case "green":
+		return t.Success
+	case "amber":
+		return t.Warning
+	case "red":
+		return t.Danger
+	default:
+		return t.LabelTertiary
 	}
 }

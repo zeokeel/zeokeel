@@ -84,7 +84,7 @@ func TestSwitchDialogMakesTheChosenFolderCurrent(t *testing.T) {
 	h := newHarnessWithWorkspace(t, treeChat(), sidebar.Config{}, workspace)
 	tester := h.tester()
 
-	if err := tester.Click("切换工作文件夹"); err != nil {
+	if err := tester.Click("管理工作文件夹"); err != nil {
 		t.Fatalf("open the switch dialog: %v", err)
 	}
 	tester.Frame()
@@ -99,7 +99,7 @@ func TestSwitchDialogMakesTheChosenFolderCurrent(t *testing.T) {
 	}
 	// The list now shows the other folder's conversation, and only that one.
 	h.assertTexts(tester, "项目二", "C 会话")
-	h.assertNoTexts(tester, "A 会话", "B 会话", "项目一")
+	h.assertNoTexts(tester, "A 会话", "B 会话")
 }
 
 // TestOpeningUnboundSessionKeepsCurrentWorkspace pins the no-op case: a session

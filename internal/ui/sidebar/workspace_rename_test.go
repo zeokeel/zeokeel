@@ -59,7 +59,7 @@ func (f *renamingWorkspace) RenameWorkspace(_ context.Context, id, name string) 
 // rename entry (the single-workspace path to the existing rename dialog).
 func openWorkspaceRename(t *testing.T, tester *ui.Tester, title string) {
 	t.Helper()
-	if err := tester.Click("切换工作文件夹"); err != nil {
+	if err := tester.Click("管理工作文件夹"); err != nil {
 		t.Fatalf("open the switch dialog: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
@@ -154,7 +154,7 @@ func TestWorkspaceRenameEscapeCancels(t *testing.T) {
 	h.assertNoTexts(tester, "重命名工作区")
 	h.assertTexts(tester, "项目一")
 	// The registry is unchanged: reopening the switch dialog still lists 项目二.
-	if err := tester.Click("切换工作文件夹"); err != nil {
+	if err := tester.Click("管理工作文件夹"); err != nil {
 		t.Fatalf("reopen the switch dialog: %v", err)
 	}
 	tester.Frame()
@@ -188,7 +188,7 @@ func TestWorkspaceRenameDuplicateIsLocalized(t *testing.T) {
 	// switch dialog still lists both folders.
 	h.click(tester, "取消")
 	h.assertTexts(tester, "项目一")
-	if err := tester.Click("切换工作文件夹"); err != nil {
+	if err := tester.Click("管理工作文件夹"); err != nil {
 		t.Fatalf("reopen the switch dialog: %v", err)
 	}
 	tester.Frame()
@@ -205,7 +205,7 @@ func TestWorkspaceRenameHiddenWithoutRenamer(t *testing.T) {
 	h := newHarnessWithWorkspace(t, treeChat(), sidebar.Config{}, workspace)
 	tester := h.tester()
 
-	if err := tester.Click("切换工作文件夹"); err != nil {
+	if err := tester.Click("管理工作文件夹"); err != nil {
 		t.Fatalf("open the switch dialog: %v", err)
 	}
 	tester.Frame()

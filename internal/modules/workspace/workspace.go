@@ -188,6 +188,7 @@ func contractWorkspace(workspace rigworkspace.Workspace) contracts.Workspace {
 		Name:      workspace.Name,
 		Root:      workspace.Root,
 		CreatedAt: workspace.CreatedAt,
+		Color:     workspace.Color,
 	}
 }
 
@@ -289,6 +290,15 @@ func (s *Service) RenameWorkspace(ctx context.Context, id, name string) (contrac
 }
 
 // currentWorkspaceRoot returns the current workspace and its canonical root.
+// SetWorkspaceColor implements contracts.WorkspaceColorer.
+func (s *Service) SetWorkspaceColor(ctx context.Context, id, color string) (contracts.Workspace, error) {
+	updated, err := s.service.SetColor(ctx, id, color)
+	if err != nil {
+		return contracts.Workspace{}, err
+	}
+	return contractWorkspace(updated), nil
+}
+
 func (s *Service) currentWorkspaceRoot() (contracts.Workspace, string, error) {
 	workspace, ok, err := s.service.Current(context.Background())
 	if err != nil {

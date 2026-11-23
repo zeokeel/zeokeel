@@ -51,7 +51,7 @@ func TestSidebarHasNoViewMenu(t *testing.T) {
 	tester.Frame()
 	h.assertNoTexts(tester, "View", "Sort", "Recent activity", "Name", "Group", "By workspace", "Flat")
 	// The fixed product labels survive the language switch.
-	h.assertTexts(tester, "Workspace", "Switch workspace folder")
+	h.assertTexts(tester, "Manage workspace folders", "Add workspace folder")
 }
 
 // TestSidebarAlwaysScopesToTheOpenFolder ignores stale view settings: even a
@@ -76,7 +76,7 @@ func TestSidebarAlwaysScopesToTheOpenFolder(t *testing.T) {
 	// The open folder wins over the stale "flat" value: only 项目一's
 	// conversations are listed, the other folder's session is not.
 	h.assertTexts(tester, "项目一", "Alpha 旧", "Zulu 置顶")
-	h.assertNoTexts(tester, "项目二", "Beta 新")
+	h.assertNoTexts(tester, "Beta 新")
 	texts := tester.Texts()
 	// Name sorting does not apply: the pinned Zulu row comes before the unpinned
 	// Alpha row even though Alpha sorts first by name.

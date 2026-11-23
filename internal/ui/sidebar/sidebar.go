@@ -392,25 +392,6 @@ func Module() *module.Descriptor[Config] {
 				buildWorkspaceRail(c, design.Of(c), runtime, state)
 			},
 		}
-		workspaceHeader := contracts.SlotItem{
-			Slot:  contracts.SlotSidebarPrimary,
-			ID:    "sidebar.primary.workspace",
-			Order: 5,
-			Build: func(c *ui.Context) {
-				workspace, ok := state.ctx.Get(contracts.KeyWorkspace)
-				if !ok || workspace == nil {
-					return
-				}
-				if _, err := workspace.List(context.Background()); err != nil {
-					return
-				}
-				current, hasCurrent := contracts.Workspace{}, false
-				if opened, found, err := workspace.Current(context.Background()); err == nil && found {
-					current, hasCurrent = opened, true
-				}
-				buildWorkspaceHeader(c, design.Of(c), runtime, state, current, hasCurrent)
-			},
-		}
 		primary := contracts.SlotItem{
 			Slot:  contracts.SlotSidebarPrimary,
 			ID:    "sidebar.primary.new-chat",
@@ -471,7 +452,7 @@ func Module() *module.Descriptor[Config] {
 			},
 		}
 
-		for _, item := range []contracts.SlotItem{workspaceRail, workspaceHeader, primary, navSlot, footer, renameDialog, workspaceSwitchDialog, workspaceRenameDialog, workspaceDialog} {
+		for _, item := range []contracts.SlotItem{workspaceRail, primary, navSlot, footer, renameDialog, workspaceSwitchDialog, workspaceRenameDialog, workspaceDialog} {
 			if err := own(ctx, func() (func(), error) { return runtime.RegisterSlotItem(item) }); err != nil {
 				return err
 			}
@@ -553,6 +534,15 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState, title string) {
 	ui.Column(c).FillWidth().Gap(design.Space1).Padding(design.Space2, design.Space0, design.Space0, design.Space0).
 		Children(func() {
+			if state.addWorkspaceStatus != "" {
+				uikit.StatusBadge(c, t, uikit.StatusSuccess, state.addWorkspaceStatus)
+			}
+			if state.addWorkspaceErr != "" {
+				buildSidebarError(c, t, state.addWorkspaceErr)
+			}
+			if state.workspaceDeleteErr != "" {
+				buildSidebarError(c, t, state.workspaceDeleteErr)
+			}
 			// Generic module-screen destinations: every registered screen the
 			// sidebar does not own itself (the session list is its own screen, and
 			// the home screen is intentionally not a destination) gets one native
@@ -576,6 +566,9 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 			if hasWorkspace {
 				if opened, ok, err := workspace.Current(context.Background()); err == nil && ok {
 					current, hasCurrent = opened, true
+				}
+				if !hasCurrent {
+					uikit.EmptyState(c, state.T("未选择工作文件夹", "No workspace folder selected"))
 				}
 			} else {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -1376,15 +1369,6 @@ func buildWorkspaceSwitchDialog(c *ui.Context, t *design.Tokens, workspace contr
 					"After switching, the sidebar, files, memory and automation follow this folder."),
 				OnClose: closeDialog,
 			})
-			design.Apply(ui.Column(c), t.Gap(design.Space1)).FillWidth().Children(func() {
-				design.Apply(ui.Text(c, state.T("最近使用", "Recently used")), t.TextMuted(design.TypeXXS)).
-					TextColor(t.LabelTertiary)
-				if len(recent) == 0 {
-					sidebarEmptyLine(c, state.T("还没有工作文件夹", "No workspace folders yet"), design.Space1)
-				} else {
-					buildWorkspaceSwitchList(c, t, workspace, runtime, state, recent, open)
-				}
-			})
 			ui.Row(c).FillWidth().Gap(design.Space2).Children(func() {
 				chooseLabel := state.T("选择其他文件夹…", "Choose another folder…")
 				choose := ui.Button(c, chooseLabel)
@@ -1406,6 +1390,28 @@ func buildWorkspaceSwitchDialog(c *ui.Context, t *design.Tokens, workspace contr
 				design.Apply(cancel, t.SecondaryButton())
 				if cancel.Clicked() {
 					closeDialog()
+				}
+			})
+			if colorer, ok := workspace.(contracts.WorkspaceColorer); ok && state.switchRow >= 0 && state.switchRow < len(recent) {
+				currentColor := workspaceColorLabel(state, recent[state.switchRow].Workspace.Color)
+				selector := ui.Select(c.Key("sidebar.workspace.color"), &currentColor, workspaceColorLabels(state)).
+					Label(state.T("颜色", "Color"))
+				if selector.Changed() {
+					if _, err := colorer.SetWorkspaceColor(context.Background(), recent[state.switchRow].Workspace.ID, workspaceColorValue(currentColor)); err != nil {
+						state.switchErr = state.T("设置颜色失败：", "Could not set the color: ") + err.Error()
+					} else {
+						state.switchErr = ""
+					}
+					runtime.Invalidate()
+				}
+			}
+			design.Apply(ui.Column(c), t.Gap(design.Space1)).FillWidth().Children(func() {
+				design.Apply(ui.Text(c, state.T("最近使用", "Recently used")), t.TextMuted(design.TypeXXS)).
+					TextColor(t.LabelTertiary)
+				if len(recent) == 0 {
+					sidebarEmptyLine(c, state.T("还没有工作文件夹", "No workspace folders yet"), design.Space1)
+				} else {
+					buildWorkspaceSwitchList(c, t, workspace, runtime, state, recent, open)
 				}
 			})
 			if state.switchErr != "" {
@@ -2408,4 +2414,47 @@ func own(ctx cordis.Context, register func() (func(), error)) error {
 		return err
 	}
 	return nil
+}
+
+// workspaceColorLabels returns the palette labels for the current language.
+func workspaceColorLabels(state *paneState) []string {
+	return []string{
+		state.T("默认", "Default"),
+		state.T("蓝色", "Blue"),
+		state.T("绿色", "Green"),
+		state.T("黄色", "Amber"),
+		state.T("红色", "Red"),
+	}
+}
+
+// workspaceColorValue maps a palette label back to its stored id.
+func workspaceColorValue(label string) string {
+	switch label {
+	case "蓝色", "Blue":
+		return "blue"
+	case "绿色", "Green":
+		return "green"
+	case "黄色", "Amber":
+		return "amber"
+	case "红色", "Red":
+		return "red"
+	default:
+		return ""
+	}
+}
+
+// workspaceColorLabel maps a stored id to the palette label.
+func workspaceColorLabel(state *paneState, id string) string {
+	switch strings.ToLower(strings.TrimSpace(id)) {
+	case "blue":
+		return state.T("蓝色", "Blue")
+	case "green":
+		return state.T("绿色", "Green")
+	case "amber":
+		return state.T("黄色", "Amber")
+	case "red":
+		return state.T("红色", "Red")
+	default:
+		return state.T("默认", "Default")
+	}
 }

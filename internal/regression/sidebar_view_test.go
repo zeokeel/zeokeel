@@ -75,14 +75,14 @@ func TestSidebarViewMenuIsGone(t *testing.T) {
 		{ID: "s1", Title: "Alpha", WorkspaceID: "w1", UpdatedAt: time.Unix(1_700_000_000, 0)},
 	}}
 	h, tester := startSidebarView(t, chat, workspace)
-	requireHasTexts(t, tester, "工作文件夹", "项目一", "切换工作文件夹", "Alpha")
+	requireHasTexts(t, tester, "管理工作文件夹", "添加工作文件夹", "项目一", "Alpha")
 	for _, gone := range []string{"视图", "排序", "最近活动", "名称", "分组", "按工作区", "平铺"} {
 		requireNoText(t, tester, gone)
 	}
 
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	requireHasTexts(t, tester, "Workspace", "Switch workspace folder", "项目一", "Alpha")
+	requireHasTexts(t, tester, "Manage workspace folders", "Add workspace folder", "项目一", "Alpha")
 	for _, gone := range []string{"View", "Sort", "Recent activity", "Group", "By workspace", "Flat"} {
 		requireNoText(t, tester, gone)
 	}
@@ -117,7 +117,6 @@ func TestSidebarStaleViewSettingsIgnored(t *testing.T) {
 	// The open folder wins over the stale "flat" value: only its conversations
 	// are listed, the other folder's session is not.
 	requireHasTexts(t, tester, "项目一", "Alpha 旧", "Zulu 置顶")
-	requireNoText(t, tester, "项目二")
 	requireNoText(t, tester, "Beta 新")
 	// Name sorting does not apply: the pinned Zulu row comes before the unpinned
 	// Alpha row even though Alpha sorts first by name.
@@ -155,7 +154,7 @@ func TestSidebarSwitchDialogRecentOrdering(t *testing.T) {
 	// The open folder's (empty) conversation list, then the dialog's recents.
 	requireHasText(t, tester, "还没有会话")
 	requireNoText(t, tester, "归档会话")
-	clickSidebar(t, tester, "切换工作文件夹")
+	clickSidebar(t, tester, "管理工作文件夹")
 	tester.Frame()
 	tester.Frame()
 	requireHasTexts(t, tester, "新建项目", "旧项目")

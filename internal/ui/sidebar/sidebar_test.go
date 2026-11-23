@@ -198,6 +198,7 @@ func newHarnessFull(t *testing.T, chat contracts.ChatService, cfg sidebar.Config
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
+	uiRoot.SetKernelContext(ctx)
 
 	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())

@@ -11,7 +11,6 @@ import (
 	"errors"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -60,7 +59,13 @@ func (f *fakeWorkspace) Create(context.Context, string, string) (contracts.Works
 	return contracts.Workspace{}, nil
 }
 
-func (f *fakeWorkspace) Open(context.Context, string) (contracts.Workspace, error) {
+func (f *fakeWorkspace) Open(_ context.Context, id string) (contracts.Workspace, error) {
+	for _, ws := range f.workspaces {
+		if ws.ID == id {
+			f.current, f.hasCurrent = ws, true
+			return ws, nil
+		}
+	}
 	return contracts.Workspace{}, nil
 }
 
@@ -121,11 +126,10 @@ func TestSingleWorkspaceHeaderAndScopedList(t *testing.T) {
 	h := newHarnessWithWorkspace(t, treeChat(), sidebar.Config{}, workspace)
 	tester := h.tester()
 
-	h.assertTexts(tester, "工作文件夹", "项目一", "切换工作文件夹",
-		"A 会话", "B 会话", "D 会话", "E 会话")
+	h.assertTexts(tester, "A 会话", "B 会话", "D 会话", "E 会话")
 	// The other folder's conversation is not in this folder's list, and the old
 	// tree vocabulary (groups, add button, per-group new chat) is gone.
-	h.assertNoTexts(tester, "C 会话", "工作区", "未分组", "项目二", "添加工作区",
+	h.assertNoTexts(tester, "C 会话", "工作区", "未分组", "添加工作区",
 		"在“项目一”中新建会话", "在“项目二”中新建会话")
 	// The flat "会话" section label has no group heading any more.
 	if got := countText(tester, "会话"); got != 0 {
@@ -143,7 +147,7 @@ func TestSingleWorkspaceSwitchingScopesTheList(t *testing.T) {
 	tester := h.tester()
 
 	h.assertTexts(tester, "项目二", "C 会话", "D 会话", "E 会话")
-	h.assertNoTexts(tester, "A 会话", "B 会话", "项目一")
+	h.assertNoTexts(tester, "A 会话", "B 会话")
 }
 
 // TestSingleWorkspaceRowClickOpensSession keeps the flat row's click behavior:
@@ -172,34 +176,20 @@ func TestSingleWorkspaceRowClickOpensSession(t *testing.T) {
 	}
 }
 
-// TestSingleWorkspaceHeaderTooltipIsRoot keeps the duplicate-basename case
-// readable: the header's name shows the folder's full root on hover.
-func TestSingleWorkspaceHeaderTooltipIsRoot(t *testing.T) {
-	workspace := newFakeWorkspace(contracts.Workspace{ID: "w1", Name: "src", Root: "/projects/one/src"}).
-		withCurrent(contracts.Workspace{ID: "w1", Name: "src", Root: "/projects/one/src"})
-	h := newHarnessWithWorkspace(t, &fakeChat{}, sidebar.Config{}, workspace)
+// TestSingleWorkspaceRailSwitchesFolders covers the rail as the quick switcher:
+// clicking another workspace opens it and the flat list follows it.
+func TestSingleWorkspaceRailSwitchesFolders(t *testing.T) {
+	workspace := newFakeWorkspace(treeWorkspaces()...).withCurrent(currentWorkspace())
+	h := newHarnessWithWorkspace(t, treeChat(), sidebar.Config{}, workspace)
 	tester := h.tester()
-	names := 0
-	var rect ui.Rect
-	// The header name is the only "src" text; hover it for the root tooltip.
-	if found, ok := tester.Find("src"); ok {
-		rect = found
-		names++
+	if err := tester.Click("切换工作文件夹：项目二"); err != nil {
+		t.Fatalf("click the rail item: %v; texts = %v", err, tester.Texts())
 	}
-	if names != 1 {
-		t.Fatalf("header name count = %d, want one; texts = %v", names, tester.Texts())
-	}
-	tester.Move(rect.X+rect.W/2, rect.Y+rect.H/2)
-	tester.Advance(700 * time.Millisecond)
 	tester.Frame()
-	if !tester.HasText("/projects/one/src") {
-		t.Fatalf("header tooltip does not show the folder root; texts = %v", tester.Texts())
-	}
+	tester.Frame()
+	h.assertTexts(tester, "C 会话", "D 会话", "E 会话")
 }
 
-// TestSingleWorkspaceZeroSessions is the fresh-install state: the header still
-// names the folder, the empty state invites a conversation and the new-chat
-// action works without any tree row.
 func TestSingleWorkspaceZeroSessions(t *testing.T) {
 	workspace := newFakeWorkspace(treeWorkspaces()...).withCurrent(currentWorkspace())
 	h := newHarnessWithWorkspace(t, &fakeChat{}, sidebar.Config{}, workspace)
@@ -230,7 +220,7 @@ func TestSingleWorkspaceNoOpenFolderCopy(t *testing.T) {
 	tester := h.tester()
 
 	h.assertTexts(tester, "工作文件夹", "未选择工作文件夹", "旧会话", "别的文件夹会话")
-	h.assertNoTexts(tester, "还没有会话", "项目一", "项目二")
+	h.assertNoTexts(tester, "还没有会话")
 }
 
 // TestSingleWorkspaceSearchStaysInTheFolder keeps the title search scoped: a
@@ -245,7 +235,7 @@ func TestSingleWorkspaceSearchStaysInTheFolder(t *testing.T) {
 	tester.Type("C 会话")
 	tester.Frame()
 	h.assertTexts(tester, "没有匹配")
-	h.assertNoTexts(tester, "C 会话", "A 会话", "B 会话", "项目二")
+	h.assertNoTexts(tester, "C 会话", "A 会话", "B 会话")
 
 	clickLabel(t, tester, "搜索会话与消息")
 	tester.Key(ui.Cmd, ui.KeyA)
@@ -274,7 +264,7 @@ func TestSingleWorkspaceNoBackendKeepsFlatList(t *testing.T) {
 	h := newHarness(t, treeChat(), sidebar.Config{})
 	tester := h.tester()
 	h.assertTexts(tester, "会话", "A 会话", "B 会话", "C 会话", "D 会话", "E 会话")
-	h.assertNoTexts(tester, "工作文件夹", "切换工作文件夹", "未分组", "项目一")
+	h.assertNoTexts(tester, "未分组", "项目一")
 }
 
 // TestSingleWorkspaceListErrorFallsBackFlat: a failing registry must not hide

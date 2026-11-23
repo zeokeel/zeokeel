@@ -142,6 +142,7 @@ func newHarnessCoreWith(t *testing.T, dataDir string, withBridges bool, local *m
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel", Settings: provided})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
+	uiRoot.SetKernelContext(ctx)
 
 	h := &harness{t: t, ctx: ctx, ui: uiRoot, settings: local, logger: logger, dataDir: dataDir}
 	provide(t, ctx, contracts.KeyDataDir, h.dataDir)

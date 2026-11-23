@@ -157,7 +157,7 @@ func requireHasTexts(t *testing.T, tester *ui.Tester, wants ...string) {
 // pickFolderInDialog opens the switch dialog and clicks its folder picker.
 func pickFolderInDialog(t *testing.T, tester *ui.Tester) {
 	t.Helper()
-	clickSidebar(t, tester, "切换工作文件夹")
+	clickSidebar(t, tester, "管理工作文件夹")
 	tester.Frame()
 	tester.Frame()
 	clickSidebar(t, tester, "选择其他文件夹…")
@@ -180,7 +180,7 @@ func clickSidebar(t *testing.T, tester *ui.Tester, label string) {
 func TestSidebarAddWorkspaceDirectPicker(t *testing.T) {
 	workspace := &auditWorkspace{}
 	_, tester := startSidebarUI(t, workspace)
-	requireHasTexts(t, tester, "工作文件夹", "切换工作文件夹")
+	requireHasTexts(t, tester, "管理工作文件夹", "添加工作文件夹")
 
 	var titles []string
 	overrideSidebarPicker(t, func(title string) (string, error) {
@@ -305,7 +305,7 @@ func TestSidebarAddWorkspaceReusesRegisteredFolder(t *testing.T) {
 	requireNoText(t, tester, "已添加工作区")
 	requireNoText(t, tester, "添加工作区失败")
 	// The reused workspace is the open folder, and its list is shown.
-	requireHasTexts(t, tester, "工作文件夹", "myproj")
+	requireHasTexts(t, tester, "切换工作文件夹：myproj")
 }
 
 // TestSidebarAddWorkspaceHiddenWithoutBackend covers the optional backend: no
@@ -313,7 +313,7 @@ func TestSidebarAddWorkspaceReusesRegisteredFolder(t *testing.T) {
 // session list), and the picker is never reached.
 func TestSidebarAddWorkspaceHiddenWithoutBackend(t *testing.T) {
 	_, tester := startSidebarUI(t, nil)
-	requireNoText(t, tester, "切换工作文件夹")
+	requireNoText(t, tester, "管理工作文件夹")
 	requireNoText(t, tester, "选择其他文件夹…")
-	requireNoText(t, tester, "工作文件夹")
+
 }

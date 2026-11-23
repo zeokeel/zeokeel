@@ -95,7 +95,7 @@ func overrideSidebarPicker(t *testing.T, fn func(title string) (string, error)) 
 func pickFolderFromDialog(t *testing.T, h *harness) {
 	t.Helper()
 	tester := h.tester()
-	if err := tester.Click("切换工作文件夹"); err != nil {
+	if err := tester.Click("管理工作文件夹"); err != nil {
 		t.Fatalf("open the switch dialog: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
@@ -116,7 +116,7 @@ func TestSwitchDialogPickerPicksFolderDirectly(t *testing.T) {
 		return "/work/myproj", nil
 	})
 	tester := h.tester()
-	if err := tester.Click("切换工作文件夹"); err != nil {
+	if err := tester.Click("管理工作文件夹"); err != nil {
 		t.Fatalf("open the switch dialog: %v", err)
 	}
 	tester.Frame()
@@ -244,7 +244,7 @@ func TestSwitchDialogPickerNotifierReportsToasts(t *testing.T) {
 func TestSwitchDialogPickerHiddenWithoutBackend(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, sidebar.Config{})
 	tester := h.tester()
-	h.assertNoTexts(tester, "切换工作文件夹", "选择其他文件夹…", "工作文件夹")
+	h.assertNoTexts(tester, "选择其他文件夹…")
 }
 
 // TestWorkspacePickerTitleFollowsLocale pins that the native directory picker's
@@ -260,7 +260,7 @@ func TestWorkspacePickerTitleFollowsLocale(t *testing.T) {
 	})
 	tester := h.tester()
 	tester.Frame()
-	clickLabel(t, tester, "Switch workspace folder")
+	clickLabel(t, tester, "Manage workspace folders")
 	h.click(tester, "Choose another folder…")
 	if captured != "Choose a workspace folder" {
 		t.Fatalf("English directory dialog title = %q, want %q", captured, "Choose a workspace folder")
@@ -284,7 +284,7 @@ func TestSwitchDialogPickerAddsToAnEmptyRegistry(t *testing.T) {
 	overrideSidebarPicker(t, func(string) (string, error) { return "/work/first", nil })
 
 	tester := h.tester()
-	if err := tester.Click("切换工作文件夹"); err != nil {
+	if err := tester.Click("管理工作文件夹"); err != nil {
 		t.Fatalf("open the switch dialog: %v", err)
 	}
 	tester.Frame()

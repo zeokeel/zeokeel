@@ -14,6 +14,8 @@ type Workspace struct {
 	Name      string
 	Root      string
 	CreatedAt time.Time
+	// Color is the rail palette id (empty = default).
+	Color string
 }
 
 // FileEntry is one entry of a workspace directory listing.
@@ -85,6 +87,12 @@ type WorkspaceRenamer interface {
 // The errors RenameWorkspace may report, so a UI can localize them instead of
 // printing an English backend message (UI modules cannot import the workspace
 // backend module).
+// WorkspaceColorer is the optional palette half of the workspace service.
+// Setting a color never changes identity, name or root.
+type WorkspaceColorer interface {
+	SetWorkspaceColor(ctx context.Context, id, color string) (Workspace, error)
+}
+
 var (
 	// ErrWorkspaceNameEmpty reports a workspace rename with no display name.
 	ErrWorkspaceNameEmpty = errors.New("workspace: name is empty")

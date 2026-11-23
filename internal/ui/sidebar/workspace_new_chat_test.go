@@ -7,10 +7,10 @@ package sidebar_test
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/ui/sidebar"
 )
 
@@ -100,17 +100,16 @@ func TestPerWorkspaceNewChatIsGone(t *testing.T) {
 	tester := h.tester()
 
 	h.assertNoTexts(tester, plusLabel("项目一"), plusLabel("项目二"))
-	// The header carries the one folder action: the switch chevron.
-	h.assertTexts(tester, "工作文件夹", "切换工作文件夹")
+	// The rail carries the folder actions now.
+	h.assertTexts(tester, "管理工作文件夹", "添加工作文件夹")
 	// The row actions that remain belong to conversations.
 	if _, ok := tester.Find("会话操作：A 会话"); !ok {
 		t.Fatalf("the conversation row lost its ⋯ action; texts = %v", tester.Texts())
 	}
 }
 
-// TestHeaderLongNameKeepsTheSwitchControlInside covers the long-name case that
-// the old group row guarded: an unbroken workspace name ellipsizes instead of
-// pushing the header's switch chevron outside the 280 DIP sidebar.
+// TestHeaderLongNameKeepsTheSwitchControlInside covers the long-name case in
+// the rail: the accessible item stays inside the 64 DIP rail.
 func TestHeaderLongNameKeepsTheSwitchControlInside(t *testing.T) {
 	long := "drive-new-workspace-with-a-very-long-unbroken-name-0123456789"
 	workspace := &recordingWorkspace{fakeWorkspace: newFakeWorkspace(
@@ -119,19 +118,11 @@ func TestHeaderLongNameKeepsTheSwitchControlInside(t *testing.T) {
 	h := newHarnessWithWorkspace(t, currentWorkspaceSessions(), sidebar.Config{}, workspace)
 	tester := h.tester()
 
-	switchRect, ok := tester.Find("切换工作文件夹")
+	item, ok := tester.Find("切换工作文件夹：" + long)
 	if !ok {
-		t.Fatalf("switch control missing; texts = %v", tester.Texts())
+		t.Fatalf("rail item missing; texts = %v", tester.Texts())
 	}
-	if switchRect.X+switchRect.W > 280 {
-		t.Fatalf("switch control leaves the sidebar: x=%v w=%v", switchRect.X, switchRect.W)
-	}
-	// The name is truncated, never wider than the space the header gives it.
-	if nameRect, ok := tester.Find(long); ok {
-		if nameRect.X+nameRect.W > 280 {
-			t.Fatalf("name leaves the sidebar: x=%v w=%v", nameRect.X, nameRect.W)
-		}
-	} else if !strings.Contains(strings.Join(tester.Texts(), "\n"), long) {
-		t.Fatalf("the long name is not shown at all; texts = %v", tester.Texts())
+	if item.W > design.WorkspaceRailWidth {
+		t.Fatalf("rail item leaves the rail: x=%v w=%v", item.X, item.W)
 	}
 }
