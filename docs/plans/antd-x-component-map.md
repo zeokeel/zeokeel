@@ -157,3 +157,34 @@ X 的直接依赖里较重的：`mermaid`、`react-syntax-highlighter`、`@ant-d
 | 文件拖入走宿主代理 | 浏览器拿不到绝对路径 |
 
 以上六条应写进 `docs/WEB-CLIENT.md` 并落到验收清单，与组件选型解耦。
+
+---
+
+## 6. 有意不用：`Suggestion` 不能承载文本输入区的斜杠菜单
+
+2026-11-23（task-37 #1）。斜杠命令菜单**保留自建**，不换成 X 的 `Suggestion`。理由是可复核的事实，不是偏好：
+
+**实测（真实 chromium + dev server，`inputValue()` 读回）**
+
+| 场景 | 输入 | 期望 | 实际 |
+|---|---|---|---|
+| 菜单关闭 | `a b` | `a b` | **`ab`**（空格丢失） |
+| 菜单打开 | `/files` + 空格 | `/files ` | **`/files`**（空格丢失） |
+| 光标移动 | `ab` → ← → `X` | `aXb` | `aXb` ✓ |
+| 中间退格 | `abc` → ← → ⌫ | `ac` | `ac` ✓ |
+
+**机制**：`@ant-design/x/es/suggestion/index.js:86,138` —— 我们把输入区作为 `children` 交给 `Suggestion`，它把 child 作为 **`Cascader` 的 children（trigger）** 渲染，键盘先过 rc-select/rc-cascader 的 trigger 层。`useActive.js` 只处理方向键/Enter/Esc（无空格分支），所以空格是被 **cascader 的 trigger 语义**吞掉的：选择器的"空格=打开/选中"与文本输入区的"空格=输入"天然冲突。
+
+**影响面**：英文单词之间、文件路径、代码片段全部无法输入；中文不受影响（无空格），因此**只在中文手测时不会暴露**——这正是它危险的地方。
+
+**若 X 将来支持文本输入型 Suggestion，用这条断言验证它已可用**：
+
+```ts
+await box.click();
+await page.keyboard.type('a b');
+expect(await box.inputValue()).toBe('a b');   // 菜单关闭时
+```
+
+**保留自建的部分**：菜单的 DOM、`role="listbox"/"option"`、方向键高亮、`Tab` 补全（K3: 补全文本不执行、不移焦点）、`Enter` 执行高亮命令。**Esc 关菜单由仲裁栈持有**（`composer-slash-menu`，level `overlay`），与渲染者无关——`src/chat/slash-esc-contract.test.tsx` 与 `e2e-smoke.mjs` 的 `slash.menu.*` 三条共同守着它。
+
+**这条"不用"是决定，不是放弃**：判据、证据、复验断言都在上面；X 升级后按最后一节重跑四组探针即可推翻它。
