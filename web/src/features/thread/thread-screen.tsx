@@ -15,6 +15,7 @@ import { PromptQueuePanel } from './prompt-queue-panel';
 import { TaskChip } from './task-chip';
 import { usePromptQueue } from './use-prompt-queue';
 import { useT } from '@/i18n';
+import { describeError } from '@/features/describe-error';
 
 function focusComposer() {
   document.querySelector<HTMLTextAreaElement>('.zk-composer textarea')?.focus();
@@ -50,7 +51,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
 
   const chat = useGatewayChat(sessionId, {
     onSnapshotError: (cause) =>
-      setSnapshotError(cause instanceof Error ? cause.message : t('thread.loadFailed')),
+      setSnapshotError(describeError(cause, t, 'thread.loadFailed')),
     onRegenerateUnsupported: () => setRegenerateUnsupported(true),
   });
 

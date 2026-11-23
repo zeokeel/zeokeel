@@ -112,8 +112,6 @@ const PENDING_CONVERSION = new Set([
   'features/settings/settings-screen.tsx',
   // Diagnostics, not copy: these strings surface only when something is already
   // broken, and translating them would hide the cause from a bug report.
-  'api/gateway.ts',
-  'api/ws/auth.ts',
 ]);
 
 const here = dirname(fileURLToPath(import.meta.url));

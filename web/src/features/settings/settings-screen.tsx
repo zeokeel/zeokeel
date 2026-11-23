@@ -20,6 +20,8 @@ import {
 import { useEscClaim } from '@/keyboard/keyboard-provider';
 import { ZkIcon } from '@/design/icons';
 import { ConfirmDanger } from '@/ui/confirm-danger';
+import { describeError } from '@/features/describe-error';
+import { useT } from '@/i18n';
 
 /**
  * R12–R21 · Settings — nine pages over the real `settings` domain.
@@ -161,6 +163,7 @@ function SettingsPageForm({
   canWrite: boolean;
   extraRows: string[];
 }) {
+  const t = useT();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const focusRef = useFocusField(searchParams.get('focus'));
@@ -237,7 +240,7 @@ function SettingsPageForm({
       setSavedRows(changes);
       setNotice(`已提交 ${changes.length} 项，等待网关回声`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '保存失败');
+      setError(describeError(cause, t, 'settings.saveFailed'));
     } finally {
       setSaving(false);
     }

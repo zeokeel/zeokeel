@@ -317,6 +317,10 @@ export const en: Catalog = {
   'tool.sect.workspace': 'Workspace',
   'tool.sect.imageNote': 'Image bytes are read via /blob/<id>; no preview is faked when the gateway sends none.',
   'tool.sect.noArgs': '(no arguments)',
+  'error.methodUnsupported': 'This gateway does not offer {method}',
+  'error.authExchangeFailed': 'Authorization failed (HTTP {status})',
+  'error.sessionCreateFailed': 'Could not create the session',
+  'error.settingsWriteFailed': 'Could not write the setting',
   'toast.dismiss': 'Close',
 
   // -------------------------------------------------------------- actions --

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Empty, Spin, Switch, Table, Typography } from 'antd';
 import { loadAutomation, setAutomationEnabled, type AutomationTask } from '@/api/read-models';
 import { useT } from '@/i18n';
+import { describeError } from '@/features/describe-error';
 
 /** R22 · Automation — scheduled tasks. Toggling is the only write in this milestone. */
 export function AutomationScreen() {
@@ -16,7 +17,7 @@ export function AutomationScreen() {
         const value = await loadAutomation();
         if (!cancelled) setTasks(value);
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : t('screen.automation.loadFailed'));
+        if (!cancelled) setError(describeError(cause, t, 'screen.automation.loadFailed'));
       }
     })();
     return () => {
@@ -35,7 +36,7 @@ export function AutomationScreen() {
       setTasks((current) =>
         (current ?? []).map((item) => (item.id === task.id ? { ...item, enabled: !enabled } : item)),
       );
-      setError(cause instanceof Error ? cause.message : t('screen.automation.toggleFailed'));
+      setError(describeError(cause, t, 'screen.automation.toggleFailed'));
     }
   };
 

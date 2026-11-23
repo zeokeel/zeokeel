@@ -321,6 +321,10 @@ export const zh = {
   'tool.sect.workspace': '工作区',
   'tool.sect.imageNote': '图片内容经 /blob/<id> 读取；服务端未提供预览数据时不伪造图像。',
   'tool.sect.noArgs': '（无参数）',
+  'error.methodUnsupported': '当前网关未提供 {method}',
+  'error.authExchangeFailed': '授权失败（HTTP {status}）',
+  'error.sessionCreateFailed': '新建会话失败',
+  'error.settingsWriteFailed': '设置写入失败',
   'toast.dismiss': '关闭',
 
   // -------------------------------------------------------------- actions --

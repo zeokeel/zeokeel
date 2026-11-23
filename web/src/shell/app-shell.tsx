@@ -7,6 +7,8 @@ import { useSystemAppearance } from '@/design/use-system-appearance';
 import { CommandPalette } from '@/features/palette/command-palette';
 import { Sidebar } from './sidebar';
 import { TopBand } from './top-band';
+import { describeError } from '@/features/describe-error';
+import { useT } from '@/i18n';
 
 const SIDEBAR_WIDTH_KEY = 'zk.sidebar.width';
 const SIDEBAR_DEFAULT = 264;
@@ -30,6 +32,7 @@ function storedSidebarWidth(): number {
  * (fill, edge rule, breakpoint collapse) inside the panel.
  */
 export function AppShell({ children }: { children: ReactNode }) {
+  const t = useT();
   const location = useLocation();
   const navigate = useNavigate();
   const { create } = useSessions();
@@ -51,7 +54,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       setCreateError(null);
       navigate(`/c/${session.id}`);
     } catch (cause) {
-      setCreateError(cause instanceof Error ? cause.message : '新建会话失败');
+      setCreateError(describeError(cause, t, 'error.sessionCreateFailed'));
     }
   };
 

@@ -12,6 +12,8 @@
  * the other order is a guaranteed 401 — the browser has no cookie yet.
  */
 
+import { ApiError } from '../errors';
+
 export type AuthOutcome =
   /** No `#token=` in the URL: a cookie is already expected to be present. */
   | 'none'
@@ -67,7 +69,8 @@ export async function exchangeFragmentToken(options: AuthOptions = {}): Promise<
     return 'invalid';
   }
   if (!response.ok && response.status !== 204) {
-    throw new Error(`授权交换失败：HTTP ${response.status}`);
+    // A code, not a sentence: the UI phrases this (task-26).
+    throw new ApiError('auth_exchange_failed', String(response.status));
   }
 
   // Erase the fragment: it must not stay in the address bar or in history

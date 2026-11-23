@@ -5,6 +5,7 @@ import { loadSnapshot, type SnapshotMessage } from '@/api/gateway';
 import { toolMeta } from '@/chat/tools/meta';
 import { ZkIcon } from '@/design/icons';
 import { useT } from '@/i18n';
+import { describeError } from '@/features/describe-error';
 
 interface Row {
   key: string;
@@ -30,7 +31,7 @@ export function TrajectoryScreen() {
         if (cancelled) return;
         setRows(flatten(snapshot.messages, t));
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : t('trajectory.loadFailed'));
+        if (!cancelled) setError(describeError(cause, t, 'trajectory.loadFailed'));
       }
     })();
     return () => {

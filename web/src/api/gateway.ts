@@ -14,6 +14,7 @@
  */
 import { GatewayRpc, type ConnectionStatus, gatewayRpc } from './ws/rpc';
 import { exchangeFragmentToken, probeAuthorization } from './ws/auth';
+import { ApiError, isMethodUnsupported } from './errors';
 import { applyPromptsDelta, type QueuedPrompt, type QueuedPromptWire } from './prompt-queue';
 import {
   applyContextDelta,
@@ -641,12 +642,19 @@ export async function createSession(title = ''): Promise<SessionSummary> {
     return { id: result.sessionId, title };
   } catch (cause) {
     // A gateway without the method is a capability gap, not a transport fault:
-    // say so plainly instead of showing a JSON-RPC code.
-    if ((cause as { code?: number }).code === -32601) {
-      throw new Error('网关尚未提供 session.create');
+    // it gets a code so the UI can phrase it in the user's language.
+    if (isMethodUnsupported(cause)) {
+      throw new ApiError('method_unsupported', 'session.create');
     }
-    throw cause;
+    throw new ApiError('session_create_failed', messageOf(cause));
   }
+}
+
+/** A failure's raw detail for logs — never shown to the user as-is. */
+function messageOf(cause: unknown): string {
+  if (cause instanceof Error) return cause.message;
+  if (typeof cause === 'string') return cause;
+  return 'unknown';
 }
 
 /** `settings.set` — one row per call; the gateway pushes the delta back. */
@@ -654,10 +662,10 @@ export async function setSetting(key: string, value: string): Promise<void> {
   try {
     await client().request('settings.set', { key, value });
   } catch (cause) {
-    if ((cause as { code?: number }).code === -32601) {
-      throw new Error('网关尚未提供 settings.set');
+    if (isMethodUnsupported(cause)) {
+      throw new ApiError('method_unsupported', 'settings.set');
     }
-    throw cause;
+    throw new ApiError('settings_write_failed', messageOf(cause));
   }
 }
 
