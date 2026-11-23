@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { CodeHighlighter } from '@ant-design/x';
 import { parseUnifiedDiff, type DiffLine } from '@/api/files';
 import { useT } from '@/i18n';
+import type { MessageKey } from '@/i18n';
 
 /**
  * The section primitives every tool card is built from. One anatomy for all 26
@@ -9,12 +10,32 @@ import { useT } from '@/i18n';
  * A renderer only chooses which sections apply; it never invents a new look.
  */
 
-export function SectionRow({ label, children }: { label: string; children: ReactNode }) {
+export function SectionRow({ labelKey, children }: { labelKey: MessageKey; children: ReactNode }) {
+  const t = useT();
   return (
     <div className="zk-tool-section">
-      <span className="zk-tool-section__label">{label}</span>
+      <span className="zk-tool-section__label">{t(labelKey)}</span>
       <div className="zk-tool-section__body">{children}</div>
     </div>
+  );
+}
+
+/** Label/value rows whose labels come from the catalogue (keys, not strings). */
+export function KeyValueRows({
+  rows,
+}: {
+  rows: Array<{ labelKey: MessageKey; text: string }>;
+}) {
+  const t = useT();
+  return (
+    <dl className="zk-kv">
+      {rows.map((row) => (
+        <div key={row.labelKey} className="zk-kv__row">
+          <dt className="zk-kv__key">{t(row.labelKey)}</dt>
+          <dd className="zk-kv__value">{row.text}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 

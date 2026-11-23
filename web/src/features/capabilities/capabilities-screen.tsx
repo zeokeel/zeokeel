@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 import { Empty, Spin, Table, Tabs, Tag, Typography } from 'antd';
 import { useSearchParams } from 'react-router';
 import { loadCapabilities, type Capabilities } from '@/api/read-models';
+import { useT } from '@/i18n';
 
 /** R23 · Capabilities — skills and MCP connectors, tab in the URL. */
 export function CapabilitiesScreen() {
+  const t = useT();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = searchParams.get('tab') === 'connectors' ? 'connectors' : 'skills';
   const [data, setData] = useState<Capabilities | null>(null);
@@ -17,7 +19,7 @@ export function CapabilitiesScreen() {
         const value = await loadCapabilities();
         if (!cancelled) setData(value);
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : '能力加载失败');
+        if (!cancelled) setError(cause instanceof Error ? cause.message : t('screen.capabilities.loadFailed'));
       }
     })();
     return () => {
@@ -28,8 +30,8 @@ export function CapabilitiesScreen() {
   return (
     <div className="zk-screen">
       <header className="zk-screen__header">
-        <h1 className="zk-screen__title">能力</h1>
-        <p className="zk-screen__note">装了什么技能、连了哪些 MCP 服务器。</p>
+        <h1 className="zk-screen__title">{t('screen.capabilities.title')}</h1>
+        <p className="zk-screen__note">{t('screen.capabilities.note')}</p>
       </header>
       {error ? (
         <div className="zk-msg-error" role="alert">
@@ -46,10 +48,10 @@ export function CapabilitiesScreen() {
           items={[
             {
               key: 'skills',
-              label: `技能 ${data.skills.length}`,
+              label: t('screen.capabilities.skills', { count: data.skills.length }),
               children:
                 data.skills.length === 0 ? (
-                  <Empty description="没有加载技能。" />
+                  <Empty description={t('screen.capabilities.noSkills')} />
                 ) : (
                   <Table
                     size="small"
@@ -57,10 +59,10 @@ export function CapabilitiesScreen() {
                     pagination={false}
                     dataSource={data.skills}
                     columns={[
-                      { title: '名称', dataIndex: 'name', width: 160 },
-                      { title: '说明', dataIndex: 'description' },
+                      { title: t('screen.capabilities.col.name'), dataIndex: 'name', width: 160 },
+                      { title: t('screen.capabilities.col.description'), dataIndex: 'description' },
                       {
-                        title: '来源',
+                        title: t('screen.capabilities.col.source'),
                         dataIndex: 'source',
                         width: 120,
                         render: (value: string) => <Tag variant="filled">{value}</Tag>,
@@ -71,10 +73,10 @@ export function CapabilitiesScreen() {
             },
             {
               key: 'connectors',
-              label: `连接器 ${data.connectors.length}`,
+              label: t('screen.capabilities.connectors', { count: data.connectors.length }),
               children:
                 data.connectors.length === 0 ? (
-                  <Empty description="没有连接器。" />
+                  <Empty description={t('screen.capabilities.noConnectors')} />
                 ) : (
                   <Table
                     size="small"
@@ -82,16 +84,16 @@ export function CapabilitiesScreen() {
                     pagination={false}
                     dataSource={data.connectors}
                     columns={[
-                      { title: '名称', dataIndex: 'name' },
-                      { title: '传输', dataIndex: 'transport' },
-                      { title: '工具数', dataIndex: 'tools', width: 100 },
+                      { title: t('screen.capabilities.col.name'), dataIndex: 'name' },
+                      { title: t('screen.capabilities.col.transport'), dataIndex: 'transport' },
+                      { title: t('screen.capabilities.col.tools'), dataIndex: 'tools', width: 100 },
                       {
-                        title: '状态',
+                        title: t('screen.capabilities.col.status'),
                         dataIndex: 'status',
                         width: 140,
                         render: (value: string) => (
                           <Typography.Text type={value === 'connected' ? undefined : 'secondary'}>
-                            {value === 'connected' ? '已连接' : '空闲'}
+                            {value === 'connected' ? t('screen.capabilities.connected') : t('screen.capabilities.idle')}
                           </Typography.Text>
                         ),
                       },

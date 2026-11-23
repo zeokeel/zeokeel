@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react';
 import type { ToolStep } from '@/chat/types';
+import type { MessageKey } from '@/i18n';
+import { useT } from '@/i18n';
 import {
   CodeBlock,
   DiffBlock,
-  KeyValueList,
+  KeyValueRows,
   MonoLine,
   SectionRow,
   TextBlock,
@@ -12,6 +14,24 @@ import {
   stringField,
   valueText,
 } from './sections';
+
+/** Raw arguments, with a translated stand-in when the call carried none. */
+function ArgsBlock({ input }: { input: string }) {
+  const t = useT();
+  return <TextBlock text={input || t('tool.sect.noArgs')} />;
+}
+
+/** Falls back to a translated word instead of a raw empty string. */
+function ScopeLine({ path }: { path: string | undefined }) {
+  const t = useT();
+  return <MonoLine text={path ?? t('tool.sect.workspace')} />;
+}
+
+/** The image card says why it shows no picture rather than faking one. */
+function ImageNote({ error }: { error: string | undefined }) {
+  const t = useT();
+  return <TextBlock text={error ?? t('tool.sect.imageNote')} />;
+}
 
 /**
  * The 26 tool-card renderers and their dispatch table
@@ -35,7 +55,7 @@ type CardRenderer = (step: ToolStep) => ReactNode;
 
 interface CardSpec {
   /** The thing being acted on: command, path, url, pattern. */
-  target?: (args: Record<string, unknown>) => { label: string; text: string } | undefined;
+  target?: (args: Record<string, unknown>) => { labelKey: MessageKey; text: string } | undefined;
   /** A unified diff the call produced or will produce ("将改动"). */
   changes?: (args: Record<string, unknown>, step: ToolStep) => string | undefined;
   /** Structured body: code, list, plan, output. */
@@ -43,6 +63,8 @@ interface CardSpec {
 }
 
 function defineCard(spec: CardSpec): CardRenderer {
+  // `t` is unused by most cards (their copy is a `labelKey` on a component), so
+  // it is accepted and ignored here rather than threaded through every body.
   return (step: ToolStep) => {
     const args = asRecord(step.input);
     const target = spec.target?.(args);
@@ -51,12 +73,12 @@ function defineCard(spec: CardSpec): CardRenderer {
     return (
       <>
         {target ? (
-          <SectionRow label={target.label}>
+          <SectionRow labelKey={target.labelKey}>
             <MonoLine text={target.text} />
           </SectionRow>
         ) : null}
         {changes ? (
-          <SectionRow label="将改动">
+          <SectionRow labelKey="tool.sect.changes">
             <DiffBlock unified={changes} />
           </SectionRow>
         ) : null}
@@ -70,7 +92,7 @@ function defineCard(spec: CardSpec): CardRenderer {
 function OutputText({ step }: { step: ToolStep }) {
   const output = valueText(step.output);
   return output ? (
-    <SectionRow label="输出">
+    <SectionRow labelKey="tool.sect.output">
       <TextBlock text={output} />
     </SectionRow>
   ) : null;
@@ -80,7 +102,7 @@ function OutputText({ step }: { step: ToolStep }) {
 function OutputCode({ step, lang, maxLines }: { step: ToolStep; lang: string; maxLines?: number }) {
   const output = valueText(step.output);
   return output ? (
-    <SectionRow label="输出">
+    <SectionRow labelKey="tool.sect.output">
       <CodeBlock text={output} lang={lang} maxLines={maxLines} />
     </SectionRow>
   ) : null;
@@ -92,31 +114,31 @@ const patchOf = (args: Record<string, unknown>): string | undefined => {
 };
 
 const pathTarget =
-  (label = '路径') =>
+  (labelKey: MessageKey = 'tool.target.path') =>
   (args: Record<string, unknown>) => {
     const path = stringField(args, 'path', 'file_path', 'filename');
-    return path ? { label, text: path } : undefined;
+    return path ? { labelKey, text: path } : undefined;
   };
 
 const commandTarget =
-  (label = '命令') =>
+  (labelKey: MessageKey = 'tool.target.command') =>
   (args: Record<string, unknown>) => {
     const command = stringField(args, 'command', 'cmd');
-    return command ? { label, text: command } : undefined;
+    return command ? { labelKey, text: command } : undefined;
   };
 
 const patternTarget =
-  (label: string, ...keys: string[]) =>
+  (labelKey: MessageKey, ...keys: string[]) =>
   (args: Record<string, unknown>) => {
     const pattern = stringField(args, ...keys);
-    return pattern ? { label, text: pattern } : undefined;
+    return pattern ? { labelKey, text: pattern } : undefined;
   };
 
 const idTarget =
-  (label: string, ...keys: string[]) =>
+  (labelKey: MessageKey, ...keys: string[]) =>
   (args: Record<string, unknown>) => {
     const id = stringField(args, ...keys);
-    return id ? { label, text: id } : undefined;
+    return id ? { labelKey, text: id } : undefined;
   };
 
 const languageOf = (args: Record<string, unknown>) => languageForPath(stringField(args, 'path'));
@@ -140,7 +162,7 @@ export const TOOL_RENDERERS: Record<string, CardRenderer> = {
       if (patchOf(args)) return null;
       const written = stringField(args, 'content', 'text');
       return written ? (
-        <SectionRow label="写入内容">
+        <SectionRow labelKey="tool.sect.writeContent">
           <CodeBlock text={written} lang={languageOf(args)} maxLines={32} />
         </SectionRow>
       ) : (
@@ -156,11 +178,11 @@ export const TOOL_RENDERERS: Record<string, CardRenderer> = {
       const after = stringField(args, 'new_string', 'new');
       if (!before || !after || patchOf(args)) return <OutputText step={step} />;
       return (
-        <SectionRow label="替换">
-          <KeyValueList
-            entries={[
-              ['原内容', before],
-              ['新内容', after],
+        <SectionRow labelKey="tool.sect.replace">
+          <KeyValueRows
+            rows={[
+              { labelKey: 'tool.sect.oldContent', text: before },
+              { labelKey: 'tool.sect.newContent', text: after },
             ]}
           />
         </SectionRow>
@@ -175,28 +197,28 @@ export const TOOL_RENDERERS: Record<string, CardRenderer> = {
       const after = stringField(args, 'new_str', 'new_string');
       if (!before || !after) return <OutputText step={step} />;
       return (
-        <SectionRow label="替换">
-          <KeyValueList
-            entries={[
-              ['原内容', before],
-              ['新内容', after],
+        <SectionRow labelKey="tool.sect.replace">
+          <KeyValueRows
+            rows={[
+              { labelKey: 'tool.sect.oldContent', text: before },
+              { labelKey: 'tool.sect.newContent', text: after },
             ]}
           />
         </SectionRow>
       );
     },
   }),
-  list_dir: defineCard({ target: pathTarget('目录'), body: (_args, step) => <OutputText step={step} /> }),
+  list_dir: defineCard({ target: pathTarget('tool.target.dir'), body: (_args, step) => <OutputText step={step} /> }),
   glob: defineCard({
-    target: patternTarget('模式', 'pattern', 'glob'),
+    target: patternTarget('tool.target.pattern', 'pattern', 'glob'),
     body: (_args, step) => <OutputText step={step} />,
   }),
   grep: defineCard({
-    target: patternTarget('搜索', 'pattern', 'query', 'regex'),
+    target: patternTarget('tool.target.search', 'pattern', 'query', 'regex'),
     body: (args, step) => (
       <>
-        <SectionRow label="范围">
-          <MonoLine text={stringField(args, 'path', 'glob') ?? '工作区'} />
+        <SectionRow labelKey="tool.sect.scope">
+          <ScopeLine path={stringField(args, 'path', 'glob')} />
         </SectionRow>
         <OutputText step={step} />
       </>
@@ -205,10 +227,8 @@ export const TOOL_RENDERERS: Record<string, CardRenderer> = {
   read_image: defineCard({
     target: pathTarget(),
     body: (_args, step) => (
-      <SectionRow label="预览">
-        <TextBlock
-          text={step.error ?? '图片内容经 /blob/<id> 读取；服务端未提供预览数据时不伪造图像。'}
-        />
+      <SectionRow labelKey="tool.sect.preview">
+        <ImageNote error={step.error} />
       </SectionRow>
     ),
   }),
@@ -217,12 +237,12 @@ export const TOOL_RENDERERS: Record<string, CardRenderer> = {
   web_fetch: defineCard({
     target: (args) => {
       const url = stringField(args, 'url');
-      return url ? { label: '地址', text: url } : undefined;
+      return url ? { labelKey: 'tool.target.url', text: url } : undefined;
     },
     body: (_args, step) => <OutputText step={step} />,
   }),
   web_search: defineCard({
-    target: patternTarget('搜索', 'query', 'q'),
+    target: patternTarget('tool.target.search', 'query', 'q'),
     body: (_args, step) => <OutputText step={step} />,
   }),
 
@@ -232,13 +252,13 @@ export const TOOL_RENDERERS: Record<string, CardRenderer> = {
     body: (_args, step) => <OutputCode step={step} lang="bash" maxLines={24} />,
   }),
   job_output: defineCard({
-    target: idTarget('任务', 'jobId', 'job_id', 'id'),
+    target: idTarget('tool.target.task', 'jobId', 'job_id', 'id'),
     body: (_args, step) => <OutputText step={step} />,
   }),
   terminal_send: defineCard({
     target: (args) => {
       const text = stringField(args, 'input', 'text', 'data');
-      return text ? { label: '输入', text } : undefined;
+      return text ? { labelKey: 'tool.sect.input', text } : undefined;
     },
     body: (_args, step) => <OutputText step={step} />,
   }),
@@ -248,7 +268,7 @@ export const TOOL_RENDERERS: Record<string, CardRenderer> = {
   enter_worktree: defineCard({
     target: (args) => {
       const path = stringField(args, 'path', 'worktree', 'branch');
-      return path ? { label: '工作树', text: path } : undefined;
+      return path ? { labelKey: 'tool.target.worktree', text: path } : undefined;
     },
     body: (_args, step) => <OutputText step={step} />,
   }),
@@ -258,33 +278,33 @@ export const TOOL_RENDERERS: Record<string, CardRenderer> = {
   subagent: defineCard({
     target: (args) => {
       const task = stringField(args, 'description', 'prompt', 'task');
-      return task ? { label: '任务', text: task } : undefined;
+      return task ? { labelKey: 'tool.target.task', text: task } : undefined;
     },
     body: (_args, step) => <OutputText step={step} />,
   }),
   workflow: defineCard({
     target: (args) => {
       const name = stringField(args, 'name', 'workflow');
-      return name ? { label: '工作流', text: name } : undefined;
+      return name ? { labelKey: 'tool.target.workflow', text: name } : undefined;
     },
     body: (_args, step) => <OutputText step={step} />,
   }),
   ralph: defineCard({
     target: (args) => {
       const objective = stringField(args, 'objective', 'goal');
-      return objective ? { label: '目标', text: objective } : undefined;
+      return objective ? { labelKey: 'tool.target.objective', text: objective } : undefined;
     },
     body: (_args, step) => <OutputText step={step} />,
   }),
   team_task_create: defineCard({
     target: (args) => {
       const subject = stringField(args, 'subject', 'title');
-      return subject ? { label: '任务', text: subject } : undefined;
+      return subject ? { labelKey: 'tool.target.task', text: subject } : undefined;
     },
     body: (_args, step) => <OutputText step={step} />,
   }),
   team_task_update: defineCard({
-    target: idTarget('任务', 'taskId', 'task_id', 'id'),
+    target: idTarget('tool.target.task', 'taskId', 'task_id', 'id'),
     body: (_args, step) => <OutputText step={step} />,
   }),
 
@@ -295,7 +315,7 @@ export const TOOL_RENDERERS: Record<string, CardRenderer> = {
       const todos = Array.isArray(args.todos) ? args.todos : [];
       if (todos.length === 0) return <OutputText step={step} />;
       return (
-        <SectionRow label="待办">
+        <SectionRow labelKey="tool.sect.todos">
           <ul className="zk-tool-list">
             {todos.map((item, index) => {
               const record = asRecord(item);
@@ -315,13 +335,13 @@ export const TOOL_RENDERERS: Record<string, CardRenderer> = {
   plan_review: defineCard({
     target: (args) => {
       const title = stringField(args, 'title', 'summary');
-      return title ? { label: '计划', text: title } : undefined;
+      return title ? { labelKey: 'tool.target.plan', text: title } : undefined;
     },
     body: (args, step) => {
       const plan = stringField(args, 'plan', 'content');
       if (plan) {
         return (
-          <SectionRow label="计划正文">
+          <SectionRow labelKey="tool.sect.planBody">
             <CodeBlock text={plan} lang="markdown" maxLines={24} />
           </SectionRow>
         );
@@ -332,14 +352,14 @@ export const TOOL_RENDERERS: Record<string, CardRenderer> = {
   skill: defineCard({
     target: (args) => {
       const name = stringField(args, 'name', 'skill');
-      return name ? { label: '技能', text: name } : undefined;
+      return name ? { labelKey: 'tool.target.skill', text: name } : undefined;
     },
     body: (_args, step) => <OutputText step={step} />,
   }),
   demo: defineCard({
     target: (args) => {
       const text = stringField(args, 'text', 'prompt', 'message');
-      return text ? { label: '输入', text } : undefined;
+      return text ? { labelKey: 'tool.sect.input', text } : undefined;
     },
     body: (_args, step) => <OutputText step={step} />,
   }),
@@ -355,11 +375,11 @@ export function GenericToolCard(step: ToolStep): ReactNode {
   const output = valueText(step.output);
   return (
     <>
-      <SectionRow label="输入">
-        <TextBlock text={input || '（无参数）'} />
+      <SectionRow labelKey="tool.sect.input">
+        <ArgsBlock input={input} />
       </SectionRow>
       {output ? (
-        <SectionRow label="输出">
+        <SectionRow labelKey="tool.sect.output">
           <TextBlock text={output} />
         </SectionRow>
       ) : null}

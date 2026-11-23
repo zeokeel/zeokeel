@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 import { Empty, Spin, Typography } from 'antd';
 import { useParams } from 'react-router';
 import { loadMemory, type MemoryEntry } from '@/api/mock-surfaces';
+import { useT } from '@/i18n';
 
 /** R5 · Memory — what this session remembered. Read-only in this milestone. */
 export function MemoryScreen() {
+  const t = useT();
   const { sessionId } = useParams<{ sessionId: string }>();
   const [entries, setEntries] = useState<MemoryEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -17,7 +19,7 @@ export function MemoryScreen() {
         const value = await loadMemory(sessionId);
         if (!cancelled) setEntries(value);
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : '记忆加载失败');
+        if (!cancelled) setError(cause instanceof Error ? cause.message : t('screen.memory.loadFailed'));
       }
     })();
     return () => {
@@ -28,8 +30,8 @@ export function MemoryScreen() {
   return (
     <div className="zk-screen">
       <header className="zk-screen__header">
-        <h1 className="zk-screen__title">记忆</h1>
-        <p className="zk-screen__note">这个会话里被记住的事实。</p>
+        <h1 className="zk-screen__title">{t('screen.memory.title')}</h1>
+        <p className="zk-screen__note">{t('screen.memory.note')}</p>
       </header>
       {error ? (
         <div className="zk-msg-error" role="alert">
@@ -40,7 +42,7 @@ export function MemoryScreen() {
           <Spin />
         </div>
       ) : entries.length === 0 ? (
-        <Empty description="这个会话还没有记忆条目。" />
+        <Empty description={t('screen.memory.empty')} />
       ) : (
         <ul className="zk-memory">
           {entries.map((entry) => (

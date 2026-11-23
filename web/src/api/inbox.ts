@@ -18,21 +18,19 @@ export interface InboxItem {
   kind: InboxKind;
   sessionId?: string;
   sessionTitle?: string;
+  /**
+   * Items carry **data**, not copy: the screen decides how a kind is labelled.
+   * `options` is returned raw so the caller can phrase it in the user's language
+   * instead of this layer baking a sentence into a string.
+   */
   title: string;
   detail?: string;
+  options?: string[];
   createdAt?: string;
   expiresAt?: string;
   /** Pending approvals are decided in place from the Inbox as well. */
   decision?: 'pending' | 'settled';
 }
-
-export const INBOX_KIND_LABEL: Record<InboxKind, string> = {
-  approval: '待审批',
-  ask: '在问你',
-  plan: '计划待审阅',
-  artifact: '产物待预览',
-  completion: '完成回执',
-};
 
 /** Source order in the list: decisions first, receipts last. */
 export const INBOX_KIND_ORDER: InboxKind[] = [
@@ -72,9 +70,7 @@ export function buildInboxItems(sources: InboxSources): InboxItem[] {
       id: `ask:${sources.ask.id}`,
       kind: 'ask',
       title: sources.ask.text,
-      detail: sources.ask.options?.length
-        ? `可选：${sources.ask.options.join(' / ')}`
-        : undefined,
+      ...(sources.ask.options?.length ? { options: sources.ask.options } : {}),
       createdAt: sources.ask.createdAt,
     });
   }
@@ -83,7 +79,9 @@ export function buildInboxItems(sources: InboxSources): InboxItem[] {
     items.push({
       id: 'plan:current',
       kind: 'plan',
-      title: '计划待审阅',
+      // No title of its own: the screen labels a plan item from its kind, so the
+      // phrase lives in the catalogue rather than in this data layer.
+      title: '',
       detail: sources.plan.content.slice(0, 200),
     });
   }

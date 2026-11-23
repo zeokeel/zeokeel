@@ -108,16 +108,8 @@ const PENDING_CONVERSION = new Set([
   // Secondary screens still holding inline Chinese. This list is the remaining
   // B5 budget: removing an entry is progress, adding one is a regression, and a
   // file that no longer has CJK must be removed (the test below enforces it).
-  'api/inbox.ts',
   'api/settings.ts',
-  'chat/tools/registry.tsx',
-  'features/automation/automation-screen.tsx',
-  'features/capabilities/capabilities-screen.tsx',
-  'features/insights/insights-screen.tsx',
-  'features/palette/command-palette.tsx',
   'features/settings/settings-screen.tsx',
-  'features/thread/child-session-screen.tsx',
-  'features/thread/memory-screen.tsx',
   // Diagnostics, not copy: these strings surface only when something is already
   // broken, and translating them would hide the cause from a bug report.
   'api/gateway.ts',

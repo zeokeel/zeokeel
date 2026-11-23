@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Segmented, Spin, Table, Typography } from 'antd';
 import { useSearchParams } from 'react-router';
 import { loadInsights, type Insights } from '@/api/read-models';
+import { useT } from '@/i18n';
 
 /**
  * R24 · Insights — read-only usage. No chart library is added for this (the
@@ -12,6 +13,7 @@ import { loadInsights, type Insights } from '@/api/read-models';
  * a fabricated value (S11).
  */
 export function InsightsScreen() {
+  const t = useT();
   const [searchParams, setSearchParams] = useSearchParams();
   const range = searchParams.get('range') === '30' ? 30 : 7;
   const [data, setData] = useState<Insights | null>(null);
@@ -24,7 +26,7 @@ export function InsightsScreen() {
         const value = await loadInsights(range);
         if (!cancelled) setData(value);
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : '洞察加载失败');
+        if (!cancelled) setError(cause instanceof Error ? cause.message : t('screen.insights.loadFailed'));
       }
     })();
     return () => {
@@ -36,8 +38,8 @@ export function InsightsScreen() {
     <div className="zk-screen">
       <header className="zk-screen__header zk-screen__header--row">
         <div>
-          <h1 className="zk-screen__title">洞察</h1>
-          <p className="zk-screen__note">跨会话用量，只读。</p>
+          <h1 className="zk-screen__title">{t('screen.insights.title')}</h1>
+          <p className="zk-screen__note">{t('screen.insights.note')}</p>
         </div>
         <Segmented
           size="small"
@@ -46,8 +48,8 @@ export function InsightsScreen() {
             setSearchParams(value === '7' ? {} : { range: String(value) }, { replace: true })
           }
           options={[
-            { label: '近 7 天', value: '7' },
-            { label: '近 30 天', value: '30' },
+            { label: t('screen.insights.range.last7'), value: '7' },
+            { label: t('screen.insights.range.last30'), value: '30' },
           ]}
         />
       </header>
@@ -64,11 +66,11 @@ export function InsightsScreen() {
         <div className="zk-insights">
           <dl className="zk-insights__totals">
             {[
-              ['会话', data.totals.sessions],
-              ['轮次', data.totals.turns],
-              ['输入 tokens', data.totals.inputTokens.toLocaleString()],
-              ['输出 tokens', data.totals.outputTokens.toLocaleString()],
-              ['工具调用', data.totals.toolCalls],
+              [t('screen.insights.sessions'), data.totals.sessions],
+              [t('screen.insights.turns'), data.totals.turns],
+              [t('screen.insights.inputTokens'), data.totals.inputTokens.toLocaleString()],
+              [t('screen.insights.outputTokens'), data.totals.outputTokens.toLocaleString()],
+              [t('screen.insights.toolCalls'), data.totals.toolCalls],
             ].map(([label, value]) => (
               <div key={String(label)} className="zk-insights__total">
                 <dt>{label}</dt>
@@ -78,29 +80,29 @@ export function InsightsScreen() {
           </dl>
 
           <div className="zk-insights__tables">
-            <section aria-label="按天">
-              <Typography.Text strong>按天</Typography.Text>
+            <section aria-label={t('screen.insights.byDay')}>
+              <Typography.Text strong>{t('screen.insights.byDay')}</Typography.Text>
               <Table
                 size="small"
                 rowKey="day"
                 pagination={false}
                 dataSource={data.byDay}
                 columns={[
-                  { title: '日期', dataIndex: 'day' },
-                  { title: '轮次', dataIndex: 'turns', width: 100 },
+                  { title: t('screen.insights.col.day'), dataIndex: 'day' },
+                  { title: t('screen.insights.col.turns'), dataIndex: 'turns', width: 100 },
                 ]}
               />
             </section>
-            <section aria-label="按工具">
-              <Typography.Text strong>按工具</Typography.Text>
+            <section aria-label={t('screen.insights.byTool')}>
+              <Typography.Text strong>{t('screen.insights.byTool')}</Typography.Text>
               <Table
                 size="small"
                 rowKey="tool"
                 pagination={false}
                 dataSource={data.byTool}
                 columns={[
-                  { title: '工具', dataIndex: 'tool' },
-                  { title: '调用', dataIndex: 'calls', width: 100 },
+                  { title: t('screen.insights.col.tool'), dataIndex: 'tool' },
+                  { title: t('screen.insights.col.calls'), dataIndex: 'calls', width: 100 },
                 ]}
               />
             </section>

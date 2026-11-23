@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router';
 import { loadChildSession, type ChildSession } from '@/api/mock-surfaces';
 import { Bubble } from '@ant-design/x';
 import { useEscClaim } from '@/keyboard/keyboard-provider';
+import { useT } from '@/i18n';
 
 /**
  * R7 · a child session (sub-agent / teammate), with the breadcrumb back to its
@@ -14,6 +15,7 @@ import { useEscClaim } from '@/keyboard/keyboard-provider';
  * exactly the regression E6 pins down.
  */
 export function ChildSessionScreen() {
+  const t = useT();
   const { sessionId, childId } = useParams<{ sessionId: string; childId: string }>();
   const navigate = useNavigate();
   const [child, setChild] = useState<ChildSession | null>(null);
@@ -27,7 +29,7 @@ export function ChildSessionScreen() {
         const value = await loadChildSession(sessionId, childId);
         if (!cancelled) setChild(value);
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : '子会话加载失败');
+        if (!cancelled) setError(cause instanceof Error ? cause.message : t('screen.child.loadFailed'));
       }
     })();
     return () => {
@@ -54,18 +56,18 @@ export function ChildSessionScreen() {
           type="text"
           onClick={() => sessionId && navigate(`/c/${sessionId}`)}
         >
-          ← 返回父会话
+          {t('screen.child.back')}
         </Button>
-        <Typography.Text strong>{child?.title ?? '子会话'}</Typography.Text>
-        <Typography.Text type="secondary">Esc 返回</Typography.Text>
+        <Typography.Text strong>{child?.title ?? t('screen.child.title')}</Typography.Text>
+        <Typography.Text type="secondary">{t('screen.child.escBack')}</Typography.Text>
       </div>
       <div className="zk-thread__body">
         {error ? (
           <div className="zk-msg-error" role="alert">
-            子会话加载失败：{error}
+            {t('screen.child.loadFailed')}: {error}
           </div>
         ) : child === null ? (
-          <div className="zk-empty">正在加载子会话…</div>
+          <div className="zk-empty">{t('screen.child.loading')}</div>
         ) : (
           <div className="zk-transcript">
             <div className="zk-transcript__scroll">

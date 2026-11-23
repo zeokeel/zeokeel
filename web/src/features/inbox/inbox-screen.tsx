@@ -82,8 +82,14 @@ export function InboxScreen() {
               <div className="zk-inbox__body">
                 <div className="zk-inbox__title">
                   <Tag variant="filled">{t(KIND_KEY[item.kind])}</Tag>
-                  <span>{item.title}</span>
+                  {/* A plan item has no title of its own; its kind is the title. */}
+                  <span>{item.title || t(KIND_KEY[item.kind])}</span>
                 </div>
+                {item.options?.length ? (
+                  <div className="zk-inbox__detail">
+                    {t('inbox.askOptions', { options: item.options.join(' / ') })}
+                  </div>
+                ) : null}
                 {item.detail ? <div className="zk-inbox__detail">{item.detail}</div> : null}
               </div>
               <div className="zk-inbox__actions">

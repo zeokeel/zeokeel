@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Empty, Spin, Switch, Table, Typography } from 'antd';
 import { loadAutomation, setAutomationEnabled, type AutomationTask } from '@/api/read-models';
+import { useT } from '@/i18n';
 
 /** R22 · Automation — scheduled tasks. Toggling is the only write in this milestone. */
 export function AutomationScreen() {
+  const t = useT();
   const [tasks, setTasks] = useState<AutomationTask[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -14,7 +16,7 @@ export function AutomationScreen() {
         const value = await loadAutomation();
         if (!cancelled) setTasks(value);
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : '自动化加载失败');
+        if (!cancelled) setError(cause instanceof Error ? cause.message : t('screen.automation.loadFailed'));
       }
     })();
     return () => {
@@ -33,15 +35,15 @@ export function AutomationScreen() {
       setTasks((current) =>
         (current ?? []).map((item) => (item.id === task.id ? { ...item, enabled: !enabled } : item)),
       );
-      setError(cause instanceof Error ? cause.message : '切换失败');
+      setError(cause instanceof Error ? cause.message : t('screen.automation.toggleFailed'));
     }
   };
 
   return (
     <div className="zk-screen">
       <header className="zk-screen__header">
-        <h1 className="zk-screen__title">自动化</h1>
-        <p className="zk-screen__note">按时间表运行的会话。本轮只支持启停。</p>
+        <h1 className="zk-screen__title">{t('screen.automation.title')}</h1>
+        <p className="zk-screen__note">{t('screen.automation.note')}</p>
       </header>
       {error ? (
         <div className="zk-msg-error" role="alert">
@@ -52,7 +54,7 @@ export function AutomationScreen() {
           <Spin />
         </div>
       ) : tasks.length === 0 ? (
-        <Empty description="还没有定时任务。" />
+        <Empty description={t('screen.automation.empty')} />
       ) : (
         <>
           <Table
@@ -61,28 +63,28 @@ export function AutomationScreen() {
             pagination={false}
             dataSource={tasks}
             columns={[
-              { title: '任务', dataIndex: 'title' },
+              { title: t('screen.automation.col.task'), dataIndex: 'title' },
               {
-                title: '时间表',
+                title: t('screen.automation.col.schedule'),
                 dataIndex: 'schedule',
                 width: 200,
                 render: (value: string) => <Typography.Text code>{value}</Typography.Text>,
               },
               {
-                title: '上次运行',
+                title: t('screen.automation.col.lastRun'),
                 dataIndex: 'lastRun',
                 width: 180,
                 render: (value: string | undefined) => value ?? '—',
               },
               {
-                title: '启用',
+                title: t('screen.automation.col.enabled'),
                 key: 'enabled',
                 width: 96,
                 render: (_: unknown, task: AutomationTask) => (
                   <Switch
                     size="small"
                     checked={task.enabled}
-                    aria-label={`启用 ${task.title}`}
+                    aria-label={t('screen.automation.enableOne', { title: task.title })}
                     onChange={(next) => void toggle(task, next)}
                   />
                 ),

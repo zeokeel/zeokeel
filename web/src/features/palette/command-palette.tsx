@@ -4,11 +4,13 @@ import { useNavigate } from 'react-router';
 import { useSessions } from '@/features/sessions/sessions-context';
 import { useEscClaim, useShortcut } from '@/keyboard/keyboard-provider';
 import { ZkIcon, type IconName } from '@/design/icons';
+import { useT } from '@/i18n';
 
 interface PaletteCommand {
   id: string;
   label: string;
-  group: '操作' | '前往';
+  /** Group id: the label comes from the catalogue, this is data. */
+  group: 'action' | 'go';
   icon: IconName;
   run: () => void | Promise<void>;
 }
@@ -24,6 +26,7 @@ interface PaletteCommand {
  */
 export function CommandPalette() {
   const navigate = useNavigate();
+  const t = useT();
   const { create } = useSessions();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -33,52 +36,54 @@ export function CommandPalette() {
     () => [
       {
         id: 'new-session',
-        label: '新建会话',
-        group: '操作',
+        label: t('palette.newSession'),
+        group: 'action',
         icon: 'new-chat',
         run: async () => {
           const session = await create();
           navigate(`/c/${session.id}`);
         },
       },
-      { id: 'go-now', label: '前往 现在', group: '前往', icon: 'home', run: () => navigate('/') },
+      { id: 'go-now', label: t('palette.goNow'), group: 'go', icon: 'home', run: () => navigate('/') },
       {
         id: 'go-inbox',
-        label: '前往 收件箱',
-        group: '前往',
+        label: t('palette.goInbox'),
+        group: 'go',
         icon: 'message',
         run: () => navigate('/inbox'),
       },
       {
         id: 'go-settings',
-        label: '前往 设置',
-        group: '前往',
+        label: t('palette.goSettings'),
+        group: 'go',
         icon: 'sliders',
         run: () => navigate('/settings/model'),
       },
       {
         id: 'go-capabilities',
-        label: '前往 能力',
-        group: '前往',
+        label: t('palette.goCapabilities'),
+        group: 'go',
         icon: 'plugin',
         run: () => navigate('/capabilities'),
       },
       {
         id: 'go-automation',
-        label: '前往 自动化',
-        group: '前往',
+        label: t('palette.goAutomation'),
+        group: 'go',
         icon: 'clock',
         run: () => navigate('/automation'),
       },
       {
         id: 'go-insights',
-        label: '前往 洞察',
-        group: '前往',
+        label: t('palette.goInsights'),
+        group: 'go',
         icon: 'activity',
         run: () => navigate('/insights'),
       },
     ],
-    [create, navigate],
+    // `t` is a dependency: the labels are copy, so switching language must
+    // rebuild the command list instead of keeping the first render's strings.
+    [create, navigate, t],
   );
 
   const filtered = useMemo(() => {
@@ -151,7 +156,7 @@ export function CommandPalette() {
       open={open}
       onCancel={close}
       footer={null}
-      title="命令面板"
+      title={t('palette.title')}
       width={560}
       destroyOnHidden
       // antd's own Esc handling would race the arbiter; the arbiter owns Esc.
@@ -166,15 +171,15 @@ export function CommandPalette() {
           setActiveIndex(0);
         }}
         onKeyDown={onKeyDown}
-        placeholder="输入以过滤命令…"
-        aria-label="命令搜索"
+        placeholder={t('palette.search')}
+        aria-label={t('palette.searchLabel')}
         aria-activedescendant={
           filtered[activeIndex] ? `zk-palette-${filtered[activeIndex].id}` : undefined
         }
       />
-      <ul className="zk-palette" role="listbox" aria-label="命令">
+      <ul className="zk-palette" role="listbox" aria-label={t('palette.listLabel')}>
         {filtered.length === 0 ? (
-          <li className="zk-palette__empty">没有匹配的命令</li>
+          <li className="zk-palette__empty">{t('palette.empty')}</li>
         ) : (
           filtered.map((command, index) => (
             <li

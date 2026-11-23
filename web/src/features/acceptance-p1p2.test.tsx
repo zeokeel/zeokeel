@@ -134,7 +134,10 @@ describe('C1 — double-clicking 新建会话 creates one session', () => {
 describe('C3 — every palette command is searchable', () => {
   it('reaches each command by typing its title', async () => {
     const user = renderAt('/');
-    await screen.findByRole('textbox');
+    // Wait for the settings snapshot to settle the locale: the command labels
+    // now come from the catalogue, so asserting Chinese copy before it lands
+    // would be a race (the shell falls back to navigator.language first).
+    await screen.findByRole('menuitem', { name: '团队' });
 
     await user.keyboard('{Meta>}k{/Meta}');
     const dialog = await screen.findByText('命令面板');
