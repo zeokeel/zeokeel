@@ -17,10 +17,13 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(here, '..');
 const repoRoot = resolve(webRoot, '..');
+/** Read a repo-relative file; `gen-baseline` parses exactly this shape. */
+const read = (path) => readFileSync(resolve(repoRoot, path), 'utf8');
+
 const CONTRACT = resolve(repoRoot, 'internal/gateway/contract.json');
 const OUTPUT = resolve(webRoot, 'src/design/ws-contract.ts');
 
-const raw = readFileSync(CONTRACT, 'utf8');
+const raw = read('internal/gateway/contract.json');
 let contract;
 try {
   contract = JSON.parse(raw);
