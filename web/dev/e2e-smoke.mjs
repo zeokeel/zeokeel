@@ -48,6 +48,8 @@ const PASSES = [
       needApproval: '需要审批',
       allowOnce: '允许一次',
       deny: '拒绝',
+      toolDone: '完成',
+      usage: '入',
     },
   },
   {
@@ -62,6 +64,8 @@ const PASSES = [
       needApproval: 'Needs approval',
       allowOnce: 'Allow once',
       deny: 'Deny',
+      toolDone: 'Done',
+      usage: 'in',
     },
   },
 ];
@@ -292,11 +296,44 @@ async function runPass(browser, pass) {
       timeout: 180_000,
     })
     .catch(() => fail(`这一轮 180 秒内没有结束（期望提示含「${copy.idleHint}」）`));
-  const assistantText = await page.evaluate(() => {
+  /**
+   * Structured assertions, not one blob of textContent.
+   *
+   * `textContent` includes nodes that are in the DOM but visually hidden, and a
+   * collapse animation leaves the card's sections mounted for a frame — so the
+   * same screen compared equal or unequal depending on *when* it was read. It did
+   * exactly that: the English pass captured `Output ok Raw arguments` while the
+   * Chinese one did not, although both screenshots are structurally identical
+   * (tool row collapsed, one summary line, status, answer, usage).
+   *
+   * So assert the three things that matter, each through a stable element:
+   */
+  const settled = await page.evaluate(() => {
+    const thought = document.querySelector('.zk-thought');
     const rows = [...document.querySelectorAll('.zk-transcript__row')];
-    return rows[rows.length - 1]?.textContent?.slice(0, 160) ?? '';
+    return {
+      toolRow: thought?.textContent ?? '',
+      lastRow: rows[rows.length - 1]?.textContent ?? '',
+    };
   });
-  step('run.settled', { lastRow: assistantText });
+  if (!settled.toolRow.includes('web_fetch')) {
+    await fail(`工具行里没有 web_fetch：「${settled.toolRow.slice(0, 80)}」`);
+  }
+  if (!norm(settled.toolRow).includes(norm(copy.toolDone))) {
+    await fail(`工具行没有完成态「${copy.toolDone}」：「${settled.toolRow.slice(0, 80)}」`);
+  }
+  if (!settled.lastRow.includes('The fetch returned ok')) {
+    await fail('结算后最后一行里没有模型回答（fake model 的固定句子）');
+  }
+  if (!norm(settled.lastRow).includes(norm(copy.usage))) {
+    await fail(`最后一行没有用量标记「${copy.usage}」`);
+  }
+  step('run.settled', {
+    toolVisible: 'web_fetch',
+    toolStatus: copy.toolDone,
+    answerVisible: true,
+    usageVisible: copy.usage,
+  });
   await page.screenshot({ path: `${OUT}/smoke-settled-${tag}.png` });
 
   // 7. Refresh: the conversation returns from the snapshot, still in the chosen
