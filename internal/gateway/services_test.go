@@ -168,11 +168,12 @@ func TestNotifierKeepsActionIDs(t *testing.T) {
 		t.Fatalf("ActionLabel = %q", notification.ActionLabel)
 	}
 	gateway.mu.Lock()
-	actionID := gateway.toastActions[notification.ID]
+	pending := gateway.toastActions[notification.ID]
 	gateway.mu.Unlock()
-	if actionID == "" {
+	if pending == nil || pending.actionID == "" {
 		t.Fatal("the toast action was not retained")
 	}
+	actionID := pending.actionID
 	if _, err := gateway.runNotificationAction(mustRaw(t, notifyActionParams{ID: notification.ID, ActionID: actionID})); err != nil {
 		t.Fatalf("runNotificationAction: %v", err)
 	}

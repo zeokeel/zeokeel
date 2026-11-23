@@ -291,7 +291,9 @@ func (s *planService) State() string {
 // notificationAction is one retained toast action (the wire cannot carry the
 // contract's func(), so it becomes an actionId the client posts back).
 type notificationAction struct {
-	run func()
+	// actionID is what the client echoes; "" means the toast has no action.
+	actionID string
+	run      func()
 }
 
 // notifyService implements contracts.Notifier and its optional halves.
@@ -308,23 +310,42 @@ func (s *notifyService) SetHandler(fn func(contracts.Notification)) {
 
 // Notify posts one toast.
 func (s *notifyService) Notify(level, text string) contracts.Notification {
-	return s.post("", level, text, "", "", false)
+	return s.post("", level, text, "", "", nil, false)
 }
 
 // NotifyAction posts one toast with an action button.
 func (s *notifyService) NotifyAction(level, text, actionLabel string, action func()) contracts.Notification {
-	return s.post("", level, text, actionLabel, s.retainAction(action), false)
+	return s.postAction("", level, text, actionLabel, "", action)
+}
+
+// NotifyActionNamed posts one toast whose action carries a stable id the client
+// can recognise ("restore"), instead of the generated one. Callers that offer a
+// well-known affordance (undo) should use this: it lets clients, mocks and tests
+// name the action instead of matching an opaque counter.
+func (s *notifyService) NotifyActionNamed(level, text, actionLabel, actionID string, action func()) contracts.Notification {
+	return s.postAction("", level, text, actionLabel, actionID, action)
+}
+
+// postAction is NotifyAction/NotifyActionNamed with an explicit action id.
+func (s *notifyService) postAction(sessionID, level, text, actionLabel, actionID string, action func()) contracts.Notification {
+	if action == nil {
+		return s.post(sessionID, level, text, actionLabel, "", nil, false)
+	}
+	if strings.TrimSpace(actionID) == "" {
+		actionID = s.gw.newID("act")
+	}
+	return s.post(sessionID, level, text, actionLabel, actionID, action, false)
 }
 
 // NotifySystem posts one toast and asks the tray shell to mirror it to the OS
 // notification center. The gateway process owns no notification sink (§7.2).
 func (s *notifyService) NotifySystem(level, text string) contracts.Notification {
-	return s.post("", level, text, "", "", true)
+	return s.post("", level, text, "", "", nil, true)
 }
 
 // NotifySystemFor is NotifySystem tagged with the originating conversation.
 func (s *notifyService) NotifySystemFor(level, text, sessionID string) contracts.Notification {
-	return s.post(sessionID, level, text, "", "", true)
+	return s.post(sessionID, level, text, "", "", nil, true)
 }
 
 // SystemNotificationsSupported reports that the gateway holds no OS sink: the
@@ -340,7 +361,7 @@ func (s *notifyService) Dismiss(id string) {
 }
 
 // post builds, records and broadcasts one notification.
-func (s *notifyService) post(sessionID, level, text, actionLabel, actionID string, wantSystem bool) contracts.Notification {
+func (s *notifyService) post(sessionID, level, text, actionLabel, actionID string, actionRun func(), wantSystem bool) contracts.Notification {
 	g := s.gw
 	notification := contracts.Notification{
 		ID:          g.newID("toast"),
@@ -351,7 +372,7 @@ func (s *notifyService) post(sessionID, level, text, actionLabel, actionID strin
 	}
 	g.mu.Lock()
 	if actionID != "" {
-		g.toastActions[notification.ID] = actionID
+		g.toastActions[notification.ID] = &notificationAction{actionID: actionID, run: actionRun}
 	}
 	handler := g.toastHandler
 	g.mu.Unlock()
@@ -375,19 +396,6 @@ func (s *notifyService) post(sessionID, level, text, actionLabel, actionID strin
 	}
 	g.broadcastEvent("toast.posted", payload)
 	return notification
-}
-
-// retainAction registers one action closure under a fresh id.
-func (s *notifyService) retainAction(action func()) string {
-	if action == nil {
-		return ""
-	}
-	g := s.gw
-	id := g.newID("act")
-	g.mu.Lock()
-	g.actions[id] = &notificationAction{run: action}
-	g.mu.Unlock()
-	return id
 }
 
 // pendingQuestionSnapshot returns the question a run is currently parked on, if
@@ -530,13 +538,12 @@ func (g *Gateway) runNotificationAction(raw []byte) (any, *protocolError) {
 	}
 	params.ActionID = strings.TrimSpace(params.ActionID)
 	g.mu.Lock()
-	actionID, known := g.toastActions[params.ID]
+	pending, known := g.toastActions[params.ID]
 	var action *notificationAction
-	if known && (params.ActionID == "" || params.ActionID == actionID) {
-		action = g.actions[actionID]
-		// Consume both registrations: one notification's action runs once, and a
+	if known && (params.ActionID == "" || params.ActionID == pending.actionID) {
+		action = pending
+		// Consume the registration: one notification's action runs once, and a
 		// second click is a parameter error rather than a silent no-op.
-		delete(g.actions, actionID)
 		delete(g.toastActions, params.ID)
 	}
 	g.mu.Unlock()
@@ -548,7 +555,7 @@ func (g *Gateway) runNotificationAction(raw []byte) (any, *protocolError) {
 		protocolErr := errInvalidParams("id", "no pending action for this notification")
 		protocolErr.Data["name"] = "action_unavailable"
 		return nil, protocolErr
-	case params.ActionID != "" && params.ActionID != actionID:
+	case pending != nil && params.ActionID != "" && params.ActionID != pending.actionID:
 		protocolErr := errInvalidParams("actionId", "does not match the pending action")
 		protocolErr.Data["name"] = "action_unavailable"
 		return nil, protocolErr

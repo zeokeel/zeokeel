@@ -343,12 +343,17 @@ type fakeTaskBoard struct {
 	mu    sync.Mutex
 	tasks []contracts.BoardTask
 	next  int
+	// deleted holds the tombstoned ids: the real board hides a deleted task
+	// behind a tombstone (rig has no Delete), so the row survives for an undo.
+	deleted map[string]contracts.BoardTask
 	// sessions, when set, makes the fake implement contracts.SessionTaskBoard.
 	sessions map[string][]contracts.BoardTask
 }
 
 // newFakeTaskBoard returns an empty board.
-func newFakeTaskBoard() *fakeTaskBoard { return &fakeTaskBoard{} }
+func newFakeTaskBoard() *fakeTaskBoard {
+	return &fakeTaskBoard{deleted: map[string]contracts.BoardTask{}}
+}
 
 // List implements contracts.TaskBoard.
 func (f *fakeTaskBoard) List(context.Context) ([]contracts.BoardTask, error) {
@@ -385,17 +390,33 @@ func (f *fakeTaskBoard) SetStatus(_ context.Context, id, status string) (contrac
 	return contracts.BoardTask{}, fmt.Errorf("task %q not found", id)
 }
 
-// Delete implements contracts.TaskBoard.
+// Delete implements contracts.TaskBoard: the row is tombstoned (hidden), not
+// erased, exactly like the real board.
 func (f *fakeTaskBoard) Delete(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for index := range f.tasks {
 		if f.tasks[index].ID == id {
+			f.deleted[id] = f.tasks[index]
 			f.tasks = append(f.tasks[:index], f.tasks[index+1:]...)
 			return nil
 		}
 	}
 	return fmt.Errorf("task %q not found", id)
+}
+
+// RestoreTask implements contracts.TaskBoardRestorer: the same row comes back
+// with its id, status, owner and timestamps.
+func (f *fakeTaskBoard) RestoreTask(_ context.Context, id string) (contracts.BoardTask, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	task, ok := f.deleted[id]
+	if !ok {
+		return contracts.BoardTask{}, fmt.Errorf("task %q is not deleted", id)
+	}
+	delete(f.deleted, id)
+	f.tasks = append(f.tasks, task)
+	return task, nil
 }
 
 // seed adds one task directly (the "someone else mutated the board" path).

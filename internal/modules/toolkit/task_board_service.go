@@ -84,10 +84,11 @@ type taskBoardService struct {
 }
 
 var (
-	_ contracts.TaskBoard        = (*taskBoardService)(nil)
-	_ contracts.TaskAssigner     = (*taskBoardService)(nil)
-	_ contracts.SessionTaskBoard = (*taskBoardService)(nil)
-	_ contracts.TaskBoardCleaner = (*taskBoardService)(nil)
+	_ contracts.TaskBoard         = (*taskBoardService)(nil)
+	_ contracts.TaskAssigner      = (*taskBoardService)(nil)
+	_ contracts.SessionTaskBoard  = (*taskBoardService)(nil)
+	_ contracts.TaskBoardRestorer = (*taskBoardService)(nil)
+	_ contracts.TaskBoardCleaner  = (*taskBoardService)(nil)
 )
 
 // newTaskBoardService returns the board service for dataDir ("" keeps every
@@ -656,6 +657,16 @@ func (s *taskBoardService) Delete(ctx context.Context, id string) error {
 		board = s.adapterForTool(contracts.AgentSessionFromContext(ctx))
 	}
 	return board.Delete(ctx, id)
+}
+
+// RestoreTask implements contracts.TaskBoardRestorer for the aggregate service:
+// the undo of Delete, scoped to the same board the deletion touched.
+func (s *taskBoardService) RestoreTask(ctx context.Context, id string) (contracts.BoardTask, error) {
+	board, err := s.boardForOperation(ctx)
+	if err != nil {
+		board = s.adapterForTool(contracts.AgentSessionFromContext(ctx))
+	}
+	return board.RestoreTask(ctx, id)
 }
 
 // Assign implements contracts.TaskAssigner. A session-scoped call only touches

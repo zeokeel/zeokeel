@@ -108,14 +108,16 @@ type Gateway struct {
 	foreground  *foregroundService
 
 	// Service state, guarded by mu.
-	mu                 sync.Mutex
-	questions          map[string]*pendingQuestion
-	questionHandler    func(contracts.UserQuestion)
-	artifactHandler    func(contracts.Artifact)
-	artifactItems      []contracts.Artifact
-	toastHandler       func(contracts.Notification)
-	toastActions       map[string]string
-	actions            map[string]*notificationAction
+	mu              sync.Mutex
+	questions       map[string]*pendingQuestion
+	questionHandler func(contracts.UserQuestion)
+	artifactHandler func(contracts.Artifact)
+	artifactItems   []contracts.Artifact
+	toastHandler    func(contracts.Notification)
+	// toastActions holds the not-yet-clicked action of each posted toast, keyed
+	// by the toast id. The action id is stored inside, so a caller may reuse one
+	// stable id ("restore") across toasts without two pending undos colliding.
+	toastActions       map[string]*notificationAction
 	foregroundByClient map[string]foregroundEntry
 	foregroundTick     uint64
 
@@ -163,8 +165,7 @@ func New(root cordis.Context, opts Options) (*Gateway, error) {
 		logger:             opts.Logger,
 		out:                opts.Out,
 		questions:          make(map[string]*pendingQuestion),
-		toastActions:       make(map[string]string),
-		actions:            make(map[string]*notificationAction),
+		toastActions:       make(map[string]*notificationAction),
 		foregroundByClient: make(map[string]foregroundEntry),
 		shutdown:           make(chan struct{}),
 	}

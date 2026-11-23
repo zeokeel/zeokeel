@@ -620,6 +620,12 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | ↳ 通知 `toast.posted` | `{Notification 无 Action}` | — | — | `SetHandler` `notify.go:47` | — |
 | `foreground.set` | `{sessionId}` | `{}` | Y | `ForegroundSession` `foreground.go:24`（**方向反转**） | ✅ 已实现 |
 
+> **第一个真实用例（2026-11-23）**：`task.delete` 成功后会发一条带 `撤销` 动作的通知
+> （`actionLabel:"撤销"`、**稳定的 `actionId:"restore"`**——每个 toast 的 id 不同，所以两个待撤销
+> 的删除不会互相串；实现上动作按 **toast id** 存放，不按 actionId 存放）。点撤销把**同一行**原样
+> 恢复（id/status/owner/时间戳都在——任务板内部是墓碑隐藏而非物理删除，撤销即清墓碑），而不是
+> 新建一条。后端若未实现 `contracts.TaskBoardRestorer`，只发普通通知、不承诺撤销。
+
 > **`notify.action` 的语义（2026-11-23 补死）**：`ActionNotifier.NotifyAction` 注册的回调在
 > 收到本方法时**同步执行一次**（回 `{}` 即代表"撤销已发生"），随后该动作的两份登记都被删除，
 > 所以同一 `id` 的第二次点击、未知 `id`、`actionId` 不匹配一律回

@@ -33,8 +33,9 @@ type taskBoardAdapter struct {
 }
 
 var (
-	_ contracts.TaskBoard    = (*taskBoardAdapter)(nil)
-	_ contracts.TaskAssigner = (*taskBoardAdapter)(nil)
+	_ contracts.TaskBoard         = (*taskBoardAdapter)(nil)
+	_ contracts.TaskAssigner      = (*taskBoardAdapter)(nil)
+	_ contracts.TaskBoardRestorer = (*taskBoardAdapter)(nil)
 )
 
 // newTaskBoard wraps one rig task manager and its SDK store.
@@ -198,6 +199,28 @@ func (b *taskBoardAdapter) Delete(ctx context.Context, id string) error {
 	}
 	b.persist()
 	return nil
+}
+
+// RestoreTask implements contracts.TaskBoardRestorer: Delete hides a task behind
+// a tombstone (rig has no Delete), so restoring is clearing that tombstone — the
+// manager still holds the row with its id, status, owner and timestamps.
+func (b *taskBoardAdapter) RestoreTask(ctx context.Context, id string) (contracts.BoardTask, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return contracts.BoardTask{}, errors.New("toolkit: task board: task id is required")
+	}
+	if !b.isDeleted(id) {
+		return contracts.BoardTask{}, fmt.Errorf("toolkit: task board: %w: %q", team.ErrTaskNotFound, id)
+	}
+	if b.store != nil {
+		b.store.ClearDeleted(id)
+	}
+	b.persist()
+	task, err := b.manager.Get(ctx, id)
+	if err != nil {
+		return contracts.BoardTask{}, fmt.Errorf("toolkit: task board: %w", err)
+	}
+	return boardTaskFromRig(task), nil
 }
 
 // isDeleted reports whether the board API removed id.

@@ -1192,10 +1192,60 @@ func (g *Gateway) taskDelete(ctx context.Context, raw json.RawMessage) (any, *pr
 	if board == nil {
 		return nil, appError(codeNotReady, "task_board_unavailable", false)
 	}
+	// Remember the row before it disappears: the undo toast restores that very
+	// row (the board hides deletes behind a tombstone, so its id and fields
+	// survive), and the notice needs a subject a human can recognise.
+	deleted := taskDTO{ID: id}
+	for _, task := range g.tasksSnapshotOf(board, ctx) {
+		if task.ID == id {
+			deleted = task
+			break
+		}
+	}
 	if err := board.Delete(ctx, id); err != nil {
 		return nil, internalError(err)
 	}
+	g.offerTaskUndo(ctx, board, deleted, params.SessionID)
 	return g.publishTaskChange(ctx, params.SessionID, nil)
+}
+
+// tasksSnapshotOf reads the board's rows for one undo capture.
+func (g *Gateway) tasksSnapshotOf(board contracts.TaskBoard, ctx context.Context) []taskDTO {
+	rows, err := board.List(ctx)
+	if err != nil {
+		return nil
+	}
+	out := make([]taskDTO, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, taskDTO{ID: row.ID, Subject: row.Subject})
+	}
+	return out
+}
+
+// offerTaskUndo posts the "撤销" toast for a deletion. The action id is the stable
+// "restore" (the toast id keeps two pending undos apart), and the callback brings
+// the same row back — never a re-created look-alike.
+func (g *Gateway) offerTaskUndo(ctx context.Context, board contracts.TaskBoard, deleted taskDTO, sessionID string) {
+	restorer, ok := board.(contracts.TaskBoardRestorer)
+	if !ok {
+		// A board that cannot restore gets a plain notice: promising an undo the
+		// backend cannot honour would be worse than not showing one.
+		g.notifier.Notify(contracts.NotifyInfo, "已删除任务："+deleted.Subject)
+		return
+	}
+	label := "已删除任务"
+	if strings.TrimSpace(deleted.Subject) != "" {
+		label += "：" + deleted.Subject
+	}
+	g.notifier.NotifyActionNamed(contracts.NotifyInfo, label, "撤销", "restore", func() {
+		if _, err := restorer.RestoreTask(context.Background(), deleted.ID); err != nil {
+			g.logger.Printf("gateway: undo task %q: %v", deleted.ID, err)
+			return
+		}
+		if err := g.hub.refreshNow(context.Background(), tasksDomainKey(sessionID)); err != nil {
+			g.logger.Printf("gateway: refresh task board after undo: %v", err)
+		}
+	})
 }
 
 // publishTaskChange refreshes the board domain right after a gateway write, so

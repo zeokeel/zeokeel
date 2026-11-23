@@ -75,5 +75,15 @@ type TaskBoardCleaner interface {
 	RemoveTaskBoardForSession(sessionID string) error
 }
 
+// TaskBoardRestorer is the optional undo half of the task board: a backend that
+// hides a deleted task (rather than erasing it) can bring the very same row back,
+// which is what a "撤销" toast promises. Delete keeps the row's id, status, owner
+// and timestamps, so restoring is a flag flip — not a re-creation.
+type TaskBoardRestorer interface {
+	// RestoreTask brings back a task deleted through the board API. A task that is
+	// not deleted (never deleted, or already restored) is reported as not found.
+	RestoreTask(ctx context.Context, id string) (BoardTask, error)
+}
+
 // KeyTaskBoard is provided by the toolkit module (rig team.TaskManager).
 var KeyTaskBoard = cordis.NewServiceKey[TaskBoard]("zeokeel/taskboard")

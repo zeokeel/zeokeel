@@ -13,6 +13,7 @@ package gateway
 // of the gap rather than a description of it.
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -240,5 +241,71 @@ func TestSnapshotsDoNotAdvertiseSinceRev(t *testing.T) {
 		if !found {
 			t.Errorf("%s lost its sinceRev field", method)
 		}
+	}
+}
+
+// TestTaskDeleteOffersUndo is the ① follow-up: the undo mechanism now has a real
+// user-facing use. Deleting a task posts a toast with an "撤销" action; clicking
+// it restores the very same row (same id, status, owner and timestamps), not a
+// freshly created look-alike. Without this the whole action path is unreachable
+// from the product.
+func TestTaskDeleteOffersUndo(t *testing.T) {
+	rig := startDomainGateway(t)
+	defer rig.stop(t)
+	conn := rig.connect(t)
+
+	task := rig.tasks.seed("write the report", contracts.TaskStatusInProgress)
+	// The board has no change notification: refresh the domain explicitly so the
+	// snapshot starts from the seeded state (the poll would take 2s).
+	if err := rig.gateway.hub.refreshNow(context.Background(), domainTasks); err != nil {
+		t.Fatalf("refresh tasks: %v", err)
+	}
+	before := resultOf(t, conn.call("tasks.snapshot", nil))
+	rows, _ := before["tasks"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("tasks.snapshot = %v, want one seeded task", before["tasks"])
+	}
+
+	// The delete must announce itself with an undo action.
+	resultOf(t, conn.call("task.delete", map[string]any{"id": task.ID}))
+	posted := conn.receive(func(method string) bool { return method == "toast.posted" })
+	params, _ := posted["params"].(map[string]any)
+	if params["actionLabel"] != "撤销" {
+		t.Fatalf("toast.posted = %v, want an undo action", params)
+	}
+	actionID, _ := params["actionId"].(string)
+	if actionID != "restore" {
+		t.Fatalf("actionId = %q, want the stable id %q so clients and mocks can assert it", actionID, "restore")
+	}
+	toastID, _ := params["id"].(string)
+	if toastID == "" {
+		t.Fatalf("toast.posted = %v, want an id", params)
+	}
+
+	// It is gone from the board…
+	after := resultOf(t, conn.call("tasks.snapshot", nil))
+	if rows, _ := after["tasks"].([]any); len(rows) != 0 {
+		t.Fatalf("tasks.snapshot after delete = %v, want none", rows)
+	}
+
+	// …and the undo brings back the same row.
+	resultOf(t, conn.call("notify.action", map[string]any{"id": toastID, "actionId": actionID}))
+	restored := resultOf(t, conn.call("tasks.snapshot", nil))
+	rows, _ = restored["tasks"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("tasks.snapshot after undo = %v, want the row back", restored["tasks"])
+	}
+	row, _ := rows[0].(map[string]any)
+	if row["id"] != task.ID {
+		t.Fatalf("restored id = %v, want %q (a new row would be a different task)", row["id"], task.ID)
+	}
+	if row["status"] != contracts.TaskStatusInProgress || row["subject"] != "write the report" {
+		t.Fatalf("restored row = %v, want the original status and subject", row)
+	}
+
+	// The action is consumed: a second click must not run it again.
+	second := errorOf(t, conn.call("notify.action", map[string]any{"id": toastID, "actionId": actionID}))
+	if data, _ := second["data"].(map[string]any); data["name"] != "action_unavailable" {
+		t.Fatalf("second click = %v, want action_unavailable", second)
 	}
 }
