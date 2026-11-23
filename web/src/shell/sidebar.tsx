@@ -42,6 +42,7 @@ export function Sidebar({
           type="text"
           onClick={onCreate}
           aria-label={t('shell.newSession')}
+          data-testid="new-session"
           title={collapsed ? t('shell.newSession') : undefined}
         >
           {collapsed ? '+' : t('shell.newSession')}

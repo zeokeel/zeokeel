@@ -262,9 +262,9 @@ export function Composer({
         submitType="enter"
         // Sender forwards aria-* to its textarea (X reads restProps through
         // pickAttrs); these props are not in SenderProps' type surface.
-        {...{ 'aria-label': t('composer.inputLabel') }}
+        {...{ 'aria-label': t('composer.inputLabel'), 'data-testid': 'composer-input' }}
       />
-      <div className="zk-composer__hint">
+      <div className="zk-composer__hint" data-testid="composer-hint">
         {running
           ? t('composer.hint.running')
           : t('composer.hint.idle')}

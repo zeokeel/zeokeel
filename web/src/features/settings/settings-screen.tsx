@@ -336,6 +336,7 @@ function SettingsPageForm({
           </Button>
           <Button
             type="primary"
+            data-testid="settings-save-button"
             onClick={() => void save()}
             disabled={!dirty || !canWrite}
             loading={saving}
@@ -389,7 +390,12 @@ function FieldRow({
   const t = useT();
   const id = `zk-field-${field.key}`;
   return (
-    <div className="zk-field" data-field-key={field.key} ref={focusRef}>
+    <div
+      className="zk-field"
+      data-field-key={field.key}
+      data-testid={`settings-field-${field.key}`}
+      ref={focusRef}
+    >
       <div className="zk-field__label-row">
         <label className="zk-field__label" htmlFor={id}>
           {t(field.labelKey)}
@@ -440,7 +446,9 @@ function FieldRow({
             onChange={(event) => onChange(String(event.target.value))}
             options={(field.options ?? []).map((option) => ({
               value: option.value,
-              label: t(option.labelKey),
+              // `<label data-testid>` is what the e2e clicks: the radio *text*
+              // is the copy under test, the id is only a locator.
+              label: <span data-testid={`settings-option-${field.key}-${option.value}`}>{t(option.labelKey)}</span>,
             }))}
           />
         ) : null}

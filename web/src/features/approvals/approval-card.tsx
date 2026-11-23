@@ -125,8 +125,13 @@ export function ApprovalCard({
         />
         {/* No filled primary: an approval must have no visual default action
             (docs/WEB-CLIENT.md A9). Both choices are equally weighted. */}
-        <Button onClick={() => onResolve('deny')}>{t('approval.deny')}</Button>
-        <Button onClick={() => onResolve(scope === 'once' ? 'allow' : 'allow_always')}>
+        <Button data-testid="approval-deny" onClick={() => onResolve('deny')}>
+          {t('approval.deny')}
+        </Button>
+        <Button
+          data-testid="approval-allow"
+          onClick={() => onResolve(scope === 'once' ? 'allow' : 'allow_always')}
+        >
           {scope === 'once' ? t('approval.allowOnce') : t('approval.allowAlways')}
         </Button>
       </div>
