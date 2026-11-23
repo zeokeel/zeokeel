@@ -84,6 +84,11 @@ func (e runEvent) size() int {
 
 // runRequest is the POST /api/chat/run body.
 //
+// EditMessageID turns the endpoint into the "edit an earlier user message" mode:
+// the backend truncates the history to just before that message and runs the
+// edited text (docs/TRANSPORT.md §4.6). Like regenerate it is a *mode* of the
+// one send path, and it is mutually exclusive with regenerate.
+//
 // Regenerate turns the same endpoint into the "retry the last turn" mode: the
 // backend rewinds the last exchange (dropping the trailing assistant reply and
 // its user message) and runs the user message again. It exists as a *mode* of
@@ -97,6 +102,8 @@ type runRequest struct {
 	Attachments []string `json:"attachments"`
 	ClientRunID string   `json:"clientRunId"`
 	Regenerate  bool     `json:"regenerate"`
+	// EditMessageID names the user message being replaced ("" = not an edit).
+	EditMessageID string `json:"editMessageId,omitempty"`
 }
 
 // runStream is one run: the events it produced, and the listeners reading them.
@@ -144,7 +151,16 @@ func (g *Gateway) handleChatRun(w http.ResponseWriter, r *http.Request) {
 		writeProtocolError(w, http.StatusBadRequest, errInvalidParams("sessionId", "is required"))
 		return
 	}
-	if body.Regenerate {
+	body.EditMessageID = strings.TrimSpace(body.EditMessageID)
+	if body.Regenerate && body.EditMessageID != "" {
+		// Two different rewrites of the same history: refuse instead of picking
+		// one silently.
+		writeProtocolError(w, http.StatusBadRequest,
+			errInvalidParams("editMessageId", "is mutually exclusive with regenerate"))
+		return
+	}
+	switch {
+	case body.Regenerate:
 		// The backend re-runs the last user message it already holds; sending
 		// text as well would silently append a second prompt.
 		if strings.TrimSpace(body.Text) != "" {
@@ -152,9 +168,20 @@ func (g *Gateway) handleChatRun(w http.ResponseWriter, r *http.Request) {
 				errInvalidParams("text", "must be empty when regenerate is true"))
 			return
 		}
-	} else if strings.TrimSpace(body.Text) == "" {
-		writeProtocolError(w, http.StatusBadRequest, errInvalidParams("text", "is required"))
-		return
+	case body.EditMessageID != "":
+		// The edit replaces the target message's text, so the text IS the new
+		// content: empty would mean "delete the message", which the protocol
+		// does not offer.
+		if strings.TrimSpace(body.Text) == "" {
+			writeProtocolError(w, http.StatusBadRequest,
+				errInvalidParams("text", "is required when editMessageId is set"))
+			return
+		}
+	default:
+		if strings.TrimSpace(body.Text) == "" {
+			writeProtocolError(w, http.StatusBadRequest, errInvalidParams("text", "is required"))
+			return
+		}
 	}
 	if body.ClientRunID == "" {
 		// Without it a retry after a dropped connection cannot be made
@@ -266,26 +293,73 @@ func (g *Gateway) beginRun(ctx context.Context, body runRequest) (stream *runStr
 			// to disable the action instead of reporting a failure.
 			return nil, false, appError(codeCapabilityUnsupported, "regenerate_not_supported", false)
 		}
+		if errors.Is(err, errEditUnsupported) {
+			return nil, false, appError(codeCapabilityUnsupported, "edit_not_supported", false)
+		}
+		if protocolErr := editRefusal(body.EditMessageID, err); protocolErr != nil {
+			return nil, false, protocolErr
+		}
 		return nil, false, internalError(err)
 	}
 	return stream, false, nil
 }
 
-// startTurn starts the turn a run request describes: a normal send, or a
-// regenerate of the last exchange (docs/TRANSPORT.md §4.6).
+// startTurn starts the turn a run request describes: a normal send, a regenerate
+// of the last exchange, or an edit of an earlier user message
+// (docs/TRANSPORT.md §4.6). All three are modes of the one send path.
 func (g *Gateway) startTurn(chat contracts.ChatService, body runRequest) error {
-	if !body.Regenerate {
+	switch {
+	case body.EditMessageID != "":
+		editor, ok := chat.(contracts.SessionEditor)
+		if !ok {
+			return errEditUnsupported
+		}
+		return editor.EditMessage(body.SessionID, body.EditMessageID, body.Text)
+	case body.Regenerate:
+		regenerator, ok := chat.(contracts.SessionRegenerator)
+		if !ok {
+			return errRegenerateUnsupported
+		}
+		return regenerator.Regenerate(body.SessionID)
+	default:
 		return chat.Send(body.SessionID, body.Text)
 	}
-	regenerator, ok := chat.(contracts.SessionRegenerator)
-	if !ok {
-		return errRegenerateUnsupported
-	}
-	return regenerator.Regenerate(body.SessionID)
 }
+
+// errEditUnsupported reports a backend without the edit half.
+var errEditUnsupported = errors.New("gateway: the chat backend cannot edit messages")
 
 // errRegenerateUnsupported reports a backend without the regenerate half.
 var errRegenerateUnsupported = errors.New("gateway: the chat backend cannot regenerate")
+
+// editRefusal maps the backend's edit refusals onto parameter errors that name
+// the field, so the client can explain ("this message was compacted away")
+// instead of retrying or, worse, silently starting a fresh turn.
+func editRefusal(editMessageID string, err error) *protocolError {
+	if editMessageID == "" {
+		return nil
+	}
+	refusals := []struct {
+		sentinel error
+		name     string
+		reason   string
+	}{
+		{contracts.ErrEditTargetNotFound, "edit_target_not_found", "no such user message in this session"},
+		{contracts.ErrEditTargetNotUser, "edit_target_not_user", "only user messages can be edited"},
+		{contracts.ErrEditTargetHasAttachments, "edit_target_has_attachments", "messages with attachments cannot be edited"},
+		{contracts.ErrEditTargetCompacted, "edit_target_compacted", "the message is no longer in the durable history window"},
+		{contracts.ErrEditTargetMoved, "edit_target_moved", "the conversation changed while the edit was being applied"},
+	}
+	for _, refusal := range refusals {
+		if !errors.Is(err, refusal.sentinel) {
+			continue
+		}
+		protocolErr := errInvalidParams("editMessageId", refusal.reason)
+		protocolErr.Data["name"] = refusal.name
+		return protocolErr
+	}
+	return nil
+}
 
 // dropRun forgets one run that never lived.
 func (g *Gateway) dropRun(stream *runStream) {
@@ -499,13 +573,19 @@ func (s *runStream) consume(delta *sessionDelta) {
 		case opSessionPatch:
 			terminal = append(terminal, s.sessionPatchEvents(op.Fields)...)
 		case opMsgReset:
-			// Regenerate/compact rewrote the history mid-run: the SSE fast lane
-			// cannot describe that, and the WS domain already carries it. Failing
-			// the stream keeps the two stories from diverging.
-			s.emit(runEvent{name: sseError, data: map[string]any{
-				"code":    codeRevisionGone,
-				"message": "session history was rewritten during the run; reload the session",
-			}})
+			// The history was rewritten. For the regenerate and edit modes that IS
+			// the turn's start: the backend truncated before it began streaming,
+			// and the WS session domain already carried the reset to the client.
+			// The fast lane therefore re-baselines and keeps streaming, instead of
+			// failing a run it caused itself.
+			//
+			// A rewrite that is NOT ours would be a compaction, and compaction is
+			// rejected while a session runs (contracts.ErrChatCompacting), so this
+			// cannot mask a concurrent third-party rewrite.
+			s.baseline = make(map[string]bool, len(op.Messages))
+			for _, message := range op.Messages {
+				s.baseline[message.ID] = true
+			}
 		}
 	}
 }

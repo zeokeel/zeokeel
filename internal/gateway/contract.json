@@ -261,6 +261,10 @@
         "when": "KeyContext"
       },
       {
+        "name": "edit",
+        "when": "SessionEditor"
+      },
+      {
         "name": "regenerate",
         "when": "SessionRegenerator"
       },

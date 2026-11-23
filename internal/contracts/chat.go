@@ -480,6 +480,43 @@ type SessionRegenerator interface {
 	Regenerate(sessionID string) error
 }
 
+// SessionEditor is the optional half of the chat service that edits an earlier
+// user message: it truncates the history to just before that message and runs
+// the edited text as a new turn (the old shell's 编辑 + 重发 action).
+//
+// The durable rig history carries no message ids, so the target is located
+// through the read model and then anchored durably by *user-message ordinal
+// counted from the tail*, verified by (role, text). Every failure below is a
+// refusal, never a silent "start from the beginning": quietly discarding the
+// user's history is worse than not editing.
+type SessionEditor interface {
+	// EditMessage replaces the user message messageID of sessionID with text,
+	// drops everything after it and runs the new turn.
+	EditMessage(sessionID, messageID, text string) error
+}
+
+// Edit refusal vocabulary (SessionEditor.EditMessage). The gateway maps each to
+// a parameter error naming editMessageId, so the client can explain instead of
+// retrying.
+var (
+	// ErrEditTargetNotFound means the session or the message does not exist any
+	// more (deleted, or the id belongs to a reloaded transcript).
+	ErrEditTargetNotFound = errors.New("edit target message not found")
+	// ErrEditTargetNotUser means the target is not a user message: editing an
+	// assistant message would be "regenerate from here", a different feature.
+	ErrEditTargetNotUser = errors.New("edit target is not a user message")
+	// ErrEditTargetHasAttachments means the target carried files/images. The run
+	// path has no attachment support, so allowing the edit would silently drop
+	// them.
+	ErrEditTargetHasAttachments = errors.New("edit target has attachments")
+	// ErrEditTargetCompacted means the target fell outside the durable history
+	// window (a compaction replaced the head), so it cannot be located safely.
+	ErrEditTargetCompacted = errors.New("edit target was compacted away")
+	// ErrEditTargetMoved means the durable anchor no longer matches the read
+	// model: something rewrote the history between the click and the edit.
+	ErrEditTargetMoved = errors.New("edit target moved")
+)
+
 // SessionArchivedSettingKey is the settings row storing a session's archive
 // flag (pins and archives both live in settings, not in the schema).
 func SessionArchivedSettingKey(sessionID string) string {

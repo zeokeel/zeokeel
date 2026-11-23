@@ -73,6 +73,13 @@ func (g *Gateway) hasConditionalCapability(when string) bool {
 		}
 		_, ok := chat.(contracts.SessionRegenerator)
 		return ok
+	case "SessionEditor":
+		chat, err := g.chatService()
+		if err != nil {
+			return false
+		}
+		_, ok := chat.(contracts.SessionEditor)
+		return ok
 	}
 	// An unknown marker must not silently grant a capability.
 	return false

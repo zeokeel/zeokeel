@@ -1185,14 +1185,14 @@ func TestInitializeAdvertisesCapabilities(t *testing.T) {
 		"session.list", "session.snapshot", "session.delta", "session.subscribe",
 		"session.create", "run.cancel", "approvals", "ask", "plan", "artifacts",
 		"settings", "settings.set", "workspace", "prompts", "notify", "foreground",
-		"context", "regenerate", "tasks",
+		"context", "regenerate", "edit", "tasks",
 	} {
 		if !containsString(caps, want) {
 			t.Fatalf("capabilities = %v, want it to contain %q", caps, want)
 		}
 	}
-	if len(caps) != len(serverCapabilities)+3 {
-		t.Fatalf("capabilities = %v, want %d static + 3 conditional entries", caps, len(serverCapabilities))
+	if len(caps) != len(serverCapabilities)+4 {
+		t.Fatalf("capabilities = %v, want %d static + 4 conditional entries", caps, len(serverCapabilities))
 	}
 
 	// The static set is what the document lists: a capability added to (or
@@ -1225,7 +1225,7 @@ func TestInitializeAdvertisesCapabilities(t *testing.T) {
 	bare := &domainTestRig{runningGateway: serveGateway(t, gateway)}
 	defer bare.stop(t)
 	bareCaps := initialize(bare)
-	for _, absent := range []string{"context", "regenerate", "tasks"} {
+	for _, absent := range []string{"context", "regenerate", "edit", "tasks"} {
 		if containsString(bareCaps, absent) {
 			t.Fatalf("a bare assembly advertised %q: %v", absent, bareCaps)
 		}

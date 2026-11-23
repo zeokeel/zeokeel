@@ -30,6 +30,59 @@ type scriptedChat struct {
 	// regenerate mode), and regenerateErr lets a test make the backend refuse.
 	regenerated   int
 	regenerateErr error
+	// edited records the edit-mode calls, and editErr lets a test make the
+	// backend refuse (the gateway maps the refusal onto a parameter error).
+	edited  []editCall
+	editErr error
+}
+
+// editCall is one EditMessage invocation as the fake saw it.
+type editCall struct {
+	sessionID string
+	messageID string
+	text      string
+}
+
+// EditMessage implements contracts.SessionEditor: the edit mode calls it instead
+// of Send. Like the real agent it rewrites the history and runs, so the script
+// drives the fake session the same way.
+func (c *scriptedChat) EditMessage(sessionID, messageID, text string) error {
+	c.mu.Lock()
+	c.edited = append(c.edited, editCall{sessionID: sessionID, messageID: messageID, text: text})
+	err := c.editErr
+	script := c.script
+	c.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	// Mirror the real backend: drop everything from the target message on, then
+	// append the edited user message.
+	c.fakeChat.mu.Lock()
+	session := c.fakeChat.sessions[sessionID]
+	if session != nil {
+		for index := range session.Messages {
+			if session.Messages[index].ID == messageID {
+				session.Messages = append([]contracts.ChatMessage(nil), session.Messages[:index]...)
+				break
+			}
+		}
+		session.Messages = append(session.Messages, contracts.ChatMessage{
+			ID: "edited-user", Role: contracts.ChatRoleUser, Text: text, CreatedAt: time.Now(),
+		})
+	}
+	c.fakeChat.mu.Unlock()
+	c.fakeChat.notify(sessionID)
+	if script != nil {
+		go script(c.fakeChat)
+	}
+	return nil
+}
+
+// editCount reports how many edit calls the backend saw.
+func (c *scriptedChat) editCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.edited)
 }
 
 // Regenerate implements contracts.SessionRegenerator: the run endpoint's
@@ -831,4 +884,161 @@ func TestChatRunRegenerateNeedsTheBackendHalf(t *testing.T) {
 // capability test has a backend that genuinely lacks it.
 type fakeChatOnly struct {
 	*fakeChat
+}
+
+// TestChatRunEditModeTruncatesAndRuns is the edit mode's end-to-end cover
+// (§4.6): the backend is asked to edit the named message exactly once, the SSE
+// stream is the same seven-event stream as a normal run, and a repeated
+// clientRunId replays instead of truncating a second time.
+func TestChatRunEditModeTruncatesAndRuns(t *testing.T) {
+	chat := newScriptedChat()
+	chat.addSession("s1", "First", "hello")
+	// A two-turn transcript: the second turn is what the edit replaces.
+	chat.addMessage("s1", contracts.ChatRoleUser, "second question")
+	chat.addMessage("s1", contracts.ChatRoleAssistant, "old answer")
+	chat.mu.Lock()
+	targetID := ""
+	for _, message := range chat.sessions["s1"].Messages {
+		if message.Text == "second question" {
+			targetID = message.ID
+		}
+	}
+	chat.mu.Unlock()
+	if targetID == "" {
+		t.Fatal("the test session has no target message")
+	}
+	finished := make(chan struct{})
+	chat.script = fullRunScript(finished)
+	gw := startTestGateway(t, chat)
+	defer gw.stop(t)
+
+	response := openRun(t, gw, runRequest{
+		SessionID: "s1", ClientRunID: "run-edit", EditMessageID: targetID, Text: "second question, edited",
+	})
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("edit status = %d, want 200", response.StatusCode)
+	}
+	frames := readFrames(t, response.Body, true)
+	names := eventNames(frames)
+	if !containsString(names, sseDone) {
+		t.Fatalf("edit stream is missing done: %v (%+v)", names, frames[len(frames)-1].data)
+	}
+
+	// The backend saw exactly one edit, with the new text, and no plain send.
+	chat.mu.Lock()
+	edits := append([]editCall(nil), chat.edited...)
+	sent := len(chat.sent)
+	chat.mu.Unlock()
+	if len(edits) != 1 {
+		t.Fatalf("edit calls = %d, want 1 (%+v)", len(edits), edits)
+	}
+	if edits[0].messageID != targetID || edits[0].text != "second question, edited" {
+		t.Fatalf("edit call = %+v", edits[0])
+	}
+	if sent != 0 {
+		t.Fatalf("edit mode called Send %d times, want 0", sent)
+	}
+
+	// No leftover: the old answer is gone from the transcript the edit rewrote.
+	chat.mu.Lock()
+	var texts []string
+	for _, message := range chat.sessions["s1"].Messages {
+		texts = append(texts, message.Text)
+	}
+	chat.mu.Unlock()
+	for _, text := range texts {
+		if text == "old answer" || text == "second question" {
+			t.Fatalf("the edited turn survived: %v", texts)
+		}
+	}
+
+	// Idempotency: the same clientRunId replays the finished stream and must not
+	// truncate the history a second time.
+	replay := openRun(t, gw, runRequest{
+		SessionID: "s1", ClientRunID: "run-edit", EditMessageID: targetID, Text: "second question, edited",
+	})
+	defer func() { _ = replay.Body.Close() }()
+	if replay.StatusCode != http.StatusOK {
+		t.Fatalf("replay status = %d, want 200", replay.StatusCode)
+	}
+	_ = readFrames(t, replay.Body, true)
+	chat.mu.Lock()
+	editsAfterReplay := len(chat.edited)
+	chat.mu.Unlock()
+	if editsAfterReplay != 1 {
+		t.Fatalf("a replayed clientRunId edited again (%d calls, want 1)", editsAfterReplay)
+	}
+}
+
+// TestChatRunEditModeValidation pins the mode's parameter rules: the edit target
+// and regenerate are mutually exclusive, and an edit without new text is
+// refused before the backend is touched.
+func TestChatRunEditModeValidation(t *testing.T) {
+	chat := newScriptedChat()
+	chat.addSession("s1", "First", "hello")
+	gw := startTestGateway(t, chat)
+	defer gw.stop(t)
+
+	cases := []struct {
+		name string
+		body runRequest
+	}{
+		{name: "mutually exclusive with regenerate", body: runRequest{
+			SessionID: "s1", ClientRunID: "r1", Regenerate: true, EditMessageID: "msg-1", Text: "x"}},
+		{name: "edit without text", body: runRequest{
+			SessionID: "s1", ClientRunID: "r2", EditMessageID: "msg-1"}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			response := openRun(t, gw, test.body)
+			defer func() { _ = response.Body.Close() }()
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", response.StatusCode)
+			}
+			var body map[string]any
+			if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+				t.Fatalf("decode error body: %v", err)
+			}
+			errObject, _ := body["error"].(map[string]any)
+			data, _ := errObject["data"].(map[string]any)
+			if data["field"] == "" {
+				t.Fatalf("error = %v, want a field", body)
+			}
+		})
+	}
+	if count := chat.editCount(); count != 0 {
+		t.Fatalf("a rejected edit reached the backend (%d calls)", count)
+	}
+}
+
+// TestChatRunEditModeRefusalNamesTheField: a backend refusal (the target moved,
+// was compacted away, …) must reach the client as a parameter error naming
+// editMessageId — never as a silent fresh run.
+func TestChatRunEditModeRefusalNamesTheField(t *testing.T) {
+	chat := newScriptedChat()
+	chat.addSession("s1", "First", "hello")
+	chat.editErr = contracts.ErrEditTargetCompacted
+	gw := startTestGateway(t, chat)
+	defer gw.stop(t)
+
+	response := openRun(t, gw, runRequest{
+		SessionID: "s1", ClientRunID: "run-edit", EditMessageID: "msg-9", Text: "edited",
+	})
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", response.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	errObject, _ := body["error"].(map[string]any)
+	data, _ := errObject["data"].(map[string]any)
+	if data["field"] != "editMessageId" {
+		t.Fatalf("error = %v, want field editMessageId", body)
+	}
+	if data["name"] != "edit_target_compacted" {
+		t.Fatalf("error = %v, want name edit_target_compacted", body)
+	}
 }

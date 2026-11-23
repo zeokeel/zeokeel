@@ -540,6 +540,7 @@ var (
 	_ contracts.SessionPinner             = (*service)(nil)
 	_ contracts.SessionArchiver           = (*service)(nil)
 	_ contracts.SessionRegenerator        = (*service)(nil)
+	_ contracts.SessionEditor             = (*service)(nil)
 	_ contracts.SessionModelSwitcher      = (*service)(nil)
 	_ contracts.SessionWorkspaceSwitcher  = (*service)(nil)
 	_ contracts.SessionPermissionSwitcher = (*service)(nil)
@@ -2608,6 +2609,180 @@ func (s *service) Regenerate(sessionID string) error {
 		s.run(runCtx, sessionID, cfg, runInput, runHistory, s.thinkingParamsForSession(sessionID, cfg.Model), s.runOrigin(sessionID, ""))
 	})
 	return nil
+}
+
+// EditMessage implements contracts.SessionEditor: it replaces one user message
+// with new text, drops everything after it and runs the new turn.
+//
+// Locating the target is the whole problem. The durable rig history has no
+// message ids, and the read model does not mirror it one-to-one (a live run
+// folds every provider iteration into one assistant message, while a restored
+// conversation keeps one per iteration). What DOES correspond one-to-one is the
+// *user* messages: a turn appends exactly one. The durable anchor is therefore
+// "the k-th user message counted from the tail", where k is how many user
+// messages follow the target in the read model, and it is accepted only after
+// (role, text) verification.
+//
+// Every failure is a refusal (contracts.ErrEditTarget*): silently starting a
+// fresh turn would discard the user's history, which is worse than not editing.
+func (s *service) EditMessage(sessionID, messageID, text string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	messageID = strings.TrimSpace(messageID)
+	text = strings.TrimSpace(text)
+
+	s.mu.Lock()
+	state, ok := s.sessions[sessionID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: unknown session %q", contracts.ErrEditTargetNotFound, sessionID)
+	}
+	if state.running {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: %q", ErrSessionRunning, sessionID)
+	}
+	if state.compacting {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: %q", contracts.ErrChatCompacting, sessionID)
+	}
+	targetIndex := -1
+	for index := range state.messages {
+		if state.messages[index].ID == messageID {
+			targetIndex = index
+			break
+		}
+	}
+	if targetIndex < 0 {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: %q", contracts.ErrEditTargetNotFound, messageID)
+	}
+	target := state.messages[targetIndex]
+	if target.Role != contracts.ChatRoleUser {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: %q", contracts.ErrEditTargetNotUser, messageID)
+	}
+	if len(target.Attachments) > 0 {
+		// The run path has no attachment support: allowing the edit would drop
+		// the files silently.
+		s.mu.Unlock()
+		return fmt.Errorf("%w: %q", contracts.ErrEditTargetHasAttachments, messageID)
+	}
+	if text == "" {
+		s.mu.Unlock()
+		return contracts.ErrEditTargetNotFound
+	}
+	// How many user messages follow the target: the durable anchor distance.
+	followingUsers := 0
+	for index := targetIndex + 1; index < len(state.messages); index++ {
+		if state.messages[index].Role == contracts.ChatRoleUser {
+			followingUsers++
+		}
+	}
+	cfg := s.configForSessionLocked(sessionID)
+	if strings.TrimSpace(cfg.Model) == "" {
+		s.mu.Unlock()
+		return ErrNoModelConfigured
+	}
+	targetText := target.Text
+	s.mu.Unlock()
+
+	// Anchor the target in the durable history; refuse when it is not there.
+	base, err := s.editBaseHistory(context.Background(), sessionID, targetText, followingUsers)
+	if err != nil {
+		return err
+	}
+	// Re-validate immediately before replacing: the click and the edit are
+	// separated by a round trip, and any writer that bypassed this service must
+	// not have its messages truncated by a stale anchor (the same guard
+	// compaction uses, compact_now.go).
+	rechecked, err := s.editBaseHistory(context.Background(), sessionID, targetText, followingUsers)
+	if err != nil {
+		return err
+	}
+	if len(rechecked) != len(base) || !sameHistoryPrefix(base, rechecked) {
+		return fmt.Errorf("%w: %q", contracts.ErrEditTargetMoved, messageID)
+	}
+	if err := s.replaceSessionHistory(context.Background(), sessionID, base); err != nil {
+		return err
+	}
+
+	// Build the new read model: everything before the target, the edited user
+	// message, then the streaming assistant placeholder.
+	s.mu.Lock()
+	state, ok = s.sessions[sessionID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: unknown session %q", contracts.ErrEditTargetNotFound, sessionID)
+	}
+	// The durable truncation already happened and cannot fail from here on, so
+	// the read model is only ever moved forward (a crash in between leaves
+	// durable and read model consistent: the transcript is rebuilt from durable).
+	now := time.Now()
+	edited := make([]contracts.ChatMessage, 0, targetIndex+2)
+	edited = append(edited, state.messages[:targetIndex]...)
+	edited = append(edited, contracts.ChatMessage{
+		ID:        s.nextMessageIDLocked(),
+		Role:      contracts.ChatRoleUser,
+		Text:      text,
+		CreatedAt: now,
+	})
+	edited = append(edited, contracts.ChatMessage{
+		ID:        s.nextMessageIDLocked(),
+		Role:      contracts.ChatRoleAssistant,
+		Streaming: true,
+		CreatedAt: now,
+	})
+	state.messages = edited
+	state.assistant = len(state.messages) - 1
+	state.turnStarted = false
+	state.running = true
+	state.interrupted = false
+	state.waiting = true
+	state.err = ""
+	state.updatedAt = now
+	s.touchLocked(state)
+	runCtx, cancel := context.WithCancel(context.Background())
+	state.cancel = cancel
+	s.mu.Unlock()
+
+	s.setSessionUnread(sessionID, false)
+	s.notify(sessionID)
+	input := buildUserInput(text, nil)
+	s.startRunGoroutine(func() {
+		s.run(runCtx, sessionID, cfg, input, s.historyView(),
+			s.thinkingParamsForSession(sessionID, cfg.Model), s.runOrigin(sessionID, ""))
+	})
+	return nil
+}
+
+// editBaseHistory returns the durable history strictly before the user message
+// that is `followingUsers` places from the tail, after verifying it is the
+// message the read model pointed at.
+func (s *service) editBaseHistory(ctx context.Context, sessionID, targetText string, followingUsers int) ([]rig.Message, error) {
+	messages, err := s.historyView().Load(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("agent: edit: load history of %q: %w", sessionID, err)
+	}
+	found := -1
+	remaining := followingUsers
+	for index := len(messages) - 1; index >= 0; index-- {
+		if messages[index].Role != rig.RoleUser {
+			continue
+		}
+		if remaining == 0 {
+			found = index
+			break
+		}
+		remaining--
+	}
+	if found < 0 {
+		// The durable window no longer reaches that far back (compaction
+		// replaced the head) or the transcript is shorter than the read model.
+		return nil, fmt.Errorf("%w: %q", contracts.ErrEditTargetCompacted, sessionID)
+	}
+	if strings.TrimSpace(messageText(messages[found])) != strings.TrimSpace(targetText) {
+		return nil, fmt.Errorf("%w: %q", contracts.ErrEditTargetMoved, sessionID)
+	}
+	return append([]rig.Message(nil), messages[:found]...), nil
 }
 
 // regenerateBaseHistory returns the durable history up to (excluding) the last

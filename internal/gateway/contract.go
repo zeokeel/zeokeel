@@ -91,6 +91,7 @@ var conditionalCapabilities = []conditionalCapability{
 	{Name: "context", When: "KeyContext"},
 	{Name: "tasks", When: "KeyTaskBoard"},
 	{Name: "regenerate", When: "SessionRegenerator"},
+	{Name: "edit", When: "SessionEditor"},
 }
 
 // contractParamSpec is one method's parameter contract.

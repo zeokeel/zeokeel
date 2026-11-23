@@ -260,6 +260,7 @@ SIGINT/SIGTERM（signals_unix.go:11）
 |---|---|---|
 | `context` | 装配提供 `contracts.KeyContext` | 「上下文」Tab（`context.snapshot/subscribe`，§5.1.8） |
 | `regenerate` | 聊天后端实现 `contracts.SessionRegenerator` | 「⋯」菜单里的「重新生成」（§4.6 regenerate 模式） |
+| `edit` | 聊天后端实现 `contracts.SessionEditor` | 「⋯」菜单里的「编辑并重发」（§4.6 editMessageId 模式） |
 | `tasks` | 装配提供 `contracts.KeyTaskBoard` | 后台任务 chip（`tasks.snapshot/subscribe`、`task.status/delete`，§5.1.8） |
 
 > 能力名**全小写、无前缀**，与 `context`/`plan`/`ask` 同风格。`regenerate` 是**运行模式**而不是
@@ -404,6 +405,37 @@ Accept: text/event-stream
 | `error` | `{ code, message }` | 终止性错误；随后关闭连接 |
 
 事件顺序保证：`tool.start` 必在同一 `callId` 的 `tool.result` 之前；`done`/`error` 必为最后一个事件。
+
+#### 编辑并重发（`editMessageId` 模式，2026-11-23）
+
+编辑一条**更早的**用户消息并重发，同样是这个端点的模式：
+
+```json
+{ "sessionId": "<id>", "clientRunId": "<uuid>", "editMessageId": "<msg-id>", "text": "<新文本>" }
+```
+
+- 语义：**截断到该消息之前**（该消息及其之后的一切都被丢弃），再用 `text` 起一轮——标准聊天语义。
+- `editMessageId` 与 `regenerate` **互斥**（同时出现 → `invalid_params {field:"editMessageId"}`）；
+  带 `editMessageId` 时 `text` **必填非空**（空文本等于"删除消息"，协议不提供）。
+- 事件流、`clientRunId` 幂等、断连≠停止，与普通 run 相同；同一 `clientRunId` **只截断一次**。
+- **目标定位**：durable 历史（rig）**没有消息 ID**，读模型的 `msg-N` 是内存生成、重启后按序重分配。
+  因此服务端用**从尾部倒数第 k 条用户消息**作锚点（k = 读模型里目标之后还有几条用户消息），
+  并用 (role, text) 校验；对不上就拒绝。助手消息在 durable 里是一次迭代一条、读模型里折叠成一条，
+  所以**按消息条数倒推是错的**（`TestEditAnchorCountsUserMessages` 钉住这一点）。
+- **拒绝清单**（每个都是 `invalid_params {field:"editMessageId"}`，`data.name` 见括注），
+  **绝不会静默从头跑**（那等于悄悄丢掉用户历史）：
+  | 情况 | `data.name` |
+  |---|---|
+  | 会话或消息不存在 | `edit_target_not_found` |
+  | 目标不是用户消息（编辑助手 = "从这里重生成"，另一个功能） | `edit_target_not_user` |
+  | 目标带附件（run 路径不支持附件，允许编辑等于静默丢图） | `edit_target_has_attachments` |
+  | 目标已被 compact 掉（durable 窗口外，无法安全定位） | `edit_target_compacted` |
+  | 锚点在替换前复核时对不上（期间历史被改写） | `edit_target_moved` |
+- **替换前复核**：算完锚点后、写入前**重新加载并校验前缀仍然是那个锚点**（照 compaction 的做法，
+  `compact_now.go`）——客户端点击到服务端执行之间有时间窗，校验不过就拒绝。
+- 能力探测：装配提供 `contracts.SessionEditor` 时 `initialize.capabilities` 含 `edit`（§4.2.1），
+  客户端据此启用菜单项；不支持时 `1023 capability_unsupported` + `data.name="edit_not_supported"`。
+- **为什么不做独立 WS 方法**：同 regenerate——两步式会留下"历史已截断但没有 run"的半状态。
 
 #### 与 WS 状态的关系（关键）
 

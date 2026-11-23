@@ -129,7 +129,7 @@ func TestContractCapabilitiesAreTheHandshakeList(t *testing.T) {
 	}
 	for _, conditional := range document.Capabilities.Conditional {
 		switch conditional.When {
-		case "KeyContext", "KeyTaskBoard", "SessionRegenerator":
+		case "KeyContext", "KeyTaskBoard", "SessionRegenerator", "SessionEditor":
 		default:
 			t.Errorf("conditional capability %q uses unknown marker %q", conditional.Name, conditional.When)
 		}
