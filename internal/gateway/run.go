@@ -119,6 +119,12 @@ type runStream struct {
 	turnID      string
 
 	baseline map[string]bool
+	// notBody holds message IDs that are not this turn's assistant body — the
+	// user's own message, and anything else the session carries. Send appends the
+	// user's prompt after the baseline is taken, so it arrives as an opMsgAdd on
+	// this stream; without this the prompt is emitted as `message.delta` and the
+	// browser renders it a second time as the answer's first tokens.
+	notBody map[string]bool
 
 	mu       sync.Mutex
 	log      []runEvent
@@ -500,6 +506,19 @@ func (s *runStream) eventsFrom(cursor int) (events []runEvent, next int, dropped
 
 // emit records one event and wakes every listener. It runs inside the hub
 // goroutine (the delta observer), so it only appends and pokes.
+// markNotBody remembers a message that is not this turn's assistant body, so its
+// later ops stay off the stream. consume runs on the hub goroutine, so no lock is
+// taken here (the map is only read from the same goroutine).
+func (s *runStream) markNotBody(id string) {
+	if id == "" {
+		return
+	}
+	if s.notBody == nil {
+		s.notBody = make(map[string]bool, 2)
+	}
+	s.notBody[id] = true
+}
+
 func (s *runStream) emit(event runEvent) {
 	s.mu.Lock()
 	if s.finished {
@@ -545,9 +564,16 @@ func (s *runStream) consume(delta *sessionDelta) {
 			if op.Message == nil || s.baseline[op.Message.ID] {
 				continue
 			}
+			// Only the assistant writes the turn's body (TRANSPORT §4.6). Send
+			// appends the user's prompt after the baseline, so it lands here too;
+			// remembering it keeps its late deltas out as well.
+			if op.Message.Role != "assistant" {
+				s.markNotBody(op.Message.ID)
+				continue
+			}
 			s.emitMessageStart(*op.Message)
 		case opMsgDelta:
-			if s.baseline[op.MessageID] {
+			if s.baseline[op.MessageID] || s.notBody[op.MessageID] {
 				continue
 			}
 			if op.TextAppend != "" {
@@ -563,12 +589,12 @@ func (s *runStream) consume(delta *sessionDelta) {
 				}})
 			}
 		case opMsgToolUpsert:
-			if s.baseline[op.MessageID] || op.Tool == nil {
+			if s.baseline[op.MessageID] || s.notBody[op.MessageID] || op.Tool == nil {
 				continue
 			}
 			s.emitTool(*op.Tool)
 		case opMsgPatch:
-			if s.baseline[op.MessageID] {
+			if s.baseline[op.MessageID] || s.notBody[op.MessageID] {
 				continue
 			}
 			s.emitPatch(op.Fields)
