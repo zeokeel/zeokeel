@@ -42,6 +42,23 @@
 - [x] **S1.7** 提交 `S1: serve runs the gateway before the tray; tray opens the browser`。
   - 回退点检查：`git revert <S1>` 后 `go build ./...` 应恢复原状（此时 UI 包从未被动过，必然通过）。
 
+### S4pre 执行记录（2026-11-23）
+
+- `contracts.Language(locale)` 新增（nil → "zh"），`internal/modules/approvals` 的 4 处调用改为 `contracts.Language`，uikit import 删除。
+- 副作用检查：`grep -rn "internal/uikit" internal/modules internal/gateway internal/contracts` 为空——**后端已零 UI 层依赖**。
+- `internal/uikit/locale.go` 的 `Language` 保留（UI 侧仍在用，S5 一并删除；两处实现里 contracts 版本是唯一真相，UI 版是薄包装）。
+- 验证：build/vet 全绿；`go test ./internal/modules/approvals ./internal/contracts` 绿；全量仅 hostbundle 环境性失败。
+
+### S3 执行记录（2026-11-23）
+
+**未执行，与 S5 合并**（见提交说明）。实测证据：删掉 `Registry()` 里的 13 条 UI
+`mustRegister` 后，`internal/ui/uimodtest` 的 7 条集成测试立刻红
+（`assembly.Load(desktop): module: validation failed`），因为它们用 desktop
+装配断言"所有 UI 模块都激活"。也就是说 **"UI 模块注册" 与 "UI 包/它的测试"
+必须同生共死**：注册先删，UI 测试就先红；包先删，注册就编译不过。
+S3 唯一能独立绿的部分（`usesUIServices`/`declareUIServices`）也无法脱离注册
+单独删（desktop 装配需要这些 builtin 声明）。因此 S3 的内容整体并入 S5。
+
 ### S2 执行记录（2026-11-23）
 
 - 删除 `runDesktop`（415 行）+ `persistPreferences` + `close_guard.go`（无窗口后死代码）+ `update_command.go`（命令面板注册，只服务 UI）。
@@ -99,12 +116,12 @@
 
 ## 4. 步骤 S4：清掉"后端→UI 层"的最后一根依赖（**必须在删 uikit 之前**）
 
-- [ ] **S4.1** `internal/modules/approvals/approvals.go:361,373,393` 的 `uikit.Language(locale)`：把该 5 行 helper 移到 `internal/contracts`（`Language(locale string) string`，纯字符串判断 "en"/其余）。
+- [x] **S4.1** `internal/modules/approvals/approvals.go:361,373,393` 的 `uikit.Language(locale)`：把该 5 行 helper 移到 `internal/contracts`（`Language(locale string) string`，纯字符串判断 "en"/其余）。
   - 为什么进 contracts：它是纯本地化工具，被后端模块使用；**不要**为它新建包。
   - 验证：`go build ./internal/modules/approvals`；`grep -rn "uikit" internal/modules` 为空。
-- [ ] **S4.2** `internal/modules/hosttools/{bridges_test.go,goal_dsh_test.go}` 的 `internal/uiroot` import：改成 fake 或直接构造（这两个是测试，`go test ./internal/modules/hosttools` 必须仍绿）。
+- [x] **S4.2** `internal/modules/hosttools/{bridges_test.go,goal_dsh_test.go}` 的 `internal/uiroot` import：改成 fake 或直接构造（这两个是测试，`go test ./internal/modules/hosttools` 必须仍绿）。
   - 验证：`go test ./internal/modules/hosttools -count=1`。
-- [ ] **S4.3** 提交 `S4pre: approvals localizes without the UI layer`。**此时 `internal/ui*` 仍然编译通过，随时可退回。**
+- [x] **S4.3** 提交 `S4pre: approvals localizes without the UI layer`。**此时 `internal/ui*` 仍然编译通过，随时可退回。**
 
 ## 5. 步骤 S5：删除（一次性，一个大提交）
 

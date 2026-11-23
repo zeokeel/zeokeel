@@ -191,6 +191,19 @@ type LocaleService interface {
 	T(key string) string
 }
 
+// Language reports the effective language code of a locale service, defaulting
+// to "zh" when none is provided ("zh" when nil).
+//
+// It lives here rather than in a UI package because backend modules localize
+// their own notification copy (the approvals module's waiting/timeout texts) and
+// must not depend on the retired native UI layer.
+func Language(locale LocaleService) string {
+	if locale == nil {
+		return "zh"
+	}
+	return locale.Language()
+}
+
 // SettingsService is the host settings store (file-backed in the process host).
 type SettingsService interface {
 	Get(key, def string) string

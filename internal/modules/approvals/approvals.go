@@ -49,7 +49,6 @@ import (
 	"github.com/zeokeel/zeokeel-rig/gate"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
-	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 const (
@@ -358,7 +357,7 @@ func approvalDecisionToRig(decision contracts.ApprovalDecision) (rig.Decision, b
 // auto-deny notification (the waiting notice's sibling): it says the unattended
 // request was denied because nobody answered within the configured window.
 func (s *service) approvalTimeoutText(request contracts.ApprovalRequest) string {
-	english := uikit.Language(s.locale) == "en"
+	english := contracts.Language(s.locale) == "en"
 	name := strings.TrimSpace(request.Tool)
 	if english {
 		return "Approval timed out and was auto-denied: " + name + " (automation)"
@@ -370,7 +369,7 @@ func (s *service) approvalTimeoutText(request contracts.ApprovalRequest) string 
 // The payload is the stable tool id, localised at render time by the toast
 // overlay; a background origin rides the translatable affix suffix.
 func (s *service) approvalWaitingText(request contracts.ApprovalRequest) string {
-	english := uikit.Language(s.locale) == "en"
+	english := contracts.Language(s.locale) == "en"
 	text := "审批等待："
 	if english {
 		text = "Approval waiting: "
@@ -390,7 +389,7 @@ func (s *service) approvalWaitingText(request contracts.ApprovalRequest) string 
 // "subagent"). The active human turn needs no label, and an unknown origin is
 // omitted rather than leaking a raw origin id into visible copy.
 func approvalSourceLabel(locale contracts.LocaleService, source string) string {
-	english := uikit.Language(locale) == "en"
+	english := contracts.Language(locale) == "en"
 	switch strings.ToLower(strings.TrimSpace(source)) {
 	case "", "user":
 		return ""
