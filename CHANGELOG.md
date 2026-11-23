@@ -6,6 +6,15 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.60] - 2026-11-23
+
+### Changed
+
+- **收敛为单默认工作区**：启动自动使用 `<dataDir>/workspace`（不存在则创建），不再显示工作区选择页；删除工作区 rail、切换/管理对话框、颜色 UI 与多工作区前端。
+- 侧栏顶部保留一行只读「工作文件夹 / 当前文件夹」，平铺显示该工作区会话；其它已注册工作区保留在磁盘但 UI 不再暴露。
+- 设置页新增「工作文件夹」行，可查看当前路径并“更改…”文件夹；切换后触发 MCP 重载。
+- 保留后端 workspace registry 与按工作区隔离的记忆/技能/连接器数据。
+
 ## [0.2.59] - 2026-11-23
 
 ### Changed

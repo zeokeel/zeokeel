@@ -13,15 +13,17 @@
 // # Single-workspace sidebar
 //
 // The product opens one workspace folder at a time (WORKSPACE-UX, AGENT-SURFACES
-// S12). With the workspace backend (contracts.KeyWorkspace) the sidebar header
-// names the open folder and its chevron opens the switch/manage dialog; the
-// session list below is one native ui.List of THAT folder's conversations (rows
-// keyed by session ID, named by their title, the choice follows the active
-// session, Enter opens the chosen row and a single click opens the row from the
-// row content). Every row's ⋯ action and its right-click share one menu. The
-// old workspace tree, its groups, its indentation and its per-group new-chat
-// buttons are gone; the registry still keeps every folder and the switch dialog
-// lists/manages them (open, rename, delete, pick another).
+// S12). With the workspace backend (contracts.KeyWorkspace) the sidebar shows
+// one read-only line naming the open folder ("工作文件夹 / <name>", the folder's
+// root as its tooltip); the line has no chevron and opens no dialog. The session
+// list below is one native ui.List of THAT folder's conversations (rows keyed by
+// session ID, named by their title, the choice follows the active session, Enter
+// opens the chosen row and a single click opens the row from the row content).
+// Every row's ⋯ action and its right-click share one menu. The old workspace
+// tree, its groups, its indentation and its per-group new-chat buttons are gone;
+// the registry still keeps every folder, but the chrome only displays the open
+// one — registration and switching belong to the host and the settings surface,
+// not to this module.
 //
 // The chosen row is the quiet persistent selection of the design system
 // (DESIGN §5.2): the BgSelected tint plus a 2 DIP accent stripe on the left,
@@ -43,9 +45,7 @@
 // The product has exactly one view: sessions are ordered by UpdatedAt with
 // pinned rows first; there is no view menu and no persisted sort/group setting.
 // A host without a workspace backend keeps the same flat list of every session
-// (the "会话" section) as a graceful fallback. Choosing another folder runs the
-// native directory picker directly (the backend derives the name from the
-// folder), so there is no naming dialog.
+// (the "会话" section) as a graceful fallback.
 //
 // # Session operations
 //
@@ -76,7 +76,6 @@ package sidebar
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -94,7 +93,6 @@ import (
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/lib/mcpreload"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
-	"github.com/zeokeel/zeokeel/internal/lib/workspacerecent"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -124,15 +122,13 @@ type paneState struct {
 	// a deliberate second click still starts a second session.
 	lastNewChat time.Time
 
-	// sessionMenuFocus holds one focus handle per row ⋯ button (session rows and
-	// workspace group rows), so a confirmation the menu opened can give the
-	// keyboard back to that button when it closes (A4 focus-return).
+	// sessionMenuFocus holds one focus handle per session row ⋯ button, so a
+	// confirmation the menu opened can give the keyboard back to that button
+	// when it closes (A4 focus-return).
 	sessionMenuFocus map[string]*ui.Handle
 	// deleteTrigger is the ⋯ button that opened the pending session delete
-	// confirmation; workspaceMenuTrigger is the group row's, for the workspace
-	// delete.
-	deleteTrigger        *ui.Handle
-	workspaceMenuTrigger *ui.Handle
+	// confirmation.
+	deleteTrigger *ui.Handle
 	// sessionListFocus is the handle of the session list, the element a closed
 	// dialog gives the keyboard back to.
 	sessionListFocus *ui.Handle
@@ -165,32 +161,6 @@ type paneState struct {
 	sessionRow    int
 	sessionActive string
 
-	// Workspace switch dialog state: the native List's choice (one row per
-	// recent workspace), the dialog's open flag and the last failure. The rows
-	// are rebuilt every frame from the registry, so a rename or a deletion shows
-	// up at once; the List's Key keeps the choice on its workspace ID.
-	switchOpen    bool
-	switchList    ui.ListState
-	switchRow     int
-	switchWasOpen bool
-	switchFocus   bool
-	switchErr     string
-
-	// Pending delete confirmation of one workspace opened from its row menu,
-	// and the last failure of one of those menu actions.
-	workspaceDeleteOpen bool
-	workspaceDeleteID   string
-	workspaceDeleteName string
-	workspaceDeleteErr  string
-
-	// Pending rename of one workspace opened from its row menu: the name draft
-	// the dialog input holds and its inline error. The menu entry exists only
-	// when the backend implements contracts.WorkspaceRenamer.
-	workspaceRenameOpen  bool
-	workspaceRenameID    string
-	workspaceRenameDraft string
-	workspaceRenameErr   string
-
 	// screens lists the registered screens so the sidebar can offer a
 	// generic navigation item for every module screen it does not own (the
 	// session list is the sidebar's own screen). Home is no longer a sidebar
@@ -218,21 +188,13 @@ type paneState struct {
 	searchSel  int
 
 	// notifier is the optional host toast bridge: archiving a session reports
-	// success there (with Undo when the host supports action toasts), and the
-	// workspace add/report feedback prefers it over the header's status rows.
+	// success there (with Undo when the host supports action toasts).
 	notifier contracts.Notifier
 
 	renameOpen   bool
 	renameTarget string
 	renameDraft  string
 	renameErr    string
-
-	// Workspace-picker feedback: the last failure and the last quiet success
-	// status (only used when the host has no notifier: the picker flow has no
-	// naming dialog, one native folder chooser runs the whole action). Shown
-	// under the sidebar header and inside the switch dialog.
-	addWorkspaceErr    string
-	addWorkspaceStatus string
 
 	deleteOpen   bool
 	deleteTarget string
@@ -288,14 +250,6 @@ func (state *paneState) sessionListHandle() *ui.Handle {
 	return state.sessionListFocus
 }
 
-// groupMenuHandle is sessionMenuHandle for a workspace group row's ⋯ button,
-// and remembers it as the trigger of that group's delete confirmation.
-func (state *paneState) groupMenuHandle(key string) *ui.Handle {
-	handle := state.sessionMenuHandle("workspace/" + key)
-	state.workspaceMenuTrigger = handle
-	return handle
-}
-
 // claimNewChat reports whether this press may create a session: it is the first
 // press inside the double-click window. See paneState.lastNewChat.
 func (state *paneState) claimNewChat() bool {
@@ -347,7 +301,6 @@ func Module() *module.Descriptor[Config] {
 		state := &paneState{
 			ctx:              ctx,
 			sessionRow:       -1,
-			switchRow:        -1,
 			searchSel:        -1,
 			cfgNewChatLabel:  strings.TrimSpace(cfg.NewChatLabel),
 			cfgSettingsLabel: strings.TrimSpace(cfg.SettingsLabel),
@@ -385,14 +338,6 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 
-		workspaceRail := contracts.SlotItem{
-			Slot:  contracts.SlotWorkspaceRail,
-			ID:    "sidebar.workspace.rail",
-			Order: 10,
-			Build: func(c *ui.Context) {
-				buildWorkspaceRail(c, design.Of(c), runtime, state)
-			},
-		}
 		primary := contracts.SlotItem{
 			Slot:  contracts.SlotSidebarPrimary,
 			ID:    "sidebar.primary.new-chat",
@@ -425,35 +370,7 @@ func Module() *module.Descriptor[Config] {
 				buildRenameDialog(c, design.Of(c), renamer, runtime, state)
 			},
 		}
-		workspaceSwitchDialog := contracts.SlotItem{
-			Slot:  contracts.SlotOverlayDialogs,
-			ID:    "sidebar.workspace.switch.dialog",
-			Order: 22,
-			Build: func(c *ui.Context) {
-				workspace, _ := state.ctx.Get(contracts.KeyWorkspace)
-				buildWorkspaceSwitchDialog(c, design.Of(c), workspace, chat, runtime, state)
-			},
-		}
-		workspaceDialog := contracts.SlotItem{
-			Slot:  contracts.SlotOverlayDialogs,
-			ID:    "sidebar.workspace.dialog",
-			Order: 30,
-			Build: func(c *ui.Context) {
-				workspace, _ := state.ctx.Get(contracts.KeyWorkspace)
-				buildWorkspaceDeleteDialog(c, workspace, runtime, state)
-			},
-		}
-		workspaceRenameDialog := contracts.SlotItem{
-			Slot:  contracts.SlotOverlayDialogs,
-			ID:    "sidebar.workspace.rename.dialog",
-			Order: 25,
-			Build: func(c *ui.Context) {
-				workspace, _ := state.ctx.Get(contracts.KeyWorkspace)
-				buildWorkspaceRenameDialog(c, design.Of(c), workspace, runtime, state)
-			},
-		}
-
-		for _, item := range []contracts.SlotItem{workspaceRail, primary, navSlot, footer, renameDialog, workspaceSwitchDialog, workspaceRenameDialog, workspaceDialog} {
+		for _, item := range []contracts.SlotItem{primary, navSlot, footer, renameDialog} {
 			if err := own(ctx, func() (func(), error) { return runtime.RegisterSlotItem(item) }); err != nil {
 				return err
 			}
@@ -476,8 +393,8 @@ func Module() *module.Descriptor[Config] {
 // button beside a selected row would be a second loud accent block on one
 // screen (DESIGN §5.2 accent budget). The row keeps its button role and label,
 // so Enter and Space still activate it and assistive technology still names it.
-// Creating a session in the current workspace also unfolds that workspace's
-// group, so the fresh row is visible.
+// The new session binds to the open folder on the agent side; the sidebar itself
+// never switches folders.
 func buildPrimary(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState) {
 	label := state.newChatLabel()
@@ -525,25 +442,16 @@ func buildPrimary(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 }
 
 // buildSessionList renders the sidebar's navigation column in the product's one
-// view: the current folder's header ("工作文件夹" + name + switch chevron), the
-// search field, the flat conversation list of that folder and the message
-// search below it. The workspace tree is gone (WORKSPACE-UX): the multi-folder
-// registry still exists in the backend, but the chrome shows one folder at a
-// time and the switch dialog is the only way to change it. A host without the
-// workspace backend keeps the plain "会话" list it always had.
+// view: the read-only current folder line ("工作文件夹 / <name>"), the search
+// field, the flat conversation list of that folder and the message search below
+// it. The workspace tree and the switch/manage dialog are gone (WORKSPACE-UX):
+// the multi-folder registry still exists in the backend, but the chrome shows
+// the one open folder and nothing else. A host without the workspace backend
+// keeps the plain "会话" list it always had.
 func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState, title string) {
 	ui.Column(c).FillWidth().Gap(design.Space1).Padding(design.Space2, design.Space0, design.Space0, design.Space0).
 		Children(func() {
-			if state.addWorkspaceStatus != "" {
-				uikit.StatusBadge(c, t, uikit.StatusSuccess, state.addWorkspaceStatus)
-			}
-			if state.addWorkspaceErr != "" {
-				buildSidebarError(c, t, state.addWorkspaceErr)
-			}
-			if state.workspaceDeleteErr != "" {
-				buildSidebarError(c, t, state.workspaceDeleteErr)
-			}
 			// Generic module-screen destinations: every registered screen the
 			// sidebar does not own itself (the session list is its own screen, and
 			// the home screen is intentionally not a destination) gets one native
@@ -568,9 +476,7 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 				if opened, ok, err := workspace.Current(context.Background()); err == nil && ok {
 					current, hasCurrent = opened, true
 				}
-				if !hasCurrent {
-					uikit.EmptyState(c, state.T("未选择工作文件夹", "No workspace folder selected"))
-				}
+				buildWorkspaceLine(c, t, state, current, hasCurrent)
 			} else {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 					design.Apply(ui.Text(c, title), t.SectionLabel())
@@ -1205,74 +1111,44 @@ func sidebarEmptyLine(c *ui.Context, text string, padTop float32) {
 	})
 }
 
-// switchRecentLimit caps the switch dialog's recent list: the sidebar is one
-// column, so the dialog shows the folders a human actually cycles through and
-// the native picker covers the rest of the registry.
-const switchRecentLimit = 6
-
-// buildWorkspaceHeader is the sidebar's single-workspace header (the approved
-// frame 02-main.png): the folder glyph, the "工作文件夹" label, the open folder's
-// name and the chevron that opens the switch dialog. It replaces the old
-// "工作区" heading + add button + workspace tree: the registry still keeps every
-// folder, but the chrome shows one at a time.
-func buildWorkspaceHeader(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
-	state *paneState, current contracts.Workspace, hasCurrent bool) {
-	name := workspaceName(state, current, hasCurrent)
-	label := state.T("工作文件夹", "Workspace")
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-		ui.Icon(c, icons.Folder()).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelSecondary)
-		ui.Column(c).Grow(1).Shrink(1).MinWidth(design.Space0).Gap(design.Space0).Children(func() {
-			design.Apply(ui.Text(c, label), t.TextMuted(design.TypeXXS)).
-				TextColor(t.LabelTertiary).MaxLines(1)
-			// The name is the row's identity; its tooltip is the folder's root,
-			// so two folders with the same base name stay apart.
-			title := design.Apply(ui.Text(c, name), t.Text(design.TypeXS)).
-				TextColor(t.LabelPrimary).FontWeight(design.WeightMedium).Grow(1).
-				MaxLines(1).Ellipsis("…")
-			if root := strings.TrimSpace(current.Root); root != "" {
-				title = title.Tooltip(root)
-			}
-		})
-		// One switch affordance for the whole header: the chevron opens the
-		// dialog that lists the recent folders and manages them.
-		uikit.IconButton(c, uikit.IconButtonOptions{
-			Key:   "sidebar.workspace.switch",
-			Label: state.T("切换工作文件夹", "Switch workspace folder"),
-			// No Tooltip: the dialog is an Escape-owning surface and a tip would
-			// take the key first (A4-I-01).
-			Icon:     icons.ChevronDown(),
-			Size:     design.IconSizeS,
-			InkColor: t.LabelTertiary,
-			OnClick: func() {
-				state.switchOpen = true
-				state.switchRow = -1
-				state.switchErr = ""
-				state.switchFocus = true
-				runtime.Invalidate()
-			},
-		})
+// buildWorkspaceLine renders the sidebar's single read-only workspace line:
+// "工作文件夹 / <current name>", with the folder's root as the name's tooltip.
+// It carries no chevron and opens no dialog: the product shows one folder, and
+// registration/switching belong to the host and the settings surface. A host
+// whose registry has no open folder (a fresh or just-emptied registry) reads
+// "未选择工作文件夹" instead of the pair.
+func buildWorkspaceLine(c *ui.Context, t *design.Tokens, state *paneState,
+	current contracts.Workspace, hasCurrent bool) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+		Padding(design.Space1, design.Space1).Children(func() {
+		ui.Icon(c, icons.Folder()).Size(design.IconSizeS, design.IconSizeS).
+			TextColor(t.LabelTertiary)
+		if !hasCurrent {
+			design.Apply(ui.Text(c, state.T("未选择工作文件夹", "No workspace folder selected")),
+				t.TextMuted(design.TypeXXS)).TextColor(t.LabelTertiary).
+				Grow(1).MaxLines(1).Ellipsis("…")
+			return
+		}
+		design.Apply(ui.Text(c, state.T("工作文件夹 /", "Workspace folder /")),
+			t.TextMuted(design.TypeXXS)).TextColor(t.LabelTertiary).
+			Shrink(0).MaxLines(1)
+		// The name is the line's identity; its tooltip is the folder's root,
+		// so two folders with the same base name stay apart.
+		name := design.Apply(ui.Text(c, workspaceName(state, current, true)),
+			t.Text(design.TypeXS)).TextColor(t.LabelPrimary).
+			FontWeight(design.WeightMedium).Grow(1).Shrink(1).
+			MinWidth(design.Space0).MaxLines(1).Ellipsis("…")
+		if root := strings.TrimSpace(current.Root); root != "" {
+			name.Tooltip(root)
+		}
 	})
-	// The picker/rename/delete feedback sits under the header: two badges in the
-	// 280px header would squeeze the name to nothing (the old section header's
-	// rule). The success notice wears the shared StatusBadge anatomy (AP-21).
-	if state.addWorkspaceStatus != "" {
-		ui.Row(c).FillWidth().Children(func() {
-			uikit.StatusBadge(c, t, uikit.StatusSuccess, state.addWorkspaceStatus)
-		})
-	}
-	if state.addWorkspaceErr != "" {
-		buildSidebarError(c, t, state.addWorkspaceErr)
-	}
-	if state.workspaceDeleteErr != "" {
-		buildSidebarError(c, t, state.workspaceDeleteErr)
-	}
 }
 
 // workspaceName is a workspace's visible name: the registered name, else the
-// folder's base name, else the "no folder open" copy.
+// folder's base name, else the "untitled" copy.
 func workspaceName(state *paneState, workspace contracts.Workspace, has bool) string {
 	if !has {
-		return state.T("未选择工作文件夹", "No workspace folder")
+		return state.T("未选择工作文件夹", "No workspace folder selected")
 	}
 	if name := strings.TrimSpace(workspace.Name); name != "" {
 		return name
@@ -1281,298 +1157,6 @@ func workspaceName(state *paneState, workspace contracts.Workspace, has bool) st
 		return textutil.FirstNonEmpty(filepath.Base(filepath.Clean(root)), root)
 	}
 	return state.T("未命名工作文件夹", "Untitled workspace")
-}
-
-// workspaceRecents orders the registry by last use for the switch dialog: the
-// product's one recency rule (newest conversation per folder, the folder's
-// creation time as the fallback), shared with the startup gate.
-func workspaceRecents(workspace contracts.WorkspaceService, chat contracts.ChatService) []workspacerecent.Recent {
-	workspaces, err := workspace.List(context.Background())
-	if err != nil {
-		return nil
-	}
-	currentID := ""
-	if current, ok, err := workspace.Current(context.Background()); err == nil && ok {
-		currentID = strings.TrimSpace(current.ID)
-	}
-	var sessions []contracts.ChatSessionInfo
-	if chat != nil {
-		sessions = chat.Sessions()
-	}
-	return workspacerecent.Build(workspaces, sessions, currentID, switchRecentLimit)
-}
-
-// buildWorkspaceSwitchDialog is the sidebar's switch/manage dialog (the
-// approved frame 03-switch.png): the recent folders with the open one checked,
-// the folder picker, "打开" for the chosen row and "取消", plus the row menu
-// that reuses the existing workspace rename and delete dialogs.
-//
-// It is a window-level overlay slot item, so it renders above the shell and
-// Escape closes it through the native Modal. Rename and delete close it first:
-// they are dialogs of their own, and stacking two modals would trap the
-// keyboard in an ambiguous order.
-func buildWorkspaceSwitchDialog(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
-	chat contracts.ChatService, runtime contracts.UIRuntime, state *paneState) {
-	if workspace == nil {
-		return
-	}
-	if !state.switchOpen {
-		// The close bookkeeping runs on the frame after the dialog closed (a
-		// native Modal flips its open pointer while dismissing itself).
-		if state.switchWasOpen {
-			state.switchWasOpen = false
-			state.switchRow = -1
-			state.switchErr = ""
-			runtime.Invalidate()
-		}
-		return
-	}
-	state.switchWasOpen = true
-	recent := workspaceRecents(workspace, chat)
-	if state.switchRow >= len(recent) {
-		state.switchRow = -1
-	}
-	if state.switchRow < 0 {
-		for index, entry := range recent {
-			if entry.Current {
-				state.switchRow = index
-				break
-			}
-		}
-	}
-	closeDialog := func() {
-		state.switchOpen = false
-		state.switchErr = ""
-		runtime.Invalidate()
-	}
-	open := func(id string) {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			return
-		}
-		if _, err := workspace.Open(context.Background(), id); err != nil {
-			state.switchErr = state.T("打开工作文件夹失败：", "Could not open the folder: ") + err.Error()
-			runtime.Invalidate()
-			return
-		}
-		state.switchErr = ""
-		state.addWorkspaceStatus = ""
-		// MCP connectors are workspace-scoped: rebuild them for the new folder.
-		mcpreload.Trigger(state.ctx)
-		closeDialog()
-	}
-
-	ui.Modal(c, &state.switchOpen, func() {
-		design.Apply(ui.Column(c), t.Gap(design.Space4)).
-			Width(design.DialogWidthCompact).MaxWidthPercent(86).Children(func() {
-			uikit.DialogHeader(c, uikit.DialogHeaderOptions{
-				Key:   "sidebar.workspace.switch.header",
-				Title: state.T("工作文件夹", "Workspace folder"),
-				Subtitle: state.T("切换后侧栏、文件、记忆和自动化都跟着这个文件夹。",
-					"After switching, the sidebar, files, memory and automation follow this folder."),
-				OnClose: closeDialog,
-			})
-			ui.Row(c).FillWidth().Gap(design.Space2).Children(func() {
-				chooseLabel := state.T("选择其他文件夹…", "Choose another folder…")
-				choose := ui.Button(c, chooseLabel)
-				design.Apply(choose, t.SecondaryButton()).Grow(1)
-				if choose.Clicked() {
-					// The picker flow registers the folder and makes it current;
-					// a success dismisses the dialog (the next frame's header
-					// reads the new folder).
-					if _, ok := addWorkspace(state, workspace, runtime); ok {
-						closeDialog()
-					}
-				}
-				openButton := ui.PrimaryButton(c, state.T("打开", "Open"))
-				design.Apply(openButton, t.PrimaryButton())
-				if openButton.Clicked() && state.switchRow >= 0 && state.switchRow < len(recent) {
-					open(recent[state.switchRow].Workspace.ID)
-				}
-				cancel := ui.Button(c, state.T("取消", "Cancel"))
-				design.Apply(cancel, t.SecondaryButton())
-				if cancel.Clicked() {
-					closeDialog()
-				}
-			})
-			if colorer, ok := workspace.(contracts.WorkspaceColorer); ok && state.switchRow >= 0 && state.switchRow < len(recent) {
-				currentColor := workspaceColorLabel(state, recent[state.switchRow].Workspace.Color)
-				selector := ui.Select(c.Key("sidebar.workspace.color"), &currentColor, workspaceColorLabels(state)).
-					Label(state.T("颜色", "Color"))
-				if selector.Changed() {
-					if _, err := colorer.SetWorkspaceColor(context.Background(), recent[state.switchRow].Workspace.ID, workspaceColorValue(currentColor)); err != nil {
-						state.switchErr = state.T("设置颜色失败：", "Could not set the color: ") + err.Error()
-					} else {
-						state.switchErr = ""
-					}
-					runtime.Invalidate()
-				}
-			}
-			design.Apply(ui.Column(c), t.Gap(design.Space1)).FillWidth().Children(func() {
-				design.Apply(ui.Text(c, state.T("最近使用", "Recently used")), t.TextMuted(design.TypeXXS)).
-					TextColor(t.LabelTertiary)
-				if len(recent) == 0 {
-					sidebarEmptyLine(c, state.T("还没有工作文件夹", "No workspace folders yet"), design.Space1)
-				} else {
-					buildWorkspaceSwitchList(c, t, workspace, runtime, state, recent, open)
-				}
-			})
-			if state.switchErr != "" {
-				buildSidebarError(c, t, state.switchErr)
-			}
-			if state.addWorkspaceErr != "" {
-				buildSidebarError(c, t, state.addWorkspaceErr)
-			}
-			if state.workspaceDeleteErr != "" {
-				buildSidebarError(c, t, state.workspaceDeleteErr)
-			}
-		})
-	})
-}
-
-// buildWorkspaceSwitchList renders the recent folders as one native List: the
-// choice follows the open folder when the dialog opens, Enter opens the chosen
-// row, and each row carries the folder name, its root, how long ago it was used
-// and the row menu (rename/delete).
-func buildWorkspaceSwitchList(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
-	runtime contracts.UIRuntime, state *paneState, recent []workspacerecent.Recent,
-	open func(string)) {
-	now := time.Now()
-	state.switchList.Key = func(row int) any { return recent[row].Workspace.ID }
-	state.switchList.Label = func(row int) string {
-		return workspaceSwitchRowLabel(state, recent[row], now)
-	}
-	state.switchList.Selected = &state.switchRow
-	var list ui.Element
-	// Same quiet selection tint as the session list: the native chosen-row fill
-	// is BgSelected, not a saturated accent block (DESIGN §5.2).
-	ui.Themed(c, sessionSelectionTheme(t)).Background(ui.Transparent).FillWidth().Children(func() {
-		list = ui.List(c, &state.switchList, len(recent)).Rows(func(row ui.ListRow) {
-			buildWorkspaceSwitchRow(row.Context, t, workspace, runtime, state, recent[row.Index],
-				row.Index == state.switchRow)
-		})
-	})
-	if state.switchFocus {
-		// The dialog opened: the list takes the keyboard, so Up/Down choose and
-		// Enter opens (the dialog's one default action).
-		state.switchFocus = false
-		list.Focus(ui.FocusOptions{PreventScroll: true})
-	}
-	if list.Submitted() && state.switchRow >= 0 && state.switchRow < len(recent) {
-		open(recent[state.switchRow].Workspace.ID)
-	}
-}
-
-// buildWorkspaceSwitchRow renders one recent folder: the glyph, the name with
-// its root, the age (the open folder says "当前") and the trailing check. A
-// single click chooses the row (the native List selection); Enter, a double
-// click or the dialog's 打开 button opens it. The hover/focus-revealed ⋯ opens
-// the row menu that reuses the existing workspace rename and delete dialogs.
-func buildWorkspaceSwitchRow(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
-	runtime contracts.UIRuntime, state *paneState, entry workspacerecent.Recent,
-	selected bool) {
-	ws := entry.Workspace
-	name := workspaceName(state, ws, true)
-	label := workspaceSwitchRowLabel(state, entry, time.Now())
-	row := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
-		Padding(design.Space2, design.Space2).Radius(design.RadiusSM).Label(label)
-	if selected {
-		row = row.Background(t.BgSelected)
-	}
-	row.Children(func() {
-		ui.Icon(c, icons.Folder()).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelSecondary)
-		design.Apply(ui.Column(c), t.Gap(design.Space0)).Grow(1).MinWidth(design.Space0).Children(func() {
-			design.Apply(ui.Text(c, name), t.Font(design.TypeXS)).TextColor(t.LabelPrimary).
-				MaxLines(1).Ellipsis("…")
-			root := strings.TrimSpace(ws.Root)
-			if root == "" {
-				root = name
-			}
-			design.Apply(ui.Text(c, root), t.TextMuted(design.TypeXXS)).MaxLines(1).Ellipsis("…")
-		})
-		design.Apply(ui.Text(c, workspaceSwitchAge(state, entry, time.Now())), t.TextMuted(design.TypeXXS)).
-			Shrink(0)
-		if selected {
-			ui.Icon(c, icons.Check()).Size(design.IconSizeS, design.IconSizeS).TextColor(t.Accent)
-		}
-		// The row menu stays out of the way until the row is hovered, focused or
-		// chosen (the session row's pattern); it is built always so assistive
-		// technology describes it.
-		revealed := selected || row.Hovered() || row.FocusWithin()
-		more := uikit.IconButton(c, uikit.IconButtonOptions{
-			Key:      "sidebar.workspace.menu/" + ws.ID,
-			Label:    state.T("工作区操作：", "Workspace actions: ") + name,
-			Icon:     icons.More(),
-			Size:     design.IconSizeS,
-			InkColor: t.LabelTertiary,
-		}).Bind(state.groupMenuHandle(ws.ID))
-		if !revealed {
-			more = more.Opacity(0).IgnoreInput(true)
-		}
-		more.PopoverMenuButton(workspaceRowMenu(state, runtime, workspace, ws, name),
-			ui.PopoverMenuButtonOptions{At: ui.AnchorBottomEnd, Self: ui.AnchorTopEnd})
-	})
-	// The row's ⋯ and its right-click share one menu, as every row action in the
-	// product does.
-	row.ContextMenu(workspaceRowMenu(state, runtime, workspace, ws, name))
-}
-
-// workspaceSwitchRowLabel is a row's accessible name: folder, root and age, so
-// the check-colored choice is never color-only.
-func workspaceSwitchRowLabel(state *paneState, entry workspacerecent.Recent, now time.Time) string {
-	name := workspaceName(state, entry.Workspace, true)
-	parts := []string{name}
-	if root := strings.TrimSpace(entry.Workspace.Root); root != "" && root != name {
-		parts = append(parts, root)
-	}
-	if age := workspaceSwitchAge(state, entry, now); age != "" {
-		parts = append(parts, age)
-	}
-	return strings.Join(parts, "，")
-}
-
-// workspaceSwitchAge is a recent row's age text: "当前" for the open folder,
-// else the relative day ("今天/昨天/3 天前").
-func workspaceSwitchAge(state *paneState, entry workspacerecent.Recent, now time.Time) string {
-	if entry.Current {
-		return state.T("当前", "Current")
-	}
-	return workspacerecent.AgeLabel(state.T, entry.Activity, now)
-}
-
-// workspaceRowMenu is the switch row's one menu: rename (only when the backend
-// implements the optional contracts.WorkspaceRenamer) and the destructive
-// delete. Both reuse the existing workspace dialogs, so the confirmations keep
-// their danger defaults; the switch dialog closes first (one modal at a time).
-func workspaceRowMenu(state *paneState, runtime contracts.UIRuntime,
-	workspace contracts.WorkspaceService, ws contracts.Workspace, name string) func(m *ui.Menu) {
-	renamer, _ := workspace.(contracts.WorkspaceRenamer)
-	return func(m *ui.Menu) {
-		if renamer != nil {
-			if m.Item(state.T("重命名工作区", "Rename workspace")).ID("rename").Chosen() {
-				state.switchOpen = false
-				state.workspaceRenameOpen = true
-				state.workspaceRenameID = ws.ID
-				state.workspaceRenameDraft = textutil.FirstNonEmpty(strings.TrimSpace(ws.Name), name)
-				state.workspaceRenameErr = ""
-				runtime.Invalidate()
-			}
-		}
-		m.Separator()
-		remove := m.Item(state.T("删除工作区", "Delete workspace")).ID("delete").Danger()
-		if root := strings.TrimSpace(ws.Root); root != "" {
-			remove.Subtitle(root)
-		}
-		if remove.Chosen() {
-			state.switchOpen = false
-			state.workspaceDeleteOpen = true
-			state.workspaceDeleteID = ws.ID
-			state.workspaceDeleteName = name
-			state.workspaceDeleteErr = ""
-			state.workspaceMenuTrigger = state.groupMenuHandle(ws.ID)
-			runtime.Invalidate()
-		}
-	}
 }
 
 // sessionLeadingGlyph draws a conversation's leading glyph: the run's phase
@@ -1659,8 +1243,7 @@ func buildFlatSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatSe
 	}
 }
 
-// sessionSelectionTheme is the local theme the session list and the switch
-// dialog's folder list build with:
+// sessionSelectionTheme is the local theme the session list builds with:
 // mygo paints a chosen row with Theme.Accent and Theme.AccentText, so a theme
 // whose accent is the 12% selection tint turns the native chosen fill into the
 // quiet persistent selection (BgSelected fill, LabelPrimary text) instead of a
@@ -1766,8 +1349,7 @@ func filterSessions(sessions []contracts.ChatSessionInfo, query string, state *p
 
 // pinnedFirst moves pinned sessions to the front while keeping the existing
 // order inside both partitions. Sessions arrive newest-updated first, so this
-// only reorders pinned vs unpinned; workspace groups and search results inherit
-// the same order.
+// only reorders pinned vs unpinned; search results inherit the same order.
 func pinnedFirst(sessions []contracts.ChatSessionInfo) []contracts.ChatSessionInfo {
 	if len(sessions) < 2 {
 		return sessions
@@ -2313,84 +1895,6 @@ func buildRenameDialog(c *ui.Context, t *design.Tokens, renamer contracts.Sessio
 	})
 }
 
-// buildWorkspaceRenameDialog renames a registered workspace from its row menu:
-// one native name input (focused as the dialog opens, Enter saves, Escape or
-// Cancel dismisses), the same explicit save/cancel footer the session rename
-// uses, and an inline localized error. A successful rename keeps the
-// workspace's ID, root, creation time and current selection; the header and the
-// registry again on the next frame, so the row and the current workspace title
-// show the new name.
-func buildWorkspaceRenameDialog(c *ui.Context, t *design.Tokens,
-	workspace contracts.WorkspaceService, runtime contracts.UIRuntime, state *paneState) {
-	if !state.workspaceRenameOpen || workspace == nil {
-		return
-	}
-	renamer, ok := workspace.(contracts.WorkspaceRenamer)
-	if !ok {
-		// The backend lost the optional half (or never had it): no dialog, and
-		// the menu entry could not have been offered.
-		state.workspaceRenameOpen = false
-		return
-	}
-	target := state.workspaceRenameID
-	save := func() {
-		name := strings.TrimSpace(state.workspaceRenameDraft)
-		switch {
-		case name == "":
-			// Local validation keeps the empty name off the backend entirely.
-			state.workspaceRenameErr = state.T("名称不能为空", "Name cannot be empty")
-		case target == "":
-			state.workspaceRenameErr = state.T("工作区不存在", "Workspace not found")
-		default:
-			if _, err := renamer.RenameWorkspace(context.Background(), target, name); err != nil {
-				state.workspaceRenameErr = workspaceRenameErrorText(state, err)
-			} else {
-				state.workspaceRenameOpen = false
-				state.workspaceRenameErr = ""
-				state.addWorkspaceStatus = state.T("已重命名工作区", "Workspace renamed")
-			}
-		}
-		runtime.Invalidate()
-	}
-	ui.Modal(c, &state.workspaceRenameOpen, func() {
-		ui.Column(c).Width(design.DialogWidthXS).Gap(design.Space3).Children(func() {
-			design.Apply(ui.Text(c, state.T("重命名工作区", "Rename workspace")),
-				t.Text(design.TypeM)).FontWeight(design.WeightSemibold)
-			// One line of input, focused as the dialog opens; Enter saves in
-			// place while the input keeps the keyboard.
-			ui.TextInput(c, &state.workspaceRenameDraft).
-				Label(state.T("工作区名称", "Workspace name")).
-				FillWidth().AutoFocus().OnTextKey(uikit.EnterTo(save))
-			if state.workspaceRenameErr != "" {
-				design.Apply(ui.Text(c, state.workspaceRenameErr), t.TextMuted(design.TypeXS)).
-					TextColor(t.DangerText)
-			}
-			uikit.DialogFooter(c, []uikit.DialogAction{
-				{Label: state.T("取消", "Cancel"), OnClick: func() {
-					state.workspaceRenameOpen = false
-					state.workspaceRenameErr = ""
-					runtime.Invalidate()
-				}},
-				{Label: state.T("保存", "Save"), Primary: true, OnClick: save},
-			})
-		})
-	})
-}
-
-// workspaceRenameErrorText localizes the rename errors the backend reports
-// through the contracts sentinels; any other error keeps the backend's own
-// message after the localized prefix.
-func workspaceRenameErrorText(state *paneState, err error) string {
-	switch {
-	case errors.Is(err, contracts.ErrWorkspaceNameEmpty):
-		return state.T("名称不能为空", "Name cannot be empty")
-	case errors.Is(err, contracts.ErrWorkspaceNameTaken):
-		return state.T("已有同名工作区", "A workspace with this name already exists")
-	default:
-		return state.T("重命名工作区失败：", "Could not rename the workspace: ") + err.Error()
-	}
-}
-
 // sessionTitleByID looks a session up and returns its display title.
 func sessionTitleByID(chat contracts.ChatService, sessionID string, state *paneState) string {
 	if session, ok := chat.Session(sessionID); ok {
@@ -2420,47 +1924,4 @@ func own(ctx cordis.Context, register func() (func(), error)) error {
 		return err
 	}
 	return nil
-}
-
-// workspaceColorLabels returns the palette labels for the current language.
-func workspaceColorLabels(state *paneState) []string {
-	return []string{
-		state.T("默认", "Default"),
-		state.T("蓝色", "Blue"),
-		state.T("绿色", "Green"),
-		state.T("黄色", "Amber"),
-		state.T("红色", "Red"),
-	}
-}
-
-// workspaceColorValue maps a palette label back to its stored id.
-func workspaceColorValue(label string) string {
-	switch label {
-	case "蓝色", "Blue":
-		return "blue"
-	case "绿色", "Green":
-		return "green"
-	case "黄色", "Amber":
-		return "amber"
-	case "红色", "Red":
-		return "red"
-	default:
-		return ""
-	}
-}
-
-// workspaceColorLabel maps a stored id to the palette label.
-func workspaceColorLabel(state *paneState, id string) string {
-	switch strings.ToLower(strings.TrimSpace(id)) {
-	case "blue":
-		return state.T("蓝色", "Blue")
-	case "green":
-		return state.T("绿色", "Green")
-	case "amber":
-		return state.T("黄色", "Amber")
-	case "red":
-		return state.T("红色", "Red")
-	default:
-		return state.T("默认", "Default")
-	}
 }

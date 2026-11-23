@@ -160,6 +160,14 @@ func TestHeadlessRun(t *testing.T) {
 	if !strings.Contains(string(data), "headless") {
 		t.Fatalf("headless log = %q, want the product start line", data)
 	}
+	// The headless product opens the host's one default workspace before it
+	// reports ready: the folder exists and the log says which one is open.
+	if _, err := os.Stat(filepath.Join(dataDir, defaultWorkspaceDirName)); err != nil {
+		t.Fatalf("headless default workspace folder: %v", err)
+	}
+	if !strings.Contains(string(data), "opened the default workspace folder") {
+		t.Fatalf("headless log = %q, want the default-workspace line", data)
+	}
 }
 
 // TestProvideServicesSatisfiesDesktopAssembly checks the host's service list

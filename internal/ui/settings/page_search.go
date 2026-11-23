@@ -116,12 +116,15 @@ func modelPageSearchItems(locale contracts.LocaleService) []contracts.SettingsSe
 func behaviorPageKeywords() []string {
 	return []string{"行为", "behavior", "权限", "permission", "审批", "approval", "沙箱", "sandbox",
 		"工作步骤", "steps", "详细", "verbose", "精简", "minimal", "创作", "creative", "模式", "mode",
-		"消息字号", "字号", "字体大小", "text size", "font size", "工作区指令", "agents.md", "instructions"}
+		"消息字号", "字号", "字体大小", "text size", "font size", "工作区指令", "agents.md", "instructions",
+		"工作文件夹", "文件夹", "work folder", "workspace folder", "folder"}
 }
 
 // behaviorPageSearchItems are the behavior page's searchable regions.
 func behaviorPageSearchItems(locale contracts.LocaleService) []contracts.SettingsSearchItem {
 	return []contracts.SettingsSearchItem{
+		{ID: "work-folder", Label: localized(locale, "工作文件夹", "Work folder"), AnchorKey: "behavior.work-folder",
+			Keywords: []string{"工作文件夹", "文件夹", "work folder", "workspace folder", "folder", "更改"}},
 		{ID: "work-details", Label: localized(locale, "工作步骤", "Work details"), AnchorKey: "behavior.work-details",
 			Keywords: []string{"工作步骤", "steps", "详细", "verbose", "精简", "minimal", "折叠", "collapse"}},
 		{ID: "message-size", Label: localized(locale, "消息字号", "Message text size"), AnchorKey: "behavior.message-size",

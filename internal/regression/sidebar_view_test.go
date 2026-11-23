@@ -2,8 +2,8 @@ package regression
 
 // Adversarial audit: the sidebar's fixed single-workspace view. The 视图 popover
 // and its persisted sort/group options are gone, and so is the workspace tree:
-// with a workspace backend the sidebar names the one open folder, lists only its
-// conversations (pinned-first) and offers the switch dialog. A stale stored
+// with a workspace backend the sidebar shows one read-only folder line, lists
+// only its conversations (pinned-first) and offers no switch dialog. A stale stored
 // option cannot bring the name sort, the flat mode or the tree back. Only a host
 // without a workspace backend gets the plain flat list, which still sorts
 // recent-first and pinned-first.
@@ -75,14 +75,18 @@ func TestSidebarViewMenuIsGone(t *testing.T) {
 		{ID: "s1", Title: "Alpha", WorkspaceID: "w1", UpdatedAt: time.Unix(1_700_000_000, 0)},
 	}}
 	h, tester := startSidebarView(t, chat, workspace)
-	requireHasTexts(t, tester, "管理工作文件夹", "添加工作文件夹", "项目一", "Alpha")
+	requireHasTexts(t, tester, "工作文件夹 /", "项目一", "Alpha")
+	requireNoText(t, tester, "管理工作文件夹")
+	requireNoText(t, tester, "添加工作文件夹")
 	for _, gone := range []string{"视图", "排序", "最近活动", "名称", "分组", "按工作区", "平铺"} {
 		requireNoText(t, tester, gone)
 	}
 
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	requireHasTexts(t, tester, "Manage workspace folders", "Add workspace folder", "项目一", "Alpha")
+	requireHasTexts(t, tester, "Workspace folder /", "项目一", "Alpha")
+	requireNoText(t, tester, "Manage workspace folders")
+	requireNoText(t, tester, "Add workspace folder")
 	for _, gone := range []string{"View", "Sort", "Recent activity", "Group", "By workspace", "Flat"} {
 		requireNoText(t, tester, gone)
 	}
@@ -130,39 +134,6 @@ func TestSidebarStaleViewSettingsIgnored(t *testing.T) {
 	if got := h.settings.Get("sidebar.group", ""); got != "flat" {
 		t.Fatalf("a frame overwrote the stale sidebar.group to %q", got)
 	}
-}
-
-// TestSidebarSwitchDialogRecentOrdering covers the recency ordering the old
-// group list owned: the switch dialog sorts folders by their newest visible
-// conversation, a folder with none uses its CreatedAt (so a freshly added folder
-// is on top), and an archived session never counts as activity.
-func TestSidebarSwitchDialogRecentOrdering(t *testing.T) {
-	base := time.Unix(1_700_000_000, 0)
-	workspace := &auditWorkspace{
-		created: []contracts.Workspace{
-			{ID: "w-old", Name: "旧项目", Root: "/work/old", CreatedAt: base.Add(-10 * time.Hour)},
-			{ID: "w-empty", Name: "新建项目", Root: "/work/empty", CreatedAt: base},
-		},
-		currentID: "w-empty",
-	}
-	chat := &sidebarViewChat{fakeChat: newFakeChat(), infos: []contracts.ChatSessionInfo{
-		{ID: "s-old", Title: "旧会话", WorkspaceID: "w-old", UpdatedAt: base.Add(-5 * time.Hour)},
-		// An archived session in 旧项目 is newer, but it is not visible.
-		{ID: "s-archived", Title: "归档会话", WorkspaceID: "w-old", Archived: true, UpdatedAt: base.Add(time.Hour)},
-	}}
-	_, tester := startSidebarView(t, chat, workspace)
-	// The open folder's (empty) conversation list, then the dialog's recents.
-	requireHasText(t, tester, "还没有会话")
-	requireNoText(t, tester, "归档会话")
-	clickSidebar(t, tester, "管理工作文件夹")
-	tester.Frame()
-	tester.Frame()
-	requireHasTexts(t, tester, "新建项目", "旧项目")
-	if order := sidebarOrder(tester, "新建项目", "旧项目"); !(order[0] >= 0 && order[0] < order[1]) {
-		t.Fatalf("recent order = %v; want the empty folder by CreatedAt first; texts = %v",
-			order, tester.Texts())
-	}
-	requireNoText(t, tester, "归档会话")
 }
 
 // TestSidebarNoWorkspaceFlatRecentPinned covers the only fallback: without a

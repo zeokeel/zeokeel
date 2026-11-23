@@ -320,6 +320,10 @@ func runHeadless(ctx context.Context, opts Options, out io.Writer) error {
 		return fmt.Errorf("%s: load product %q: %w", appName, opts.Product, err)
 	}
 	moduleLister.set(moduleInfos(loadedModulesFromInstances(loader.Instances())))
+	// The headless product has no window, but it serves the same agent tools:
+	// open the single default workspace before reporting ready, so a run
+	// without a current folder does not work against nothing.
+	ensureDefaultWorkspace(root, opts.DataDir, logger)
 	logger.Printf("%s: %s product %q loaded", appName, opts.versionString(), opts.Product)
 	fmt.Fprintf(out, "%s\n", opts.versionString())
 	fmt.Fprintf(out, "product: %s (no window)\n", opts.Product)
@@ -434,11 +438,10 @@ func runDesktop(opts Options) error {
 	// services during activation. It owns the frame and every contribution
 	// registry; the host only creates the window around its single view.
 	uiRoot := uiroot.New(uiroot.Config{
-		AppName:             appName,
-		Dark:                settings.Get(settingDark, "false") == "true",
-		Language:            settings.Get(settingLanguage, "zh"),
-		Settings:            settings,
-		EnableWorkspaceGate: true,
+		AppName:  appName,
+		Dark:     settings.Get(settingDark, "false") == "true",
+		Language: settings.Get(settingLanguage, "zh"),
+		Settings: settings,
 		// mygo localizes its own controls, menus and accessibility text
 		// separately; mirror a runtime language switch into the framework so
 		// those strings follow the product language (fix round SH-06).
@@ -670,6 +673,10 @@ func runDesktop(opts Options) error {
 		}
 		loader = loaded
 		moduleLister.set(moduleInfos(loadedModulesFromInstances(loaded.Instances())))
+		// One default workspace, once, after the assembly is active and before
+		// the first frame: a launch without a current folder gets
+		// <dataDir>/workspace opened here; an existing current folder is kept.
+		ensureDefaultWorkspace(root, opts.DataDir, logger)
 		if err := uiRoot.Validate(); err != nil {
 			startupErr = fmt.Errorf("%s: %w", appName, err)
 			logger.Printf("%v", startupErr)

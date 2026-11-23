@@ -536,11 +536,11 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 等待回复 `Running && Waiting` | `icons.Clock` | `等待回复`（`TypeXXXS` 微标签） | 已发送、模型尚无任何输出 |
 | 运行中 `Running && !Waiting` | `ui.Spinner` | `运行中`（`TypeXXXS`） | 已有文本/推理/工具事件 |
 | 后台完成未读 `Unread` | 会话 glyph | 8 DIP `Accent` 圆点 | 标题 `WeightMedium`；行无障碍名带「未读回复」 |
-| 侧栏「工作文件夹」头 | 文件夹图标 + `工作文件夹` 微标签 | 当前文件夹名 + 2px 无关的 chevron（`切换工作文件夹`） | 分组树已移除；会话行承担状态，头部只切换文件夹 |
+| 侧栏「工作文件夹」行 | 文件夹图标 + `工作文件夹 /` 微标签 | 当前文件夹名（`TypeXS`、500、根路径做 tooltip） | 只读一行：无 chevron、无切换/管理对话框；切换走设置页，注册归宿主 |
 
 状态词是行内微标签，不是 Badge（避免「中性底 + 状态字」拼法，AP-21）；未读点不是唯一信息载体，`ListState.Label`/行无障碍名同时给出文字。当前会话行不再常显 ⋯（hover/focus 或右键显示），把宽度留给标题与状态。
 
-**会话行的前置位（2026-11-14 DSH 对齐；2026-11-23 单工作区收口）**：侧栏会话行统一为 `[选中 2px 左条][一个 16px leading slot][gap][标题][状态]`，leading slot 里放会话的运行 glyph（Clock/Spinner/Message），行尾是状态词/未读点与 hover 显现的 ⋯。工作区树与层级缩进随单工作区模式删除（AGENT-SURFACES S12）：文件夹只出现在头部与启动门/切换对话框里，所以会话没有嵌套层级。
+**会话行的前置位（2026-11-14 DSH 对齐；2026-11-23 单工作区收口）**：侧栏会话行统一为 `[选中 2px 左条][一个 16px leading slot][gap][标题][状态]`，leading slot 里放会话的运行 glyph（Clock/Spinner/Message），行尾是状态词/未读点与 hover 显现的 ⋯。工作区树与层级缩进随单工作区模式删除（AGENT-SURFACES S12）：文件夹只出现在侧栏那条只读的「工作文件夹 / <名称>」行里（切换走设置「工作文件夹」行），所以会话没有嵌套层级。
 
 ### 5.3 字号（type scale，`design.TypeRole`）
 

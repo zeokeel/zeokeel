@@ -39,19 +39,22 @@ func sessionAt(id, title string, updated time.Time) contracts.ChatSessionInfo {
 // and grouping choices in both languages.
 func TestSidebarHasNoViewMenu(t *testing.T) {
 	settings := newSidebarSettings(nil)
-	workspace := newFakeWorkspace(treeWorkspaces()...)
+	workspace := newFakeWorkspace(treeWorkspaces()...).withCurrent(currentWorkspace())
 	h := newHarnessWithSettingsAndWorkspace(t, treeChat(), settings, workspace, sidebar.Config{})
 	tester := h.tester()
 
 	// "分组" alone would match the "未分组" group name, so the retired menu's
 	// grouping choices are pinned by their own labels.
+	h.assertTexts(tester, "工作文件夹 /", "项目一")
 	h.assertNoTexts(tester, "视图", "排序", "最近活动", "名称", "按工作区", "平铺")
 
 	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
 	h.assertNoTexts(tester, "View", "Sort", "Recent activity", "Name", "Group", "By workspace", "Flat")
-	// The fixed product labels survive the language switch.
-	h.assertTexts(tester, "Manage workspace folders", "Add workspace folder")
+	// The fixed product labels survive the language switch: the read-only
+	// folder line, with no manage or add action beside it.
+	h.assertTexts(tester, "Workspace folder /", "项目一")
+	h.assertNoTexts(tester, "Manage workspace folders", "Add workspace folder")
 }
 
 // TestSidebarAlwaysScopesToTheOpenFolder ignores stale view settings: even a

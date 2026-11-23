@@ -153,10 +153,12 @@ func TestSidebarEnglishWorkspaceBadgesAndEmptyStates(t *testing.T) {
 	tester.Frame()
 	// The archived session (Beta) is owned by the settings archive page now: it
 	// never renders in the sidebar, even with the legacy view setting on. The
-	// header names the one open folder and offers the switch control.
-	h.assertTexts(tester, "Manage workspace folders", "Add workspace folder", "Alpha", "Gamma", "Pinned")
+	// read-only line names the one open folder; there is no switch or add
+	// control beside it.
+	h.assertTexts(tester, "Workspace folder /", "ZeoKeel", "Alpha", "Gamma", "Pinned")
 	h.assertNoTexts(tester, "Beta", "Archived", "Running", "Show archived", "Hide archived",
-		"管理工作文件夹", "添加工作文件夹", "置顶", "已归档", "运行中")
+		"管理工作文件夹", "添加工作文件夹", "Manage workspace folders", "Add workspace folder",
+		"置顶", "已归档", "运行中")
 
 	// Empty state for a fresh sidebar.
 	empty := newLocaleHarness(t, &i18nChat{fakeChat: &fakeChat{}}, sidebar.Config{}, "en", nil, nil)

@@ -1,11 +1,9 @@
 package sidebar_test
 
 // Conformance frame tests for the sidebar's native widgets: the session rows are
-// a mygo List (keyboard, Enter, single click), and the workspace switch dialog
-// is a mygo Modal around a List (Up/Down choose, Enter opens) with the native
-// directory picker behind 选择其他文件夹…. The old workspace Outline and its
-// per-group actions were removed with the single-workspace view; the switch
-// dialog tests live in workspace_switch_test.go.
+// a mygo List (keyboard, Enter, single click). The old workspace Outline, its
+// per-group actions and the switch/manage dialog were removed with the
+// single-workspace view; see sidebar_workspace_test.go for that side.
 
 import (
 	"testing"

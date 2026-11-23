@@ -259,7 +259,8 @@ func saveBehaviorSetting(st *behaviorState, runtime contracts.UIRuntime,
 // explicit-save half, persisted by the footer Save button (US-13/VE-01).
 func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 	store contracts.SettingsService, locale contracts.LocaleService, st *behaviorState,
-	sandboxService contracts.SandboxService, chat contracts.ChatService, capabilities *capabilitiesState, search *pageSearch) {
+	sandboxService contracts.SandboxService, chat contracts.ChatService, capabilities *capabilitiesState,
+	workFolder *workFolderState, search *pageSearch) {
 	t := design.Of(c)
 	// The message-size and workspace-instruction settings live inside the
 	// collapsed 更多对话设置 disclosure: a search hit on either opens it before
@@ -270,6 +271,12 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 	}
 	ui.Column(c).FillWidth().Gap(design.SpaceScreen).Children(func() {
 		uikit.PageHeader(c, localized(locale, "行为与限额", "Behavior & limits"), "")
+		// The single work folder: the host opens one workspace at startup and
+		// this row is where the user points it at another. It stays visible
+		// because it scopes everything else on the page.
+		search.region(c, "behavior.work-folder", func(c *ui.Context) {
+			buildWorkFolderSection(c, t, locale, runtime, workFolder)
+		})
 		// The permission presets are documented here in one bulleted block; the
 		// control itself lives on the composer's permission button (A5 §3.1,
 		// the meta sentence "已移到输入框工具栏" is gone: it described a layout

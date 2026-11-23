@@ -1027,8 +1027,7 @@
         "internal/ui/session/export.go",
         "internal/ui/session/view.go",
         "internal/ui/settings/data.go",
-        "internal/ui/settings/import.go",
-        "internal/ui/sidebar/workspace_add.go"
+        "internal/ui/settings/import.go"
       ],
       "rules": [
         "DS-06"

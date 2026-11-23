@@ -696,6 +696,9 @@ func Module() *module.Descriptor[Config] {
 		lsp := &lspState{sel: -1}
 		notifications := &notificationsState{}
 		behavior := &behaviorState{}
+		// Optional workspace backend: the Behavior page shows the current work
+		// folder with its native-picker action when the product provides one.
+		workFolder := newWorkFolderState(ctx)
 		network := newNetworkState()
 		capabilities := newCapabilitiesState()
 		dataPrivacy := newDataPrivacyState()
@@ -773,7 +776,7 @@ func Module() *module.Descriptor[Config] {
 				reveal:      behaviorSearch.reveal,
 				Build: func(c *ui.Context) {
 					syncer.sync()
-					buildBehaviorPage(c, runtime, store, locale, behavior, sandboxService, chat, capabilities, behaviorSearch)
+					buildBehaviorPage(c, runtime, store, locale, behavior, sandboxService, chat, capabilities, workFolder, behaviorSearch)
 				},
 				Footer: func(c *ui.Context) {
 					uikit.PageFooter(c, uikit.PageFooterOptions{

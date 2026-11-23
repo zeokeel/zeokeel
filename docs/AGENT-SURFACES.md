@@ -42,7 +42,7 @@ Agent 客户端的 UI 不是 CRUD 页面，而是**推理与行动的外化**：
 | S9 | 多 Agent / 团队 | 会话 Agent Run Band（`session` 包） | `internal/ui/session/agentsurface.go`（Run Band + Popover 团队/子代理/任务 + 主栏子会话视图）；团队/子代理零值常显；旧 `uikit.TeamSurface` 已删除 | 已有（2026-11-11 Run Band） |
 | S10 | 会话上下文账本 | 会话「上下文 / Context」页签（`session` 包） | `internal/ui/session/context_pane.go` + `internal/contracts/contextinspect.go`（agent 折叠 `ContextInspector`） | 已有（2026-11-14） |
 | S11 | 跨会话洞察 | 一级侧栏「洞察 / Insights」screen | `internal/ui/insights/` + `internal/modules/insights/` + `internal/contracts/insights.go` | 已有（2026-11-15） |
-| S12 | 单工作区侧栏 + 启动文件夹门 | 启动门（`uiroot.workspaceGate`）+ 侧栏「工作文件夹」头 + 切换对话框 | `internal/uiroot/workspacegate.go` + `internal/ui/sidebar/`（`buildWorkspaceHeader` / `buildWorkspaceSwitchDialog`）+ `internal/lib/workspacerecent` | 已有（2026-11-23，WORKSPACE-UX） |
+| S12 | 单工作区侧栏 + 默认工作文件夹 | 宿主启动默认文件夹（`host.ensureDefaultWorkspace`）+ 设置「工作文件夹」行 + 侧栏只读「工作文件夹 / <名称>」行 | `internal/host/defaultworkspace.go` + `internal/ui/settings/workfolder.go` + `internal/ui/sidebar/`（`buildWorkspaceLine`）+ `internal/lib/workspacerecent` | 已有（2026-11-23，WORKSPACE-UX） |
 
 > 错误展示是横跨所有 surface 的原语：`uikit.ErrorLine` 已有（RoleAlert + 可选中 + DangerText），大块错误用 `uikit.ErrorPanel`（待建，见 §2.6）。
 
@@ -119,7 +119,7 @@ func SessionThread(c *ui.Context, o SessionThreadOptions)
 
 **dock 高度预算（2026-11 审计 UX-02/US-12）**：composer 上方 dock（目标条 + 审批内联卡 + 子会话 banner）有总高度预算 `composerDockMaxHeight = design.Space8 * 10`（320 DIP），超出部分 dock 内滚动（`TrackScroll`），**决策按钮在 900×600 窗口可达**；几何帧测试钉住 input.bottom ≤ 预算（修复前 1036/974 → 修复后 507/允许 395，transcript ≈40 DIP 与 demo 同量级）。
 
-**右栏文件树 Outline（2026-11 审计 UD-14）**：右栏文件页工作区树用官方 `ui.Outline`（懒加载缓存，`filesOutline`），不再 `ui.Tree` + 400 cap——第 401 项可达。侧栏不再有工作区树（S12 的单工作区模式），侧栏的最近文件夹列表与启动门共用 `ui.List`。
+**右栏文件树 Outline（2026-11 审计 UD-14）**：右栏文件页工作区树用官方 `ui.Outline`（懒加载缓存，`filesOutline`），不再 `ui.Tree` + 400 cap——第 401 项可达。侧栏不再有工作区树（S12 的单工作区模式），也没有文件夹切换/管理列表；当前文件夹在侧栏只读显示，启动默认文件夹由宿主负责（见 S12）。
 
 **迁移步骤**：① 把 `buildChatPane` 的 List 配置/空态/回到最新抽成 `uikit.SessionThread`；② 消息体渲染保留为可插拔 `func(*ui.Context)`（业务 slot）；③ 用现有 transcript/scroll 测试作回归；④ 新增快照 `uikit-session-thread.png`。
 
@@ -578,34 +578,29 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 
 **验收**：`go test ./internal/modules/insights`（聚合/日界时区/无价/空/缓存/截断）、`go test ./internal/ui/insights`（入口/数据/空/无价/切范围/点击跳转/错误重试/加载/窄窗/英文/无后端）、`internal/ui/uimodtest/insights_e2e_test.go`（真实后端 2 轮 → 3M tokens/$4.00/排行点击；无价 → 隐藏成本）、`ui-snapshot` 场景 `p2-insights.png` / `p2-insights-dark.png`。
 
-### S12 单工作区侧栏与启动文件夹门（WORKSPACE-UX）
+### S12 单工作区侧栏与默认工作文件夹（WORKSPACE-UX）
 
-**职责**：产品一次只开一个工作文件夹。启动时先问用哪个文件夹（启动门），进入后侧栏只显示该文件夹的会话，切换/重命名/删除文件夹走同一个切换对话框。后端 `contracts.KeyWorkspace` 仍保留多工作区注册表（`List/Current/Create/Open/Delete`），被收起来的只是"树"这一层 UI。
+**职责**：产品一次只开一个工作文件夹。启动不再询问：宿主在装配加载后、首帧前保证一个默认文件夹，进入后侧栏只显示该文件夹的会话并用一条只读行命名它；切换文件夹走设置页的「工作文件夹」行，侧栏没有切换/管理/颜色 UI。后端 `contracts.KeyWorkspace` 仍保留多工作区注册表（`List/Current/Create/Open/Delete`），被收起来的只是"树"这一层 UI。
 
-**启动门（`uiroot`，每次启动）**：
+**默认工作文件夹（`internal/host/defaultworkspace.go`，每次启动一次）**：
 
-- 全窗口页（不是 Modal），布局见 `.cache/workspace-preview/01-startup.png`：产品名 → `打开工作文件夹`（TypeXL heading）→ 一句说明 → `最近使用` 面板（最多 3 条，`ui.List`，文件夹图标 + 名称 + 根路径 + 相对时间；当前文件夹标 `上次使用` 并带勾）→ 主按钮 `继续使用 <名称>` + 次按钮 `选择其他文件夹…` → 提示 `按 Enter 继续；每次启动都会询问。`。
-- 最近程度 = 该文件夹最新可见会话的 `UpdatedAt`，没有会话时回落工作区 `CreatedAt`（`internal/lib/workspacerecent`，与切换对话框同源）。当前文件夹优先预选，否则第一条。
-- Enter = 继续预选项；点击某条最近行 = 直接打开该文件夹；`选择其他文件夹…` / 无最近项的 Enter = 原生目录选择器（`mygo.Dialog.Open{Directory:true}`）→ `WorkspaceService.Create("", dir)`（后端从目录名派生名称并设为 current）。
-- 打开失败留在门页并内联报错（`无法打开工作文件夹：…`）；取消选择器不改变任何状态。
-- 只在 `contracts.KeyWorkspace` 解析成功时渲染（headless / ACP / 未装工作区模块的宿主保持原壳层）；桌面 host 通过 `uiroot.Config.EnableWorkspaceGate` 开启；嵌入方/测试默认关闭，`SkipWorkspaceGate` 可在开启后显式跳过。
-- 门页期间窗口的 chrome 快捷键（Cmd+B/K/N/,、Esc 回退）不绑定：门后没有可操作的 shell。
+- 桌面对话与 headless 产品在装配加载成功后、首帧/上报 ready 前调用：`Current` 已存在则保持原样（旧多工作区用户保留当前文件夹，其它已登记工作区留在磁盘上但从单文件夹 UI 不可达）；否则 `os.MkdirAll(<dataDir>/workspace)` → `WorkspaceService.Create("", dir)` → `Open(created.ID)`，并写一行启动日志 `opened the default workspace folder "<dir>"`。
+- 没有工作区后端（精简装配）或 `Current` 读取失败时不做任何创建；`uiroot` 不再有启动页，shell 直接渲染（`Config.EnableWorkspaceGate` / `SkipWorkspaceGate` 与 `workspacegate.go` 已删除）。
+
+**设置「工作文件夹」行（`internal/ui/settings/workfolder.go`，行为与限额页）**：
+
+- `uikit.Section` 标题 `工作文件夹`，显示当前根路径（未选择时显示 `未选择工作文件夹`）与说明 `会话、文件和记忆都属于这个文件夹。`，右侧 `更改…` 次按钮（`t.SecondaryButton()`，唯一操作；不加工作区列表）。
+- `更改…` → `mygo.Dialog.Open{Directory:true}` 原生目录选择器 → `WorkspaceService.Create("", dir)`（已登记目录由后端复用并设为 current）→ `mcpreload.Trigger` 重建工作区级 MCP 连接 → 无效化重绘；成功显示 `工作文件夹已更改`，取消失败不改变状态/内联报错。选择器经 `settings.WorkFolderDirectoryPicker` 测试缝替换。
+- 搜索：`behavior.work-folder` 锚点 + `工作文件夹 / work folder` 关键词。
 
 **侧栏（`ui/sidebar`，单工作区模式）**：
 
-- 头部：文件夹图标 + `工作文件夹`（TypeXXS 三级文字）+ 当前文件夹名（TypeXS、500、路径做 tooltip）+ `切换工作文件夹` chevron（`uikit.IconButton`，打开切换对话框）。旧 `工作区` 标题 + `+ 添加工作区` + 分组树 + 每组 `⊕` 全部移除。
+- 头部：一行只读的「文件夹图标 + `工作文件夹 /`（TypeXXS 三级文字）+ 当前文件夹名（TypeXS、500、路径做 tooltip）」；没有 chevron、没有切换/管理对话框、没有添加动作。旧 `工作区` 标题 + `+ 添加工作区` + 分组树 + 每组 `⊕` 全部移除。
 - 会话列表：`visibleSessions(chat.Sessions())` 过滤到当前文件夹（`ChatSessionInfo.WorkspaceID == current.ID`），保留原生的 `ui.List`、搜索（标题 + 全文消息）、pin/archive/fork/rename/delete 行菜单与 2px 选中条。无绑定（`""`）或指向已不存在工作区的会话仍显示在当前文件夹列表里——否则任何界面都到不了它；没有 current 文件夹时显示全部。
 - 搜索的消息命中也按当前文件夹收窄（其他文件夹的会话进入隐藏集）。
 - 没有工作区后端（或 `List` 失败）时退回旧的平铺「会话」列表，行为不变。
 
-**切换对话框（`buildWorkspaceSwitchDialog`，`sidebar.workspace.switch.dialog` 槽）**：
-
-- `ui.Modal` + `uikit.DialogHeader`（标题 `工作文件夹`、副标题 `切换后侧栏、文件、记忆和自动化都跟着这个文件夹。`）+ `最近使用` 列表（最多 6 条，`ui.List`，当前项 `当前` + 勾）+ 底部 `选择其他文件夹…`（grow）/ `打开`（primary）/ `取消`。
-- 打开对话框时列表取得键盘：单击选中、Up/Down 移动、Enter / 双击 / `打开` = 打开选中文件夹；Esc / `取消` = 取消。选中文件夹的 `⋯`（hover/focus 显现，右键同一菜单）提供 `重命名工作区`（后端实现 `contracts.WorkspaceRenamer` 时）与 `删除工作区`，复用现有重命名/删除对话框；两个对话框打开前先关闭切换对话框（同一时刻只一个 Modal）。
-- 重命名/删除成功后头部与列表下一帧即刷新；删除当前文件夹时后端回落到其它文件夹作为 current。
-- 已知边界：切换文件夹只改变工作区（侧栏/文件/记忆/自动化的作用域），当前正在阅读的会话不会被替换（`ChatService` 没有"清空活动会话"的 API）；下一个新建会话/发送按当前文件夹绑定。
-
-**验收**：`internal/uiroot/workspacegate_test.go`（门页文案/预选/Enter/点击最近项/选择器/错误/英文/i18n/SkipWorkspaceGate/无后端）、`internal/ui/sidebar/workspace_single_test.go`（头部 + 过滤 + 搜索 + 空态 + 无后端回落）、`workspace_switch_test.go`（最近项排序/当前勾选/打开/取消/选择文件夹/重命名/删除/长名）、`workspace_add_test.go`、`workspace_rename_test.go`、`workspace_new_chat_test.go`、`internal/lib/workspacerecent`，以及 `internal/regression` 的 sidebar 审计迁移。快照：`.cache/workspace-final/workspace-{startup,main,switch}{,-dark}.png`。
+**验收**：`internal/host/defaultworkspace_test.go`（缺失→创建 `<dataDir>/workspace` 并 Open；已存在→不改动；无后端/读失败不创建）、`internal/host/host_test.go`（headless 启动创建默认文件夹）、`internal/uiroot/workspace_default_test.go`（shell 直接渲染，无启动页）、`internal/ui/settings/workfolder_test.go`（当前根/更改/取消/英文）、`internal/ui/sidebar/sidebar_workspace_test.go`（只读行 + 无 chevron/对话框 + 过滤 + 搜索范围 + 新建会话 + 行操作 + 无后端回落 + 无 current 回退）、`session_workspace_switch_test.go`（会话绑定切换 + MCP 重载）、`internal/lib/workspacerecent`，以及 `internal/regression` 的 sidebar 审计迁移。快照：`.cache/workspace-final/workspace-{main}{,-dark}.png`。
 
 ---
 

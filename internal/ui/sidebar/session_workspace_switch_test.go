@@ -1,121 +1,104 @@
 package sidebar_test
 
-// A conversation belongs to a workspace: opening one must make its workspace
-// current, otherwise the agent's file and shell tools keep operating on
-// whatever project the user opened last. After the single-workspace move the
-// sidebar only lists the open folder's conversations, so the cross-folder half
-// of the rule moved to the switch dialog: switching the folder is the explicit
-// gesture, and opening a listed conversation never changes it.
+// A conversation belongs to a folder: opening one must make its folder current,
+// otherwise the agent's file and shell tools keep operating on whatever project
+// the user opened last. The sidebar itself never switches folders (there is no
+// rail or switch dialog any more); this rule survives only for a conversation
+// whose folder is not the open one, which the list only shows when no folder is
+// open (a fresh or just-emptied registry).
 
 import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/sidebar"
 )
 
-// switchingWorkspace records Open calls and updates the current workspace, like
-// the real workspace service.
-type switchingWorkspace struct {
-	*fakeWorkspace
-	mu     sync.Mutex
-	opened []string
+// recordingMCPReloader records the workspace-switch reload trigger.
+type recordingMCPReloader struct {
+	mu    sync.Mutex
+	calls int
 }
 
-func (w *switchingWorkspace) Open(_ context.Context, id string) (contracts.Workspace, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.opened = append(w.opened, id)
-	for _, workspace := range w.workspaces {
-		if workspace.ID == id {
-			w.current = workspace
-			w.hasCurrent = true
-			return workspace, nil
+func (r *recordingMCPReloader) Reload(context.Context) ([]contracts.MCPPlugin, error) {
+	r.mu.Lock()
+	r.calls++
+	r.mu.Unlock()
+	return nil, nil
+}
+
+func (r *recordingMCPReloader) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
+// waitMCPReload waits for the asynchronous reload trigger.
+func waitMCPReload(t *testing.T, reloader *recordingMCPReloader, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if reloader.count() >= want {
+			return
 		}
+		time.Sleep(5 * time.Millisecond)
 	}
-	return contracts.Workspace{ID: id}, nil
-}
-
-func (w *switchingWorkspace) openedIDs() []string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return append([]string(nil), w.opened...)
+	t.Fatalf("MCP reload calls = %d, want >= %d", reloader.count(), want)
 }
 
 // TestOpeningScopedSessionKeepsTheOpenFolder: a conversation in the open folder
-// is already bound to it, so clicking it must not re-open the workspace (the
-// list only shows this folder's rows).
+// is already bound to it, so clicking it must not re-open the workspace.
 func TestOpeningScopedSessionKeepsTheOpenFolder(t *testing.T) {
-	workspace := &switchingWorkspace{fakeWorkspace: newFakeWorkspace(treeWorkspaces()...)}
-	workspace.current = currentWorkspace()
-	workspace.hasCurrent = true
+	workspace := newFakeWorkspace(treeWorkspaces()...).withCurrent(currentWorkspace())
 	h := newHarnessWithWorkspace(t, treeChat(), sidebar.Config{}, workspace)
 	tester := h.tester()
 
 	// C 会话 belongs to the other folder and is not listed; A 会话 is this one.
 	h.assertNoTexts(tester, "C 会话")
-	if err := tester.Click("A 会话"); err != nil {
-		t.Fatalf("Click(A 会话): %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
+	h.click(tester, "A 会话")
 	if opened := workspace.openedIDs(); len(opened) != 0 {
 		t.Fatalf("opening an already-bound conversation reopened %v", opened)
 	}
-	// B 会话 is also this folder's: still no open.
-	if err := tester.Click("B 会话"); err != nil {
-		t.Fatalf("Click(B 会话): %v", err)
-	}
-	tester.Frame()
+	h.click(tester, "B 会话")
 	if opened := workspace.openedIDs(); len(opened) != 0 {
 		t.Fatalf("opening a second scoped conversation reopened %v", opened)
 	}
 }
 
-// TestSwitchDialogMakesTheChosenFolderCurrent pins the cross-folder gesture: the
-// dialog's Open makes the other folder current, and the list then shows its
-// conversation — the sidebar follows the folder, and session tools follow the
-// sidebar.
-func TestSwitchDialogMakesTheChosenFolderCurrent(t *testing.T) {
-	workspace := &switchingWorkspace{fakeWorkspace: newFakeWorkspace(treeWorkspaces()...)}
-	workspace.current = currentWorkspace()
-	workspace.hasCurrent = true
+// TestOpeningUnboundSessionKeepsCurrentWorkspace: a conversation without a
+// folder binding must not change the current workspace.
+func TestOpeningUnboundSessionKeepsCurrentWorkspace(t *testing.T) {
+	workspace := newFakeWorkspace(treeWorkspaces()...).withCurrent(currentWorkspace())
 	h := newHarnessWithWorkspace(t, treeChat(), sidebar.Config{}, workspace)
 	tester := h.tester()
 
-	if err := tester.Click("管理工作文件夹"); err != nil {
-		t.Fatalf("open the switch dialog: %v", err)
+	h.click(tester, "D 会话")
+	if opened := workspace.openedIDs(); len(opened) != 0 {
+		t.Fatalf("an unbound conversation switched the workspace: %v", opened)
 	}
-	tester.Frame()
-	tester.Frame()
-	if err := tester.Click("项目二"); err != nil {
-		t.Fatalf("choose 项目二: %v", err)
-	}
-	tester.Frame()
-	h.click(tester, "打开")
-	if opened := workspace.openedIDs(); len(opened) != 1 || opened[0] != "w2" {
-		t.Fatalf("workspace opens after choosing 项目二 = %v, want [w2]", opened)
-	}
-	// The list now shows the other folder's conversation, and only that one.
-	h.assertTexts(tester, "项目二", "C 会话")
-	h.assertNoTexts(tester, "A 会话", "B 会话")
 }
 
-// TestOpeningUnboundSessionKeepsCurrentWorkspace pins the no-op case: a session
-// without a workspace binding must not change the current workspace.
-func TestOpeningUnboundSessionKeepsCurrentWorkspace(t *testing.T) {
-	workspace := &switchingWorkspace{fakeWorkspace: newFakeWorkspace(treeWorkspaces()...)}
-	workspace.current = currentWorkspace()
-	workspace.hasCurrent = true
-	h := newHarnessWithWorkspace(t, treeChat(), sidebar.Config{}, workspace)
+// TestOpeningCrossFolderSessionSwitchesWorkspace: with no folder open the list
+// shows every conversation, so opening one bound to another folder switches the
+// workspace and rebuilds the workspace-scoped MCP connectors.
+func TestOpeningCrossFolderSessionSwitchesWorkspace(t *testing.T) {
+	workspace := newFakeWorkspace(treeWorkspaces()...) // no current folder
+	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{
+		{ID: "s2", Title: "W2 会话", WorkspaceID: "w2"},
+	}}
+	h := newHarnessWithWorkspace(t, chat, sidebar.Config{}, workspace)
+	reloader := &recordingMCPReloader{}
+	provide[contracts.MCPReloader](t, h.ctx, contracts.KeyMCPReloader, reloader)
 	tester := h.tester()
 
-	if err := tester.Click("D 会话"); err != nil {
-		t.Fatalf("Click(D 会话): %v", err)
+	h.click(tester, "W2 会话")
+	if opened := workspace.openedIDs(); len(opened) != 1 || opened[0] != "w2" {
+		t.Fatalf("workspace opens = %v, want [w2]", opened)
 	}
-	tester.Frame()
-	if opened := workspace.openedIDs(); len(opened) != 0 {
-		t.Fatalf("an unbound session switched the workspace: %v", opened)
-	}
+	waitMCPReload(t, reloader, 1)
+	// The folder line follows the conversation's folder on the next frame.
+	h.assertTexts(tester, "工作文件夹 /", "项目二")
 }
