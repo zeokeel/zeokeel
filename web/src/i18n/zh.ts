@@ -213,6 +213,13 @@ export const zh = {
   'inspector.noDiff': '没有改动。',
   'inspector.unpreviewable': '无法预览该文件。',
   'inspector.workspaceRoot': '工作区根目录',
+  'task.title': '后台任务',
+  'task.count': '{count} 个后台任务',
+  'task.stop': '停止',
+  'task.cancel': '取消',
+  'task.status.pending': '已停止',
+  'task.status.inProgress': '进行中',
+  'task.status.completed': '已完成',
   'toast.dismiss': '关闭',
 
   // -------------------------------------------------------------- actions --

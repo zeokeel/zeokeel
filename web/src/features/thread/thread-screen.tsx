@@ -12,6 +12,7 @@ import { useGatewayChat } from '@/runtime/use-gateway-chat';
 import { EmptyState } from '@/ui/empty-state';
 import { FindBar } from './find-bar';
 import { PromptQueuePanel } from './prompt-queue-panel';
+import { TaskChip } from './task-chip';
 import { usePromptQueue } from './use-prompt-queue';
 import { useT } from '@/i18n';
 
@@ -251,6 +252,10 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
       </div>
 
       <ApprovalDock currentSessionId={sessionId} />
+
+      {/* B12: process-wide board (no sessionId) — tasks are not per-conversation
+          unless the gateway scopes them. */}
+      <TaskChip />
 
       <PromptQueuePanel
         items={queue.items}

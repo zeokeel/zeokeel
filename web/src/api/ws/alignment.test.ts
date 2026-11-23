@@ -70,6 +70,10 @@ const CLIENT_METHODS = [
   'prompts.enqueue',
   'prompts.remove',
   'foreground.set',
+  'tasks.snapshot',
+  'tasks.subscribe',
+  'task.status',
+  'task.delete',
 ];
 
 describe('mock ↔ gateway', () => {

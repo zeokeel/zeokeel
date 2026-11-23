@@ -11,6 +11,7 @@ import { GatewayRpc, setGatewayRpc, type SocketLike } from '@/api/ws/rpc';
 // unknown field fails here too instead of only against the real gateway.
 import { validateParams } from '../../dev/ws-params.mjs';
 import { SETTING_KEYS } from '@/design/settings-keys';
+import { clearConnectionCaches } from '@/api/gateway';
 
 export interface FakeSessionInfo {
   id: string;
@@ -62,6 +63,12 @@ export interface FakeState {
   workspaces: Array<{ id: string; name: string; root: string }>;
   /** sessionId → queued prompts, oldest first. */
   prompts: Record<string, FakeQueuedPrompt[]>;
+  /**
+   * Task boards: `''` is the process-wide board, a session id is that session's
+   * board (§5.1.8). `added` deltas upsert by id.
+   */
+  tasks: Record<string, Array<Record<string, unknown>>>;
+  taskRevs: Record<string, number>;
   currentWorkspaceId?: string;
   capabilities: string[];
 }
@@ -84,6 +91,8 @@ export function defaultState(): FakeState {
     artifacts: [],
     workspaces: [{ id: 'ws-1', name: 'mygo', root: '/data/mygo' }],
     prompts: {},
+    tasks: { '': [] },
+    taskRevs: { '': 1 },
     currentWorkspaceId: 'ws-1',
     capabilities: [
       'session.list',
@@ -101,6 +110,8 @@ export function defaultState(): FakeState {
       'run.cancel',
       'prompts',
       'foreground',
+      'tasks',
+      'regenerate',
     ],
   };
 }
@@ -391,6 +402,43 @@ export class FakeGateway {
       reply({});
       return;
     }
+    if (method === 'tasks.snapshot') {
+      const key = this.taskKey(params);
+      reply({ epoch: 'fake', rev: this.state.taskRevs[key] ?? 1, tasks: this.state.tasks[key] ?? [] });
+      return;
+    }
+    if (method === 'tasks.subscribe') {
+      const key = this.taskKey(params);
+      const since = Number(params.sinceRev ?? 0);
+      reply({
+        epoch: 'fake',
+        rev: this.state.taskRevs[key] ?? 1,
+        resync: since !== (this.state.taskRevs[key] ?? 1),
+      });
+      return;
+    }
+    if (method === 'task.status') {
+      const key = this.taskKey(params);
+      const board = this.state.tasks[key] ?? [];
+      const row = board.find((task) => task.id === params.id);
+      if (!row) {
+        fail(1001, 'task_not_found');
+        return;
+      }
+      row.status = String(params.status ?? 'pending');
+      this.broadcastTasks(key, [row], []);
+      reply({});
+      return;
+    }
+    if (method === 'task.delete') {
+      const key = this.taskKey(params);
+      const board = this.state.tasks[key] ?? [];
+      const index = board.findIndex((task) => task.id === params.id);
+      if (index >= 0) board.splice(index, 1);
+      this.broadcastTasks(key, [], [String(params.id ?? '')]);
+      reply({});
+      return;
+    }
     if (method === 'foreground.set') {
       reply({});
       return;
@@ -441,6 +489,22 @@ export class FakeGateway {
     this.notify('prompts.delta', { sessionId, baseRev: rev - 1, rev, added, removed });
   }
 
+  /** `''` = the process-wide board (§5.1.8). */
+  private taskKey(params: Record<string, unknown>): string {
+    return params.sessionId === undefined ? '' : String(params.sessionId);
+  }
+
+  broadcastTasks(
+    key: string,
+    added: Array<Record<string, unknown>> = [],
+    removed: string[] = [],
+  ): void {
+    const rev = (this.state.taskRevs[key] ?? 1) + 1;
+    this.state.taskRevs[key] = rev;
+    // The delta carries no sessionId; the client routes it to the board it holds.
+    this.notify('tasks.delta', { baseRev: rev - 1, rev, added, removed });
+  }
+
   broadcastApprovals(added: FakeApproval[] = [], removed: string[] = []): void {
     const rev = ++this.revs.approvals;
     this.notify('approvals.delta', { baseRev: rev - 1, rev, added, removed });
@@ -473,6 +537,9 @@ export interface FakeGatewayHandle {
 
 /** Install a fake gateway as the app's control plane. */
 export function installFakeGateway(state: FakeState = defaultState()): FakeGatewayHandle {
+  // A new fake gateway is a new gateway: cached boards from the previous one
+  // would otherwise describe state that never existed here.
+  clearConnectionCaches();
   const gateway = new FakeGateway(state);
   setGatewayRpc(
     new GatewayRpc({
@@ -488,6 +555,7 @@ export function installFakeGateway(state: FakeState = defaultState()): FakeGatew
   return {
     gateway,
     dispose: () => {
+      clearConnectionCaches();
       setGatewayRpc(null);
     },
   };

@@ -214,6 +214,51 @@ const queueOf = (sessionId) => {
   return promptQueues.get(sessionId);
 };
 
+// ---------------------------------------------------------------- tasks --
+/**
+ * Task boards: the process-wide one (`''`) and one per session. `added` in
+ * `tasks.delta` is an upsert — a whole changed row — so the publisher sends the
+ * changed rows, not field patches (§5.1.8).
+ * @type {Map<string, {rev:number, tasks:Array<any>}>}
+ */
+const taskBoards = new Map();
+const taskBoard = (sessionId) => {
+  if (!taskBoards.has(sessionId)) taskBoards.set(sessionId, { rev: 1, tasks: [] });
+  return taskBoards.get(sessionId);
+};
+
+const publishTasks = (sessionId) => {
+  const board = taskBoard(sessionId);
+  const rev = board.rev + 1;
+  board.rev = rev;
+  // The delta carries no sessionId: the client routes it to the board it holds.
+  wsNotify('tasks.delta', {
+    baseRev: rev - 1,
+    rev,
+    added: board.tasks.map((task) => ({ ...task })),
+    removed: [],
+  });
+};
+
+// Seed one board so the chip has something to show in the mock.
+taskBoard('').tasks.push(
+  {
+    id: 'task-1',
+    subject: '复核 B5 的英文覆盖',
+    status: 'in_progress',
+    owner: 'web-engineer',
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  },
+  {
+    id: 'task-2',
+    subject: '给 tasks 域补 mock 形状',
+    status: 'pending',
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  },
+);
+
 // ---------------------------------------------------------------- settings --
 const settingsCatalog = {
   groups: [
@@ -1055,12 +1100,16 @@ const WS_CAPABILITIES = [
   'ask',
   'plan',
   'artifacts',
+  'approvals',
   'settings',
   'settings.set',
   'workspace',
   'notify',
   'prompts',
   'foreground',
+  // Conditional halves this build provides (contract.json capabilities.conditional).
+  'tasks',
+  'regenerate',
 ];
 const wsClients = new Set();
 
@@ -1374,6 +1423,41 @@ const wsDispatch = (client, message) => {
       // The client took a snapshot first; anything it missed can only be
       // honoured when the revision is the one we hold. Otherwise resync.
       return reply({ epoch: WS_EPOCH, rev: promptRev(sessionId), resync: since !== promptRev(sessionId) });
+    }
+    case 'tasks.snapshot': {
+      // Process-wide board when sessionId is absent, per-session otherwise
+      // (§5.1.8). Same shape either way, which is why one handler serves both.
+      const sessionId = params.sessionId === undefined ? '' : String(params.sessionId);
+      const board = taskBoard(sessionId);
+      return reply({ epoch: WS_EPOCH, rev: board.rev, tasks: board.tasks.slice() });
+    }
+    case 'tasks.subscribe': {
+      const sessionId = params.sessionId === undefined ? '' : String(params.sessionId);
+      const since = Number(params.sinceRev ?? 0);
+      const board = taskBoard(sessionId);
+      return reply({ epoch: WS_EPOCH, rev: board.rev, resync: since !== board.rev });
+    }
+    case 'task.status': {
+      const sessionId = params.sessionId === undefined ? '' : String(params.sessionId);
+      const status = String(params.status ?? '');
+      if (!['pending', 'in_progress', 'completed'].includes(status)) {
+        return fail(-32602, 'invalid_params');
+      }
+      const board = taskBoard(sessionId);
+      const row = board.tasks.find((task) => task.id === params.id);
+      if (!row) return fail(1001, 'task_not_found');
+      row.status = status;
+      row.updatedAt = nowIso();
+      publishTasks(sessionId);
+      return reply({});
+    }
+    case 'task.delete': {
+      const sessionId = params.sessionId === undefined ? '' : String(params.sessionId);
+      const board = taskBoard(sessionId);
+      const index = board.tasks.findIndex((task) => task.id === params.id);
+      if (index >= 0) board.tasks.splice(index, 1);
+      publishTasks(sessionId);
+      return reply({});
     }
     case 'prompts.enqueue': {
       const sessionId = String(params.sessionId ?? '');

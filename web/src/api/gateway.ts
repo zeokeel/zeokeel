@@ -16,6 +16,14 @@ import { GatewayRpc, type ConnectionStatus, gatewayRpc } from './ws/rpc';
 import { exchangeFragmentToken, probeAuthorization } from './ws/auth';
 import { applyPromptsDelta, type QueuedPrompt, type QueuedPromptWire } from './prompt-queue';
 import {
+  applyTasksDelta,
+  normalizeTask,
+  type GatewayTask,
+  type TaskStatus,
+  type TasksSnapshot,
+  type TaskWire,
+} from './tasks';
+import {
   SyncedDomain,
   applyItemSet,
   applyListDelta,
@@ -234,6 +242,20 @@ export function stopGateway(): void {
   client().stop();
 }
 
+/**
+ * Drop every per-connection domain cache.
+ *
+ * A domain holds a snapshot from *one* gateway; after the client points at a
+ * different one (re-auth to another port, or a new fake gateway in a test) the
+ * cached value describes a board that no longer exists. Reconnect alone must not
+ * call this: same gateway, same state.
+ */
+export function clearConnectionCaches(): void {
+  sessionDomains.clear();
+  promptsDomains.clear();
+  tasksDomains.clear();
+}
+
 /** Fires after each successful handshake (used to re-subscribe). */
 export function onGatewayReady(handler: () => void): () => void {
   readyListeners.add(handler);
@@ -444,6 +466,15 @@ export function handleDelta(method: string, params: unknown): void {
       domain?.applyDelta(delta);
       return;
     }
+    case 'tasks.delta': {
+      // One board per session, plus the process-wide board (`tasks`). The delta
+      // carries no sessionId, so both are offered the row: a row that does not
+      // belong to a board is simply absent from its snapshot set.
+      const sessionId = typeof delta.sessionId === 'string' ? delta.sessionId : '';
+      if (sessionId) tasksDomains.get(sessionId)?.applyDelta(delta);
+      tasksDomains.get(PROCESS_TASKS)?.applyDelta(delta);
+      return;
+    }
     default:
       return;
   }
@@ -619,6 +650,85 @@ export async function setSetting(key: string, value: string): Promise<void> {
 // --------------------------------------------------------------- snapshots --
 
 /** sessionId → its prompt inbox domain (`prompts:<sessionID>`). */
+/** The process-wide task board is keyed like a session so one code path serves both. */
+const PROCESS_TASKS = '';
+
+const tasksDomains = new Map<string, SyncedDomain<GatewayTask[]>>();
+
+/** `tasks:<id>` when a session is given, `tasks` otherwise (§6.5). */
+function tasksDomain(sessionId: string | undefined): SyncedDomain<GatewayTask[]> {
+  const key = sessionId ?? PROCESS_TASKS;
+  const existing = tasksDomains.get(key);
+  if (existing) return existing;
+  const domain = new SyncedDomain<GatewayTask[]>(
+    sessionId ? `tasks:${sessionId}` : 'tasks',
+    async () => {
+      const result = await client().request<TasksSnapshot>(
+        'tasks.snapshot',
+        sessionId ? { sessionId } : {},
+      );
+      return {
+        value: (result.tasks ?? []).map(normalizeTask),
+        rev: result.rev ?? 0,
+        epoch: result.epoch ?? '',
+      };
+    },
+    (value, delta) => applyTasksDelta(value, delta as { added?: TaskWire[]; removed?: string[] }),
+  );
+  tasksDomains.set(key, domain);
+  return domain;
+}
+
+/**
+ * Subscribe to a task board. `sessionId` omitted = the process-wide board.
+ *
+ * The board is polled by the gateway for changes made elsewhere (§6.3, 2s
+ * ceiling), so a listener is never a promise of "instant".
+ */
+export async function subscribeTasks(
+  sessionId: string | undefined,
+  listener: (tasks: GatewayTask[]) => void,
+): Promise<() => void> {
+  routeNotifications();
+  const domain = tasksDomain(sessionId);
+  await domain.reload();
+  const unsubscribe = domain.subscribe(listener);
+  const reply = await client().request<{ rev: number; resync?: boolean }>('tasks.subscribe', {
+    ...(sessionId ? { sessionId } : {}),
+    sinceRev: domain.rev(),
+  });
+  if (reply.resync) await domain.reload();
+  return unsubscribe;
+}
+
+/** Re-read the board once (the chip refreshes on demand, never on a timer). */
+export async function refreshTasks(sessionId?: string): Promise<GatewayTask[]> {
+  const domain = tasksDomain(sessionId);
+  await domain.reload();
+  return domain.value() ?? [];
+}
+
+/**
+ * Stop or resume one task. `pending` **is** the stop state (§5.1.8), so stopping
+ * and parking are the same command — there is no `task.stop`.
+ */
+export async function setTaskStatus(
+  id: string,
+  status: TaskStatus,
+  sessionId?: string,
+): Promise<void> {
+  await client().request('task.status', {
+    id,
+    status,
+    ...(sessionId ? { sessionId } : {}),
+  });
+}
+
+/** Cancel = delete on the backend (§5.1.8). Idempotent. */
+export async function deleteTask(id: string, sessionId?: string): Promise<void> {
+  await client().request('task.delete', { id, ...(sessionId ? { sessionId } : {}) });
+}
+
 const promptsDomains = new Map<string, SyncedDomain<QueuedPrompt[]>>();
 
 function promptsDomain(sessionId: string): SyncedDomain<QueuedPrompt[]> {

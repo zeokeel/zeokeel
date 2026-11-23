@@ -19,7 +19,7 @@
 | B9 | 工具行点击/键盘展开收起 + 运行 spinner + 完成态 | 完成 | `thought-steps.tsx`：`ThoughtChain` + `onExpand`（点/键盘均可），`status: loading/success/error`，行文案 运行中/完成/失败；运行/失败项默认展开 |
 | B10 | 工具失败行 + 可展开 stderr | 完成 | 本轮补：`tool-card.tsx` 渲染 `step.error`（`role="alert"`），与卡片同级、展开可见；状态行显示「失败」 |
 | B11 | 消息 `⋯` 菜单（复制/编辑/重生成） | 部分 | 已完成：助手消息 hover 出 `⋯`，**复制**（客户端）+ **重新生成**（`POST /api/chat/run {sessionId, clientRunId, regenerate:true}`，**不带 text**，复用唯一发送路径；§4.6）。网关答 `1023 capability_unsupported / regenerate_not_supported` 时菜单项**禁用 + tooltip**，不弹"请求失败"。测试：`message-actions.test.tsx` 6 条；浏览器实测请求体 `{"sessionId":"s-c2721796","clientRunId":"…","regenerate":true}`（`.cache/ui-review/regenerate.png`）。**缺**："编辑"——协议无 `message.edit`，`message.regenerate` 已按 §5.1 移除，故记部分 |
-| B12 | 后台任务 chip → 浮层 → 停止 | 未做 | `tasks` 域已在 TRANSPORT §5.1 标注实现（`tasks.snapshot`/`tasks.subscribe`/`task.status`/`task.delete`），web 侧接线是 task-24 的另一半，尚未接 |
+| B12 | 后台任务 chip → 浮层 → 停止 | 完成 | 已接：`api/tasks.ts`（`tasks.snapshot`/`tasks.subscribe`，`added` **按 id upsert** 而非字段 patch）+ `gateway.ts` 的 `subscribeTasks/setTaskStatus/deleteTask`；UI `features/thread/task-chip.tsx`：chip「N 个后台任务」→ Popover 列出任务，进行中给**停止**（`task.status {status:'pending'}`，`pending` 即停止态）、未完成给**取消**（`task.delete`）；空看板**不渲染 chip**（不显示 0）；不写死等待（网关延迟上限 2s，自己的写入立即回声）。测试：`task-chip.test.tsx` 8 条（upsert 整体替换/新增删除/未完成计数/状态映射无第四态/popover 列表/空态无 chip/停止与取消的命令参数/收到别人改动的 delta）。浏览器实测：`{"chip":"2 个后台任务","rows":["复核 B5 的英文覆盖进行中停止取消","给 tasks 域补 mock 形状已停止取消"]}`（`.cache/ui-review/tasks-open.png`） |
 | B13 | 队列弹层可查看并取消 | 完成 | 已改成 antd `Popover`：收起态只有一个「N 条待发送」chip（`thread.queue.count`），点开是行列表 + 单条取消 + 空闲时「发送队首」；数据仍走 WS `prompts:*`。测试：`queue-and-breadcrumb.test.tsx`「shows the count on the chip and reveals the rows only when opened」「keeps the send-head affordance inside the popover when idle」，`prompt-queue.test.tsx` 三条回归（排队/取消/中止保留）全绿 |
 | B14 | toast（带撤销）4s 消失、错误粘滞 | 完成 | 已接：`features/toasts/toasts.tsx` 订阅 WS `toast.posted {id, level, text, sessionId?, actionLabel?, actionId?}`（§6.3 形状），antd `notification` 渲染；带 action 时按钮回 `notify.action {id, actionId}`；回执 `duration: 4`、`level=error` `duration: 0` 粘滞；同 id 不堆叠。测试：`toasts.test.tsx`（渲染/回执 action/去重/error 熬过 4s 仍在）；浏览器实测（`.cache/ui-review/toast.png`）：`这一轮已完成 + 查看会话` 出现在右上 `x 872 y 24`，5s 后回执计数 0（错误级别不消失由单测覆盖） |
 | B15 | 危险确认默认焦点在取消、Enter 不执行 | 完成 | `ui/confirm-danger.tsx`：取消按钮 `autoFocus`，危险动作为 danger 且非默认；`esc-chain` E5/E7 与 `ConfirmDanger` 单测覆盖 |
@@ -37,8 +37,7 @@
 
 > B5 由"完成"改判"部分"：验收原文要求"**全站跟随**"，而 10 个文件（自动化/能力/洞察/检查器/设置页标签/记忆/子会话/`api/settings.ts`/`api/inbox.ts`/`tools/registry.tsx`）English 模式下仍是中文。基础设施与主路径已完成、且有扫描闸门防回归，但"全站"未达成——账面按事实记，不按进度记。
 
-未做的 1 条与原因：
-- **B12 后台任务 chip**：`tasks` 域已在 TRANSPORT §5.1 标注实现，web 侧接线是本任务的另一半，尚未接（下一步）。
+未做 0 条；剩余 3 条**部分**：B5（英文覆盖未清）、B6（上下文 Tab 待接线）、B11（编辑无协议方法）。
 
 部分的 3 条：
 - **B6** 三 Tab 完成、「上下文」按能力隐藏（已知等价性缺口，需 Go 侧 `context.*`）；

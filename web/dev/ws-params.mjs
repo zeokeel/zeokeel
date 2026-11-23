@@ -56,6 +56,10 @@ export const WS_PARAMS = {
 
   'workspace.list.snapshot': { allowed: [] },
 
+  'tasks.snapshot': { allowed: ['sessionId', 'sinceRev'], required: [] },
+  'tasks.subscribe': { allowed: ['sessionId', 'sinceRev'], required: [] },
+  'task.status': { allowed: ['id', 'status', 'sessionId'], required: ['id', 'status'] },
+  'task.delete': { allowed: ['id', 'sessionId'], required: ['id'] },
   'prompts.snapshot': { allowed: ['sessionId'], required: ['sessionId'] },
   'prompts.subscribe': { allowed: ['sessionId', 'sinceRev'], required: ['sessionId'] },
   'prompts.enqueue': { allowed: ['sessionId', 'prompt'], required: ['sessionId', 'prompt'] },

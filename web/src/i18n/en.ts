@@ -209,6 +209,13 @@ export const en: Catalog = {
   'inspector.noDiff': 'No changes.',
   'inspector.unpreviewable': 'This file cannot be previewed.',
   'inspector.workspaceRoot': 'Workspace root',
+  'task.title': 'Background tasks',
+  'task.count': '{count} running',
+  'task.stop': 'Stop',
+  'task.cancel': 'Cancel',
+  'task.status.pending': 'Stopped',
+  'task.status.inProgress': 'In progress',
+  'task.status.completed': 'Completed',
   'toast.dismiss': 'Close',
 
   // -------------------------------------------------------------- actions --
