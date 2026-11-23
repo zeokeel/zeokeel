@@ -47,6 +47,13 @@ func (t *fakeTool) Invoke(context.Context, rig.ToolCall) (rig.ToolResult, error)
 }
 
 func TestHostBundleCompilesIntoKit(t *testing.T) {
+	// The kit opens a SQLite memory backend under the user's state directory, so
+	// the test needs a writable HOME. Sandboxing it here keeps the suite green on
+	// machines where HOME is read-only (CI containers, some sandboxed runners):
+	// without this it fails with `sqlite: unable to open database file` and looks
+	// like a product bug rather than a missing writable directory. A test that is
+	// permanently red in one environment teaches people to ignore red.
+	sandboxHome(t)
 	provider := &fakeProvider{}
 	if err := kit.RegisterProvider("hostbundle-test", func(json.RawMessage) (rig.Provider, error) {
 		return provider, nil
@@ -90,4 +97,18 @@ func TestHostBundleCompilesIntoKit(t *testing.T) {
 	if err := agent.Shutdown(context.Background()); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
+}
+
+// sandboxHome points every user-scoped directory at a temporary tree so a test
+// that persists state cannot depend on the machine's HOME being writable.
+// os.UserHomeDir and os.UserConfigDir read these variables on Linux/macOS, and
+// os.UserConfigDir also honours XDG_CONFIG_HOME when it is absolute.
+func sandboxHome(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir+"/config")
+	t.Setenv("XDG_DATA_HOME", dir+"/data")
+	t.Setenv("XDG_STATE_HOME", dir+"/state")
+	t.Setenv("XDG_CACHE_HOME", dir+"/cache")
 }
