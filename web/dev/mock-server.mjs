@@ -27,6 +27,9 @@ const PORT = Number(process.env.PORT ?? 8788);
 const HOST = process.env.HOST ?? '127.0.0.1';
 
 const nowIso = () => new Date().toISOString();
+
+/** Cold store: no persisted settings rows, the way a fresh data dir starts. */
+const COLD_STORE = process.env.MOCK_COLD_STORE === '1';
 const shortId = (prefix) => `${prefix}-${randomUUID().slice(0, 8)}`;
 
 // ---------------------------------------------------------------- sessions --
@@ -1237,7 +1240,10 @@ const settingsRows = new Map([
   ['toolkit.shellTimeoutSeconds', '120'],
   ['toolkit.shellMaxOutputKiB', '256'],
   ['ui.theme.mode', 'system'],
-  ['ui.language', 'zh'],
+  // The language row is **not** seeded when the caller asks for a cold store:
+  // `ACCEPTANCE_DATA_DIR` pointing at an empty directory is exactly what CI
+  // starts from, and the client must fall back to `navigator.language` there.
+  ...(COLD_STORE ? [] : [['ui.language', 'zh']]),
   ['ui.chatFontSize', '14'],
   ['ui.workSteps.mode', 'standard'],
   ['ui.workSteps.collapse', 'completion'],

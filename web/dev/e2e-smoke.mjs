@@ -120,33 +120,46 @@ async function runPass(browser, pass) {
   await page.goto(`${BASE}/settings/appearance`, { waitUntil: 'domcontentloaded' });
   const option = page.locator(`[data-testid="settings-option-ui.language-${optionId}"]`);
   await option.waitFor({ timeout: 15_000 });
-  // Wait for the row to *have* a value first: clicking before the settings
-  // snapshot lands is undone by the form re-initialising, leaving Save disabled.
-  await page
-    .waitForFunction(
-      () =>
-        document.querySelector('[data-testid="settings-field-ui.language"] input:checked') !== null,
-      { timeout: 15_000 },
-    )
-    .catch(() => fail('语言行一直没有加载出当前值（settings 快照没到）'));
-  // The row may already hold this language (the previous pass left it there):
-  // then there is nothing to save and the button stays disabled by design.
-  const already = await page.evaluate((id) => {
+
+  // **Both initial states are legal.** On a warm store `ui.language` already has
+  // a value; on a cold one the row is absent and the product falls back to
+  // `navigator.language`. Asserting "a value must appear" made this pass depend
+  // on a database that happened to be warm — green locally, red in CI.
+  const stored = await page.evaluate(() => {
     const field = document.querySelector('[data-testid="settings-field-ui.language"]');
-    const inputs = [...(field?.querySelectorAll('input[type=radio]') ?? [])];
-    const index = [...(field?.querySelectorAll('[data-testid^="settings-option-"]') ?? [])].findIndex(
-      (node) => node.getAttribute('data-testid')?.endsWith(`-${id}`),
-    );
-    return index >= 0 && inputs[index]?.checked === true;
-  }, optionId);
-  if (already) {
-    step('language.already', { lang: optionId });
-  } else {
+    const checked = field?.querySelector('input[type=radio]:checked');
+    return checked instanceof HTMLInputElement ? checked.value : null;
+  });
+  step('language.initial', { lang: optionId, storedValue: stored });
+
+  // Write only when the stored value differs — on a cold store that is exactly
+  // the case (`stored === null`), so the write path is exercised in CI too. When
+  // the row already holds this language there is nothing to save and Save stays
+  // disabled by design.
+  if (stored !== optionId) {
     await option.click();
     const saveButton = page.locator('[data-testid="settings-save-button"]');
     await saveButton.waitFor({ timeout: 10_000 });
-    await saveButton.click();
+    const canSave = await page.evaluate(
+      () => {
+        const button = document.querySelector('[data-testid="settings-save-button"]');
+        return !(button instanceof HTMLButtonElement && button.disabled);
+      },
+    );
+    if (canSave) {
+      await saveButton.click();
+      step('language.written', { lang: optionId });
+    } else {
+      // Recorded, not swallowed: when the chosen option is the language the UI
+      // already renders (cold store + `zh-CN` browser → Chinese), selecting it
+      // changes nothing, so the form is legitimately not dirty and Save is
+      // disabled. Nothing to write, nothing to fail — but the step is logged so
+      // a reader can tell "no write" from "write failed".
+      step('language.write.unavailable', { lang: optionId, storedValue: stored });
+    }
   }
+  // Whatever the path taken, the shell must now render the target language —
+  // this is the assertion, the branch above is only how we got here.
   await page
     .waitForFunction(
       (label) =>
