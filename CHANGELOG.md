@@ -6,6 +6,13 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.59] - 2026-11-23
+
+### Changed
+
+- **工作区完全隔离的边界补齐**：OAuth token 按工作区+连接器分 key（旧 token 迁入首个读取的工作区）；旧连接器在 toolkit 加载/重载时立即归入当前工作区；删除工作区时清理其连接器、禁用项、OAuth token 与技能额外目录设置；技能额外目录改为 `skills.dirs.<workspaceID>`；切换重载失败会通过本地化 toast 提示。
+- 工作区文件/技能文件不会因删除注册而删除。
+
 ## [0.2.58] - 2026-11-23
 
 ### Changed
