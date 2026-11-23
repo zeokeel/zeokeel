@@ -164,4 +164,14 @@ func TestE2EAutomationRunAppliesModelOverride(t *testing.T) {
 		}
 		return payload.Model == "override-model"
 	})
+	// Let the run finish before teardown: a run still writing its session while
+	// the temp dir is removed makes the cleanup flaky.
+	waitFor(t, "the automation run to settle", func() bool {
+		for _, session := range rig.chat.Sessions() {
+			if session.Running {
+				return false
+			}
+		}
+		return true
+	})
 }

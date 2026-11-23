@@ -42,6 +42,16 @@
 - [x] **S1.7** 提交 `S1: serve runs the gateway before the tray; tray opens the browser`。
   - 回退点检查：`git revert <S1>` 后 `go build ./...` 应恢复原状（此时 UI 包从未被动过，必然通过）。
 
+### S2 执行记录（2026-11-23）
+
+- 删除 `runDesktop`（415 行）+ `persistPreferences` + `close_guard.go`（无窗口后死代码）+ `update_command.go`（命令面板注册，只服务 UI）。
+- `provideServices(root, dataDir, settings, logger)`：只剩 DataDir/Settings/Logger 三键；注释写明窗口类服务由 `gateway.Provide` 提供。
+- `Run()` 的 desktop 分支改为明确错误；**`--product` 默认值改为 `serve`**（否则裸启动会立刻报错）。
+- 测试调整：删掉"desktop host 提供 interaction/notifier/foreground"的 3 条（属性已转移给 gateway，gateway 侧 `services_test.go` 覆盖），保留并改名"host 不提供这些键"；`--port` 用例表更新（裸 `--port` 现在合法），新增 `--no-tray` 冲突用例。
+- 顺带把全局热键接进托盘壳（`setupGlobalHotkey` 接受同一个 `BrowserWindow` 适配器，"按热键 = 打开客户端"）。
+- **发现并修掉一个测试稳定性问题**：`TestE2EAutomationRunAppliesModelOverride` 在 run 未落定时就结束，SQLite 仍在写导致 `TempDir RemoveAll cleanup: directory not empty`（间歇红）。修法：追加"等 run 落定"，之后 `-count=5` 连跑 4 批全绿。
+- 验收：build/vet 干净；`go test ./internal/host ./internal/assembly ./internal/gateway` 全绿；`make acceptance-approval` 通过；`./zeokeel --product desktop` 退出码 1 并给出指向 serve 的提示；裸启动 = serve。
+
 ### S1 执行记录（2026-11-23）
 
 - 顺序与双保险落地：`runServe` 先起 `gw.Serve` goroutine 再进托盘；`trayEnabled(opts.NoTray)` = `--no-tray` 优先，Linux 无 `DISPLAY`/`WAYLAND_DISPLAY` 静默跳过。
@@ -52,26 +62,26 @@
 
 ## 2. 步骤 S2：切除 host 的桌面路径
 
-- [ ] **S2.1** `internal/host/host.go:291-292`：`case assembly.ProductDesktop:` 从 `runDesktop(opts)` 改成明确错误并指向 serve。
+- [x] **S2.1** `internal/host/host.go:291-292`：`case assembly.ProductDesktop:` 从 `runDesktop(opts)` 改成明确错误并指向 serve。
   - 文案：`desktop 产品已移除：请用 --product serve（浏览器客户端）`，返回 `fmt.Errorf`，退出码非零。
   - 验证：`go run ./cmd/zeokeel --product desktop; echo $?` → 非零 + 该文案。
-- [ ] **S2.2** 删除 `internal/host/host.go:407-832` 的 `runDesktop` 整段（约 425 行）。
+- [x] **S2.2** 删除 `internal/host/host.go:407-832` 的 `runDesktop` 整段（约 425 行）。
   - 含 `:431-436` 单实例 GUI 握手、`:461 uiroot.New`、`:820 mygo.App.Run()`。
   - 注意：单实例锁已在 `gateway.New` 里做（S1a 决策），serve 不需要 GUI 握手。
   - 验证：`go build ./...`；`grep -n "uiroot" internal/host/host.go` 只剩 `provideServices` 与 `persistPreferences` 两处签名（删段后行号会前移，S2.3/S2.4 再收掉）。
-- [ ] **S2.3** `internal/host/host.go:834` `provideServices(root, dataDir, settings, logger, uiRoot *uiroot.Root)`：去掉 `uiRoot` 参数与 `:845-882` 的 uiRoot 分支（12 个键）。
+- [x] **S2.3** `internal/host/host.go:834` `provideServices(root, dataDir, settings, logger, uiRoot *uiroot.Root)`：去掉 `uiRoot` 参数与 `:845-882` 的 uiRoot 分支（12 个键）。
   - 保留：DataDir / Settings / Logger。另 5 个键（UserInteraction/ArtifactPresenter/PlanReviewer/Notifier/ForegroundSession）由 `gateway.Provide` 提供 —— 已经是现状。
   - 验证：`go vet ./internal/host`；`go test ./internal/host -run 'Provide'`。
-- [ ] **S2.4** `internal/host/host.go:893` 删除 `persistPreferences(settings, uiRoot, logger)`（窗口尺寸/位置的持久化随窗口消失）。
+- [x] **S2.4** `internal/host/host.go:893` 删除 `persistPreferences(settings, uiRoot, logger)`（窗口尺寸/位置的持久化随窗口消失）。
   - 验证：`go build ./...`；`grep -rn "persistPreferences" internal` 为空。
-- [ ] **S2.5** `internal/host/update_command.go`：去掉 uiroot。
+- [x] **S2.5** `internal/host/update_command.go`：去掉 uiroot。
   - `:18` 删 import；`:38` `registerUpdateInstallCommand(uiRoot *uiroot.Root, dataDir string, …)` 去掉参数；`:23` 命令 ID `"uiroot.install-update"` 删除（无消费者）或改 `"host.install-update"`（若托盘菜单要读，用后者）；`:27` `quitApplication` 保留（托盘 quit 用它）。
   - 保留 `applyPendingUpdateOnStartup` 的启动路径。
   - 验证：`go test ./internal/host -run 'Update'`；`grep -n "uiroot" internal/host/update_command.go` 为空。
-- [ ] **S2.6** 改 4 个 host 测试文件（去掉 uiroot 依赖）：`host_test.go`、`interaction_test.go`、`notifier_test.go`、`update_command_test.go`。
+- [x] **S2.6** 改 4 个 host 测试文件（去掉 uiroot 依赖）：`host_test.go`、`interaction_test.go`、`notifier_test.go`、`update_command_test.go`。
   - 手法：删掉"经 uiroot 驱动窗口"的断言；保留并补"经网关服务直接断言"的等价断言（gateway 侧已有覆盖，见 15 条 `TestE2E*`）。
   - 验证：`go test ./internal/host -count=1` 全绿。
-- [ ] **S2.7** 提交 `S2: remove the desktop host path`；回退点：`git revert <S2>`。
+- [x] **S2.7** 提交 `S2: remove the desktop host path`；回退点：`git revert <S2>`。
 
 ## 3. 步骤 S3：装配层塌缩
 

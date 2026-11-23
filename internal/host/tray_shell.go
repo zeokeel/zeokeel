@@ -99,8 +99,8 @@ func trayEnabled(noTray bool) bool {
 // The gw pointer supplies the live run/approval counters; settings keeps the
 // language and close-to-tray rows (the latter now only affects the menu label
 // the desktop used to change).
-func startTrayShell(ctx context.Context, dataDir string, status func() (running, approvals int),
-	english func() bool, quit func(), logger contracts.Logger) error {
+func startTrayShell(ctx context.Context, dataDir string, settings *Settings,
+	status func() (running, approvals int), english func() bool, quit func(), logger contracts.Logger) error {
 	if logger == nil {
 		logger = discardLogger{}
 	}
@@ -118,6 +118,11 @@ func startTrayShell(ctx context.Context, dataDir string, status func() (running,
 			return ctx.Err() == nil
 		}, actions, logger); err != nil {
 			logger.Printf("%s: tray unavailable: %v", appName, err)
+		}
+		// The global hotkey is a tray feature: pressing it is "open the client".
+		// Best effort, exactly like the tray itself.
+		if _, err := setupGlobalHotkey(window, settings, mygoHotkeyRegistrar{}); err != nil {
+			logger.Printf("%s: global hotkey unavailable: %v", appName, err)
 		}
 	})
 	// Quit requests (tray menu, SIGINT handled by the caller) end the loop.

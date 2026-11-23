@@ -60,9 +60,9 @@ func runServe(ctx context.Context, opts Options, out io.Writer) error {
 			logger.Printf("%s: dispose kernel root: %v", appName, err)
 		}
 	}()
-	// uiRoot is nil: the gateway has no native UI. This provides the data dir,
-	// settings and log only — the gateway adds the other five services below.
-	if err := provideServices(root, opts.DataDir, settings, logger, nil); err != nil {
+	// The gateway host provides the data dir, settings and log; the gateway adds
+	// the five window-owned services itself (TRANSPORT §7.2).
+	if err := provideServices(root, opts.DataDir, settings, logger); err != nil {
 		return err
 	}
 	gw, err := gateway.New(root, gateway.Options{
@@ -127,7 +127,7 @@ func runServe(ctx context.Context, opts Options, out io.Writer) error {
 		// the service to end instead of starting the mygo event loop.
 		err = <-serveErr
 	} else {
-		err = runServeWithTray(ctx, opts, root, gw, logger, serveErr, cancelServe)
+		err = runServeWithTray(ctx, opts, root, gw, settings, logger, serveErr, cancelServe)
 	}
 	if err != nil && errors.Is(err, gateway.ErrAlreadyRunning) {
 		// A second launch is not an error: report where the running gateway is
@@ -142,7 +142,7 @@ func runServe(ctx context.Context, opts Options, out io.Writer) error {
 // the tray shell, on the main goroutine. Whoever ends first ends the process:
 // the tray quitting cancels the gateway, and the gateway ending quits the tray.
 func runServeWithTray(ctx context.Context, opts Options, root cordis.Context, gw *gateway.Gateway,
-	logger *Logger, serveErr <-chan error, cancelServe context.CancelFunc) error {
+	settings *Settings, logger *Logger, serveErr <-chan error, cancelServe context.CancelFunc) error {
 	// The tray mirrors the live counters the desktop read through uiroot: running
 	// conversations and pending approvals, both from the in-process services.
 	status := func() (running, approvals int) {
@@ -175,7 +175,7 @@ func runServeWithTray(ctx context.Context, opts Options, root cordis.Context, gw
 		stopTray()
 	}()
 
-	runErr := startTrayShell(trayCtx, opts.DataDir, status, english, func() {
+	runErr := startTrayShell(trayCtx, opts.DataDir, settings, status, english, func() {
 		cancelServe()
 	}, logger)
 	if runErr != nil {

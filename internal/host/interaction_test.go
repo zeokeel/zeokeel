@@ -1,6 +1,7 @@
 package host
 
-// Desktop host provides the interaction bridge; the headless product must not.
+// The window-owned interaction services belong to whoever runs the browser
+// transport (gateway.Provide for --product serve), never to the process host.
 
 import (
 	"testing"
@@ -8,43 +9,18 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
-	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
-func TestProvideServicesDesktopProvidesInteraction(t *testing.T) {
+// TestProvideServicesSkipsInteraction pins that the process host provides only
+// data dir/settings/log: the browser transport adds the interaction services.
+func TestProvideServicesSkipsInteraction(t *testing.T) {
 	root := cordis.Root()
 	t.Cleanup(func() { _ = root.DisposeAll() })
 	settings, err := NewSettings(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewSettings: %v", err)
 	}
-	uiRoot := uiroot.New(uiroot.Config{AppName: appName})
-	if err := provideServices(root, t.TempDir(), settings, NewLogger(""), uiRoot); err != nil {
-		t.Fatalf("provideServices: %v", err)
-	}
-	interaction, ok := root.Get(contracts.KeyUserInteraction)
-	if !ok {
-		t.Fatal("desktop host did not provide KeyUserInteraction")
-	}
-	if interaction == nil {
-		t.Fatal("desktop host provided a nil UserInteraction")
-	}
-	if presenter, ok := root.Get(contracts.KeyArtifactPresenter); !ok || presenter == nil {
-		t.Fatal("desktop host did not provide KeyArtifactPresenter")
-	}
-	if reviewer, ok := root.Get(contracts.KeyPlanReviewer); !ok || reviewer == nil {
-		t.Fatal("desktop host did not provide KeyPlanReviewer")
-	}
-}
-
-func TestProvideServicesHeadlessSkipsInteraction(t *testing.T) {
-	root := cordis.Root()
-	t.Cleanup(func() { _ = root.DisposeAll() })
-	settings, err := NewSettings(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewSettings: %v", err)
-	}
-	if err := provideServices(root, t.TempDir(), settings, NewLogger(""), nil); err != nil {
+	if err := provideServices(root, t.TempDir(), settings, NewLogger("")); err != nil {
 		t.Fatalf("provideServices: %v", err)
 	}
 	if _, ok := root.Get(contracts.KeyUserInteraction); ok {

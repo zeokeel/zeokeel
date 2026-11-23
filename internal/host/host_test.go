@@ -9,11 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	cordis "github.com/zeokeel/zeokeel-kernel"
-
 	"github.com/zeokeel/zeokeel/internal/assembly"
-	"github.com/zeokeel/zeokeel/internal/contracts"
-	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
 func TestOptionsNormalize(t *testing.T) {
@@ -85,9 +81,12 @@ func TestServePortFlagValidation(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "desktop product", args: []string{"--port", "1234"}},
+		// --product defaults to serve now, so a bare --port is valid and is not
+		// part of this table.
 		{name: "headless product", args: []string{"--headless", "--port", "1234"}},
-		{name: "explicit desktop", args: []string{"--product", "desktop", "--port", "1234"}},
+		{name: "desktop product", args: []string{"--product", "desktop", "--port", "1234"}},
+		{name: "no-tray on headless", args: []string{"--product", "headless", "--no-tray"}},
+		{name: "no-tray on acp", args: []string{"--acp", "--no-tray"}},
 		{name: "out of range", args: []string{"--product", "serve", "--port", "70000"}},
 		{name: "negative", args: []string{"--product", "serve", "--port", "-2"}},
 	}
@@ -97,8 +96,12 @@ func TestServePortFlagValidation(t *testing.T) {
 			if code := mainWithStreams(c.args, &stdout, &stderr); code != 2 {
 				t.Fatalf("exit code = %d, want 2 (stdout %q, stderr %q)", code, stdout.String(), stderr.String())
 			}
-			if !strings.Contains(stderr.String(), "--port") {
-				t.Fatalf("stderr = %q, want it to explain --port", stderr.String())
+			want := "--port"
+			if strings.Contains(strings.Join(c.args, " "), "--no-tray") {
+				want = "--no-tray"
+			}
+			if !strings.Contains(stderr.String(), want) {
+				t.Fatalf("stderr = %q, want it to explain %s", stderr.String(), want)
 			}
 		})
 	}
@@ -109,7 +112,7 @@ func TestMainHelp(t *testing.T) {
 	if code := mainWithStreams([]string{"--help"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("--help exit code = %d, want 0", code)
 	}
-	for _, want := range []string{"--product", "--headless", "--data-dir", "--version", "--list-products", "--port"} {
+	for _, want := range []string{"--product", "--headless", "--data-dir", "--version", "--list-products", "--port", "--no-tray"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("--help output = %q, want it to document %q", stdout.String(), want)
 		}
@@ -205,58 +208,6 @@ func TestHeadlessRun(t *testing.T) {
 	}
 }
 
-// TestProvideServicesSatisfiesDesktopAssembly checks the host's service list
-// against what the desktop assembly declares as builtins: a missing provide
-// would fail module.Load's builtin check. No window is created.
-func TestProvideServicesSatisfiesDesktopAssembly(t *testing.T) {
-	root := cordis.Root()
-	t.Cleanup(func() {
-		if err := root.DisposeAll(); err != nil {
-			t.Errorf("DisposeAll: %v", err)
-		}
-	})
-	settings, err := NewSettings(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewSettings: %v", err)
-	}
-	logger := NewLogger("")
-	uiRoot := uiroot.New(uiroot.Config{AppName: appName})
-	if err := provideServices(root, "/tmp/zeokeel-test-data", settings, logger, uiRoot); err != nil {
-		t.Fatalf("provideServices: %v", err)
-	}
-	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductDesktop, assembly.BuildInfo{
-		Version:   "1.0.0",
-		Commit:    "test",
-		BuildTime: "now",
-	})
-	if err != nil {
-		t.Fatalf("desktop assembly on host services: %v", err)
-	}
-	defer func() {
-		if err := loader.Close(); err != nil {
-			t.Errorf("loader.Close: %v", err)
-		}
-	}()
-	if err := uiRoot.Validate(); err != nil {
-		t.Fatalf("uiroot Validate: %v", err)
-	}
-	info, ok := root.Get(contracts.KeyAppInfo)
-	if !ok {
-		t.Fatal("appinfo service not provided by the assembly")
-	}
-	if info.Version != "1.0.0" {
-		t.Fatalf("appinfo version = %q, want 1.0.0", info.Version)
-	}
-	// The host-owned settings store is reachable as the settings contract.
-	settingsService, ok := root.Get(contracts.KeySettings)
-	if !ok {
-		t.Fatal("settings service not available to modules")
-	}
-	if got := settingsService.Get("ui.language", "zh"); got != "zh" {
-		t.Fatalf("default language = %q, want zh", got)
-	}
-}
-
 func TestVersionString(t *testing.T) {
 	opts := Options{AppVersion: "2.0.0", AppCommit: "abcdef", AppBuildTime: "yesterday"}
 	got := opts.versionString()
@@ -278,40 +229,5 @@ func TestDefaultDataDirEnvOverride(t *testing.T) {
 	}
 	if got := defaultDataDir(); strings.TrimSpace(got) != got {
 		t.Fatalf("defaultDataDir() kept surrounding spaces: %q", got)
-	}
-}
-
-// TestProvideServicesForegroundSession checks the desktop host advertises the
-// foreground-session read model the agent uses to silence background-run
-// notifications for the conversation actually on screen, and that the headless
-// product, which has no window, does not.
-func TestProvideServicesForegroundSession(t *testing.T) {
-	root := cordis.Root()
-	t.Cleanup(func() { _ = root.DisposeAll() })
-	settings, err := NewSettings(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewSettings: %v", err)
-	}
-	uiRoot := uiroot.New(uiroot.Config{AppName: appName})
-	if err := provideServices(root, t.TempDir(), settings, NewLogger(""), uiRoot); err != nil {
-		t.Fatalf("provideServices: %v", err)
-	}
-	foreground, ok := root.Get(contracts.KeyForegroundSession)
-	if !ok {
-		t.Fatal("desktop host did not provide KeyForegroundSession")
-	}
-	if foreground == nil {
-		t.Fatal("desktop host provided a nil ForegroundSession")
-	}
-
-	// The headless product has no foreground read model: the backend keeps its
-	// own active-session rule.
-	headless := cordis.Root()
-	t.Cleanup(func() { _ = headless.DisposeAll() })
-	if err := provideServices(headless, t.TempDir(), settings, NewLogger(""), nil); err != nil {
-		t.Fatalf("headless provideServices: %v", err)
-	}
-	if _, ok := headless.Get(contracts.KeyForegroundSession); ok {
-		t.Fatal("headless host provided KeyForegroundSession")
 	}
 }

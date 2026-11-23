@@ -33,18 +33,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
-	"sync/atomic"
 
-	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
-	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/assembly"
 	"github.com/zeokeel/zeokeel/internal/contracts"
-	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
-	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
 // Product identity and process defaults.
@@ -184,7 +177,7 @@ func mainWithStreams(args []string, stdout, stderr io.Writer) int {
 	// Print help ourselves: flag's default help goes to the error stream, and
 	// --help is a success, not an error.
 	flags.Usage = func() {}
-	product := flags.String("product", assembly.ProductDesktop, "assembly product to run")
+	product := flags.String("product", assembly.ProductServe, "assembly product to run")
 	headless := flags.Bool("headless", false, "run without a window (same as --product headless)")
 	dataDir := flags.String("data-dir", "", "data directory")
 	showVersion := flags.Bool("version", false, "print version information and exit")
@@ -282,7 +275,7 @@ Usage:
   zeokeel [flags]
 
 Flags:
-  --product <name>   assembly product to run (default "desktop")
+  --product <name>   assembly product to run (default "serve")
   --headless         run without a window (same as --product headless)
   --acp              run the Agent Client Protocol stdio server (editor integration)
   --port <port>      first gateway port for --product serve (default 9932)
@@ -300,7 +293,11 @@ func Run(opts Options) error {
 	opts = opts.normalize()
 	switch opts.Product {
 	case assembly.ProductDesktop:
-		return runDesktop(opts)
+		// The windowed product was retired when the browser client became the
+		// main surface (docs/plans/web-client-pivot.md). Fail loudly instead of
+		// starting something the build no longer contains.
+		return fmt.Errorf("the desktop product is gone; run --product %s and open the printed URL in a browser",
+			assembly.ProductServe)
 	case assembly.ProductHeadless:
 		ctx, stop := signal.NotifyContext(context.Background(), terminationSignals...)
 		defer stop()
@@ -339,7 +336,7 @@ func runHeadless(ctx context.Context, opts Options, out io.Writer) error {
 			logger.Printf("%s: dispose kernel root: %v", appName, err)
 		}
 	}()
-	if err := provideServices(root, opts.DataDir, settings, logger, nil); err != nil {
+	if err := provideServices(root, opts.DataDir, settings, logger); err != nil {
 		return err
 	}
 	moduleLister, err := provideModuleLister(root)
@@ -394,7 +391,7 @@ func RunACP(ctx context.Context, opts Options, in io.Reader, out io.Writer) erro
 			logger.Printf("%s: dispose kernel root: %v", appName, err)
 		}
 	}()
-	if err := provideServices(root, opts.DataDir, settings, logger, nil); err != nil {
+	if err := provideServices(root, opts.DataDir, settings, logger); err != nil {
 		return err
 	}
 	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductHeadless, buildInfo(opts))
@@ -414,435 +411,12 @@ func RunACP(ctx context.Context, opts Options, in io.Reader, out io.Writer) erro
 	return server.Serve(ctx, in, out)
 }
 
-// runDesktop runs the windowed product.
-func runDesktop(opts Options) error {
-	// Windows GUI builds have no console; give them one hidden console so the
-	// shell/job/terminal tools' child processes inherit it instead of opening
-	// cmd/pwsh windows for every tool call. No-op elsewhere.
-	hideWindowsConsoleForChildren()
-	settings, err := NewSettings(opts.DataDir)
-	if err != nil {
-		return err
-	}
-	logger := NewLogger(opts.DataDir)
-	defer func() { _ = logger.Close() }()
-	logger.Printf("%s: starting %s, data dir %q, log %q",
-		appName, opts.versionString(), opts.DataDir, logger.Path())
-	mygo.App.SetName(appName)
-	mygo.App.SetVersion(orDefault(opts.AppVersion, "dev"))
-
-	// Apply the stored outbound proxy to the process environment before any
-	// outbound HTTP happens (clients and child processes inherit it). A bad
-	// setting is logged and never blocks startup.
-	if err := applyProxySettings(settings); err != nil {
-		logger.Printf("%s: proxy settings: %v", appName, err)
-	}
-
-	// Single-instance lock, before mygo starts the GUI backend and before Run:
-	// RequestSingleInstanceLock forwards this launch's arguments to the first
-	// instance and returns false here; the second process must exit without a
-	// window. The lock is released by mygo on quit. The handshake needs the GUI
-	// event loop, so it is not unit-tested (singleInstanceEnabled is).
-	singleInstance := singleInstanceSetting(settings)
-	if singleInstance && !mygo.App.RequestSingleInstanceLock() {
-		logger.Printf("%s: another instance is already running; this launch exits", appName)
-		return nil
-	}
-
-	// Install a scheduled update before the GUI and assembly start: the update
-	// page wrote <dataDir>/updates/pending.json, the host replaces its own
-	// executable here (it takes effect on the next start) and never blocks on a
-	// failure (the plan is kept for a retry).
-	applyPendingUpdateOnStartup(opts.DataDir, opts.AppVersion, logger)
-
-	// Best-effort XDG autostart entry sync (only the owning instance manages
-	// the entry): the appearance page writes the setting; this keeps
-	// <configHome>/autostart/zeokeel.desktop in step with it. A failure is
-	// logged by syncAutostart and never blocks startup.
-	_ = syncAutostart(settings, logger)
-
-	// refreshChrome re-applies the host chrome that follows the live backend
-	// state and the product language (window title, tray tooltip/menu). It is
-	// assigned once the window and tray exist; the language hook may fire before
-	// that, hence the nil check.
-	var refreshChrome func()
-	// The UI root exists before the assembly loads: UI modules require its
-	// services during activation. It owns the frame and every contribution
-	// registry; the host only creates the window around its single view.
-	uiRoot := uiroot.New(uiroot.Config{
-		AppName:  appName,
-		Dark:     settings.Get(settingDark, "false") == "true",
-		Language: settings.Get(settingLanguage, "zh"),
-		Settings: settings,
-		// mygo localizes its own controls, menus and accessibility text
-		// separately; mirror a runtime language switch into the framework so
-		// those strings follow the product language (fix round SH-06).
-		OnLanguageChange: func(lang string) {
-			mygo.App.SetLocale(frameworkLocale(lang))
-			if refreshChrome != nil {
-				refreshChrome()
-			}
-		},
-	})
-	root := cordis.Root()
-	if err := provideServices(root, opts.DataDir, settings, logger, uiRoot); err != nil {
-		_ = root.DisposeAll()
-		return err
-	}
-	// The UI root resolves backend services from the kernel context (the close
-	// guard's running-work probe, Cmd/Ctrl+N). Bind it before the assembly loads.
-	uiRoot.SetKernelContext(root)
-	moduleLister, err := provideModuleLister(root)
-	if err != nil {
-		_ = root.DisposeAll()
-		return fmt.Errorf("%s: provide module lister: %w", appName, err)
-	}
-
-	var (
-		loader *module.Loader
-		window *mygo.Window
-		tray   trayHandle
-		// chatService is the loaded product's conversation service: the tray
-		// actions and the activity chrome (P2-9) both read it.
-		chatService contracts.ChatService
-		// activityUnsubscribes release the backend subscriptions that refresh the
-		// window title and tray on shutdown.
-		activityUnsubscribes []func()
-		hotkeyOff            func()
-		themeOff             func()
-		updateCommandOff     func()
-		updateCommandErr     error
-		notificationClickOff func()
-		startupErr           error
-		shutdownOnce         sync.Once
-		closing              atomic.Bool
-	)
-	// Close/quit guard: closing the window, Cmd+Q, the tray's 退出 or an update
-	// restart while backend work is in flight asks first instead of silently
-	// dropping a run/job/goal. The probe is the UI root's live view of the
-	// backend services; the confirmation is mygo's native dialog in the
-	// product language. With close-to-tray on, closing hides the window (the
-	// tray's listener) and the guard stays quiet.
-	quitGuard := newCloseGuard(closeGuardDeps{
-		runningWork: uiRoot.RunningWork,
-		confirm: func() bool {
-			return confirmQuitWithRunningWork(window, uiRoot.Locale().Language() == "en")
-		},
-		closeToTray: closeToTrayEnabled(settings),
-		keepAlive:   func() bool { return !closing.Load() },
-	})
-	// The immediate-install command lives with the UI root's command surface:
-	// the update settings page and the palette reach "install update and restart"
-	// through it (the page only schedules the download). Registration is
-	// non-fatal: a command registry the host cannot extend must not block startup.
-	updateCommandOff, updateCommandErr = registerUpdateInstallCommand(uiRoot, opts.DataDir, logger)
-	if updateCommandErr != nil {
-		logger.Printf("%s: register the install-update command: %v", appName, updateCommandErr)
-	}
-	// shutdown is the one teardown path: unload the assembly (UI modules
-	// unregister their contributions in reverse through the kernel), close the
-	// window, persist host-owned UI preferences, dispose the kernel root. It is
-	// idempotent so the quit listener and the post-Run fallback can both call it.
-	shutdown := func() {
-		shutdownOnce.Do(func() {
-			closing.Store(true)
-			logger.Printf("%s: shutting down", appName)
-			uiRoot.SetInvalidator(nil)
-			if updateCommandOff != nil {
-				updateCommandOff()
-				updateCommandOff = nil
-			}
-			if notificationClickOff != nil {
-				notificationClickOff()
-				notificationClickOff = nil
-			}
-			if loader != nil {
-				if err := loader.Close(); err != nil {
-					logger.Printf("%s: close assembly: %v", appName, err)
-				}
-				loader = nil
-			}
-			// Release the activity subscriptions before the services they read
-			// go away: a late callback must not post a frame during teardown.
-			for _, unregister := range activityUnsubscribes {
-				if unregister != nil {
-					unregister()
-				}
-			}
-			activityUnsubscribes = nil
-			if themeOff != nil {
-				themeOff()
-				themeOff = nil
-			}
-			if hotkeyOff != nil {
-				hotkeyOff()
-				hotkeyOff = nil
-			}
-			if tray != nil {
-				tray.Destroy()
-				tray = nil
-			}
-			if window != nil && !window.IsDestroyed() {
-				window.Close()
-			}
-			persistPreferences(settings, uiRoot, logger)
-			if err := root.DisposeAll(); err != nil {
-				logger.Printf("%s: dispose kernel root: %v", appName, err)
-			}
-		})
-	}
-
-	if singleInstance {
-		// Later launches hand their command line to this instance; bring the
-		// existing window to the front. The callback runs on the UI thread, and
-		// the window may still be nil during startup, so both are guarded.
-		mygo.App.OnSecondInstance(func(args []string, workingDir string) {
-			logger.Printf("%s: second launch forwarded (args %v, cwd %q)", appName, args, workingDir)
-			if window != nil && !window.IsDestroyed() {
-				window.Show()
-				window.Restore()
-				window.Focus()
-			}
-		})
-	}
-
-	// A click on one of the app's OS notifications brings the window to the
-	// front and, when the notification carries a conversation, opens that
-	// session (contracts.SessionNotifier ids). Registering before Run also
-	// receives the click of a notification from an earlier run that launched
-	// this instance; the window and the assembly may still be missing then, so
-	// the clicker keeps the target until startup finishes (markReady below).
-	notificationClicks := newNotificationClicker(notificationClickDeps{
-		window:    func() *mygo.Window { return window },
-		chat:      func() contracts.ChatService { chat, _ := root.Require(contracts.KeyChat); return chat },
-		navigator: func() contracts.Navigator { return uiRoot.Navigator() },
-		session: func(notificationID string) (string, bool) {
-			return uiRoot.NotificationSession(notificationID)
-		},
-		logger: logger,
-	})
-	notificationClickOff = mygo.App.OnNotificationClick(notificationClicks.handle)
-
-	// A quit (Cmd+Q, tray/OS quit, SIGINT/SIGTERM) runs the teardown before
-	// mygo closes the windows, so the assembly is unloaded while the UI thread
-	// and the window still exist.
-	//
-	// When the OS ends the session (logout, restart, shutdown), mygo says so on
-	// the event: the quit cannot be canceled and the process may end as soon as
-	// this listener returns, so the teardown has to finish synchronously and the
-	// log file is flushed before returning.
-	//
-	// The quit guard asks first when backend work is still running (unless the
-	// user already confirmed the window close that led here, or the OS is ending
-	// the session and the quit cannot be canceled).
-	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
-		if !quitGuard.allowQuitEvent(e) {
-			logger.Printf("%s: quit canceled: backend work is still running", appName)
-			return
-		}
-		if e.SessionEnding {
-			logger.Printf("%s: OS session ending; tearing down synchronously", appName)
-		} else {
-			logger.Printf("%s: quit requested", appName)
-		}
-		shutdown()
-		if e.SessionEnding {
-			// Run returns too late to flush on this path: the OS ends the
-			// process right after the quit listeners return.
-			_ = logger.Close()
-		}
-	})
-	// Closing the last window quits the product. The listener must exist for
-	// mygo to report the close instead of starting a nested quit; during the
-	// host's own teardown it stays quiet.
-	mygo.App.OnWindowAllClosed(func() {
-		if closing.Load() {
-			return
-		}
-		logger.Printf("%s: last window closed", appName)
-		mygo.App.Quit()
-	})
-
-	// The assembly loads here, on the main thread, only once mygo is ready:
-	// every UI module activates and registers its contributions on the UI
-	// thread, synchronously, before the first frame.
-	mygo.App.WhenReady(func() {
-		// The framework's own strings follow the product language from the
-		// first frame (see framework_locale.go). App.SetLocale persists the tag
-		// in the framework's own file, but the product stays the source of
-		// truth: this line sets it from the stored ui.language setting on every
-		// start, and OnLanguageChange (uiroot.Config) mirrors later switches.
-		mygo.App.SetLocale(frameworkLocale(uiRoot.Locale().Language()))
-		// OS notifications: mygo can show them now, before the assembly loads,
-		// so even a notification posted during startup mirrors. The UI root
-		// mirrors the notifications that ask for the OS (contracts.SystemNotifier:
-		// background run completions/failures, approval waits) through this sink;
-		// a platform without support keeps the in-app toast and the settings page
-		// shows its 系统通知 switch disabled.
-		if mygo.NotificationsSupported() {
-			uiRoot.SetOSNotifier(mygoOSNotifier())
-			logger.Printf("%s: system notifications ready", appName)
-		} else {
-			logger.Printf("%s: system notifications unavailable on this platform", appName)
-		}
-		// Appearance mode: mygo is ready here, so Theme.IsDark and the desktop
-		// appearance listener are available. System mode keeps following the
-		// desktop; light/dark force the app theme.
-		themeOff = applyThemeMode(uiRoot.Theme(), settings, mygo.Theme)
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				startupErr = fmt.Errorf("%s: startup panic: %v", appName, recovered)
-				logger.Printf("%v", startupErr)
-				mygo.App.Quit()
-			}
-		}()
-		loaded, err := assembly.LoadWithBuildInfo(root, opts.Product, buildInfo(opts))
-		if err != nil {
-			startupErr = fmt.Errorf("%s: load product %q: %w", appName, opts.Product, err)
-			logger.Printf("%v", startupErr)
-			mygo.App.Quit()
-			return
-		}
-		loader = loaded
-		moduleLister.set(moduleInfos(loadedModulesFromInstances(loaded.Instances())))
-		// One default workspace, once, after the assembly is active and before
-		// the first frame: a launch without a current folder gets
-		// <dataDir>/workspace opened here; an existing current folder is kept.
-		ensureDefaultWorkspace(root, opts.DataDir, logger)
-		if err := uiRoot.Validate(); err != nil {
-			startupErr = fmt.Errorf("%s: %w", appName, err)
-			logger.Printf("%v", startupErr)
-			mygo.App.Quit()
-			return
-		}
-		window = mygo.NewWindow(mygo.WindowOptions{
-			Title:     appName,
-			Width:     mainWindowWidth,
-			Height:    mainWindowHeight,
-			MinWidth:  mainWindowMinWidth,
-			MinHeight: mainWindowMinHeight,
-			StateKey:  mainWindowStateKey,
-			Content:   ui.View(uiRoot.View),
-		})
-		uiRoot.SetInvalidator(window.Invalidate)
-		window.OnFileDrop(func(event *mygo.FileDropEvent) {
-			if event != nil {
-				uiRoot.FileDrop().Dispatch(event.Paths)
-			}
-		})
-		// Tray actions: a fresh session (create + push the session screen), the
-		// settings overlay, and the live chrome (P2-9): the localized menu copy
-		// and the run/approval counters the tooltip and menu show.
-		trayMenuActions := trayActions{
-			English: func() bool { return uiRoot.Locale().Language() == "en" },
-			Status: func() (int, int) {
-				status := uiRoot.Activity()
-				return status.Running, status.Approvals
-			},
-		}
-		if service, chatErr := root.Require(contracts.KeyChat); chatErr != nil {
-			logger.Printf("%s: tray actions unavailable: %v", appName, chatErr)
-		} else {
-			chatService = service
-			navigator := uiRoot.Navigator()
-			trayMenuActions.NewSession = func() error {
-				if _, err := chatService.NewSession(""); err != nil {
-					return fmt.Errorf("create session: %w", err)
-				}
-				if err := navigator.Push("session"); err != nil {
-					return fmt.Errorf("show session screen: %w", err)
-				}
-				return nil
-			}
-			trayMenuActions.OpenSettings = func() { navigator.ToggleSettings() }
-		}
-		// System tray (best effort): a session without a tray host, such as a
-		// bare Xvfb display, fails NewTray; log it and keep running. With
-		// close-to-tray enabled the close handler hides the window instead of
-		// quitting; the teardown path (keepAlive false) still closes it.
-		var trayRefresh func()
-		if created, refresh, trayErr := setupTrayWithActivity(window, settings, func() bool { return !closing.Load() }, trayMenuActions, newMygoTray, logger); trayErr != nil {
-			logger.Printf("%s: system tray unavailable: %v", appName, trayErr)
-		} else {
-			tray = created
-			trayRefresh = refresh
-			logger.Printf("%s: system tray ready (close to tray: %t)", appName, closeToTrayEnabled(settings))
-		}
-		// P2-9: the window title and the tray mirror the live run/approval state
-		// ("ZeoKeel · 运行中 2", "ZeoKeel · 等待审批", the app name alone when idle),
-		// in the product language. Backends notify from any goroutine, so every
-		// refresh hops onto the UI thread through the frame queue.
-		refreshChrome = func() {
-			status := uiRoot.Activity()
-			english := uiRoot.Locale().Language() == "en"
-			if window != nil {
-				window.SetTitle(activityStatusText(appName, status.Running, status.Approvals, english))
-			}
-			if trayRefresh != nil {
-				trayRefresh()
-			}
-		}
-		refreshChrome()
-		if chatService != nil {
-			if unregister, subErr := chatService.Subscribe(func(string) {
-				uiRoot.Runtime().Post(refreshChrome)
-			}); subErr != nil {
-				logger.Printf("%s: activity chrome (sessions): %v", appName, subErr)
-			} else {
-				activityUnsubscribes = append(activityUnsubscribes, unregister)
-			}
-		}
-		if approvals, ok := root.Get(contracts.KeyApprovals); ok && approvals != nil {
-			if unregister, subErr := approvals.Subscribe(func() {
-				uiRoot.Runtime().Post(refreshChrome)
-			}); subErr != nil {
-				logger.Printf("%s: activity chrome (approvals): %v", appName, subErr)
-			} else {
-				activityUnsubscribes = append(activityUnsubscribes, unregister)
-			}
-		}
-		// Close-to-tray only hides the window when the tray exists to bring it
-		// back; without a tray the quit-on-close path (with its running-work
-		// confirmation) stays, instead of hiding an app the user cannot reach.
-		quitGuard.deps.closeToTray = quitGuard.deps.closeToTray && tray != nil
-		// Close guard: with close-to-tray off, closing the window quits; with
-		// backend work in flight it asks first. With close-to-tray on, the tray's
-		// own listener hides the window and the guard stays quiet (the quit path
-		// still checks before an explicit quit).
-		window.OnClose(quitGuard.handleClose)
-		// Global hotkey (best effort): the appearance page stores the
-		// accelerator; an invalid value or a shortcut owned by the desktop is
-		// logged and skipped. Unregistered again on shutdown.
-		if unregisterHotkey, hotkeyErr := setupGlobalHotkey(window, settings, mygoHotkeyRegistrar{}); hotkeyErr != nil {
-			logger.Printf("%s: global hotkey unavailable: %v", appName, hotkeyErr)
-		} else if unregisterHotkey != nil {
-			hotkeyOff = unregisterHotkey
-			logger.Printf("%s: global hotkey registered", appName)
-		}
-		logger.Printf("%s: %s product %q loaded: %d module instances, screens %v",
-			appName, opts.versionString(), opts.Product, len(loader.Instances()),
-			uiRoot.ScreenLister().Screens())
-		// Startup finished: apply a notification click that arrived while the
-		// assembly/window were still loading (a notification from an earlier run
-		// can launch the instance and immediately report the click).
-		notificationClicks.markReady()
-	})
-
-	runErr := mygo.App.Run()
-	shutdown()
-	if startupErr != nil {
-		return startupErr
-	}
-	if runErr != nil {
-		return fmt.Errorf("%s: run: %w", appName, runErr)
-	}
-	return nil
-}
-
 // provideServices provides the process-host services on the kernel root before
-// any assembly loads. uiRoot is nil for the headless product, which provides
-// only settings and log.
-func provideServices(root cordis.Context, dataDir string, settings *Settings, logger *Logger, uiRoot *uiroot.Root) error {
+// any assembly loads. It is the gateway/headless host: the window-owned
+// services (user interaction, artifacts, plans, notifications, foreground
+// session, theme, locale) are provided by whoever runs the browser transport —
+// for --product serve that is gateway.Provide (TRANSPORT §7.2).
+func provideServices(root cordis.Context, dataDir string, settings *Settings, logger *Logger) error {
 	if _, err := root.Provide(contracts.KeyDataDir, dataDir); err != nil {
 		return fmt.Errorf("%s: provide data dir: %w", appName, err)
 	}
@@ -854,63 +428,7 @@ func provideServices(root cordis.Context, dataDir string, settings *Settings, lo
 	if _, err := root.Provide(contracts.KeyLogger, logService); err != nil {
 		return fmt.Errorf("%s: provide log: %w", appName, err)
 	}
-	if uiRoot == nil {
-		return nil
-	}
-	if _, err := root.Provide(uinative.KeyUIRuntime, uiRoot.Runtime()); err != nil {
-		return fmt.Errorf("%s: provide ui runtime: %w", appName, err)
-	}
-	if _, err := root.Provide(contracts.KeyNavigator, uiRoot.Navigator()); err != nil {
-		return fmt.Errorf("%s: provide navigator: %w", appName, err)
-	}
-	// The foreground-session read model is host-owned (it mirrors the live
-	// screens): the agent uses it to keep background-run notifications quiet
-	// only for the conversation actually on screen. Provided before any module
-	// loads; the service resolves the chat backend from the kernel lazily
-	// because the agent module provides KeyChat later.
-	if _, err := root.Provide(contracts.KeyForegroundSession, uiRoot.ForegroundSession()); err != nil {
-		return fmt.Errorf("%s: provide foreground session: %w", appName, err)
-	}
-	if _, err := root.Provide(contracts.KeyTheme, uiRoot.Theme()); err != nil {
-		return fmt.Errorf("%s: provide theme: %w", appName, err)
-	}
-	if _, err := root.Provide(contracts.KeyLocale, uiRoot.Locale()); err != nil {
-		return fmt.Errorf("%s: provide locale: %w", appName, err)
-	}
-	if _, err := root.Provide(contracts.KeyScreenLister, uiRoot.ScreenLister()); err != nil {
-		return fmt.Errorf("%s: provide screen lister: %w", appName, err)
-	}
-	if _, err := root.Provide(contracts.KeyFileDrop, contracts.FileDropService(uiRoot.FileDrop())); err != nil {
-		return fmt.Errorf("%s: provide file drop: %w", appName, err)
-	}
-	if _, err := root.Provide(contracts.KeyUserInteraction, contracts.UserInteraction(uiRoot.UserInteraction())); err != nil {
-		return fmt.Errorf("%s: provide user interaction: %w", appName, err)
-	}
-	if _, err := root.Provide(contracts.KeyArtifactPresenter, contracts.ArtifactPresenter(uiRoot.ArtifactPresenter())); err != nil {
-		return fmt.Errorf("%s: provide artifact presenter: %w", appName, err)
-	}
-	if _, err := root.Provide(contracts.KeyPlanReviewer, contracts.PlanReviewer(uiRoot.PlanReviewer())); err != nil {
-		return fmt.Errorf("%s: provide plan reviewer: %w", appName, err)
-	}
-	if _, err := root.Provide(contracts.KeyNotifier, contracts.Notifier(uiRoot.Notifier())); err != nil {
-		return fmt.Errorf("%s: provide notifier: %w", appName, err)
-	}
 	return nil
-}
-
-// persistPreferences writes the host-owned UI preferences back to the settings
-// file. It runs on the teardown path, where a brief file write on the main
-// thread is acceptable.
-func persistPreferences(settings *Settings, uiRoot *uiroot.Root, logger *Logger) {
-	if err := settings.Set(settingDark, fmt.Sprintf("%t", uiRoot.Theme().Dark())); err != nil {
-		logger.Printf("%s: persist theme: %v", appName, err)
-	}
-	if err := settings.Set(settingLanguage, uiRoot.Locale().Language()); err != nil {
-		logger.Printf("%s: persist language: %v", appName, err)
-	}
-	// The appearance page already persists the switches; this keeps the
-	// desktop entry in step with the final settings on the exit path too.
-	_ = syncAutostart(settings, logger)
 }
 
 // buildInfo maps host options to the assembly's build-identity overlay.
