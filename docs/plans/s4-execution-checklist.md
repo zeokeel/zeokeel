@@ -52,12 +52,14 @@
 | `gofmt -l internal cmd` | 空 |
 | `go build ./internal/... ./cmd/...` | OK |
 | `go vet ./internal/... ./cmd/...` | OK |
-| `go test ./internal/... ./cmd/... -count=1` | 1467 个顶层测试；唯一 FAIL = `internal/lib/hostbundle`（环境性，见下） |
+| `go test ./internal/... ./cmd/... -count=1` | 1467 个顶层测试；**34 个包全 ok，非 ok 包数 = 0**（hostbundle 已由 `8873f41` 修复，见下） |
 | `go list -deps ./internal/{contracts,gateway,modules/...} \| grep -c egoist/mygo` | 0 / 0 / 0 |
 | `./zeokeel --list-products` | `headless`、`serve` |
 | `./zeokeel --product desktop` | exit=1，提示改用 serve |
 | `serve --no-tray --port 9967` | `GET /`=200、`/settings`=200、`/api/ws`（无 token）=401 |
 | `make acceptance-check / -approval / -slow` | 三条 PASSED（plain / approval / slow） |
+| 交叉编译 linux/arm64·darwin/amd64·darwin/arm64·windows/amd64（CGO_ENABLED=0） | 四个目标全部 OK |
+| 泄漏检查（ui/uiroot/uikit 引用、`zeokeel-ui/` id、`ProductDesktop`、`desktop.json`、`memory.db`） | 产品代码 0 处（仅 `assembly_test.go` 里有意断言"已不存在"的字符串；`docs/research` 属历史调研，不动） |
 | CI `-race`（21 包） | 0 FAIL |
 | headless / ACP smoke | 正常（165/ACP 帧含 protocolVersion:1） |
 
@@ -86,10 +88,22 @@ artifact/plan 桥（present 经宿主桥到渲染器、plan_review 状态机、i
 `TestE2EPlanReviewOverTheProtocol` + `TestE2EApprovalAllowRunsTheTool`。
 **净损失**：Go 侧不再覆盖"渲染侧"（谁把 artifact 画出来）——那现在归 web 端测试。
 
-**本沙箱永久红的一条**
-`internal/lib/hostbundle` 的 `TestHostBundleCompilesIntoKit`：`sqlite: pragma: unable to
-open database file (14)`，因沙箱 `$HOME` 只读。**迁移前的 pristine HEAD 上同样失败**，
-非迁移引入；可写 HOME 的环境下通过。在此沙箱跑 CI 请直接跳过这一条。
+**hostbundle：曾是环境性失败，已修，现全量全绿**
+`internal/lib/hostbundle` 的 `TestHostBundleCompilesIntoKit` 曾经在本沙箱恒红
+（`sqlite: pragma: unable to open database file (14)`，因为 kit 在用户 state 目录开库，
+而沙箱 `$HOME` 只读）。它**不是环境宿命，是测试卫生问题**：让它自带 HOME 沙盒即可
+（`t.Setenv("HOME"/"XDG_*", t.TempDir())`），已在 `8873f41` 修复。
+理由写进了那条提交：**一个在某个环境里永久红的测试，会教人忽略红**——与"永远空过的
+检查"是同一个失效模式。修复后 `go test ./internal/... ./cmd/...` 非 ok 包数 = **0**。
+
+**文档↔脚本一致性断言（web 轨，`ba12a38`）**
+`npm run e2e` 一度只存在于 `AGENTS.md` 而没注册进 `web/package.json`（第 7 次"文档比现实
+宽松"）。web 轨补了脚本，并加了一条机器断言：从 `AGENTS.md`/`docs/**` 抓 `npm run <x>`，
+断言每个 `x` 都存在于 `package.json`。它一上线就抓出**两处真实漂移**（`npm run design-check`、
+`npm run tokens` 都是原生期命令），且修法是**改文档而不是加豁免**——豁免机制存在但不能当
+创可贴。另一个细节值得记：他第一版正则把 `npm run e2e` 截成了 `npm run e`，于是把 fixture
+断言改成精确列表。**检查器本身也会错**，这正是每条断言都必须"证明会咬人"、并且要能自校验
+的原因。
 
 **`go tool mygo vet` 移除说明**
 S5 之后产品里已无 `ui.Element` 帧循环（托盘只有 App + Tray + 菜单），该工具在当前树上
