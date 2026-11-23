@@ -1,56 +1,50 @@
 /**
- * The prompt queue (A5/B13; mirrors contracts/promptqueue.go).
+ * The session's prompt inbox (A5/B13) over the WS `prompts:<sessionID>` domain
+ * (docs/TRANSPORT.md §6; contracts/promptqueue.go).
  *
- * A prompt sent while the session is running waits in the session's inbox
- * instead of being dropped. The backend owns the queue (durable, per session);
- * the client only enqueues, lists, cancels, and — because the run is
- * client-driven here (`POST /api/chat/run`, TRANSPORT §4.6) — claims the head
- * and issues the next run when the current one settles.
+ * The backend owns the queue — durable, ordered oldest-first. The client only
+ * enqueues, removes, and reads the domain: there is no local copy and no REST
+ * endpoint (one path, so the two can never drift apart again).
+ *
+ * The client drives the run (`POST /api/chat/run`, §4.6), so it claims the head
+ * when a run settles instead of the gateway starting it.
  */
-import { authorizationReady } from './gateway';
-
 export interface QueuedPrompt {
   id: string;
-  sessionId: string;
+  sessionId?: string;
   text: string;
   createdAt?: string;
 }
 
-/** Every call waits for the cookie: /auth must land before any /api request. */
-async function authorized(): Promise<void> {
-  await authorizationReady();
+/** Wire form of one queued prompt (`queuedPromptDTO`). */
+export interface QueuedPromptWire {
+  id: string;
+  text: string;
+  createdAt?: string;
 }
 
-async function readJson<T>(res: Response, what: string): Promise<T> {
-  if (!res.ok) throw new Error(`${what} failed: ${res.status} ${res.statusText}`);
-  return (await res.json()) as T;
-}
-
-const queuePath = (sessionId: string) => `/api/sessions/${encodeURIComponent(sessionId)}/prompts`;
-
-export async function listQueuedPrompts(sessionId: string): Promise<QueuedPrompt[]> {
-  await authorized();
-  const res = await fetch(queuePath(sessionId), { headers: { Accept: 'application/json' } });
-  const body = await readJson<{ prompts: QueuedPrompt[] }>(res, 'prompt queue');
-  return body.prompts;
-}
-
-export async function enqueuePrompt(sessionId: string, text: string): Promise<QueuedPrompt> {
-  await authorized();
-  const res = await fetch(queuePath(sessionId), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ text }),
-  });
-  const body = await readJson<{ prompt: QueuedPrompt }>(res, 'enqueue prompt');
-  return body.prompt;
-}
-
-export async function removeQueuedPrompt(sessionId: string, promptId: string): Promise<void> {
-  await authorized();
-  const res = await fetch(`${queuePath(sessionId)}/${encodeURIComponent(promptId)}`, {
-    method: 'DELETE',
-    headers: { Accept: 'application/json' },
-  });
-  await readJson<{ ok: boolean }>(res, 'remove prompt');
+/** Fold one `prompts.delta` into the held list (added / removed by id). */
+export function applyPromptsDelta(
+  items: QueuedPrompt[],
+  delta: { added?: QueuedPromptWire[]; removed?: string[] },
+): QueuedPrompt[] {
+  const removed = new Set(delta.removed ?? []);
+  const added = delta.added ?? [];
+  const kept = items.filter((item) => !removed.has(item.id));
+  const byId = new Map(kept.map((item) => [item.id, item]));
+  // The queue is ordered: appended prompts go to the end, not to the front.
+  const order: QueuedPrompt[] = [];
+  const seen = new Set<string>();
+  for (const item of kept) {
+    order.push(item);
+    seen.add(item.id);
+  }
+  for (const item of added) {
+    const value = byId.get(item.id) ?? { ...item };
+    if (!seen.has(item.id)) {
+      order.push(value);
+      seen.add(item.id);
+    }
+  }
+  return order;
 }

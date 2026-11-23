@@ -16,22 +16,22 @@
 
 > 目的：让 `serve` 在"无窗口、无 uiroot、无 UI 模块"的世界里已经能跑起来，再动删除。这一步结束时 `internal/ui` 仍然在场（只是没人注册它），所以回退 = 撤这一步的几个文件。
 
-- [ ] **S1.1** `internal/host/serve.go`：起服务顺序改成 **先网关、后托盘**。
+- [x] **S1.1** `internal/host/serve.go`：起服务顺序改成 **先网关、后托盘**。
   - 现：`gateway.New/Provide` → `LoadEntriesWithBuildInfo` → `gw.Serve(ctx)`（阻塞到 ctx 结束）。
   - 改：`serveCtx, cancel := context.WithCancel(ctx)`；`go func(){ err := gw.Serve(serveCtx); cancel(); … }()`；随后进托盘分支；末尾 `<-ctx.Done()`。
   - 验证：`go run ./cmd/zeokeel --product serve --no-tray` 打印 URL 后可 `POST /quit` 正常退出。
-- [ ] **S1.2** `internal/host/serve.go`：新增 `trayEnabled` 判定，双保险。
+- [x] **S1.2** `internal/host/serve.go`：新增 `trayEnabled` 判定，双保险。
   - `--no-tray` 直接 false；否则 Linux 下 `os.Getenv("DISPLAY")=="" && os.Getenv("WAYLAND_DISPLAY")==""` → false（**静默跳过，不告警**）；其余平台 true。
   - 验证：`env -u DISPLAY -u WAYLAND_DISPLAY go run ./cmd/zeokeel --product serve` 正常起、无托盘日志、无报错；带 `DISPLAY=:0` 时有托盘尝试日志。
-- [ ] **S1.3** 新增 `internal/host/tray_shell.go`（新文件，约 120 行）：`setupTrayShell(opts, settings, logger, openClient func() error, quit func())`。
+- [x] **S1.3** 新增 `internal/host/tray_shell.go`（新文件，约 120 行）：`setupTrayShell(opts, settings, logger, openClient func() error, quit func())`。
   - `mygo.App.WhenReady(func(){ tray, err = setupTrayWithActions(...) }); mygo.App.Run()`；`Run` 返回错误 → **只记 warning**，不杀网关（`mygo: cannot open display` 属于预期，见 `mygo@v0.9.2/internal/linux/app.go:141`）。
   - `openClient`：读 `<data-dir>/gateway.json` 的 `port`+`token` → `openurl` 打开 `http://127.0.0.1:<port>/#token=<T>`。
   - `quit`：`cancel()` + `mygo.App.Quit()`（复用 `internal/host/update_command.go:27` 的 `quitApplication` 语义）。
   - 验证：`go test ./internal/host -run 'Tray'`；`make acceptance` 起服务后点托盘图标能打开浏览器。
-- [ ] **S1.4** `internal/host/tray.go`：`trayWindow` 接口换成 `clientOpener`。
-  - 位置：`:104 setupTray(window *mygo.Window…)`、`:113/:124/:148/:168/:175` 五个签名 + `:5` 处 `window.Show/Focus` 调用。
-  - 改：`window trayWindow` → `opener clientOpener`（`OpenClient() error`）；菜单项「打开」调 `opener.OpenClient()`。
-  - 验证：`go test ./internal/host -run 'Tray'`（`tray_test.go`、`tray_actions_test.go` 需同批改 fake）。
+- [x] **S1.4–S1.6（改法调整，见提交说明）** 没有改 `trayWindow` 的签名，而是新增 `BrowserWindow` 适配器**实现**该接口（`Show/Restore/Focus` → 打开浏览器 URL；`Hide` 空操作；`OnClose` 返回空注销）。于是 `tray.go` / `hotkey.go` / `notify.go` / `notification_click.go` 保持单一代码路径，零签名改动、零测试重写。
+  - 理由：把"窗口"抽象成接口的初衷就是这个——换个实现即可。原计划的签名级替换会牵动 4 个文件 + 6 个测试 fake，收益为零而风险更高。
+  - `close_guard.go` **移到 S2 删除**：它只被 `runDesktop` 与 tray 的 close 监听使用，S2 删 `runDesktop` 后自然成为死代码。
+  - 验证：`go test ./internal/host -run 'Tray|Hotkey|Notify'` 全绿。
 - [ ] **S1.5** `internal/host/{hotkey.go,notify.go,notification_click.go}`：同样把 `*mygo.Window` 换成 `clientOpener`（热键、通知点击 → `OpenClient()`）。
   - 位置：`hotkey.go` 7 处、`notify.go` 7 处、`notification_click.go` 10 处 `window` 引用。
   - 验证：`go test ./internal/host -run 'Hotkey|Notify|NotificationClick'`。
@@ -39,8 +39,16 @@
   - 连带的**第二处**读取点在 `internal/host/tray.go:81-88 closeToTrayEnabled` + 它喂给 `setupTray(…, closeToTray bool)` 的菜单文案：新世界里没有窗口可关，去掉该参数与 `contracts.SettingCloseToTray` 的读取。
   - `contracts.SettingCloseToTray` 常量本身保留在 contracts（契约不删类型），设置页那一行由 **web 轨**标注「仅桌面端」或移除（跨轨事项，登记后通知）。
   - 验证：`go build ./...`；`grep -rn "CloseToTray" --include=*.go internal | grep -v internal/ui` 只剩 `internal/contracts/interaction.go`。
-- [ ] **S1.7** 提交 `S1: serve runs the gateway before the tray; tray opens the browser`。
+- [x] **S1.7** 提交 `S1: serve runs the gateway before the tray; tray opens the browser`。
   - 回退点检查：`git revert <S1>` 后 `go build ./...` 应恢复原状（此时 UI 包从未被动过，必然通过）。
+
+### S1 执行记录（2026-11-23）
+
+- 顺序与双保险落地：`runServe` 先起 `gw.Serve` goroutine 再进托盘；`trayEnabled(opts.NoTray)` = `--no-tray` 优先，Linux 无 `DISPLAY`/`WAYLAND_DISPLAY` 静默跳过。
+- **过程中发现并修掉一个真 bug**：最初版本在托盘失败后 `cancelServe()`，导致"托盘起不来 → 网关跟着退出"（实测 `curl /` 得到 000）。改成"托盘失败只告警、等待网关自然结束"，实测 `DISPLAY=:99`（无 X server）时日志 `tray shell unavailable (mygo: cannot open display…)`，且 `/` 持续 200。
+- 新增 `gateway.ReadInfo(dataDir)` 供托盘读 `gateway.json`；`internal/host/tray_shell.go` + 4 条单测（flag 优先、无显示跳过、适配器、URL 构造）。
+- `--no-tray` 加进 `Options`/flag/usage，并对非 serve 产品报错。
+- 验收：`make acceptance-approval` 与 `make acceptance-check` 通过；`go test ./internal/host ./internal/gateway ./internal/assembly` 全绿。
 
 ## 2. 步骤 S2：切除 host 的桌面路径
 

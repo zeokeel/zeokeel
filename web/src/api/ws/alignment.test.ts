@@ -64,6 +64,11 @@ const CLIENT_METHODS = [
   'plan.snapshot',
   'artifacts.snapshot',
   'run.cancel',
+  'prompts.snapshot',
+  'prompts.subscribe',
+  'prompts.enqueue',
+  'prompts.remove',
+  'foreground.set',
 ];
 
 describe('mock ↔ gateway', () => {

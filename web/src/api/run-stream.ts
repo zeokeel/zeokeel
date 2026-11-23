@@ -16,11 +16,18 @@ export const RUN_ENDPOINT = '/api/chat/run';
 
 export function createRunRequest(
   baseURL: string = RUN_ENDPOINT,
+  /**
+   * Extra headers. In the browser there are none: the gateway authenticates the
+   * run with the `zk` cookie (§3.1). Non-browser callers (the integration test,
+   * curl) use `Authorization: Bearer <token>` instead.
+   */
+  extraHeaders: Record<string, string> = {},
 ): RunRequestClient {
   return XRequest<RunRequest, SSEOutput, ZeoMessage>(baseURL, {
     headers: {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
+      ...extraHeaders,
     },
     // No request timeout: a turn can legitimately take minutes. The stream
     // timeout catches a stalled gateway instead (50–100ms coalescing means a

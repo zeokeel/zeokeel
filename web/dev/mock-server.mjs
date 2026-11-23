@@ -185,6 +185,28 @@ addInbox({
 // ------------------------------------------------------------ prompt queue --
 /** @type {Map<string, Array<{id:string,sessionId:string,text:string,createdAt:string}>>} */
 const promptQueues = new Map();
+/** Per-session inbox revisions, so `prompts.delta` carries a real baseRev. */
+const promptRevs = new Map();
+const publishedPrompts = new Map();
+const promptRev = (sessionId) => promptRevs.get(sessionId) ?? 0;
+
+/** Bump one session's inbox revision and push the delta to every ready client. */
+const publishPrompts = (sessionId) => {
+  const next = queueOf(sessionId).map((item) => ({
+    id: item.id,
+    text: item.text,
+    createdAt: item.createdAt,
+  }));
+  const previous = publishedPrompts.get(sessionId) ?? [];
+  const previousIds = new Set(previous.map((item) => item.id));
+  const nextIds = new Set(next.map((item) => item.id));
+  const added = next.filter((item) => !previousIds.has(item.id));
+  const removed = previous.filter((item) => !nextIds.has(item.id)).map((item) => item.id);
+  publishedPrompts.set(sessionId, next);
+  const rev = promptRev(sessionId) + 1;
+  promptRevs.set(sessionId, rev);
+  wsNotify('prompts.delta', { sessionId, baseRev: rev - 1, rev, added, removed });
+};
 
 const queueOf = (sessionId) => {
   if (!promptQueues.has(sessionId)) promptQueues.set(sessionId, []);
@@ -931,124 +953,8 @@ const server = createServer(async (req, res) => {
   }
 
   // -------------------------------------------------------- prompt queue --
-  const queueMatch = path.match(/^\/api\/sessions\/([\w-]+)\/prompts$/);
-  if (queueMatch) {
-    const sessionId = queueMatch[1];
-    if (!sessions.has(sessionId)) return sendJson(res, 404, { error: 'unknown session' });
-    if (method === 'GET') return sendJson(res, 200, { prompts: queueOf(sessionId) });
-    if (method === 'POST') {
-      const body = await readBody(req).catch(() => ({}));
-      const text = typeof body?.text === 'string' ? body.text.trim() : '';
-      if (!text) return sendJson(res, 400, { error: 'text is required' });
-      const prompt = { id: shortId('q'), sessionId, text, createdAt: nowIso() };
-      queueOf(sessionId).push(prompt);
-      return sendJson(res, 200, { prompt });
-    }
-  }
-  const queueItemMatch = path.match(/^\/api\/sessions\/([\w-]+)\/prompts\/([\w-]+)$/);
-  if (queueItemMatch && method === 'DELETE') {
-    const queue = queueOf(queueItemMatch[1]);
-    const index = queue.findIndex((item) => item.id === queueItemMatch[2]);
-    if (index >= 0) queue.splice(index, 1);
-    return sendJson(res, 200, { ok: true });
-  }
-
-  // ------------------------------------------------------------ settings --
-  if (path === '/api/settings' && method === 'GET') {
-    return sendJson(res, 200, settingsCatalog);
-  }
-  if (path === '/api/settings' && method === 'PUT') {
-    const body = await readBody(req).catch(() => ({}));
-    const page = findPage(body?.page);
-    if (!page) return sendJson(res, 404, { error: 'unknown settings page' });
-    for (const section of page.sections) {
-      for (const field of section.fields) {
-        if (body?.values && Object.prototype.hasOwnProperty.call(body.values, field.key)) {
-          field.value = body.values[field.key];
-        }
-      }
-    }
-    return sendJson(res, 200, { ok: true, page });
-  }
-
-  if (path === '/api/settings/check-update' && method === 'POST') {
-    return sendJson(res, 200, { upToDate: true, version: '0.0.0-web (mock)' });
-  }
-  if (path === '/api/settings/data/clear' && method === 'POST') {
-    sessions.clear();
-    inbox.clear();
-    approvals.clear();
-    childOf.clear();
-    return sendJson(res, 200, { ok: true, cleared: true });
-  }
-
-  // --------------------------------------------------------------- files --
-  if (path === '/api/files/tree' && method === 'GET') {
-    return sendJson(res, 200, {
-      root: '/data/mygo',
-      nodes: workspaceFiles.map((entry) => ({
-        key: entry.path,
-        path: entry.path,
-        title: entry.path.split('/').pop(),
-        isLeaf: !entry.dir,
-        changed: Boolean(entry.changed),
-      })),
-    });
-  }
-  if (path === '/api/files/content' && method === 'GET') {
-    const file = url.searchParams.get('path') ?? '';
-    const text = fileContents[file];
-    if (text === undefined) return sendJson(res, 404, { error: 'unknown file' });
-    return sendJson(res, 200, { path: file, text, truncated: false });
-  }
-  if (path === '/api/files/diff' && method === 'GET') {
-    const file = url.searchParams.get('path') ?? '';
-    const unified = fileDiffs[file];
-    if (unified === undefined) return sendJson(res, 404, { error: 'no diff for this file' });
-    const additions = unified
-      .split('\n')
-      .filter((line) => line.startsWith('+') && !line.startsWith('+++')).length;
-    const deletions = unified
-      .split('\n')
-      .filter((line) => line.startsWith('-') && !line.startsWith('---')).length;
-    return sendJson(res, 200, { path: file, unified, additions, deletions });
-  }
-
-  // --------------------------------------------------------- read models --
-  if (path === '/api/capabilities' && method === 'GET') {
-    return sendJson(res, 200, capabilities);
-  }
-  if (path === '/api/automation' && method === 'GET') {
-    return sendJson(res, 200, { tasks: automationTasks });
-  }
-  const taskMatch = path.match(/^\/api\/automation\/([\w-]+)$/);
-  if (taskMatch && method === 'PATCH') {
-    const body = await readBody(req).catch(() => ({}));
-    const task = automationTasks.find((item) => item.id === taskMatch[1]);
-    if (!task) return sendJson(res, 404, { error: 'unknown task' });
-    if (typeof body?.enabled === 'boolean') task.enabled = body.enabled;
-    return sendJson(res, 200, { task });
-  }
-  if (path === '/api/insights' && method === 'GET') {
-    const range = url.searchParams.get('range') === '30' ? 30 : 7;
-    return sendJson(res, 200, { range, ...insights[range] });
-  }
-
-  // ---------------------------------------------------------------- chat --
-  if (path === '/api/chat/run' && method === 'POST') {
-    return void handleRun(req, res);
-  }
-  if (path.startsWith('/api/') && !authorized(req)) {
-    return unauthorized(res, { 'Retry-After': '1' });
-  }
-  if (path === '/api/health') {
-    return sendJson(res, 200, {
-      ok: true,
-      approvals: approvals.size,
-      inbox: inbox.size,
-      sessions: sessions.size,
-    });
-  }
+  // Note: the prompt inbox is a WS domain (`prompts.*`) — it deliberately has
+  // no REST shape any more, so the client cannot keep a second path alive.
 
   sendJson(res, 404, { error: 'not found' });
 });
@@ -1075,7 +981,12 @@ const cookieToken = (req) => {
   return null;
 };
 
-const authorized = (req) => cookieToken(req) === AUTH_TOKEN;
+const authorized = (req) => {
+  if (cookieToken(req) === AUTH_TOKEN) return true;
+  // §3.1: non-browser clients (tests, curl, scripts) use a Bearer token.
+  const header = String(req.headers.authorization ?? '');
+  return header.toLowerCase().startsWith('bearer ') && header.slice(7).trim() === AUTH_TOKEN;
+};
 
 const unauthorized = (res, extraHeaders = {}) => {
   for (const [name, value] of Object.entries(extraHeaders)) res.setHeader(name, value);
@@ -1386,15 +1297,23 @@ const wsDispatch = (client, message) => {
       });
     }
     case 'prompts.snapshot': {
-      const prompts = queueOf(String(params.sessionId ?? '')).map((item) => ({
+      const sessionId = String(params.sessionId ?? '');
+      if (!sessions.has(sessionId)) return fail(1001, 'session_not_found');
+      const prompts = queueOf(sessionId).map((item) => ({
         id: item.id,
         text: item.text,
         createdAt: item.createdAt,
       }));
-      return reply({ epoch: WS_EPOCH, rev: wsRevs.artifacts, prompts });
+      publishedPrompts.set(sessionId, prompts);
+      return reply({ epoch: WS_EPOCH, rev: promptRev(sessionId), prompts });
     }
-    case 'prompts.subscribe':
-      return reply({ epoch: WS_EPOCH, rev: wsRevs.artifacts, resync: false });
+    case 'prompts.subscribe': {
+      const sessionId = String(params.sessionId ?? '');
+      const since = Number(params.sinceRev ?? 0);
+      // The client took a snapshot first; anything it missed can only be
+      // honoured when the revision is the one we hold. Otherwise resync.
+      return reply({ epoch: WS_EPOCH, rev: promptRev(sessionId), resync: since !== promptRev(sessionId) });
+    }
     case 'prompts.enqueue': {
       const sessionId = String(params.sessionId ?? '');
       const text = String(params.text ?? '').trim();
@@ -1402,6 +1321,7 @@ const wsDispatch = (client, message) => {
       if (text === '') return fail(-32602, 'invalid_params');
       const prompt = { id: shortId('q'), sessionId, text };
       queueOf(sessionId).push(prompt);
+      publishPrompts(sessionId);
       return reply({ id: prompt.id });
     }
     case 'prompts.remove': {
@@ -1409,6 +1329,7 @@ const wsDispatch = (client, message) => {
       const queue = queueOf(sessionId);
       const index = queue.findIndex((item) => item.id === params.id);
       if (index >= 0) queue.splice(index, 1);
+      publishPrompts(sessionId);
       return reply({});
     }
     case 'foreground.set':

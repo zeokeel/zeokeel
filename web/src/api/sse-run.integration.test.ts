@@ -16,12 +16,35 @@ import { assistantMessage } from '@/chat/types';
  * framing, the seven event types, their ordering, and client-side abort.
  */
 const mockPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../dev/mock-server.mjs');
+/** Non-browser clients authenticate with a Bearer token (§3.1), not a cookie. */
+const MOCK_TOKEN = process.env.ZK_TOKEN ?? 'dev-token';
+const bearer = { Authorization: `Bearer ${MOCK_TOKEN}` };
 
 let server: ChildProcess;
 let base: string;
+/** The mock authenticates like the gateway: /api needs the `zk` cookie. */
+let cookie = '';
+
+async function authenticate(): Promise<void> {
+  const response = await fetch(`${base}/auth`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: MOCK_TOKEN }),
+  });
+  const setCookie = response.headers.get('set-cookie') ?? '';
+  cookie = setCookie.split(';')[0] ?? '';
+  if (response.status !== 204 || cookie === '') {
+    throw new Error(`mock /auth failed: ${response.status} ${setCookie}`);
+  }
+}
+
+/** fetch with the session cookie — the browser does this implicitly. */
+function authed(input: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(input, { ...init, headers: { ...(init.headers ?? {}), cookie } });
+}
 
 async function createSession(): Promise<string> {
-  const res = await fetch(`${base}/api/sessions`, { method: 'POST' });
+  const res = await authed(`${base}/api/sessions`, { method: 'POST' });
   const body = (await res.json()) as { session: { id: string } };
   return body.session.id;
 }
@@ -34,6 +57,7 @@ beforeAll(async () => {
   });
   await once(server.stdout!, 'data');
   base = `http://127.0.0.1:${port}`;
+  await authenticate();
 }, 20_000);
 
 afterAll(() => {
@@ -69,12 +93,12 @@ describe('POST /api/chat/run over the real mock gateway', () => {
       // queue is the bridge the card and the Inbox both read.
       await waitFor(() => chunks.some((chunk) => chunk.event === 'tool.start'));
       expect(chunks.some((chunk) => chunk.event === 'tool.start')).toBe(true);
-      const queued = (await (await fetch(`${base}/api/approvals`)).json()) as {
+      const queued = (await (await authed(`${base}/api/approvals`)).json()) as {
         approvals: Array<{ id: string }>;
       };
       expect(queued.approvals.length).toBeGreaterThan(0);
       for (const request of queued.approvals) {
-        await fetch(`${base}/api/approvals/${request.id}/resolve`, {
+        await authed(`${base}/api/approvals/${request.id}/resolve`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ decision: 'allow' }),
@@ -109,7 +133,7 @@ describe('POST /api/chat/run over the real mock gateway', () => {
       expect(message.unknownEvents).toBeUndefined();
 
       // The turn joined the snapshot the client reloads after a refresh.
-      const snapshot = await fetch(`${base}/api/sessions/${sessionId}`);
+      const snapshot = await authed(`${base}/api/sessions/${sessionId}`);
       const body = (await snapshot.json()) as { messages: Array<{ role: string; text: string }> };
       expect(body.messages.at(0)).toMatchObject({ role: 'user', text: '解释一下 transport 层' });
       expect(body.messages.at(-1)?.text).toContain('mock 网关');
@@ -127,7 +151,7 @@ describe('POST /api/chat/run over the real mock gateway', () => {
         settle = resolvePromise;
       });
 
-      const request = createRunRequest(`${base}/api/chat/run`);
+      const request = createRunRequest(`${base}/api/chat/run`, bearer);
       request.options.callbacks = {
         onUpdate: (chunk) => {
           received.push(chunk);
@@ -169,7 +193,7 @@ describe('POST /api/chat/run over the real mock gateway', () => {
         settle = { resolve: resolvePromise, reject: rejectPromise };
       });
 
-      const request = createRunRequest(`${base}/api/chat/run`);
+      const request = createRunRequest(`${base}/api/chat/run`, bearer);
       request.options.callbacks = {
         onUpdate: (chunk) => {
           chunks.push(chunk);

@@ -14,6 +14,7 @@
  */
 import { GatewayRpc, type ConnectionStatus, gatewayRpc } from './ws/rpc';
 import { exchangeFragmentToken, probeAuthorization } from './ws/auth';
+import { applyPromptsDelta, type QueuedPrompt, type QueuedPromptWire } from './prompt-queue';
 import {
   SyncedDomain,
   applyItemSet,
@@ -431,6 +432,12 @@ export function handleDelta(method: string, params: unknown): void {
     case 'artifacts.delta':
       artifactsDomain.applyDelta(delta);
       return;
+    case 'prompts.delta': {
+      const sessionId = typeof delta.sessionId === 'string' ? delta.sessionId : '';
+      const domain = sessionId ? promptsDomains.get(sessionId) : undefined;
+      domain?.applyDelta(delta);
+      return;
+    }
     case 'session.delta': {
       const sessionId = typeof delta.sessionId === 'string' ? delta.sessionId : '';
       const domain = sessionId ? sessionDomains.get(sessionId) : undefined;
@@ -571,6 +578,72 @@ export async function setSetting(key: string, value: string): Promise<void> {
 }
 
 // --------------------------------------------------------------- snapshots --
+
+/** sessionId → its prompt inbox domain (`prompts:<sessionID>`). */
+const promptsDomains = new Map<string, SyncedDomain<QueuedPrompt[]>>();
+
+function promptsDomain(sessionId: string): SyncedDomain<QueuedPrompt[]> {
+  const existing = promptsDomains.get(sessionId);
+  if (existing) return existing;
+  const domain = new SyncedDomain<QueuedPrompt[]>(
+    `prompts:${sessionId}`,
+    async () => {
+      const result = await client().request<{
+        epoch: string;
+        rev: number;
+        prompts: QueuedPromptWire[];
+      }>('prompts.snapshot', { sessionId });
+      return {
+        value: (result.prompts ?? []).map((item) => ({ ...item, sessionId })),
+        rev: result.rev,
+        epoch: result.epoch,
+      };
+    },
+    (items, delta) => applyPromptsDelta(items, delta as never),
+  );
+  promptsDomains.set(sessionId, domain);
+  return domain;
+}
+
+/**
+ * Subscribe to one session's inbox: snapshot first, then `prompts.delta`. A
+ * delta that cannot be applied (missed frames, resync) is answered with a fresh
+ * snapshot by `SyncedDomain`, never with a guessed append.
+ */
+export async function subscribePrompts(
+  sessionId: string,
+  listener: (items: QueuedPrompt[]) => void,
+): Promise<() => void> {
+  routeNotifications();
+  const domain = promptsDomain(sessionId);
+  await domain.reload();
+  const unsubscribe = domain.subscribe(listener);
+  const reply = await client().request<{ rev: number; resync?: boolean }>('prompts.subscribe', {
+    sessionId,
+    sinceRev: domain.rev(),
+  });
+  if (reply.resync) await domain.reload();
+  return unsubscribe;
+}
+
+/** Enqueue one prompt into the session's inbox (command, §5.1.1). */
+export async function enqueuePrompt(sessionId: string, text: string): Promise<{ id: string }> {
+  const result = await client().request<{ id: string }>('prompts.enqueue', { sessionId, text });
+  // The pushed delta is the truth; the domain folds it in.
+  return { id: result.id };
+}
+
+/** Remove one queued prompt. Idempotent on the backend (repeat removes succeed). */
+export async function removeQueuedPrompt(sessionId: string, id: string): Promise<void> {
+  await client().request('prompts.remove', { sessionId, id });
+}
+
+/** Read the inbox once (used when claiming the head after a run settles). */
+export async function refreshPrompts(sessionId: string): Promise<QueuedPrompt[]> {
+  const domain = promptsDomain(sessionId);
+  await domain.reload();
+  return domain.value() ?? [];
+}
 
 /** Load one conversation (tail window) — the `defaultMessages` seam. */
 export async function loadSnapshot(sessionId: string): Promise<SessionSnapshot> {

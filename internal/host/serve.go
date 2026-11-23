@@ -14,8 +14,10 @@ package host
 //     gets, because provideServices returns early when uiRoot is nil: user
 //     interaction, artifact presenter, plan reviewer, notifier and foreground
 //     session (TRANSPORT §7.2);
-//  3. nothing here touches mygo: no window, no tray, no event loop. The tray
-//     shell is its own tiny process that reads gateway.json.
+//  3. the tray is optional and best effort: the gateway starts first, then the
+//     mygo event loop (main goroutine) hosts only the tray icon, whose "show"
+//     opens the browser client. A tray that cannot start (no display, no tray
+//     host) is a warning; --no-tray skips it entirely (TRANSPORT §2.2).
 
 import (
 	"context"
@@ -27,6 +29,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/assembly"
+	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/gateway"
 )
 
@@ -112,7 +115,20 @@ func runServe(ctx context.Context, opts Options, out io.Writer) error {
 		fmt.Fprintf(out, "  warning: %s\n", warning)
 	}
 
-	err = gw.Serve(ctx)
+	// The gateway owns the service: start it before the tray so a tray that
+	// cannot start never costs the gateway. serveErr carries its verdict.
+	serveCtx, cancelServe := context.WithCancel(ctx)
+	defer cancelServe()
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- gw.Serve(serveCtx) }()
+
+	if !trayEnabled(opts.NoTray) {
+		// --no-tray, or a Linux session without a display: pure gateway. Wait for
+		// the service to end instead of starting the mygo event loop.
+		err = <-serveErr
+	} else {
+		err = runServeWithTray(ctx, opts, root, gw, logger, serveErr, cancelServe)
+	}
 	if err != nil && errors.Is(err, gateway.ErrAlreadyRunning) {
 		// A second launch is not an error: report where the running gateway is
 		// and let the process exit 0 (desktop second-instance behaviour).
@@ -120,6 +136,67 @@ func runServe(ctx context.Context, opts Options, out io.Writer) error {
 		return nil
 	}
 	return err
+}
+
+// runServeWithTray runs the gateway (already started in a goroutine) alongside
+// the tray shell, on the main goroutine. Whoever ends first ends the process:
+// the tray quitting cancels the gateway, and the gateway ending quits the tray.
+func runServeWithTray(ctx context.Context, opts Options, root cordis.Context, gw *gateway.Gateway,
+	logger *Logger, serveErr <-chan error, cancelServe context.CancelFunc) error {
+	// The tray mirrors the live counters the desktop read through uiroot: running
+	// conversations and pending approvals, both from the in-process services.
+	status := func() (running, approvals int) {
+		if chat, ok := root.Get(contracts.KeyChat); ok && chat != nil {
+			for _, session := range chat.Sessions() {
+				if session.Running {
+					running++
+				}
+			}
+		}
+		if service, ok := root.Get(contracts.KeyApprovals); ok && service != nil {
+			approvals = len(service.Pending())
+		}
+		return running, approvals
+	}
+	english := func() bool {
+		if service, ok := root.Get(contracts.KeyLocale); ok && service != nil {
+			return service.Language() == "en"
+		}
+		return false
+	}
+	trayCtx, stopTray := context.WithCancel(ctx)
+	defer stopTray()
+
+	// Watch the gateway: when it ends, the tray must end too.
+	gatewayEnded := make(chan error, 1)
+	go func() {
+		err := <-serveErr
+		gatewayEnded <- err
+		stopTray()
+	}()
+
+	runErr := startTrayShell(trayCtx, opts.DataDir, status, english, func() {
+		cancelServe()
+	}, logger)
+	if runErr != nil {
+		// The event loop itself failed to start (no display backend, no tray
+		// host): the gateway keeps serving. This is the documented degradation,
+		// so it is a warning, not an error, and the service keeps running until
+		// the process context ends.
+		logger.Printf("%s: tray shell unavailable (%v); the gateway keeps serving", appName, runErr)
+		err := <-gatewayEnded
+		if err != nil && !errors.Is(err, gateway.ErrAlreadyRunning) {
+			return err
+		}
+		return nil
+	}
+	// The tray ended through its quit item: stop the gateway and wait for it.
+	cancelServe()
+	err := <-gatewayEnded
+	if err != nil && !errors.Is(err, gateway.ErrAlreadyRunning) {
+		return err
+	}
+	return nil
 }
 
 // parseServePort validates the --port flag value: a port in 1..65535, or 0 for

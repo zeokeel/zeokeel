@@ -41,6 +41,12 @@ export interface FakeApproval {
   expiresAt?: string;
 }
 
+export interface FakeQueuedPrompt {
+  id: string;
+  text: string;
+  createdAt?: string;
+}
+
 export interface FakeState {
   sessions: FakeSessionInfo[];
   messages: Record<string, FakeMessage[]>;
@@ -51,6 +57,8 @@ export interface FakeState {
   plan: { state: string; content: string };
   artifacts: Array<{ id: string; title: string; body: string }>;
   workspaces: Array<{ id: string; name: string; root: string }>;
+  /** sessionId → queued prompts, oldest first. */
+  prompts: Record<string, FakeQueuedPrompt[]>;
   currentWorkspaceId?: string;
   capabilities: string[];
 }
@@ -66,6 +74,7 @@ export function defaultState(): FakeState {
     plan: { state: 'idle', content: '' },
     artifacts: [],
     workspaces: [{ id: 'ws-1', name: 'mygo', root: '/data/mygo' }],
+    prompts: {},
     currentWorkspaceId: 'ws-1',
     capabilities: [
       'session.list',
@@ -81,6 +90,8 @@ export function defaultState(): FakeState {
       'settings.set',
       'workspace',
       'run.cancel',
+      'prompts',
+      'foreground',
     ],
   };
 }
@@ -136,7 +147,16 @@ export class FakeGateway {
   readonly state: FakeState;
   readonly calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   readonly sockets: FakeSocket[] = [];
-  private revs = { list: 0, approvals: 0, settings: 0, workspace: 0, ask: 0, plan: 0, artifacts: 0 };
+  private revs = {
+    list: 0,
+    approvals: 0,
+    settings: 0,
+    workspace: 0,
+    ask: 0,
+    plan: 0,
+    artifacts: 0,
+    prompts: {} as Record<string, number>,
+  };
   private epoch = 'epoch-test';
   /** Simulate a gateway restart: next connect answers with a new epoch. */
   nextEpoch: string | null = null;
@@ -296,6 +316,60 @@ export class FakeGateway {
       });
       return;
     }
+    if (method === 'prompts.snapshot') {
+      const sessionId = String(params.sessionId ?? '');
+      if (!this.state.sessions.some((item) => item.id === sessionId)) {
+        fail(1001, 'session_not_found');
+        return;
+      }
+      reply({
+        epoch: this.epoch,
+        rev: this.promptsRev(sessionId),
+        prompts: this.state.prompts[sessionId] ?? [],
+      });
+      return;
+    }
+    if (method === 'prompts.subscribe') {
+      const sessionId = String(params.sessionId ?? '');
+      reply({
+        epoch: this.epoch,
+        rev: this.promptsRev(sessionId),
+        resync: Number(params.sinceRev ?? 0) !== this.promptsRev(sessionId),
+      });
+      return;
+    }
+    if (method === 'prompts.enqueue') {
+      const sessionId = String(params.sessionId ?? '');
+      const text = String(params.text ?? '');
+      if (!this.state.sessions.some((item) => item.id === sessionId)) {
+        fail(1001, 'session_not_found');
+        return;
+      }
+      if (text.trim() === '') {
+        fail(-32602, 'invalid_params');
+        return;
+      }
+      const queue = this.state.prompts[sessionId] ?? [];
+      const prompt = { id: `q-${queue.length + 1}-${Date.now()}`, text };
+      queue.push(prompt);
+      this.state.prompts[sessionId] = queue;
+      this.broadcastPrompts(sessionId, [prompt], []);
+      reply({ id: prompt.id });
+      return;
+    }
+    if (method === 'prompts.remove') {
+      const sessionId = String(params.sessionId ?? '');
+      const queue = this.state.prompts[sessionId] ?? [];
+      const index = queue.findIndex((item) => item.id === params.id);
+      if (index >= 0) queue.splice(index, 1);
+      this.broadcastPrompts(sessionId, [], [String(params.id ?? '')]);
+      reply({});
+      return;
+    }
+    if (method === 'foreground.set') {
+      reply({});
+      return;
+    }
     if (method === 'ask.snapshot') {
       reply({ epoch: this.epoch, rev: this.revs.ask, pending: this.state.ask });
       return;
@@ -326,6 +400,20 @@ export class FakeGateway {
   ): void {
     const rev = ++this.revs.list;
     this.notify('session.list.delta', { baseRev: rev - 1, rev, added, changed, removed });
+  }
+
+  private promptsRev(sessionId: string): number {
+    return this.revs.prompts[sessionId] ?? 0;
+  }
+
+  broadcastPrompts(
+    sessionId: string,
+    added: FakeQueuedPrompt[] = [],
+    removed: string[] = [],
+  ): void {
+    const rev = this.promptsRev(sessionId) + 1;
+    this.revs.prompts[sessionId] = rev;
+    this.notify('prompts.delta', { sessionId, baseRev: rev - 1, rev, added, removed });
   }
 
   broadcastApprovals(added: FakeApproval[] = [], removed: string[] = []): void {

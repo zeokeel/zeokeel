@@ -103,6 +103,10 @@ type Options struct {
 	// default range (gateway.DefaultPort..+9, then any free port). It is
 	// meaningless for the other products.
 	Port int
+	// NoTray skips the tray shell of the gateway product: a pure server. A
+	// display-less Linux session skips it anyway (silently), so this flag is for
+	// a machine with a display that must not show an icon.
+	NoTray bool
 }
 
 // normalize fills zero-valued options with their process defaults. Product
@@ -187,6 +191,7 @@ func mainWithStreams(args []string, stdout, stderr io.Writer) int {
 	listProducts := flags.Bool("list-products", false, "print the embedded assembly products and exit")
 	acpMode := flags.Bool("acp", false, "run the Agent Client Protocol (ACP) stdio server")
 	servePort := flags.Int("port", 0, "first port for --product serve (default 9932, then +1..+9, then any free port)")
+	noTray := flags.Bool("no-tray", false, "run --product serve without the system tray (pure gateway)")
 
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -241,8 +246,13 @@ func mainWithStreams(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s\n\n%s", err, usageText)
 		return 2
 	}
+	if *noTray && (strings.TrimSuffix(strings.TrimSpace(*product), ".json") != assembly.ProductServe || *acpMode || *headless) {
+		fmt.Fprintf(stderr, "%s: --no-tray only applies to --product %s\n\n%s", appName, assembly.ProductServe, usageText)
+		return 2
+	}
 	opts := Options{
 		Product:      *product,
+		NoTray:       *noTray,
 		DataDir:      *dataDir,
 		AppVersion:   Version,
 		AppCommit:    Commit,
@@ -276,6 +286,7 @@ Flags:
   --headless         run without a window (same as --product headless)
   --acp              run the Agent Client Protocol stdio server (editor integration)
   --port <port>      first gateway port for --product serve (default 9932)
+  --no-tray          run --product serve without the system tray (pure gateway)
   --data-dir <dir>   data directory (default $ZEOKEEL_DATA_DIR or ~/.zeokeel)
   --version          print version information and exit
   --list-products    print the embedded assembly products and exit

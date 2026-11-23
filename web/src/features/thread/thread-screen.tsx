@@ -36,7 +36,6 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   const { approvals } = useApprovals();
   const queue = usePromptQueue(sessionId);
   const [draft, setDraft] = useState('');
-  const [queueNotice, setQueueNotice] = useState<string | null>(null);
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState('');
@@ -145,10 +144,6 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
       // A5/B13: a prompt typed during a run waits in the backend queue. If this
       // gateway serves the inbox as the WS `prompts` domain and the client is
       // not switched over yet, keep the text and say so — never drop it.
-      if (queue.disabled) {
-        setQueueNotice('这一轮的队列还没接到网关：等这一轮结束后再发，或先停止本轮。');
-        return;
-      }
       setDraft('');
       void queue.enqueue(text);
       return;
@@ -237,11 +232,6 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
         )}
       </div>
 
-      {queueNotice ? (
-        <div className="zk-notice" role="status">
-          {queueNotice}
-        </div>
-      ) : null}
       <ApprovalDock currentSessionId={sessionId} />
 
       <PromptQueuePanel

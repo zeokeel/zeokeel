@@ -105,6 +105,11 @@ func writeInfo(dataDir string, info Info) error {
 	return nil
 }
 
+// ReadInfo reads the running gateway's <data-dir>/gateway.json. It is the
+// supported way for another in-process component (the tray shell) to learn the
+// port and token; a missing file means no gateway is running.
+func ReadInfo(dataDir string) (Info, error) { return readInfo(dataDir) }
+
 // readInfo reads <data-dir>/gateway.json. A missing or unreadable file is
 // reported as an error so callers can distinguish "no gateway" from a bad port.
 func readInfo(dataDir string) (Info, error) {

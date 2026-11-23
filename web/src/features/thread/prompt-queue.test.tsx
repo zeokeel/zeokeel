@@ -10,8 +10,8 @@ import { App } from '@/app';
  * instead of being dropped, and the queue survives an abort.
  *
  * The run transport is stubbed but real (`XRequest` over a controllable SSE
- * stream), and the queue is the mock gateway's in-memory inbox reached through
- * `src/api/prompt-queue.ts`.
+ * stream); the queue is the WS `prompts:<sessionID>` domain served by the fake
+ * gateway, so the test exercises the same snapshot/delta path as production.
  */
 
 interface Queued {
@@ -32,12 +32,6 @@ let harness: Harness;
 let gateway: FakeGatewayHandle;
 const encoder = new TextEncoder();
 
-const json = (body: unknown) =>
-  new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  });
-
 function sseChunk(event: string, data: unknown) {
   return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
@@ -56,31 +50,7 @@ beforeEach(() => {
   gateway = installFakeGateway(state);
   vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    const method = init?.method ?? 'GET';
 
-    // ---- the prompt queue inbox -----------------------------------------
-    const queueMatch = url.match(/\/api\/sessions\/(s-\d)\/prompts$/);
-    if (queueMatch && method === 'GET') {
-      return json({ prompts: harness.queued.filter((item) => item.sessionId === queueMatch[1]) });
-    }
-    if (queueMatch && method === 'POST') {
-      const body = JSON.parse(String(init?.body ?? '{}')) as { text: string };
-      const prompt = {
-        id: `q-${harness.queued.length + 1}`,
-        sessionId: queueMatch[1],
-        text: body.text,
-      };
-      harness.queued.push(prompt);
-      return json({ prompt });
-    }
-    const removeMatch = url.match(/\/api\/sessions\/(s-\d)\/prompts\/([\w-]+)$/);
-    if (removeMatch && method === 'DELETE') {
-      // Group 1 is the session, group 2 the prompt id.
-      harness.queued = harness.queued.filter((item) => item.id !== removeMatch[2]);
-      return json({ ok: true });
-    }
-
-    // ---- one controllable run -------------------------------------------
     if (url.includes('/api/chat/run')) {
       const body = JSON.parse(String(init?.body ?? '{}')) as { text: string };
       harness.requested.push(body.text);
@@ -169,7 +139,7 @@ describe('prompt queue while a run is active', () => {
 
     await user.click(screen.getByRole('button', { name: '取消待发送：B' }));
     await waitFor(() => expect(screen.getByText('1 条待发送')).toBeInTheDocument());
-    expect(harness.queued.map((item) => item.text)).toEqual(['C']);
+    expect(gateway.gateway.state.prompts['s-2']?.map((item) => item.text)).toEqual(['C']);
 
     await finishRun();
     await waitFor(() => expect(harness.requested).toEqual(['A', 'C']));
