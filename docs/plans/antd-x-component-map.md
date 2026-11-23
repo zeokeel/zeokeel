@@ -53,9 +53,9 @@ X 的直接依赖里较重的：`mermaid`、`react-syntax-highlighter`、`@ant-d
 | `CodeHighlighter` | 代码块高亮 | 消息内代码、工具卡代码 |
 | `Mermaid` | 图表渲染 | 计划/架构图（按需） |
 | `Sources` | 引用来源 | 检索结果引用 |
-| `Prompts` / `Suggestion` | 推荐提示词 | 空态引导、slash 建议 |
+| `Prompts` / `Suggestion` | 推荐提示词 | 空态引导；**slash 菜单不用 Suggestion（见 §7.1）** |
 | `Welcome` | 欢迎/空态 | Home 屏 |
-| `Actions` | 消息操作组 | 复制/重试/编辑 |
+| `Actions` | 消息操作组 | **不用（见 §7.2）：形状是动作条，不是菜单** |
 | `Notification` | 通知 | 运行完成/失败提示 |
 | `Folder` | 文件目录展示 | 右检查器文件页 |
 | `XProvider` | 主题/国际化/上下文 | 顶层 Provider |
@@ -90,13 +90,13 @@ X 的直接依赖里较重的：`mermaid`、`react-syntax-highlighter`、`@ant-d
 | transcript | `BubbleList`（**虚拟化要自己加**，见 §4） |
 | 流式输出 | `Bubble` 的 loading/typing 机制 |
 | composer | `Sender`（含停止、附件、语音位） |
-| slash / @ 建议 | `Suggestion`（输入触发仍要自己接） |
+| slash / @ 建议 | **自建**（`Suggestion` 不可用，见 §7.1） |
 | 推理 / 工具步骤 | `ThoughtChain`（`Item` + `Status`） |
 | 工具卡 | **自建**（X 无），内嵌 `CodeHighlighter` / `Collapse` |
 | 审批卡 | **自建**（`Card` + `Space` + `Button`，danger 语义） |
 | 附件 | `Attachments` + `FileCard` |
 | 代码块 | `CodeHighlighter` |
-| 消息操作 | `Actions` |
+| 消息操作 | **自建 `⋯` 菜单**（`Actions` 不可用，见 §7.2） |
 | 子 Tab（对话/轨迹/记忆/上下文） | `Tabs` |
 | 空态 | `Welcome` |
 
@@ -160,7 +160,9 @@ X 的直接依赖里较重的：`mermaid`、`react-syntax-highlighter`、`@ant-d
 
 ---
 
-## 6. 有意不用：`Suggestion` 不能承载文本输入区的斜杠菜单
+## 7. 有意不用（每条都带复验断言）
+
+### 7.1 `Suggestion` 不能承载文本输入区的斜杠菜单
 
 2026-11-23（task-37 #1）。斜杠命令菜单**保留自建**，不换成 X 的 `Suggestion`。理由是可复核的事实，不是偏好：
 
@@ -188,3 +190,19 @@ expect(await box.inputValue()).toBe('a b');   // 菜单关闭时
 **保留自建的部分**：菜单的 DOM、`role="listbox"/"option"`、方向键高亮、`Tab` 补全（K3: 补全文本不执行、不移焦点）、`Enter` 执行高亮命令。**Esc 关菜单由仲裁栈持有**（`composer-slash-menu`，level `overlay`），与渲染者无关——`src/chat/slash-esc-contract.test.tsx` 与 `e2e-smoke.mjs` 的 `slash.menu.*` 三条共同守着它。
 
 **这条"不用"是决定，不是放弃**：判据、证据、复验断言都在上面；X 升级后按最后一节重跑四组探针即可推翻它。
+
+### 7.2 `Actions` 不能承载消息的 `⋯` 菜单
+
+2026-11-23（task-37 #3）。消息操作保留自建的 `⋯` 菜单，不换成 X 的 `Actions`。两条理由，**顺序按决定性排列**：
+
+**① 形状不符（决定性）**：WEB-CLIENT 的 B11 原文是「消息 `⋯` **菜单**」。`Actions` 是**内联动作行**——`ActionsProps extends React.HTMLAttributes<HTMLDivElement>` + `items`，横向排出若干动作按钮，不是点开才出现的菜单。`actionRender` 只能替换**单项的内容**，改不了外层仍是动作条这一事实。
+
+**② 表达力不足（次要但独立成立）**：`actions/interface.d.ts` 的 `ItemType` 字段是
+`key` / `label` / `icon` / `onItemClick` / `danger` / `subItems` / `triggerSubMenuAction` / `actionRender`——
+**没有 `disabled`，没有 `title`**。而"重新生成"和"编辑"的拒绝态（`regenerate_not_supported` 与 5 条编辑拒绝码）正是靠 `disabled` + `title` 提示表达；丢了它们等于把拒绝理由藏起来。
+
+**保留自建的形态**：`复制` / `⋮`（重新生成）/ `编辑`（仅 user 消息，因为 `edit_target_not_user` 的存在意义就是"用户只能编辑自己的话"）。拒绝时按钮置灰并带 `title`。
+
+**复验条件（两条同时满足才重评）**：
+1. `ItemType` 增加 `disabled` 与 `title`（检查：`grep -n "disabled\|title" web/node_modules/@ant-design/x/es/actions/interface.d.ts`）；
+2. `Actions` 提供菜单形态（检查：渲染后 `document.querySelector('.ant-dropdown')` 存在，而不是只有 `.ant-actions` 动作条）。
