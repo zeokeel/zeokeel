@@ -6,6 +6,12 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.57] - 2026-11-23
+
+### Fixed
+
+- 补齐 `go-isatty` / `go-strftime` 的 `go.sum` 条目，修复 v0.2.56 跨平台 release 构建失败（tag 不可移动）。
+
 ## [0.2.56] - 2026-11-23
 
 ### Changed
