@@ -1,0 +1,1534 @@
+#!/usr/bin/env node
+/**
+ * Local gateway stand-in for the web client (no Go required).
+ *
+ * Two kinds of surface live here:
+ *
+ *  1. The real contract: `POST /api/chat/run` → text/event-stream with the
+ *     seven event types of docs/TRANSPORT.md §4.6, including a run that parks
+ *     on a tool approval and resumes when the client resolves it.
+ *  2. A temporary read/write bridge for everything the WS control plane will
+ *     own (TRANSPORT §6): sessions, approvals, inbox, settings, files,
+ *     capabilities, automation, insights. The client only reaches these
+ *     through `web/src/api/*`, so swapping them for WS changes no component.
+ *
+ * Run: node dev/mock-server.mjs        (PORT=8788 by default)
+ */
+import { randomUUID } from 'node:crypto';
+import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
+
+const PORT = Number(process.env.PORT ?? 8788);
+const HOST = process.env.HOST ?? '127.0.0.1';
+
+const nowIso = () => new Date().toISOString();
+const shortId = (prefix) => `${prefix}-${randomUUID().slice(0, 8)}`;
+
+// ---------------------------------------------------------------- sessions --
+/** @type {Map<string, {id:string,title:string,updatedAt:string,messages:any[]}>} */
+const sessions = new Map();
+
+const session = (title) => {
+  const value = { id: shortId('s'), title, updatedAt: nowIso(), messages: [] };
+  sessions.set(value.id, value);
+  return value;
+};
+
+const msg = (role, text, extra = {}) => ({ id: shortId('m'), role, text, ...extra });
+
+const seeded = session('重构 transport 层');
+seeded.messages.push(
+  msg('user', '把 SSE 解析从组件里挪到 api 层。'),
+  msg('assistant', '已经挪好了：`src/api/run-stream.ts` 负责创建请求，组件只消费事件。', {
+    reasoning: '先确认现在的解析在哪里，再决定迁移边界。',
+    steps: [
+      {
+        callId: 'call-seed-1',
+        name: 'read_file',
+        input: { path: 'src/chat/markdown.tsx' },
+        output: 'export function MarkdownBody(…)',
+        status: 'ok',
+      },
+      {
+        callId: 'call-seed-2',
+        name: 'grep',
+        input: { pattern: 'new EventSource', path: 'src' },
+        output: 'no matches',
+        status: 'ok',
+      },
+    ],
+    usage: { inputTokens: 980, outputTokens: 210 },
+    stopReason: 'end_turn',
+  }),
+);
+
+const other = session('写 WEB-CLIENT 验收');
+
+// A 600-message conversation: the browser checks the virtualised transcript
+// (no blank window, no jump) against it in `dev/browser-check.mjs`.
+const longSession = session('长会话 · 600 条');
+for (let index = 0; index < 600; index += 1) {
+  longSession.messages.push(
+    index % 2 === 0
+      ? msg('user', `第 ${index} 条提问：这一段用来撑开滚动高度。`)
+      : msg('assistant', `第 ${index} 条回答：虚拟列表只渲染视口附近的行。`, {
+          reasoning: index % 40 === 1 ? '先确认滚动位置，再决定是否跟随。' : undefined,
+          usage: { inputTokens: 120 + index, outputTokens: 30 },
+          stopReason: 'end_turn',
+        }),
+  );
+}
+
+other.messages.push(
+  msg('user', 'transcript 虚拟化的验收项怎么定？'),
+  msg('assistant', '按 §7.1：变高行测量、稳定 key、流式原地增长、首屏 80 条。', {
+    reasoning: '对照原生 ui.List 的既有约束。',
+    usage: { inputTokens: 640, outputTokens: 96 },
+    stopReason: 'end_turn',
+  }),
+);
+
+const childOf = new Map();
+childOf.set(seeded.id, [
+  {
+    id: 'child-3f4a1b2c',
+    parentId: seeded.id,
+    title: '子代理 · 梳理 SSE 调用点',
+    messages: [
+      msg('user', '列出所有订阅 SSE 的地方。'),
+      msg('assistant', '共 2 处：`run-stream.ts`（创建）与 `use-gateway-chat.ts`（消费）。'),
+    ],
+  },
+]);
+
+// --------------------------------------------------------------- approvals --
+const approvals = new Map();
+const approvalWaiters = new Map();
+/** Assigned by the WS section; no-ops until then (seeded data runs first). */
+let publishApprovals = () => {};
+const permission = { mode: 'workspace' };
+
+const createApproval = (input) => {
+  const approval = {
+    id: shortId('appr'),
+    createdAt: nowIso(),
+    expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+    source: 'user',
+    ...input,
+  };
+  approvals.set(approval.id, approval);
+  publishApprovals();
+  return approval;
+};
+
+const resolveApproval = (id, decision) => {
+  const approval = approvals.get(id);
+  if (!approval) return false;
+  approvals.delete(id);
+  publishApprovals();
+  const waiter = approvalWaiters.get(id);
+  if (waiter) {
+    approvalWaiters.delete(id);
+    waiter(decision);
+  }
+  return true;
+};
+
+// One approval waits on a cold load so the card and the Inbox are visible
+// without first starting a run.
+createApproval({
+  tool: 'bash',
+  summary: '运行构建脚本',
+  risk: 'exec',
+  sessionId: other.id,
+  target: { kind: 'command', text: 'npm run build' },
+  arguments: { command: 'npm run build', cwd: '/data/mygo/web' },
+});
+
+// ------------------------------------------------------------------ inbox --
+const inbox = new Map();
+const addInbox = (item) => {
+  inbox.set(item.id, { createdAt: nowIso(), ...item });
+  return item.id;
+};
+
+addInbox({
+  id: 'ask-1',
+  kind: 'ask',
+  sessionId: other.id,
+  title: '需要你的确认：发布前要不要跑全量回归？',
+  detail: '选项：跑全量 / 只跑 web / 跳过',
+  expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+});
+addInbox({
+  id: 'plan-1',
+  kind: 'plan',
+  sessionId: seeded.id,
+  title: '计划待审阅：把 transport 抽象为三层',
+  detail: '3 个步骤，等待批准或反馈',
+});
+addInbox({
+  id: 'artifact-1',
+  kind: 'artifact',
+  sessionId: seeded.id,
+  title: '产物待预览：transport-notes.md',
+  detail: '1.8 KB · Markdown',
+});
+addInbox({
+  id: 'done-1',
+  kind: 'completion',
+  sessionId: seeded.id,
+  title: '子代理完成：梳理 SSE 调用点',
+  detail: '2 处调用点，已回到父会话',
+});
+
+// ------------------------------------------------------------ prompt queue --
+/** @type {Map<string, Array<{id:string,sessionId:string,text:string,createdAt:string}>>} */
+const promptQueues = new Map();
+
+const queueOf = (sessionId) => {
+  if (!promptQueues.has(sessionId)) promptQueues.set(sessionId, []);
+  return promptQueues.get(sessionId);
+};
+
+// ---------------------------------------------------------------- settings --
+const settingsCatalog = {
+  groups: [
+    {
+      key: 'common',
+      label: '常用',
+      rank: 12,
+      pages: [
+        {
+          key: 'model',
+          label: '模型',
+          order: 10,
+          sections: [
+            {
+              title: '默认模型',
+              fields: [
+                {
+                  key: 'defaultModel',
+                  label: '默认模型',
+                  kind: 'select',
+                  value: 'deepseek-v4.1-flash',
+                  options: ['deepseek-v4.1-flash', 'deepseek-v4.1-pro', 'zeokeel-local'],
+                  help: '新会话默认使用的模型。',
+                },
+                {
+                  key: 'contextBudget',
+                  label: '上下文预算',
+                  kind: 'number',
+                  value: 0,
+                  min: 0,
+                  max: 1000000,
+                  help: '0 表示跟随模型默认值。',
+                },
+                {
+                  key: 'reasoningEffort',
+                  label: '推理等级',
+                  kind: 'radio',
+                  value: 'medium',
+                  options: ['low', 'medium', 'high'],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          key: 'behavior',
+          label: '行为与限额',
+          order: 20,
+          sections: [
+            {
+              title: '权限',
+              fields: [
+                {
+                  key: 'permissionMode',
+                  label: '权限模式',
+                  kind: 'radio',
+                  value: 'workspace',
+                  options: ['read-only', 'workspace', 'auto'],
+                  help: '只能看 / 可以改文件 / 什么都能做。审批与操作系统沙箱都跟随它。',
+                },
+                {
+                  key: 'workFolder',
+                  label: '工作文件夹',
+                  kind: 'text',
+                  value: '/data/mygo',
+                  placeholder: '/path/to/workspace',
+                },
+                {
+                  key: 'maxIterations',
+                  label: '单轮最大迭代',
+                  kind: 'number',
+                  value: 0,
+                  min: 0,
+                  max: 200,
+                  help: '0 表示使用模块默认值。',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      key: 'interface',
+      label: '界面与通知',
+      rank: 30,
+      pages: [
+        {
+          key: 'appearance',
+          label: '外观',
+          order: 10,
+          sections: [
+            {
+              title: '主题',
+              fields: [
+                {
+                  key: 'theme',
+                  label: '主题',
+                  kind: 'radio',
+                  value: 'system',
+                  options: ['system', 'light', 'dark'],
+                },
+                {
+                  key: 'language',
+                  label: '语言',
+                  kind: 'radio',
+                  value: 'zh-CN',
+                  options: ['zh-CN', 'en-US'],
+                },
+                {
+                  key: 'textScale',
+                  label: '字号',
+                  kind: 'select',
+                  value: '100',
+                  options: ['90', '100', '110', '120'],
+                },
+                { key: 'reduceMotion', label: '减少动效', kind: 'switch', value: false },
+              ],
+            },
+          ],
+        },
+        {
+          key: 'notifications',
+          label: '通知',
+          order: 10,
+          sections: [
+            {
+              title: '分级',
+              fields: [
+                {
+                  key: 'level',
+                  label: '通知级别',
+                  kind: 'radio',
+                  value: 'needs-action',
+                  options: ['all', 'needs-action', 'off'],
+                  help: '只有「需要你处理」会打断你；完成回执仍在收件箱。',
+                },
+                { key: 'sound', label: '提示音', kind: 'switch', value: false },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      key: 'connections',
+      label: '连接',
+      rank: 50,
+      pages: [
+        {
+          key: 'network',
+          label: '网络与搜索',
+          order: 30,
+          sections: [
+            {
+              title: '代理',
+              fields: [
+                {
+                  key: 'proxy',
+                  label: 'HTTP 代理',
+                  kind: 'text',
+                  value: '',
+                  placeholder: 'http://127.0.0.1:7890',
+                },
+                {
+                  key: 'searchProvider',
+                  label: '搜索提供方',
+                  kind: 'select',
+                  value: 'builtin',
+                  options: ['builtin', 'tavily', 'brave'],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          key: 'lsp',
+          label: 'LSP',
+          order: 50,
+          sections: [
+            {
+              title: '服务器',
+              fields: [
+                {
+                  key: 'servers',
+                  label: '语言服务器',
+                  kind: 'records',
+                  value: [
+                    {
+                      id: 'lsp-ts',
+                      name: 'typescript-language-server',
+                      command: 'typescript-language-server --stdio',
+                    },
+                  ],
+                  columns: [
+                    { key: 'name', label: '名称' },
+                    { key: 'command', label: '命令' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      key: 'data',
+      label: '数据',
+      rank: 70,
+      pages: [
+        {
+          key: 'archive',
+          label: '归档',
+          order: 30,
+          sections: [
+            {
+              title: '已归档会话',
+              fields: [
+                {
+                  key: 'archived',
+                  label: '会话',
+                  kind: 'records',
+                  value: [{ id: 'arc-1', title: '旧版 transport 讨论', archivedAt: '2026-11-02' }],
+                  columns: [
+                    { key: 'title', label: '标题' },
+                    { key: 'archivedAt', label: '归档时间' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          key: 'data-privacy',
+          label: '数据与隐私',
+          order: 40,
+          sections: [
+            {
+              title: '导入',
+              fields: [
+                {
+                  key: 'importPath',
+                  label: '从归档文件导入',
+                  kind: 'text',
+                  value: '',
+                  placeholder: '/path/to/archive.zip',
+                },
+                {
+                  key: 'hiddenFiles',
+                  label: '对 agent 隐藏的文件',
+                  kind: 'records',
+                  value: [{ id: 'hide-1', pattern: '.env' }],
+                  columns: [{ key: 'pattern', label: '模式' }],
+                },
+                {
+                  key: 'clearAll',
+                  label: '清除全部本地数据',
+                  kind: 'danger',
+                  help: '不可撤销。会话、归档与上传都会删除。',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      key: 'about',
+      label: '关于',
+      rank: 90,
+      pages: [
+        {
+          key: 'about',
+          label: '关于',
+          order: 10,
+          sections: [
+            {
+              title: '版本',
+              fields: [
+                { key: 'version', label: '版本', kind: 'readonly', value: '0.0.0-web (mock)' },
+                { key: 'gateway', label: '网关', kind: 'readonly', value: 'mock-server.mjs' },
+                { key: 'checkUpdate', label: '检查更新', kind: 'action', value: 'check-update' },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+const findPage = (key) =>
+  settingsCatalog.groups.flatMap((group) => group.pages).find((page) => page.key === key);
+
+// ------------------------------------------------------------------- files --
+const workspaceFiles = [
+  { path: 'src', dir: true },
+  { path: 'src/api', dir: true },
+  { path: 'src/api/run-stream.ts', changed: true },
+  { path: 'src/api/protocol.ts' },
+  { path: 'src/chat/transcript.tsx', changed: true },
+  { path: 'src/app.tsx' },
+  { path: 'package.json' },
+  { path: 'README.md' },
+];
+
+const fileContents = {
+  'src/api/run-stream.ts': `import { XRequest } from '@ant-design/x-sdk';
+
+export const RUN_ENDPOINT = '/api/chat/run';
+
+export function createRunRequest(baseURL = RUN_ENDPOINT) {
+  return XRequest(baseURL, { manual: true });
+}
+`,
+  'src/api/protocol.ts': `export const RUN_EVENTS = ['message.delta', 'done'] as const;\n`,
+  'src/chat/transcript.tsx': `import { Bubble } from '@ant-design/x';\n\nexport function Transcript({ messages }) {\n  return <Bubble.List items={messages} />;\n}\n`,
+  'src/app.tsx': `export function App() {\n  return <Shell />;\n}\n`,
+  'package.json': `{\n  "name": "zeokeel-web",\n  "private": true\n}\n`,
+  'README.md': `# web/\n\nZeoKeel 浏览器客户端。\n`,
+};
+
+const fileDiffs = {
+  'src/api/run-stream.ts': `--- a/src/api/run-stream.ts
++++ b/src/api/run-stream.ts
+@@ -1,6 +1,9 @@
+ import { XRequest } from '@ant-design/x-sdk';
+ 
+ export const RUN_ENDPOINT = '/api/chat/run';
++
++// The stream timeout catches a stalled gateway; no request timeout.
++const STREAM_TIMEOUT = 60_000;
+ 
+-export function createRunRequest(baseURL = RUN_ENDPOINT) {
+-  return XRequest(baseURL, { manual: true });
++export function createRunRequest(baseURL = RUN_ENDPOINT) {
++  return XRequest(baseURL, { manual: true, streamTimeout: STREAM_TIMEOUT });
+ }
+`,
+  'src/chat/transcript.tsx': `--- a/src/chat/transcript.tsx
++++ b/src/chat/transcript.tsx
+@@ -1,6 +1,10 @@
+ import { Bubble } from '@ant-design/x';
+ 
+ export function Transcript({ messages }) {
+-  return <Bubble.List items={messages} />;
++  return (
++    <Bubble.List items={messages} autoScroll />
++  );
+ }
+`,
+};
+
+// -------------------------------------------------------- other read models --
+const memoryEntries = [
+  { id: 'mem-1', text: '这个仓库的 Go 侧 UI 正在退役，只有 web/ 继续演进。', createdAt: '2026-11-22' },
+  { id: 'mem-2', text: 'SSE 只负责单轮增量，权威状态在 WS 的 session:<id> 域。', createdAt: '2026-11-23' },
+];
+
+const capabilities = {
+  skills: [
+    { id: 'antd', name: 'antd', description: 'antd v6 组件查询与陷阱', source: '内置' },
+    { id: 'antd-x', name: 'antd-x', description: '@ant-design/x 2.10 对话面规格', source: '内置' },
+  ],
+  connectors: [
+    { id: 'mcp-fs', name: 'filesystem', transport: 'stdio', tools: 6, status: 'connected' },
+    { id: 'mcp-gh', name: 'github', transport: 'http', tools: 12, status: 'idle' },
+  ],
+};
+
+const automationTasks = [
+  {
+    id: 'task-1',
+    title: '每天 09:00 汇总仓库改动',
+    schedule: '0 9 * * *',
+    enabled: true,
+    lastRun: '2026-11-23 09:00',
+  },
+  {
+    id: 'task-2',
+    title: '每周一扫描依赖更新',
+    schedule: '0 8 * * 1',
+    enabled: false,
+    lastRun: '2026-11-17 08:00',
+  },
+];
+
+const insights = {
+  7: {
+    totals: { sessions: 12, turns: 86, inputTokens: 482000, outputTokens: 96000, toolCalls: 214 },
+    byDay: [
+      { day: '2026-11-17', turns: 9 },
+      { day: '2026-11-18', turns: 14 },
+      { day: '2026-11-19', turns: 11 },
+      { day: '2026-11-20', turns: 18 },
+      { day: '2026-11-21', turns: 7 },
+      { day: '2026-11-22', turns: 15 },
+      { day: '2026-11-23', turns: 12 },
+    ],
+    byTool: [
+      { tool: 'read_file', calls: 96 },
+      { tool: 'bash', calls: 48 },
+      { tool: 'grep', calls: 39 },
+      { tool: 'edit_file', calls: 31 },
+    ],
+  },
+  30: {
+    totals: { sessions: 41, turns: 302, inputTokens: 1810000, outputTokens: 372000, toolCalls: 812 },
+    byDay: [
+      { day: '2026-11-01', turns: 12 },
+      { day: '2026-11-08', turns: 21 },
+      { day: '2026-11-15', turns: 18 },
+      { day: '2026-11-22', turns: 15 },
+    ],
+    byTool: [
+      { tool: 'read_file', calls: 341 },
+      { tool: 'bash', calls: 168 },
+      { tool: 'grep', calls: 122 },
+      { tool: 'edit_file', calls: 96 },
+    ],
+  },
+};
+
+// ------------------------------------------------------------------ server --
+function sendJson(res, status, body) {
+  const payload = JSON.stringify(body);
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(payload),
+    'Cache-Control': 'no-store',
+  });
+  res.end(payload);
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += chunk;
+      if (raw.length > 1_000_000) reject(new Error('body too large'));
+    });
+    req.on('end', () => {
+      if (!raw) return resolve({});
+      try {
+        resolve(JSON.parse(raw));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function sse(res, event, data) {
+  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+function chunkText(text, words) {
+  const pieces = text.match(/\S+\s*/g) ?? [text];
+  const out = [];
+  for (let index = 0; index < pieces.length; index += words) {
+    out.push(pieces.slice(index, index + words).join(''));
+  }
+  return out;
+}
+
+/** The run parks on this tool call until a human answers. */
+const PARKED_TOOL = {
+  name: 'bash',
+  input: { command: 'npm run test -- --watch=false', cwd: '/data/mygo/web' },
+  summary: '运行测试',
+  risk: 'exec',
+};
+
+async function handleRun(req, res) {
+  let body;
+  try {
+    body = await readBody(req);
+  } catch {
+    return sendJson(res, 400, { error: 'invalid json' });
+  }
+
+  const { sessionId, text } = body ?? {};
+  if (!sessionId || typeof text !== 'string' || text.trim() === '') {
+    return sendJson(res, 400, { error: 'sessionId and text are required' });
+  }
+  const target = sessions.get(sessionId);
+  if (!target) return sendJson(res, 404, { error: 'unknown session' });
+
+  const turnId = shortId('t');
+  target.messages.push(msg('user', text));
+  if (target.title === '新会话') target.title = text.trim().slice(0, 24);
+  target.updatedAt = nowIso();
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const run = { aborted: false, turnId, timers: new Set() };
+  const wait = (ms) =>
+    new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        run.timers.delete(timer);
+        resolve();
+      }, ms);
+      run.timers.add(timer);
+    });
+
+  res.on('close', () => {
+    if (res.writableEnded) return;
+    run.aborted = true;
+    for (const timer of run.timers) clearTimeout(timer);
+    run.timers.clear();
+    console.log(`[mock] run ${turnId} aborted by client (not a stop request)`);
+  });
+
+  const assistant = msg('assistant', '');
+  const steps = [];
+  let assistantText = '';
+
+  try {
+    if (/error/i.test(text)) {
+      await wait(60);
+      if (run.aborted) return;
+      sse(res, 'error', { code: 'provider_unavailable', message: '模型服务暂时不可用（mock 触发）' });
+      return res.end();
+    }
+
+    const reasoning = '先确认这一轮需要什么信息，再决定要不要调用工具。';
+    for (const piece of chunkText(reasoning, 6)) {
+      if (run.aborted) return;
+      sse(res, 'reasoning.delta', { turnId, text: piece });
+      await wait(35);
+    }
+    assistant.reasoning = reasoning;
+
+    // ---- the approval gate -------------------------------------------------
+    if (permission.mode === 'workspace' || permission.mode === 'read-only') {
+      const approval = createApproval({
+        tool: PARKED_TOOL.name,
+        summary: PARKED_TOOL.summary,
+        risk: PARKED_TOOL.risk,
+        sessionId,
+        target: { kind: 'command', text: PARKED_TOOL.input.command },
+        arguments: PARKED_TOOL.input,
+      });
+      const callId = shortId('call');
+      sse(res, 'tool.start', { callId, name: PARKED_TOOL.name, input: PARKED_TOOL.input });
+
+      const decision = await new Promise((resolve) => {
+        approvalWaiters.set(approval.id, resolve);
+        const timer = setTimeout(() => {
+          approvalWaiters.delete(approval.id);
+          approvals.delete(approval.id);
+          resolve('deny');
+        }, 120_000);
+        run.timers.add(timer);
+      });
+      if (run.aborted) return;
+
+      if (decision === 'deny') {
+        const error = '用户拒绝了这次调用';
+        sse(res, 'tool.result', { callId, ok: false, error });
+        steps.push({ callId, name: PARKED_TOOL.name, input: PARKED_TOOL.input, error, status: 'error' });
+      } else {
+        const output = 'Tests  7 passed (7)';
+        sse(res, 'tool.result', { callId, ok: true, output });
+        steps.push({ callId, name: PARKED_TOOL.name, input: PARKED_TOOL.input, output, status: 'ok' });
+      }
+      await wait(120);
+    }
+
+    const answer = [
+      '这一轮由 **mock 网关** 回答，用来验证 SSE 的七个事件按序到达。',
+      '',
+      '1. `reasoning.delta` 写入推理区',
+      '2. `tool.start` / `tool.result` 生成工具卡',
+      '3. `message.delta` 流式写入正文',
+      '',
+      '```ts',
+      "const event = parseRunEvent({ event: 'message.delta', data: '{\"text\":\"hi\"}' });",
+      '```',
+      '',
+      '发送含 `error` 的文字可以看到终止性错误；点停止可以看到中性「已停止」。',
+    ].join('\n');
+
+    for (const piece of chunkText(answer, 5)) {
+      if (run.aborted) return;
+      assistantText += piece;
+      sse(res, 'message.delta', { turnId, text: piece });
+      await wait(45);
+    }
+    if (run.aborted) return;
+
+    sse(res, 'usage', { inputTokens: 1280, outputTokens: 320 });
+    target.messages.push({
+      ...assistant,
+      text: assistantText,
+      steps,
+      usage: { inputTokens: 1280, outputTokens: 320 },
+      stopReason: 'end_turn',
+    });
+    target.updatedAt = nowIso();
+    sse(res, 'done', { turnId, stopReason: 'end_turn' });
+    res.end();
+    console.log(`[mock] run ${turnId} done (${assistantText.length} chars)`);
+  } catch (error) {
+    if (!res.writableEnded) {
+      sse(res, 'error', { code: 'internal', message: String(error) });
+      res.end();
+    }
+  }
+}
+
+const server = createServer(async (req, res) => {
+  // Fragment → cookie exchange (§3.1). Returns 204 with `Set-Cookie: zk=…`.
+  if (req.url === '/auth' && req.method === 'POST') {
+    let body;
+    try {
+      body = await readBody(req);
+    } catch {
+      return sendJson(res, 400, { error: { code: -32600, message: 'invalid_request' } });
+    }
+    if (!body || body.token !== AUTH_TOKEN) {
+      return unauthorized(res, { 'Retry-After': '1' });
+    }
+    res.setHeader(
+      'Set-Cookie',
+      `${AUTH_COOKIE}=${AUTH_TOKEN}; HttpOnly; SameSite=Strict; Path=/`,
+    );
+    res.writeHead(204);
+    return res.end();
+  }
+
+  const url = new URL(req.url ?? '/', `http://${req.headers.host ?? HOST}`);
+  const path = url.pathname;
+  const method = req.method ?? 'GET';
+
+  // ------------------------------------------------------------ sessions --
+  if (path === '/api/sessions' && method === 'GET') {
+    return sendJson(res, 200, {
+      sessions: [...sessions.values()]
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .map(({ id, title, updatedAt }) => ({ id, title, updatedAt })),
+    });
+  }
+  if (path === '/api/sessions' && method === 'POST') {
+    const created = session('新会话');
+    return sendJson(res, 200, {
+      session: { id: created.id, title: created.title, updatedAt: created.updatedAt },
+    });
+  }
+
+  const childMatch = path.match(/^\/api\/sessions\/([\w-]+)\/children\/([\w-]+)$/);
+  if (childMatch && method === 'GET') {
+    const children = childOf.get(childMatch[1]) ?? [];
+    const child = children.find((item) => item.id === childMatch[2]);
+    if (!child) return sendJson(res, 404, { error: 'unknown child session' });
+    return sendJson(res, 200, child);
+  }
+
+  const memoryMatch = path.match(/^\/api\/sessions\/([\w-]+)\/memory$/);
+  if (memoryMatch && method === 'GET') {
+    return sendJson(res, 200, { entries: memoryEntries });
+  }
+
+  const snapshotMatch = path.match(/^\/api\/sessions\/([\w-]+)$/);
+  if (snapshotMatch && method === 'GET') {
+    const found = sessions.get(snapshotMatch[1]);
+    if (!found) return sendJson(res, 404, { error: 'unknown session' });
+    return sendJson(res, 200, {
+      id: found.id,
+      title: found.title,
+      messages: found.messages,
+      children: (childOf.get(found.id) ?? []).map(({ id, title }) => ({ id, title })),
+    });
+  }
+
+  // ----------------------------------------------------------- approvals --
+  if (path === '/api/approvals' && method === 'GET') {
+    return sendJson(res, 200, {
+      mode: permission.mode,
+      approvals: [...approvals.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    });
+  }
+  const resolveMatch = path.match(/^\/api\/approvals\/([\w-]+)\/resolve$/);
+  if (resolveMatch && method === 'POST') {
+    const body = await readBody(req).catch(() => ({}));
+    const decision = body?.decision;
+    if (!['allow', 'allow_always', 'deny'].includes(decision)) {
+      return sendJson(res, 400, { error: 'decision must be allow|allow_always|deny' });
+    }
+    if (!resolveApproval(resolveMatch[1], decision)) {
+      return sendJson(res, 404, { error: 'unknown or expired approval' });
+    }
+    return sendJson(res, 200, { ok: true });
+  }
+  if (path === '/api/approval-mode' && method === 'GET') {
+    return sendJson(res, 200, permission);
+  }
+
+  // --------------------------------------------------------------- inbox --
+  if (path === '/api/inbox' && method === 'GET') {
+    const items = [];
+    // An approval is the same entity the thread card shows, not a copy.
+    for (const approval of approvals.values()) {
+      const source = sessions.get(approval.sessionId);
+      items.push({
+        id: approval.id,
+        kind: 'approval',
+        sessionId: approval.sessionId,
+        sessionTitle: source?.title ?? '',
+        title: `${approval.summary} · ${approval.tool}`,
+        detail: approval.target?.text ?? '',
+        createdAt: approval.createdAt,
+        expiresAt: approval.expiresAt,
+        decision: 'pending',
+      });
+    }
+    for (const item of inbox.values()) {
+      const source = sessions.get(item.sessionId);
+      items.push({ ...item, sessionTitle: source?.title ?? '' });
+    }
+    items.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    return sendJson(res, 200, { items });
+  }
+  const inboxAct = path.match(/^\/api\/inbox\/([\w-]+)\/act$/);
+  if (inboxAct && method === 'POST') {
+    const body = await readBody(req).catch(() => ({}));
+    const id = inboxAct[1];
+    if (body?.action === 'deny') resolveApproval(id, 'deny');
+    else if (body?.action === 'allow') resolveApproval(id, 'allow');
+    else inbox.delete(id);
+    return sendJson(res, 200, { ok: true });
+  }
+
+  // -------------------------------------------------------- prompt queue --
+  const queueMatch = path.match(/^\/api\/sessions\/([\w-]+)\/prompts$/);
+  if (queueMatch) {
+    const sessionId = queueMatch[1];
+    if (!sessions.has(sessionId)) return sendJson(res, 404, { error: 'unknown session' });
+    if (method === 'GET') return sendJson(res, 200, { prompts: queueOf(sessionId) });
+    if (method === 'POST') {
+      const body = await readBody(req).catch(() => ({}));
+      const text = typeof body?.text === 'string' ? body.text.trim() : '';
+      if (!text) return sendJson(res, 400, { error: 'text is required' });
+      const prompt = { id: shortId('q'), sessionId, text, createdAt: nowIso() };
+      queueOf(sessionId).push(prompt);
+      return sendJson(res, 200, { prompt });
+    }
+  }
+  const queueItemMatch = path.match(/^\/api\/sessions\/([\w-]+)\/prompts\/([\w-]+)$/);
+  if (queueItemMatch && method === 'DELETE') {
+    const queue = queueOf(queueItemMatch[1]);
+    const index = queue.findIndex((item) => item.id === queueItemMatch[2]);
+    if (index >= 0) queue.splice(index, 1);
+    return sendJson(res, 200, { ok: true });
+  }
+
+  // ------------------------------------------------------------ settings --
+  if (path === '/api/settings' && method === 'GET') {
+    return sendJson(res, 200, settingsCatalog);
+  }
+  if (path === '/api/settings' && method === 'PUT') {
+    const body = await readBody(req).catch(() => ({}));
+    const page = findPage(body?.page);
+    if (!page) return sendJson(res, 404, { error: 'unknown settings page' });
+    for (const section of page.sections) {
+      for (const field of section.fields) {
+        if (body?.values && Object.prototype.hasOwnProperty.call(body.values, field.key)) {
+          field.value = body.values[field.key];
+        }
+      }
+    }
+    return sendJson(res, 200, { ok: true, page });
+  }
+
+  if (path === '/api/settings/check-update' && method === 'POST') {
+    return sendJson(res, 200, { upToDate: true, version: '0.0.0-web (mock)' });
+  }
+  if (path === '/api/settings/data/clear' && method === 'POST') {
+    sessions.clear();
+    inbox.clear();
+    approvals.clear();
+    childOf.clear();
+    return sendJson(res, 200, { ok: true, cleared: true });
+  }
+
+  // --------------------------------------------------------------- files --
+  if (path === '/api/files/tree' && method === 'GET') {
+    return sendJson(res, 200, {
+      root: '/data/mygo',
+      nodes: workspaceFiles.map((entry) => ({
+        key: entry.path,
+        path: entry.path,
+        title: entry.path.split('/').pop(),
+        isLeaf: !entry.dir,
+        changed: Boolean(entry.changed),
+      })),
+    });
+  }
+  if (path === '/api/files/content' && method === 'GET') {
+    const file = url.searchParams.get('path') ?? '';
+    const text = fileContents[file];
+    if (text === undefined) return sendJson(res, 404, { error: 'unknown file' });
+    return sendJson(res, 200, { path: file, text, truncated: false });
+  }
+  if (path === '/api/files/diff' && method === 'GET') {
+    const file = url.searchParams.get('path') ?? '';
+    const unified = fileDiffs[file];
+    if (unified === undefined) return sendJson(res, 404, { error: 'no diff for this file' });
+    const additions = unified
+      .split('\n')
+      .filter((line) => line.startsWith('+') && !line.startsWith('+++')).length;
+    const deletions = unified
+      .split('\n')
+      .filter((line) => line.startsWith('-') && !line.startsWith('---')).length;
+    return sendJson(res, 200, { path: file, unified, additions, deletions });
+  }
+
+  // --------------------------------------------------------- read models --
+  if (path === '/api/capabilities' && method === 'GET') {
+    return sendJson(res, 200, capabilities);
+  }
+  if (path === '/api/automation' && method === 'GET') {
+    return sendJson(res, 200, { tasks: automationTasks });
+  }
+  const taskMatch = path.match(/^\/api\/automation\/([\w-]+)$/);
+  if (taskMatch && method === 'PATCH') {
+    const body = await readBody(req).catch(() => ({}));
+    const task = automationTasks.find((item) => item.id === taskMatch[1]);
+    if (!task) return sendJson(res, 404, { error: 'unknown task' });
+    if (typeof body?.enabled === 'boolean') task.enabled = body.enabled;
+    return sendJson(res, 200, { task });
+  }
+  if (path === '/api/insights' && method === 'GET') {
+    const range = url.searchParams.get('range') === '30' ? 30 : 7;
+    return sendJson(res, 200, { range, ...insights[range] });
+  }
+
+  // ---------------------------------------------------------------- chat --
+  if (path === '/api/chat/run' && method === 'POST') {
+    return void handleRun(req, res);
+  }
+  if (path.startsWith('/api/') && !authorized(req)) {
+    return unauthorized(res, { 'Retry-After': '1' });
+  }
+  if (path === '/api/health') {
+    return sendJson(res, 200, {
+      ok: true,
+      approvals: approvals.size,
+      inbox: inbox.size,
+      sessions: sessions.size,
+    });
+  }
+
+  sendJson(res, 404, { error: 'not found' });
+});
+
+
+// ---------------------------------------------------------------- auth --
+// The mock authenticates like the gateway (docs/TRANSPORT.md §3.1), because a
+// laxer mock hides exactly this class of bug: the client "worked" here while it
+// could not connect to the real gateway at all.
+//
+// What is NOT modelled: the Host and Origin checks (C2/C3). Under `npm run dev`
+// the page's origin is the Vite port while the proxy connects to us, so a
+// faithful Origin check would reject every dev request — modelling it would
+// mean modelling the proxy, not the gateway.
+const AUTH_TOKEN = process.env.ZK_TOKEN ?? 'dev-token';
+const AUTH_COOKIE = 'zk';
+
+const cookieToken = (req) => {
+  const header = req.headers.cookie ?? '';
+  for (const part of header.split(';')) {
+    const [name, ...rest] = part.trim().split('=');
+    if (name === AUTH_COOKIE) return rest.join('=');
+  }
+  return null;
+};
+
+const authorized = (req) => cookieToken(req) === AUTH_TOKEN;
+
+const unauthorized = (res, extraHeaders = {}) => {
+  for (const [name, value] of Object.entries(extraHeaders)) res.setHeader(name, value);
+  sendJson(res, 401, { error: { code: 1020, message: 'unauthorized', data: { name: 'unauthorized' } } });
+};
+
+// ------------------------------------------------------ WS control plane --
+// The browser client speaks only JSON-RPC over WS (docs/TRANSPORT.md §4.1), so
+// the mock does too: one client code path for mock and real gateway. The REST
+// routes above stay for the surfaces that are still mock-only (prompt queue,
+// files, capabilities, automation, insights, memory, child sessions).
+
+const WS_EPOCH = randomUUID().replace(/-/g, '').slice(0, 16);
+const WS_CAPABILITIES = [
+  'session.list',
+  'session.snapshot',
+  'session.delta',
+  'session.subscribe',
+  'session.create',
+  'run.cancel',
+  'ask',
+  'plan',
+  'artifacts',
+  'settings',
+  'settings.set',
+  'workspace',
+  'notify',
+  'prompts',
+  'foreground',
+];
+const wsClients = new Set();
+
+/** Real settings rows (contracts/settingskeys.go names only). */
+const settingsRows = new Map([
+  ['agent.permission', 'workspace'],
+  ['agent.approvalTimeoutSeconds', '900'],
+  ['agent.subagentMaxConcurrent', '4'],
+  ['agent.teamMaxConcurrent', '3'],
+  ['toolkit.shellTimeoutSeconds', '120'],
+  ['toolkit.shellMaxOutputKiB', '256'],
+  ['ui.theme.mode', 'system'],
+  ['ui.chatFontSize', '14'],
+  ['ui.workSteps.mode', 'standard'],
+  ['ui.workSteps.collapse', 'completion'],
+  ['ui.notifications', 'true'],
+  ['ui.notifications.system', 'false'],
+  ['ui.sessions.showArchived', 'false'],
+  ['net.proxy', ''],
+  ['net.noProxy', 'localhost,127.0.0.1'],
+]);
+
+const workspaces = [
+  { id: 'ws-mygo', name: 'mygo', root: '/data/mygo', color: '#5b8def' },
+  { id: 'ws-web', name: 'web', root: '/data/mygo/web', color: '#7a5bf0' },
+];
+let currentWorkspaceId = 'ws-mygo';
+
+const wsRevs = { list: 0, approvals: 0, settings: 0, workspace: 0, ask: 0, plan: 0, artifacts: 0 };
+const lastPublished = { list: [], approvals: [], settings: {}, workspace: [] };
+
+const wsFrame = (payload) => {
+  const data = Buffer.from(payload, 'utf8');
+  const length = data.length;
+  let header;
+  if (length < 126) header = Buffer.from([0x81, length]);
+  else if (length < 65536) {
+    header = Buffer.alloc(4);
+    header[0] = 0x81;
+    header[1] = 126;
+    header.writeUInt16BE(length, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x81;
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(length), 2);
+  }
+  return Buffer.concat([header, data]);
+};
+
+const wsSend = (client, message) => {
+  try {
+    client.socket.write(wsFrame(`${JSON.stringify(message)}\n`));
+  } catch {
+    wsClients.delete(client);
+  }
+};
+
+const wsResult = (client, id, result) => wsSend(client, { jsonrpc: '2.0', id, result });
+const wsError = (client, id, code, message, name) =>
+  wsSend(client, {
+    jsonrpc: '2.0',
+    id,
+    error: { code, message, data: name ? { name } : {} },
+  });
+const wsNotify = (method, params) => {
+  for (const client of wsClients) {
+    if (client.ready) wsSend(client, { jsonrpc: '2.0', method, params });
+  }
+};
+
+const approvalWire = (approval) => ({
+  id: approval.id,
+  tool: approval.tool,
+  summary: approval.summary,
+  arguments:
+    typeof approval.arguments === 'string'
+      ? approval.arguments
+      : approval.arguments
+        ? JSON.stringify(approval.arguments)
+        : undefined,
+  sessionId: approval.sessionId,
+  source: approval.source,
+  createdAt: approval.createdAt,
+  expiresAt: approval.expiresAt,
+});
+
+const sessionInfoWire = (value) => ({
+  id: value.id,
+  title: value.title,
+  updatedAt: value.updatedAt,
+  running: Boolean(value.running),
+  unread: false,
+  messageCount: value.messages.length,
+});
+
+const sessionWire = (value) => ({
+  id: value.id,
+  title: value.title,
+  model: 'deepseek-v4.1-flash',
+  running: Boolean(value.running),
+  interrupted: false,
+  messages: value.messages.map((message) => ({
+    id: message.id,
+    role: message.role,
+    text: message.text,
+    reasoning: message.reasoning,
+    streaming: message.streaming,
+    usage: message.usage
+      ? { promptTokens: message.usage.inputTokens, completionTokens: message.usage.outputTokens }
+      : undefined,
+    tools: (message.steps ?? []).map((step) => ({
+      id: step.callId,
+      name: step.name,
+      status: step.status === 'running' ? 'running' : step.status === 'error' ? 'error' : 'succeeded',
+      summary: typeof step.output === 'string' ? step.output : undefined,
+      arguments: step.input ? JSON.stringify(step.input) : undefined,
+    })),
+    createdAt: message.createdAt,
+  })),
+});
+
+const publishList = () => {
+  const next = [...sessions.values()].map(sessionInfoWire);
+  const previous = lastPublished.list;
+  const byId = new Map(previous.map((item) => [item.id, item]));
+  const added = next.filter((item) => !byId.has(item.id));
+  const changed = next.filter((item) => {
+    const before = byId.get(item.id);
+    return before && JSON.stringify(before) !== JSON.stringify(item);
+  });
+  const removed = previous.filter((item) => !next.some((now) => now.id === item.id)).map((item) => item.id);
+  lastPublished.list = next;
+  const rev = ++wsRevs.list;
+  wsNotify('session.list.delta', { baseRev: rev - 1, rev, added, changed, removed });
+};
+
+publishApprovals = () => {
+  const next = [...approvals.values()].map(approvalWire);
+  const previous = lastPublished.approvals;
+  const previousIds = new Set(previous.map((item) => item.id));
+  const nextIds = new Set(next.map((item) => item.id));
+  const added = next.filter((item) => !previousIds.has(item.id));
+  const removed = previous.filter((item) => !nextIds.has(item.id)).map((item) => item.id);
+  lastPublished.approvals = next;
+  const rev = ++wsRevs.approvals;
+  wsNotify('approvals.delta', { baseRev: rev - 1, rev, added, removed });
+};
+
+const publishSettings = (rows) => {
+  const changed = {};
+  for (const [key, value] of rows) {
+    if (lastPublished.settings[key] !== value) changed[key] = value;
+  }
+  const removed = Object.keys(lastPublished.settings).filter((key) => !rows.has(key));
+  lastPublished.settings = Object.fromEntries(rows);
+  const rev = ++wsRevs.settings;
+  wsNotify('settings.delta', { baseRev: rev - 1, rev, rows: changed, removed });
+};
+
+const publishWorkspaces = () => {
+  const next = [...workspaces];
+  const previous = lastPublished.workspace;
+  const byId = new Map(previous.map((item) => [item.id, item]));
+  const added = next.filter((item) => !byId.has(item.id));
+  const changed = next.filter((item) => {
+    const before = byId.get(item.id);
+    return before && JSON.stringify(before) !== JSON.stringify(item);
+  });
+  const removed = previous.filter((item) => !next.some((now) => now.id === item.id)).map((item) => item.id);
+  lastPublished.workspace = next;
+  const rev = ++wsRevs.workspace;
+  wsNotify('workspace.list.delta', {
+    baseRev: rev - 1,
+    rev,
+    added,
+    changed,
+    removed,
+    currentId: currentWorkspaceId,
+  });
+};
+
+const wsDispatch = (client, message) => {
+  const { id, method } = message;
+  const params = message.params ?? {};
+  const reply = (result) => wsResult(client, id, result);
+  const fail = (code, name, text) => wsError(client, id, code, text ?? name, name);
+
+  if (method !== 'initialize' && method !== 'ready' && !client.ready) {
+    return fail(1024, 'not_ready');
+  }
+
+  switch (method) {
+    case 'initialize':
+      return reply({
+        epoch: WS_EPOCH,
+        protocolVersion: 1,
+        serverVersion: 'mock',
+        capabilities: WS_CAPABILITIES,
+        limits: {
+          maxFrameBytes: 16 * 1024 * 1024,
+          maxAttachmentBytes: 10 * 1024 * 1024,
+          snapshotTailDefault: 60,
+          deltaRingBytes: 256 * 1024,
+        },
+      });
+    case 'ready':
+      client.ready = true;
+      return reply({});
+    case 'ping':
+      return reply({ pong: true, epoch: WS_EPOCH });
+    case 'session.list.snapshot': {
+      const sessionsNow = [...sessions.values()].map(sessionInfoWire);
+      lastPublished.list = sessionsNow;
+      return reply({ epoch: WS_EPOCH, rev: wsRevs.list, sessions: sessionsNow });
+    }
+    case 'session.snapshot': {
+      const value = sessions.get(params.sessionId);
+      if (!value) return fail(1001, 'session_not_found');
+      return reply({
+        epoch: WS_EPOCH,
+        rev: wsRevs.list,
+        session: sessionWire(value),
+        truncated: false,
+      });
+    }
+    case 'session.subscribe':
+      return reply({ epoch: WS_EPOCH, rev: wsRevs.list, resync: false });
+    case 'session.unsubscribe':
+      return reply({});
+    case 'session.create': {
+      const created = session(params.title || '新会话');
+      publishList();
+      return reply({ sessionId: created.id });
+    }
+    case 'approvals.snapshot': {
+      const pending = [...approvals.values()].map(approvalWire);
+      lastPublished.approvals = pending;
+      return reply({
+        epoch: WS_EPOCH,
+        rev: wsRevs.approvals,
+        mode: permission.mode,
+        permission: permission.mode,
+        approvalTimeoutSeconds: 900,
+        pending,
+      });
+    }
+    case 'approval.resolve': {
+      if (!['allow', 'allow_always', 'deny'].includes(params.decision)) {
+        return fail(-32602, 'invalid_params');
+      }
+      if (!resolveApproval(params.id, params.decision)) {
+        return fail(1019, 'approval_not_pending');
+      }
+      publishApprovals();
+      return reply({ resolved: true });
+    }
+    case 'settings.snapshot': {
+      const rows = Object.fromEntries(settingsRows);
+      lastPublished.settings = rows;
+      return reply({ epoch: WS_EPOCH, rev: wsRevs.settings, rows });
+    }
+    case 'settings.set': {
+      if (typeof params.key !== 'string' || params.key === '') {
+        return fail(-32602, 'invalid_params');
+      }
+      settingsRows.set(params.key, String(params.value ?? ''));
+      publishSettings(settingsRows);
+      return reply({});
+    }
+    case 'workspace.list.snapshot': {
+      const list = [...workspaces];
+      lastPublished.workspace = list;
+      return reply({
+        epoch: WS_EPOCH,
+        rev: wsRevs.workspace,
+        workspaces: list,
+        currentId: currentWorkspaceId,
+      });
+    }
+    case 'prompts.snapshot': {
+      const prompts = queueOf(String(params.sessionId ?? '')).map((item) => ({
+        id: item.id,
+        text: item.text,
+        createdAt: item.createdAt,
+      }));
+      return reply({ epoch: WS_EPOCH, rev: wsRevs.artifacts, prompts });
+    }
+    case 'prompts.subscribe':
+      return reply({ epoch: WS_EPOCH, rev: wsRevs.artifacts, resync: false });
+    case 'prompts.enqueue': {
+      const sessionId = String(params.sessionId ?? '');
+      const text = String(params.text ?? '').trim();
+      if (!sessions.has(sessionId)) return fail(1001, 'session_not_found');
+      if (text === '') return fail(-32602, 'invalid_params');
+      const prompt = { id: shortId('q'), sessionId, text };
+      queueOf(sessionId).push(prompt);
+      return reply({ id: prompt.id });
+    }
+    case 'prompts.remove': {
+      const sessionId = String(params.sessionId ?? '');
+      const queue = queueOf(sessionId);
+      const index = queue.findIndex((item) => item.id === params.id);
+      if (index >= 0) queue.splice(index, 1);
+      return reply({});
+    }
+    case 'foreground.set':
+      return reply({});
+    case 'ask.snapshot':
+      return reply({ epoch: WS_EPOCH, rev: wsRevs.ask, pending: null });
+    case 'plan.snapshot':
+      return reply({ epoch: WS_EPOCH, rev: wsRevs.plan, state: 'idle', content: '' });
+    case 'artifacts.snapshot':
+      return reply({ epoch: WS_EPOCH, rev: wsRevs.artifacts, items: [] });
+    case 'run.cancel': {
+      const value = sessions.get(params.sessionId);
+      if (value) value.running = false;
+      publishList();
+      return reply({});
+    }
+    default:
+      return fail(-32601, 'method_not_found');
+  }
+};
+
+server.on('upgrade', (req, socket) => {
+  if (!req.url?.startsWith('/ws')) {
+    socket.destroy();
+    return;
+  }
+  if (!authorized(req)) {
+    // §3.1/C4: the upgrade is refused with a real HTTP response, not a socket
+    // that silently closes — the browser surfaces it as a failed handshake.
+    socket.write(
+      'HTTP/1.1 401 Unauthorized\r\n' +
+        'Content-Type: application/json\r\n' +
+        'Retry-After: 1\r\n' +
+        'Connection: close\r\n' +
+        'Content-Length: 74\r\n\r\n' +
+        '{"error":{"code":1020,"message":"unauthorized","data":{"name":"unauthorized"}}}',
+    );
+    socket.destroy();
+    return;
+  }
+  const key = req.headers['sec-websocket-key'];
+  if (!key) {
+    socket.destroy();
+    return;
+  }
+  const accept = createHash('sha1')
+    .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+    .digest('base64');
+  socket.write(
+    'HTTP/1.1 101 Switching Protocols\r\n' +
+      'Upgrade: websocket\r\n' +
+      'Connection: Upgrade\r\n' +
+      `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+  );
+  const client = { socket, ready: false, buffer: Buffer.alloc(0) };
+  wsClients.add(client);
+
+  socket.on('data', (chunk) => {
+    client.buffer = Buffer.concat([client.buffer, chunk]);
+    for (;;) {
+      const frame = readFrame(client.buffer);
+      if (!frame) break;
+      client.buffer = client.buffer.slice(frame.bytes);
+      if (frame.opcode === 0x8) {
+        socket.end();
+        wsClients.delete(client);
+        return;
+      }
+      if (frame.opcode === 0x9) {
+        socket.write(Buffer.from([0x8a, 0x00]));
+        continue;
+      }
+      if (frame.opcode !== 0x1) continue;
+      const text = frame.payload.toString('utf8');
+      for (const line of text.split('\n')) {
+        if (line.trim() === '') continue;
+        try {
+          wsDispatch(client, JSON.parse(line));
+        } catch (error) {
+          console.error('[mock] ws dispatch failed', error);
+        }
+      }
+    }
+  });
+
+  socket.on('close', () => wsClients.delete(client));
+  socket.on('error', () => wsClients.delete(client));
+});
+
+/** Read one masked client frame; null until the whole frame is buffered. */
+function readFrame(buffer) {
+  if (buffer.length < 2) return null;
+  const opcode = buffer[0] & 0x0f;
+  const masked = (buffer[1] & 0x80) !== 0;
+  let length = buffer[1] & 0x7f;
+  let offset = 2;
+  if (length === 126) {
+    if (buffer.length < 4) return null;
+    length = buffer.readUInt16BE(2);
+    offset = 4;
+  } else if (length === 127) {
+    if (buffer.length < 10) return null;
+    length = Number(buffer.readBigUInt64BE(2));
+    offset = 10;
+  }
+  const maskSize = masked ? 4 : 0;
+  if (buffer.length < offset + maskSize + length) return null;
+  const mask = masked ? buffer.subarray(offset, offset + 4) : null;
+  const payload = Buffer.from(buffer.subarray(offset + maskSize, offset + maskSize + length));
+  if (mask) {
+    for (let i = 0; i < payload.length; i += 1) payload[i] ^= mask[i % 4];
+  }
+  return { opcode, payload, bytes: offset + maskSize + length };
+}
+
+server.listen(PORT, HOST, () => {
+  console.log(
+    `[mock] listening on http://${HOST}:${PORT}  (${sessions.size} sessions, ${approvals.size} approval)`,
+  );
+  // The gateway prints the tokenised URL; the fragment is the only way in.
+  console.log(`[mock] open: http://${HOST}:${PORT}/#token=${AUTH_TOKEN}`);
+  console.log(`[mock] dev client (vite): http://127.0.0.1:5178/#token=${AUTH_TOKEN}`);
+});

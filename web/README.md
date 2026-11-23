@@ -1,0 +1,109 @@
+<!-- @format -->
+
+# web/ — ZeoKeel 浏览器客户端
+
+网关（Go，`internal/gateway`）的消费者。协议见 [`docs/TRANSPORT.md`](../docs/TRANSPORT.md)，
+客户端契约见 [`docs/WEB-CLIENT.md`](../docs/WEB-CLIENT.md)，组件映射见
+[`docs/plans/antd-x-component-map.md`](../docs/plans/antd-x-component-map.md)。
+
+交付状态：**S2 骨架 + S3 功能对齐（mock 驱动）**。审批 / Inbox / 工具卡 / 设置 / 检查器 /
+分层 Esc 已落地；唯一未接线的是 WS 快照/差值（隔离在 `src/api/`，等 task-3）。
+
+## 启动（不需要 Go）
+
+```bash
+cd web
+npm ci
+
+# 终端 A：mock 网关（SSE + 审批闸门 + 全部读模型）
+npm run mock            # http://127.0.0.1:8788
+
+# 终端 B：dev server（/api 代理到 mock）
+npm run dev             # http://127.0.0.1:5178
+```
+
+对着真实网关跑：`ZK_API_URL=http://127.0.0.1:9932 npm run dev`。
+
+### mock 可触发的路径
+
+| 操作 | 观察 |
+| --- | --- |
+| 随便发一句 | 推理 → 工具调用**停在审批** → 允许后继续 → 流式正文（代码高亮）→ 用量 → 完成 |
+| 停在审批时按 `Esc`（焦点在任何地方，含侧栏/顶栏） | 拒绝最旧那条；本轮继续跑完（工具结果是失败行） |
+| 停在审批时按 `Cmd/Ctrl+Enter` | 允许最旧那条；裸 `Enter` 永远不做决定 |
+| 审批卡「范围」选「本会话内始终允许」 | 主按钮变为该动作（`allow_always`） |
+| 点「拒绝」/`Esc` 后 | 卡片消失，下一条（若有）出现 |
+| 文字含 `error` | 终止性 `error` 事件 → 红色错误行（不是 warning） |
+| 点停止 / 运行中按 `Esc` | 连接中断，保留已收到内容 + 中性「已停止」 |
+| `/inbox` | 5 类打断源（审批/提问/计划/产物/完成回执）；审批可直接处置；空态无 0 值统计 |
+| `/c/:id` 工具卡 | 26 个渲染器按工具名分发；未注册工具（MCP）走通用卡（输入+输出） |
+| `/c/:id/files` | 工作区树 + 预览 + 「改动」逐文件 diff（`?view=diff`） |
+| `/settings/*` | 9 页目录；改一项后 `Esc` 弹丢弃守卫且页面不关；页脚唯一 primary |
+| 输入 `/` | 命令菜单（↑↓ + Enter 执行；Tab 只补全；Esc 关闭且保留草稿） |
+| 输入 `@` | 文件候选（Enter/Tab 补全路径；Esc 关闭） |
+| `Mod+K` / `Mod+Shift+P` | 命令面板（打开即可输入；Esc 关闭且下次清空） |
+| `Mod+F` | 会话内查找条（Enter 下一个 / Shift+Enter 上一个；Esc 关闭并把焦点还给 composer） |
+| `Mod+Alt+F` | 打开右侧文件检查器 |
+| 刷新 `/c/:id` | 快照恢复（含推理/工具步骤/用量） |
+| 切走再切回会话 | 回到该会话上次的阅读位置；原来贴底则继续跟随，原来上滚则显示「回到最新」 |
+| 运行中再发一条 | 进入队列（「N 条待发送」，可单条取消）；本轮 `done` 后自动发队首；`Esc` 停止时队列保留 |
+
+## 命令
+
+```bash
+npm run dev        # vite dev server
+npm run typecheck  # tsc --noEmit
+npm run lint       # eslint（含"禁止颜色字面量"规则）
+npm run test       # vitest run（E1–E9、SSE 集成、520 条虚拟化、整树冒烟）
+npm run build      # tsc + vite build → dist/（由 go:embed 打进二进制）
+npm run gen:tokens # 从 internal/{brand,design} 重新生成 tokens.css 与 antd-theme.ts
+npm run gen:icons  # 从 internal/icons/svg 重新生成 src/design/icons.tsx（34 个）
+```
+
+## 目录
+
+```
+src/api/        唯一的网关入口：SSE 传输（库存 XRequest）、协议类型、会话/审批/收件箱/设置/文件/读模型
+src/runtime/    GatewayChatProvider（3 个抽象方法）+ useXChat 接线
+src/chat/       transcript（虚拟化）/ composer（斜杠、@）/ markdown / ThoughtChain / 工具卡（26 渲染器）
+src/keyboard/   分层 Esc 仲裁器 + 全局 chord 仲裁器（单一 document capture 监听）
+src/shell/      Layout + Sider + Splitter 壳层、顶带、会话列表、侧栏导航
+src/features/   now / thread（含 trajectory、memory、child、find）/ approvals / inbox / palette
+                settings（9 页）/ inspector / automation / capabilities / insights
+src/design/     tokens.css + antd-theme.ts + icons.tsx（**三者皆为生成物**）+ 三行主题
+dev/            mock-server.mjs
+scripts/        gen-tokens.mjs · gen-icons.mjs
+```
+
+## 硬约束（不要偏离）
+
+- **`src/api/` 之外不写 `fetch`**（库存 `XRequest` 在 `src/api/run-stream.ts` 创建）。
+- **`tokens.css` / `antd-theme.ts` / `icons.tsx` 是生成物**：改色/字号改 `internal/{brand,design}`；
+  改图标改 `internal/icons/svg`，然后跑对应 `gen:*`。手改视为违规（WEB-CLIENT §9.1 T1）。
+- **不许颜色字面量**：`src/` 内 hex/rgb/hsl 由 ESLint 拦（白名单只有生成文件）。
+- **主题只有三行**：`algorithm` + `colorPrimary` + `fontFamily`；**不用** `compactAlgorithm`。
+- **键盘**：不绑 `Cmd/Ctrl+N/T/W/.` 与 `Tab`（Tab 只做焦点移动；菜单里只补全文本）；
+  `Esc` 只经 `esc-arbiter.ts` 的单一监听 + 声明式 claim 栈，组件内不得自己绑 keydown。
+- **审批无默认动作**：不用 `Modal.confirm`；裸 `Enter` 不决定；拒绝不是 primary。
+- **不引第二套设计系统**；markdown 只用 `@ant-design/x-markdown`；图表不引库（洞察用表格）。
+- **antd API 先查不猜**：`bash scripts/antd-cli.sh info <Component> --version 6 --format json`。
+
+## 订阅源版本（精确锁定，不要加 `^`）
+
+`antd 6.7.1` · `@ant-design/x` / `x-sdk` / `x-markdown` `2.10.0` · `@ant-design/icons 6.3.4` ·
+`react 19.3.1` · `react-router 8.5.2` · `@tanstack/react-virtual 3.14.28` · `vite 8.3.8`。
+
+## 本期有意延后（不是遗漏）
+
+| 项 | 原因 / 归属 |
+| --- | --- |
+| WS 快照/差值接线 | 权威状态在 WS `session:<id>` 域；当前由 `src/api/{gateway,approvals,inbox,settings,files}.ts` 的 HTTP 桥提供，task-3 落地后只改这些文件。审批队列用 1.5s 轮询桥接（`ApprovalsProvider`），同样只换实现。 |
+| ~~会话切换的滚动位置恢复（A3）~~ | 已完成（task-8）：消息 id + 行内偏移 + 贴底布尔。 |
+| ~~运行中排队（A5/B13）~~ | 已完成（task-8）：队列在网关侧（`/api/sessions/:id/prompts`），客户端镜像 + 取消 + done 后发队首 + abort 保留。 |
+| 消息 `⋯` 菜单（B11）、后台任务 chip（B12） | 本轮范围外。 |
+| 计划/提问/产物三类浮层（S5/S6） | Inbox 能看见并跳回会话；浮层本身属下一轮。 |
+| 设置页的动态记录新增（LSP 服务器添加、归档恢复） | 目录驱动的删除已实现；新增表单未做。 |
+| Context Tab（R6） | 后端无 `KeyContext` 时该 Tab 不出现的规则已遵守；mock 不提供，故为占位路由。 |
+| 暗色/语言切换的真实生效（B5） | 当前跟随系统 `prefers-color-scheme`；设置值已能保存，尚未驱动外观。 |
+| 终端、图表、插件市场 | 任务书明确不做。 |
+| Playwright / 截图回归 | 环境无 headless 浏览器；以 vitest（E1–E9、真 SSE 集成、520 条虚拟化）替代，**不声称**已在真实浏览器验证滚动帧率。 |

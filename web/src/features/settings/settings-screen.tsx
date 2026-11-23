@@ -1,0 +1,381 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Button, Input, InputNumber, Menu, Radio, Switch, Typography } from 'antd';
+import { useNavigate, useParams } from 'react-router';
+import {
+  changedRows,
+  defaultPageKey,
+  findPage,
+  orderedPages,
+  pageValues,
+  unmappedRows,
+  type SettingsField,
+  type SettingsPage,
+} from '@/api/settings';
+import {
+  hasCapability,
+  setSetting,
+  subscribeSettings,
+  type SettingsRows,
+} from '@/api/gateway';
+import { useEscClaim } from '@/keyboard/keyboard-provider';
+import { ZkIcon } from '@/design/icons';
+import { ConfirmDanger } from '@/ui/confirm-danger';
+
+/**
+ * R12–R21 · Settings — nine pages over the real `settings` domain.
+ *
+ * Three behaviours are the client's own:
+ *  - the dirty guard (B1/B2/E5): Esc on a dirty page opens 丢弃/继续编辑;
+ *  - a sticky footer with the page's single primary action (B4);
+ *  - one `settings.set` per changed row. The gateway pushes `settings.delta`
+ *    after the write, so "已保存" appears when the domain echoes the value —
+ *    never after a fixed delay, and never merely because the RPC returned.
+ */
+export function SettingsScreen() {
+  const { page: pageKey } = useParams<{ page: string }>();
+  const navigate = useNavigate();
+  const [rows, setRows] = useState<SettingsRows>({});
+  const [connected, setConnected] = useState(false);
+  const [navQuery, setNavQuery] = useState('');
+  const canWrite = hasCapability('settings.set');
+
+  useEffect(() => {
+    const unsubscribe = subscribeSettings((value) => {
+      setRows(value);
+      setConnected(true);
+    });
+    return unsubscribe;
+  }, []);
+
+  const pages = useMemo(() => orderedPages(), []);
+  const page = pageKey ? findPage(pageKey) : undefined;
+
+  // `/settings` with no page (or an unknown one) lands on the first page.
+  useEffect(() => {
+    if (!pageKey || !findPage(pageKey)) {
+      navigate(`/settings/${defaultPageKey()}`, { replace: true });
+    }
+  }, [pageKey, navigate]);
+
+  const navItems = useMemo(() => {
+    const groups = new Map<
+      string,
+      { key: string; label: string; rank: number; pages: SettingsPage[] }
+    >();
+    for (const item of pages) {
+      const group = groups.get(item.group.key) ?? { ...item.group, pages: [] };
+      group.pages.push(item);
+      groups.set(item.group.key, group);
+    }
+    return [...groups.values()]
+      .sort((a, b) => a.rank - b.rank)
+      .map((group) => ({
+        key: group.key,
+        label: group.label,
+        type: 'group' as const,
+        children: group.pages
+          .filter(
+            (item) =>
+              navQuery.trim() === '' ||
+              item.label.toLowerCase().includes(navQuery.trim().toLowerCase()),
+          )
+          .map((item) => ({ key: item.key, label: item.label })),
+      }))
+      .filter((group) => group.children.length > 0);
+  }, [pages, navQuery]);
+
+  return (
+    <div className="zk-settings">
+      <div className="zk-settings__nav">
+        <Input
+          size="small"
+          prefix={<ZkIcon name="search" />}
+          placeholder="搜索设置页"
+          aria-label="搜索设置页"
+          value={navQuery}
+          onChange={(event) => setNavQuery(event.target.value)}
+          allowClear
+        />
+        <Menu
+          mode="inline"
+          selectedKeys={pageKey ? [pageKey] : []}
+          items={navItems}
+          onClick={({ key }) => navigate(`/settings/${key}`)}
+        />
+      </div>
+
+      {page ? (
+        <SettingsPageForm
+          key={page.key}
+          page={page}
+          rows={rows}
+          connected={connected}
+          canWrite={canWrite}
+          extraRows={unmappedRows(rows)}
+        />
+      ) : (
+        <div className="zk-empty">正在读取设置…</div>
+      )}
+    </div>
+  );
+}
+
+function SettingsPageForm({
+  page,
+  rows,
+  connected,
+  canWrite,
+  extraRows,
+}: {
+  page: SettingsPage;
+  rows: SettingsRows;
+  connected: boolean;
+  canWrite: boolean;
+  extraRows: string[];
+}) {
+  const navigate = useNavigate();
+  const [baseline, setBaseline] = useState<Record<string, string>>(() =>
+    pageValues(page, rows),
+  );
+  const [values, setValues] = useState<Record<string, string>>(() => pageValues(page, rows));
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [savedRows, setSavedRows] = useState<Array<{ key: string; value: string }>>([]);
+
+  const dirty = useMemo(
+    () => JSON.stringify(values) !== JSON.stringify(baseline),
+    [values, baseline],
+  );
+
+  // Adopt values that arrived from the gateway while the page is clean. The
+  // state update sits behind an await boundary (the react compiler lint forbids
+  // a synchronous setState in an effect, and this also coalesces deltas).
+  useEffect(() => {
+    if (dirty) return;
+    const next = pageValues(page, rows);
+    if (JSON.stringify(next) === JSON.stringify(baseline)) return;
+    void Promise.resolve().then(() => {
+      setBaseline(next);
+      setValues(next);
+    });
+  }, [rows, page, dirty, baseline]);
+
+  // The pushed delta is the acknowledgement: once every row we sent is echoed
+  // back, the notice flips from "等待回声" to "已保存".
+  useEffect(() => {
+    if (savedRows.length === 0) return;
+    const echoed = savedRows.every((row) => (rows[row.key] ?? '') === row.value);
+    if (!echoed) return;
+    void Promise.resolve().then(() => {
+      setNotice('已保存');
+      setSavedRows([]);
+    });
+  }, [rows, savedRows]);
+
+  useEscClaim({
+    id: 'settings-dirty-guard',
+    level: 'settingsDirtyGuard',
+    active: dirty,
+    onEscape: () => {
+      setDiscardOpen(true);
+      return true;
+    },
+  });
+
+  const setValue = (key: string, value: string) => {
+    setValues((current) => ({ ...current, [key]: value }));
+  };
+
+  const changes = changedRows(page, values, rows);
+
+  const save = async () => {
+    if (changes.length === 0) return;
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      for (const change of changes) await setSetting(change.key, change.value);
+      setBaseline(values);
+      setSavedRows(changes);
+      setNotice(`已提交 ${changes.length} 项，等待网关回声`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const close = () => {
+    if (dirty) setDiscardOpen(true);
+    else navigate('/');
+  };
+
+  return (
+    <div className="zk-settings__page">
+      <header className="zk-settings__header">
+        <div>
+          <h1 className="zk-screen__title">{page.label}</h1>
+          <Typography.Text type="secondary">
+            {connected ? '来自网关设置的实时快照' : '正在连接网关…'}
+            {canWrite ? '' : ' · 网关尚未提供 settings.set（只读）'}
+          </Typography.Text>
+        </div>
+        <Button size="small" type="text" onClick={close} aria-label="关闭设置">
+          <ZkIcon name="x" />
+        </Button>
+      </header>
+
+      {error ? (
+        <div className="zk-msg-error" role="alert">
+          {error}
+        </div>
+      ) : null}
+      {notice ? (
+        <div className="zk-notice" role="status">
+          {notice}
+        </div>
+      ) : null}
+
+      <div className="zk-settings__body">
+        {page.sections.map((section, index) => (
+          <section key={index} className="zk-settings__section">
+            {section.title ? <h2 className="zk-settings__section-title">{section.title}</h2> : null}
+            {section.fields.length === 0 ? (
+              <Typography.Text type="secondary">
+                这一页的字段尚未由网关提供；有值时会出现在下面。
+              </Typography.Text>
+            ) : null}
+            {section.fields.map((field) => (
+              <FieldRow
+                key={field.key}
+                field={field}
+                value={values[field.key] ?? ''}
+                disabled={!canWrite}
+                onChange={(value) => setValue(field.key, value)}
+              />
+            ))}
+          </section>
+        ))}
+
+        {extraRows.length > 0 ? (
+          <section className="zk-settings__section">
+            <h2 className="zk-settings__section-title">其它设置（网关有、界面未接线）</h2>
+            <ul className="zk-settings__unmapped">
+              {extraRows.slice(0, 40).map((key) => (
+                <li key={key}>
+                  <code>{key}</code>
+                  <span>{rows[key]}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+      </div>
+
+      <footer className="zk-settings__footer">
+        <Typography.Text type="secondary">
+          {dirty ? '有未保存的更改' : '已与网关快照一致'}
+        </Typography.Text>
+        <div className="zk-settings__footer-actions">
+          <Button onClick={() => setValues(baseline)} disabled={!dirty}>
+            放弃更改
+          </Button>
+          <Button
+            type="primary"
+            onClick={() => void save()}
+            disabled={!dirty || !canWrite}
+            loading={saving}
+          >
+            保存
+          </Button>
+        </div>
+      </footer>
+
+      <ConfirmDanger
+        open={discardOpen}
+        title="放弃未保存的更改？"
+        description="这一页的草稿不会保存。"
+        confirmLabel="丢弃更改"
+        onCancel={() => setDiscardOpen(false)}
+        onConfirm={() => {
+          setDiscardOpen(false);
+          setValues(baseline);
+          navigate('/');
+        }}
+      />
+    </div>
+  );
+}
+
+function FieldRow({
+  field,
+  value,
+  disabled,
+  onChange,
+}: {
+  field: SettingsField;
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const id = `zk-field-${field.key}`;
+  return (
+    <div className="zk-field">
+      <div className="zk-field__label-row">
+        <label className="zk-field__label" htmlFor={id}>
+          {field.label}
+        </label>
+        {field.help ? <span className="zk-field__help">{field.help}</span> : null}
+      </div>
+      <div className="zk-field__control">
+        {field.kind === 'text' ? (
+          <Input
+            id={id}
+            value={value}
+            disabled={disabled}
+            placeholder={field.placeholder}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        ) : null}
+        {field.kind === 'textarea' ? (
+          <Input.TextArea
+            id={id}
+            value={value}
+            disabled={disabled}
+            autoSize={{ minRows: 2, maxRows: 8 }}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        ) : null}
+        {field.kind === 'number' ? (
+          <InputNumber
+            id={id}
+            value={value === '' ? null : Number(value)}
+            disabled={disabled}
+            onChange={(next) => onChange(next === null || next === undefined ? '' : String(next))}
+          />
+        ) : null}
+        {field.kind === 'switch' ? (
+          <Switch
+            id={id}
+            checked={value === 'true'}
+            disabled={disabled}
+            onChange={(next) => onChange(next ? 'true' : 'false')}
+          />
+        ) : null}
+        {field.kind === 'radio' ? (
+          <Radio.Group
+            value={value}
+            disabled={disabled}
+            onChange={(event) => onChange(String(event.target.value))}
+            options={(field.options ?? []).map((option) => ({
+              value: option.value,
+              label: option.label,
+            }))}
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}

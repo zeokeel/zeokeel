@@ -1,0 +1,103 @@
+import { useState, type ReactNode } from 'react';
+import { Layout, Splitter } from 'antd';
+import { matchPath, useLocation, useNavigate } from 'react-router';
+import { useSessions } from '@/features/sessions/sessions-context';
+import { useSystemAppearance } from '@/design/use-system-appearance';
+import { CommandPalette } from '@/features/palette/command-palette';
+import { Sidebar } from './sidebar';
+import { TopBand } from './top-band';
+
+const SIDEBAR_WIDTH_KEY = 'zk.sidebar.width';
+const SIDEBAR_DEFAULT = 264;
+/** Widths persist across reloads (S-02); the splitter owns the drag itself. */
+function storedSidebarWidth(): number {
+  if (typeof localStorage === 'undefined') return SIDEBAR_DEFAULT;
+  const raw = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed >= 200 && parsed <= 380 ? parsed : SIDEBAR_DEFAULT;
+}
+
+/**
+ * The 4-zone shell (S-01): sidebar, then the content column with its band. The right inspector
+ * (S-06) is a route group that this milestone does not build, so there is no
+ * empty fourth zone on screen — an empty panel is not a placeholder, it is a
+ * bug the user can see.
+ *
+ * Splitter owns the draggable width; `Layout.Sider` owns the sidebar surface
+ * (fill, edge rule, breakpoint collapse) inside the panel.
+ */
+export function AppShell({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { create } = useSessions();
+  // Layout.Sider defaults to its own dark surface; keep it aligned with the
+  // appearance the ConfigProvider algorithm is using.
+  const appearance = useSystemAppearance();
+  const [createError, setCreateError] = useState<string | null>(null);
+  const activeSessionId = matchPath('/c/:sessionId/*', location.pathname)?.params.sessionId;
+
+  const handleCreate = async () => {
+    try {
+      const session = await create();
+      setCreateError(null);
+      navigate(`/c/${session.id}`);
+    } catch (cause) {
+      setCreateError(cause instanceof Error ? cause.message : '新建会话失败');
+    }
+  };
+
+  return (
+    <div className="zk-shell">
+      <CommandPalette />
+      <a className="zk-skip-link" href="#zk-main">
+        跳到主内容
+      </a>
+      <Layout className="zk-shell__body">
+        <Splitter
+          className="zk-split"
+          onResizeEnd={(sizes) => {
+            const width = sizes[0];
+            if (width && typeof localStorage !== 'undefined') {
+              localStorage.setItem(SIDEBAR_WIDTH_KEY, String(Math.round(width)));
+            }
+          }}
+        >
+          <Splitter.Panel
+            defaultSize={storedSidebarWidth()}
+            min={200}
+            max={380}
+            className="zk-shell__sidebar-panel"
+          >
+            <Layout.Sider
+              width="100%"
+              theme={appearance === 'dark' ? 'dark' : 'light'}
+              className="zk-sidebar-sider"
+            >
+              <Sidebar
+                activeKey={activeSessionId}
+                onSelect={(sessionId) => navigate(`/c/${sessionId}`)}
+                onCreate={() => void handleCreate()}
+              />
+            </Layout.Sider>
+          </Splitter.Panel>
+          <Splitter.Panel>
+            {/* The band sits in the content column, beside the sidebar — the
+                native frame's shape, and the order keyboard users tab through
+                (sidebar → band → content, WEB-CLIENT §5.3). */}
+            <div className="zk-column">
+              <TopBand />
+              <main id="zk-main" className="zk-content">
+                {createError ? (
+                  <div className="zk-msg-error" role="alert">
+                    {createError}
+                  </div>
+                ) : null}
+                {children}
+              </main>
+            </div>
+          </Splitter.Panel>
+        </Splitter>
+      </Layout>
+    </div>
+  );
+}
