@@ -104,15 +104,7 @@ describe('B5 — the settings row drives the copy', () => {
  * budget and it may only shrink — a *new* file with CJK fails immediately,
  * which is the case this guards (someone writes copy straight into JSX).
  */
-const PENDING_CONVERSION = new Set([
-  // Secondary screens still holding inline Chinese. This list is the remaining
-  // B5 budget: removing an entry is progress, adding one is a regression, and a
-  // file that no longer has CJK must be removed (the test below enforces it).
-  'api/settings.ts',
-  'features/settings/settings-screen.tsx',
-  // Diagnostics, not copy: these strings surface only when something is already
-  // broken, and translating them would hide the cause from a bug report.
-]);
+const PENDING_CONVERSION = new Set<string>([]);
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sourceRoot = resolve(here, '..');
@@ -165,7 +157,10 @@ describe('B5 — copy lives in the catalogs', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('keeps the pending list honest: every entry still exists and still has CJK', () => {
+  it('keeps the pending list honest: it may only shrink, and is empty today', () => {
+    // B5 is clean: every file that held copy now reads the catalogue. An entry
+    // added back here must be deleted again once its file is converted.
+    expect(PENDING_CONVERSION.size).toBe(0);
     const stale = [...PENDING_CONVERSION].filter((relative) => {
       const full = resolve(sourceRoot, relative);
       try {
@@ -176,5 +171,28 @@ describe('B5 — copy lives in the catalogs', () => {
     });
     // A converted file must be removed from the list, so the budget shrinks.
     expect(stale).toEqual([]);
+  });
+});
+describe('the api layer carries no copy', () => {
+  /**
+   * `src/api/` is "what the gateway says" — it must not own display text at all
+   * (`task-26`). This is a structural rule, not a translation: new code that
+   * puts a Chinese sentence in the api layer fails here, and the fix is to move
+   * the copy to the screen, not to translate it in place.
+   *
+   * Test files are exempt: their payloads are fixtures the gateway echoes back
+   * (e.g. an integration test's prompt string), not shipped copy.
+   */
+  it('has no Chinese outside *.test.ts under src/api', () => {
+    const apiRoot = resolve(sourceRoot, 'api');
+    const offenders: string[] = [];
+    for (const file of tsxFiles(apiRoot)) {
+      if (/\.test\.(ts|tsx)$/.test(file)) continue;
+      const hits = userVisibleChinese(readFileSync(file, 'utf8'));
+      if (hits.length > 0) {
+        offenders.push(`${file.slice(sourceRoot.length + 1)}:${hits[0]}`);
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });

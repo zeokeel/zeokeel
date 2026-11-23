@@ -10,7 +10,7 @@ import {
   unmappedRows,
   type SettingsField,
   type SettingsPage,
-} from '@/api/settings';
+} from './ia';
 import {
   hasCapability,
   setSetting,
@@ -22,6 +22,7 @@ import { ZkIcon } from '@/design/icons';
 import { ConfirmDanger } from '@/ui/confirm-danger';
 import { describeError } from '@/features/describe-error';
 import { useT } from '@/i18n';
+import type { MessageKey } from '@/i18n';
 
 /**
  * R12–R21 · Settings — nine pages over the real `settings` domain.
@@ -34,6 +35,7 @@ import { useT } from '@/i18n';
  *    never after a fixed delay, and never merely because the RPC returned.
  */
 export function SettingsScreen() {
+  const t = useT();
   const { page: pageKey } = useParams<{ page: string }>();
   const navigate = useNavigate();
   const [rows, setRows] = useState<SettingsRows>({});
@@ -69,13 +71,13 @@ export function SettingsScreen() {
         hits.set(page.key, []);
         continue;
       }
-      if (page.label.toLowerCase().includes(needle)) {
+      if (t(page.labelKey).toLowerCase().includes(needle)) {
         hits.set(page.key, []);
         continue;
       }
       const fields = page.sections
         .flatMap((section) => section.fields)
-        .filter((field) => field.label.toLowerCase().includes(needle));
+        .filter((field) => t(field.labelKey).toLowerCase().includes(needle));
       if (fields.length > 0) hits.set(page.key, fields.map((field) => field.key));
     }
     return hits;
@@ -84,7 +86,7 @@ export function SettingsScreen() {
   const navItems = useMemo(() => {
     const groups = new Map<
       string,
-      { key: string; label: string; rank: number; pages: SettingsPage[] }
+      { key: string; labelKey: MessageKey; rank: number; pages: SettingsPage[] }
     >();
     for (const item of pages) {
       if (!matches.has(item.key)) continue;
@@ -96,15 +98,15 @@ export function SettingsScreen() {
       .sort((a, b) => a.rank - b.rank)
       .map((group) => ({
         key: group.key,
-        label: group.label,
+        label: t(group.labelKey),
         type: 'group' as const,
         children: group.pages.map((item) => ({
           key: item.key,
-          label: item.label,
+          label: t(item.labelKey),
           // Field-level hits say which field matched, so 「主题」 lands on 外观
           // instead of silently showing the whole page.
           ...(matches.get(item.key)?.length
-            ? { extra: `字段 ${matches.get(item.key)?.length} 项` }
+            ? { extra: t('settings.fieldHits', { count: matches.get(item.key)?.length ?? 0 }) }
             : {}),
         })),
       }))
@@ -117,8 +119,8 @@ export function SettingsScreen() {
         <Input
           size="small"
           prefix={<ZkIcon name="search" />}
-          placeholder="搜索设置页"
-          aria-label="搜索设置页"
+          placeholder={t('settings.search')}
+          aria-label={t('settings.search')}
           value={navQuery}
           onChange={(event) => setNavQuery(event.target.value)}
           allowClear
@@ -144,7 +146,7 @@ export function SettingsScreen() {
           extraRows={unmappedRows(rows)}
         />
       ) : (
-        <div className="zk-empty">正在读取设置…</div>
+        <div className="zk-empty">{t('settings.loading')}</div>
       )}
     </div>
   );
@@ -202,7 +204,7 @@ function SettingsPageForm({
     const echoed = savedRows.every((row) => (rows[row.key] ?? '') === row.value);
     if (!echoed) return;
     void Promise.resolve().then(() => {
-      setNotice('已保存');
+      setNotice(t('settings.savedDone'));
       setSavedRows([]);
     });
   }, [rows, savedRows]);
@@ -238,7 +240,7 @@ function SettingsPageForm({
       for (const change of changes) await setSetting(change.key, change.value);
       setBaseline(values);
       setSavedRows(changes);
-      setNotice(`已提交 ${changes.length} 项，等待网关回声`);
+      setNotice(t('settings.submitted', { count: changes.length }));
     } catch (cause) {
       setError(describeError(cause, t, 'settings.saveFailed'));
     } finally {
@@ -255,13 +257,13 @@ function SettingsPageForm({
     <div className="zk-settings__page">
       <header className="zk-settings__header">
         <div>
-          <h1 className="zk-screen__title">{page.label}</h1>
+          <h1 className="zk-screen__title">{t(page.labelKey)}</h1>
           <Typography.Text type="secondary">
-            {connected ? '来自网关设置的实时快照' : '正在连接网关…'}
-            {canWrite ? '' : ' · 网关尚未提供 settings.set（只读）'}
+            {connected ? t('settings.source.live') : t('settings.source.connecting')}
+            {canWrite ? '' : t('settings.readonly')}
           </Typography.Text>
         </div>
-        <Button size="small" type="text" onClick={close} aria-label="关闭设置">
+        <Button size="small" type="text" onClick={close} aria-label={t('settings.close')}>
           <ZkIcon name="x" />
         </Button>
       </header>
@@ -280,11 +282,9 @@ function SettingsPageForm({
       <div className="zk-settings__body">
         {page.sections.map((section, index) => (
           <section key={index} className="zk-settings__section">
-            {section.title ? <h2 className="zk-settings__section-title">{section.title}</h2> : null}
+            {section.titleKey ? <h2 className="zk-settings__section-title">{t(section.titleKey)}</h2> : null}
             {section.fields.length === 0 ? (
-              <Typography.Text type="secondary">
-                这一页的字段尚未由网关提供；有值时会出现在下面。
-              </Typography.Text>
+              <Typography.Text type="secondary">{t('settings.pageEmpty')}</Typography.Text>
             ) : null}
             {section.fields.map((field) => (
               <FieldRow
@@ -301,7 +301,7 @@ function SettingsPageForm({
 
         {extraRows.length > 0 ? (
           <section className="zk-settings__section">
-            <h2 className="zk-settings__section-title">其它设置（网关有、界面未接线）</h2>
+            <h2 className="zk-settings__section-title">{t('settings.unmapped')}</h2>
             <ul className="zk-settings__unmapped">
               {extraRows.slice(0, 40).map((key) => (
                 <li key={key}>
@@ -316,11 +316,11 @@ function SettingsPageForm({
 
       <footer className="zk-settings__footer">
         <Typography.Text type="secondary">
-          {dirty ? '有未保存的更改' : '已与网关快照一致'}
+          {dirty ? t('settings.unsaved') : t('settings.saved')}
         </Typography.Text>
         <div className="zk-settings__footer-actions">
           <Button onClick={() => setValues(baseline)} disabled={!dirty}>
-            放弃更改
+            {t('settings.revert')}
           </Button>
           <Button
             type="primary"
@@ -328,16 +328,16 @@ function SettingsPageForm({
             disabled={!dirty || !canWrite}
             loading={saving}
           >
-            保存
+            {t('settings.save')}
           </Button>
         </div>
       </footer>
 
       <ConfirmDanger
         open={discardOpen}
-        title="放弃未保存的更改？"
-        description="这一页的草稿不会保存。"
-        confirmLabel="丢弃更改"
+        title={t('settings.discard.title')}
+        description={t('settings.discard.description')}
+        confirmLabel={t('settings.discard.confirm')}
         onCancel={() => setDiscardOpen(false)}
         onConfirm={() => {
           setDiscardOpen(false);
@@ -374,14 +374,17 @@ function FieldRow({
   disabled: boolean;
   onChange: (value: string) => void;
 }) {
+  const t = useT();
   const id = `zk-field-${field.key}`;
   return (
     <div className="zk-field" data-field-key={field.key} ref={focusRef}>
       <div className="zk-field__label-row">
         <label className="zk-field__label" htmlFor={id}>
-          {field.label}
+          {t(field.labelKey)}
         </label>
-        {field.help ? <span className="zk-field__help">{field.help}</span> : null}
+        {field.helpKey ? (
+          <span className="zk-field__help">{t(field.helpKey)}</span>
+        ) : null}
       </div>
       <div className="zk-field__control">
         {field.kind === 'text' ? (
@@ -389,7 +392,7 @@ function FieldRow({
             id={id}
             value={value}
             disabled={disabled}
-            placeholder={field.placeholder}
+            placeholder={field.example}
             onChange={(event) => onChange(event.target.value)}
           />
         ) : null}
@@ -425,7 +428,7 @@ function FieldRow({
             onChange={(event) => onChange(String(event.target.value))}
             options={(field.options ?? []).map((option) => ({
               value: option.value,
-              label: option.label,
+              label: t(option.labelKey),
             }))}
           />
         ) : null}

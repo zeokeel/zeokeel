@@ -47,7 +47,7 @@ export interface TasksSnapshot {
 /**
  * Protocol status → ours. An unknown status is `pending`: the row exists and is
  * not running, and inventing a fourth state would put a protocol value in the
- * UI (README 硬约束）。
+ * UI (README hard constraint: protocol values never become copy).
  */
 export function toTaskStatus(value: string | undefined): TaskStatus {
   if (value === 'in_progress') return 'in_progress';

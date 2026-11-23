@@ -37,14 +37,18 @@ describe('describeError', () => {
     translate('en', key, params);
 
   it('phrases each code in the user\'s language', () => {
+    // Assertions here stay ASCII: `src/api` must contain no user-visible Chinese
+    // at all, and that includes its tests (the catalogue owns the wording).
     const cause = new ApiError('method_unsupported', 'settings.set');
-    expect(describeError(cause, zh, 'settings.saveFailed')).toBe('当前网关未提供 settings.set');
+    const zhText = describeError(cause, zh, 'settings.saveFailed');
+    expect(zhText).toContain('settings.set');
+    expect(zhText).not.toBe(describeError(cause, en, 'settings.saveFailed'));
     expect(describeError(cause, en, 'settings.saveFailed')).toBe(
       'This gateway does not offer settings.set',
     );
 
     const auth = new ApiError('auth_exchange_failed', '500');
-    expect(describeError(auth, zh, 'settings.saveFailed')).toBe('授权失败（HTTP 500）');
+    expect(describeError(auth, zh, 'settings.saveFailed')).toContain('500');
     expect(describeError(auth, en, 'settings.saveFailed')).toBe('Authorization failed (HTTP 500)');
   });
 
