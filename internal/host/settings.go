@@ -110,6 +110,34 @@ func (s *Settings) Set(key, value string) error {
 	return nil
 }
 
+// Delete removes one setting and makes the removal durable. Deleting an unset
+// key is a no-op; it is part of the optional contracts.SettingsDeleter cleanup
+// surface.
+func (s *Settings) Delete(key string) error {
+	if s == nil {
+		return errors.New("host: nil settings")
+	}
+	if key == "" {
+		return errors.New("host: settings key is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.values[key]; !ok {
+		return nil
+	}
+	next := make(map[string]string, len(s.values))
+	for k, v := range s.values {
+		if k != key {
+			next[k] = v
+		}
+	}
+	if err := writeJSONAtomic(s.path, next); err != nil {
+		return err
+	}
+	s.values = next
+	return nil
+}
+
 // All returns a copy of every setting.
 func (s *Settings) All() map[string]string {
 	if s == nil {

@@ -81,11 +81,13 @@ type skillsState struct {
 
 	// Scan/extra-directory disclosure (dirsOpen) and the user-configured list
 	// stored in skills.dirs (loaded once from the settings store).
-	dirsOpen        bool
-	extraDirs       string
-	extraDirsLoaded bool
-	extraNotice     string
-	extraErr        bool
+	dirsOpen             bool
+	extraDirs            string
+	extraDirsLoaded      bool
+	extraDirsScope       string
+	extraDirsScopeLoaded bool
+	extraNotice          string
+	extraErr             bool
 
 	// Editor half (skills_edit.go): the create/edit modal drafts, the success
 	// line and the delete confirmation.
@@ -483,12 +485,24 @@ func buildSkillsDirectories(c *ui.Context, t *design.Tokens, p *skillsState, st 
 }
 
 // buildSkillsExtraDirs renders the user-configurable extra skill directory list
-// (S-03): the value is stored in skills.dirs and an apply rescans immediately.
+// (S-03). The value is workspace-scoped: skills.dirs.<workspaceID> while a
+// workspace is open, the global skills.dirs otherwise. An apply rescans the
+// current scope immediately and never edits another scope's list.
 func buildSkillsExtraDirs(c *ui.Context, t *design.Tokens, p *skillsState, st *state,
 	settingsStore contracts.SettingsService) {
+	scope := skillWorkspaceID(st.ctx)
+	if !p.extraDirsScopeLoaded || p.extraDirsScope != scope {
+		p.extraDirsScope = scope
+		p.extraDirsScopeLoaded = true
+		p.extraDirsLoaded = false
+		p.extraDirs = ""
+		p.extraNotice = ""
+		p.extraErr = false
+	}
+	key := contracts.SkillsDirsSettingKey(scope)
 	if !p.extraDirsLoaded {
 		p.extraDirsLoaded = true
-		p.extraDirs = settingsStore.Get(contracts.SettingSkillsDirs, "")
+		p.extraDirs = settingsStore.Get(key, "")
 	}
 	label := st.tr("目录列表", "Directory list")
 	ui.Field(c, label, func() {
@@ -496,15 +510,12 @@ func buildSkillsExtraDirs(c *ui.Context, t *design.Tokens, p *skillsState, st *s
 			Label(skillInputLabel(st, label)).
 			Placeholder(st.tr("例如：~/.zeokeel/skills", "e.g. ~/.zeokeel/skills")).
 			FillWidth()
-	}).Description(st.tr(
-		"用路径分隔符（Windows 为 ;，其它为 :）或换行分隔；相对路径按数据目录解析。留空表示不额外扫描。",
-		"Separate entries with the OS path separator (; on Windows, : elsewhere) or newlines; "+
-			"relative paths resolve against the data directory. Empty means no extra directories."))
+	}).Description(skillExtraDirsDescription(st, scope))
 	// Secondary: applying the directory list is a section utility, not the
 	// page's primary action.
 	if design.Apply(ui.Button(c, st.tr("应用", "Apply")), t.SecondaryButton()).Clicked() {
 		value := strings.TrimSpace(p.extraDirs)
-		if err := settingsStore.Set(contracts.SettingSkillsDirs, value); err != nil {
+		if err := settingsStore.Set(key, value); err != nil {
 			p.extraNotice = st.tr("保存失败：", "Save failed: ") + err.Error()
 			p.extraErr = true
 		} else {
@@ -521,6 +532,35 @@ func buildSkillsExtraDirs(c *ui.Context, t *design.Tokens, p *skillsState, st *s
 			design.Apply(ui.Text(c, p.extraNotice), t.Font(design.TypeXXS)).TextColor(t.SuccessText)
 		}
 	}
+}
+
+// skillWorkspaceID returns the current workspace ID ("" when none), used to
+// choose the workspace-scoped extra-directory settings key.
+func skillWorkspaceID(kctx cordis.Context) string {
+	workspaceService, ok := kctx.Get(contracts.KeyWorkspace)
+	if !ok || workspaceService == nil {
+		return ""
+	}
+	current, open, err := workspaceService.Current(context.Background())
+	if err != nil || !open {
+		return ""
+	}
+	return strings.TrimSpace(current.ID)
+}
+
+// skillExtraDirsDescription states the scope of the editable extra-directory
+// list: a workspace-scoped list says so explicitly, the no-workspace list keeps
+// the historical global copy.
+func skillExtraDirsDescription(st *state, scope string) string {
+	base := st.tr(
+		"用路径分隔符（Windows 为 ;，其它为 :）或换行分隔；相对路径按数据目录解析。留空表示不额外扫描。",
+		"Separate entries with the OS path separator (; on Windows, : elsewhere) or newlines; "+
+			"relative paths resolve against the data directory. Empty means no extra directories.")
+	if scope == "" {
+		return base
+	}
+	return st.tr("仅对当前工作区生效；切换工作区会显示各自的目录列表。",
+		"Applies to this workspace only; each workspace has its own directory list.") + " " + base
 }
 
 // skillFilter narrows the collection by the search query (case-insensitive over

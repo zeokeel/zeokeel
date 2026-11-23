@@ -56,6 +56,7 @@ func TestWorkspaceRootsIgnoreGlobalFallbacks(t *testing.T) {
 	home, envDir := isolateHome(t)
 	dataDir := t.TempDir()
 	settingsDir := t.TempDir()
+	scopedDir := t.TempDir()
 	assemblyDir := t.TempDir()
 	workspaceRoot := t.TempDir()
 	workspace := &fakeWorkspace{}
@@ -68,14 +69,19 @@ func TestWorkspaceRootsIgnoreGlobalFallbacks(t *testing.T) {
 	writeSkill(t, envDir, "envskill", "Env skill")
 	writeSkill(t, filepath.Join(home, ".zeokeel", "skills"), "homeskill", "Home skill")
 
+	writeSkill(t, scopedDir, "scoped", "Workspace-scoped extra directory")
 	service := newTestService(t, dataDir, Config{Dirs: []string{assemblyDir}}, workspace)
-	service.settings = &skillSettings{values: map[string]string{contracts.SettingSkillsDirs: settingsDir}}
+	service.settings = &skillSettings{values: map[string]string{
+		contracts.SettingSkillsDirs:                 settingsDir,
+		contracts.SkillsDirsSettingKey("ws-skills"): scopedDir,
+	}}
 
 	roots := service.Roots()
 	want := []string{
 		filepath.Join(workspaceRoot, WorkspaceDirName),
 		filepath.Join(workspaceRoot, ".agents", "skills"),
 		filepath.Join(workspaceRoot, ".zeokeel", "skills"),
+		scopedDir,
 	}
 	if len(roots) != len(want) {
 		t.Fatalf("Roots = %v, want exactly %v", roots, want)
@@ -104,7 +110,7 @@ func TestWorkspaceRootsIgnoreGlobalFallbacks(t *testing.T) {
 	if got := byName["shared"].Description; got != "Workspace version" {
 		t.Fatalf("shared description = %q, want the workspace version", got)
 	}
-	for _, name := range []string{"shared", "dsh", "rigws"} {
+	for _, name := range []string{"shared", "dsh", "rigws", "scoped"} {
 		if _, ok := byName[name]; !ok {
 			t.Fatalf("workspace skill %q not discovered; listed = %v", name, skillNames(listed))
 		}

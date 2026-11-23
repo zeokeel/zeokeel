@@ -352,6 +352,13 @@ type SettingsService interface {
 	All() map[string]string
 }
 
+// SettingsDeleter is the optional deletion half of a settings store: cleanup
+// paths use it to remove a row instead of persisting an empty value. Callers
+// must fall back to Set(key, "") when the store does not implement it.
+type SettingsDeleter interface {
+	Delete(key string) error
+}
+
 // Logger is the host log sink exposed to modules.
 type Logger interface {
 	Printf(format string, args ...any)

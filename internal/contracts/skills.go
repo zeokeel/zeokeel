@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"strings"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	rig "github.com/zeokeel/zeokeel-rig"
@@ -28,9 +29,20 @@ type SkillWarnings interface {
 
 // SettingSkillsDirs is the user-configurable extra skill directory list
 // (os.PathListSeparator separated; relative paths resolve against the product
-// data directory). It is scanned after the workspace roots and before the data
-// directory, so a user-installed skill library overrides the shipped one.
+// data directory). It is the no-workspace scope; while a workspace is open the
+// scoped SkillsDirsSettingKey is used instead.
 const SettingSkillsDirs = "skills.dirs"
+
+// SkillsDirsSettingKey scopes the extra skill directory list to a workspace:
+// "skills.dirs.<workspaceID>" when a workspace is open, the global
+// SettingSkillsDirs otherwise. One workspace's extra directories never affect
+// another's (or the no-workspace) skill inventory.
+func SkillsDirsSettingKey(workspaceID string) string {
+	if id := strings.TrimSpace(workspaceID); id != "" {
+		return SettingSkillsDirs + "." + id
+	}
+	return SettingSkillsDirs
+}
 
 // SettingSkillsDisabled is the JSON array of skill names the user disabled.
 // The user-facing skills page still lists them (so they can be re-enabled), but

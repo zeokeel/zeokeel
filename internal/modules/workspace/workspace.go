@@ -27,6 +27,7 @@ import (
 	rigworkspace "github.com/zeokeel/zeokeel-rig/workspace"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/lib/workspacecleanup"
 )
 
 const (
@@ -101,6 +102,12 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return fmt.Errorf("%s: open workspace registry: %w", ModuleID, err)
 		}
+		// Optional: deleting a workspace also forgets the product settings it
+		// owned (never the folder). A host without settings keeps plain registry
+		// deletion.
+		if settings, ok := ctx.Get(contracts.KeySettings); ok {
+			service.settings = settings
+		}
 		if _, err := ctx.Provide(contracts.KeyWorkspace, contracts.WorkspaceService(service)); err != nil {
 			return fmt.Errorf("%s: provide workspace service: %w", ModuleID, err)
 		}
@@ -142,6 +149,11 @@ type Service struct {
 	service      *rigworkspace.Service
 	maxChanges   int
 	maxDiffBytes int
+
+	// settings, when provided by the host, is purged of this workspace's scoped
+	// rows on Delete (the workspace folder is never touched).
+	settings contracts.SettingsService
+	logger   contracts.Logger
 }
 
 var (
@@ -175,7 +187,12 @@ func newService(dataDir string, cfg Config, logger contracts.Logger) (*Service, 
 	if maxDiffBytes == 0 {
 		maxDiffBytes = DefaultMaxDiffBytes
 	}
-	return &Service{service: service, maxChanges: maxChanges, maxDiffBytes: maxDiffBytes}, nil
+	return &Service{
+		service:      service,
+		maxChanges:   maxChanges,
+		maxDiffBytes: maxDiffBytes,
+		logger:       logger,
+	}, nil
 }
 
 // Path returns the resolved registry file path (diagnostics and tests).
@@ -265,9 +282,20 @@ func (s *Service) Open(ctx context.Context, id string) (contracts.Workspace, err
 	return contractWorkspace(workspace), nil
 }
 
-// Delete implements contracts.WorkspaceService: the files are not touched.
+// Delete implements contracts.WorkspaceService: the registration is removed
+// and the workspace's scoped product settings are purged; the files under its
+// root are not touched. Cleanup failures are logged (not returned): the
+// workspace is already gone by then, and failing the delete would misreport it.
 func (s *Service) Delete(ctx context.Context, id string) error {
-	return s.service.Delete(ctx, id)
+	if err := s.service.Delete(ctx, id); err != nil {
+		return err
+	}
+	if s.settings != nil {
+		if err := workspacecleanup.Settings(s.settings, id); err != nil && s.logger != nil {
+			s.logger.Printf("%s: clean settings of deleted workspace %q: %v", ModuleID, id, err)
+		}
+	}
+	return nil
 }
 
 // RenameWorkspace implements contracts.WorkspaceRenamer: it changes one

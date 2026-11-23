@@ -52,8 +52,12 @@ type fakeWorkspace struct {
 }
 
 func (f *fakeWorkspace) setRoot(root string) {
+	f.setWorkspace("ws-skills", root)
+}
+
+func (f *fakeWorkspace) setWorkspace(id, root string) {
 	f.mu.Lock()
-	f.current = contracts.Workspace{ID: "ws-skills", Root: root}
+	f.current = contracts.Workspace{ID: id, Root: root}
 	f.hasCurrent = true
 	f.currentErr = nil
 	f.mu.Unlock()
@@ -502,5 +506,53 @@ func TestTwoWorkspaceIsolation(t *testing.T) {
 	}
 	if _, err := service.Read(context.Background(), "global"); err == nil {
 		t.Fatal("workspace B read the data-dir/global skill")
+	}
+}
+
+func TestScopedSkillDirsPerWorkspace(t *testing.T) {
+	isolateHome(t)
+	dataDir := t.TempDir()
+	globalDir := t.TempDir()
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	writeSkill(t, globalDir, "global-extra", "Global extra")
+	writeSkill(t, dirA, "extra-a", "A extra")
+	writeSkill(t, dirB, "extra-b", "B extra")
+	workspaceA := t.TempDir()
+	workspaceB := t.TempDir()
+	workspace := &fakeWorkspace{}
+	service := newTestService(t, dataDir, Config{}, workspace)
+	service.settings = &skillSettings{values: map[string]string{
+		contracts.SettingSkillsDirs:            globalDir,
+		contracts.SkillsDirsSettingKey("ws-a"): dirA,
+		contracts.SkillsDirsSettingKey("ws-b"): dirB,
+	}}
+
+	// Workspace A sees only its own scoped extra directory.
+	workspace.setWorkspace("ws-a", workspaceA)
+	roots := service.Roots()
+	if len(roots) != 4 || roots[3] != dirA {
+		t.Fatalf("workspace A roots = %v, want three workspace dirs + %s", roots, dirA)
+	}
+	listed, err := service.List(context.Background())
+	if err != nil || len(listed) != 1 || listed[0].Name != "extra-a" {
+		t.Fatalf("workspace A List = %v/%v, want only extra-a", skillNames(listed), err)
+	}
+
+	// Switching to B swaps the scoped extra directory; A's and the global one
+	// are invisible.
+	workspace.setWorkspace("ws-b", workspaceB)
+	roots = service.Roots()
+	if len(roots) != 4 || roots[3] != dirB {
+		t.Fatalf("workspace B roots = %v, want three workspace dirs + %s", roots, dirB)
+	}
+	listed, err = service.List(context.Background())
+	if err != nil || len(listed) != 1 || listed[0].Name != "extra-b" {
+		t.Fatalf("workspace B List = %v/%v, want only extra-b", skillNames(listed), err)
+	}
+	for _, name := range []string{"extra-a", "global-extra"} {
+		if _, err := service.Read(context.Background(), name); err == nil {
+			t.Fatalf("workspace B read %q from another scope", name)
+		}
 	}
 }

@@ -12,12 +12,12 @@
 // Root scope is strict (S-02/S-03): when a workspace is open only its skill
 // directories are scanned (<root>/skills, <root>/.agents/skills,
 // <root>/.zeokeel/skills), and every global root - user-configured extra
-// directories (settings key skills.dirs), assembly directories, <dataDir>/skills,
-// $ZEOKEEL_SKILLS and ~/.zeokeel/skills - is ignored. With no workspace open the
-// old global list is scanned (user-configured, assembly, dataDir, env, home).
-// That makes workspaces fully isolated: switching folders swaps the whole skill
-// set, and a skill in another workspace or the data directory is never visible
-// here.
+// directories (the workspace-scoped skills.dirs.<id>), assembly directories,
+// <dataDir>/skills, $ZEOKEEL_SKILLS and ~/.zeokeel/skills - is ignored. With no
+// workspace open the old global list is scanned (global skills.dirs, assembly,
+// dataDir, env, home). That makes workspaces fully isolated: switching folders
+// swaps the whole skill set, and a skill or extra directory in another workspace
+// or the data directory is never visible here.
 //
 // The editor writes <root>/.zeokeel/skills while a workspace is open and
 // <dataDir>/skills otherwise; create/update/delete/list/warnings all use the
@@ -262,17 +262,24 @@ func (s *service) Roots() []string {
 		roots = append(roots, absolute)
 	}
 	// Strict workspace scoping: with a folder open only that workspace's skill
-	// directories are scanned. Global roots (settings/assembly/dataDir/env/home)
-	// stay visible only when no workspace is open, so a skill from another
-	// workspace or the shared data directory can never bleed into this one.
-	if currentRoot, ok := s.currentWorkspaceRoot(); ok {
-		for _, name := range workspaceSkillDirNames {
-			add(filepath.Join(currentRoot, name))
+	// directories and its own scoped extra directories are scanned. Global roots
+	// (global settings/assembly/dataDir/env/home) stay visible only when no
+	// workspace is open, so a skill or extra directory from another workspace
+	// can never bleed into this one.
+	if current, ok := s.currentWorkspace(); ok {
+		if currentRoot := strings.TrimSpace(current.Root); currentRoot != "" {
+			for _, name := range workspaceSkillDirNames {
+				add(filepath.Join(currentRoot, name))
+			}
+			for _, dir := range s.userDirs(strings.TrimSpace(current.ID)) {
+				add(dir)
+			}
+			return roots
 		}
-		return roots
 	}
-	// 2. User-configured extra directories (settings), then assembly dirs.
-	for _, dir := range s.userDirs() {
+	// 2. User-configured extra directories (global settings), then assembly
+	// dirs.
+	for _, dir := range s.userDirs("") {
 		add(dir)
 	}
 	for _, dir := range s.dirs {
@@ -292,12 +299,13 @@ func (s *service) Roots() []string {
 	return roots
 }
 
-// userDirs reads the user-configured extra directories from settings.
-func (s *service) userDirs() []string {
+// userDirs reads the user-configured extra directories for one scope: the
+// workspace-scoped key while a workspace is open, the global key otherwise.
+func (s *service) userDirs(workspaceID string) []string {
 	if s.settings == nil {
 		return nil
 	}
-	raw := strings.TrimSpace(s.settings.Get(contracts.SettingSkillsDirs, ""))
+	raw := strings.TrimSpace(s.settings.Get(contracts.SkillsDirsSettingKey(workspaceID), ""))
 	if raw == "" {
 		return nil
 	}
@@ -318,12 +326,20 @@ func envSkillDirs() []string {
 
 // currentWorkspaceRoot returns the open workspace root. An empty root is no
 // workspace (the legacy global roots apply).
-func (s *service) currentWorkspaceRoot() (string, bool) {
+func (s *service) currentWorkspace() (contracts.Workspace, bool) {
 	if s.workspace == nil {
-		return "", false
+		return contracts.Workspace{}, false
 	}
 	current, ok, err := s.workspace.Current(context.Background())
 	if err != nil || !ok {
+		return contracts.Workspace{}, false
+	}
+	return current, true
+}
+
+func (s *service) currentWorkspaceRoot() (string, bool) {
+	current, ok := s.currentWorkspace()
+	if !ok {
 		return "", false
 	}
 	root := strings.TrimSpace(current.Root)

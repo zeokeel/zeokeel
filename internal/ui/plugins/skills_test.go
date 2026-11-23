@@ -893,7 +893,8 @@ func TestSkillsDirectoriesDisclosure(t *testing.T) {
 	h.assertNoTexts(tester, workspaceSkills)
 
 	h.click(tester, "技能目录与额外目录")
-	h.assertTexts(tester, "工作区", "全局", workspaceSkills, globalSkills, "打开目录")
+	h.assertTexts(tester, "工作区", "全局", workspaceSkills, globalSkills, "打开目录",
+		"仅对当前工作区生效")
 	h.click(tester, "打开目录")
 	if len(opened) != 1 || opened[0] != workspaceSkills {
 		t.Fatalf("openpath calls = %v, want the first scanned root", opened)
@@ -906,8 +907,12 @@ func TestSkillsDirectoriesDisclosure(t *testing.T) {
 	tester.Type(filepath.Join(workspaceRoot, "extra-skills"))
 	tester.Frame()
 	h.click(tester, "应用")
-	if got := store.Get(contracts.SettingSkillsDirs, ""); got != filepath.Join(workspaceRoot, "extra-skills") {
-		t.Fatalf("%s = %q, want the typed directory list", contracts.SettingSkillsDirs, got)
+	scopedKey := contracts.SkillsDirsSettingKey("ws")
+	if got := store.Get(scopedKey, ""); got != filepath.Join(workspaceRoot, "extra-skills") {
+		t.Fatalf("%s = %q, want the typed workspace-scoped directory list", scopedKey, got)
+	}
+	if got := store.Get(contracts.SettingSkillsDirs, ""); got != "" {
+		t.Fatalf("global %s = %q, want it untouched while a workspace is open", contracts.SettingSkillsDirs, got)
 	}
 	h.assertTexts(tester, "已保存")
 	if calls := skills.listCallCount(); calls != 2 {

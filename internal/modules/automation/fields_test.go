@@ -149,3 +149,57 @@ func (l *fakeLogger) linesSnapshot() []string {
 	defer l.mu.Unlock()
 	return append([]string(nil), l.lines...)
 }
+
+// TestAutomationTasksKeepTheirWorkspaceBindings covers the automation workspace
+// boundary: every task carries its own WorkspaceID through List, and a run
+// applies that binding to its own new session instead of leaking it into (or
+// delivering into) another workspace's run.
+func TestAutomationTasksKeepTheirWorkspaceBindings(t *testing.T) {
+	chat := newSwitchChat()
+	service := newTestService(t, t.TempDir(), Config{TickMs: 3_600_000}, chat)
+	taskA := mustCreate(t, service, contracts.AutomationTask{
+		Name: "workspace A", Prompt: "run in A", Schedule: "every 3600s",
+		WorkspaceID: "ws-a", Enabled: false,
+	})
+	taskB := mustCreate(t, service, contracts.AutomationTask{
+		Name: "workspace B", Prompt: "run in B", Schedule: "every 3600s",
+		WorkspaceID: "ws-b", Enabled: false,
+	})
+
+	listed, err := service.List(context.Background())
+	if err != nil || len(listed) != 2 {
+		t.Fatalf("List = %+v/%v, want both tasks", listed, err)
+	}
+	byID := make(map[string]string, len(listed))
+	for _, task := range listed {
+		byID[task.ID] = task.WorkspaceID
+	}
+	if byID[taskA.ID] != "ws-a" || byID[taskB.ID] != "ws-b" {
+		t.Fatalf("listed workspace bindings = %v, want A=ws-a B=ws-b", byID)
+	}
+
+	deliveryA, err := service.runTask(taskA)
+	if err != nil {
+		t.Fatalf("runTask(A): %v", err)
+	}
+	chat.mu.Lock()
+	workspaceA, sessionA := chat.workspace, deliveryA.SessionID
+	chat.mu.Unlock()
+	if workspaceA != sessionA+"|ws-a" {
+		t.Fatalf("run A switched %q, want %q", workspaceA, sessionA+"|ws-a")
+	}
+
+	deliveryB, err := service.runTask(taskB)
+	if err != nil {
+		t.Fatalf("runTask(B): %v", err)
+	}
+	chat.mu.Lock()
+	workspaceB, sessionB := chat.workspace, deliveryB.SessionID
+	chat.mu.Unlock()
+	if workspaceB != sessionB+"|ws-b" {
+		t.Fatalf("run B switched %q, want %q", workspaceB, sessionB+"|ws-b")
+	}
+	if deliveryA.SessionID == deliveryB.SessionID {
+		t.Fatalf("both workspace runs reused session %q", deliveryA.SessionID)
+	}
+}
