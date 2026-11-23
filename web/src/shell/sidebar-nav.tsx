@@ -5,7 +5,7 @@ import { ZkIcon } from '@/design/icons';
 
 /**
  * The sidebar's navigation (S-02 `sidebar.nav`): Inbox, capabilities,
- * automation, insights, settings.
+ * automation, insights, team, settings.
  *
  * These entries are always visible, even at zero, because a feature the user
  * cannot find is a feature that does not exist (AGENTS.md §3.17). Only the
@@ -17,7 +17,7 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
   const { approvals } = useApprovals();
 
   const selected =
-    ['/inbox', '/capabilities', '/automation', '/insights'].find((path) =>
+    ['/inbox', '/capabilities', '/automation', '/insights', '/team'].find((path) =>
       location.pathname.startsWith(path),
     ) ?? (location.pathname.startsWith('/settings') ? '/settings/model' : '');
 
@@ -50,6 +50,9 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
         { key: '/capabilities', icon: <ZkIcon name="plugin" />, label: '能力' },
         { key: '/automation', icon: <ZkIcon name="clock" />, label: '自动化' },
         { key: '/insights', icon: <ZkIcon name="activity" />, label: '洞察' },
+        // C6: always visible, and never with a `0` badge — zero state is an
+        // empty surface inside, not a count on the entry.
+        { key: '/team', icon: <ZkIcon name="users" />, label: '团队' },
         { key: '/settings/model', icon: <ZkIcon name="sliders" />, label: '设置' },
       ]}
     />

@@ -1282,3 +1282,34 @@ body {
   outline: 2px solid var(--zk-bg-selected);
   outline-offset: 2px;
 }
+
+/* Toast action button (B14): a text button inside antd's notification card. */
+.zk-toast__action {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-left: auto;
+  font: inherit;
+  color: var(--zk-accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.zk-team {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--zk-space-3);
+  padding: var(--zk-space-8) 0;
+}
+
+.zk-team__actions {
+  display: flex;
+  gap: var(--zk-space-2);
+}
+
+/* Toasts float above the shell (B14); antd's default z-index loses to the
+ * sticky composer otherwise. */
+.ant-notification {
+  z-index: var(--zk-z-overlay, 40);
+}

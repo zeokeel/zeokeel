@@ -6,6 +6,7 @@ import { ApprovalsProvider } from '@/features/approvals/approvals-context';
 import { SessionsProvider } from '@/features/sessions/sessions-context';
 import { KeyboardProvider } from '@/keyboard/keyboard-provider';
 import { AppShell } from '@/shell/app-shell';
+import { Toasts } from '@/features/toasts/toasts';
 import { zkThemeConfig } from '@/design/theme';
 import { useSystemAppearance } from '@/design/use-system-appearance';
 import { startGateway, stopGateway } from '@/api/gateway';
@@ -40,9 +41,11 @@ export function App() {
         <KeyboardProvider>
           <SessionsProvider>
             <ApprovalsProvider>
-              <AppShell>
-                <AppRoutes />
-              </AppShell>
+              <Toasts>
+                <AppShell>
+                  <AppRoutes />
+                </AppShell>
+              </Toasts>
             </ApprovalsProvider>
           </SessionsProvider>
         </KeyboardProvider>

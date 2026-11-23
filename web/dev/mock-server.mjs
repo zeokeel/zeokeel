@@ -821,6 +821,16 @@ async function handleRun(req, res) {
     });
     target.updatedAt = nowIso();
     sse(res, 'done', { turnId, stopReason: 'end_turn' });
+    // toast.posted is a real gateway broadcast (§6.3); the mock emits one when a
+    // turn settles so the client's toast path is exercised outside vitest too.
+    wsNotify('toast.posted', {
+      id: shortId('toast'),
+      level: 'info',
+      text: '这一轮已完成',
+      sessionId: target.id,
+      actionLabel: '查看会话',
+      actionId: 'open-session',
+    });
     res.end();
     console.log(`[mock] run ${turnId} done (${assistantText.length} chars)`);
   } catch (error) {

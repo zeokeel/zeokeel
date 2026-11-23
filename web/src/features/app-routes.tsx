@@ -5,6 +5,7 @@ import { CapabilitiesScreen } from '@/features/capabilities/capabilities-screen'
 import { InboxScreen } from '@/features/inbox/inbox-screen';
 import { InspectorPanel } from '@/features/inspector/inspector-panel';
 import { InsightsScreen } from '@/features/insights/insights-screen';
+import { TeamScreen } from '@/features/team/team-screen';
 import { NowScreen } from '@/features/now/now-screen';
 import { ROUTES } from '@/features/routes';
 import { SettingsScreen } from '@/features/settings/settings-screen';
@@ -73,6 +74,7 @@ export function AppRoutes() {
       <Route path="/automation" element={<AutomationScreen />} />
       <Route path="/capabilities" element={<CapabilitiesScreen />} />
       <Route path="/insights" element={<InsightsScreen />} />
+      <Route path="/team" element={<TeamScreen />} />
       <Route path="*" element={<NotFoundScreen />} />
     </Routes>
   );

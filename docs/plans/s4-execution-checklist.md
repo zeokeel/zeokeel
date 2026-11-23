@@ -96,6 +96,7 @@ artifact/plan 桥（present 经宿主桥到渲染器、plan_review 状态机、i
 理由写进了那条提交：**一个在某个环境里永久红的测试，会教人忽略红**——与"永远空过的
 检查"是同一个失效模式。修复后 `go test ./internal/... ./cmd/...` 非 ok 包数 = **0**。
 
+<!-- npm-scripts:ignore-begin — 本段是在*记录*检查器抓到的旧命令，不是指令 -->
 **文档↔脚本一致性断言（web 轨，`ba12a38`）**
 `npm run e2e` 一度只存在于 `AGENTS.md` 而没注册进 `web/package.json`（第 7 次"文档比现实
 宽松"）。web 轨补了脚本，并加了一条机器断言：从 `AGENTS.md`/`docs/**` 抓 `npm run <x>`，
@@ -104,6 +105,7 @@ artifact/plan 桥（present 经宿主桥到渲染器、plan_review 状态机、i
 创可贴。另一个细节值得记：他第一版正则把 `npm run e2e` 截成了 `npm run e`，于是把 fixture
 断言改成精确列表。**检查器本身也会错**，这正是每条断言都必须"证明会咬人"、并且要能自校验
 的原因。
+<!-- npm-scripts:ignore-end -->
 
 **`go tool mygo vet` 移除说明**
 S5 之后产品里已无 `ui.Element` 帧循环（托盘只有 App + Tray + 菜单），该工具在当前树上

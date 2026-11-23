@@ -56,6 +56,7 @@
 | R23 | `/capabilities` | 能力屏 (`plugins.go:159`) | 技能 / MCP 连接器 | ✅ | Tab 在 URL query `?tab=skills\|connectors` |
 | R24 | `/insights` | 洞察屏 (`insights.go:125`) | 跨会话用量（只读） | ✅ | 范围 `?range=7\|30` 在 URL |
 | R25 | `*` | 404 | 未知路由 | — | 提供「回 Now」 |
+| R26 | `/team` | 团队屏 | 队友 / 子任务看板 | ✅ | 验收 C6 要求"入口零值常显"，原 25 条路由里没有落点，故新增；零值显示空态，**入口不显示计数**。`team.*` 域投影后只填数据，路由与形态不变 |
 
 **设置页分组**（5 组 9 页，`frame.go:1879-1893` 的 rank 与 `settings.go:742-965` 的 Section 决定）：
 

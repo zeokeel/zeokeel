@@ -501,6 +501,45 @@ export function subscribeArtifacts(listener: (items: ArtifactItem[]) => void): (
   return artifactsDomain.subscribe(listener);
 }
 
+/**
+ * Toasts (§6.3): `toast.posted {id, level, text, sessionId?, actionLabel?,
+ * actionId?}` is a domain-less one-way event, so it is not part of a snapshot or
+ * a delta — it is subscribed straight off the notification stream.
+ */
+export interface ToastEvent {
+  id: string;
+  level: string;
+  text: string;
+  sessionId?: string;
+  actionLabel?: string;
+  actionId?: string;
+  /** The gateway asks the tray to show a system notification too. */
+  wantSystem?: boolean;
+}
+
+export function subscribeToasts(listener: (toast: ToastEvent) => void): () => void {
+  client().start();
+  return client().onNotification((method, params) => {
+    if (method !== 'toast.posted') return;
+    const payload = (params ?? {}) as Partial<ToastEvent>;
+    if (typeof payload.id !== 'string' || typeof payload.text !== 'string') return;
+    listener({
+      id: payload.id,
+      level: typeof payload.level === 'string' ? payload.level : 'info',
+      text: payload.text,
+      sessionId: payload.sessionId,
+      actionLabel: payload.actionLabel,
+      actionId: payload.actionId,
+      wantSystem: payload.wantSystem,
+    });
+  });
+}
+
+/** A toast's action button: `notify.action {id, actionId}` (§6.3). */
+export async function notifyAction(id: string, actionId: string): Promise<void> {
+  await client().request('notify.action', { id, actionId });
+}
+
 /** Read the current workspace value without subscribing. */
 export function currentWorkspaces(): WorkspaceSnapshot | null {
   return workspacesDomain.value();
