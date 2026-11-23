@@ -434,10 +434,11 @@ func runDesktop(opts Options) error {
 	// services during activation. It owns the frame and every contribution
 	// registry; the host only creates the window around its single view.
 	uiRoot := uiroot.New(uiroot.Config{
-		AppName:  appName,
-		Dark:     settings.Get(settingDark, "false") == "true",
-		Language: settings.Get(settingLanguage, "zh"),
-		Settings: settings,
+		AppName:             appName,
+		Dark:                settings.Get(settingDark, "false") == "true",
+		Language:            settings.Get(settingLanguage, "zh"),
+		Settings:            settings,
+		EnableWorkspaceGate: true,
 		// mygo localizes its own controls, menus and accessibility text
 		// separately; mirror a runtime language switch into the framework so
 		// those strings follow the product language (fix round SH-06).

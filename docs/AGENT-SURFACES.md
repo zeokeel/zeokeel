@@ -588,7 +588,7 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 - 最近程度 = 该文件夹最新可见会话的 `UpdatedAt`，没有会话时回落工作区 `CreatedAt`（`internal/lib/workspacerecent`，与切换对话框同源）。当前文件夹优先预选，否则第一条。
 - Enter = 继续预选项；点击某条最近行 = 直接打开该文件夹；`选择其他文件夹…` / 无最近项的 Enter = 原生目录选择器（`mygo.Dialog.Open{Directory:true}`）→ `WorkspaceService.Create("", dir)`（后端从目录名派生名称并设为 current）。
 - 打开失败留在门页并内联报错（`无法打开工作文件夹：…`）；取消选择器不改变任何状态。
-- 只在 `contracts.KeyWorkspace` 解析成功时渲染（headless / ACP / 未装工作区模块的宿主保持原壳层）；`uiroot.Config.SkipWorkspaceGate` 供嵌入方与 ui-snapshot / ui-drive 关闭。
+- 只在 `contracts.KeyWorkspace` 解析成功时渲染（headless / ACP / 未装工作区模块的宿主保持原壳层）；桌面 host 通过 `uiroot.Config.EnableWorkspaceGate` 开启；嵌入方/测试默认关闭，`SkipWorkspaceGate` 可在开启后显式跳过。
 - 门页期间窗口的 chrome 快捷键（Cmd+B/K/N/,、Esc 回退）不绑定：门后没有可操作的 shell。
 
 **侧栏（`ui/sidebar`，单工作区模式）**：

@@ -152,6 +152,7 @@ func gateRoot(t *testing.T, cfg Config, workspace contracts.WorkspaceService, ch
 		}
 	}
 	cfg.Kernel = kernel
+	cfg.EnableWorkspaceGate = true
 	if cfg.AppName == "" {
 		cfg.AppName = "ZeoKeelTest"
 	}

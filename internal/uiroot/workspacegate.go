@@ -9,7 +9,7 @@ package uiroot
 // The gate is a full-window page, not a modal: nothing behind it is meaningful
 // yet. It renders only when the workspace backend resolves from the kernel
 // (contracts.KeyWorkspace), so a host without that module (headless, ACP, the
-// snapshot harness) keeps the shell it always had; Config.SkipWorkspaceGate
+// snapshot harness) keeps the shell it always had; Config.EnableWorkspaceGate is the host opt-in and Config.SkipWorkspaceGate
 // lets an embedder dismiss it explicitly.
 //
 // Enter continues the preselected (most recent / currently open) folder, a
@@ -59,7 +59,7 @@ var workspaceGateDirectoryPicker = func(title string) (string, error) {
 // the shell: every launch asks, an embedder can skip it, and a host whose
 // kernel has no workspace backend never sees it.
 func (r *Root) workspaceGateActive() bool {
-	if r.skipWorkspaceGate || r.workspaceGateDone {
+	if !r.enableWorkspaceGate || r.skipWorkspaceGate || r.workspaceGateDone {
 		return false
 	}
 	_, ok := r.workspaceService()

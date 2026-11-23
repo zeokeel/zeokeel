@@ -2110,7 +2110,7 @@ func renderWorkspaceSnapshots(baseURL, outDir string) {
 		fmt.Println("workspace UX: provide chat:", err)
 		return
 	}
-	gate := uiroot.New(uiroot.Config{AppName: "ZeoKeel", Kernel: gateKernel})
+	gate := uiroot.New(uiroot.Config{AppName: "ZeoKeel", Kernel: gateKernel, EnableWorkspaceGate: true})
 	gateTester := ui.NewTester(gate.View, 1512, 944)
 	gateTester.Frame()
 	renderTester(gateTester, outDir+"/workspace-startup.png")
