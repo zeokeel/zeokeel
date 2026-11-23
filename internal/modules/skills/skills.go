@@ -249,13 +249,9 @@ func (s *service) Roots() []string {
 		roots = append(roots, absolute)
 	}
 	// 1. The current workspace's skill directories (highest precedence).
-	if s.workspace != nil {
-		if current, ok, err := s.workspace.Current(context.Background()); err == nil && ok {
-			if root := strings.TrimSpace(current.Root); root != "" {
-				for _, name := range workspaceSkillDirNames {
-					add(filepath.Join(root, name))
-				}
-			}
+	if currentRoot, ok := s.currentWorkspaceRoot(); ok {
+		for _, name := range workspaceSkillDirNames {
+			add(filepath.Join(currentRoot, name))
 		}
 	}
 	// 2. User-configured extra directories (settings), then assembly dirs.
@@ -301,6 +297,30 @@ func envSkillDirs() []string {
 		return nil
 	}
 	return strings.Split(raw, string(os.PathListSeparator))
+}
+
+// currentWorkspaceRoot returns the open workspace root. An empty root is no
+// workspace (the legacy global roots apply).
+func (s *service) currentWorkspaceRoot() (string, bool) {
+	if s.workspace == nil {
+		return "", false
+	}
+	current, ok, err := s.workspace.Current(context.Background())
+	if err != nil || !ok {
+		return "", false
+	}
+	root := strings.TrimSpace(current.Root)
+	return root, root != ""
+}
+
+// editorStore returns the store writes go to: the open workspace's
+// .zeokeel/skills directory, or the data directory when no folder is open.
+func (s *service) editorStore() *rigskills.Store {
+	dataDir := s.dataDir
+	if root, ok := s.currentWorkspaceRoot(); ok {
+		dataDir = filepath.Join(root, ".zeokeel")
+	}
+	return rigskills.New(rigskills.Options{Roots: s.Roots, DataDir: dataDir, Logger: s.logger})
 }
 
 // --- frontmatter (shared with the editor) ---

@@ -101,7 +101,7 @@ func TestUpdateSkillRejectsUnknownWorkspaceAndInvalidDrafts(t *testing.T) {
 			}
 		})
 	}
-	if raw, err := os.ReadFile(filepath.Join(dataDir, DataDirName, "kept", "SKILL.md")); err != nil || !strings.Contains(string(raw), "body") {
+	if raw, err := os.ReadFile(filepath.Join(workspaceRoot, ".zeokeel", "skills", "kept", "SKILL.md")); err != nil || !strings.Contains(string(raw), "body") {
 		t.Fatalf("kept skill damaged: %q, %v", raw, err)
 	}
 	if _, err := os.Stat(filepath.Join(workspaceRoot, WorkspaceDirName, "workspace-skill", "SKILL.md")); err != nil {

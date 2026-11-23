@@ -15,15 +15,15 @@ var _ contracts.SkillsEditor = (*service)(nil)
 
 // CreateSkill implements contracts.SkillsEditor.
 func (s *service) CreateSkill(ctx context.Context, draft contracts.SkillDraft) (contracts.Skill, error) {
-	return s.store.CreateSkill(ctx, rigskills.Draft{Name: draft.Name, Description: draft.Description, Body: draft.Body})
+	return s.editorStore().CreateSkill(ctx, rigskills.Draft{Name: draft.Name, Description: draft.Description, Body: draft.Body})
 }
 
 // UpdateSkill implements contracts.SkillsEditor.
 func (s *service) UpdateSkill(ctx context.Context, name string, draft contracts.SkillDraft) (contracts.Skill, error) {
-	return s.store.UpdateSkill(ctx, name, rigskills.Draft{Name: draft.Name, Description: draft.Description, Body: draft.Body})
+	return s.editorStore().UpdateSkill(ctx, name, rigskills.Draft{Name: draft.Name, Description: draft.Description, Body: draft.Body})
 }
 
 // DeleteSkill implements contracts.SkillsEditor.
 func (s *service) DeleteSkill(ctx context.Context, name string) error {
-	return s.store.DeleteSkill(ctx, name)
+	return s.editorStore().DeleteSkill(ctx, name)
 }
