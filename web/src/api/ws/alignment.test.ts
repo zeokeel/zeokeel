@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { WS_PARAMS, validateParams } from '../../../dev/ws-params.mjs';
+import { CONDITIONAL_CAPABILITIES, STATIC_CAPABILITIES } from '@/design/ws-contract';
 
 /**
  * Mock ↔ gateway alignment.
@@ -29,10 +30,15 @@ function gatewayCapabilities(): string[] {
   return [...block.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
 }
 
-/** The mock's `WS_CAPABILITIES` array. */
+/**
+ * What the mock advertises: the contract's static list plus the conditional
+ * halves it declares it serves. Both come from the generated contract, so this
+ * reads the *declaration* rather than a literal array.
+ */
 function mockCapabilities(): string[] {
-  const block = /const WS_CAPABILITIES = \[([\s\S]*?)\n\];/.exec(mockSource)?.[1] ?? '';
-  return [...block.matchAll(/'([^']+)'/g)].map((match) => match[1]);
+  const served = /const MOCK_CONDITIONAL = \[([^\]]*)\]/.exec(mockSource)?.[1] ?? '';
+  const conditional = [...served.matchAll(/'([^']+)'/g)].map((match) => match[1]);
+  return [...STATIC_CAPABILITIES, ...conditional];
 }
 
 /** Every method the mock's dispatcher handles (`case 'x':` or `if (method === 'x')`). */
@@ -47,6 +53,7 @@ function mockMethods(): string[] {
 }
 
 /** Methods the client sends (both directions are checked against the mock). */
+/** Read the capability list the mock advertises (now derived, not literal). */
 const CLIENT_METHODS = [
   'initialize',
   'ready',
@@ -85,10 +92,34 @@ describe('mock ↔ gateway', () => {
     expect(mockMethods().length).toBeGreaterThan(10);
   });
 
+  it('has a contract that matches the gateway\'s own capability block', () => {
+    // The generated contract is a copy of what the gateway declares; if the Go
+    // list changes and `go generate` is not re-run, this is the failure that
+    // says so — before a fixture drifts from production.
+    const contract = new Set<string>(STATIC_CAPABILITIES);
+    const missingInContract = gatewayCapabilities().filter((name) => !contract.has(name));
+    const invented = [...contract].filter((name) => !gatewayCapabilities().includes(name));
+    expect(missingInContract, 'contract.json 落后于 methods.go，请 go generate ./internal/gateway').toEqual(
+      [],
+    );
+    expect(invented, 'contract.json 里有 methods.go 没有的能力').toEqual([]);
+  });
+
   it('advertises every gateway capability in the mock', () => {
     const mock = new Set(mockCapabilities());
     const missing = gatewayCapabilities().filter((name) => !mock.has(name));
     expect(missing).toEqual([]);
+  });
+
+  it('names every conditional capability the contract declares, in the fixture', () => {
+    // A conditional half the fixture fakes must be spelled with the contract's
+    // own name, and every name the fixture lists must exist in the contract.
+    for (const name of mockCapabilities().slice(STATIC_CAPABILITIES.length)) {
+      expect(
+        CONDITIONAL_CAPABILITIES.some((item) => item.name === name),
+        `${name} 不在 contract.json 的 conditional 里`,
+      ).toBe(true);
+    }
   });
 
   it('dispatches every method the client sends', () => {

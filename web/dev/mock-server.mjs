@@ -17,6 +17,10 @@
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { validateParams } from './ws-params.mjs';
+import {
+  CONDITIONAL_CAPABILITIES,
+  STATIC_CAPABILITIES,
+} from '../src/design/ws-contract.ts';
 import { createHash } from 'node:crypto';
 
 const PORT = Number(process.env.PORT ?? 8788);
@@ -1211,27 +1215,16 @@ const unauthorized = (res, extraHeaders = {}) => {
 // files, capabilities, automation, insights, memory, child sessions).
 
 const WS_EPOCH = randomUUID().replace(/-/g, '').slice(0, 16);
+/** Conditional capabilities this mock actually serves. */
+const MOCK_CONDITIONAL = ['context', 'tasks', 'regenerate'];
+
+// Derived from the generated contract: every static capability, plus the
+// conditional halves this mock implements (named by `conditional[].name`).
 const WS_CAPABILITIES = [
-  'session.list',
-  'session.snapshot',
-  'session.delta',
-  'session.subscribe',
-  'session.create',
-  'run.cancel',
-  'ask',
-  'plan',
-  'artifacts',
-  'approvals',
-  'settings',
-  'settings.set',
-  'workspace',
-  'notify',
-  'prompts',
-  'foreground',
-  // Conditional halves this build provides (contract.json capabilities.conditional).
-  'tasks',
-  'regenerate',
-  'context',
+  ...STATIC_CAPABILITIES,
+  ...CONDITIONAL_CAPABILITIES.filter((item) => MOCK_CONDITIONAL.includes(item.name)).map(
+    (item) => item.name,
+  ),
 ];
 const wsClients = new Set();
 

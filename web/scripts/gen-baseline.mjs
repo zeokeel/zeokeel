@@ -46,7 +46,12 @@ const SETTINGS_KEY_GENERATOR = {
   script: 'scripts/gen-settings-keys.mjs',
   outputs: ['src/design/settings-keys.ts'],
 };
-const ALL_GENERATORS = [...GENERATORS, SETTINGS_KEY_GENERATOR];
+/** The WS contract is generated from `internal/gateway/contract.json`. */
+const WS_CONTRACT_GENERATOR = {
+  script: 'scripts/gen-ws-contract.mjs',
+  outputs: ['src/design/ws-contract.ts'],
+};
+const ALL_GENERATORS = [...GENERATORS, SETTINGS_KEY_GENERATOR, WS_CONTRACT_GENERATOR];
 
 const sha256 = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 

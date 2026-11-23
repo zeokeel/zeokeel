@@ -109,8 +109,10 @@ scripts/        gen-tokens.mjs · gen-icons.mjs
   分支判断，用户看到的永远是自己的词表（「已停止」「失败」）。渲染原始枚举会把实现细节漏到界面上。
 - **mock 必须和网关同等严格**：mock 宽松一次，就会藏一个只在真网关炸的集成 bug（已发生两次：
   帧尾 `\n`、`prompts.enqueue` 的 `text` vs `prompt`）。WS 方法的参数契约在
-  `dev/ws-params.mjs`，mock、测试用的 fake 网关、`alignment.test.ts` 共用它——未知/缺失字段一律
-  `invalid_params`，不再静默接受。
+  **契约不是手写的**：`internal/gateway/contract.json` 是唯一来源，`npm run gen:ws-contract`
+  把它复制成 `src/design/ws-contract.ts`；`dev/ws-params.mjs`、mock 的 capabilities、fake 网关、
+  `alignment.test.ts` 全部从生成物读，`ws-contract.test.ts` 断言生成物与契约一致（`required` 的判据是
+  Go tag 有没有 `omitempty`——可空值字段记为可选，但客户端该发什么照旧全发）。
 
 ### 生成链基线（改 Go 侧设计源之前先做）
 

@@ -12,6 +12,7 @@ import { GatewayRpc, setGatewayRpc, type SocketLike } from '@/api/ws/rpc';
 import { validateParams } from '../../dev/ws-params.mjs';
 import { SETTING_KEYS } from '@/design/settings-keys';
 import { clearConnectionCaches } from '@/api/gateway';
+import { CONDITIONAL_CAPABILITIES, STATIC_CAPABILITIES } from '@/design/ws-contract';
 
 export interface FakeSessionInfo {
   id: string;
@@ -50,6 +51,15 @@ export interface FakeQueuedPrompt {
   text: string;
   createdAt?: string;
 }
+
+/**
+ * Conditional capabilities this fixture provides. Named **by the contract's own
+ * `conditional[].name`**, not by a written-out list, so a new conditional half
+ * is a deliberate choice here rather than a silent gap.
+ */
+export const FAKED_CONDITIONAL: string[] = ['context', 'tasks', 'regenerate'].filter((name) =>
+  CONDITIONAL_CAPABILITIES.some((item) => item.name === name),
+);
 
 export interface FakeState {
   sessions: FakeSessionInfo[];
@@ -97,25 +107,10 @@ export function defaultState(): FakeState {
     taskRevs: { '': 1 },
     contexts: {},
     currentWorkspaceId: 'ws-1',
-    capabilities: [
-      'session.list',
-      'session.snapshot',
-      'session.delta',
-      'session.subscribe',
-      'session.create',
-      'approvals',
-      'ask',
-      'plan',
-      'artifacts',
-      'settings',
-      'settings.set',
-      'workspace',
-      'run.cancel',
-      'prompts',
-      'foreground',
-      'tasks',
-      'regenerate',
-    ],
+    // Every static capability the contract declares, plus the conditional ones
+    // this fixture actually fakes. Hand-writing this list is how `approvals`
+    // was once served without being declared.
+    capabilities: [...STATIC_CAPABILITIES, ...FAKED_CONDITIONAL],
   };
 }
 

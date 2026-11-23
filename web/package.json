@@ -18,7 +18,8 @@
     "gen:icons": "node scripts/gen-icons.mjs",
     "gen:settings-keys": "node scripts/gen-settings-keys.mjs",
     "gen:baseline": "node scripts/gen-baseline.mjs",
-    "gen:verify": "node scripts/gen-baseline.mjs --verify"
+    "gen:verify": "node scripts/gen-baseline.mjs --verify",
+    "gen:ws-contract": "node scripts/gen-ws-contract.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "6.3.4",
