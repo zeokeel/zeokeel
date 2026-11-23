@@ -67,7 +67,7 @@ export interface FakeState {
   approvals: FakeApproval[];
   approvalMode: string;
   settings: Record<string, string>;
-  ask: { id: string; text: string; options?: string[] } | null;
+  ask: { id: string; text: string; options?: string[]; answer?: string } | null;
   plan: { state: string; content: string };
   artifacts: Array<{ id: string; title: string; body: string }>;
   workspaces: Array<{ id: string; name: string; root: string }>;
@@ -376,6 +376,33 @@ export class FakeGateway {
     ) {
       const revKey = method.split('.')[0] as 'approvals' | 'ask' | 'plan' | 'settings';
       reply({ epoch: this.epoch, rev: this.revs[revKey], resync: false });
+      return;
+    }
+    // B group: these three are state changes, so the assertion can be on state
+    // rather than "the command returned {}".
+    if (method === 'ask.answer') {
+      if (!this.state.ask) {
+        fail(1023, 'ask_not_pending');
+        return;
+      }
+      this.state.ask = { ...this.state.ask, answer: String(params.answer ?? '') };
+      this.revs.ask += 1;
+      this.notify('ask.delta', { rev: this.revs.ask, pending: this.state.ask });
+      reply({});
+      return;
+    }
+    if (method === 'ask.cancel') {
+      this.state.ask = null;
+      this.revs.ask += 1;
+      this.notify('ask.delta', { rev: this.revs.ask, pending: null });
+      reply({});
+      return;
+    }
+    if (method === 'plan.exit') {
+      this.state.plan = { ...this.state.plan, state: String(params.action ?? 'idle') };
+      this.revs.plan += 1;
+      this.notify('plan.delta', { rev: this.revs.plan, state: this.state.plan.state });
+      reply({});
       return;
     }
     if (method === 'settings.snapshot') {

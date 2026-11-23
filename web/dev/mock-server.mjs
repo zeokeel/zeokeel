@@ -28,6 +28,14 @@ const HOST = process.env.HOST ?? '127.0.0.1';
 
 const nowIso = () => new Date().toISOString();
 
+/** Toast actions the mock can actually run (keyed by toast id, like the gateway). */
+const toastActions = new Map();
+let toastSequence = 0;
+
+/** Ask/plan state the mock really mutates (their commands are not no-ops). */
+let askState = null;
+let planState = { state: 'idle', content: '' };
+
 /** Cold store: no persisted settings rows, the way a fresh data dir starts. */
 const COLD_STORE = process.env.MOCK_COLD_STORE === '1';
 const shortId = (prefix) => `${prefix}-${randomUUID().slice(0, 8)}`;
@@ -1635,15 +1643,44 @@ const wsDispatch = (client, message) => {
         rev: params.sinceRev === undefined ? 0 : Number(params.sinceRev),
         resync: false,
       });
-    case 'ask.answer':
-    case 'ask.cancel':
-    case 'plan.exit':
-    case 'notify.action':
+    case 'notify.action': {
+      const toastId = String(params.id ?? '');
+      const actionId = String(params.actionId ?? '');
+      const entry = toastActions.get(toastId);
+      if (!entry || entry.actionId !== actionId) return fail(1021, 'action_unavailable');
+      toastActions.delete(toastId);
+      entry.run();
       return reply({});
+    }
     case 'ask.snapshot':
-      return reply({ epoch: WS_EPOCH, rev: wsRevs.ask, pending: null });
+      return reply({ epoch: WS_EPOCH, rev: wsRevs.ask, pending: askState });
+    case 'ask.answer': {
+      if (!askState || String(params.id) !== askState.id) return fail(1023, 'ask_not_pending');
+      askState = { ...askState, answer: String(params.answer ?? '') };
+      wsRevs.ask += 1;
+      wsNotify('ask.delta', { rev: wsRevs.ask, pending: askState });
+      return reply({});
+    }
+    case 'ask.cancel': {
+      if (askState && String(params.id) !== askState.id) return fail(1023, 'ask_not_pending');
+      askState = null;
+      wsRevs.ask += 1;
+      wsNotify('ask.delta', { rev: wsRevs.ask, pending: null });
+      return reply({});
+    }
+    case 'plan.exit': {
+      planState = { state: String(params.action ?? 'idle'), content: planState.content };
+      wsRevs.plan += 1;
+      wsNotify('plan.delta', { rev: wsRevs.plan, state: planState.state });
+      return reply({});
+    }
     case 'plan.snapshot':
-      return reply({ epoch: WS_EPOCH, rev: wsRevs.plan, state: 'idle', content: '' });
+      return reply({
+        epoch: WS_EPOCH,
+        rev: wsRevs.plan,
+        state: planState.state,
+        content: planState.content,
+      });
     case 'artifacts.snapshot':
       return reply({ epoch: WS_EPOCH, rev: wsRevs.artifacts, items: [] });
     case 'run.cancel': {

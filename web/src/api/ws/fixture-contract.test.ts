@@ -48,9 +48,6 @@ export const UNIMPLEMENTED_PARAMS: Record<string, Record<string, string>> = {
  * "the client starts using it" fails here instead of degrading silently.
  */
 export const UNIMPLEMENTED_METHODS: Record<string, string> = {
-  'ask.answer': '未实现：jsdom 测试里提问由 state.ask 直接构造，不经回答命令',
-  'ask.cancel': '未实现：同上，取消由测试直接重置 state.ask 而不发命令',
-  'plan.exit': '未实现：测试直接改 state.plan',
   'session.active.get': '未实现：客户端尚未使用',
 };
 
@@ -61,25 +58,16 @@ export const UNIMPLEMENTED_METHODS: Record<string, string> = {
  * counterpart in the mock at all.
  */
 export const MOCK_IGNORED_PARAMS: Record<string, Record<string, string>> = {
+  'ask.cancel': {
+    answer: '契约里 cancel 也带 answer，但取消没有答案可写；网关同样忽略它',
+  },
   initialize: {
     clientName: 'mock 不校验握手字段（真网关会按契约校验并拒绝非法值）',
     clientVersion: '同上：握手字段只做形状占位',
     protocolVersion: '同上：mock 固定按当前协议回复',
     capabilities: '同上：客户端声明的能力不参与 mock 的任何判断',
   },
-  'ask.answer': {
-    id: 'mock 的 no-op 处理器：即使有提问也直接回 {}，不落库',
-    answer: '同上：回答内容被忽略，提问状态不会前进',
-  },
-  'ask.cancel': {
-    id: 'mock 的 no-op 处理器：不回写提问状态',
-    answer: '同上：这个字段在 cancel 语义下本就多余，一并忽略',
-  },
-  'plan.exit': { action: 'mock 的 no-op 处理器：不改变计划状态' },
-  'notify.action': {
-    id: 'mock 的 no-op 处理器：toast 的撤销按钮没有对应动作实现',
-    actionId: '同上：动作标识被忽略，撤销不会真的发生',
-  },
+
 };
 
 /**
@@ -159,7 +147,7 @@ describe('registration lists stay honest', () => {
     // 9 → 8 → 4: `notify.action` (with the delete/undo loop) and the four global
     // subscribes are implemented; each removal is forced by the "handled methods
     // must not stay registered" assertion below.
-    expect(Object.keys(UNIMPLEMENTED_METHODS).length).toBeLessThanOrEqual(4);
+    expect(Object.keys(UNIMPLEMENTED_METHODS).length).toBeLessThanOrEqual(1);
   });
 });
 

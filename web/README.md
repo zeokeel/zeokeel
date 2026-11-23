@@ -166,8 +166,7 @@ npm run gen:verify     # 复跑生成器并比对：输入*消失*才红，数�
   （`sinceRev` 已由 Go 侧从契约删除，故不在本表；登记表会跟着契约一起变短。）
 - **`MOCK_IGNORED_PARAMS`**（mock 接受但 no-op 的入参）：`initialize.clientName` /
   `clientVersion` / `protocolVersion` / `capabilities`（不校验握手）、
-  `ask.answer` / `ask.cancel` 的 `id` 与 `answer`、`plan.exit.action`、
-  `notify.action.id` / `notify.action.actionId`（**toast 的撤销按钮在 mock 里没有对应动作**）。
+  `ask.cancel` 契约里的 `answer`（取消没有答案可写，网关同样忽略）。
 - **`UNIMPLEMENTED_METHODS`**（fake 网关未实现）：`approvals.subscribe`、`ask.answer`、
   `ask.cancel`、`ask.subscribe`、`plan.exit`、`plan.subscribe`、
   `session.active.get`、`settings.subscribe`。
