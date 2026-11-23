@@ -8,8 +8,11 @@ import type { MessageKey } from '@/i18n';
  * Every route below is built and rendered: R1 现在, R2 收件箱, R3 会话,
  * R4 轨迹, R5 记忆, R7 子会话, R8–R10 文件树/预览、R11 检查器 guide、
  * R13–R21 九个设置页、R22 自动化、R23 能力、R24 洞察、R25 团队, plus `*` → NotFound.
- * The only route that is deliberately unreachable is R6 上下文: the gateway has
- * no `context.*` method, so `THREAD_TABS` omits it (docs/WEB-CLIENT.md §8.2 B6).
+ * **A route is either built or not registered** (WEB-CLIENT §1.2): a registered
+ * placeholder makes the user believe a feature exists, and the honest mechanism
+ * for a missing backend half is capability gating — the entry is not rendered at
+ * all (see `TAB_CAPABILITY`). That is why there is no `deferral` field: it only
+ * documented a state that no longer exists.
  */
 export interface RouteMeta {
   /** URL pattern, also the react-router path. */
@@ -18,12 +21,6 @@ export interface RouteMeta {
   ref: string;
   /** Copy key for the top band (`i18n/zh.ts`), never a literal. */
   titleKey: MessageKey;
-  /**
-   * Why a route is unreachable. Only R6 has one today — every other route has
-   * a real screen, and claiming otherwise in this field is how the comment
-   * drifted out of date once already.
-   */
-  deferral?: string;
 }
 
 export const ROUTES: RouteMeta[] = [

@@ -9,7 +9,7 @@ import { TeamScreen } from '@/features/team/team-screen';
 import { ContextScreen } from '@/features/thread/context-screen';
 import { NowScreen } from '@/features/now/now-screen';
 import { SettingsScreen } from '@/features/settings/settings-screen';
-import { NotFoundScreen } from '@/features/stub/stub-screen';
+import { NotFoundScreen } from '@/features/not-found-screen';
 import { ChildSessionScreen } from '@/features/thread/child-session-screen';
 import { MemoryScreen } from '@/features/thread/memory-screen';
 import { ThreadScreen } from '@/features/thread/thread-screen';
