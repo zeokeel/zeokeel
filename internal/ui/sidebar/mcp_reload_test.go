@@ -6,6 +6,8 @@ package sidebar_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -73,4 +75,45 @@ func TestWorkspaceRailSwitchReloadsMCP(t *testing.T) {
 	}
 	tester.Frame()
 	waitMCPReload(t, reloader, 1)
+}
+
+// failingMCPReloader always fails, to exercise the switch failure feedback.
+type failingMCPReloader struct{ err error }
+
+func (r failingMCPReloader) Reload(context.Context) ([]contracts.MCPPlugin, error) {
+	return nil, r.err
+}
+
+// TestWorkspaceSwitchReloadFailureIsSurfaced pins that a failed switch reload is
+// reported (log + localized error toast) instead of disappearing silently.
+func TestWorkspaceSwitchReloadFailureIsSurfaced(t *testing.T) {
+	workspace := &recordingWorkspace{fakeWorkspace: newFakeWorkspace(treeWorkspaces()...).withCurrent(currentWorkspace())}
+	notifier := &plainNotifier{}
+	h := newHarnessWithWorkspaceAndNotifier(t, treeChat(), workspace, notifier, sidebar.Config{})
+	provide[contracts.MCPReloader](t, h.ctx, contracts.KeyMCPReloader,
+		failingMCPReloader{err: errors.New("mcp handshake failed")})
+	tester := openSwitchDialog(t, h)
+	if err := tester.Click("项目二"); err != nil {
+		t.Fatalf("choose 项目二: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	h.click(tester, "打开")
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(notifier.notifications) > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(notifier.notifications) == 0 {
+		t.Fatal("failed MCP reload produced no user-visible feedback")
+	}
+	notification := notifier.notifications[0]
+	if notification.Level != contracts.NotifyError {
+		t.Fatalf("notification level = %q, want error", notification.Level)
+	}
+	if !strings.Contains(notification.Text, "mcp handshake failed") ||
+		(!strings.Contains(notification.Text, "重载失败") && !strings.Contains(notification.Text, "failed to reload")) {
+		t.Fatalf("notification text = %q, want the reload failure", notification.Text)
+	}
 }

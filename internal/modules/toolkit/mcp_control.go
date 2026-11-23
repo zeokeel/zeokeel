@@ -631,11 +631,16 @@ func loadMCPServers(ctx cordis.Context, cfg Config, settings contracts.SettingsS
 		logf = func(string, ...any) {}
 	}
 	workspaceID := currentMCPWorkspaceID(ctx)
-	raw := ""
-	if hasSettings {
-		raw = settings.Get(contracts.SettingMCPServers, "")
+	validWorkspaces := mcpWorkspaceIDSet(ctx)
+	rows := reconcileMCPServerRows(settings, hasSettings, workspaceID, validWorkspaces, logf)
+	gcMCPDisabledSettings(settings, hasSettings, validWorkspaces, logf)
+	scopedRows := rows[:0]
+	for _, row := range rows {
+		if contracts.MCPServerVisibleInWorkspace(row, workspaceID) {
+			scopedRows = append(scopedRows, row)
+		}
 	}
-	servers := mergeMCPServersForWorkspace(cfg.MCPServers, raw, workspaceID, logf)
+	servers := mergeMCPServerConfigs(cfg.MCPServers, scopedRows, logf)
 	workspaceOptIn := false
 	if hasSettings {
 		workspaceOptIn = mcpWorkspaceOptInEnabled(settings.Get(contracts.SettingMCPWorkspaceOptIn, ""))
@@ -658,6 +663,26 @@ func loadMCPServers(ctx cordis.Context, cfg Config, settings contracts.SettingsS
 	}
 	disabledTools := loadDisabledTools(settings, hasSettings, workspaceID, logf)
 	return servers, disabledTools
+}
+
+// mcpWorkspaceIDSet returns the registered workspace IDs, or nil when the
+// registry is unavailable or List fails (GC must then keep every row/key).
+func mcpWorkspaceIDSet(ctx cordis.Context) map[string]bool {
+	service, ok := ctx.Get(contracts.KeyWorkspace)
+	if !ok || service == nil {
+		return nil
+	}
+	workspaces, err := service.List(context.Background())
+	if err != nil {
+		return nil
+	}
+	ids := make(map[string]bool, len(workspaces))
+	for _, workspace := range workspaces {
+		if id := strings.TrimSpace(workspace.ID); id != "" {
+			ids[id] = true
+		}
+	}
+	return ids
 }
 
 // currentMCPWorkspaceID resolves the current workspace scope from the kernel

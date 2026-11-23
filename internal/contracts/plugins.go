@@ -209,8 +209,29 @@ const MCPAuthSettingPrefix = "mcp.oauth."
 func MCPAuthSettingKey(server string) string {
 	name := strings.ToLower(strings.TrimSpace(server))
 	sum := sha256.Sum256([]byte(name))
+	return MCPAuthSettingPrefix + mcpAuthKeySlug(name, "server") + "." + hex.EncodeToString(sum[:4])
+}
+
+// MCPAuthSettingKeyForWorkspace returns the OAuth token settings key for one
+// workspace and server: mcp.oauth.<workspace>.<server-hash>. An empty workspace
+// keeps the legacy name-keyed key (the no-workspace scope). The workspace slug
+// carries a short hash so two distinct IDs that normalize to the same slug
+// cannot share a token record.
+func MCPAuthSettingKeyForWorkspace(workspaceID, server string) string {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return MCPAuthSettingKey(server)
+	}
+	sum := sha256.Sum256([]byte(workspaceID))
+	scope := mcpAuthKeySlug(strings.ToLower(workspaceID), "workspace") + "." + hex.EncodeToString(sum[:4])
+	return MCPAuthSettingPrefix + scope + "." +
+		strings.TrimPrefix(MCPAuthSettingKey(server), MCPAuthSettingPrefix)
+}
+
+// mcpAuthKeySlug normalizes one key component for a settings key.
+func mcpAuthKeySlug(value, fallback string) string {
 	var builder strings.Builder
-	for _, r := range name {
+	for _, r := range value {
 		switch {
 		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
 			builder.WriteRune(r)
@@ -220,12 +241,12 @@ func MCPAuthSettingKey(server string) string {
 	}
 	slug := strings.Trim(builder.String(), "_")
 	if slug == "" {
-		slug = "server"
+		slug = fallback
 	}
 	if runes := []rune(slug); len(runes) > 40 {
 		slug = string(runes[:40])
 	}
-	return MCPAuthSettingPrefix + slug + "." + hex.EncodeToString(sum[:4])
+	return slug
 }
 
 // ParseMCPServersJSON decodes the settings mcp.servers raw value. An empty

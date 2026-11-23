@@ -163,6 +163,91 @@ func mergeMCPServerRows(base []MCPServer, rows []contracts.MCPServerConfig, sour
 	return merged
 }
 
+// mergeMCPServerConfigs merges already-parsed settings rows after the assembly
+// servers (the reconcile step has already migrated/GC'd the rows).
+func mergeMCPServerConfigs(assembly []MCPServer, rows []contracts.MCPServerConfig,
+	logf func(format string, args ...any)) []MCPServer {
+	return mergeMCPServerRows(append([]MCPServer(nil), assembly...), rows, contracts.SettingMCPServers, true, logf)
+}
+
+// reconcileMCPServerRows migrates legacy-global connector rows (empty
+// WorkspaceID) to the current workspace and drops rows scoped to a workspace
+// that no longer exists (valid != nil; a nil set means the registry could not
+// be read and every row is kept). The rewritten list is persisted immediately
+// on the toolkit load/reload path, so migration never waits for a page visit.
+func reconcileMCPServerRows(settings contracts.SettingsService, hasSettings bool, currentID string,
+	valid map[string]bool, logf func(format string, args ...any)) []contracts.MCPServerConfig {
+	if !hasSettings || settings == nil {
+		return nil
+	}
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	rows, err := contracts.ParseMCPServersJSON(settings.Get(contracts.SettingMCPServers, ""))
+	if err != nil {
+		logf("[toolkit] parse %s: %v", contracts.SettingMCPServers, err)
+		return nil
+	}
+	currentID = strings.TrimSpace(currentID)
+	changed := false
+	kept := make([]contracts.MCPServerConfig, 0, len(rows))
+	for _, row := range rows {
+		scope := strings.TrimSpace(row.WorkspaceID)
+		if scope != "" && valid != nil && !valid[scope] {
+			logf("[toolkit] drop MCP connector %q scoped to deleted workspace %q", row.Name, scope)
+			changed = true
+			continue
+		}
+		if scope == "" && currentID != "" {
+			// Eager migration: bind the pre-upgrade global row to the workspace
+			// the toolkit is loading for, before any page reads it.
+			row.WorkspaceID = currentID
+			changed = true
+		}
+		kept = append(kept, row)
+	}
+	if changed {
+		encoded, encodeErr := contracts.EncodeMCPServersJSON(kept)
+		if encodeErr != nil {
+			logf("[toolkit] encode migrated %s: %v", contracts.SettingMCPServers, encodeErr)
+			return kept
+		}
+		if writeErr := settings.Set(contracts.SettingMCPServers, encoded); writeErr != nil {
+			logf("[toolkit] persist migrated %s: %v", contracts.SettingMCPServers, writeErr)
+		}
+	}
+	return kept
+}
+
+// gcMCPDisabledSettings clears the scoped disabled-server/tool keys of deleted
+// workspaces. A nil valid set (registry List failed) keeps every key.
+func gcMCPDisabledSettings(settings contracts.SettingsService, hasSettings bool,
+	valid map[string]bool, logf func(format string, args ...any)) {
+	if !hasSettings || settings == nil || valid == nil {
+		return
+	}
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	for _, base := range []string{contracts.SettingMCPDisabledServers, contracts.SettingMCPDisabledTools} {
+		prefix := base + "."
+		for key := range settings.All() {
+			if !strings.HasPrefix(key, prefix) {
+				continue
+			}
+			scope := strings.TrimPrefix(key, prefix)
+			if scope == "" || valid[scope] {
+				continue
+			}
+			if err := settings.Set(key, ""); err != nil {
+				logf("[toolkit] clear %s for deleted workspace %q: %v", key, scope, err)
+				continue
+			}
+			logf("[toolkit] cleared %s for deleted workspace %q", key, scope)
+		}
+	}
+}
+
 // cleanMCPArgs trims whitespace and drops empty strings, returning nil for an
 // empty input so stdio env inheritance and argument lists stay exact.
 func cleanMCPArgs(values []string) []string {

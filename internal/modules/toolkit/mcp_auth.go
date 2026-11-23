@@ -10,7 +10,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zeokeel/zeokeel-rig/tools/mcp"
@@ -25,6 +27,10 @@ import (
 type mcpOAuthTokenStore struct {
 	settings contracts.SettingsService
 	server   string
+	// workspaceID resolves the current workspace per Load/Save/Delete: the
+	// token record is per workspace so switching never reuses another
+	// workspace's authorization. nil keeps the legacy unscoped key.
+	workspaceID func() string
 }
 
 var _ mcp.TokenStore = mcpOAuthTokenStore{}
@@ -38,12 +44,42 @@ func (s mcpOAuthTokenStore) serverName(server string) string {
 	return server
 }
 
-// Load implements mcp.TokenStore.
+// scope resolves the workspace scope of this operation.
+func (s mcpOAuthTokenStore) scope() string {
+	if s.workspaceID == nil {
+		return ""
+	}
+	return strings.TrimSpace(s.workspaceID())
+}
+
+// key is the workspace-scoped record key for one server.
+func (s mcpOAuthTokenStore) key(server string) string {
+	return contracts.MCPAuthSettingKeyForWorkspace(s.scope(), s.serverName(server))
+}
+
+// Load implements mcp.TokenStore. When a workspace has no record yet, the
+// legacy name-keyed record is moved into it on first read (only the first
+// workspace to read inherits the pre-upgrade authorization; the legacy key is
+// cleared so it cannot leak into another workspace).
 func (s mcpOAuthTokenStore) Load(_ context.Context, server string) ([]byte, bool, error) {
 	if s.settings == nil {
 		return nil, false, errors.New("the settings store is unavailable")
 	}
-	raw := s.settings.Get(contracts.MCPAuthSettingKey(s.serverName(server)), "")
+	name := s.serverName(server)
+	scope := s.scope()
+	raw := s.settings.Get(s.key(name), "")
+	if strings.TrimSpace(raw) == "" && scope != "" {
+		legacyKey := contracts.MCPAuthSettingKey(name)
+		legacy := s.settings.Get(legacyKey, "")
+		if strings.TrimSpace(legacy) != "" {
+			if err := s.settings.Set(s.key(name), legacy); err == nil {
+				// Moved, not copied: the legacy global record must not leak into
+				// another workspace that reads it later.
+				_ = s.settings.Set(legacyKey, "")
+			}
+			return []byte(legacy), true, nil
+		}
+	}
 	if strings.TrimSpace(raw) == "" {
 		return nil, false, nil
 	}
@@ -55,7 +91,7 @@ func (s mcpOAuthTokenStore) Save(_ context.Context, server string, data []byte) 
 	if s.settings == nil {
 		return errors.New("the settings store is unavailable")
 	}
-	return s.settings.Set(contracts.MCPAuthSettingKey(s.serverName(server)), string(data))
+	return s.settings.Set(s.key(s.serverName(server)), string(data))
 }
 
 // Delete implements mcp.TokenStore.
@@ -63,7 +99,7 @@ func (s mcpOAuthTokenStore) Delete(_ context.Context, server string) error {
 	if s.settings == nil {
 		return errors.New("the settings store is unavailable")
 	}
-	return s.settings.Set(contracts.MCPAuthSettingKey(s.serverName(server)), "")
+	return s.settings.Set(s.key(s.serverName(server)), "")
 }
 
 // authOAuth2 reports whether the row opts into the OAuth flow.
@@ -87,6 +123,15 @@ type mcpAuthRuntime struct {
 	settings contracts.SettingsService
 	logf     func(string, ...any)
 	runtime  *auth.Runtime
+	// workspaceID resolves the current workspace per operation; the shared auth
+	// runtime must never serve one workspace's token to another.
+	workspaceID func() string
+	// httpClients are per-workspace sentinels: rig fingerprints OAuth clients by
+	// config (including the HTTPClient pointer), so a distinct client per
+	// workspace forces the cached client - and its loaded token - to be rebuilt
+	// after a switch.
+	clientsMu   sync.Mutex
+	httpClients map[string]*http.Client
 }
 
 var _ contracts.MCPAuthService = (*mcpAuthRuntime)(nil)
@@ -95,18 +140,50 @@ var _ contracts.MCPAuthService = (*mcpAuthRuntime)(nil)
 // is invoked asynchronously when an interactive flow completes, so the product
 // can reconnect the managed server.
 func newMCPAuthRuntime(settings contracts.SettingsService, logf func(string, ...any),
-	onAuthorized func(server string)) *mcpAuthRuntime {
+	onAuthorized func(server string), workspaceID ...func() string) *mcpAuthRuntime {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
+	scope := func() string { return "" }
+	if len(workspaceID) > 0 && workspaceID[0] != nil {
+		scope = workspaceID[0]
+	}
 	return &mcpAuthRuntime{
-		settings: settings,
-		logf:     logf,
+		settings:    settings,
+		logf:        logf,
+		workspaceID: scope,
+		httpClients: make(map[string]*http.Client),
 		runtime: auth.New(
 			auth.WithLogger(logf),
 			auth.WithOnAuthorized(onAuthorized),
 		),
 	}
+}
+
+// currentWorkspaceID resolves the workspace scope of one auth operation.
+func (a *mcpAuthRuntime) currentWorkspaceID() string {
+	if a == nil || a.workspaceID == nil {
+		return ""
+	}
+	return strings.TrimSpace(a.workspaceID())
+}
+
+// workspaceHTTPClient returns a stable per-workspace HTTP client. Rig includes
+// the pointer in the OAuth client fingerprint, so switching workspace rebuilds
+// the cached client and reloads the new workspace's token record.
+func (a *mcpAuthRuntime) workspaceHTTPClient() *http.Client {
+	scope := a.currentWorkspaceID()
+	a.clientsMu.Lock()
+	defer a.clientsMu.Unlock()
+	if a.httpClients == nil {
+		a.httpClients = make(map[string]*http.Client)
+	}
+	if client, ok := a.httpClients[scope]; ok {
+		return client
+	}
+	client := &http.Client{}
+	a.httpClients[scope] = client
+	return client
 }
 
 // Runtime returns the shared rig auth runtime handed to manager.Config.Auth.
@@ -157,7 +234,8 @@ func (a *mcpAuthRuntime) authConfig(cfg contracts.MCPServerConfig) (auth.Config,
 		Scopes:              append([]string(nil), cfg.Auth.Scopes...),
 		AuthorizationServer: strings.TrimSpace(cfg.Auth.AuthorizationServer),
 		ClientID:            strings.TrimSpace(cfg.Auth.ClientID),
-		TokenStore:          mcpOAuthTokenStore{settings: a.settings, server: name},
+		TokenStore:          mcpOAuthTokenStore{settings: a.settings, server: name, workspaceID: a.workspaceID},
+		HTTPClient:          a.workspaceHTTPClient(),
 		Logf:                a.logf,
 	}
 	if cfg.TimeoutMs > 0 {

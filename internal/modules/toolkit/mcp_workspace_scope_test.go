@@ -71,7 +71,10 @@ func TestMCPConnectorsAreScopedToTheCurrentWorkspace(t *testing.T) {
 		contracts.SettingMCPServers: "[" + scopedRow("alpha", alpha.URL, "ws-a") + "," +
 			scopedRow("beta", beta.URL, "ws-b") + "]",
 	})
-	workspace := &fakeMCPWorkspace{current: contracts.Workspace{ID: "ws-a"}, has: true}
+	workspace := &fakeMCPWorkspace{
+		current: contracts.Workspace{ID: "ws-a"}, has: true,
+		all: []contracts.Workspace{{ID: "ws-a"}, {ID: "ws-b"}},
+	}
 	registry, plugins, reloader := activateScopedToolkit(t, settings, workspace)
 
 	assertMCPTools := func(want map[string]bool) {
@@ -111,7 +114,10 @@ func TestMCPDisabledServersAreScoped(t *testing.T) {
 		// ws-a disables its own connector; ws-b must stay untouched.
 		contracts.MCPDisabledServersSettingKey("ws-a"): `["alpha"]`,
 	})
-	workspace := &fakeMCPWorkspace{current: contracts.Workspace{ID: "ws-a"}, has: true}
+	workspace := &fakeMCPWorkspace{
+		current: contracts.Workspace{ID: "ws-a"}, has: true,
+		all: []contracts.Workspace{{ID: "ws-a"}, {ID: "ws-b"}},
+	}
 	registry, plugins, reloader := activateScopedToolkit(t, settings, workspace)
 	if registryHasTool(registry, "mcp__alpha__alpha_tool") {
 		t.Fatal("disabled connector's tool is registered in ws-a")
@@ -140,7 +146,10 @@ func TestMCPDisabledToolsAreScoped(t *testing.T) {
 		// Only ws-a hides the tool.
 		contracts.MCPDisabledToolsSettingKey("ws-a"): `["mcp__alpha__alpha_tool"]`,
 	})
-	workspace := &fakeMCPWorkspace{current: contracts.Workspace{ID: "ws-a"}, has: true}
+	workspace := &fakeMCPWorkspace{
+		current: contracts.Workspace{ID: "ws-a"}, has: true,
+		all: []contracts.Workspace{{ID: "ws-a"}, {ID: "ws-b"}},
+	}
 	registry, _, reloader := activateScopedToolkit(t, settings, workspace)
 	if registryHasTool(registry, "mcp__alpha__alpha_tool") {
 		t.Fatal("ws-a's disabled tool is still registered")
@@ -163,17 +172,25 @@ func TestMCPLegacyGlobalRowFollowsEveryWorkspace(t *testing.T) {
 		// connectors page migrates it to the workspace it is viewed from.
 		contracts.SettingMCPServers: "[" + scopedRow("legacy", legacy.URL, "") + "]",
 	})
-	workspace := &fakeMCPWorkspace{current: contracts.Workspace{ID: "ws-a"}, has: true}
+	workspace := &fakeMCPWorkspace{
+		current: contracts.Workspace{ID: "ws-a"}, has: true,
+		all: []contracts.Workspace{{ID: "ws-a"}, {ID: "ws-b"}},
+	}
 	registry, _, reloader := activateScopedToolkit(t, settings, workspace)
 	if !registryHasTool(registry, "mcp__legacy__legacy_tool") {
 		t.Fatal("legacy-global connector is not visible in a workspace")
+	}
+	// The toolkit load migrates the row eagerly to the current workspace.
+	rows, err := contracts.ParseMCPServersJSON(settings.Get(contracts.SettingMCPServers, ""))
+	if err != nil || len(rows) != 1 || rows[0].WorkspaceID != "ws-a" {
+		t.Fatalf("legacy row after eager migration = %+v/%v", rows, err)
 	}
 	workspace.current = contracts.Workspace{ID: "ws-b"}
 	if _, err := reloader.Reload(context.Background()); err != nil {
 		t.Fatalf("reload for ws-b: %v", err)
 	}
-	if !registryHasTool(registry, "mcp__legacy__legacy_tool") {
-		t.Fatal("legacy-global connector disappeared before migration")
+	if registryHasTool(registry, "mcp__legacy__legacy_tool") {
+		t.Fatal("migrated connector leaked into another workspace")
 	}
 }
 

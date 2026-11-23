@@ -275,7 +275,7 @@ func Module() *module.Descriptor[Config] {
 			if controller != nil {
 				controller.reconnectByName(server)
 			}
-		})
+		}, func() string { return currentMCPWorkspaceID(ctx) })
 		controller = newMCPController(logf, registry, plugins, authRuntime, settingsService, cfg.MaxOutputBytes,
 			func() string { return currentMCPWorkspaceID(ctx) },
 			func() ([]MCPServer, map[string]bool) {

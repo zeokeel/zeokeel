@@ -445,7 +445,7 @@ func (p *connectorsState) saveConnector(st *state, settings contracts.SettingsSe
 	if p.editIndex >= 0 && p.editIndex < len(previous) {
 		old := previous[p.editIndex]
 		if oauthRecordMustBeDropped(old, row) {
-			_ = settings.Set(contracts.MCPAuthSettingKey(old.Name), "")
+			_ = settings.Set(contracts.MCPAuthSettingKeyForWorkspace(p.workspaceID, old.Name), "")
 		}
 	}
 	p.servers = rows
@@ -1194,7 +1194,7 @@ func (p *connectorsState) removeConnector(st *state, settings contracts.Settings
 		return
 	}
 	if removed.Auth != nil && removed.Auth.Mode == contracts.MCPAuthOAuth2 {
-		_ = settings.Set(contracts.MCPAuthSettingKey(removed.Name), "")
+		_ = settings.Set(contracts.MCPAuthSettingKeyForWorkspace(p.workspaceID, removed.Name), "")
 	}
 	p.servers = kept
 	if p.editIndex == index {

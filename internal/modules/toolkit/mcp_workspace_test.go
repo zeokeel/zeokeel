@@ -21,9 +21,19 @@ type fakeMCPWorkspace struct {
 	current    contracts.Workspace
 	has        bool
 	currentErr error
+	listErr    error
+	// all optionally lists the registered workspaces for GC tests (nil falls
+	// back to the single current workspace).
+	all []contracts.Workspace
 }
 
 func (w *fakeMCPWorkspace) List(context.Context) ([]contracts.Workspace, error) {
+	if w.listErr != nil {
+		return nil, w.listErr
+	}
+	if len(w.all) > 0 {
+		return append([]contracts.Workspace(nil), w.all...), nil
+	}
 	if !w.has {
 		return nil, nil
 	}
