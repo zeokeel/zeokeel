@@ -77,6 +77,18 @@ const PASSES = [
  */
 const norm = (text) => (text ?? '').replace(/\s+/g, '');
 
+/**
+ * One place that locates an item in the composer's slash menu, **scoped to the
+ * menu container**. `.ant-suggestion` is X's internal class (re-check when
+ * upgrading X 2.x); `.zk-slash` is the hand-written menu it is being compared
+ * against. Scoping matters: an unscoped text match also hits the approval card's
+ * "…may change files" sentence, which is always visible, and then "Esc hid the
+ * item" can never be observed.
+ */
+function slashItem(page) {
+  return page.locator('.zk-slash, .ant-suggestion').getByText('files', { exact: false }).first();
+}
+
 function makeReporter(tag) {
   const report = { tag, steps: [], ok: false, errors: [] };
   const log = (line) => console.log(`[${tag}] ${line}`);
@@ -255,7 +267,7 @@ async function runPass(browser, pass) {
     await box.waitFor({ timeout: 15_000 });
     await box.click();
     await box.fill('/');
-    const menuItem = page.getByText('files', { exact: false }).first();
+    const menuItem = slashItem(page);
     await menuItem.waitFor({ state: 'visible', timeout: 10_000 });
     step('slash.menu.open', { item: 'files' });
 
@@ -279,12 +291,9 @@ async function runPass(browser, pass) {
     await again.waitFor({ timeout: 15_000 });
     await again.click();
     await again.fill('/');
-    await page.getByText('files', { exact: false }).first().waitFor({ state: 'visible', timeout: 10_000 });
+    await slashItem(page).waitFor({ state: 'visible', timeout: 10_000 });
     await again.press('Escape');
-    await page
-      .getByText('files', { exact: false })
-      .first()
-      .waitFor({ state: 'hidden', timeout: 10_000 });
+    await slashItem(page).waitFor({ state: 'hidden', timeout: 10_000 });
     step('slash.menu.esc', { hidden: true });
     await again.fill('');
   }
