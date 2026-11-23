@@ -316,7 +316,10 @@ export function Composer({
         // pickAttrs); these props are not in SenderProps' type surface.
         {...{ 'aria-label': t('composer.inputLabel'), 'data-testid': 'composer-input' }}
       />
-      <div className="zk-composer__hint" data-testid="composer-hint">
+      {/* `data-phase` is the machine-readable form of the same state: localized
+          copy is for people, the phase is for tests and for e2e, which must not
+          match on a translated sentence. */}
+      <div className="zk-composer__hint" data-testid="composer-hint" data-phase={resolvedPhase}>
         {resolvedPhase === 'connecting'
           ? t('composer.hint.connecting')
           : resolvedPhase === 'running'

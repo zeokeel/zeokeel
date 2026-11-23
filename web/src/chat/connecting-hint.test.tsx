@@ -31,4 +31,21 @@ describe('composer hint states', () => {
     expect(text).toContain('Enter 排队发送');
     expect(text).not.toContain('正在连接模型');
   });
+
+  /**
+   * The phase is also machine-readable. e2e and any future assertion must be able
+   * to check the state without matching a translated sentence — and the attribute
+   * must not drift from the copy it describes.
+   */
+  it('carries the phase as data-phase, in step with the copy', () => {
+    for (const phase of ['idle', 'connecting', 'running'] as const) {
+      const view = render(
+        <Composer value="" onChange={() => undefined} onSubmit={() => undefined} phase={phase} />,
+      );
+      const hint = screen.getByTestId('composer-hint');
+      expect(hint.dataset.phase).toBe(phase);
+      expect(hint.textContent).not.toBe('');
+      view.unmount();
+    }
+  });
 });
