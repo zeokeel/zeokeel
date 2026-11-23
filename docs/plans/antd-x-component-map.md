@@ -206,3 +206,24 @@ expect(await box.inputValue()).toBe('a b');   // 菜单关闭时
 **复验条件（两条同时满足才重评）**：
 1. `ItemType` 增加 `disabled` 与 `title`（检查：`grep -n "disabled\|title" web/node_modules/@ant-design/x/es/actions/interface.d.ts`）；
 2. `Actions` 提供菜单形态（检查：渲染后 `document.querySelector('.ant-dropdown')` 存在，而不是只有 `.ant-actions` 动作条）。
+
+### 7.3 `Bubble.editable` 不能承载 B11 的内联编辑（取消不回滚）
+
+2026-11-23（task-37 #4）。编辑消息继续用**我们的确认弹窗流程**，不用 `Bubble` 的 `editable`。判据是数据一致性，不是样式。
+
+**探针（jsdom，`Bubble editable content="OLD"`）**
+
+| # | 探针 | 期望 | 实际 |
+|---|---|---|---|
+| ① | `editable` 是否渲染可编辑区 | 进入编辑后可输入 | ✓ 内容为 `contenteditable`，可直接输入 |
+| ② | `onEditConfirm` 是否提交前可拦截 | 可拦截 | ✓ 收到新文本后才回调 |
+| ⑤ | 编辑是否内联 | 在气泡内 | ✓ 非 Modal |
+| **④** | **点「取消」后气泡文本** | 仍是 `OLD` | **`OLDNEW`（用户的未发送编辑留在界面上）** |
+
+**④ 是决定性的**：`Bubble` 让内容直接 `contenteditable`，输入即改显示值；`onEditCancel` 不负责回滚。于是"用户点了取消，界面却显示一条从未发送的编辑"——这是数据一致性 bug，比"用了官方件"重要得多。
+
+**保留自建的部分（B11 全部语义）**：`⋯`/编辑按钮 → 弹确认框「其后对话会被丢弃」→ **默认焦点在取消** → 确认后才发 `POST /api/chat/run {editMessageId, text}`；5 条拒绝码（`edit_target_not_user` / `edit_target_moved` / `edit_run_active` / `edit_not_found` / `edit_not_supported`）置灰并带 `title`。
+
+**复验条件（必须同时满足才重评）**：
+1. `Bubble` 提供**受控**编辑入口（例如 `editable` + 受控 `value`/`onChange` 且 `onEditCancel` 能恢复原值），检查方式：探针④重跑，点取消后 `host.textContent` 必须回到 `OLD`；
+2. 提交前仍有拦截点（`onEditConfirm` 不被自动写回内容）。

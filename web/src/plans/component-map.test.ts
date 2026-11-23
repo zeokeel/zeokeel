@@ -41,7 +41,9 @@ describe('component map document', () => {
     expect(notUsed, '找不到「有意不用」章节').toBeTruthy();
     const nextSection = sections.find((item) => item.number > notUsed!.number);
     const body = lines.slice(notUsed!.index, nextSection?.index ?? lines.length).join('\n');
-    const declared = [...body.matchAll(/^### \d+\.\d+ `([A-Za-z]+)`/gm)].map((match) => match[1]);
+    // Names may be qualified (`Bubble.editable`): only that member is unused,
+    // and a bare `Bubble` row must stay untouched.
+    const declared = [...body.matchAll(/^### \d+\.\d+ `([A-Za-z.]+)`/gm)].map((match) => match[1]);
     expect(declared.length, '「有意不用」里没有声明任何组件').toBeGreaterThan(0);
 
     const offenders = lines
