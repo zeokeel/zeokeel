@@ -41,12 +41,6 @@ export const UNIMPLEMENTED_PARAMS: Record<string, Record<string, string>> = {
     beforeMessageId: '未实现功能：历史分页，客户端不发（谁开始发谁先实现）',
     tail: '未实现功能：尾巴窗口大小，客户端不发（谁开始发谁先实现）',
   },
-  'context.snapshot': {
-    sinceRev: '快照语义下无意义：快照总是全量，增量走 context.subscribe',
-  },
-  'tasks.snapshot': {
-    sinceRev: '快照语义下无意义：快照总是全量，增量走 tasks.subscribe',
-  },
 };
 
 /**
@@ -164,7 +158,9 @@ describe('registration lists stay honest', () => {
   it('does not let the lists grow silently', () => {
     // A count is the cheapest way to make growth a deliberate act: raise it *and*
     // update the README in the same change.
-    expect(Object.keys(UNIMPLEMENTED_PARAMS).length).toBeLessThanOrEqual(3);
+    // Shrunk from 3 to 1 when the gateway dropped the phantom `sinceRev` fields:
+    // the registry follows the contract down, which is the point of it.
+    expect(Object.keys(UNIMPLEMENTED_PARAMS).length).toBeLessThanOrEqual(1);
     expect(Object.keys(UNIMPLEMENTED_METHODS).length).toBeLessThanOrEqual(9);
   });
 });

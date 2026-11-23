@@ -60,7 +60,7 @@ export const WS_PARAMS: Record<WsMethod, MethodParams> = {
   'ask.cancel': { required: ['id'], optional: ['answer'] },
   'ask.snapshot': { required: [], optional: [] },
   'ask.subscribe': { required: [], optional: ['sinceRev'] },
-  'context.snapshot': { required: ['sessionId'], optional: ['sinceRev'] },
+  'context.snapshot': { required: ['sessionId'], optional: [] },
   'context.subscribe': { required: ['sessionId'], optional: ['sinceRev'] },
   'foreground.set': { required: ['sessionId'], optional: [] },
   'initialize': { required: [], optional: ['capabilities', 'clientName', 'clientVersion', 'protocolVersion'] },
@@ -86,7 +86,7 @@ export const WS_PARAMS: Record<WsMethod, MethodParams> = {
   'settings.subscribe': { required: [], optional: ['sinceRev'] },
   'task.delete': { required: ['id'], optional: ['sessionId'] },
   'task.status': { required: ['id', 'status'], optional: ['sessionId'] },
-  'tasks.snapshot': { required: [], optional: ['sessionId', 'sinceRev'] },
+  'tasks.snapshot': { required: [], optional: ['sessionId'] },
   'tasks.subscribe': { required: [], optional: ['sessionId', 'sinceRev'] },
   'workspace.list.snapshot': { required: [], optional: [] },
 };
