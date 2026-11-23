@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ThoughtChain } from '@ant-design/x';
+import { Think, ThoughtChain } from '@ant-design/x';
 import type { ThoughtChainItemType } from '@ant-design/x';
 import { ZkIcon } from '@/design/icons';
 import { ToolCardBody } from './tool-card';
@@ -29,6 +29,33 @@ export function ThoughtSteps({
   const [userExpanded, setUserExpanded] = useState<string[] | null>(null);
 
   const items: ThoughtChainItemType[] = [];
+  // While the model is thinking, the live reasoning is X's `Think` (task-37 #5):
+  // it owns the blinking in-progress affordance. Once the turn settles the same
+  // text moves into the step list, which stays `ThoughtChain` — two different
+  // surfaces (in-progress vs settled), one data source.
+  const liveThink =
+    streaming && reasoning ? (
+      <div className="zk-thought">
+        <Think
+          // Streaming must be **visible**: a collapsed Think would hide exactly
+          // what the user is waiting on, so expansion is pinned both ways.
+          expanded
+          onExpand={() => undefined}
+          loading
+          title={t('thread.reasoning')}
+          className="zk-think"
+        >
+          <div className="zk-thinking-text">{reasoning}</div>
+        </Think>
+      </div>
+    ) : null;
+
+  if (streaming && reasoning) {
+    // No `destroyOnHidden`: the content must survive being collapsed and the
+    // hand-over to the chain below.
+    return liveThink;
+  }
+
   if (reasoning) {
     items.push({
       key: 'reasoning',
