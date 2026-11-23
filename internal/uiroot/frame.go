@@ -12,6 +12,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/brand"
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -47,7 +48,7 @@ func (r *Root) view(c *ui.Context) {
 		return
 	}
 	// Framework work queued from any goroutine runs first, on the UI thread, so
-	// this frame renders its result (contracts.UIRuntime.Post).
+	// this frame renders its result (uinative.UIRuntime.Post).
 	r.rt.drain()
 	r.frames.Add(1)
 
@@ -587,7 +588,7 @@ func (r *Root) screenIcon(id string) *ui.SVG {
 // navigation table (uikit.ScreenNavLabel). A screen the table does not know
 // keeps the module's own registered title, as before; modules keep their own
 // titles for their own navigation rows.
-func (r *Root) screenLabel(spec contracts.ScreenSpec) string {
+func (r *Root) screenLabel(spec uinative.ScreenSpec) string {
 	if label := uikit.ScreenNavLabel(r.locale, spec.ID); label != spec.ID {
 		return label
 	}
@@ -1584,7 +1585,7 @@ type paletteEntry struct {
 	key     string
 	header  bool
 	ordinal int
-	cmd     contracts.CommandSpec
+	cmd     uinative.CommandSpec
 }
 
 // paletteCommands returns the commands the palette offers for one query: the
@@ -1592,9 +1593,9 @@ type paletteEntry struct {
 // settings ("设置：…") commands, filtered by the query and deduplicated by
 // title. Disabled commands are dropped; the registry's order is preserved
 // inside a category.
-func (r *Root) paletteCommands(needle string) []contracts.CommandSpec {
+func (r *Root) paletteCommands(needle string) []uinative.CommandSpec {
 	all := r.paletteCommandList()
-	matches := make([]contracts.CommandSpec, 0, len(all))
+	matches := make([]uinative.CommandSpec, 0, len(all))
 	seen := make(map[string]bool, len(all))
 	for _, cmd := range all {
 		if cmd.Enabled != nil && !cmd.Enabled() {
@@ -1619,9 +1620,9 @@ func (r *Root) paletteCommands(needle string) []contracts.CommandSpec {
 // groups are derived from the registries each frame, so a screen or settings
 // page that is unregistered (or hidden by its Visible hook) loses its palette
 // command with it.
-func (r *Root) paletteCommandList() []contracts.CommandSpec {
+func (r *Root) paletteCommandList() []uinative.CommandSpec {
 	registered := r.rt.commandSpecs()
-	all := make([]contracts.CommandSpec, 0, len(registered)+16)
+	all := make([]uinative.CommandSpec, 0, len(registered)+16)
 	all = append(all, registered...)
 	for _, spec := range visibleScreens(r.rt.screenSpecs()) {
 		spec := spec
@@ -1634,7 +1635,7 @@ func (r *Root) paletteCommandList() []contracts.CommandSpec {
 			continue
 		}
 		title := r.screenLabel(spec)
-		all = append(all, contracts.CommandSpec{
+		all = append(all, uinative.CommandSpec{
 			ID:       "uiroot.goto." + spec.ID,
 			Title:    r.tr("前往 ", "Go to ") + title,
 			Category: contracts.CommandCategoryGoTo,
@@ -1648,7 +1649,7 @@ func (r *Root) paletteCommandList() []contracts.CommandSpec {
 		page := page
 		keywords := append([]string{page.Title, r.settingsSectionTitle(page.Section)},
 			settingsPageSearchTerms(page)...)
-		all = append(all, contracts.CommandSpec{
+		all = append(all, uinative.CommandSpec{
 			ID:       "uiroot.settings." + page.ID,
 			Title:    r.tr("设置：", "Settings: ") + page.Title,
 			Category: contracts.CommandCategorySettings,
@@ -1664,7 +1665,7 @@ func (r *Root) paletteCommandList() []contracts.CommandSpec {
 
 // paletteCommandMatches reports whether cmd matches the lower-case needle on
 // its title, ID, hint or keywords.
-func paletteCommandMatches(cmd contracts.CommandSpec, needle string) bool {
+func paletteCommandMatches(cmd uinative.CommandSpec, needle string) bool {
 	if needle == "" {
 		return true
 	}
@@ -1679,7 +1680,7 @@ func paletteCommandMatches(cmd contracts.CommandSpec, needle string) bool {
 // the goto and settings categories keep their heading, and an unknown or empty
 // category joins the actions group so a module that sets something new still
 // renders its command.
-func paletteCategoryOf(cmd contracts.CommandSpec) string {
+func paletteCategoryOf(cmd uinative.CommandSpec) string {
 	switch cmd.Category {
 	case contracts.CommandCategoryGoTo, contracts.CommandCategorySettings:
 		return cmd.Category
@@ -1691,7 +1692,7 @@ func paletteCategoryOf(cmd contracts.CommandSpec) string {
 // paletteEntries lays the matching commands out in the palette's row order: the
 // actions, navigation and settings groups, each under its heading. rows maps a
 // command ordinal (the index in matches) to its List row.
-func (r *Root) paletteEntries(matches []contracts.CommandSpec) (entries []paletteEntry, rows []int) {
+func (r *Root) paletteEntries(matches []uinative.CommandSpec) (entries []paletteEntry, rows []int) {
 	groups := []struct{ id, label string }{
 		{contracts.CommandCategoryActions, r.tr("操作", "Actions")},
 		{contracts.CommandCategoryGoTo, r.tr("前往", "Go to")},
@@ -1743,7 +1744,7 @@ func (r *Root) movePaletteSelection(delta int) {
 }
 
 // runPaletteCommand closes the palette and runs one command.
-func (r *Root) runPaletteCommand(cmd contracts.CommandSpec) {
+func (r *Root) runPaletteCommand(cmd uinative.CommandSpec) {
 	r.paletteOpen = false
 	r.paletteQuery = ""
 	r.paletteFilter = ""
@@ -1871,7 +1872,7 @@ func (r *Root) commandShortcut(id string) string {
 // registry order.
 type settingsGroup struct {
 	section string
-	pages   []contracts.SettingsPageSpec
+	pages   []uinative.SettingsPageSpec
 }
 
 // settingsSectionRank orders the nav groups: the daily settings first, the
@@ -1896,9 +1897,9 @@ var settingsSectionRank = map[string]int{
 // keywords the page's own module declared, and the labels/keywords of the
 // page's searchable items: users search for the setting's name ("密钥",
 // "主题", "字号"), which is rarely the page title (report R2). The terms come
-// from the module through contracts.SettingsPageSpec, so the host keeps no alias
+// from the module through uinative.SettingsPageSpec, so the host keeps no alias
 // table that can drift away from the page.
-func (r *Root) settingsPageMatches(page contracts.SettingsPageSpec, needle string) bool {
+func (r *Root) settingsPageMatches(page uinative.SettingsPageSpec, needle string) bool {
 	haystack := []string{
 		strings.ToLower(page.Title),
 		strings.ToLower(r.settingsSectionTitle(page.Section)),
@@ -1915,7 +1916,7 @@ func (r *Root) settingsPageMatches(page contracts.SettingsPageSpec, needle strin
 // settingsPageSearchTerms returns everything a page's module declared for the
 // navigation search: the page's own keywords plus each searchable item's label
 // and keywords, lower-cased.
-func settingsPageSearchTerms(page contracts.SettingsPageSpec) []string {
+func settingsPageSearchTerms(page uinative.SettingsPageSpec) []string {
 	terms := make([]string, 0, len(page.Keywords)+3*len(page.SearchItems))
 	for _, keyword := range page.Keywords {
 		if keyword != "" {
@@ -1940,11 +1941,11 @@ func settingsPageSearchTerms(page contracts.SettingsPageSpec) []string {
 // the item's anchor key, so a search for "压缩" lands on the context-budget
 // field instead of only the model page. ok=false covers a page-level match (the
 // page's title, section or own keywords) and no match at all.
-func settingsSearchHit(pages []contracts.SettingsPageSpec, needle string) (
-	page contracts.SettingsPageSpec, item contracts.SettingsSearchItem, ok bool,
+func settingsSearchHit(pages []uinative.SettingsPageSpec, needle string) (
+	page uinative.SettingsPageSpec, item uinative.SettingsSearchItem, ok bool,
 ) {
 	if needle == "" {
-		return contracts.SettingsPageSpec{}, contracts.SettingsSearchItem{}, false
+		return uinative.SettingsPageSpec{}, uinative.SettingsSearchItem{}, false
 	}
 	for _, candidate := range pages {
 		for _, searchItem := range candidate.SearchItems {
@@ -1953,12 +1954,12 @@ func settingsSearchHit(pages []contracts.SettingsPageSpec, needle string) (
 			}
 		}
 	}
-	return contracts.SettingsPageSpec{}, contracts.SettingsSearchItem{}, false
+	return uinative.SettingsPageSpec{}, uinative.SettingsSearchItem{}, false
 }
 
 // settingsSearchItemMatches reports whether one searchable item matches the
 // needle on its label or one of its keywords.
-func settingsSearchItemMatches(item contracts.SettingsSearchItem, needle string) bool {
+func settingsSearchItemMatches(item uinative.SettingsSearchItem, needle string) bool {
 	if needle == "" {
 		return false
 	}
@@ -2007,7 +2008,7 @@ func (r *Root) settingsSectionTitle(section string) string {
 // registry order inside a section and ordering the groups by rank. The native
 // settings sidebar then reads as a grouped navigation instead of a flat dump of
 // every registered page.
-func groupSettingsPages(pages []contracts.SettingsPageSpec) []settingsGroup {
+func groupSettingsPages(pages []uinative.SettingsPageSpec) []settingsGroup {
 	groups := make([]settingsGroup, 0, 6)
 	index := make(map[string]int, 6)
 	for _, page := range pages {
@@ -2018,7 +2019,7 @@ func groupSettingsPages(pages []contracts.SettingsPageSpec) []settingsGroup {
 		index[page.Section] = len(groups)
 		groups = append(groups, settingsGroup{
 			section: page.Section,
-			pages:   []contracts.SettingsPageSpec{page},
+			pages:   []uinative.SettingsPageSpec{page},
 		})
 	}
 	sort.SliceStable(groups, func(i, j int) bool {
@@ -2156,7 +2157,7 @@ func (r *Root) settingsNavColumn(c *ui.Context, t *design.Tokens, selected *stri
 			Grow(1).Shrink(1).FillWidth().Children(func() {
 			ui.Sidebar(c, selected, func() {
 				var scrollTarget ui.Element
-				addPages := func(pages []contracts.SettingsPageSpec) {
+				addPages := func(pages []uinative.SettingsPageSpec) {
 					for _, page := range pages {
 						item := ui.SidebarItem(c, page.ID, nil, page.Title)
 						// A page holding an unsaved draft carries a small warning
@@ -2267,7 +2268,7 @@ func (r *Root) settings(c *ui.Context, open *bool) {
 	needle := strings.ToLower(strings.TrimSpace(r.settingsQuery))
 	pages := allPages
 	if needle != "" {
-		filtered := make([]contracts.SettingsPageSpec, 0, len(pages))
+		filtered := make([]uinative.SettingsPageSpec, 0, len(pages))
 		for _, page := range pages {
 			if r.settingsPageMatches(page, needle) {
 				filtered = append(filtered, page)
@@ -2372,7 +2373,7 @@ func (r *Root) settings(c *ui.Context, open *bool) {
 					r.slot(c, contracts.SlotSettingsPageBody)
 					// Hand a pending item hit to the page before it builds: the
 					// page expands the disclosure around the region and scrolls
-					// it into view in the same frame (contracts.SettingsPageSpec
+					// it into view in the same frame (uinative.SettingsPageSpec
 					// .Reveal). The hit page is usually selected one frame before
 					// its body builds, so the request waits here for it.
 					if r.settingsRevealPage == current.ID && r.settingsRevealAnchor != "" {
@@ -2419,12 +2420,12 @@ func (r *Root) settings(c *ui.Context, open *bool) {
 
 // flattenSettingsGroups returns the pages in the order the grouped settings
 // navigation shows them, which is also the order the page selection uses.
-func flattenSettingsGroups(groups []settingsGroup) []contracts.SettingsPageSpec {
+func flattenSettingsGroups(groups []settingsGroup) []uinative.SettingsPageSpec {
 	total := 0
 	for _, group := range groups {
 		total += len(group.pages)
 	}
-	ordered := make([]contracts.SettingsPageSpec, 0, total)
+	ordered := make([]uinative.SettingsPageSpec, 0, total)
 	for _, group := range groups {
 		ordered = append(ordered, group.pages...)
 	}
@@ -2456,7 +2457,7 @@ func runHandlerSafely(what string, fn func()) (panicked bool) {
 // down the frame loop (the kernel contains the same class of panic at its own
 // activation/cleanup boundaries). The stack is logged once per recovered panic
 // so the broken builder can be found from a developer log.
-func (r *Root) safeBuild(c *ui.Context, build contracts.BuildFunc) {
+func (r *Root) safeBuild(c *ui.Context, build uinative.BuildFunc) {
 	if build == nil {
 		return
 	}
@@ -2470,7 +2471,7 @@ func (r *Root) safeBuild(c *ui.Context, build contracts.BuildFunc) {
 }
 
 // safeToolBuild contains a tool renderer panic.
-func (r *Root) safeToolBuild(c *ui.Context, renderer contracts.ToolRenderer, call contracts.ToolCall) {
+func (r *Root) safeToolBuild(c *ui.Context, renderer uinative.ToolRenderer, call contracts.ToolCall) {
 	if renderer.Build == nil {
 		return
 	}
@@ -2492,14 +2493,14 @@ type panicError struct{ value any }
 
 func (e panicError) Error() string { return "uiroot: panic in module code" }
 
-func visible(spec contracts.ScreenSpec) bool {
+func visible(spec uinative.ScreenSpec) bool {
 	return spec.Visible == nil || spec.Visible()
 }
 
 // defaultScreenID is the first-run landing: the conversation surface (new
 // chat / empty session hero), not the retired Home destination. Assemblies that
 // do not ship a session screen keep their first visible screen.
-func defaultScreenID(specs []contracts.ScreenSpec) string {
+func defaultScreenID(specs []uinative.ScreenSpec) string {
 	for _, spec := range specs {
 		if spec.ID == sessionScreenID {
 			return spec.ID
@@ -2514,7 +2515,7 @@ func defaultScreenID(specs []contracts.ScreenSpec) string {
 // visibleScreens returns the screens a user can navigate to. Home is retained
 // as an embeddable screen but is no longer a product destination: the session
 // surface owns the first-run/new-chat start.
-func visibleScreens(specs []contracts.ScreenSpec) []contracts.ScreenSpec {
+func visibleScreens(specs []uinative.ScreenSpec) []uinative.ScreenSpec {
 	out := specs[:0]
 	for _, spec := range specs {
 		if visible(spec) {
@@ -2524,7 +2525,7 @@ func visibleScreens(specs []contracts.ScreenSpec) []contracts.ScreenSpec {
 	return out
 }
 
-func visiblePages(pages []contracts.SettingsPageSpec) []contracts.SettingsPageSpec {
+func visiblePages(pages []uinative.SettingsPageSpec) []uinative.SettingsPageSpec {
 	out := pages[:0]
 	for _, page := range pages {
 		if page.Visible == nil || page.Visible() {

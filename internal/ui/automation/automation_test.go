@@ -19,6 +19,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/automation"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -196,7 +197,7 @@ func newHarnessWithSetup(t *testing.T, service contracts.AutomationService, noti
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())

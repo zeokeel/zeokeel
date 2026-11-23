@@ -22,6 +22,7 @@ import (
 	"github.com/egoist/mygo/ui/editor"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // --- stubs ------------------------------------------------------------------
@@ -82,7 +83,7 @@ func (d *blockingDiffer) Changes(context.Context) ([]contracts.FileChange, error
 
 // stubRuntime records posted callbacks instead of running them on a frame loop.
 type stubRuntime struct {
-	contracts.UIRuntime
+	uinative.UIRuntime
 	posts chan func()
 }
 

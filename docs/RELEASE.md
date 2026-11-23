@@ -19,6 +19,29 @@ ZeoKeel 的安装包和更新链路全部由仓库自己的 Go 工具链完成�
 `mygo build` 还会在 Linux 输出 `.deb`、`.tar.gz`、`PKGBUILD` 等中间产物，
 但这些**不是**发布资产：Linux 只发布 AppImage（用户明确要求）。
 
+## 构建顺序（Web 客户端）
+
+网关二进制内嵌浏览器客户端（`internal/gateway/webclient/dist`，由
+`scripts/build-web-client.sh` 从 `web/dist` 复制；`go:embed` 不能引用包目录之外
+的路径）。因此**发布产物必须在客户端构建之后产出**：
+
+```sh
+(cd web && npm ci && npm run build)   # 产出 web/dist
+make package                          # = web-client-fresh + mygo build
+```
+
+- `make web-client` 强制复制；`make web-client-if-available` 是 `make build` 用的
+  软变体（没有 `web/dist` 时只警告，Go 侧仍可编译）。
+- `make package` / `make release` 依赖 `web-client-fresh`：它会在 `web/src`、
+  `web/index.html`、`web/package.json` 比内嵌包更新时**直接失败**，避免"忘了重建
+  客户端 → 发布旧 UI"。
+- 内嵌包带 `BUNDLE_INFO` 指纹（文件数 + 内容 sha256 + 源 mtime）。网关启动日志
+  会打印它：
+  `gateway: web client bundle sha256 <12 位> (<n> files, built <时间> from web/dist)`；
+  线上核对 UI 版本时以这行为准（`scripts/build-web-client.sh --print` 打印同一串）。
+- 没有客户端的内嵌目录只有一个 `.keep`：二进制仍可编译，`GET /` 返回 503 与可读的
+  构建说明，启动日志明确写 `no browser client embedded`。
+
 ## 版本与发布
 
 - 版本唯一来源是 `VERSION`。`scripts/build-app.sh` 在构建前把版本同步进

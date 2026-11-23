@@ -13,6 +13,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -95,7 +96,7 @@ func memoryWorkspaceRoot(ctx cordis.Context, chat contracts.ChatService, session
 	return strings.TrimSpace(current.Root)
 }
 
-func startMemoryLoad(runtime contracts.UIRuntime, st *state, service contracts.MemoryService, query, typ string, chat contracts.ChatService, sessionID string) {
+func startMemoryLoad(runtime uinative.UIRuntime, st *state, service contracts.MemoryService, query, typ string, chat contracts.ChatService, sessionID string) {
 	st.memoryRefresh = false
 	st.memoryPendingQuery = query
 	st.memoryPendingType = typ
@@ -134,7 +135,7 @@ func startMemoryLoad(runtime contracts.UIRuntime, st *state, service contracts.M
 	}()
 }
 
-func startMemoryDetail(runtime contracts.UIRuntime, st *state, service contracts.MemoryService, uri string) {
+func startMemoryDetail(runtime uinative.UIRuntime, st *state, service contracts.MemoryService, uri string) {
 	st.memorySeq++
 	sequence := st.memorySeq
 	st.memoryReading = true
@@ -165,7 +166,7 @@ func startMemoryDetail(runtime contracts.UIRuntime, st *state, service contracts
 }
 
 // buildMemoryPane renders the Memory tab.
-func buildMemoryPane(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, chat contracts.ChatService, sessionID string) {
+func buildMemoryPane(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state, chat contracts.ChatService, sessionID string) {
 	service := st.memoryService
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
 		centered := func(children func(*ui.Context)) {
@@ -317,7 +318,7 @@ func buildMemoryPane(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 	})
 }
 
-func buildMemoryDetail(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, service contracts.MemoryService) {
+func buildMemoryDetail(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state, service contracts.MemoryService) {
 	centered := func(children func(*ui.Context)) {
 		ui.Row(c).FillWidth().Justify(ui.Center).AlignItems(ui.Start).Children(func() {
 			design.Apply(ui.Column(c), t.Gap(design.Space3)).
@@ -475,7 +476,7 @@ func buildMemoryDetail(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 	})
 }
 
-func buildMemoryQuickAdd(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, service contracts.MemoryService) {
+func buildMemoryQuickAdd(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state, service contracts.MemoryService) {
 	draft := strings.TrimSpace(st.memoryDraft)
 	ui.Column(c.Key("session.memory.add")).FillWidth().Gap(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {

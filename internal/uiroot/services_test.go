@@ -9,7 +9,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/brand"
-	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // requirePixelColor asserts the last rendered frame paints want at (x, y).
@@ -28,7 +28,7 @@ func requirePixelColor(t *testing.T, tt *ui.Tester, x, y int, want ui.Color) {
 func TestThemeServiceDrivesFrameTheme(t *testing.T) {
 	r := newTestRoot(t)
 	var captured atomic.Pointer[ui.Theme]
-	mustScreen(t, r, contracts.ScreenSpec{ID: "home", Title: "首页", Order: 10,
+	mustScreen(t, r, uinative.ScreenSpec{ID: "home", Title: "首页", Order: 10,
 		Build: func(c *ui.Context) {
 			captured.Store(c.Theme())
 			ui.Text(c, "body-home")

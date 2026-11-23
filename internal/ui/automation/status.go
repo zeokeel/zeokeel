@@ -13,6 +13,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
@@ -34,7 +35,7 @@ func automationStatus(service contracts.AutomationService) (contracts.Automation
 // used; Retry is never a filled/primary action (the screen's one primary stays
 // the header's New task).
 func buildAutomationStatusBanner(c *ui.Context, t *design.Tokens, st *state,
-	service contracts.AutomationService, runtime contracts.UIRuntime, status contracts.AutomationStatus) {
+	service contracts.AutomationService, runtime uinative.UIRuntime, status contracts.AutomationStatus) {
 	if status.Available {
 		return
 	}

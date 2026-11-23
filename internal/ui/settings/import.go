@@ -10,6 +10,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
@@ -52,7 +53,7 @@ func newImportState() *importState { return &importState{} }
 // buildImportPage renders the page: the source directory row (native input +
 // browse seam + scan), the read-only scan preview and the import action with
 // its result. No progress percentages: the service reports counts only.
-func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runtime contracts.UIRuntime,
+func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runtime uinative.UIRuntime,
 	st *importState, locale contracts.LocaleService, showHeader bool) {
 	importer, hasImporter := kctx.Get(contracts.KeyImporter)
 
@@ -178,7 +179,7 @@ func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 // buildImportPreview renders the scan counts, the findings notes and the
 // import action (which only exists once a preview did).
 func buildImportPreview(c *ui.Context, t *design.Tokens, importer contracts.ImporterService,
-	runtime contracts.UIRuntime, st *importState, locale contracts.LocaleService) {
+	runtime uinative.UIRuntime, st *importState, locale contracts.LocaleService) {
 	preview := *st.preview
 	uikit.Section(c, localized(locale, "扫描结果", "Scan result"), func(*ui.Context) {
 		if preview.Sessions+preview.Messages+preview.Workspaces == 0 {
@@ -268,7 +269,7 @@ func importNoteIsSkip(note string) bool {
 
 // startImportScan runs one read-only scan off the UI thread and publishes the
 // preview through UIRuntime.Post.
-func startImportScan(importer contracts.ImporterService, runtime contracts.UIRuntime, st *importState) {
+func startImportScan(importer contracts.ImporterService, runtime uinative.UIRuntime, st *importState) {
 	st.scanning = true
 	st.scanErr = ""
 	st.preview = nil
@@ -292,7 +293,7 @@ func startImportScan(importer contracts.ImporterService, runtime contracts.UIRun
 }
 
 // startImportData runs the import off the UI thread and publishes the result.
-func startImportData(importer contracts.ImporterService, runtime contracts.UIRuntime, st *importState) {
+func startImportData(importer contracts.ImporterService, runtime uinative.UIRuntime, st *importState) {
 	st.importing = true
 	st.importErr = ""
 	st.result = nil

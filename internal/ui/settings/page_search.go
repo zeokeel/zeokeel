@@ -1,7 +1,7 @@
 package settings
 
 // The settings search's module half: a page declares its own searchable items
-// (contracts.SettingsPageSpec.SearchItems) and the region each item lives in
+// (uinative.SettingsPageSpec.SearchItems) and the region each item lives in
 // (its AnchorKey). When the host's navigation search lands on an item, it calls
 // the page's Reveal with the anchor key before the page builds; the page opens
 // the disclosure around the region, scrolls it into view and tints it briefly so
@@ -16,6 +16,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 )
 
@@ -97,8 +98,8 @@ func modelPageKeywords() []string {
 }
 
 // modelPageSearchItems are the model page's searchable regions.
-func modelPageSearchItems(locale contracts.LocaleService) []contracts.SettingsSearchItem {
-	return []contracts.SettingsSearchItem{
+func modelPageSearchItems(locale contracts.LocaleService) []uinative.SettingsSearchItem {
+	return []uinative.SettingsSearchItem{
 		{ID: "context-budget", Label: localized(locale, "上下文预算", "Context budget"), AnchorKey: "model.context-budget",
 			Keywords: []string{"压缩", "compact", "compaction", "自动压缩", "上下文", "context",
 				"预算", "budget", "token", "prompt token"}},
@@ -121,8 +122,8 @@ func behaviorPageKeywords() []string {
 }
 
 // behaviorPageSearchItems are the behavior page's searchable regions.
-func behaviorPageSearchItems(locale contracts.LocaleService) []contracts.SettingsSearchItem {
-	return []contracts.SettingsSearchItem{
+func behaviorPageSearchItems(locale contracts.LocaleService) []uinative.SettingsSearchItem {
+	return []uinative.SettingsSearchItem{
 		{ID: "work-folder", Label: localized(locale, "工作文件夹", "Work folder"), AnchorKey: "behavior.work-folder",
 			Keywords: []string{"工作文件夹", "文件夹", "work folder", "workspace folder", "folder", "更改"}},
 		{ID: "work-details", Label: localized(locale, "工作步骤", "Work details"), AnchorKey: "behavior.work-details",
@@ -141,8 +142,8 @@ func notificationsPageKeywords() []string {
 }
 
 // notificationsPageSearchItems are the notification page's searchable regions.
-func notificationsPageSearchItems(locale contracts.LocaleService) []contracts.SettingsSearchItem {
-	return []contracts.SettingsSearchItem{
+func notificationsPageSearchItems(locale contracts.LocaleService) []uinative.SettingsSearchItem {
+	return []uinative.SettingsSearchItem{
 		{ID: "toasts", Label: localized(locale, "通知气泡", "Notification toasts"), AnchorKey: "notifications.toasts",
 			Keywords: []string{"气泡", "toast", "应用内通知", "in-app notification", "声音", "sound"}},
 		{ID: "system", Label: localized(locale, "系统通知", "System notifications"), AnchorKey: "notifications.system",
@@ -161,8 +162,8 @@ func appearancePageKeywords() []string {
 }
 
 // appearancePageSearchItems are the appearance page's searchable regions.
-func appearancePageSearchItems(locale contracts.LocaleService) []contracts.SettingsSearchItem {
-	return []contracts.SettingsSearchItem{
+func appearancePageSearchItems(locale contracts.LocaleService) []uinative.SettingsSearchItem {
+	return []uinative.SettingsSearchItem{
 		{ID: "theme", Label: localized(locale, "主题", "Theme"), AnchorKey: "appearance.theme",
 			Keywords: []string{"主题", "theme", "深色", "dark", "浅色", "light", "跟随系统", "system", "外观模式"}},
 		{ID: "language", Label: localized(locale, "界面语言", "Interface language"), AnchorKey: "appearance.language",

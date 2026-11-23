@@ -11,6 +11,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -76,16 +77,16 @@ const updateInstallCommandID = "uiroot.install-update"
 // is for the command palette), while this page schedules the plan first and only
 // then runs the command. Every desktop build ships the command; a build without
 // it (headless, an embedder) falls back to the schedule-on-next-launch behavior.
-func updateInstallCommand(runtime contracts.UIRuntime) (contracts.CommandSpec, bool) {
+func updateInstallCommand(runtime uinative.UIRuntime) (uinative.CommandSpec, bool) {
 	if runtime == nil {
-		return contracts.CommandSpec{}, false
+		return uinative.CommandSpec{}, false
 	}
 	for _, command := range runtime.Commands() {
 		if command.ID == updateInstallCommandID {
 			return command, true
 		}
 	}
-	return contracts.CommandSpec{}, false
+	return uinative.CommandSpec{}, false
 }
 
 // updateInstallBehaviorCopy explains what installing actually does on the
@@ -133,7 +134,7 @@ func updateInstallingCopy(locale contracts.LocaleService) string {
 // the version/status result, the release-notes Markdown preview and the copy
 // link action. Downloading and scheduling install-on-next-launch are offered
 // when the backend implements those optional halves.
-func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runtime contracts.UIRuntime,
+func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runtime uinative.UIRuntime,
 	st *updateState, locale contracts.LocaleService) {
 	updateService, hasUpdate := kctx.Get(contracts.KeyUpdate)
 	appInfo, _ := kctx.Get(contracts.KeyAppInfo)
@@ -295,7 +296,7 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 				if st.installing {
 					installLabel = busyLabel
 				}
-				var command *contracts.CommandSpec
+				var command *uinative.CommandSpec
 				if hasInstallCommand {
 					selected := installCommand
 					command = &selected
@@ -358,7 +359,7 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 
 // startUpdateCheck runs one update check off the UI thread and publishes the
 // result through UIRuntime.Post (the settings page has no long-lived frame).
-func startUpdateCheck(service contracts.UpdateService, runtime contracts.UIRuntime, st *updateState) {
+func startUpdateCheck(service contracts.UpdateService, runtime uinative.UIRuntime, st *updateState) {
 	if st.checking || st.downloading {
 		return
 	}
@@ -443,7 +444,7 @@ func formatUpdateSize(size int64) string {
 
 // startUpdateDownload runs one asset download off the UI thread and publishes
 // the verified result through UIRuntime.Post, like startUpdateCheck.
-func startUpdateDownload(downloader contracts.UpdateDownloader, runtime contracts.UIRuntime, st *updateState) {
+func startUpdateDownload(downloader contracts.UpdateDownloader, runtime uinative.UIRuntime, st *updateState) {
 	if st.downloading {
 		return
 	}
@@ -469,8 +470,8 @@ func startUpdateDownload(downloader contracts.UpdateDownloader, runtime contract
 // thread, and publishes the plan/error through UIRuntime.Post. When the host's
 // immediate-install command is available it runs from the post callback (UI
 // thread), after the plan is recorded, so the installer has a plan to apply.
-func startUpdateInstall(installer contracts.UpdateInstaller, runtime contracts.UIRuntime,
-	st *updateState, download contracts.UpdateDownload, command *contracts.CommandSpec) {
+func startUpdateInstall(installer contracts.UpdateInstaller, runtime uinative.UIRuntime,
+	st *updateState, download contracts.UpdateDownload, command *uinative.CommandSpec) {
 	if st.installing {
 		return
 	}
@@ -497,11 +498,11 @@ func startUpdateInstall(installer contracts.UpdateInstaller, runtime contracts.U
 }
 
 // runUpdateInstallCommand runs the host's immediate-install command on the UI
-// thread (contracts.CommandSpec.Run may be called there only): it launches the
+// thread (uinative.CommandSpec.Run may be called there only): it launches the
 // platform installer and asks the app to quit. While it runs the page shows the
 // installing state; a failure is reported instead of pretending the update was
 // applied.
-func runUpdateInstallCommand(runtime contracts.UIRuntime, st *updateState, command contracts.CommandSpec) {
+func runUpdateInstallCommand(runtime uinative.UIRuntime, st *updateState, command uinative.CommandSpec) {
 	st.installRunErr = ""
 	st.installRunning = true
 	if err := command.Run(); err != nil {
@@ -526,8 +527,8 @@ func buildInstallingState(c *ui.Context, t *design.Tokens, locale contracts.Loca
 // plan can be applied now (install and restart); otherwise the page keeps the
 // honest next-launch explanation.
 func buildPendingInstall(c *ui.Context, t *design.Tokens, plan contracts.UpdateInstallPlan,
-	locale contracts.LocaleService, runtime contracts.UIRuntime, st *updateState,
-	installCommand contracts.CommandSpec, hasInstallCommand bool) {
+	locale contracts.LocaleService, runtime uinative.UIRuntime, st *updateState,
+	installCommand uinative.CommandSpec, hasInstallCommand bool) {
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			uikit.StatusBadge(c, t, uikit.StatusInProgress,
@@ -573,8 +574,8 @@ func buildPendingInstall(c *ui.Context, t *design.Tokens, plan contracts.UpdateI
 // re-scheduling), so a failed immediate install is not a dead end (F4); without
 // the command it keeps the honest next-launch explanation.
 func buildScheduledInstall(c *ui.Context, t *design.Tokens, plan contracts.UpdateInstallPlan,
-	locale contracts.LocaleService, runtime contracts.UIRuntime, st *updateState,
-	installCommand contracts.CommandSpec, hasInstallCommand bool) {
+	locale contracts.LocaleService, runtime uinative.UIRuntime, st *updateState,
+	installCommand uinative.CommandSpec, hasInstallCommand bool) {
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			uikit.StatusBadge(c, t, uikit.StatusSuccess,

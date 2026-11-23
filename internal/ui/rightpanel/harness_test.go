@@ -15,6 +15,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/rightpanel"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -43,7 +44,7 @@ func newHarness(t *testing.T, options harnessOptions) *harness {
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
 
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
@@ -58,7 +59,7 @@ func newHarness(t *testing.T, options harnessOptions) *harness {
 	// The host owns the inspector: the screen itself is empty and the sidebar
 	// renders through the real docked-pane/inspector slot path, exactly like
 	// the conversation screen's right panel in the product.
-	if _, err := uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := uiRoot.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID:    "session",
 		Title: "会话",
 		Build: func(c *ui.Context) {},
@@ -88,7 +89,7 @@ func (h *harness) previewer() contracts.FilePreviewer {
 }
 
 // command returns one registered command by id.
-func (h *harness) command(tester *ui.Tester, id string) contracts.CommandSpec {
+func (h *harness) command(tester *ui.Tester, id string) uinative.CommandSpec {
 	h.t.Helper()
 	tester.Frame()
 	for _, spec := range h.uiRoot.Runtime().Commands() {
@@ -97,7 +98,7 @@ func (h *harness) command(tester *ui.Tester, id string) contracts.CommandSpec {
 		}
 	}
 	h.t.Fatalf("command %q is not registered; commands = %v", id, h.uiRoot.Runtime().Commands())
-	return contracts.CommandSpec{}
+	return uinative.CommandSpec{}
 }
 
 func (h *harness) click(tester *ui.Tester, label string) {
@@ -247,7 +248,7 @@ func TestModuleMetadata(t *testing.T) {
 	for _, requirement := range descriptor.Requires {
 		requires[requirement.Name] = true
 	}
-	if !requires[contracts.KeyUIRuntime.Name()] {
+	if !requires[uinative.KeyUIRuntime.Name()] {
 		t.Fatalf("descriptor requires = %v, want UIRuntime", descriptor.Requires)
 	}
 	provides := make(map[string]bool, len(descriptor.Provides))

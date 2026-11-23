@@ -20,6 +20,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/session"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -560,7 +561,7 @@ func newHarnessWithMemory(t *testing.T, chat *fakeChat, memory contracts.MemoryS
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
 
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
@@ -770,7 +771,7 @@ func TestModuleMetadata(t *testing.T) {
 		requires = append(requires, requirement.Name)
 	}
 	sort.Strings(requires)
-	wantRequires := []string{contracts.KeyChat.Name(), contracts.KeyNavigator.Name(), contracts.KeyUIRuntime.Name()}
+	wantRequires := []string{contracts.KeyChat.Name(), contracts.KeyNavigator.Name(), uinative.KeyUIRuntime.Name()}
 	sort.Strings(wantRequires)
 	if strings.Join(requires, ",") != strings.Join(wantRequires, ",") {
 		t.Fatalf("descriptor requires = %v, want %v", requires, wantRequires)
@@ -919,7 +920,7 @@ func TestToolRendererModuleIsUsedWhenPresent(t *testing.T) {
 		}},
 	}, true)
 	h := newVerboseWorkStepsHarness(t, chat)
-	unregister, err := h.ui.Runtime().RegisterToolRenderer(contracts.ToolRenderer{
+	unregister, err := h.ui.Runtime().RegisterToolRenderer(uinative.ToolRenderer{
 		Tool:  "read_file",
 		ID:    "test.read_file",
 		Order: 10,
@@ -1020,7 +1021,7 @@ func newHarnessConfig(t *testing.T, chat *fakeChat, config session.Config) *harn
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
@@ -1167,7 +1168,7 @@ func TestComposerEnterSends(t *testing.T) {
 // harness runtime and returns the enabled command's run counter.
 func registerTestCommands(t *testing.T, h *harness, run func()) {
 	t.Helper()
-	unregister, err := h.ui.Runtime().RegisterCommand(contracts.CommandSpec{
+	unregister, err := h.ui.Runtime().RegisterCommand(uinative.CommandSpec{
 		ID:    "test.settings",
 		Title: "打开偏好设置",
 		Hint:  "打开设置面板",
@@ -1178,7 +1179,7 @@ func registerTestCommands(t *testing.T, h *harness, run func()) {
 		t.Fatalf("register command: %v", err)
 	}
 	t.Cleanup(unregister)
-	disabled, err := h.ui.Runtime().RegisterCommand(contracts.CommandSpec{
+	disabled, err := h.ui.Runtime().RegisterCommand(uinative.CommandSpec{
 		ID:      "test.disabled",
 		Title:   "已禁用的命令",
 		Hint:    "不应出现",
@@ -1342,7 +1343,7 @@ func TestComposerToolbar(t *testing.T) {
 	h.assertNoTexts(tester, "会话设置")
 	h.assertNoTexts(tester, "命令", "更多工具")
 
-	if _, err := h.ui.Runtime().RegisterCommand(contracts.CommandSpec{
+	if _, err := h.ui.Runtime().RegisterCommand(uinative.CommandSpec{
 		ID: "toolbar.demo", Title: "工具栏命令", Hint: "测试", Order: 10,
 		Run: func() error { return nil },
 	}); err != nil {

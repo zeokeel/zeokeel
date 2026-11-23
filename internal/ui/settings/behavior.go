@@ -17,6 +17,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
@@ -245,7 +246,7 @@ type behaviorState struct {
 // saveBehaviorSetting persists one immediate-apply settings row and reports the
 // result in the page's shared status line. These display preferences apply at
 // once; only the run-limits form below uses the page footer's Save button.
-func saveBehaviorSetting(st *behaviorState, runtime contracts.UIRuntime,
+func saveBehaviorSetting(st *behaviorState, runtime uinative.UIRuntime,
 	store contracts.SettingsService, locale contracts.LocaleService, key, value string) {
 	if err := store.Set(key, value); err != nil {
 		st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
@@ -262,7 +263,7 @@ func saveBehaviorSetting(st *behaviorState, runtime contracts.UIRuntime,
 // work-details segmented controls write ui.workSteps.*, the workspace
 // instruction file saves as it is edited); the run-limits form is the page's
 // explicit-save half, persisted by the footer Save button (US-13/VE-01).
-func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
+func buildBehaviorPage(c *ui.Context, runtime uinative.UIRuntime,
 	store contracts.SettingsService, locale contracts.LocaleService, st *behaviorState,
 	sandboxService contracts.SandboxService, chat contracts.ChatService, capabilities *capabilitiesState,
 	workFolder *workFolderState, search *pageSearch) {
@@ -270,7 +271,7 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 	// The message-size and workspace-instruction settings live inside the
 	// collapsed 更多对话设置 disclosure: a search hit on either opens it before
 	// they build, so the reveal can scroll the found region into view in this
-	// frame (contracts.SettingsPageSpec.Reveal runs before Build).
+	// frame (uinative.SettingsPageSpec.Reveal runs before Build).
 	if search.targetedAt("behavior.message-size") || search.targetedAt("behavior.workspace-instructions") {
 		st.moreOpen = true
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // TestScreenBandOnlyWhenSlotsContribute covers the empty state: without any
@@ -19,7 +20,7 @@ import (
 // brings the band (with the palette entry) back.
 func TestScreenBandOnlyWhenSlotsContribute(t *testing.T) {
 	r := newTestRoot(t)
-	mustScreen(t, r, contracts.ScreenSpec{
+	mustScreen(t, r, uinative.ScreenSpec{
 		ID: "home", Title: "首页", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "body-home") },
 	})
@@ -71,11 +72,11 @@ func TestScreenBandOnlyWhenSlotsContribute(t *testing.T) {
 // host/global contribution.
 func TestScreenBandScopesNamespacedItems(t *testing.T) {
 	r := newTestRoot(t)
-	mustScreen(t, r, contracts.ScreenSpec{
+	mustScreen(t, r, uinative.ScreenSpec{
 		ID: "home", Title: "首页", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "body-home") },
 	})
-	mustScreen(t, r, contracts.ScreenSpec{
+	mustScreen(t, r, uinative.ScreenSpec{
 		ID: sessionScreenID, Title: "会话", Order: 20,
 		Build: func(c *ui.Context) { ui.Text(c, "body-session") },
 	})
@@ -112,11 +113,11 @@ func TestScreenBandScopesNamespacedItems(t *testing.T) {
 	// mustSlot cleanup only runs at test end, so emulate by checking the scoped
 	// item directly on a root with just that item.
 	scoped := newTestRoot(t)
-	mustScreen(t, scoped, contracts.ScreenSpec{
+	mustScreen(t, scoped, uinative.ScreenSpec{
 		ID: "home", Title: "首页", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "body-home") },
 	})
-	mustScreen(t, scoped, contracts.ScreenSpec{
+	mustScreen(t, scoped, uinative.ScreenSpec{
 		ID: sessionScreenID, Title: "会话", Order: 20,
 		Build: func(c *ui.Context) { ui.Text(c, "body-session") },
 	})
@@ -142,7 +143,7 @@ func TestScreenBandScopesNamespacedItems(t *testing.T) {
 // adds a second row directly under it and above the screen body.
 func TestScreenBandTabsSecondRow(t *testing.T) {
 	r := newTestRoot(t)
-	mustScreen(t, r, contracts.ScreenSpec{
+	mustScreen(t, r, uinative.ScreenSpec{
 		ID: sessionScreenID, Title: "会话", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "body-session") },
 	})

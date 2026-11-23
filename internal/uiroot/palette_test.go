@@ -13,6 +13,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // paletteListViewport returns the palette List's visible box. The list carries
@@ -49,9 +50,9 @@ func TestPaletteGroupsRowsByCategory(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
 	mustScreen(t, r, textScreen("automation", "自动化", "body-automation", 20))
-	mustCommand(t, r, contracts.CommandSpec{ID: "demo.action", Title: "演示动作",
+	mustCommand(t, r, uinative.CommandSpec{ID: "demo.action", Title: "演示动作",
 		Order: 10, Run: func() error { return nil }})
-	mustPage(t, r, contracts.SettingsPageSpec{
+	mustPage(t, r, uinative.SettingsPageSpec{
 		ID: "appearance", Section: "外观", Title: "外观", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "page-body") },
 	})
@@ -66,7 +67,7 @@ func TestPaletteGroupsRowsByCategory(t *testing.T) {
 
 	// The generated commands carry stable IDs and the category that groups
 	// them, so other surfaces can address them like registered commands.
-	generated := map[string]contracts.CommandSpec{}
+	generated := map[string]uinative.CommandSpec{}
 	for _, cmd := range r.paletteCommands("") {
 		generated[cmd.ID] = cmd
 	}
@@ -115,11 +116,11 @@ func TestPaletteGoToCommandNavigates(t *testing.T) {
 func TestPaletteSettingsCommandOpensPage(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustPage(t, r, contracts.SettingsPageSpec{
+	mustPage(t, r, uinative.SettingsPageSpec{
 		ID: "appearance", Section: "外观", Title: "外观", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "page-body") },
 	})
-	mustPage(t, r, contracts.SettingsPageSpec{
+	mustPage(t, r, uinative.SettingsPageSpec{
 		ID: "model", Section: "模型", Title: "模型", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "model-body") },
 	})
@@ -150,13 +151,13 @@ func TestPaletteSettingsCommandOpensPage(t *testing.T) {
 func TestPaletteSearchMatchesKeywords(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustCommand(t, r, contracts.CommandSpec{
+	mustCommand(t, r, uinative.CommandSpec{
 		ID: "demo.theme", Title: "配色方案", Hint: "切换外观",
 		Keywords: []string{"theme", "深色"},
 		Order:    10,
 		Run:      func() error { return nil },
 	})
-	mustPage(t, r, contracts.SettingsPageSpec{
+	mustPage(t, r, uinative.SettingsPageSpec{
 		ID: "appearance", Section: "外观", Title: "外观", Order: 10,
 		Keywords: []string{"主题", "theme"},
 		Build:    func(c *ui.Context) { ui.Text(c, "page-body") },
@@ -195,7 +196,7 @@ func TestPaletteLongListKeepsChosenRowVisible(t *testing.T) {
 	const commandCount = 24
 	for index := 0; index < commandCount; index++ {
 		index := index
-		mustCommand(t, r, contracts.CommandSpec{
+		mustCommand(t, r, uinative.CommandSpec{
 			ID:    fmt.Sprintf("demo.command.%02d", index),
 			Title: fmt.Sprintf("演示命令 %02d", index),
 			Order: (index + 1) * 10,

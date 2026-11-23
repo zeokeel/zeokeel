@@ -24,6 +24,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // runA4QASteps registers the A4 interaction-QA steps.
@@ -220,7 +221,7 @@ func (d *drive) runA4QASteps() {
 	d.step("a4qa-palette-reaches-all-commands", "a4qa", "命令面板能按标题检索到每条命令",
 		"逐条命令：Cmd+K → 输入其标题 → 出现该命令行 → Esc 关闭", func(c *check) {
 			d.resetToSession()
-			runtimeService, ok := d.root.Get(contracts.KeyUIRuntime)
+			runtimeService, ok := d.root.Get(uinative.KeyUIRuntime)
 			if !ok || runtimeService == nil {
 				c.failf("没有 UI runtime")
 				return

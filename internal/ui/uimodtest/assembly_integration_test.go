@@ -19,6 +19,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/assembly"
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
@@ -68,7 +69,7 @@ func TestDesktopProductAssemblyShowsAllDemoModules(t *testing.T) {
 
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	// The product host provides the UI and process services before loading.
-	provide(t, root, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, root, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, root, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, root, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, root, contracts.KeyLocale, uiRoot.Locale())

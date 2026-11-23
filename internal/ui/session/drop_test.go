@@ -12,6 +12,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/session"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -33,7 +34,7 @@ func newDropHarness(t *testing.T, chat *fakeChat, notifier contracts.Notifier) (
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
@@ -45,7 +46,7 @@ func newDropHarness(t *testing.T, chat *fakeChat, notifier contracts.Notifier) (
 	drop := &fakeFileDrop{}
 	provide(t, ctx, contracts.KeyFileDrop, contracts.FileDropService(drop))
 	activate(t, ctx, session.Module(), session.Config{})
-	if _, err := uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := uiRoot.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID: "other-screen", Title: "其他屏", Order: 90,
 		Build: func(c *ui.Context) { ui.Text(c, "其他屏幕内容") },
 	}); err != nil {

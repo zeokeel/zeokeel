@@ -24,6 +24,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -149,7 +150,7 @@ func (st *state) reminderSchedule(now time.Time) (string, error) {
 
 // createReminderFromDialog validates and creates the reminder through the
 // automation backend, scoped to the conversation on screen.
-func (st *state) createReminderFromDialog(runtime contracts.UIRuntime,
+func (st *state) createReminderFromDialog(runtime uinative.UIRuntime,
 	chat contracts.ChatService, now time.Time) {
 	service := st.automationService()
 	sessionID := ""
@@ -199,7 +200,7 @@ func (st *state) createReminderFromDialog(runtime contracts.UIRuntime,
 // buildReminderDialogs renders the create dialog, the session reminder list and
 // the destructive delete confirmation. It is called from the screen build so
 // the dialogs live above the whole conversation.
-func buildReminderDialogs(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildReminderDialogs(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	st *state, chat contracts.ChatService) {
 	buildReminderCreateDialog(c, t, runtime, st, chat)
 	buildReminderListDialog(c, t, runtime, st, chat)
@@ -208,7 +209,7 @@ func buildReminderDialogs(c *ui.Context, t *design.Tokens, runtime contracts.UIR
 
 // buildReminderCreateDialog is the native create-reminder modal: the prompt,
 // the quick-time segmented choice, an optional exact instant and the footer.
-func buildReminderCreateDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildReminderCreateDialog(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	st *state, chat contracts.ChatService) {
 	if st == nil || !st.reminders.createOpen {
 		return
@@ -283,7 +284,7 @@ func buildReminderCreateDialog(c *ui.Context, t *design.Tokens, runtime contract
 // buildReminderListDialog is the session reminders list: only the tasks bound
 // to the conversation on screen, each with its schedule, next run, enable
 // switch and delete action, plus the jump to the automation page.
-func buildReminderListDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildReminderListDialog(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	st *state, chat contracts.ChatService) {
 	if st == nil || !st.reminders.listOpen {
 		return
@@ -366,7 +367,7 @@ func buildReminderListDialog(c *ui.Context, t *design.Tokens, runtime contracts.
 
 // buildReminderRow is one reminder card: displayed name, schedule label with
 // the raw expression as its tooltip, next run, enable switch and delete action.
-func buildReminderRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state,
+func buildReminderRow(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state,
 	service contracts.AutomationService, task contracts.AutomationTask) {
 	ui.Column(c).FillWidth().Gap(design.Space1).
 		Background(t.BgBase).Border(1, t.BorderL2).Radius(design.RadiusMD).
@@ -413,7 +414,7 @@ func buildReminderRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRunti
 
 // buildReminderDeleteConfirm asks before deleting a reminder: the safe action
 // (取消) is the Default; the danger action is explicit (DESIGN.md AP-12).
-func buildReminderDeleteConfirm(c *ui.Context, runtime contracts.UIRuntime, st *state) {
+func buildReminderDeleteConfirm(c *ui.Context, runtime uinative.UIRuntime, st *state) {
 	if st == nil || strings.TrimSpace(st.reminders.deleteID) == "" {
 		return
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/egoist/mygo/ui/editor"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
@@ -111,7 +112,7 @@ func itoa(value int) string {
 // keep the cached rows while the read lands. A result for a workspace the user
 // already switched away from is dropped.
 func (st *state) ensureChangesLoaded(workspace contracts.WorkspaceService,
-	differ contracts.WorkspaceDiffer, runtime contracts.UIRuntime) bool {
+	differ contracts.WorkspaceDiffer, runtime uinative.UIRuntime) bool {
 	current, ok, err := workspace.Current(context.Background())
 	if err != nil || !ok {
 		st.changesLoaded = true

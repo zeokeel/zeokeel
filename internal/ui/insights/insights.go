@@ -23,6 +23,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
@@ -57,7 +58,7 @@ func (c Config) resolved() Config {
 type state struct {
 	ctx       cordis.Context
 	locale    contracts.LocaleService
-	runtime   contracts.UIRuntime
+	runtime   uinative.UIRuntime
 	navigator contracts.Navigator
 	service   contracts.InsightsService
 	chat      contracts.ChatService
@@ -93,7 +94,7 @@ type state struct {
 // Module registers the Insights screen.
 func Module() *module.Descriptor[Config] {
 	return module.Define(ModuleID, func(ctx cordis.Context, cfg Config) error {
-		runtime, err := ctx.Require(contracts.KeyUIRuntime)
+		runtime, err := ctx.Require(uinative.KeyUIRuntime)
 		if err != nil {
 			return err
 		}
@@ -122,7 +123,7 @@ func Module() *module.Descriptor[Config] {
 		}
 
 		if err := own(ctx, func() (func(), error) {
-			return runtime.RegisterScreen(contracts.ScreenSpec{
+			return runtime.RegisterScreen(uinative.ScreenSpec{
 				ID:    ScreenID,
 				Title: config.Title,
 				Order: ScreenOrder,
@@ -137,7 +138,7 @@ func Module() *module.Descriptor[Config] {
 		// (SlotScreenHeader) and the page's one immediate action, Refresh
 		// (SlotScreenActions). Item IDs carry the screen namespace so the band
 		// stays on this screen only.
-		screenSlots := []contracts.SlotItem{
+		screenSlots := []uinative.SlotItem{
 			{
 				Slot: contracts.SlotScreenHeader, ID: "insights.title", Order: 10,
 				Build: func(c *ui.Context) { buildScreenHeaderSlot(c, config, moduleState) },
@@ -157,7 +158,7 @@ func Module() *module.Descriptor[Config] {
 		}
 		return nil
 	}).
-		AddRequires(module.Requires(contracts.KeyUIRuntime)).
+		AddRequires(module.Requires(uinative.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeyNavigator)).
 		WithName("ZeoKeel insights screen")
 }

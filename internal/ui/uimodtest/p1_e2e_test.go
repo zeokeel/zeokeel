@@ -22,6 +22,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/assembly"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/hosttools"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -1032,7 +1033,7 @@ func bootDesktop(t *testing.T, dataDir string, settings *memSettings) (cordis.Co
 	// behaviour (a notice yielding to a pending approval) is what gets tested.
 	uiRoot.SetKernelContext(root)
 	provide(t, root, contracts.KeyDataDir, dataDir)
-	provide(t, root, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, root, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, root, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, root, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, root, contracts.KeyLocale, uiRoot.Locale())

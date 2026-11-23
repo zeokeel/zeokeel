@@ -8,6 +8,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
@@ -15,7 +16,7 @@ import (
 // openGoalDialog opens the /goal modal, prefilled with the active session's
 // current goal. Editing keeps the goal id/revision (the compare-and-set pair)
 // and exposes its round cap; creating is always scoped to the active session.
-func openGoalDialog(st *state, runtime contracts.UIRuntime) {
+func openGoalDialog(st *state, runtime uinative.UIRuntime) {
 	if st == nil || st.goalService == nil || st.goalSessionID == "" {
 		return
 	}
@@ -33,7 +34,7 @@ func openGoalDialog(st *state, runtime contracts.UIRuntime) {
 }
 
 // openPlanDialog opens the /plan modal with an empty draft.
-func openPlanDialog(st *state, runtime contracts.UIRuntime) {
+func openPlanDialog(st *state, runtime uinative.UIRuntime) {
 	if st.planReviewer == nil {
 		return
 	}
@@ -47,7 +48,7 @@ func openPlanDialog(st *state, runtime contracts.UIRuntime) {
 // editor while editing an existing goal, and the footer actions. Saving is the
 // primary action (rightmost, Enter); clearing is destructive and goes through
 // ConfirmDanger instead of deleting at once.
-func buildGoalDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+func buildGoalDialog(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state) {
 	if !st.goalOpen || st.goalService == nil {
 		return
 	}
@@ -156,7 +157,7 @@ func buildGoalDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 
 // buildPlanDialog renders the /plan modal: the plan text area and the
 // cancel/submit footer.
-func buildPlanDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+func buildPlanDialog(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state) {
 	if !st.planOpen || st.planReviewer == nil {
 		return
 	}

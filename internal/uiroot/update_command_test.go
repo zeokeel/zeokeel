@@ -9,17 +9,17 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // findCommandByID returns the sorted command list entry with the exact ID.
-func findCommandByID(commands []contracts.CommandSpec, id string) (contracts.CommandSpec, bool) {
+func findCommandByID(commands []uinative.CommandSpec, id string) (uinative.CommandSpec, bool) {
 	for _, command := range commands {
 		if command.ID == id {
 			return command, true
 		}
 	}
-	return contracts.CommandSpec{}, false
+	return uinative.CommandSpec{}, false
 }
 
 // TestOpenUpdateCommandRegistered covers the palette entry for the update
@@ -27,7 +27,7 @@ func findCommandByID(commands []contracts.CommandSpec, id string) (contracts.Com
 func TestOpenUpdateCommandRegistered(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustPage(t, r, contracts.SettingsPageSpec{ID: "about", Section: "关于", Title: "关于页", Order: 40,
+	mustPage(t, r, uinative.SettingsPageSpec{ID: "about", Section: "关于", Title: "关于页", Order: 40,
 		Build: func(c *ui.Context) { ui.Text(c, "update-body") }})
 
 	command, ok := findCommandByID(r.Runtime().Commands(), "uiroot.open-update")
@@ -68,7 +68,7 @@ func TestOpenUpdateCommandRelocalized(t *testing.T) {
 	r.Locale().SetLanguage("en")
 	tt.Frame() // the frame re-registers host commands when the language changed
 
-	var found []contracts.CommandSpec
+	var found []uinative.CommandSpec
 	for _, command := range r.Runtime().Commands() {
 		if command.ID == "uiroot.open-update" {
 			found = append(found, command)

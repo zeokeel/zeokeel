@@ -7,6 +7,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
@@ -116,9 +117,9 @@ func TestNavigationPushBackCurrent(t *testing.T) {
 func TestSettingsSurface(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	unregAppearance := mustPage(t, r, contracts.SettingsPageSpec{ID: "appearance", Section: "general", Title: "外观设置", Order: 10,
+	unregAppearance := mustPage(t, r, uinative.SettingsPageSpec{ID: "appearance", Section: "general", Title: "外观设置", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "settings-appearance-body") }})
-	unregAccount := mustPage(t, r, contracts.SettingsPageSpec{ID: "account", Section: "account", Title: "账户设置", Order: 10,
+	unregAccount := mustPage(t, r, uinative.SettingsPageSpec{ID: "account", Section: "account", Title: "账户设置", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "settings-account-body") }})
 	mustSlot(t, r, textSlotItem(contracts.SlotSettingsSidebar, "extra", "settings-sidebar-extra", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotSettingsHeader, "header", "settings-header-slot", 10))
@@ -207,7 +208,7 @@ func TestSettingsSurface(t *testing.T) {
 func TestSettingsSurfaceEscapeClose(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustPage(t, r, contracts.SettingsPageSpec{ID: "appearance", Section: "general", Title: "外观设置", Order: 10,
+	mustPage(t, r, uinative.SettingsPageSpec{ID: "appearance", Section: "general", Title: "外观设置", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "settings-appearance-body") }})
 
 	nav := r.Navigator()
@@ -254,11 +255,11 @@ func TestMultiScreenVisibility(t *testing.T) {
 	r := newTestRoot(t)
 	var toggleVisible counter // 0 = hidden, 1 = visible
 
-	mustScreen(t, r, contracts.ScreenSpec{ID: "hidden", Title: "隐藏屏", Order: 5,
+	mustScreen(t, r, uinative.ScreenSpec{ID: "hidden", Title: "隐藏屏", Order: 5,
 		Visible: func() bool { return false },
 		Build:   func(c *ui.Context) { ui.Text(c, "body-hidden") }})
 	mustScreen(t, r, textScreen("alpha", "阿尔法屏", "body-alpha", 10))
-	mustScreen(t, r, contracts.ScreenSpec{ID: "toggle", Title: "切换屏", Order: 15,
+	mustScreen(t, r, uinative.ScreenSpec{ID: "toggle", Title: "切换屏", Order: 15,
 		Visible: func() bool { return toggleVisible.Load() == 1 },
 		Build:   func(c *ui.Context) { ui.Text(c, "body-toggle") }})
 	mustScreen(t, r, textScreen("beta", "贝塔屏", "body-beta", 20))
@@ -309,7 +310,7 @@ func TestMultiScreenVisibility(t *testing.T) {
 // contains it, keeps the window chrome, and other screens still render.
 func TestScreenBuildPanicIsContained(t *testing.T) {
 	r := newTestRoot(t)
-	mustScreen(t, r, contracts.ScreenSpec{ID: "broken", Title: "坏屏", Order: 10,
+	mustScreen(t, r, uinative.ScreenSpec{ID: "broken", Title: "坏屏", Order: 10,
 		Build: func(*ui.Context) { panic("screen build boom") }})
 	mustScreen(t, r, textScreen("good", "好屏", "body-good", 20))
 
@@ -350,7 +351,7 @@ func TestPanicErrorReportsContainedPanic(t *testing.T) {
 func TestMultiTesterAlternating(t *testing.T) {
 	r := newTestRoot(t)
 	var state counter
-	mustScreen(t, r, contracts.ScreenSpec{ID: "home", Title: "首页", Order: 10,
+	mustScreen(t, r, uinative.ScreenSpec{ID: "home", Title: "首页", Order: 10,
 		Build: func(c *ui.Context) { ui.Textf(c, "state=%d", state.Load()) }})
 
 	t1 := newTestTester(t, r, 1200, 800)
@@ -421,9 +422,9 @@ func TestCommandPaletteShortcut(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
 	var runs counter
-	mustCommand(t, r, contracts.CommandSpec{ID: "open.settings", Title: "打开设置",
+	mustCommand(t, r, uinative.CommandSpec{ID: "open.settings", Title: "打开设置",
 		Hint: "设置面板", Order: 10, Run: func() error { runs.Inc(); return nil }})
-	mustCommand(t, r, contracts.CommandSpec{ID: "other", Title: "其他命令",
+	mustCommand(t, r, uinative.CommandSpec{ID: "other", Title: "其他命令",
 		Order: 20, Run: func() error { return nil }})
 
 	tt := newTestTester(t, r, 1200, 800)
@@ -474,7 +475,7 @@ func TestCommandPaletteShortcut(t *testing.T) {
 func TestSettingsPinnedFooter(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustPage(t, r, contracts.SettingsPageSpec{
+	mustPage(t, r, uinative.SettingsPageSpec{
 		ID: "long", Section: "general", Title: "长页设置", Order: 10,
 		Build: func(c *ui.Context) {
 			// Far taller than the 800 DIP window: an inline footer would be laid
@@ -505,9 +506,9 @@ func TestSettingsPinnedFooter(t *testing.T) {
 func TestSettingsSearchFiltersNavigation(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustPage(t, r, contracts.SettingsPageSpec{ID: "appearance", Section: "general", Title: "外观设置", Order: 10,
+	mustPage(t, r, uinative.SettingsPageSpec{ID: "appearance", Section: "general", Title: "外观设置", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "settings-appearance-body") }})
-	mustPage(t, r, contracts.SettingsPageSpec{ID: "account", Section: "general", Title: "账户设置", Order: 20,
+	mustPage(t, r, uinative.SettingsPageSpec{ID: "account", Section: "general", Title: "账户设置", Order: 20,
 		Build: func(c *ui.Context) { ui.Text(c, "settings-account-body") }})
 	tt := newTestTester(t, r, 1400, 900)
 	r.Navigator().ToggleSettings()
@@ -532,7 +533,7 @@ func TestSettingsUnsavedCloseGuard(t *testing.T) {
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
 	dirty := false
 	discarded := false
-	mustPage(t, r, contracts.SettingsPageSpec{
+	mustPage(t, r, uinative.SettingsPageSpec{
 		ID: "draft", Section: "general", Title: "草稿设置", Order: 10,
 		Build:  func(c *ui.Context) { ui.Text(c, "draft-body") },
 		Footer: func(c *ui.Context) { ui.Text(c, "draft-save") },
@@ -619,7 +620,7 @@ func TestInspectorDrawerIsModal(t *testing.T) {
 func TestPaletteShowsCommandShortcut(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustCommand(t, r, contracts.CommandSpec{ID: "demo.action", Title: "演示命令", Order: 10,
+	mustCommand(t, r, uinative.CommandSpec{ID: "demo.action", Title: "演示命令", Order: 10,
 		Shortcut: "Cmd/Ctrl + Alt + D", Run: func() error { return nil }})
 	tt := newTestTester(t, r, 1280, 800)
 	tt.Frame()
@@ -635,8 +636,8 @@ func TestPaletteShowsCommandShortcut(t *testing.T) {
 // the host content column resolves to the window height (the right inspector
 // split used to leave it auto-sized, so the FillHeight column collapsed to its
 // intrinsic height and the composer floated near the top).
-func heightScreen(id, title, top, bottom string) contracts.ScreenSpec {
-	return contracts.ScreenSpec{
+func heightScreen(id, title, top, bottom string) uinative.ScreenSpec {
+	return uinative.ScreenSpec{
 		ID: id, Title: title, Order: 10,
 		Build: func(c *ui.Context) {
 			ui.Column(c).FillWidth().FillHeight().Children(func() {
@@ -826,10 +827,10 @@ func TestCollapsedSidebarStartupResolvesDefaultScreen(t *testing.T) {
 func TestSettingsSearchMatchesSettingNames(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustPage(t, r, contracts.SettingsPageSpec{ID: "model", Section: "general", Title: "模型设置", Order: 10,
+	mustPage(t, r, uinative.SettingsPageSpec{ID: "model", Section: "general", Title: "模型设置", Order: 10,
 		Keywords: []string{"密钥", "api key", "模型"},
 		Build:    func(c *ui.Context) { ui.Text(c, "settings-model-body") }})
-	mustPage(t, r, contracts.SettingsPageSpec{ID: "appearance", Section: "general", Title: "外观设置", Order: 20,
+	mustPage(t, r, uinative.SettingsPageSpec{ID: "appearance", Section: "general", Title: "外观设置", Order: 20,
 		Keywords: []string{"主题", "theme", "深色"},
 		Build:    func(c *ui.Context) { ui.Text(c, "settings-appearance-body") }})
 	tt := newTestTester(t, r, 1400, 900)

@@ -15,6 +15,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
@@ -26,10 +27,10 @@ func TestOSMirrorApprovalBodyLocalizes(t *testing.T) {
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel", Language: "zh"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
 	provide[contracts.Notifier](t, ctx, contracts.KeyNotifier, uiRoot.Notifier())
-	if _, err := uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := uiRoot.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID: "home", Title: "首页",
 		Build: func(c *ui.Context) { ui.Text(c, "主屏幕") },
 	}); err != nil {

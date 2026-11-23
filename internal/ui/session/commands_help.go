@@ -11,6 +11,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
@@ -68,11 +69,11 @@ func (st *state) helpShortcuts() []helpShortcut {
 
 // buildHelpDialog renders the /help modal: every registered command with its
 // hint, then the real keyboard map.
-func buildHelpDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+func buildHelpDialog(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state) {
 	if !st.helpOpen {
 		return
 	}
-	commands := append([]contracts.CommandSpec(nil), runtime.Commands()...)
+	commands := append([]uinative.CommandSpec(nil), runtime.Commands()...)
 	sort.SliceStable(commands, func(i, j int) bool {
 		if commands[i].Order != commands[j].Order {
 			return commands[i].Order < commands[j].Order

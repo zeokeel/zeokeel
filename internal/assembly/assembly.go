@@ -23,6 +23,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // Product names shipped in the binary.
@@ -33,6 +34,11 @@ const (
 	// ProductHeadless runs the same registry without UI modules: no window, no
 	// uiroot and therefore no display environment is required.
 	ProductHeadless = "headless"
+	// ProductServe is the gateway product: the headless assembly plus the
+	// browser control plane (docs/TRANSPORT.md §2.2). It has no assembly file
+	// of its own — it reuses the headless entries with the serve-only overrides
+	// in ServeEntries — so it never appears in Products().
+	ProductServe = "serve"
 )
 
 //go:embed assemblies/*.json
@@ -56,6 +62,21 @@ func Products() []string {
 		}
 		names = append(names, strings.TrimSuffix(entry.Name(), assemblyExt))
 	}
+	sort.Strings(names)
+	return names
+}
+
+// AllProducts lists every product this binary can run: the embedded files plus
+// the gateway, which reuses the headless entries and therefore has no file of
+// its own (see ServeEntries).
+func AllProducts() []string {
+	names := Products()
+	for _, name := range names {
+		if name == ProductServe {
+			return names
+		}
+	}
+	names = append(names, ProductServe)
 	sort.Strings(names)
 	return names
 }
@@ -120,9 +141,60 @@ func LoadWithBuildInfo(ctx cordis.Context, product string, info BuildInfo) (*mod
 	if err != nil {
 		return nil, err
 	}
+	return LoadEntriesWithBuildInfo(ctx, entries, info)
+}
+
+// LoadEntriesWithBuildInfo validates and starts an in-memory entry tree. It is
+// the seam a product uses when it must adjust a shipped assembly before load —
+// the gateway product reuses the headless entries but overrides the approvals
+// policy (see ServeEntries), which is cheaper and safer than a third JSON file
+// that would drift out of step with headless.json.
+func LoadEntriesWithBuildInfo(ctx cordis.Context, entries []module.Entry, info BuildInfo) (*module.Loader, error) {
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("assembly: no entries to load")
+	}
 	registry := registryFor(entries)
 	overlayBuildInfo(registry, entries, info)
 	return module.Load(ctx, registry, entries)
+}
+
+// ServeEntries returns the entry tree of the gateway product: the headless
+// entries with the serve-only overrides applied.
+//
+// Two headless settings are wrong for a browser client and must be changed
+// before load (docs/TRANSPORT.md §2.6):
+//
+//   - approvals: headless.json pins {"mode":"auto","ignorePermissionSetting":
+//     true}. In auto mode Approvals.Request returns allow immediately, so the
+//     browser would never receive an approval request. Serve must behave like
+//     the desktop product: the user's stored permission preset decides, with
+//     workspace as the shipped default.
+//   - hosttools.interactive: headless sets false, which clears the host-tools
+//     Asker; the ask_user tool would stay permanently unavailable even though
+//     the gateway provides contracts.KeyUserInteraction. Serve is interactive:
+//     a human is looking at the conversation in the browser.
+//
+// Every other headless entry is kept verbatim, so the gateway runs exactly the
+// backend the desktop and headless products run.
+func ServeEntries() ([]module.Entry, error) {
+	entries, err := Entries(ProductHeadless)
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		switch entries[i].Module {
+		case "zeokeel/approvals":
+			entries[i].Config = map[string]any{"mode": contracts.PermissionWorkspace}
+		case "zeokeel/hosttools":
+			config, ok := entries[i].Config.(map[string]any)
+			if !ok {
+				config = map[string]any{}
+			}
+			config["interactive"] = true
+			entries[i].Config = config
+		}
+	}
+	return entries, nil
 }
 
 // registryFor builds the registry one product needs: the compile-time modules
@@ -141,7 +213,7 @@ func registryFor(entries []module.Entry) *module.Registry {
 // declareUIServices declares the services internal/uiroot provides on the host
 // root context.
 func declareUIServices(registry *module.Registry) {
-	registry.AddBuiltin(contracts.KeyUIRuntime)
+	registry.AddBuiltin(uinative.KeyUIRuntime)
 	registry.AddBuiltin(contracts.KeyNavigator)
 	registry.AddBuiltin(contracts.KeyTheme)
 	registry.AddBuiltin(contracts.KeyLocale)
@@ -150,7 +222,7 @@ func declareUIServices(registry *module.Registry) {
 
 // uiServiceNames is the set of service names the UI host provides.
 var uiServiceNames = map[string]bool{
-	contracts.KeyUIRuntime.Name():    true,
+	uinative.KeyUIRuntime.Name():     true,
 	contracts.KeyNavigator.Name():    true,
 	contracts.KeyTheme.Name():        true,
 	contracts.KeyLocale.Name():       true,

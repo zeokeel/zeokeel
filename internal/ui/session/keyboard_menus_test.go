@@ -10,6 +10,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // registerKeyboardCommands registers two commands whose titles share a token,
@@ -18,7 +19,7 @@ func registerKeyboardCommands(t *testing.T, h *harness, runs *[]string) {
 	t.Helper()
 	for _, name := range []string{"键盘甲", "键盘乙"} {
 		name := name
-		unregister, err := h.ui.Runtime().RegisterCommand(contracts.CommandSpec{
+		unregister, err := h.ui.Runtime().RegisterCommand(uinative.CommandSpec{
 			ID:    "test.keyboard." + name,
 			Title: name,
 			Hint:  "键盘测试",

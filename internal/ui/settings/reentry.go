@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // transientStatus remembers the frame of the last build of one settings page.
@@ -23,7 +24,7 @@ type transientStatus struct {
 
 // reentered reports whether the page is being built again after being off
 // screen, and records the current frame. A nil runtime reports false.
-func (ts *transientStatus) reentered(runtime contracts.UIRuntime) bool {
+func (ts *transientStatus) reentered(runtime uinative.UIRuntime) bool {
 	if runtime == nil {
 		return false
 	}

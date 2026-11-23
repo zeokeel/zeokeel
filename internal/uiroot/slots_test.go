@@ -6,6 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // TestReservedSlotsAppearInHostRegions is the end-to-end slot test: every
@@ -14,7 +15,7 @@ import (
 // screen surface, overlay), in Order/ID order.
 func TestReservedSlotsAppearInHostRegions(t *testing.T) {
 	r := newTestRoot(t)
-	mustScreen(t, r, contracts.ScreenSpec{
+	mustScreen(t, r, uinative.ScreenSpec{
 		ID: "home", Title: "首页", Order: 10,
 		Build: func(c *ui.Context) {
 			ui.Column(c).FillWidth().Gap(8).Children(func() {
@@ -105,7 +106,7 @@ func TestCustomSlotRenderedByOwnerModule(t *testing.T) {
 	unregA := mustSlot(t, r, textSlotItem(customSlot, "turn-a", "turn-a-text", 10))
 	mustSlot(t, r, textSlotItem(customSlot, "turn-a2", "turn-a2-text", 10)) // Order tie, ID breaks it
 
-	unregisterOwner := mustScreen(t, r, contracts.ScreenSpec{
+	unregisterOwner := mustScreen(t, r, uinative.ScreenSpec{
 		ID: "session", Title: "会话", Order: 10,
 		Build: func(c *ui.Context) {
 			ui.Text(c, "session-body")
@@ -141,7 +142,7 @@ func TestCustomSlotRenderedByOwnerModule(t *testing.T) {
 func TestSlotItemPanicIsContained(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustSlot(t, r, contracts.SlotItem{Slot: contracts.SlotSidebarNav, ID: "bad", Order: 10,
+	mustSlot(t, r, uinative.SlotItem{Slot: contracts.SlotSidebarNav, ID: "bad", Order: 10,
 		Build: func(*ui.Context) { panic("slot item boom") }})
 	mustSlot(t, r, textSlotItem(contracts.SlotSidebarNav, "good", "sidebar-good", 20))
 

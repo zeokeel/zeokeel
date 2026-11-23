@@ -12,14 +12,15 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // commandsOf returns the registered commands of one attachmentHarness.
-func commandsOf(h *attachmentHarness) []contracts.CommandSpec { return h.ui.Runtime().Commands() }
+func commandsOf(h *attachmentHarness) []uinative.CommandSpec { return h.ui.Runtime().Commands() }
 
 // commandOf finds one command of the attachmentHarness.
-func commandOf(t *testing.T, h *attachmentHarness, id string) contracts.CommandSpec {
+func commandOf(t *testing.T, h *attachmentHarness, id string) uinative.CommandSpec {
 	t.Helper()
 	for _, command := range commandsOf(h) {
 		if command.ID == id {
@@ -27,7 +28,7 @@ func commandOf(t *testing.T, h *attachmentHarness, id string) contracts.CommandS
 		}
 	}
 	t.Fatalf("command %q is not registered; commands = %v", id, commandsOf(h))
-	return contracts.CommandSpec{}
+	return uinative.CommandSpec{}
 }
 
 func TestExtraCommandsRegistered(t *testing.T) {

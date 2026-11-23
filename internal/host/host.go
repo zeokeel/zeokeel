@@ -43,6 +43,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/assembly"
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
@@ -98,6 +99,10 @@ type Options struct {
 	// ACP runs the Agent Client Protocol stdio server instead of the desktop
 	// or headless wait loop (editor integration).
 	ACP bool
+	// Port is the first port the gateway product tries; 0 means the documented
+	// default range (gateway.DefaultPort..+9, then any free port). It is
+	// meaningless for the other products.
+	Port int
 }
 
 // normalize fills zero-valued options with their process defaults. Product
@@ -181,6 +186,7 @@ func mainWithStreams(args []string, stdout, stderr io.Writer) int {
 	showVersion := flags.Bool("version", false, "print version information and exit")
 	listProducts := flags.Bool("list-products", false, "print the embedded assembly products and exit")
 	acpMode := flags.Bool("acp", false, "run the Agent Client Protocol (ACP) stdio server")
+	servePort := flags.Int("port", 0, "first port for --product serve (default 9932, then +1..+9, then any free port)")
 
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -195,7 +201,7 @@ func mainWithStreams(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *listProducts {
-		for _, name := range assembly.Products() {
+		for _, name := range assembly.AllProducts() {
 			fmt.Fprintln(stdout, name)
 		}
 		return 0
@@ -226,6 +232,15 @@ func mainWithStreams(args []string, stdout, stderr io.Writer) int {
 		*product = assembly.ProductHeadless
 	}
 
+	port, err := parseServePort(*servePort)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s\n\n%s", err, usageText)
+		return 2
+	}
+	if err := servePortConflict(*product, *acpMode, *headless, port); err != nil {
+		fmt.Fprintf(stderr, "%s\n\n%s", err, usageText)
+		return 2
+	}
 	opts := Options{
 		Product:      *product,
 		DataDir:      *dataDir,
@@ -233,6 +248,7 @@ func mainWithStreams(args []string, stdout, stderr io.Writer) int {
 		AppCommit:    Commit,
 		AppBuildTime: BuildTime,
 		ACP:          *acpMode,
+		Port:         port,
 	}
 	if opts.ACP {
 		ctx, stop := signal.NotifyContext(context.Background(), terminationSignals...)
@@ -259,6 +275,7 @@ Flags:
   --product <name>   assembly product to run (default "desktop")
   --headless         run without a window (same as --product headless)
   --acp              run the Agent Client Protocol stdio server (editor integration)
+  --port <port>      first gateway port for --product serve (default 9932)
   --data-dir <dir>   data directory (default $ZEOKEEL_DATA_DIR or ~/.zeokeel)
   --version          print version information and exit
   --list-products    print the embedded assembly products and exit
@@ -277,9 +294,13 @@ func Run(opts Options) error {
 		ctx, stop := signal.NotifyContext(context.Background(), terminationSignals...)
 		defer stop()
 		return runHeadless(ctx, opts, os.Stdout)
+	case assembly.ProductServe:
+		ctx, stop := signal.NotifyContext(context.Background(), terminationSignals...)
+		defer stop()
+		return runServe(ctx, opts, os.Stdout)
 	default:
 		return fmt.Errorf("no host for product %q (known products: %s)",
-			opts.Product, strings.Join(assembly.Products(), ", "))
+			opts.Product, strings.Join(assembly.AllProducts(), ", "))
 	}
 }
 
@@ -825,7 +846,7 @@ func provideServices(root cordis.Context, dataDir string, settings *Settings, lo
 	if uiRoot == nil {
 		return nil
 	}
-	if _, err := root.Provide(contracts.KeyUIRuntime, uiRoot.Runtime()); err != nil {
+	if _, err := root.Provide(uinative.KeyUIRuntime, uiRoot.Runtime()); err != nil {
 		return fmt.Errorf("%s: provide ui runtime: %w", appName, err)
 	}
 	if _, err := root.Provide(contracts.KeyNavigator, uiRoot.Navigator()); err != nil {

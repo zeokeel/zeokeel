@@ -172,6 +172,13 @@ check_mygo_vet() {
 	"$GO" tool mygo vet .
 }
 
+# Protocol/implementation consistency: docs/TRANSPORT.md §5.1 must list exactly
+# the methods the gateway dispatches (a pure string comparison, so it is cheap
+# enough for the quick loop).
+check_protocol_consistency() {
+	"$GO" test ./internal/gateway -count=1 -run 'TestTransport' >/dev/null
+}
+
 check_regression() {
 	local log
 	log=$(mktemp "${TMPDIR:-/tmp}/zeokeel-regression.XXXXXX")
@@ -296,6 +303,7 @@ run_step "go vet ./..." "$GO" vet ./...
 run_step_quiet "designlint (--strict)" check_designlint
 run_step "design-check (phase 0 grep)" check_design_grep
 run_step_quiet "go tool mygo vet" check_mygo_vet
+run_step_quiet "protocol consistency (TRANSPORT §5.1 vs dispatch)" check_protocol_consistency
 run_step_quiet "go test ./... -count=1" "$GO" test ./... -count=1
 if [[ $RACE -eq 1 ]]; then
 	run_step_quiet "go test ./... -count=1 -race" "$GO" test ./... -count=1 -race

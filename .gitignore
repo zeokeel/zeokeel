@@ -26,3 +26,8 @@
 # Local build output of the snapshot devtool (use go run ./internal/devtools/ui-snapshot).
 /ui-snapshot
 /ui-drive
+
+# Browser client build copied into the gateway's embed directory by
+# scripts/build-web-client.sh (the .keep marker keeps go:embed compiling).
+/internal/gateway/webclient/dist/*
+!/internal/gateway/webclient/dist/.keep

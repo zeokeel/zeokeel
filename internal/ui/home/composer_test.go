@@ -14,6 +14,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/home"
 )
 
@@ -521,7 +522,7 @@ func TestHomeRecentSessionsExcludeArchivedAndOpen(t *testing.T) {
 		},
 	}}
 	h := newComposerHarness(t, chat, nil, nil)
-	if _, err := h.ui.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := h.ui.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID: "session", Title: "会话", Order: 20,
 		Build: func(c *ui.Context) { ui.Text(c, "会话屏幕") },
 	}); err != nil {

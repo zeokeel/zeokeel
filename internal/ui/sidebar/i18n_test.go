@@ -12,6 +12,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/sidebar"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -56,7 +57,7 @@ func newLocaleHarness(t *testing.T, chat contracts.ChatService, cfg sidebar.Conf
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
 	uiRoot.SetKernelContext(ctx)
 
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
@@ -68,7 +69,7 @@ func newLocaleHarness(t *testing.T, chat contracts.ChatService, cfg sidebar.Conf
 	if settings != nil {
 		provide[contracts.SettingsService](t, ctx, contracts.KeySettings, settings)
 	}
-	for _, spec := range []contracts.ScreenSpec{
+	for _, spec := range []uinative.ScreenSpec{
 		{ID: "home", Title: "首页", Order: 5, Build: func(c *ui.Context) { ui.Text(c, "home screen") }},
 		{ID: "session", Title: "会话", Order: 20, Build: func(c *ui.Context) { ui.Text(c, "session screen") }},
 		{ID: "automation", Title: "自动化", Order: 30, Build: func(c *ui.Context) { ui.Text(c, "automation screen") }},

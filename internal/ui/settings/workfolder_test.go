@@ -13,6 +13,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -74,7 +75,7 @@ func newWorkFolderHarness(t *testing.T, workspace contracts.WorkspaceService, la
 
 	store := newFakeSettings(nil)
 	chat := &fakeChat{}
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())

@@ -21,6 +21,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -61,7 +62,7 @@ type state struct {
 
 	// runtime requests frames and notifier raises the delete toast (with Undo
 	// when the host implements the optional action half).
-	runtime  contracts.UIRuntime
+	runtime  uinative.UIRuntime
 	notifier contracts.Notifier
 
 	// taskList backs the official List of scheduled tasks on the page.
@@ -136,7 +137,7 @@ type state struct {
 // Module registers the Automation screen.
 func Module() *module.Descriptor[Config] {
 	return module.Define(ModuleID, func(ctx cordis.Context, cfg Config) error {
-		runtime, err := ctx.Require(contracts.KeyUIRuntime)
+		runtime, err := ctx.Require(uinative.KeyUIRuntime)
 		if err != nil {
 			return err
 		}
@@ -175,7 +176,7 @@ func Module() *module.Descriptor[Config] {
 		}
 
 		if err := own(ctx, func() (func(), error) {
-			return runtime.RegisterScreen(contracts.ScreenSpec{
+			return runtime.RegisterScreen(uinative.ScreenSpec{
 				ID:    ScreenID,
 				Title: config.Title,
 				Order: 20,
@@ -191,7 +192,7 @@ func Module() *module.Descriptor[Config] {
 		// (SlotScreenActions), beside the host's palette and inspector controls.
 		// The item IDs carry the screen namespace so the band stays on this
 		// screen only.
-		screenSlots := []contracts.SlotItem{
+		screenSlots := []uinative.SlotItem{
 			{
 				Slot: contracts.SlotScreenHeader, ID: "automation.title", Order: 10,
 				Build: func(c *ui.Context) { buildScreenHeaderSlot(c, design.Of(c), config, moduleState) },
@@ -211,7 +212,7 @@ func Module() *module.Descriptor[Config] {
 		}
 		return nil
 	}).
-		AddRequires(module.Requires(contracts.KeyUIRuntime)).
+		AddRequires(module.Requires(uinative.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeyNavigator)).
 		WithName("ZeoKeel automation screen")
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/ui/insights"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
@@ -177,7 +178,7 @@ func newHarness(t *testing.T, service contracts.InsightsService, chat *fakeChat)
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
@@ -191,7 +192,7 @@ func newHarness(t *testing.T, service contracts.InsightsService, chat *fakeChat)
 	// A placeholder conversation screen: the Insights screen navigates to it
 	// when a leaderboard row opens (the real session screen is out of scope for
 	// this UI module test).
-	if _, err := uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := uiRoot.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID: "session", Title: "对话", Order: 20,
 		Build: func(c *ui.Context) { ui.Text(c, "会话屏幕内容") },
 	}); err != nil {

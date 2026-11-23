@@ -14,6 +14,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -42,7 +43,7 @@ func newNetworkState() *networkState { return &networkState{} }
 // buildNetworkPage renders the current effective proxy values and the two
 // native inputs with the save action. Changes are stored now and applied by the
 // host at the next start.
-func buildNetworkPage(c *ui.Context, kctx cordis.Context, store contracts.SettingsService, runtime contracts.UIRuntime, st *networkState, search *searchState, locale contracts.LocaleService) {
+func buildNetworkPage(c *ui.Context, kctx cordis.Context, store contracts.SettingsService, runtime uinative.UIRuntime, st *networkState, search *searchState, locale contracts.LocaleService) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.SpaceScreen).Children(func() {
 		uikit.PageHeader(c, localized(locale, "网络与搜索", "Network & search"), "")

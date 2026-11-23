@@ -8,6 +8,7 @@ import (
 	"github.com/egoist/mygo"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -50,7 +51,7 @@ func slugifyArtifactTitle(title string) string {
 // saveArtifact writes one artifact's Markdown body through the native save
 // dialog: cancellation is a no-op, dialog/write failures land in the section's
 // danger line and success shows the saved path.
-func saveArtifact(st *state, runtime contracts.UIRuntime, artifact contracts.Artifact) {
+func saveArtifact(st *state, runtime uinative.UIRuntime, artifact contracts.Artifact) {
 	options := mygo.SaveDialogOptions{
 		Title:       uikit.T(st.locale, "保存产物", "Save artifact"),
 		DefaultPath: slugifyArtifactTitle(artifact.Title) + ".md",

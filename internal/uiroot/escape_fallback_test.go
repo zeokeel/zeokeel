@@ -25,6 +25,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // escChat is a ChatService with one running conversation; it records the
@@ -188,7 +189,7 @@ func TestEscapeFallbackNoopOffSessionScreen(t *testing.T) {
 // settings surface is the host's own modal.
 func TestEscapeFallbackModalOwnsEscape(t *testing.T) {
 	h := newEscHarness(t, true)
-	mustPage(t, h.root, contracts.SettingsPageSpec{
+	mustPage(t, h.root, uinative.SettingsPageSpec{
 		ID: "appearance", Section: "界面", Title: "外观", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "settings-body") },
 	})
@@ -219,7 +220,7 @@ func TestEscapeFallbackModalOwnsEscape(t *testing.T) {
 func TestEscapeFallbackDelegatesToSessionEscape(t *testing.T) {
 	h := newEscHarness(t, true)
 	calls := 0
-	mustCommand(t, h.root, contracts.CommandSpec{
+	mustCommand(t, h.root, uinative.CommandSpec{
 		ID:    "session.escape",
 		Title: "会话 Escape",
 		Run:   func() error { calls++; return nil },
@@ -244,7 +245,7 @@ func TestEscapeFallbackDelegatesToSessionEscape(t *testing.T) {
 func TestEscapeFallbackDisabledSessionEscapeFallsBack(t *testing.T) {
 	h := newEscHarness(t, true)
 	calls := 0
-	mustCommand(t, h.root, contracts.CommandSpec{
+	mustCommand(t, h.root, uinative.CommandSpec{
 		ID:      "session.escape",
 		Title:   "会话 Escape",
 		Enabled: func() bool { return false },

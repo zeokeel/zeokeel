@@ -13,6 +13,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/session"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -85,7 +86,7 @@ func TestSessionBannerSlotAboveComposer(t *testing.T) {
 		Messages: []contracts.ChatMessage{{ID: "m1", Role: contracts.ChatRoleUser, Text: "跑一下"}},
 	}, true)
 	h := newHarness(t, chat)
-	unregister, err := h.ui.Runtime().RegisterSlotItem(contracts.SlotItem{
+	unregister, err := h.ui.Runtime().RegisterSlotItem(uinative.SlotItem{
 		Slot: contracts.SlotSessionBanner, ID: "test.approval-card", Order: 10,
 		Build: func(c *ui.Context) {
 			ui.Text(c, "审批内联卡")
@@ -170,7 +171,7 @@ func newApprovalHarness(t *testing.T, chat *fakeChat, approvals contracts.Approv
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())

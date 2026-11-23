@@ -14,6 +14,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	sessionui "github.com/zeokeel/zeokeel/internal/ui/session"
 	sidebarui "github.com/zeokeel/zeokeel/internal/ui/sidebar"
@@ -261,7 +262,7 @@ func TestToastsStayClearOfTheInspectorAtNarrowWidth(t *testing.T) {
 	}
 	// The inspector counts only while the screen contributes its pane; the real
 	// product's right panel does, so the probe registers one contribution.
-	if _, err := h.ui.Runtime().RegisterSlotItem(contracts.SlotItem{
+	if _, err := h.ui.Runtime().RegisterSlotItem(uinative.SlotItem{
 		Slot:  contracts.SlotSessionPanelRight,
 		ID:    "probe.right",
 		Order: 10,

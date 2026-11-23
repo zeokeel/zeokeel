@@ -11,12 +11,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
 // registeredCommand finds one command in the UI root's command surface.
-func registeredCommand(t *testing.T, uiRoot *uiroot.Root, id string) contracts.CommandSpec {
+func registeredCommand(t *testing.T, uiRoot *uiroot.Root, id string) uinative.CommandSpec {
 	t.Helper()
 	for _, command := range uiRoot.Runtime().Commands() {
 		if command.ID == id {
@@ -28,7 +28,7 @@ func registeredCommand(t *testing.T, uiRoot *uiroot.Root, id string) contracts.C
 		ids = append(ids, command.ID)
 	}
 	t.Fatalf("command %q not registered; commands = %v", id, ids)
-	return contracts.CommandSpec{}
+	return uinative.CommandSpec{}
 }
 
 // TestUpdateInstallCommandEnabledOnlyWithPendingPlan covers F7 for the palette:

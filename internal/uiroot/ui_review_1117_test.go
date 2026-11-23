@@ -15,6 +15,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -41,11 +42,11 @@ func TestRailReadsTheSingleScreenNavTable(t *testing.T) {
 	// Known ids take the table's localized label; an unregistered screen keeps
 	// its module-registered title, as before the delegation.
 	for _, id := range []string{"home", "session", "automation", "insights", "plugins", "settings"} {
-		if got, want := r.screenLabel(contracts.ScreenSpec{ID: id, Title: "module-" + id}), uikit.ScreenNavLabel(r.locale, id); got != want {
+		if got, want := r.screenLabel(uinative.ScreenSpec{ID: id, Title: "module-" + id}), uikit.ScreenNavLabel(r.locale, id); got != want {
 			t.Errorf("screenLabel(%q) = %q, want the table label %q", id, got, want)
 		}
 	}
-	if got := r.screenLabel(contracts.ScreenSpec{ID: "custom-screen", Title: "自定义屏幕"}); got != "自定义屏幕" {
+	if got := r.screenLabel(uinative.ScreenSpec{ID: "custom-screen", Title: "自定义屏幕"}); got != "自定义屏幕" {
 		t.Errorf("unknown screen label = %q, want the registered title", got)
 	}
 }
@@ -68,7 +69,7 @@ func TestRailDrawsInsightsDestination(t *testing.T) {
 	for index, screen := range screens {
 		screen := screen
 		mustScreen(t, r, textScreen(screen.id, screen.title, "body-"+screen.id, 20+index*10))
-		mustSlot(t, r, contracts.SlotItem{
+		mustSlot(t, r, uinative.SlotItem{
 			Slot: contracts.SlotSidebarNav, ID: screen.id + ".nav", Order: 20 + index*10,
 			Build: func(c *ui.Context) {
 				ui.Icon(c, uikit.ScreenNavIcon(screen.id)).Size(design.IconSizeS, design.IconSizeS)
@@ -166,11 +167,11 @@ func TestRailSessionsEntryMarksCurrentScreen(t *testing.T) {
 func TestPaletteShortcutColumnIsFixed(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustCommand(t, r, contracts.CommandSpec{ID: "demo.short", Title: "有键命令", Hint: "短提示",
+	mustCommand(t, r, uinative.CommandSpec{ID: "demo.short", Title: "有键命令", Hint: "短提示",
 		Order: 10, Shortcut: "Cmd/Ctrl+N", Run: func() error { return nil }})
-	mustCommand(t, r, contracts.CommandSpec{ID: "demo.none", Title: "无键命令", Hint: "这是一个比较长的提示文本",
+	mustCommand(t, r, uinative.CommandSpec{ID: "demo.none", Title: "无键命令", Hint: "这是一个比较长的提示文本",
 		Order: 20, Run: func() error { return nil }})
-	mustCommand(t, r, contracts.CommandSpec{ID: "demo.long", Title: "长键命令",
+	mustCommand(t, r, uinative.CommandSpec{ID: "demo.long", Title: "长键命令",
 		Order: 30, Shortcut: "Cmd/Ctrl + Alt + Shift + P", Run: func() error { return nil }})
 	tt := newTestTester(t, r, 1280, 800)
 	tt.Frame()
@@ -223,7 +224,7 @@ func TestSettingsNavKeepsDarkRampBelowPanel(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		r := newTestRoot(t)
 		mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-		mustPage(t, r, contracts.SettingsPageSpec{
+		mustPage(t, r, uinative.SettingsPageSpec{
 			ID: "demo", Section: "常用", Title: "演示页", Order: 10,
 			Build: func(c *ui.Context) { ui.Text(c, "page-body") },
 		})
@@ -262,7 +263,7 @@ func TestSettingsNavKeepsDarkRampBelowPanel(t *testing.T) {
 // the status strip), and clear of a docked inspector.
 func TestToastAnchorFollowsChromeState(t *testing.T) {
 	r := newTestRoot(t)
-	mustScreen(t, r, contracts.ScreenSpec{
+	mustScreen(t, r, uinative.ScreenSpec{
 		ID: "session", Title: "会话", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "body-session") },
 	})

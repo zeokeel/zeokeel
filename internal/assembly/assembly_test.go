@@ -23,6 +23,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/assembly"
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/hosttools"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -108,7 +109,7 @@ func provideHostServices(t *testing.T, root cordis.Context, withUI bool) *uiroot
 		return nil
 	}
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel test"})
-	provide(t, root, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, root, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, root, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, root, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, root, contracts.KeyLocale, uiRoot.Locale())
@@ -562,7 +563,7 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	}
 	// The product genuinely has no UI: no UI service was provided and the
 	// headless assembly never asks for one.
-	if _, ok := root.Get(contracts.KeyUIRuntime); ok {
+	if _, ok := root.Get(uinative.KeyUIRuntime); ok {
 		t.Fatal("headless root unexpectedly has a UI runtime service")
 	}
 	info, ok := root.Get(contracts.KeyAppInfo)

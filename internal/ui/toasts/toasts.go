@@ -30,6 +30,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -137,7 +138,7 @@ type state struct {
 	settings contracts.SettingsService
 	// runtime requests the next frame after a toast closes so the queue's head
 	// can take the freed slot.
-	runtime contracts.UIRuntime
+	runtime uinative.UIRuntime
 	// kernel resolves the optional host toast anchor lazily: a host may bind
 	// the service after this module activates, so the lookup retries per frame
 	// until it lands (nil keeps the module's default placement).
@@ -200,7 +201,7 @@ func dedupeToastID(level, text string) string {
 // Module registers the toast overlay contribution.
 func Module() *module.Descriptor[Config] {
 	return module.Define(ModuleID, func(ctx cordis.Context, cfg Config) error {
-		runtime, err := ctx.Require(contracts.KeyUIRuntime)
+		runtime, err := ctx.Require(uinative.KeyUIRuntime)
 		if err != nil {
 			return err
 		}
@@ -257,7 +258,7 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 
-		item := contracts.SlotItem{
+		item := uinative.SlotItem{
 			Slot:  contracts.SlotOverlayToasts,
 			ID:    SlotID,
 			Order: 10,
@@ -269,7 +270,7 @@ func Module() *module.Descriptor[Config] {
 			return runtime.RegisterSlotItem(item)
 		})
 	}).
-		AddRequires(module.Requires(contracts.KeyUIRuntime)).
+		AddRequires(module.Requires(uinative.KeyUIRuntime)).
 		WithName("ZeoKeel toast notifications")
 }
 

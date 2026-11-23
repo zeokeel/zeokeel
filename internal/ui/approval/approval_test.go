@@ -20,6 +20,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/approval"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -213,7 +214,7 @@ func newHarnessWithChat(t *testing.T, cfg approval.Config, chat contracts.ChatSe
 
 	// The session screen renders the banner slot directly above where the
 	// composer would be; the real ui/session module does the same.
-	if _, err := uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := uiRoot.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID:    "session",
 		Title: "会话",
 		Build: func(c *ui.Context) {
@@ -223,7 +224,7 @@ func newHarnessWithChat(t *testing.T, cfg approval.Config, chat contracts.ChatSe
 	}); err != nil {
 		t.Fatalf("register session screen: %v", err)
 	}
-	if _, err := uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := uiRoot.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID:    "home",
 		Title: "首页",
 		Build: func(c *ui.Context) { ui.Text(c, "主屏幕") },
@@ -231,7 +232,7 @@ func newHarnessWithChat(t *testing.T, cfg approval.Config, chat contracts.ChatSe
 		t.Fatalf("register home screen: %v", err)
 	}
 
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
 	provide(t, ctx, contracts.KeyApprovals, contracts.Approvals(approvals))
 	nav := &recordingNavigator{inner: uiRoot.Navigator()}
@@ -740,7 +741,7 @@ func TestModuleManifest(t *testing.T) {
 		required[requirement.Name] = true
 	}
 	for _, name := range []string{
-		contracts.KeyUIRuntime.Name(),
+		uinative.KeyUIRuntime.Name(),
 		contracts.KeyApprovals.Name(),
 		contracts.KeyNavigator.Name(),
 	} {

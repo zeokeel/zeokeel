@@ -11,6 +11,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // shortcutChat is a minimal ChatService recording NewSession calls.
@@ -72,7 +73,7 @@ func TestShortcutCmdNFallsBackToRegisteredCommand(t *testing.T) {
 	root := New(Config{AppName: "ShortcutTest"})
 	mustScreen(t, root, textScreen("session", "会话", "session-body", 20))
 	ran := 0
-	unregister, err := root.Runtime().RegisterCommand(contracts.CommandSpec{
+	unregister, err := root.Runtime().RegisterCommand(uinative.CommandSpec{
 		ID: "zeokeel.session.new", Title: "新会话", Run: func() error {
 			ran++
 			return nil

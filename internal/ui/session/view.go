@@ -16,6 +16,7 @@ import (
 	"github.com/egoist/mygo/ui/markdown"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
@@ -43,7 +44,7 @@ const (
 // widgets; the screen draws nothing itself.
 func buildScreen(
 	c *ui.Context,
-	runtime contracts.UIRuntime,
+	runtime uinative.UIRuntime,
 	navigator contracts.Navigator,
 	chat contracts.ChatService,
 	cfg Config,
@@ -315,7 +316,7 @@ func resetSessionErrors(st *state) {
 // second request while stopping is ignored. A failure is reported inline. It is
 // shared by the stop button, Esc/Cmd+. and the screen shortcut so every
 // interrupt path has identical semantics.
-func cancelRunningTurn(chat contracts.ChatService, st *state, runtime contracts.UIRuntime, sessionID string) {
+func cancelRunningTurn(chat contracts.ChatService, st *state, runtime uinative.UIRuntime, sessionID string) {
 	if chat == nil || st == nil || sessionID == "" {
 		return
 	}
@@ -362,7 +363,7 @@ func sessionDialogOpen(st *state) bool {
 // approval card's deny action does. Esc on the screen must dismiss an approval
 // before it interrupts the turn: the card is the thing waiting for the user.
 // It reports whether one was pending, so the interrupt paths leave the run alive.
-func denyPendingApproval(st *state, runtime contracts.UIRuntime) bool {
+func denyPendingApproval(st *state, runtime uinative.UIRuntime) bool {
 	if st == nil {
 		return false
 	}
@@ -423,7 +424,7 @@ func (st *state) announceApprovalArrival(c *ui.Context) {
 // surface) → the child-view detour → a pending approval (deny, keep the run) →
 // modal dialogs (left to their own overlay shortcut) → an open suggestion menu
 // (dismiss) → the running turn (stop). It reports whether it consumed the key.
-func sessionEscape(chat contracts.ChatService, st *state, runtime contracts.UIRuntime, activeID string) bool {
+func sessionEscape(chat contracts.ChatService, st *state, runtime uinative.UIRuntime, activeID string) bool {
 	if st == nil {
 		return false
 	}
@@ -476,7 +477,7 @@ func sessionEscape(chat contracts.ChatService, st *state, runtime contracts.UIRu
 // pending approval or an open suggestion menu); otherwise the key belongs to
 // the focused control. Cmd+. never belongs to a menu and interrupts directly
 // while a turn runs.
-func registerSessionEscape(c *ui.Context, chat contracts.ChatService, st *state, runtime contracts.UIRuntime, activeID string) {
+func registerSessionEscape(c *ui.Context, chat contracts.ChatService, st *state, runtime uinative.UIRuntime, activeID string) {
 	if activeID == "" {
 		return
 	}
@@ -619,7 +620,7 @@ func buildConversationTitle(c *ui.Context, t *design.Tokens, st *state, chat con
 // the conversation-actions ⋯ menu. The run state and agent entries live in the
 // header's Agent Run Band, before the spacer that puts these utilities at the
 // band's end.
-func buildScreenActionsSlot(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildScreenActionsSlot(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	st *state, chat contracts.ChatService, cfg Config) {
 	activeID := chat.ActiveSession()
 	session, hasSession := chat.Session(activeID)
@@ -632,7 +633,7 @@ func buildScreenActionsSlot(c *ui.Context, t *design.Tokens, runtime contracts.U
 // visible words) whose menu holds the conversation clipboard, export and archive
 // actions. The actions themselves keep the old overflow menu's order.
 func buildConversationActionsButton(c *ui.Context, t *design.Tokens, st *state,
-	runtime contracts.UIRuntime, cfg Config, chatSession contracts.ChatSession) {
+	runtime uinative.UIRuntime, cfg Config, chatSession contracts.ChatSession) {
 	label := st.tr("会话操作", "Conversation actions")
 	uikit.IconButton(c, uikit.IconButtonOptions{
 		Label:   label,
@@ -651,7 +652,7 @@ func buildConversationActionsButton(c *ui.Context, t *design.Tokens, st *state,
 // archive action. Actions are grouped: clipboard first, the export formats, the
 // goal, archiving last.
 func buildConversationActionsMenu(m *ui.Menu, c *ui.Context, st *state,
-	runtime contracts.UIRuntime, cfg Config, chatSession contracts.ChatSession) {
+	runtime uinative.UIRuntime, cfg Config, chatSession contracts.ChatSession) {
 	if m.Item(st.tr("复制会话 ID", "Copy session ID")).Chosen() {
 		c.WriteClipboard(chatSession.ID)
 	}
@@ -808,7 +809,7 @@ func (st *state) reportDockTop(top float32) {
 // draws its inline card into, inside one height-budgeted scroll (UX-02). A
 // pending approval docks FIRST so its decision buttons are reachable without
 // scrolling; otherwise the ambient todo/goal order is kept.
-func buildComposerDock(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+func buildComposerDock(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state) {
 	// The dock sits on the shared reading column, so it lines up with the
 	// transcript and the composer card instead of a hand-rolled 960 frame
 	// (uikit.ReadingColumn owns the 92% cap and the horizontal padding).
@@ -846,7 +847,7 @@ func buildComposerDock(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 // user reads a child, since the inline card is the product's only approval UI.
 // The same height budget keeps a long card from pushing the child's send box
 // out of the window (UX-02).
-func buildChildBannerDock(c *ui.Context, runtime contracts.UIRuntime, st *state) {
+func buildChildBannerDock(c *ui.Context, runtime uinative.UIRuntime, st *state) {
 	// Same reading column as the transcript and the composer dock.
 	uikit.ReadingColumn(c, func(c *ui.Context) {
 		ui.Scroll(c.Key("session.childBanner")).FillWidth().
@@ -1128,7 +1129,7 @@ func childNoticeText(st *state, agent contracts.ChildAgent) (string, bool) {
 func buildChatPane(
 	c *ui.Context,
 	t *design.Tokens,
-	runtime contracts.UIRuntime,
+	runtime uinative.UIRuntime,
 	navigator contracts.Navigator,
 	chat contracts.ChatService,
 	cfg Config,
@@ -1242,7 +1243,7 @@ func buildChatPane(
 // 新对话 action then only hands the keyboard to the composer instead of
 // creating a second empty conversation (FR-30); a genuinely new conversation is
 // created untitled so the backend still auto-titles it from the first prompt.
-func buildHero(c *ui.Context, t *design.Tokens, cfg Config, runtime contracts.UIRuntime,
+func buildHero(c *ui.Context, t *design.Tokens, cfg Config, runtime uinative.UIRuntime,
 	navigator contracts.Navigator, chat contracts.ChatService, st *state, hasSession bool) {
 	th := t.Theme()
 	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(design.Space3).
@@ -1300,7 +1301,7 @@ func (st *state) heroExamplePrompts() []string {
 	}
 }
 
-func buildHeroExamples(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+func buildHeroExamples(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state) {
 	prompts := st.heroExamplePrompts()
 	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).Children(func() {
 		for _, prompt := range prompts {
@@ -1320,7 +1321,7 @@ func buildHeroExamples(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 // no model, no API key, no workspace — with one action each that fixes it
 // (FR-07). Home's setup card is no longer reachable, so this is the guided
 // path; it stays quiet when everything is configured.
-func buildFirstRunChecklist(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildFirstRunChecklist(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	navigator contracts.Navigator, chat contracts.ChatService, st *state) {
 	if chat == nil || st == nil {
 		return
@@ -1391,7 +1392,7 @@ func buildFirstRunAction(c *ui.Context, t *design.Tokens, label, actionLabel str
 // buildMessage renders one transcript entry. User turns are right-aligned
 // raised bubbles; assistant turns are plain brand body text with optional
 // reasoning, tool cards and errors.
-func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, last, defaultOpen bool) {
+func buildMessage(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, last, defaultOpen bool) {
 	switch message.Role {
 	case contracts.ChatRoleUser:
 		if message.GoalRound != nil {
@@ -1481,7 +1482,7 @@ func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 // finished, compact/standard/detailed fold the process into one summary row (open
 // by default only for the latest turn under collapse=next-input), while verbose
 // always shows the full timeline under its meta row. A failed turn never folds.
-func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, last, defaultOpen bool) {
+func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, last, defaultOpen bool) {
 	policy := st.workStepsPolicyFor()
 	foldable := assistantProcessFoldable(message, policy.mode)
 	open, explicit := st.processOpen[message.ID]
@@ -1546,7 +1547,7 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 // compact/standard replace the live timeline with one activity line (then the
 // streaming body and any decision card), while detailed/verbose keep the
 // interleaved timeline and the generating indicator.
-func buildAssistantStreaming(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildAssistantStreaming(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	st *state, message contracts.ChatMessage, policy workStepsPolicy) {
 	switch policy.mode {
 	case contracts.WorkStepsCompact:
@@ -1592,7 +1593,7 @@ func assistantProcessFoldable(message contracts.ChatMessage, mode string) bool {
 // of the same row, so a folded turn spends one row instead of two. It returns
 // the resulting fold state; a click stores it in the transcript state and asks
 // for HoldPlace so the row keeps its place.
-func buildProcessSummary(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state,
+func buildProcessSummary(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state,
 	message contracts.ChatMessage, open bool) bool {
 	return buildProcessFoldRow(c, t, runtime, st, message.ID, open,
 		processSummaryParts(st, message.Reasoning, reasoningSegmentCount(message), len(message.Tools)))
@@ -1602,7 +1603,7 @@ func buildProcessSummary(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 // chevron, the summary and the turn's meta (time/usage/⋯) on one row. The fold
 // key is the message ID for a single turn and the first message ID for a grouped
 // multi-step turn, so both remember their state the same way.
-func buildProcessFoldRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state,
+func buildProcessFoldRow(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state,
 	key string, open bool, parts []string) bool {
 	summary := strings.Join(parts, " · ")
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -1692,7 +1693,7 @@ func assistantTurnContinues(prev, next contracts.ChatMessage) bool {
 // intermediate replies stay behind the fold, and only the final result (plus any
 // decision card that is waiting on the user) is shown under it. Expanding the
 // fold restores every step's full timeline in order.
-func buildAssistantTurnGroup(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state,
+func buildAssistantTurnGroup(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state,
 	group []contracts.ChatMessage, canRegenerate, last, defaultOpen bool) {
 	key := group[0].ID
 	open, explicit := st.processOpen[key]
@@ -1770,7 +1771,7 @@ func groupedMessageUsage(group []contracts.ChatMessage) *contracts.MessageUsage 
 // buildAssistantReply draws the folded turn's visible reply: the Markdown body
 // and the prominent decision cards (ask_user / plan_review / exit_plan_mode) in
 // call order, while the timeline rows stay folded behind the summary.
-func buildAssistantReply(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, message contracts.ChatMessage) {
+func buildAssistantReply(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state, message contracts.ChatMessage) {
 	renderAssistantText(c, t, st, message)
 	buildProminentDecisions(c, t, runtime, st, message)
 }
@@ -1778,7 +1779,7 @@ func buildAssistantReply(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 // buildProminentDecisions draws the decision cards (ask_user / plan_review /
 // exit_plan_mode) of one step: a folded process must never hide a decision the
 // turn is waiting on, so these stay visible while the rest of the step folds.
-func buildProminentDecisions(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, message contracts.ChatMessage) {
+func buildProminentDecisions(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state, message contracts.ChatMessage) {
 	for _, tool := range message.Tools {
 		if prominentTool(tool.Name) {
 			buildAssistantToolRow(c, t, runtime, st, message.ID, tool, false)
@@ -1806,7 +1807,7 @@ func renderAssistantText(c *ui.Context, t *design.Tokens, st *state, message con
 // (per-iteration reasoning disclosures and compact tool rows, indented Space4,
 // Space1 row spacing, inline chevrons) interleaved with the reply prose in the
 // recorded order (2026-11 audit US-01/US-02).
-func buildAssistantTimeline(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, message contracts.ChatMessage) {
+func buildAssistantTimeline(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state, message contracts.ChatMessage) {
 	timeline := ui.Column(c).FillWidth().Gap(design.Space1)
 	timeline.Children(func() {
 		renderAssistantBody(c, t, runtime, st, message)
@@ -1935,7 +1936,7 @@ func activeReasoningSegment(message contracts.ChatMessage) bool {
 // on a live message is valid order — every event happened before any prose.
 // Messages whose tool timeline was never recorded keep the whole-text-then-cards
 // fallback for the calls (their reasoning segments still precede the prose).
-func renderAssistantBody(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func renderAssistantBody(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	st *state, message contracts.ChatMessage) {
 	// renderText draws one slice of the reply. Only the slice after the last
 	// event — the tail still being written — is streaming markdown: a slice that
@@ -2029,7 +2030,7 @@ func prominentTool(name string) bool {
 // wins (its own card layout), decision tools keep the prominent card, and every
 // other call uses the shared compact disclosure row, placed inside the activity
 // band when inBand is set.
-func buildAssistantToolRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildAssistantToolRow(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	st *state, messageID string, tool contracts.ToolCall, inBand bool) {
 	call := contracts.ToolCall{
 		ID: tool.ID, Name: tool.Name, Status: tool.Status,
@@ -2143,7 +2144,7 @@ func buildReasoningSegmentDisclosure(c *ui.Context, t *design.Tokens, st *state,
 // time, the usage summary and the ⋯ message-actions menu. It draws no row of its
 // own so the folded process row can host it at its trailing edge, next to the
 // 过程 summary, instead of spending a separate row under the turn.
-func buildAssistantMetaContent(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildAssistantMetaContent(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	st *state, message contracts.ChatMessage, canRegenerate bool) bool {
 	chat, hasText := messageActionTarget(st, message)
 	regenerate := canRegenerate && strings.TrimSpace(message.Error) == ""
@@ -2192,7 +2193,7 @@ func buildAssistantMetaContent(c *ui.Context, t *design.Tokens, runtime contract
 // two seconds after a reply settles (metaRowRevealed). The row is built either
 // way, so assistive technology always reads the time and the actions, and Tab
 // reaches the ⋯ of a message the pointer never touched.
-func buildAssistantMetaRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildAssistantMetaRow(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	st *state, message contracts.ChatMessage, canRegenerate, shown bool) {
 	if !assistantMetaHasContent(message) {
 		return
@@ -2266,7 +2267,7 @@ func assistantMetaHasContent(message contracts.ChatMessage) bool {
 
 // buildAssistantActionsMenu fills the ⋯ menu of a finished turn: copy, regenerate
 // and the compact usage-detail submenu.
-func buildAssistantActionsMenu(m *ui.Menu, c *ui.Context, runtime contracts.UIRuntime,
+func buildAssistantActionsMenu(m *ui.Menu, c *ui.Context, runtime uinative.UIRuntime,
 	st *state, chat contracts.ChatService, message contracts.ChatMessage,
 	canRegenerate, hasText bool) {
 	if hasText {
@@ -2341,7 +2342,7 @@ func usageSummaryText(st *state, usage *contracts.MessageUsage) string {
 // (a restored history without the event) draws no row: a lone ⋯ under the
 // bubble is exactly the metadata noise the audit found, so copy/edit for that
 // message are unavailable rather than hidden behind an unlabelled dot.
-func buildUserMessageMeta(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildUserMessageMeta(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	st *state, message contracts.ChatMessage, shown bool) {
 	hasText := strings.TrimSpace(message.Text) != ""
 	if message.CreatedAt.IsZero() {
@@ -2381,7 +2382,7 @@ func buildUserMessageMeta(c *ui.Context, t *design.Tokens, runtime contracts.UIR
 // editUserMessageDraft puts one user message back into the composer without
 // sending it: the draft replaces the composer text, any suggestion menu the text
 // would open is suppressed, and the keyboard goes to the composer.
-func editUserMessageDraft(st *state, runtime contracts.UIRuntime, message contracts.ChatMessage) {
+func editUserMessageDraft(st *state, runtime uinative.UIRuntime, message contracts.ChatMessage) {
 	requestDraftOverwrite(st, runtime, message.Text)
 }
 
@@ -2389,7 +2390,7 @@ func editUserMessageDraft(st *state, runtime contracts.UIRuntime, message contra
 // example): an empty draft takes it directly, but a non-empty draft is the
 // user's half-written work — replacing it asks through ConfirmDanger first
 // (UX-05, DESIGN rule 9: Cancel is the Default, the overwrite is the danger).
-func requestDraftOverwrite(st *state, runtime contracts.UIRuntime, text string) {
+func requestDraftOverwrite(st *state, runtime uinative.UIRuntime, text string) {
 	if st == nil {
 		return
 	}
@@ -2409,7 +2410,7 @@ func requestDraftOverwrite(st *state, runtime contracts.UIRuntime, text string) 
 // buildDraftOverwriteConfirm draws the overwrite confirmation while one is
 // pending: confirming applies the staged text, cancelling (button, Esc or
 // backdrop) keeps the draft untouched.
-func buildDraftOverwriteConfirm(c *ui.Context, st *state, runtime contracts.UIRuntime) {
+func buildDraftOverwriteConfirm(c *ui.Context, st *state, runtime uinative.UIRuntime) {
 	if st == nil || st.draftOverwritePending == "" {
 		return
 	}
@@ -2437,7 +2438,7 @@ func buildDraftOverwriteConfirm(c *ui.Context, st *state, runtime contracts.UIRu
 // runRegenerate re-runs the last exchange of the active conversation through
 // the optional SessionRegenerator. A failure stays on the message as an error
 // line instead of a toast: the message is where the action was.
-func runRegenerate(st *state, runtime contracts.UIRuntime) {
+func runRegenerate(st *state, runtime uinative.UIRuntime) {
 	chat, _ := st.ctx.Get(contracts.KeyChat)
 	regenerator, ok := chat.(contracts.SessionRegenerator)
 	if !ok || chat == nil {
@@ -2457,7 +2458,7 @@ func runRegenerate(st *state, runtime contracts.UIRuntime) {
 
 // buildRetryAction is the failed turn's one obvious retry: a labeled secondary
 // button under the error row, enabled even when the turn has no text to copy.
-func buildRetryAction(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+func buildRetryAction(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state) {
 	_ = t
 	uikit.RunStatus(c, uikit.RunStatusOptions{
 		Retryable: true,
@@ -2510,7 +2511,7 @@ func messageActionTarget(st *state, message contracts.ChatMessage) (chat contrac
 // buildMessageError renders a failed assistant turn: a localized kind heading
 // with actionable guidance, plus the original backend text as muted diagnostic
 // copy so no information is lost. Unknown/other kinds keep the raw line.
-func buildMessageError(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildMessageError(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	st *state, message contracts.ChatMessage) {
 	kind := strings.ToLower(strings.TrimSpace(message.ErrorKind))
 	// The iteration cap running out is not a provider failure: explain the
@@ -3113,7 +3114,7 @@ func formatTimestamp(locale contracts.LocaleService, value time.Time) string {
 func buildComposer(
 	c *ui.Context,
 	t *design.Tokens,
-	runtime contracts.UIRuntime,
+	runtime uinative.UIRuntime,
 	navigator contracts.Navigator,
 	chat contracts.ChatService,
 	cfg Config,
@@ -3424,7 +3425,7 @@ func buildComposer(
 // is dismissed with Esc, or when nothing matches, Enter sends the draft
 // literally (C-22), so a message that begins with "/" stays sendable; the
 // composer hint says which of the two Enter will do.
-func composerTextKey(runtime contracts.UIRuntime, chat contracts.ChatService, st *state, activeID string, running, queueAllowed bool) func(ui.TextKey) bool {
+func composerTextKey(runtime uinative.UIRuntime, chat contracts.ChatService, st *state, activeID string, running, queueAllowed bool) func(ui.TextKey) bool {
 	return func(k ui.TextKey) bool {
 		// Esc closes an open suggestion menu and leaves the draft untouched
 		// (the dismissal is remembered until the draft changes again).
@@ -3611,7 +3612,7 @@ func composerVisibleHint(st *state, running, slashMenuActive, queueAllowed, mode
 // width the official toolbar (or its overflow menu) keeps that entry reachable
 // instead of the old very-compact session-menu fallback. Only the
 // all-permissions preset warns on the button.
-func buildComposerToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildComposerToolbar(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	navigator contracts.Navigator, chat contracts.ChatService, st *state, running, compactControls, veryCompact bool) {
 	uikit.ComposerToolbar(c, uikit.ComposerToolbarOptions{
 		Key:    "session.composer.toolbar",
@@ -3630,7 +3631,7 @@ func buildComposerToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIR
 // and drop and image pasting stay the other attachment paths. When the picker
 // is unavailable it reports the reason and the remaining paths in the
 // composer's error row instead of asking for a typed path.
-func buildAttachButton(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, running bool) {
+func buildAttachButton(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state, running bool) {
 	label := st.tr("附件", "Attach")
 	tip := st.tr("添加文件或图片", "Add files or images")
 	if running {
@@ -3657,7 +3658,7 @@ func buildAttachButton(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 // with the current permission preset itself (工作区修改 / 所有权限 / 只读) so the
 // composer never shows a separate destination name. Without a settings store
 // there is no permission to show or choose, so the button is not built at all.
-func buildSessionMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+func buildSessionMenu(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state) {
 	if st.settings == nil {
 		return
 	}
@@ -3697,7 +3698,7 @@ func (st *state) permissionMenuLabel() (label string, warn bool) {
 // Radio item each. The disabled header row keeps the group name above its
 // choices and carries the explanation in its tooltip, so the menu does not grow
 // another row; the current value is already on the toolbar button.
-func buildSessionPermissionMenuItems(m *ui.Menu, runtime contracts.UIRuntime, st *state) {
+func buildSessionPermissionMenuItems(m *ui.Menu, runtime uinative.UIRuntime, st *state) {
 	if st.settings == nil {
 		return
 	}
@@ -3845,7 +3846,7 @@ func resolveSessionThinking(st *state, chat contracts.ChatService, activeID stri
 // buildSessionThinkingRow adds the compact 推理等级 submenu row whose trailing
 // value is the effective level. The model chip's menu and the very-compact
 // session-menu fallback share it, so both entry points behave identically.
-func buildSessionThinkingRow(m *ui.Menu, runtime contracts.UIRuntime, st *state,
+func buildSessionThinkingRow(m *ui.Menu, runtime uinative.UIRuntime, st *state,
 	thinking sessionThinkingState, activeID string) {
 	row := m.Submenu(st.tr("推理等级", "Reasoning level"), func(sub *ui.Menu) {
 		buildSessionThinkingChoices(sub, runtime, st, thinking, activeID)
@@ -3859,7 +3860,7 @@ func buildSessionThinkingRow(m *ui.Menu, runtime contracts.UIRuntime, st *state,
 // Selecting a mode stores it on that (conversation, model) row and clears the
 // legacy conversation-wide rows; following the default clears every override
 // row, so switching models never inherits another model's strength.
-func buildSessionThinkingChoices(m *ui.Menu, runtime contracts.UIRuntime, st *state,
+func buildSessionThinkingChoices(m *ui.Menu, runtime uinative.UIRuntime, st *state,
 	thinking sessionThinkingState, activeID string) {
 	modelID := strings.TrimSpace(thinking.info.ID)
 	label := modelThinkingDefaultLabel(st, thinking.info)
@@ -4002,7 +4003,7 @@ func sessionChipModelLabel(st *state, models []contracts.ModelInfo, effectiveMod
 // grouped by provider (a disabled header per provider group, in catalog order),
 // each row radio-marking the conversation's current model and switching it when
 // chosen. An empty catalog says so instead of rendering an empty menu.
-func buildSessionModelChoices(m *ui.Menu, runtime contracts.UIRuntime, st *state,
+func buildSessionModelChoices(m *ui.Menu, runtime uinative.UIRuntime, st *state,
 	switcher contracts.SessionModelSwitcher, activeID, effectiveModel string,
 	models []contracts.ModelInfo) {
 	if len(models) == 0 {
@@ -4088,7 +4089,7 @@ func truncateRunes(s string, max int) string {
 
 // buildModelChip shows the session's effective model (session override, then
 // the configured model) and opens the model switcher or the model settings.
-func buildModelChip(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildModelChip(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	navigator contracts.Navigator, chat contracts.ChatService, st *state, compactControls, veryCompact bool) {
 	activeID := chat.ActiveSession()
 	activeSession, hasSession := chat.Session(activeID)
@@ -4530,7 +4531,7 @@ func (st *state) recoveryActionLabel(kind string) string {
 // runRecovery performs the one-click fix of a known failure: the model/search
 // pages open the settings surface on that page; the workspace action runs the
 // native folder picker (the workspace seam the @ menu uses).
-func (st *state) runRecovery(runtime contracts.UIRuntime, kind string) {
+func (st *state) runRecovery(runtime uinative.UIRuntime, kind string) {
 	switch kind {
 	case recoveryKindModel:
 		openSettingsPage(st.navigator, settingsPageModel)
@@ -4617,7 +4618,7 @@ func buildTruncatedNotice(c *ui.Context, t *design.Tokens, st *state, messageID 
 // buildRecoveryLine is the shared localized-failure row: the localized heading,
 // the fixing action and, when the caller has one, the raw backend text as
 // selectable technical detail. Nothing is hidden: the raw text stays copyable.
-func buildRecoveryLine(c *ui.Context, t *design.Tokens, st *state, runtime contracts.UIRuntime,
+func buildRecoveryLine(c *ui.Context, t *design.Tokens, st *state, runtime uinative.UIRuntime,
 	heading, kind, detail string) {
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -4643,7 +4644,7 @@ func buildRecoveryLine(c *ui.Context, t *design.Tokens, st *state, runtime contr
 
 // buildComposerRecovery renders one mapped send failure under the composer
 // input (the attachment row owns the generic raw error line).
-func buildComposerRecovery(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+func buildComposerRecovery(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state) {
 	if st.commandRecovery == "" {
 		return
 	}
@@ -4714,9 +4715,9 @@ func slashQuery(draft string) (string, bool) {
 // matchingCommands filters the command surface for the slash query: commands
 // with Enabled()==false are always hidden, and a non-empty query matches the
 // title, ID or hint case-insensitively. The result is capped for the menu.
-func matchingCommands(runtime contracts.UIRuntime, query string) []contracts.CommandSpec {
+func matchingCommands(runtime uinative.UIRuntime, query string) []uinative.CommandSpec {
 	needle := strings.ToLower(strings.TrimSpace(query))
-	matches := make([]contracts.CommandSpec, 0, maxSlashCommands)
+	matches := make([]uinative.CommandSpec, 0, maxSlashCommands)
 	// Two modules can register the same visible action (the old shell's
 	// "打开设置" and the home screen's "设置"): the slash menu, like the command
 	// palette, shows each title once.
@@ -4778,7 +4779,7 @@ func clampSelection(sel, n int) int {
 // nothing matches the key keeps its normal meaning: the draft is sent literally
 // (C-22 — a message that begins with "/" must stay sendable, and the composer
 // hint says so after the menu is dismissed).
-func handleSlashMenuKey(k ui.TextKey, runtime contracts.UIRuntime, st *state, query string) bool {
+func handleSlashMenuKey(k ui.TextKey, runtime uinative.UIRuntime, st *state, query string) bool {
 	matches := matchingCommands(runtime, query)
 	switch k.Key {
 	case ui.KeyUp:
@@ -4811,7 +4812,7 @@ func handleSlashMenuKey(k ui.TextKey, runtime contracts.UIRuntime, st *state, qu
 // move). The keyboard path stays in composerTextKey: Up/Down move the highlight,
 // Enter/Tab run the highlighted command, Esc closes the menu and keeps the
 // draft. Clicking outside closes it too.
-func buildSlashPopover(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildSlashPopover(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	st *state, query string, anchor ui.Element) ui.Element {
 	matches := matchingCommands(runtime, query)
 	sel := clampSelection(st.slashSel, len(matches))
@@ -5065,7 +5066,7 @@ func applyMention(st *state, draft string, tokenStart, tokenEnd int, row mention
 // highlight, Enter (or Cmd/Ctrl+Enter) and Tab insert the highlighted
 // reference, Esc is handled by the caller. With no rows the keys keep their
 // normal editing meaning.
-func handleMentionMenuKey(k ui.TextKey, runtime contracts.UIRuntime, chat contracts.ChatService,
+func handleMentionMenuKey(k ui.TextKey, runtime uinative.UIRuntime, chat contracts.ChatService,
 	st *state, query string, tokenStart, tokenEnd int) bool {
 	workspace, _ := st.ctx.Get(contracts.KeyWorkspace)
 	ensureMentionCache(st, workspace, query)
@@ -5098,7 +5099,7 @@ func handleMentionMenuKey(k ui.TextKey, runtime contracts.UIRuntime, chat contra
 // It lists the workspace files the cached query matched and, when other
 // conversations exist, the 会话 group referencing them. Choosing a file inserts
 // "@path " into the draft; choosing a chat inserts "@session:<id>".
-func buildMentionPopover(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildMentionPopover(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	workspace contracts.WorkspaceService, chat contracts.ChatService, st *state,
 	query string, tokenStart, tokenEnd int, anchor ui.Element) ui.Element {
 	ensureMentionCache(st, workspace, query)
@@ -5199,7 +5200,7 @@ var WorkspacePicker = func(title string) (string, error) {
 // buildMentionNoWorkspaceBlock is the @ menu's no-workspace state: the localized
 // explanation (instead of the backend's English error), a hint and the
 // open/create recovery actions (R7).
-func buildMentionNoWorkspaceBlock(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildMentionNoWorkspaceBlock(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	workspace contracts.WorkspaceService, st *state) {
 	ui.Column(c).FillWidth().Gap(design.Space2).
 		PaddingX(design.Space2).PaddingY(design.Space1).Children(func() {
@@ -5236,7 +5237,7 @@ func buildMentionNoWorkspaceBlock(c *ui.Context, t *design.Tokens, runtime contr
 
 // openWorkspaceForMention makes one registered workspace current and refreshes
 // the @ menu's file list; the read model is a bounded in-memory call.
-func openWorkspaceForMention(runtime contracts.UIRuntime, workspace contracts.WorkspaceService,
+func openWorkspaceForMention(runtime uinative.UIRuntime, workspace contracts.WorkspaceService,
 	st *state, id string) {
 	if workspace == nil || strings.TrimSpace(id) == "" {
 		return
@@ -5255,7 +5256,7 @@ func openWorkspaceForMention(runtime contracts.UIRuntime, workspace contracts.Wo
 // startWorkspaceCreate runs the native directory picker off the UI thread (the
 // dialog blocks its caller) and publishes the created workspace through
 // UIRuntime.Post, so a slow picker never freezes a frame.
-func startWorkspaceCreate(runtime contracts.UIRuntime, workspace contracts.WorkspaceService, st *state) {
+func startWorkspaceCreate(runtime uinative.UIRuntime, workspace contracts.WorkspaceService, st *state) {
 	if workspace == nil || st.workspaceBusy {
 		return
 	}
@@ -5350,7 +5351,7 @@ func composerSuggestionRow(c *ui.Context, t *design.Tokens, o composerSuggestion
 
 // buildMentionRow is one selectable @ menu option. It reports the option the
 // composer's ActiveDescendant points at when it is the highlighted one.
-func buildMentionRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state,
+func buildMentionRow(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state,
 	index, sel, total int, row mentionRow, tokenStart, tokenEnd int) ui.Element {
 	label, detail, icon := "", "", icons.File()
 	key := ""
@@ -5392,7 +5393,7 @@ func buildMentionRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 
 // executeSlashCommand clears the composer draft, runs the command (nil safe)
 // and requests the frame that hides the menu.
-func executeSlashCommand(runtime contracts.UIRuntime, st *state, cmd contracts.CommandSpec) {
+func executeSlashCommand(runtime uinative.UIRuntime, st *state, cmd uinative.CommandSpec) {
 	st.draft = ""
 	st.slashSel = 0
 	st.slashDismissed = ""
@@ -5458,7 +5459,7 @@ type findMatch struct {
 // belongs to the transcript, so the chord switches to the conversation tab first
 // when the user is reading another tab; a child conversation has no transcript
 // of its own, so the chord does nothing there.
-func registerFindShortcut(c *ui.Context, st *state, runtime contracts.UIRuntime) {
+func registerFindShortcut(c *ui.Context, st *state, runtime uinative.UIRuntime) {
 	if c == nil || st == nil {
 		return
 	}

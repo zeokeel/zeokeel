@@ -7,6 +7,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // TestRenderToolOrderAndFallback covers UIRuntime.RenderTool: renderers are
@@ -20,7 +21,7 @@ func TestRenderToolOrderAndFallback(t *testing.T) {
 	var matched atomic.Bool
 	var lastCall atomic.Pointer[contracts.ToolCall]
 
-	mustScreen(t, r, contracts.ScreenSpec{ID: "tools", Title: "工具", Order: 10,
+	mustScreen(t, r, uinative.ScreenSpec{ID: "tools", Title: "工具", Order: 10,
 		Build: func(c *ui.Context) {
 			call := contracts.ToolCall{ID: "call-1", Name: toolName.Load().(string), Status: "ok", Summary: "summary-1"}
 			ok := r.Runtime().RenderTool(c, call)
@@ -30,15 +31,15 @@ func TestRenderToolOrderAndFallback(t *testing.T) {
 			}
 		}})
 
-	mustToolRenderer(t, r, contracts.ToolRenderer{Tool: "shell", ID: "z", Order: 20,
+	mustToolRenderer(t, r, uinative.ToolRenderer{Tool: "shell", ID: "z", Order: 20,
 		Build: func(c *ui.Context, call contracts.ToolCall) { ui.Text(c, "tool-z") }})
-	mustToolRenderer(t, r, contracts.ToolRenderer{Tool: "shell", ID: "a", Order: 10,
+	mustToolRenderer(t, r, uinative.ToolRenderer{Tool: "shell", ID: "a", Order: 10,
 		Build: func(c *ui.Context, call contracts.ToolCall) {
 			cp := call
 			lastCall.Store(&cp)
 			ui.Text(c, "tool-a")
 		}})
-	mustToolRenderer(t, r, contracts.ToolRenderer{Tool: "shell", ID: "a2", Order: 10,
+	mustToolRenderer(t, r, uinative.ToolRenderer{Tool: "shell", ID: "a2", Order: 10,
 		Build: func(c *ui.Context, call contracts.ToolCall) { ui.Text(c, "tool-a2") }})
 
 	tt := newTestTester(t, r, 1200, 800)
@@ -65,7 +66,7 @@ func TestRenderToolOrderAndFallback(t *testing.T) {
 	requireNoText(t, tt, "tool-z")
 
 	// A panicking renderer is contained; its neighbours still render.
-	mustToolRenderer(t, r, contracts.ToolRenderer{Tool: "shell", ID: "panic", Order: 15,
+	mustToolRenderer(t, r, uinative.ToolRenderer{Tool: "shell", ID: "panic", Order: 15,
 		Build: func(*ui.Context, contracts.ToolCall) { panic("tool renderer boom") }})
 	toolName.Store("shell")
 	tt.Frame() // must not panic
@@ -82,24 +83,24 @@ func TestRenderToolRegistrationValidation(t *testing.T) {
 	r := newTestRoot(t)
 	rt := r.Runtime()
 
-	if _, err := rt.RegisterToolRenderer(contracts.ToolRenderer{Tool: "", ID: "x", Build: func(*ui.Context, contracts.ToolCall) {}}); err == nil {
+	if _, err := rt.RegisterToolRenderer(uinative.ToolRenderer{Tool: "", ID: "x", Build: func(*ui.Context, contracts.ToolCall) {}}); err == nil {
 		t.Fatal("tool renderer with an empty Tool was accepted")
 	} else {
 		requireContains(t, err, "Tool and ID")
 	}
-	if _, err := rt.RegisterToolRenderer(contracts.ToolRenderer{Tool: "shell", ID: "", Build: func(*ui.Context, contracts.ToolCall) {}}); err == nil {
+	if _, err := rt.RegisterToolRenderer(uinative.ToolRenderer{Tool: "shell", ID: "", Build: func(*ui.Context, contracts.ToolCall) {}}); err == nil {
 		t.Fatal("tool renderer with an empty ID was accepted")
 	} else {
 		requireContains(t, err, "Tool and ID")
 	}
-	if _, err := rt.RegisterToolRenderer(contracts.ToolRenderer{Tool: "shell", ID: "no-build"}); err == nil {
+	if _, err := rt.RegisterToolRenderer(uinative.ToolRenderer{Tool: "shell", ID: "no-build"}); err == nil {
 		t.Fatal("tool renderer with nil Build was accepted")
 	} else {
 		requireContains(t, err, "nil Build")
 	}
 
 	var matched atomic.Bool
-	mustScreen(t, r, contracts.ScreenSpec{ID: "tools", Title: "工具", Order: 10,
+	mustScreen(t, r, uinative.ScreenSpec{ID: "tools", Title: "工具", Order: 10,
 		Build: func(c *ui.Context) {
 			matched.Store(rt.RenderTool(c, contracts.ToolCall{Name: "shell"}))
 		}})

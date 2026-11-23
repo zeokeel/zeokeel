@@ -15,6 +15,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/sidebar"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -200,7 +201,7 @@ func newHarnessFull(t *testing.T, chat contracts.ChatService, cfg sidebar.Config
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
 	uiRoot.SetKernelContext(ctx)
 
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
@@ -223,7 +224,7 @@ func newHarnessFull(t *testing.T, chat contracts.ChatService, cfg sidebar.Config
 	// longer paints a screen list: the sidebar module renders the session rows.
 	// The home screen stays registered (the product still has that screen) but
 	// the sidebar no longer offers it as a destination.
-	for _, spec := range []contracts.ScreenSpec{
+	for _, spec := range []uinative.ScreenSpec{
 		{ID: "home", Title: "首页", Order: 5, Build: func(c *ui.Context) { ui.Text(c, "home screen") }},
 		{ID: "session", Title: "会话", Order: 20, Build: func(c *ui.Context) { ui.Text(c, "会话屏幕") }},
 	} {
@@ -439,7 +440,7 @@ func TestModuleManifest(t *testing.T) {
 		required[requirement.Name] = true
 	}
 	for _, name := range []string{
-		contracts.KeyUIRuntime.Name(),
+		uinative.KeyUIRuntime.Name(),
 		contracts.KeyNavigator.Name(),
 		contracts.KeyChat.Name(),
 	} {

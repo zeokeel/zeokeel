@@ -11,6 +11,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -36,7 +37,7 @@ func TestDiagnosticsPage(t *testing.T) {
 		contracts.SettingMCPServers: `[{"name":"srv","transport":"stdio","command":"run","env":["GITHUB_TOKEN=gh-secret-value","FOO=bar"]}]`,
 	})
 	chat := &fakeChat{}
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())

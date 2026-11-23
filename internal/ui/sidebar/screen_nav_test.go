@@ -11,7 +11,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/sidebar"
 )
 
@@ -19,7 +19,7 @@ func TestSidebarListsModuleScreens(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, sidebar.Config{})
 	// The ScreenLister is the live runtime registry, so a screen registered
 	// after module activation still shows up on the next frame.
-	if _, err := h.uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := h.uiRoot.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID:    "automation",
 		Title: "自动化",
 		Order: 20,
@@ -62,7 +62,7 @@ func TestSidebarSkipsOwnScreens(t *testing.T) {
 
 func TestSidebarListsPluginsScreen(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, sidebar.Config{})
-	if _, err := h.uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := h.uiRoot.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID:    "plugins",
 		Title: "能力",
 		Order: 30,
@@ -129,7 +129,7 @@ func TestScreenNavSpecIsTheSingleSource(t *testing.T) {
 // the registered screens, and both use the one ScreenNavSpec table.
 func TestExpandedSidebarAndRailAgreeOnModuleScreens(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, sidebar.Config{})
-	for _, spec := range []contracts.ScreenSpec{
+	for _, spec := range []uinative.ScreenSpec{
 		{ID: "automation", Title: "自动化", Order: 20, Build: func(c *ui.Context) { ui.Text(c, "automation screen") }},
 		{ID: "plugins", Title: "能力", Order: 30, Build: func(c *ui.Context) { ui.Text(c, "plugins screen") }},
 	} {

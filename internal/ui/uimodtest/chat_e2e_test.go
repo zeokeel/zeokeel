@@ -16,6 +16,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/assembly"
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
@@ -27,7 +28,7 @@ func TestDesktopChatPipelineEndToEnd(t *testing.T) {
 	defer func() { _ = root.DisposeAll() }()
 
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
-	provide(t, root, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, root, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, root, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, root, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, root, contracts.KeyLocale, uiRoot.Locale())

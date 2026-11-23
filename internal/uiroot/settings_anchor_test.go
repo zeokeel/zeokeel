@@ -9,7 +9,7 @@ package uiroot
 import (
 	"testing"
 
-	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // anchorTestPages registers the small settings surface these tests address: a
@@ -20,11 +20,11 @@ func anchorTestPages(t *testing.T, r *Root) (model, advanced *searchProbe) {
 	model = &searchProbe{}
 	advanced = &searchProbe{}
 	mustPage(t, r, model.page("model", "模型", "模型设置", 10, nil,
-		[]contracts.SettingsSearchItem{
+		[]uinative.SettingsSearchItem{
 			{ID: "context-budget", Label: "上下文预算", AnchorKey: "model.context-budget"},
 		}, "settings-model-body"))
 	mustPage(t, r, advanced.page("about", "关于", "诊断", 10, nil,
-		[]contracts.SettingsSearchItem{
+		[]uinative.SettingsSearchItem{
 			{ID: "log-path", Label: "日志位置", AnchorKey: "diagnostics.log"},
 		}, "settings-diagnostics-body"))
 	return model, advanced

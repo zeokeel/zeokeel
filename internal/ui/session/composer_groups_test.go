@@ -9,6 +9,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 func groupsChat() *fakeChat {
@@ -153,7 +154,7 @@ func TestNarrowHeaderAndToolbarWithInspectorDrawer(t *testing.T) {
 	goals.seed("sess-1", "完成 Q4 发布清单并更新文档")
 	tester := h.tester()
 	// A right-panel contribution makes uiroot dock/draw the inspector.
-	if _, err := h.ui.Runtime().RegisterSlotItem(contracts.SlotItem{
+	if _, err := h.ui.Runtime().RegisterSlotItem(uinative.SlotItem{
 		Slot: contracts.SlotSessionPanelRight, ID: "test.inspector", Order: 1,
 		Build: func(c *ui.Context) { ui.Text(c, "检查器内容") },
 	}); err != nil {

@@ -18,6 +18,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -32,16 +33,16 @@ func newAnchorHarness(t *testing.T) (*harness, *uiroot.Root) {
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
 	backend := &fakeNotifier{}
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
 	provide[contracts.Notifier](t, ctx, contracts.KeyNotifier, backend)
-	if _, err := uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := uiRoot.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID: "session", Title: "会话", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "会话正文") },
 	}); err != nil {
 		t.Fatalf("register session screen: %v", err)
 	}
-	for _, item := range []contracts.SlotItem{
+	for _, item := range []uinative.SlotItem{
 		{Slot: contracts.SlotScreenHeader, ID: "session.header", Order: 10,
 			Build: func(c *ui.Context) { ui.Text(c, "会话标题") }},
 		{Slot: contracts.SlotScreenTabs, ID: "session.tabs", Order: 10,

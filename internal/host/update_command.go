@@ -14,6 +14,7 @@ import (
 	"github.com/egoist/mygo"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
@@ -43,7 +44,7 @@ func registerUpdateInstallCommand(uiRoot *uiroot.Root, dataDir string,
 	if uiRoot.Locale().Language() == "en" {
 		title, hint = "Install update and restart", "Run the downloaded update installer and restart ZeoKeel"
 	}
-	return uiRoot.Runtime().RegisterCommand(contracts.CommandSpec{
+	return uiRoot.Runtime().RegisterCommand(uinative.CommandSpec{
 		ID:    updateInstallCommandID,
 		Title: title,
 		Hint:  hint,

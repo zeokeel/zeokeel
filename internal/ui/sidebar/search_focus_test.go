@@ -13,6 +13,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/ui/sidebar"
 )
@@ -149,7 +150,7 @@ func TestNonSessionScreenDoesNotHighlightActiveSessionRow(t *testing.T) {
 		active: "s1",
 	}
 	h := newHarness(t, chat, sidebar.Config{})
-	if _, err := h.uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := h.uiRoot.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID: "insights", Title: "洞察", Order: 30,
 		Build: func(c *ui.Context) { ui.Text(c, "洞察面板内容") },
 	}); err != nil {

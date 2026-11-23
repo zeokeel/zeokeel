@@ -33,6 +33,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
@@ -100,7 +101,7 @@ type state struct {
 // Module registers the approval banner contribution.
 func Module() *module.Descriptor[Config] {
 	return module.Define(ModuleID, func(ctx cordis.Context, cfg Config) error {
-		runtime, err := ctx.Require(contracts.KeyUIRuntime)
+		runtime, err := ctx.Require(uinative.KeyUIRuntime)
 		if err != nil {
 			return err
 		}
@@ -141,7 +142,7 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 
-		item := contracts.SlotItem{
+		item := uinative.SlotItem{
 			Slot:  contracts.SlotSessionBanner,
 			ID:    SlotID,
 			Order: 10,
@@ -161,7 +162,7 @@ func Module() *module.Descriptor[Config] {
 		}
 		return nil
 	}).
-		AddRequires(module.Requires(contracts.KeyUIRuntime)).
+		AddRequires(module.Requires(uinative.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeyApprovals)).
 		AddRequires(module.Requires(contracts.KeyNavigator)).
 		WithName("ZeoKeel approval banner")
@@ -200,7 +201,7 @@ func (st *state) localized(value, zhDefault, enDefault string) string {
 // the composer, or nothing while no request is waiting. The module keeps the
 // FIFO and settle state; the component owns the card's anatomy, its footer
 // order and its no-default decision semantics.
-func buildBanner(c *ui.Context, runtime contracts.UIRuntime, approvals contracts.Approvals,
+func buildBanner(c *ui.Context, runtime uinative.UIRuntime, approvals contracts.Approvals,
 	cfg Config, st *state) {
 	pending := approvals.Pending()
 	if len(pending) == 0 {
@@ -300,7 +301,7 @@ func (st *state) labels(cfg Config) uikit.ApprovalLabels {
 // resolve answers the displayed request once. The request ID is remembered so a
 // Pending list that still lists it during the backend's settle cannot reopen the
 // card for the same decision.
-func resolve(runtime contracts.UIRuntime, approvals contracts.Approvals, st *state,
+func resolve(runtime uinative.UIRuntime, approvals contracts.Approvals, st *state,
 	id string, decision contracts.ApprovalDecision) {
 	if id == "" {
 		return

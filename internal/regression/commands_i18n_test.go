@@ -11,6 +11,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	sessionui "github.com/zeokeel/zeokeel/internal/ui/session"
 )
 
@@ -31,7 +32,7 @@ var englishSessionCommands = map[string][2]string{
 }
 
 // sessionCommandByID finds one registered command.
-func sessionCommandByID(t *testing.T, h *harness, id string) contracts.CommandSpec {
+func sessionCommandByID(t *testing.T, h *harness, id string) uinative.CommandSpec {
 	t.Helper()
 	for _, command := range h.ui.Runtime().Commands() {
 		if command.ID == id {
@@ -39,7 +40,7 @@ func sessionCommandByID(t *testing.T, h *harness, id string) contracts.CommandSp
 		}
 	}
 	t.Fatalf("command %q is not registered", id)
-	return contracts.CommandSpec{}
+	return uinative.CommandSpec{}
 }
 
 // startCommandLocaleUI boots the session screen with one active session.

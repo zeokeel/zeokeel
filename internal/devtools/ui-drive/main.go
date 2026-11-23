@@ -41,6 +41,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel/internal/assembly"
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
@@ -157,7 +158,7 @@ func (d *drive) boot() error {
 		contracts.SettingMCPServers: `[{"name":"demo-mcp","url":"http://127.0.0.1:1/mcp"}]`,
 	}}
 	provide(root, contracts.KeyDataDir, d.dataDir)
-	provide(root, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(root, uinative.KeyUIRuntime, uiRoot.Runtime())
 	// Hand-wired boot: provide the host toast anchor so driven frames match
 	// the real desktop placement (see ui-snapshot boot for the same note).
 	provide(root, contracts.KeyToastAnchor, uiRoot.ToastAnchor())

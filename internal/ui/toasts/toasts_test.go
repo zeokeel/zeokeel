@@ -16,6 +16,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -84,13 +85,13 @@ func newSettingsHarness(t *testing.T, language string, settings contracts.Settin
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
 	backend := &fakeNotifier{}
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
 	provide[contracts.Notifier](t, ctx, contracts.KeyNotifier, backend)
 	if settings != nil {
 		provide[contracts.SettingsService](t, ctx, contracts.KeySettings, settings)
 	}
-	if _, err := uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := uiRoot.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID:    "home",
 		Title: "首页",
 		Build: func(c *ui.Context) { ui.Text(c, "主屏幕") },

@@ -12,6 +12,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/home"
 	"github.com/zeokeel/zeokeel/internal/ui/toolcards"
 	"github.com/zeokeel/zeokeel/internal/ui/welcome"
@@ -41,7 +42,7 @@ func TestHomeRendersInjectionPointRegions(t *testing.T) {
 
 	// A third-party contribution to home.hero replaces the module's default
 	// hero; home is not edited for this.
-	unregister, err := h.ui.Runtime().RegisterSlotItem(contracts.SlotItem{
+	unregister, err := h.ui.Runtime().RegisterSlotItem(uinative.SlotItem{
 		Slot:  contracts.SlotHomeHero,
 		ID:    "test.hero",
 		Order: 10,
@@ -93,7 +94,7 @@ func TestToolcardsRenderDemoCall(t *testing.T) {
 	h := newHarness(t)
 	call := contracts.ToolCall{ID: "demo-1", Name: "demo", Status: "ok",
 		Summary: "示例工具调用：由 ui/toolcards 模块渲染"}
-	unregister, err := h.ui.Runtime().RegisterScreen(contracts.ScreenSpec{
+	unregister, err := h.ui.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID: "tool-demo", Title: "工具卡", Order: 10,
 		Build: func(c *ui.Context) {
 			if !h.ui.Runtime().RenderTool(c, call) {
@@ -125,11 +126,11 @@ func TestToolcardsRenderDemoCall(t *testing.T) {
 // service a UI module does not need.
 func TestModuleManifests(t *testing.T) {
 	assertManifest(t, home.Module(), "zeokeel-ui/home",
-		contracts.KeyUIRuntime.Name(), contracts.KeyNavigator.Name(), contracts.KeyAppInfo.Name())
+		uinative.KeyUIRuntime.Name(), contracts.KeyNavigator.Name(), contracts.KeyAppInfo.Name())
 	assertManifest(t, welcome.Module(), "zeokeel-ui/welcome",
-		contracts.KeyUIRuntime.Name(), contracts.KeyAppInfo.Name())
+		uinative.KeyUIRuntime.Name(), contracts.KeyAppInfo.Name())
 	assertManifest(t, toolcards.Module(), "zeokeel-ui/toolcards",
-		contracts.KeyUIRuntime.Name())
+		uinative.KeyUIRuntime.Name())
 }
 
 func assertManifest[T any](t *testing.T, descriptor *module.Descriptor[T], wantID string, wantRequires ...string) {

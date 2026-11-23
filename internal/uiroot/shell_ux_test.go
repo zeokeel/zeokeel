@@ -7,6 +7,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // TestPaletteKeyboard covers the command palette's keyboard path: Up/Down move
@@ -15,9 +16,9 @@ func TestPaletteKeyboard(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
 	var runs [2]int
-	mustCommand(t, r, contracts.CommandSpec{ID: "a", Title: "命令A", Order: 10,
+	mustCommand(t, r, uinative.CommandSpec{ID: "a", Title: "命令A", Order: 10,
 		Run: func() error { runs[0]++; return nil }})
-	mustCommand(t, r, contracts.CommandSpec{ID: "b", Title: "命令B", Order: 20,
+	mustCommand(t, r, uinative.CommandSpec{ID: "b", Title: "命令B", Order: 20,
 		Run: func() error { runs[1]++; return nil }})
 
 	tt := newTestTester(t, r, 1200, 800)
@@ -56,7 +57,7 @@ func TestPaletteKeyboard(t *testing.T) {
 func TestSettingsScrollReachesBottomAction(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustPage(t, r, contracts.SettingsPageSpec{
+	mustPage(t, r, uinative.SettingsPageSpec{
 		ID: "tall", Section: "general", Title: "长页", Order: 10,
 		Build: func(c *ui.Context) {
 			ui.Column(c).FillWidth().Gap(12).Children(func() {
@@ -98,7 +99,7 @@ func TestSettingsScrollReachesBottomAction(t *testing.T) {
 func TestSettingsCloseButtonAndAdaptiveSize(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustPage(t, r, contracts.SettingsPageSpec{
+	mustPage(t, r, uinative.SettingsPageSpec{
 		ID: "about", Section: "general", Title: "关于", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "about-body") },
 	})
@@ -167,13 +168,13 @@ func TestRightPanelDrawerOnNarrowWindow(t *testing.T) {
 func TestSettingsNavGroups(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustPage(t, r, contracts.SettingsPageSpec{ID: "about", Section: "关于", Title: "关于页", Order: 10,
+	mustPage(t, r, uinative.SettingsPageSpec{ID: "about", Section: "关于", Title: "关于页", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "about-body") }})
-	mustPage(t, r, contracts.SettingsPageSpec{ID: "behavior", Section: "general", Title: "行为页", Order: 10,
+	mustPage(t, r, uinative.SettingsPageSpec{ID: "behavior", Section: "general", Title: "行为页", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "behavior-body") }})
-	mustPage(t, r, contracts.SettingsPageSpec{ID: "appearance", Section: "外观", Title: "外观页", Order: 10,
+	mustPage(t, r, uinative.SettingsPageSpec{ID: "appearance", Section: "外观", Title: "外观页", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "appearance-body") }})
-	mustPage(t, r, contracts.SettingsPageSpec{ID: "memory", Section: "高级", Title: "记忆页", Order: 10,
+	mustPage(t, r, uinative.SettingsPageSpec{ID: "memory", Section: "高级", Title: "记忆页", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "memory-body") }})
 
 	tt := newTestTester(t, r, 1280, 800)
@@ -241,7 +242,7 @@ func TestSettingsNavGroups(t *testing.T) {
 // body, so the conversation the user scrolled must stay where they left it.
 func TestInspectorCloseFocusReturnKeepsScroll(t *testing.T) {
 	r := newTestRoot(t)
-	mustScreen(t, r, contracts.ScreenSpec{
+	mustScreen(t, r, uinative.ScreenSpec{
 		ID: sessionScreenID, Title: "会话", Order: 10,
 		Build: func(c *ui.Context) {
 			ui.Scroll(c).FillWidth().Grow(1).Children(func() {

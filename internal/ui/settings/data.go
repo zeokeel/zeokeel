@@ -18,6 +18,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -110,7 +111,7 @@ func newDataPrivacyState() *dataPrivacyState { return &dataPrivacyState{} }
 // row end; the bulk clear is a danger action behind the native confirmation
 // dialog. The page's only footer primary is the denied-globs draft Save.
 func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
-	runtime contracts.UIRuntime, chat contracts.ChatService, store contracts.SettingsService,
+	runtime uinative.UIRuntime, chat contracts.ChatService, store contracts.SettingsService,
 	st *dataPrivacyState, importState *importState, locale contracts.LocaleService) {
 	dataDir, _ := kctx.Get(contracts.KeyDataDir)
 	dataDir = strings.TrimSpace(dataDir)

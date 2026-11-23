@@ -26,6 +26,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
@@ -102,7 +103,7 @@ func (st *state) tr(zh, en string) string { return uikit.T(st.locale, zh, en) }
 // Module registers the ask_user / artifact / plan-review overlays.
 func Module() *module.Descriptor[Config] {
 	return module.Define(ModuleID, func(ctx cordis.Context, cfg Config) error {
-		runtime, err := ctx.Require(contracts.KeyUIRuntime)
+		runtime, err := ctx.Require(uinative.KeyUIRuntime)
 		if err != nil {
 			return err
 		}
@@ -186,7 +187,7 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 
-		item := contracts.SlotItem{
+		item := uinative.SlotItem{
 			Slot:  contracts.SlotOverlayDialogs,
 			ID:    SlotID,
 			Order: 20,
@@ -198,7 +199,7 @@ func Module() *module.Descriptor[Config] {
 			return runtime.RegisterSlotItem(item)
 		})
 	}).
-		AddRequires(module.Requires(contracts.KeyUIRuntime)).
+		AddRequires(module.Requires(uinative.KeyUIRuntime)).
 		WithName("ZeoKeel interaction overlays")
 }
 
@@ -255,7 +256,7 @@ func (st *state) removePlanOverlay() {
 // empty. The ask and plan dialogs are uikit entry components that own their
 // native Modal (and with it the Escape contract); the artifact preview is a
 // plain Modal whose dismissal closes it.
-func buildDialog(c *ui.Context, runtime contracts.UIRuntime, st *state) {
+func buildDialog(c *ui.Context, runtime uinative.UIRuntime, st *state) {
 	st.syncPlanOverlays()
 	if len(st.overlays) == 0 {
 		st.open = false
@@ -295,7 +296,7 @@ func buildDialog(c *ui.Context, runtime contracts.UIRuntime, st *state) {
 // component owns the Modal, the Esc-does-not-cancel contract, the one-shot
 // warning and the footer safety order; the module owns the plan state, the
 // reviewer bridge and the keep-planning feedback delivery.
-func buildPlanDialog(c *ui.Context, runtime contracts.UIRuntime, st *state) {
+func buildPlanDialog(c *ui.Context, runtime uinative.UIRuntime, st *state) {
 	if st.reviewer == nil || st.plan == nil {
 		return
 	}
@@ -331,7 +332,7 @@ func buildPlanDialog(c *ui.Context, runtime contracts.UIRuntime, st *state) {
 // buildAskDialog renders an ask_user question through uikit.AskDialog: the
 // component owns the equal-weight options, the "Other…" input and the
 // no-stray-Enter safety semantics; the module answers through the bridge.
-func buildAskDialog(c *ui.Context, runtime contracts.UIRuntime, st *state, question contracts.UserQuestion) {
+func buildAskDialog(c *ui.Context, runtime uinative.UIRuntime, st *state, question contracts.UserQuestion) {
 	uikit.AskDialog(c, uikit.AskDialogOptions{
 		Question:  question,
 		OtherOpen: &st.askOtherOpen,
@@ -349,7 +350,7 @@ func buildAskDialog(c *ui.Context, runtime contracts.UIRuntime, st *state, quest
 // artifactPanel is the present-tool preview: the artifact title over its
 // Markdown body, with the close action in the same footer position every other
 // overlay uses.
-func artifactPanel(c *ui.Context, runtime contracts.UIRuntime, st *state, artifact contracts.Artifact) {
+func artifactPanel(c *ui.Context, runtime uinative.UIRuntime, st *state, artifact contracts.Artifact) {
 	t := design.Of(c)
 	title := textutil.FirstNonEmptyTrimmed(artifact.Title, st.tr("工件预览", "Artifact preview"))
 	close := func() { popOverlay(runtime, st) }
@@ -381,7 +382,7 @@ func artifactPanel(c *ui.Context, runtime contracts.UIRuntime, st *state, artifa
 
 // exitPlan applies the plan decision through the reviewer bridge; errors stay
 // visible in the dialog instead of closing it silently.
-func exitPlan(runtime contracts.UIRuntime, st *state, action, errPrefix string) {
+func exitPlan(runtime uinative.UIRuntime, st *state, action, errPrefix string) {
 	if st.reviewer == nil {
 		return
 	}
@@ -399,7 +400,7 @@ func exitPlan(runtime contracts.UIRuntime, st *state, action, errPrefix string) 
 // dialog must never trap the window: the review is cancelled best effort, and
 // the local snapshot is marked cancelled even when the bridge refuses so the
 // overlay cannot be re-enqueued on the next frame.
-func closePlanAfterFailure(runtime contracts.UIRuntime, st *state) {
+func closePlanAfterFailure(runtime uinative.UIRuntime, st *state) {
 	if st.reviewer != nil {
 		_, _ = st.reviewer.Exit("cancel")
 	}
@@ -414,7 +415,7 @@ func closePlanAfterFailure(runtime contracts.UIRuntime, st *state) {
 // never succeed (the reported deadlock). A failed delivery now leaves the
 // review untouched, so the user can retry, approve, cancel, or press Escape
 // to close.
-func keepPlanning(runtime contracts.UIRuntime, st *state, feedback string) {
+func keepPlanning(runtime uinative.UIRuntime, st *state, feedback string) {
 	if st.reviewer == nil || st.chat == nil {
 		return
 	}
@@ -479,7 +480,7 @@ func markPlanExited(st *state, action string) {
 }
 
 // answerQuestion resolves the shown question with answer and pops it.
-func answerQuestion(runtime contracts.UIRuntime, st *state, id, answer string) {
+func answerQuestion(runtime uinative.UIRuntime, st *state, id, answer string) {
 	if st.interaction != nil {
 		st.interaction.Answer(id, answer)
 	}
@@ -487,7 +488,7 @@ func answerQuestion(runtime contracts.UIRuntime, st *state, id, answer string) {
 }
 
 // cancelQuestion dismisses the shown question with an error and pops it.
-func cancelQuestion(runtime contracts.UIRuntime, st *state, id string) {
+func cancelQuestion(runtime uinative.UIRuntime, st *state, id string) {
 	if st.interaction != nil {
 		st.interaction.Cancel(id)
 	}
@@ -495,7 +496,7 @@ func cancelQuestion(runtime contracts.UIRuntime, st *state, id string) {
 }
 
 // popOverlay removes the displayed overlay and resets the dialog state.
-func popOverlay(runtime contracts.UIRuntime, st *state) {
+func popOverlay(runtime uinative.UIRuntime, st *state) {
 	if len(st.overlays) > 0 {
 		st.overlays = st.overlays[1:]
 	}

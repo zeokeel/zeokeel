@@ -20,6 +20,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -602,7 +603,7 @@ func catalogAdvancedSummary(locale contracts.LocaleService, draft *catalogEditDr
 // connection and default-model choice on top, its thinking/generation
 // configuration in the collapsed advanced group below. Saving writes the whole
 // list and the default-model mirror in one transactional step.
-func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	store contracts.SettingsService, models []contracts.ModelInfo, st *catalogState,
 	locale contracts.LocaleService, fallbackBaseURL, fallbackAPIKey string) {
 	draft := st.edit

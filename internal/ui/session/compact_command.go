@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // compactCommandEnabled reports whether the active session can be compacted:
@@ -36,7 +37,7 @@ func compactCommandEnabled(chat contracts.ChatService, st *state) bool {
 
 // runCompactCommand starts one asynchronous compaction. The st.compacting guard
 // (and the command's Enabled callback) prevents duplicate runs.
-func runCompactCommand(chat contracts.ChatService, st *state, runtime contracts.UIRuntime) {
+func runCompactCommand(chat contracts.ChatService, st *state, runtime uinative.UIRuntime) {
 	if !compactCommandEnabled(chat, st) {
 		return
 	}

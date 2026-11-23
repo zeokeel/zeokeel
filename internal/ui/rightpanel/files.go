@@ -15,6 +15,7 @@ import (
 	"github.com/egoist/mygo/ui/markdown"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
@@ -90,7 +91,7 @@ type editorKey struct {
 // invalidated it. It reports whether a read is in flight, so the page can show
 // the loading row.
 func (st *state) syncFilesRoot(workspace contracts.WorkspaceService,
-	runtime contracts.UIRuntime) ([]contracts.FileEntry, bool, error) {
+	runtime uinative.UIRuntime) ([]contracts.FileEntry, bool, error) {
 	current, ok, err := workspace.Current(context.Background())
 	if err != nil || !ok {
 		st.resetFilesState("")
@@ -141,7 +142,7 @@ func (st *state) directoryListing(dir string) *dirListing {
 // to the frame that invalidated it. A result for another workspace (or one an
 // explicit refresh superseded) is dropped.
 func (st *state) startDirectoryLoad(workspace contracts.WorkspaceService, dir string,
-	runtime contracts.UIRuntime) {
+	runtime uinative.UIRuntime) {
 	listing := st.directoryListing(dir)
 	if listing.loading {
 		return
@@ -243,7 +244,7 @@ func (st *state) dropPathCaches(path string) {
 // presented artifacts with an expandable Markdown preview. It never registers a
 // presenter handler: the interaction module owns display.
 func buildArtifactsSection(c *ui.Context, t *design.Tokens, artifacts contracts.ArtifactLister,
-	runtime contracts.UIRuntime, st *state) {
+	runtime uinative.UIRuntime, st *state) {
 	history := append([]contracts.Artifact(nil), artifacts.Artifacts()...)
 	sort.SliceStable(history, func(i, j int) bool {
 		return history[i].CreatedAt.After(history[j].CreatedAt)
@@ -331,7 +332,7 @@ func artifactTitle(st *state, artifact contracts.Artifact) string {
 // preview toggle, the download action and, while open, the Markdown preview
 // below them. The List around it owns the row state, choice and keyboard.
 func buildArtifactRow(row ui.ListRow, t *design.Tokens, st *state,
-	runtime contracts.UIRuntime, artifact contracts.Artifact, title string, open bool, toggle func()) {
+	runtime uinative.UIRuntime, artifact contracts.Artifact, title string, open bool, toggle func()) {
 	c := row.Context
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 		// The artifact row is 32 DIP with the metadata step for its time and
@@ -382,7 +383,7 @@ func buildArtifactRow(row ui.ListRow, t *design.Tokens, st *state,
 // empty-state block explains the state and offers the native open-folder
 // action.
 func buildOpenWorkspace(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
-	runtime contracts.UIRuntime, st *state) {
+	runtime uinative.UIRuntime, st *state) {
 	uikit.EmptyStateBlock(c,
 		st.tr("还没有打开工作区", "No workspace is open"),
 		st.tr("打开一个文件夹作为工作区，浏览其中的文件。",

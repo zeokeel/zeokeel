@@ -10,6 +10,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/home"
 )
 
@@ -17,7 +18,7 @@ import (
 // surface to deep-link to (settings.Module is not activated in this harness).
 func stubSettingsPage(t *testing.T, h *harness, id, section, title, body string) {
 	t.Helper()
-	unregister, err := h.ui.Runtime().RegisterSettingsPage(contracts.SettingsPageSpec{
+	unregister, err := h.ui.Runtime().RegisterSettingsPage(uinative.SettingsPageSpec{
 		ID:      id,
 		Section: section,
 		Title:   title,

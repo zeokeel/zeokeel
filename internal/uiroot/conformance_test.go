@@ -8,6 +8,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/brand"
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 )
 
@@ -104,7 +105,7 @@ func TestNavigationAnnouncement(t *testing.T) {
 func TestPaletteListIsLabeled(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustCommand(t, r, contracts.CommandSpec{ID: "demo.action", Title: "演示命令", Order: 10,
+	mustCommand(t, r, uinative.CommandSpec{ID: "demo.action", Title: "演示命令", Order: 10,
 		Run: func() error { return nil }})
 	tt := newTestTester(t, r, 1280, 800)
 	tt.Frame()
@@ -124,7 +125,7 @@ func TestPaletteListIsLabeled(t *testing.T) {
 func TestThemeFollowsTextScale(t *testing.T) {
 	r := newTestRoot(t)
 	var fontSize float32
-	mustScreen(t, r, contracts.ScreenSpec{ID: "home", Title: "首页", Order: 10,
+	mustScreen(t, r, uinative.ScreenSpec{ID: "home", Title: "首页", Order: 10,
 		Build: func(c *ui.Context) { fontSize = c.Theme().FontSize }})
 	tt := ui.NewTesterWith(r.View, 800, 600, ui.TesterOptions{
 		Preferences: ui.Preferences{TextScale: 1.5, ReduceMotion: true},

@@ -18,6 +18,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
@@ -364,7 +365,7 @@ func buildCatalogSetDefaultField(c *ui.Context, t *design.Tokens, locale contrac
 // buildModelCatalogSection renders the model list inside the merged 模型 page.
 // The list is the control surface itself: add/edit/remove apply at once. The
 // page footer Save owns only the prompt and runtime drafts.
-func buildModelCatalogSection(c *ui.Context, runtime contracts.UIRuntime, store contracts.SettingsService,
+func buildModelCatalogSection(c *ui.Context, runtime uinative.UIRuntime, store contracts.SettingsService,
 	st *catalogState, locale contracts.LocaleService, fallbackBaseURL, fallbackAPIKey, effectiveModel string) {
 	t := design.Of(c)
 	models, ok := catalogModels(store)
@@ -588,7 +589,7 @@ func catalogAddFamily(draft *catalogAddDraft) string {
 // buildCatalogAddDialog renders the add-model modal: the provider selector
 // prefills the endpoint and an example model ID, the endpoint and key are the
 // model's own connection, and the dialog tests the current draft before adding.
-func buildCatalogAddDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildCatalogAddDialog(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	store contracts.SettingsService, models []contracts.ModelInfo, st *catalogState,
 	locale contracts.LocaleService, fallbackBaseURL, fallbackAPIKey string) {
 	draft := st.add

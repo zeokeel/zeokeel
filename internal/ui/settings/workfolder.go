@@ -19,6 +19,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/lib/mcpreload"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -65,7 +66,7 @@ func newWorkFolderState(kernel cordis.Context) *workFolderState {
 // sidebar and other surfaces can change it) and a failed read reads as "no
 // folder" instead of hiding the action.
 func buildWorkFolderSection(c *ui.Context, t *design.Tokens, locale contracts.LocaleService,
-	runtime contracts.UIRuntime, st *workFolderState) {
+	runtime uinative.UIRuntime, st *workFolderState) {
 	if st == nil || st.workspace == nil {
 		return
 	}
@@ -108,7 +109,7 @@ func buildWorkFolderSection(c *ui.Context, t *design.Tokens, locale contracts.Lo
 // folder is a harmless no-op rather than a duplicate. MCP connectors are
 // workspace-scoped, so the switch triggers their rebuild; the shell redraws
 // from the new current workspace on the next frame.
-func changeWorkFolder(st *workFolderState, runtime contracts.UIRuntime, locale contracts.LocaleService) {
+func changeWorkFolder(st *workFolderState, runtime uinative.UIRuntime, locale contracts.LocaleService) {
 	dir, err := WorkFolderDirectoryPicker(localized(locale, "选择工作文件夹", "Choose a workspace folder"))
 	if err != nil {
 		st.status = localized(locale, "无法打开目录选择器：", "Could not open the folder picker: ") + err.Error()

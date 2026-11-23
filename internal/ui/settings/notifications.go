@@ -20,6 +20,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
@@ -68,7 +69,7 @@ type notificationsState struct {
 // buildNotificationsPage renders the notification settings. Both switches apply
 // at once and are independent: turning off the in-app toasts leaves OS
 // notifications on, and vice versa.
-func buildNotificationsPage(c *ui.Context, runtime contracts.UIRuntime,
+func buildNotificationsPage(c *ui.Context, runtime uinative.UIRuntime,
 	store contracts.SettingsService, locale contracts.LocaleService, st *notificationsState,
 	systemSupported bool, search *pageSearch) {
 	t := design.Of(c)

@@ -12,6 +12,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
@@ -135,7 +136,7 @@ func TestBandKeepsActionsOnWideWindow(t *testing.T) {
 func TestPaletteRowIsA36DIPQuietSelection(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustCommand(t, r, contracts.CommandSpec{ID: "alpha", Title: "Alpha", Order: 10,
+	mustCommand(t, r, uinative.CommandSpec{ID: "alpha", Title: "Alpha", Order: 10,
 		Run: func() error { return nil }})
 	tt := newTestTester(t, r, 1200, 800)
 	tt.Frame()
@@ -257,7 +258,7 @@ func TestNewSessionClickDebounces(t *testing.T) {
 func TestSettingsEscapeFromPageControl(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustPage(t, r, contracts.SettingsPageSpec{
+	mustPage(t, r, uinative.SettingsPageSpec{
 		ID: "general", Section: "通用", Title: "通用", Order: 10,
 		Build: func(c *ui.Context) {
 			ui.Button(c, "页面控件").Tooltip("这一段说明只在指针停留时出现")
@@ -332,7 +333,7 @@ func TestPaletteDoesNotRepeatAChordInTheName(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen(sessionScreenID, "会话", "body-session", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotScreenHeader, sessionScreenID+".title", "会话标题", 10))
-	for _, c := range []contracts.CommandSpec{
+	for _, c := range []uinative.CommandSpec{
 		{ID: "esc", Title: "Esc: 关闭 / 拒绝 / 停止", Shortcut: "Esc", Order: 10},
 		{ID: "new", Title: "新建会话", Shortcut: "Cmd/Ctrl+N", Order: 20},
 	} {

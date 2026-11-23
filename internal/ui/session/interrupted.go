@@ -17,6 +17,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -26,7 +27,7 @@ import (
 // a neutral status badge (an interrupted run is not a red failure), one quiet
 // explanation, the 继续 action and a dismiss icon. It renders nothing for a
 // normal session, while a run is starting, or after the user dismissed it.
-func buildInterruptedNotice(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildInterruptedNotice(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	st *state, session contracts.ChatSession) {
 	if st == nil || session.ID == "" || !session.Interrupted || session.Running {
 		return

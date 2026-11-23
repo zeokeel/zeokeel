@@ -10,6 +10,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // TestInspectorOnlyOnSessionScreen covers D-03: the window-level inspector
@@ -218,7 +219,7 @@ func TestAltLeftNeverNavigates(t *testing.T) {
 	draft := ""
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustScreen(t, r, contracts.ScreenSpec{
+	mustScreen(t, r, uinative.ScreenSpec{
 		ID: sessionScreenID, Title: "会话", Order: 20,
 		Build: func(c *ui.Context) {
 			ui.Text(c, "body-session")

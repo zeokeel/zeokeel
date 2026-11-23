@@ -157,7 +157,7 @@ func (n *navigator) OpenSettingsPage(pageID string) error {
 // OpenSettingsPageAt shows one settings page and reveals one of its searchable
 // items in the same visit: the deep link a non-settings surface uses to hand the
 // user to the control it talks about ("上下文设置" → the model page's context
-// budget). The page's Reveal hook (contracts.SettingsPageSpec.Reveal) opens the
+// budget). The page's Reveal hook (uinative.SettingsPageSpec.Reveal) opens the
 // disclosure around the anchor, scrolls it into view and tints it briefly, the
 // same path a navigation-search hit uses. The pending navigation search state is
 // cleared, so a stale query neither consumes the request nor hides the page.

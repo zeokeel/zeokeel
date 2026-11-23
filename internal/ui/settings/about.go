@@ -12,6 +12,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -103,7 +104,7 @@ func buildAboutHubPage(c *ui.Context, kctx cordis.Context, info contracts.AppInf
 
 // uiRuntimeFrom returns the host UI runtime, or nil in a stripped test
 // assembly (the update section then simply renders without async actions).
-func uiRuntimeFrom(kctx cordis.Context) contracts.UIRuntime {
-	runtime, _ := kctx.Get(contracts.KeyUIRuntime)
+func uiRuntimeFrom(kctx cordis.Context) uinative.UIRuntime {
+	runtime, _ := kctx.Get(uinative.KeyUIRuntime)
 	return runtime
 }

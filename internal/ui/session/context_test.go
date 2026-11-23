@@ -15,6 +15,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/session"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -95,7 +96,7 @@ func newContextHarness(t *testing.T, chat *fakeChat, inspector contracts.Context
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
@@ -708,7 +709,7 @@ func newContextHarnessWithChat(t *testing.T, chat contracts.ChatService, inspect
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
@@ -900,7 +901,7 @@ func TestContextSettingsActionOpensModelPageAtBudget(t *testing.T) {
 	// The settings module is not part of this harness; register the model page the
 	// action deep-links to and record the anchor the host reveals.
 	revealed := ""
-	unregister, err := h.ui.Runtime().RegisterSettingsPage(contracts.SettingsPageSpec{
+	unregister, err := h.ui.Runtime().RegisterSettingsPage(uinative.SettingsPageSpec{
 		ID: "model", Section: "常用", Title: "模型", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "fake-model-page") },
 		Reveal: func(_ *ui.Context, anchorKey string) {

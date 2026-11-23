@@ -7,24 +7,45 @@
 
 ---
 
+## 0. 架构换轨进行中（2026-11-23 起）
+
+目标形态：**网关进程（gateway）+ 浏览器 Web 客户端（主体）+ 极小原生托盘壳**。本文件已按新形态改写，但**迁移尚未完成**——请按两条轨分开读：
+
+| 轨 | 位置 | 适用规则 |
+|---|---|---|
+| **Web 轨**（新代码默认） | `web/`（React + TypeScript + Vite） | §3.1 + DESIGN.md |
+| **托盘壳轨** | `internal/host/` 的托盘/热键/通知（约 1.5k 行原生 mygo） | §3 的 mygo 规则全量适用 |
+
+- 决策记录：[docs/plans/web-client-pivot.md](docs/plans/web-client-pivot.md)
+- 协议：[docs/TRANSPORT.md](docs/TRANSPORT.md)　客户端：[docs/WEB-CLIENT.md](docs/WEB-CLIENT.md)
+- **冻结区**：`internal/ui`、`internal/uiroot`、`internal/uikit`（54,425 行 + 83,050 行测试）——只允许 P0 修复，**禁止新功能**。原生桌面产品保留为回退路径，直到 Stage 3 退役。
+- 换轨依据：`.cache/pivot/contracts-projection.md`（契约投影盘点）、`.cache/pivot/native-ui-inventory.md`（原生 UI 清点）。
+
+---
+
 ## 1. 项目概览
 
-**ZeoKeel**：Go 桌面 AI Agent 客户端，UI 由 `github.com/egoist/mygo v0.9.2` 的**原生控件**绘制（无 HTML/CSS/JS/webview）。当前依赖见 [go.mod](go.mod)。
+**ZeoKeel**：Go 编码的常驻 AI Agent。**网关进程**承载后端能力，**浏览器**是主客户端，**原生托盘壳**（mygo）负责常驻图标、全局快捷键与系统通知。前端 **React + TypeScript + Vite + Ant Design 6（antd）+ Ant Design X 2.0**；视觉由 antd seed token 从 `internal/design` + `internal/brand` 派生（`web/src/design/antd-theme.ts` 为生成物，手改即违规）。依赖见 [go.mod](go.mod) 与 [web/package.json](web/package.json)。框架决策与 token 映射见 [docs/plans/web-ui-framework.md](docs/plans/web-ui-framework.md)。
 
 ```
-cmd/zeokeel             入口（desktop / headless / acp 产品）
-internal/uiroot         窗口壳层：Split/Sidebar/Toolbar/Overlay/palette/设置面
-internal/ui/*           13 个 UI 模块（session/toolcards/approval/interaction/rightpanel/settings/...）
-internal/uikit          共享组合：页头/小节/空态/错误行/对话框动作条/工具行
-internal/design         设计 token（颜色/字号/间距/圆角/阴影/预设）
-internal/brand          品牌层：唯一 hex 来源、主题、字体栈
-internal/icons          34 个 SVG 图标（16/24 网格不变量测试）
+cmd/zeokeel             入口（desktop / serve / headless / acp 产品）
+internal/gateway        【新】serve 产品：WS 控制面（快照+差值）、端口协商、token/Origin 校验
+web/                    【新】浏览器客户端：路由 / /inbox /c/:id /settings
+internal/host           进程宿主：窗口/托盘/单实例/设置存储/日志/退出
 internal/contracts      服务契约（chat/approval/plan/team/task/...）
-internal/modules/*      后端能力模块
+internal/modules/*      后端能力模块（27 个，迁移中 100% 保留）
+internal/design         设计 token（→ 生成 web/src/design/tokens.css）
+internal/brand          品牌层：唯一 hex 来源、主题、字体栈
+internal/icons          34 个 SVG 图标（web 侧直接复用）
+── 冻结区（Stage 3 退役）──
+internal/uiroot         旧窗口壳层
+internal/ui/*           旧 UI 模块（session/toolcards/approval/rightpanel/settings/...）
+internal/uikit          旧共享组合
 ```
 
-- 模块边界：UI 模块只能 import `internal/contracts`、`internal/uikit`、`internal/design`、`internal/icons`、`internal/brand`（资产层 logo）、`internal/lib/*` 与第三方模块；禁止 import 其他 UI 模块实现、`internal/uiroot`、`internal/host`。后端模块可 import `contracts/uikit/design/lib/*` 与共享库 `internal/{hosttools,memorytools,websearch}`，禁止其他模块实现与 UI 壳层；`host` 不得直连 `internal/modules/*`（按 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3 执行；**CI 机器断言**：`internal/assembly/boundary_test.go` `TestImportBoundaries`，`go list` 解析全产品 import 图）。
-- 依赖方向：`contracts ← modules/ui ← uiroot`；帧循环/窗口/`*ui.Context` 只归 `uiroot`，模块只贡献 builder（`func(c *ui.Context)`）。
+- **Go 侧模块边界（不变）**：旧 UI 模块只能 import `internal/contracts`、`internal/uikit`、`internal/design`、`internal/icons`、`internal/brand`（资产层 logo）、`internal/lib/*` 与第三方；禁止 import 其他模块实现、`internal/uiroot`、`internal/host`。后端模块可 import `contracts/uikit/design/lib/*` 与共享库 `internal/{hosttools,memorytools,websearch}`；`host` 不得直连 `internal/modules/*`（[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3；**CI 机器断言** `TestImportBoundaries`）。
+- **Web 侧模块边界（新）**：`web/src` 只能经 `web/src/api/`（协议生成）访问网关，**禁止**手写 `fetch`/`WebSocket`；`web/src/ui/`（设计系统）不得 import `web/src/features/`；`web/src/design/tokens.css` 是唯一颜色/字号/间距来源。
+- **依赖方向（新）**：`contracts ← modules ← gateway ← WS ← web`；托盘壳只读网关状态（`gateway.json` + 只读状态服务），不参与会话逻辑。
 
 ---
 
@@ -95,6 +116,34 @@ make ci                                   # build+vet+test；全量用 make veri
 - `TMPDIR`/`GOTMPDIR` 必须放在**仓库外**（本环境用 `/tmp/zeokeel-tmp`，沙箱可写）；放在工作区内会让 `internal/modules/workspace` 的临时目录被当成 git 仓库（TestChangesErrors 失败）。`/data/zeokeel-tmp` 在本沙箱只读，不要用。
 - 帧测试：`ui.NewTester`（`Click/Key/Type/Find/Focused/AccessByRole`）；每个交互改动必须补帧测试。
 - 快照/驱动：`internal/devtools/ui-snapshot`（PNG）、`internal/devtools/ui-drive`（交互步骤）。视觉改动必须人工看 PNG。
+  以上两条只对**托盘壳与冻结区**适用；改 Web 代码时跑它们不算验证。
+
+**Web 轨命令（`web/`，新增）**
+
+```bash
+cd web
+npm ci                        # 锁定依赖（package-lock.json 必须提交）
+npm run typecheck             # tsc --noEmit
+npm run lint                  # eslint
+npm run test                  # vitest
+npm run e2e                   # playwright（对应 WEB-CLIENT.md 的验收清单）
+npm run build                 # 产物由 go:embed 打进二进制
+npm run dev                   # dev server，代理到网关
+```
+
+- **antd 组件知识必须查、不许凭记忆写**（v6 与训练数据有差异）。离线 CLI（内置 v4/v5/v6 全量元数据）：
+
+  ```bash
+  bash scripts/antd-cli.sh --install                              # 首次；装到 .cache/antd-cli
+  bash scripts/antd-cli.sh info Button --version 6 --format json   # props
+  bash scripts/antd-cli.sh demo Select basic --format json         # 可运行示例
+  bash scripts/antd-cli.sh token Table --version 6 --format json   # 组件 token
+  bash scripts/antd-cli.sh semantic Modal --version 6 --format json
+  bash scripts/antd-cli.sh lint ./web/src --format json            # 废弃 API / a11y / 性能
+  ```
+
+  包装脚本把 `HOME`/`XDG_*` 重定向到 `.cache/antd-cli/`；**不要**直接调 `antd` 或 `npm i -g`（本沙箱 `~/.config`、`~/.npm` 只读）。CLI 不覆盖 `@ant-design/x`——X 的确切 props 读 `web/node_modules/@ant-design/x/es/**/*.d.ts`。
+- 两个 skill：`antd`（antd v6）与 `antd-x`（`@ant-design/x` 2.10）——见 [.agents/skills/README.txt](.agents/skills/README.txt)。
 
 ---
 

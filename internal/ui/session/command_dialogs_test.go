@@ -14,6 +14,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/session"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -61,7 +62,7 @@ func newCommandDialogHarness(t *testing.T, chat *fakeChat, language string,
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel", Language: language})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
@@ -77,7 +78,7 @@ func newCommandDialogHarness(t *testing.T, chat *fakeChat, language string,
 	return &harness{t: t, ctx: ctx, ui: uiRoot, chat: chat}
 }
 
-func findSessionCommand(t *testing.T, h *harness, id string) contracts.CommandSpec {
+func findSessionCommand(t *testing.T, h *harness, id string) uinative.CommandSpec {
 	t.Helper()
 	for _, command := range h.ui.Runtime().Commands() {
 		if command.ID == id {
@@ -85,7 +86,7 @@ func findSessionCommand(t *testing.T, h *harness, id string) contracts.CommandSp
 		}
 	}
 	t.Fatalf("command %q is not registered; commands = %v", id, h.ui.Runtime().Commands())
-	return contracts.CommandSpec{}
+	return uinative.CommandSpec{}
 }
 
 func focusDialogInput(t *testing.T, tester *ui.Tester, label string) {

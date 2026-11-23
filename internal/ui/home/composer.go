@@ -19,6 +19,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
@@ -171,7 +172,7 @@ func stageHomePastedImage(st *homeComposerState, services ui.Services, tr func(z
 // caller, so a synchronous call from a frame would freeze the window; the
 // composer shows a busy attach action until the posted result stages the files.
 // A second click while busy is ignored (the action is disabled as well).
-func startHomeAttachmentPick(runtime contracts.UIRuntime, st *homeComposerState, tr func(zh, en string) string) {
+func startHomeAttachmentPick(runtime uinative.UIRuntime, st *homeComposerState, tr func(zh, en string) string) {
 	if st.attachBusy {
 		return
 	}
@@ -271,7 +272,7 @@ func openHomeSettingsPage(nav contracts.Navigator, pageID string) {
 // hid) and opens a menu that switches the workspace through the existing
 // WorkspaceService, or adds one through the same native folder picker the
 // empty state uses. One quiet menu button, not a second settings form.
-func buildHomeWorkspaceControl(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildHomeWorkspaceControl(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	kctx cordis.Context, st *homeComposerState, tr func(zh, en string) string) {
 	var workspace contracts.WorkspaceService
 	if raw, ok := kctx.Get(contracts.KeyWorkspace); ok {
@@ -358,7 +359,7 @@ func homeChipLabel(label string) string {
 // buildHomeModelControl is the composer's model picker: the model catalog's
 // presets write the default chat model for new conversations; without a catalog
 // the control deep-links to the provider settings page.
-func buildHomeModelControl(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildHomeModelControl(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	nav contracts.Navigator, chat contracts.ChatService, kctx cordis.Context,
 	settings contracts.SettingsService, st *homeComposerState, english bool,
 	tr func(zh, en string) string) {
@@ -431,7 +432,7 @@ func homeDefaultModelLabel(models []contracts.ModelInfo, modelID string,
 // grouped by provider (a disabled header per provider group, in catalog order),
 // each row radio-marking the current default model and writing chat.model when
 // chosen.
-func buildHomeModelChoices(m *ui.Menu, runtime contracts.UIRuntime,
+func buildHomeModelChoices(m *ui.Menu, runtime uinative.UIRuntime,
 	settings contracts.SettingsService, current string, models []contracts.ModelInfo,
 	english bool, tr func(zh, en string) string) {
 	group := ""
@@ -514,7 +515,7 @@ func persistHomeModelDefaultThinking(settings contracts.SettingsService, modelID
 // default model's DefaultThinking (the model-level strength new conversations
 // follow), writing the modelcatalog.models row. Reports whether the row was
 // added: a model without selectable modes or a missing settings store hides it.
-func buildHomeThinkingRow(m *ui.Menu, runtime contracts.UIRuntime, st *homeComposerState,
+func buildHomeThinkingRow(m *ui.Menu, runtime uinative.UIRuntime, st *homeComposerState,
 	settings contracts.SettingsService, info contracts.ModelInfo, english bool,
 	tr func(zh, en string) string) bool {
 	modelID := strings.TrimSpace(info.ID)
@@ -600,7 +601,7 @@ var homeModeChoices = []homeModeChoice{
 
 // buildHomeModeControl is the composer's chat-mode picker; Home can switch the
 // mode for the conversation it is about to start.
-func buildHomeModeControl(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildHomeModeControl(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	settings contracts.SettingsService, tr func(zh, en string) string) {
 	if settings == nil {
 		return
@@ -650,7 +651,7 @@ func homeModeChoiceLabel(settings contracts.SettingsService, tr func(zh, en stri
 
 // submitHomeComposer creates a session, sends the draft (with attachments when
 // the backend supports them) and navigates to the conversation screen.
-func submitHomeComposer(chat contracts.ChatService, nav contracts.Navigator, runtime contracts.UIRuntime,
+func submitHomeComposer(chat contracts.ChatService, nav contracts.Navigator, runtime uinative.UIRuntime,
 	st *homeComposerState, tr func(zh, en string) string) bool {
 	if chat == nil || st.sending || strings.TrimSpace(st.draft) == "" {
 		return false
@@ -702,7 +703,7 @@ func submitHomeComposer(chat contracts.ChatService, nav contracts.Navigator, run
 // semantics as the conversation composer. Home keeps its own business slots —
 // the staged attachment chips, the workspace/model/conversation-mode toolbar and
 // its error/notice rows — and sends through submitHomeComposer.
-func buildHomeComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildHomeComposer(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	navigator contracts.Navigator, chat contracts.ChatService, kctx cordis.Context,
 	st *homeComposerState, placeholder string, tr func(zh, en string) string) {
 	var settings contracts.SettingsService

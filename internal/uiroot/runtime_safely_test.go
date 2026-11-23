@@ -13,7 +13,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // TestPostPanicIsLoggedWithStack injects a panic into a Post callback, drains it
@@ -26,7 +26,7 @@ func TestPostPanicIsLoggedWithStack(t *testing.T) {
 	t.Cleanup(func() { log.SetOutput(prev) })
 
 	r := newTestRoot(t)
-	mustScreen(t, r, contracts.ScreenSpec{ID: "home", Title: "首页", Order: 10,
+	mustScreen(t, r, uinative.ScreenSpec{ID: "home", Title: "首页", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "alive") }})
 	tt := newTestTester(t, r, 1200, 800)
 	tt.Frame()

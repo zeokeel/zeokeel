@@ -23,6 +23,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/brand"
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
@@ -59,7 +60,7 @@ const homeColumnWidth float32 = 720
 // Module registers the Home screen and its command.
 func Module() *module.Descriptor[Config] {
 	return module.Define("zeokeel-ui/home", func(ctx cordis.Context, cfg Config) error {
-		runtime, err := ctx.Require(contracts.KeyUIRuntime)
+		runtime, err := ctx.Require(uinative.KeyUIRuntime)
 		if err != nil {
 			return err
 		}
@@ -96,7 +97,7 @@ func Module() *module.Descriptor[Config] {
 				unregisterCommand()
 				unregisterCommand = nil
 			}
-			unregister, err := runtime.RegisterCommand(contracts.CommandSpec{
+			unregister, err := runtime.RegisterCommand(uinative.CommandSpec{
 				ID:    "home.settings",
 				Title: uikit.T(locale, "设置", "Settings"),
 				Hint:  uikit.T(locale, "打开设置", "Open settings"),
@@ -127,7 +128,7 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 
-		screen := contracts.ScreenSpec{
+		screen := uinative.ScreenSpec{
 			ID:    "home",
 			Title: title,
 			Order: 10,
@@ -182,7 +183,7 @@ func Module() *module.Descriptor[Config] {
 		}
 		return own(ctx, func() (func(), error) { return runtime.RegisterScreen(screen) })
 	}).
-		AddRequires(module.Requires(contracts.KeyUIRuntime)).
+		AddRequires(module.Requires(uinative.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeyNavigator)).
 		AddRequires(module.Requires(contracts.KeyAppInfo)).
 		WithName("ZeoKeel Home screen")
@@ -293,7 +294,7 @@ type homeRecentState struct {
 // the same conversation is "most recent" on both surfaces. Each row names the
 // workspace its conversation belongs to (muted; the sidebar groups by it), as
 // the user otherwise has to hunt the tree to know where a recent chat lives.
-func buildRecentSessions(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildRecentSessions(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	nav contracts.Navigator, chat contracts.ChatService, workspace contracts.WorkspaceService,
 	st *homeRecentState, locale contracts.LocaleService, tr func(zh, en string) string) {
 	visible := homeVisibleSessions(chat)
@@ -409,7 +410,7 @@ func buildRecentSessions(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 // page offers the actions that get a first chat started (configure a model,
 // open a workspace, start the conversation) instead of leaving the composer as
 // the only entry. Only the steps that still need doing are shown.
-func buildNextSteps(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildNextSteps(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	nav contracts.Navigator, chat contracts.ChatService, kctx cordis.Context,
 	st *homeComposerState, tr func(zh, en string) string) {
 	if chat == nil || len(homeVisibleSessions(chat)) > 0 {
@@ -513,7 +514,7 @@ func buildHero(c *ui.Context, t *design.Tokens, greeting string, showFallbackHin
 
 // region renders one injection point. When nothing is registered yet it draws
 // the module's default state instead of an empty hole.
-func region(c *ui.Context, runtime contracts.UIRuntime, slot string, fallback contracts.BuildFunc) {
+func region(c *ui.Context, runtime uinative.UIRuntime, slot string, fallback uinative.BuildFunc) {
 	for _, name := range runtime.Slots() {
 		if name == slot {
 			runtime.RenderSlot(c, slot)

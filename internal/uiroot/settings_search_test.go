@@ -12,7 +12,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // searchProbe is a settings page that records the regions the host asked it to
@@ -23,9 +23,9 @@ type searchProbe struct {
 }
 
 func (p *searchProbe) page(id, section, title string, order int,
-	keywords []string, items []contracts.SettingsSearchItem, body string,
-) contracts.SettingsPageSpec {
-	return contracts.SettingsPageSpec{
+	keywords []string, items []uinative.SettingsSearchItem, body string,
+) uinative.SettingsPageSpec {
+	return uinative.SettingsPageSpec{
 		ID: id, Section: section, Title: title, Order: order,
 		Keywords:    keywords,
 		SearchItems: items,
@@ -56,14 +56,14 @@ func settingsSearchPages(t *testing.T, r *Root) (model, behavior, notifications,
 	notifications = &searchProbe{}
 	advanced = &searchProbe{}
 	mustPage(t, r, model.page("model", "模型", "模型设置", 10, nil,
-		[]contracts.SettingsSearchItem{
+		[]uinative.SettingsSearchItem{
 			{ID: "context-budget", Label: "上下文预算", AnchorKey: "model.context-budget",
 				Keywords: []string{"压缩", "compact", "compaction", "上下文", "context", "预算", "budget"}},
 			{ID: "pricing", Label: "模型价格", AnchorKey: "model.catalog",
 				Keywords: []string{"价格", "price", "定价", "成本", "cost"}},
 		}, "settings-model-body"))
 	mustPage(t, r, behavior.page("behavior", "常用", "行为", 10, nil,
-		[]contracts.SettingsSearchItem{
+		[]uinative.SettingsSearchItem{
 			{ID: "message-size", Label: "消息字号", AnchorKey: "behavior.message-size",
 				Keywords: []string{"字号", "字体大小", "text size", "font size", "字体"}},
 		}, "settings-behavior-body"))
@@ -71,7 +71,7 @@ func settingsSearchPages(t *testing.T, r *Root) (model, behavior, notifications,
 		[]string{"通知", "notification", "气泡", "toast"},
 		nil, "settings-notifications-body"))
 	mustPage(t, r, advanced.page("diagnostics", "高级", "诊断", 10, nil,
-		[]contracts.SettingsSearchItem{
+		[]uinative.SettingsSearchItem{
 			{ID: "log-path", Label: "日志位置", AnchorKey: "diagnostics.log",
 				Keywords: []string{"日志", "log", "日志文件"}},
 		}, "settings-diagnostics-body"))

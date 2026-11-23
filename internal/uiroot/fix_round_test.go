@@ -13,7 +13,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // selectionPixels counts the pixels of the light theme's persistent selection
@@ -64,11 +64,11 @@ func TestPaletteKeepsChosenRowVisibleAfterReopen(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
 	var alphaRan, betaRan bool
-	mustCommand(t, r, contracts.CommandSpec{ID: "alpha", Title: "Alpha", Order: 10,
+	mustCommand(t, r, uinative.CommandSpec{ID: "alpha", Title: "Alpha", Order: 10,
 		Run: func() error { alphaRan = true; return nil }})
-	mustCommand(t, r, contracts.CommandSpec{ID: "beta", Title: "Beta", Order: 20,
+	mustCommand(t, r, uinative.CommandSpec{ID: "beta", Title: "Beta", Order: 20,
 		Run: func() error { betaRan = true; return nil }})
-	unregisterZulu := mustCommand(t, r, contracts.CommandSpec{ID: "zulu", Title: "Zulu", Order: 30,
+	unregisterZulu := mustCommand(t, r, uinative.CommandSpec{ID: "zulu", Title: "Zulu", Order: 30,
 		Run: func() error { return nil }})
 
 	tt := newTestTester(t, r, 1200, 800)
@@ -119,7 +119,7 @@ func TestPaletteReopenStartsFromFirstRow(t *testing.T) {
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
 	titles := []string{"Alpha", "Beta", "Gamma", "Delta", "Epsilon"}
 	for i, title := range titles {
-		mustCommand(t, r, contracts.CommandSpec{ID: fmt.Sprintf("cmd-%d", i), Title: title,
+		mustCommand(t, r, uinative.CommandSpec{ID: fmt.Sprintf("cmd-%d", i), Title: title,
 			Order: i * 10, Run: func() error { return nil }})
 	}
 	tt := newTestTester(t, r, 1200, 800)
@@ -161,7 +161,7 @@ func TestPaletteFilterChangeChoosesFirstVisibleRow(t *testing.T) {
 	ran := make(map[string]bool)
 	for i, title := range []string{"Alpha", "Beta", "Gamma", "Delta", "Epsilon"} {
 		title, i := title, i
-		mustCommand(t, r, contracts.CommandSpec{ID: fmt.Sprintf("cmd-%d", i), Title: title,
+		mustCommand(t, r, uinative.CommandSpec{ID: fmt.Sprintf("cmd-%d", i), Title: title,
 			Order: i * 10, Run: func() error { ran[title] = true; return nil }})
 	}
 	tt := newTestTester(t, r, 1200, 800)
@@ -208,7 +208,7 @@ func TestPaletteReopenForgetsPreviousChosenCommand(t *testing.T) {
 	ran := make(map[string]bool)
 	for i, title := range []string{"Alpha", "Beta", "Gamma"} {
 		title, i := title, i
-		mustCommand(t, r, contracts.CommandSpec{ID: fmt.Sprintf("cmd-%d", i), Title: title,
+		mustCommand(t, r, uinative.CommandSpec{ID: fmt.Sprintf("cmd-%d", i), Title: title,
 			Order: i * 10, Run: func() error { ran[title] = true; return nil }})
 	}
 	tt := newTestTester(t, r, 1200, 800)
@@ -246,7 +246,7 @@ func TestPaletteReopenForgetsPreviousChosenCommand(t *testing.T) {
 func TestPaletteOpensAboveSettings(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustPage(t, r, contracts.SettingsPageSpec{
+	mustPage(t, r, uinative.SettingsPageSpec{
 		ID: "appearance", Section: "外观", Title: "外观", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "page-body") },
 	})
@@ -277,7 +277,7 @@ func TestPaletteOpensAboveSettings(t *testing.T) {
 func TestPaletteNoMatchResetsCount(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustCommand(t, r, contracts.CommandSpec{ID: "alpha", Title: "Alpha", Order: 10,
+	mustCommand(t, r, uinative.CommandSpec{ID: "alpha", Title: "Alpha", Order: 10,
 		Run: func() error { return nil }})
 	tt := newTestTester(t, r, 1200, 800)
 	tt.Frame()
@@ -308,7 +308,7 @@ func TestRailNewChatActionAndScreenSet(t *testing.T) {
 	mustScreen(t, r, textScreen("automation", "自动化", "body-automation", 30))
 	mustScreen(t, r, textScreen("plugins", "能力", "body-plugins", 40))
 	var newRan bool
-	mustCommand(t, r, contracts.CommandSpec{ID: "zeokeel.session.new", Title: "新会话", Order: 10,
+	mustCommand(t, r, uinative.CommandSpec{ID: "zeokeel.session.new", Title: "新会话", Order: 10,
 		Run: func() error {
 			newRan = true
 			return r.Navigator().Push("session")

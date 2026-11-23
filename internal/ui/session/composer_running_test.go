@@ -11,6 +11,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // TestComposerStaysVisibleWhileRunningWithDefaultQueue covers the default:
@@ -125,7 +126,7 @@ func TestComposerAutofocusAfterNewSession(t *testing.T) {
 	h := newHarness(t, chat)
 	tester := h.tester()
 
-	var newCommand contracts.CommandSpec
+	var newCommand uinative.CommandSpec
 	for _, command := range h.ui.Runtime().Commands() {
 		if command.ID == "zeokeel.session.new" {
 			newCommand = command

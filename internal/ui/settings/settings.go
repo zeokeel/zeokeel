@@ -6,7 +6,7 @@
 //
 // It is a UI module: a kernel Descriptor that requires the host UI runtime, the
 // settings store, the chat read model, the theme and the locale, and registers
-// the contracts.SettingsPageSpec values on activation. The host owns the settings
+// the uinative.SettingsPageSpec values on activation. The host owns the settings
 // shell (native Sidebar + Modal); this module only composes native mygo controls
 // — ui.TextInput, ui.TextArea, ui.Toggle, ui.Select, ui.Button,
 // ui.PrimaryButton, ui.Icon — and styles them with internal/design tokens
@@ -33,6 +33,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -76,7 +77,7 @@ type shortcutRow struct {
 // shortcutReferenceRows builds the read-only keyboard reference. H5: the two
 // configurable shortcuts are edited in the section above and are not repeated
 // here; this table lists the fixed window shortcuts only.
-func shortcutReferenceRows(locale contracts.LocaleService, runtime contracts.UIRuntime) []shortcutRow {
+func shortcutReferenceRows(locale contracts.LocaleService, runtime uinative.UIRuntime) []shortcutRow {
 	// One notation for every chord: uikit.FormatShortcut spells the command
 	// modifier for the platform and joins keys with " + " (V11). Non-chord
 	// entries (Enter, "type /") keep their literal key names.
@@ -174,7 +175,7 @@ type shortcutsState struct {
 // two editable desktop shortcuts (persisted through the host settings). Every
 // control on the page applies immediately, so there is no save button.
 func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store contracts.SettingsService,
-	runtime contracts.UIRuntime, locale contracts.LocaleService, st *shortcutsState, showHeader bool) {
+	runtime uinative.UIRuntime, locale contracts.LocaleService, st *shortcutsState, showHeader bool) {
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		if showHeader {
 			uikit.PageHeader(c, title, "")
@@ -425,11 +426,11 @@ type pageDefinition struct {
 	zhTitle       string
 	enTitle       string
 	titleOverride string
-	Build         contracts.BuildFunc
+	Build         uinative.BuildFunc
 	// Footer renders the page's pinned action row in the host's fixed settings
 	// footer (outside the scrolling body), and Dirty reports unsaved edits so
 	// the host can show the unsaved state and guard closing the surface.
-	Footer contracts.BuildFunc
+	Footer uinative.BuildFunc
 	Dirty  func() bool
 	// Discard throws the drafts away and re-reads the saved values; the host
 	// calls it when the user closes the settings with "Discard".
@@ -440,9 +441,9 @@ type pageDefinition struct {
 	// values are resolved per registration, so the search never reads a stale
 	// translation.
 	keywords    func() []string
-	searchItems func() []contracts.SettingsSearchItem
+	searchItems func() []uinative.SettingsSearchItem
 	// reveal is the page's search-locate hook: the host calls it with the hit
-	// item's anchor key before the page builds (contracts.SettingsPageSpec
+	// item's anchor key before the page builds (uinative.SettingsPageSpec
 	// .Reveal). A page with searchable items binds its regions in Build and
 	// sets up a *pageSearch here.
 	reveal func(c *ui.Context, anchorKey string)
@@ -454,14 +455,14 @@ type pageDefinition struct {
 // before the settings overlay) to make the navigation labels change on the next
 // frame without restarting the module.
 type pageSyncer struct {
-	runtime    contracts.UIRuntime
+	runtime    uinative.UIRuntime
 	locale     contracts.LocaleService
 	pages      []pageDefinition
 	registered map[string]func()
 	lang       string
 }
 
-func newPageSyncer(runtime contracts.UIRuntime, locale contracts.LocaleService) *pageSyncer {
+func newPageSyncer(runtime uinative.UIRuntime, locale contracts.LocaleService) *pageSyncer {
 	return &pageSyncer{runtime: runtime, locale: locale, registered: map[string]func(){}}
 }
 
@@ -479,11 +480,11 @@ func (s *pageSyncer) register(def pageDefinition) error {
 	if def.keywords != nil {
 		keywords = def.keywords()
 	}
-	var searchItems []contracts.SettingsSearchItem
+	var searchItems []uinative.SettingsSearchItem
 	if def.searchItems != nil {
 		searchItems = def.searchItems()
 	}
-	unregister, err := s.runtime.RegisterSettingsPage(contracts.SettingsPageSpec{
+	unregister, err := s.runtime.RegisterSettingsPage(uinative.SettingsPageSpec{
 		ID:          def.ID,
 		Section:     s.sectionKey(def.Section),
 		Title:       s.title(def),
@@ -652,7 +653,7 @@ func buildDiagnosticsPage(c *ui.Context, t *design.Tokens, state *diagnosticsSta
 // Module registers the model and appearance settings pages.
 func Module() *module.Descriptor[Config] {
 	return module.Define("zeokeel-ui/settings", func(ctx cordis.Context, cfg Config) error {
-		runtime, err := ctx.Require(contracts.KeyUIRuntime)
+		runtime, err := ctx.Require(uinative.KeyUIRuntime)
 		if err != nil {
 			return err
 		}
@@ -742,7 +743,7 @@ func Module() *module.Descriptor[Config] {
 				ID: PageID, Section: PageSection, Order: PageOrder,
 				zhTitle: "模型", enTitle: "Model", titleOverride: cfg.Title,
 				keywords:    modelPageKeywords,
-				searchItems: func() []contracts.SettingsSearchItem { return modelPageSearchItems(locale) },
+				searchItems: func() []uinative.SettingsSearchItem { return modelPageSearchItems(locale) },
 				reveal:      modelSearch.reveal,
 				Build: func(c *ui.Context) {
 					syncer.sync()
@@ -772,7 +773,7 @@ func Module() *module.Descriptor[Config] {
 				keywords: func() []string {
 					return append(append([]string{}, behaviorPageKeywords()...), capabilitiesPageKeywords()...)
 				},
-				searchItems: func() []contracts.SettingsSearchItem { return behaviorPageSearchItems(locale) },
+				searchItems: func() []uinative.SettingsSearchItem { return behaviorPageSearchItems(locale) },
 				reveal:      behaviorSearch.reveal,
 				Build: func(c *ui.Context) {
 					syncer.sync()
@@ -811,7 +812,7 @@ func Module() *module.Descriptor[Config] {
 				keywords: func() []string {
 					return append(append([]string{}, appearancePageKeywords()...), shortcutsPageKeywords()...)
 				},
-				searchItems: func() []contracts.SettingsSearchItem { return appearancePageSearchItems(locale) },
+				searchItems: func() []uinative.SettingsSearchItem { return appearancePageSearchItems(locale) },
 				reveal:      appearanceSearch.reveal,
 				Build: func(c *ui.Context) {
 					syncer.sync()
@@ -842,7 +843,7 @@ func Module() *module.Descriptor[Config] {
 				ID: NotificationsPageID, Section: "界面", Order: notificationsOrderInData,
 				zhTitle: "通知", enTitle: "Notifications",
 				keywords:    notificationsPageKeywords,
-				searchItems: func() []contracts.SettingsSearchItem { return notificationsPageSearchItems(locale) },
+				searchItems: func() []uinative.SettingsSearchItem { return notificationsPageSearchItems(locale) },
 				reveal:      notificationsSearch.reveal,
 				Build: func(c *ui.Context) {
 					syncer.sync()
@@ -991,7 +992,7 @@ func Module() *module.Descriptor[Config] {
 		// Invisible slot contribution: re-registers page titles when the host
 		// language changed. The host sidebar slot is built before the settings
 		// overlay, so a switch updates the navigation in the same frame.
-		localeSync := contracts.SlotItem{
+		localeSync := uinative.SlotItem{
 			Slot:  contracts.SlotSidebarFooter,
 			ID:    "settings.locale-sync",
 			Order: 1000,
@@ -1005,7 +1006,7 @@ func Module() *module.Descriptor[Config] {
 		}
 		return nil
 	}).
-		AddRequires(module.Requires(contracts.KeyUIRuntime)).
+		AddRequires(module.Requires(uinative.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeySettings)).
 		AddRequires(module.Requires(contracts.KeyChat)).
 		AddRequires(module.Requires(contracts.KeyTheme)).
@@ -1363,7 +1364,7 @@ func rowActionLabel(locale contracts.LocaleService, action, name string) string 
 // control surface (add/edit/remove and the default model apply immediately);
 // the system prompt and the runtime limits are the only explicit-save drafts,
 // persisted by the page footer's Save.
-func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, catalog *catalogState,
+func buildPage(c *ui.Context, runtime uinative.UIRuntime, state *moduleState, catalog *catalogState,
 	chat contracts.ChatService, labels buildLabels, store contracts.SettingsService,
 	locale contracts.LocaleService, search *pageSearch) {
 	t := design.Of(c)
@@ -1513,7 +1514,7 @@ func sessionTitleRow(chat contracts.ChatService, locale contracts.LocaleService)
 // for a setting that takes effect immediately); the global hotkey is the page's
 // only explicit-save field and says so next to its input.
 func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.SettingsService,
-	theme contracts.ThemeService, runtime contracts.UIRuntime, locale contracts.LocaleService,
+	theme contracts.ThemeService, runtime uinative.UIRuntime, locale contracts.LocaleService,
 	labels buildAppearanceLabels, shortcuts *shortcutsState, search *pageSearch) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.SpaceScreen).Children(func() {

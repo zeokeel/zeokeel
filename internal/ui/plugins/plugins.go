@@ -18,6 +18,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -58,7 +59,7 @@ type state struct {
 	locale contracts.LocaleService
 
 	// runtime is the host UI runtime: async connector work posts results here.
-	runtime contracts.UIRuntime
+	runtime uinative.UIRuntime
 	// refreshing is true while an MCP re-connect runs off the UI thread: the
 	// Refresh call pings every client and can block on a hung server, so it
 	// never runs inside the frame's click handler.
@@ -137,7 +138,7 @@ func (st *state) localized(value, zhDefault, enDefault string) string {
 // Module registers the Plugins screen.
 func Module() *module.Descriptor[Config] {
 	return module.Define(ModuleID, func(ctx cordis.Context, cfg Config) error {
-		runtime, err := ctx.Require(contracts.KeyUIRuntime)
+		runtime, err := ctx.Require(uinative.KeyUIRuntime)
 		if err != nil {
 			return err
 		}
@@ -156,7 +157,7 @@ func Module() *module.Descriptor[Config] {
 			pendingRestartServers: make(map[string]bool),
 		}
 		if err := own(ctx, func() (func(), error) {
-			return runtime.RegisterScreen(contracts.ScreenSpec{
+			return runtime.RegisterScreen(uinative.ScreenSpec{
 				ID:    ScreenID,
 				Title: config.Title,
 				Order: 30,
@@ -170,7 +171,7 @@ func Module() *module.Descriptor[Config] {
 		// The screen's chrome lives in the host's B3 top band: only the title.
 		// The page's actions belong to its tabs (each tab carries its own
 		// refresh/create row), so the band does not switch actions with a tab.
-		screenSlots := []contracts.SlotItem{
+		screenSlots := []uinative.SlotItem{
 			{
 				Slot: contracts.SlotScreenHeader, ID: "plugins.title", Order: 10,
 				Build: func(c *ui.Context) { buildScreenHeaderSlot(c, design.Of(c), config, moduleState) },
@@ -186,7 +187,7 @@ func Module() *module.Descriptor[Config] {
 		}
 		return nil
 	}).
-		AddRequires(module.Requires(contracts.KeyUIRuntime)).
+		AddRequires(module.Requires(uinative.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeyNavigator)).
 		WithName("ZeoKeel plugins screen")
 }

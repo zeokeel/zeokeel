@@ -10,9 +10,10 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
-// runtime implements contracts.UIRuntime and contracts.ScreenLister: the five
+// runtime implements uinative.UIRuntime and contracts.ScreenLister: the five
 // contribution registries plus the frame-start Post queue.
 //
 // Concurrency: Register* is meant for assembly/startup on the UI thread, but the
@@ -22,29 +23,29 @@ type runtime struct {
 	root *Root
 
 	mu        sync.Mutex
-	screens   map[string]contracts.ScreenSpec
-	slots     map[string]map[string]contracts.SlotItem
-	pages     map[string]contracts.SettingsPageSpec
-	renderers map[string]map[string]contracts.ToolRenderer
-	commands  map[string]contracts.CommandSpec
+	screens   map[string]uinative.ScreenSpec
+	slots     map[string]map[string]uinative.SlotItem
+	pages     map[string]uinative.SettingsPageSpec
+	renderers map[string]map[string]uinative.ToolRenderer
+	commands  map[string]uinative.CommandSpec
 	posts     []func()
 }
 
 func newRuntime(root *Root) *runtime {
 	return &runtime{
 		root:      root,
-		screens:   make(map[string]contracts.ScreenSpec),
-		slots:     make(map[string]map[string]contracts.SlotItem),
-		pages:     make(map[string]contracts.SettingsPageSpec),
-		renderers: make(map[string]map[string]contracts.ToolRenderer),
-		commands:  make(map[string]contracts.CommandSpec),
+		screens:   make(map[string]uinative.ScreenSpec),
+		slots:     make(map[string]map[string]uinative.SlotItem),
+		pages:     make(map[string]uinative.SettingsPageSpec),
+		renderers: make(map[string]map[string]uinative.ToolRenderer),
+		commands:  make(map[string]uinative.CommandSpec),
 	}
 }
 
-// --- contracts.UIRuntime ---
+// --- uinative.UIRuntime ---
 
 // Commands returns the registered commands, sorted by Order then ID.
-func (r *runtime) Commands() []contracts.CommandSpec {
+func (r *runtime) Commands() []uinative.CommandSpec {
 	return r.commandSpecs()
 }
 
@@ -62,7 +63,7 @@ func (r *runtime) Invalidate() { r.root.requestFrame() }
 
 func (r *runtime) Frame() uint64 { return r.root.Frames() }
 
-func (r *runtime) RegisterScreen(spec contracts.ScreenSpec) (func(), error) {
+func (r *runtime) RegisterScreen(spec uinative.ScreenSpec) (func(), error) {
 	if spec.ID == "" {
 		return nil, fmt.Errorf("uiroot: screen with empty ID")
 	}
@@ -84,7 +85,7 @@ func (r *runtime) RegisterScreen(spec contracts.ScreenSpec) (func(), error) {
 	}), nil
 }
 
-func (r *runtime) RegisterSlotItem(item contracts.SlotItem) (func(), error) {
+func (r *runtime) RegisterSlotItem(item uinative.SlotItem) (func(), error) {
 	if item.Slot == "" || item.ID == "" {
 		return nil, fmt.Errorf("uiroot: slot item needs Slot and ID")
 	}
@@ -95,7 +96,7 @@ func (r *runtime) RegisterSlotItem(item contracts.SlotItem) (func(), error) {
 	defer r.mu.Unlock()
 	items, ok := r.slots[item.Slot]
 	if !ok {
-		items = make(map[string]contracts.SlotItem)
+		items = make(map[string]uinative.SlotItem)
 		r.slots[item.Slot] = items
 	}
 	if _, exists := items[item.ID]; exists {
@@ -116,7 +117,7 @@ func (r *runtime) RegisterSlotItem(item contracts.SlotItem) (func(), error) {
 	}), nil
 }
 
-func (r *runtime) RegisterSettingsPage(page contracts.SettingsPageSpec) (func(), error) {
+func (r *runtime) RegisterSettingsPage(page uinative.SettingsPageSpec) (func(), error) {
 	if page.ID == "" {
 		return nil, fmt.Errorf("uiroot: settings page with empty ID")
 	}
@@ -138,7 +139,7 @@ func (r *runtime) RegisterSettingsPage(page contracts.SettingsPageSpec) (func(),
 	}), nil
 }
 
-func (r *runtime) RegisterToolRenderer(renderer contracts.ToolRenderer) (func(), error) {
+func (r *runtime) RegisterToolRenderer(renderer uinative.ToolRenderer) (func(), error) {
 	if renderer.Tool == "" || renderer.ID == "" {
 		return nil, fmt.Errorf("uiroot: tool renderer needs Tool and ID")
 	}
@@ -149,7 +150,7 @@ func (r *runtime) RegisterToolRenderer(renderer contracts.ToolRenderer) (func(),
 	defer r.mu.Unlock()
 	items, ok := r.renderers[renderer.Tool]
 	if !ok {
-		items = make(map[string]contracts.ToolRenderer)
+		items = make(map[string]uinative.ToolRenderer)
 		r.renderers[renderer.Tool] = items
 	}
 	if _, exists := items[renderer.ID]; exists {
@@ -170,7 +171,7 @@ func (r *runtime) RegisterToolRenderer(renderer contracts.ToolRenderer) (func(),
 	}), nil
 }
 
-func (r *runtime) RegisterCommand(cmd contracts.CommandSpec) (func(), error) {
+func (r *runtime) RegisterCommand(cmd uinative.CommandSpec) (func(), error) {
 	if cmd.ID == "" {
 		return nil, fmt.Errorf("uiroot: command with empty ID")
 	}
@@ -257,9 +258,9 @@ func (r *runtime) drain() {
 	}
 }
 
-func (r *runtime) screenSpecs() []contracts.ScreenSpec {
+func (r *runtime) screenSpecs() []uinative.ScreenSpec {
 	r.mu.Lock()
-	specs := make([]contracts.ScreenSpec, 0, len(r.screens))
+	specs := make([]uinative.ScreenSpec, 0, len(r.screens))
 	for _, spec := range r.screens {
 		specs = append(specs, spec)
 	}
@@ -273,7 +274,7 @@ func (r *runtime) screenSpecs() []contracts.ScreenSpec {
 	return specs
 }
 
-func (r *runtime) screen(id string) (contracts.ScreenSpec, bool) {
+func (r *runtime) screen(id string) (uinative.ScreenSpec, bool) {
 	r.mu.Lock()
 	spec, ok := r.screens[id]
 	r.mu.Unlock()
@@ -285,9 +286,9 @@ func (r *runtime) hasScreen(id string) bool {
 	return ok
 }
 
-func (r *runtime) slotItems(slot string) []contracts.SlotItem {
+func (r *runtime) slotItems(slot string) []uinative.SlotItem {
 	r.mu.Lock()
-	items := make([]contracts.SlotItem, 0, len(r.slots[slot]))
+	items := make([]uinative.SlotItem, 0, len(r.slots[slot]))
 	for _, item := range r.slots[slot] {
 		items = append(items, item)
 	}
@@ -315,9 +316,9 @@ func (r *runtime) slotNames(prefix string) []string {
 	return names
 }
 
-func (r *runtime) settingsPages() []contracts.SettingsPageSpec {
+func (r *runtime) settingsPages() []uinative.SettingsPageSpec {
 	r.mu.Lock()
-	pages := make([]contracts.SettingsPageSpec, 0, len(r.pages))
+	pages := make([]uinative.SettingsPageSpec, 0, len(r.pages))
 	for _, page := range r.pages {
 		pages = append(pages, page)
 	}
@@ -334,9 +335,9 @@ func (r *runtime) settingsPages() []contracts.SettingsPageSpec {
 	return pages
 }
 
-func (r *runtime) commandSpecs() []contracts.CommandSpec {
+func (r *runtime) commandSpecs() []uinative.CommandSpec {
 	r.mu.Lock()
-	cmds := make([]contracts.CommandSpec, 0, len(r.commands))
+	cmds := make([]uinative.CommandSpec, 0, len(r.commands))
 	for _, cmd := range r.commands {
 		cmds = append(cmds, cmd)
 	}
@@ -350,9 +351,9 @@ func (r *runtime) commandSpecs() []contracts.CommandSpec {
 	return cmds
 }
 
-func (r *runtime) toolRenderers(tool string) []contracts.ToolRenderer {
+func (r *runtime) toolRenderers(tool string) []uinative.ToolRenderer {
 	r.mu.Lock()
-	items := make([]contracts.ToolRenderer, 0, len(r.renderers[tool]))
+	items := make([]uinative.ToolRenderer, 0, len(r.renderers[tool]))
 	for _, item := range r.renderers[tool] {
 		items = append(items, item)
 	}

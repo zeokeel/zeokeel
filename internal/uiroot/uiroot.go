@@ -4,7 +4,7 @@
 //
 // Rules (see docs/ARCHITECTURE.md):
 //   - Only this package creates the frame entry (ui.View) and window content.
-//     UI modules contribute builders (contracts.BuildFunc) called inside it.
+//     UI modules contribute builders (uinative.BuildFunc) called inside it.
 //   - Builders run on the UI thread, only inside a frame, and may run several
 //     times per frame (mygo re-builds after events): they must be side-effect
 //     free. Mutations happen in click handlers, commands or UIRuntime.Post.
@@ -26,6 +26,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 )
 
@@ -476,7 +477,7 @@ func (r *Root) registerHostCommands() {
 			unregisters[index]()
 		}
 	}
-	specs := []contracts.CommandSpec{
+	specs := []uinative.CommandSpec{
 		{
 			ID:       "uiroot.toggle-inspector",
 			Title:    r.tr("切换右侧栏", "Toggle inspector"),
@@ -559,8 +560,8 @@ func (r *Root) SetKernelContext(ctx cordis.Context) {
 // AppName returns the product name shown in the title bar and UI.
 func (r *Root) AppName() string { return r.appName }
 
-// Runtime returns the host UI runtime service (contracts.KeyUIRuntime).
-func (r *Root) Runtime() contracts.UIRuntime { return r.rt }
+// Runtime returns the host UI runtime service (uinative.KeyUIRuntime).
+func (r *Root) Runtime() uinative.UIRuntime { return r.rt }
 
 // Navigator returns the host navigation service (contracts.KeyNavigator).
 func (r *Root) Navigator() contracts.Navigator { return r.nav }

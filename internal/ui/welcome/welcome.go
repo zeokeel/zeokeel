@@ -13,6 +13,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -27,7 +28,7 @@ type Config struct {
 // Module registers the welcome contributions.
 func Module() *module.Descriptor[Config] {
 	return module.Define("zeokeel-ui/welcome", func(ctx cordis.Context, cfg Config) error {
-		runtime, err := ctx.Require(contracts.KeyUIRuntime)
+		runtime, err := ctx.Require(uinative.KeyUIRuntime)
 		if err != nil {
 			return err
 		}
@@ -55,7 +56,7 @@ func Module() *module.Descriptor[Config] {
 		// 1. Home hero: replaces home's default hero with the welcome content.
 		// The hero build also captures the frame services the command needs.
 		if err := own(ctx, func() (func(), error) {
-			return runtime.RegisterSlotItem(contracts.SlotItem{
+			return runtime.RegisterSlotItem(uinative.SlotItem{
 				Slot:  contracts.SlotHomeHero,
 				ID:    "welcome.hero",
 				Order: 10,
@@ -75,7 +76,7 @@ func Module() *module.Descriptor[Config] {
 		// 2. A command, rendered by the host's command surface (the palette).
 		// It actually copies the version, as its label says.
 		return own(ctx, func() (func(), error) {
-			return runtime.RegisterCommand(contracts.CommandSpec{
+			return runtime.RegisterCommand(uinative.CommandSpec{
 				ID:    "welcome.copy-version",
 				Title: uikit.T(locale, "复制版本", "Copy version"),
 				Hint:  uikit.T(locale, "复制 ZeoKeel 版本号", "Copy the ZeoKeel version"),
@@ -92,7 +93,7 @@ func Module() *module.Descriptor[Config] {
 			})
 		})
 	}).
-		AddRequires(module.Requires(contracts.KeyUIRuntime)).
+		AddRequires(module.Requires(uinative.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeyAppInfo)).
 		WithName("ZeoKeel welcome contributions")
 }

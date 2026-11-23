@@ -34,6 +34,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -121,7 +122,7 @@ type rendererState struct {
 	// foldStateLimit.
 	seenAt map[string]uint64
 	// runtime is the host UI runtime: its frame number orders the fold states.
-	runtime contracts.UIRuntime
+	runtime uinative.UIRuntime
 	// locale localizes the real cards' copy per frame (zh is the default).
 	locale contracts.LocaleService
 	// ctx resolves the optional plan reviewer per frame.
@@ -197,7 +198,7 @@ func (s *rendererState) evictLocked() {
 // Module registers the demo renderer and the real Rig tool cards.
 func Module() *module.Descriptor[Config] {
 	return module.Define("zeokeel-ui/toolcards", func(ctx cordis.Context, cfg Config) error {
-		runtime, err := ctx.Require(contracts.KeyUIRuntime)
+		runtime, err := ctx.Require(uinative.KeyUIRuntime)
 		if err != nil {
 			return err
 		}
@@ -211,7 +212,7 @@ func Module() *module.Descriptor[Config] {
 		// The demo card stays exactly as it was: the host's capability probe and
 		// its integration test assert its text and raw status.
 		if err := own(ctx, func() (func(), error) {
-			return runtime.RegisterToolRenderer(contracts.ToolRenderer{
+			return runtime.RegisterToolRenderer(uinative.ToolRenderer{
 				Tool:  "demo",
 				ID:    "toolcards.demo-card",
 				Order: demoCardOrder,
@@ -228,7 +229,7 @@ func Module() *module.Descriptor[Config] {
 				build = planReviewBuild(state)
 			}
 			if err := own(ctx, func() (func(), error) {
-				return runtime.RegisterToolRenderer(contracts.ToolRenderer{
+				return runtime.RegisterToolRenderer(uinative.ToolRenderer{
 					Tool:  tool,
 					ID:    "toolcards." + tool + "-card",
 					Order: realCardOrder,
@@ -240,7 +241,7 @@ func Module() *module.Descriptor[Config] {
 		}
 		return nil
 	}).
-		AddRequires(module.Requires(contracts.KeyUIRuntime)).
+		AddRequires(module.Requires(uinative.KeyUIRuntime)).
 		WithName("ZeoKeel tool cards")
 }
 
@@ -282,7 +283,7 @@ func demoBuild(title string) func(c *ui.Context, call contracts.ToolCall) {
 // rows and registered tool rows one under the other: a far-end chevron on one
 // row and an inline chevron on the next read as two different widgets (the
 // 2026-11 per-screen review, p2-process-expanded).
-func realBuild(state *rendererState, runtime contracts.UIRuntime) func(c *ui.Context, call contracts.ToolCall) {
+func realBuild(state *rendererState, runtime uinative.UIRuntime) func(c *ui.Context, call contracts.ToolCall) {
 	return func(c *ui.Context, call contracts.ToolCall) {
 		t := design.Of(c)
 		tool := strings.TrimSpace(call.Name)

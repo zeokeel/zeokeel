@@ -11,6 +11,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/interaction"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -103,7 +104,7 @@ func newLoopHarness(t *testing.T, chat *loopChat, notifier *loopNotifier) *loopH
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
 	plan := &fakePlanReviewer{}
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
 	provide[contracts.PlanReviewer](t, ctx, contracts.KeyPlanReviewer, plan)
 	if chat != nil {
@@ -112,7 +113,7 @@ func newLoopHarness(t *testing.T, chat *loopChat, notifier *loopNotifier) *loopH
 	if notifier != nil {
 		provide[contracts.Notifier](t, ctx, contracts.KeyNotifier, notifier)
 	}
-	if _, err := uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := uiRoot.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID: "home", Title: "首页", Build: func(c *ui.Context) { ui.Text(c, "主屏幕") },
 	}); err != nil {
 		t.Fatalf("register home: %v", err)

@@ -24,6 +24,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
@@ -86,7 +87,7 @@ func sandboxNoteText(locale contracts.LocaleService, mode string) string {
 // stripped assembly without the module renders the unavailable state. store
 // supplies the global permission mode the status face must reflect (RG-02).
 func buildSandboxSection(c *ui.Context, locale contracts.LocaleService, service contracts.SandboxService,
-	store contracts.SettingsService, st *behaviorState, uiRuntime contracts.UIRuntime) {
+	store contracts.SettingsService, st *behaviorState, uiRuntime uinative.UIRuntime) {
 	t := design.Of(c)
 	mode := contracts.PermissionWorkspace
 	if store != nil {

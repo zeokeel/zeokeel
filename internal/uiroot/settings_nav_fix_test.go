@@ -12,7 +12,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // TestSettingsNavMarksDirtyPage registers two pages, one with an unsaved draft,
@@ -21,12 +21,12 @@ import (
 func TestSettingsNavMarksDirtyPage(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustPage(t, r, contracts.SettingsPageSpec{
+	mustPage(t, r, uinative.SettingsPageSpec{
 		ID: "model", Section: "常用", Title: "模型", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "model-body") },
 		Dirty: func() bool { return true },
 	})
-	mustPage(t, r, contracts.SettingsPageSpec{
+	mustPage(t, r, uinative.SettingsPageSpec{
 		ID: "behavior", Section: "常用", Title: "行为", Order: 20,
 		Build: func(c *ui.Context) { ui.Text(c, "behavior-body") },
 		Dirty: func() bool { return false },

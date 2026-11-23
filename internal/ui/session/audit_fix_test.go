@@ -16,6 +16,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // auditTurnChat is one finished turn with the given tool calls.
@@ -115,7 +116,7 @@ func TestChildViewKeepsApprovalBanner(t *testing.T) {
 		children: childAgentsFixture(), approvals: approvals,
 	})
 	// The host approval module draws the inline card into this slot.
-	unregister, err := h.ui.Runtime().RegisterSlotItem(contracts.SlotItem{
+	unregister, err := h.ui.Runtime().RegisterSlotItem(uinative.SlotItem{
 		Slot: contracts.SlotSessionBanner, ID: "test.approval-card", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "审批内联卡") },
 	})
@@ -329,7 +330,7 @@ func TestPopoversCloseOnScreenRevisit(t *testing.T) {
 
 	// A second screen keeps the session module out of the build pass; returning
 	// starts a fresh visit with no overlay.
-	if _, err := h.ui.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := h.ui.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID: "plugins", Title: "插件", Order: 50,
 		Build: func(c *ui.Context) { ui.Text(c, "插件屏幕") },
 	}); err != nil {

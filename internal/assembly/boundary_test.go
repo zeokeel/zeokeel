@@ -36,6 +36,12 @@ import (
 
 const modulePath = "github.com/zeokeel/zeokeel/"
 
+// engineModulePath is the native UI engine. Stage 0 of the web-client pivot
+// (docs/plans/stage0-decouple-contracts.md) moves the mygo-bound contribution
+// model into internal/contracts/uinative so that internal/contracts — and every
+// transport that only needs the contracts — stays engine-free.
+const engineModulePath = "github.com/egoist/mygo"
+
 // boundaryPkg is one package row of `go list`.
 type boundaryPkg struct {
 	path     string   // full import path
@@ -91,9 +97,11 @@ func listProductPackages(t *testing.T) []boundaryPkg {
 }
 
 // uiModuleAllowed is the AR-07 allowlist for internal/ui/* product imports.
+// internal/contracts/uinative is the mygo-bound contribution model those
+// modules register into (Stage 0); it is deleted with them in Stage 3.
 func uiModuleAllowed(imp string) bool {
 	switch imp {
-	case "internal/contracts", "internal/uikit", "internal/design", "internal/icons", "internal/brand":
+	case "internal/contracts", "internal/contracts/uinative", "internal/uikit", "internal/design", "internal/icons", "internal/brand":
 		return true
 	}
 	return strings.HasPrefix(imp, "internal/lib/")
@@ -136,7 +144,7 @@ func TestImportBoundaries(t *testing.T) {
 				}
 			case rel == "internal/uiroot":
 				switch {
-				case imp == "internal/contracts" || imp == "internal/uikit" || imp == "internal/design" || imp == "internal/icons" || imp == "internal/brand":
+				case imp == "internal/contracts" || imp == "internal/contracts/uinative" || imp == "internal/uikit" || imp == "internal/design" || imp == "internal/icons" || imp == "internal/brand":
 				case strings.HasPrefix(imp, "internal/lib/"):
 				default:
 					reason = "the shell (uiroot) must not import UI module implementations, backend modules or host"
@@ -156,5 +164,104 @@ func TestImportBoundaries(t *testing.T) {
 				t.Errorf("%s imports %s: %s", rel, imp, reason)
 			}
 		}
+	}
+}
+
+// moduleRoot resolves the repository root from this test's package directory.
+func moduleRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve module root: %v", err)
+	}
+	return root
+}
+
+// goList runs one go list invocation from the module root and returns its
+// non-empty output lines.
+func goList(t *testing.T, format string, patterns ...string) []string {
+	t.Helper()
+	args := append([]string{"list", "-e", "-f", format}, patterns...)
+	cmd := exec.Command("go", args...)
+	cmd.Dir = moduleRoot(t)
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			t.Fatalf("go list %v: %v\n%s", patterns, err, exitErr.Stderr)
+		}
+		t.Fatalf("go list %v: %v", patterns, err)
+	}
+	var lines []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+// TestContractsDependsOnNoEngine is the Stage 0 machine assertion: the
+// dependency graph of internal/contracts must not contain the native UI engine,
+// so a transport (the gateway, ACP) can depend on the contracts without
+// dragging github.com/egoist/mygo into its binary.
+func TestContractsDependsOnNoEngine(t *testing.T) {
+	deps := goList(t, "{{.ImportPath}}", "-deps", "./internal/contracts")
+	if len(deps) == 0 {
+		t.Fatal("go list -deps ./internal/contracts returned no packages")
+	}
+	for _, dep := range deps {
+		if dep == engineModulePath || strings.HasPrefix(dep, engineModulePath+"/") {
+			t.Errorf("internal/contracts depends on %s: the contracts surface must stay engine-free "+
+				"(move mygo-bound types into internal/contracts/uinative; docs/plans/stage0-decouple-contracts.md)", dep)
+		}
+	}
+}
+
+// TestNativeUIModelIsQuarantined asserts internal/contracts/uinative — the
+// package that keeps the mygo-bound contribution model — is imported only by
+// the native-UI stack and the wiring that hosts it. A backend module, a lib or
+// a new transport importing it would re-couple that code to the engine that
+// Stage 3 removes.
+//
+// The allowlist is the set of native-UI packages today (Stage 3/4 shrink it as
+// the native UI is deleted): the UI modules, the shell, the process host, the
+// assembly/registry wiring, the native devtools/regression harnesses and the
+// audit evidence harnesses. Test-only packages are covered through TestImports
+// so a regression harness cannot quietly become a product dependency.
+func TestNativeUIModelIsQuarantined(t *testing.T) {
+	const nativeModel = "internal/contracts/uinative"
+	allowed := func(rel string) bool {
+		switch {
+		case strings.HasPrefix(rel, "internal/ui/"), rel == "internal/uiroot",
+			rel == "internal/host", rel == "internal/assembly",
+			strings.HasPrefix(rel, "internal/devtools/"),
+			rel == "internal/regression", strings.HasPrefix(rel, "audit/"):
+			return true
+		}
+		return false
+	}
+	rows := goList(t, "{{.ImportPath}}|{{join .Imports \",\"}}|{{join .TestImports \",\"}}", "./...")
+	if len(rows) == 0 {
+		t.Fatal("go list ./... returned no packages")
+	}
+	seen := 0
+	for _, row := range rows {
+		parts := strings.SplitN(row, "|", 3)
+		if len(parts) != 3 {
+			t.Fatalf("go list row %q: want path|imports|testimports", row)
+		}
+		rel := strings.TrimPrefix(parts[0], modulePath)
+		for _, imp := range strings.Split(parts[1]+","+parts[2], ",") {
+			if imp != modulePath+nativeModel {
+				continue
+			}
+			seen++
+			if !allowed(rel) {
+				t.Errorf("%s imports %s: the native UI contribution model is quarantined to internal/ui/**, internal/uiroot, internal/host, internal/assembly, internal/devtools/**, internal/regression and audit/** until Stage 3 deletes it", rel, nativeModel)
+			}
+		}
+	}
+	if seen == 0 {
+		t.Fatalf("no package imports %s: the quarantine assertion would pass vacuously", nativeModel)
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -213,7 +214,7 @@ func (st *state) goalErrorText(err error) string {
 }
 
 // goalActionFailed records one localized lifecycle failure.
-func goalActionFailed(st *state, runtime contracts.UIRuntime, prefix string, err error) {
+func goalActionFailed(st *state, runtime uinative.UIRuntime, prefix string, err error) {
 	st.goalActionErr = prefix + st.goalErrorText(err)
 	st.refreshGoalSnapshot()
 	runtime.Invalidate()
@@ -221,7 +222,7 @@ func goalActionFailed(st *state, runtime contracts.UIRuntime, prefix string, err
 
 // goalActionSucceeded publishes the service's new snapshot and clears the last
 // failure.
-func goalActionSucceeded(st *state, runtime contracts.UIRuntime, goal contracts.Goal, toast string) {
+func goalActionSucceeded(st *state, runtime uinative.UIRuntime, goal contracts.Goal, toast string) {
 	st.setGoalSnapshot(goal)
 	st.goalActionErr = ""
 	if toast != "" {
@@ -231,7 +232,7 @@ func goalActionSucceeded(st *state, runtime contracts.UIRuntime, goal contracts.
 }
 
 // pauseGoalAction pauses the cached active goal.
-func pauseGoalAction(st *state, runtime contracts.UIRuntime) {
+func pauseGoalAction(st *state, runtime uinative.UIRuntime) {
 	if st == nil || st.goalService == nil || st.goal == nil {
 		return
 	}
@@ -252,7 +253,7 @@ func pauseGoalAction(st *state, runtime contracts.UIRuntime) {
 
 // resumeGoalAction continues an active-disarmed, paused or blocked goal through
 // the human path (the model cannot resume a paused goal).
-func resumeGoalAction(st *state, runtime contracts.UIRuntime) {
+func resumeGoalAction(st *state, runtime uinative.UIRuntime) {
 	if st == nil || st.goalService == nil || st.goal == nil {
 		return
 	}
@@ -278,7 +279,7 @@ func resumeGoalAction(st *state, runtime contracts.UIRuntime) {
 }
 
 // completeGoalAction marks the cached goal complete.
-func completeGoalAction(st *state, runtime contracts.UIRuntime) {
+func completeGoalAction(st *state, runtime uinative.UIRuntime) {
 	if st == nil || st.goalService == nil || st.goal == nil {
 		return
 	}
@@ -299,7 +300,7 @@ func completeGoalAction(st *state, runtime contracts.UIRuntime) {
 
 // clearGoalAction removes the cached goal with its revision check; the record
 // is gone (not merely ended), so the confirmation is the caller's job.
-func clearGoalAction(st *state, runtime contracts.UIRuntime) {
+func clearGoalAction(st *state, runtime uinative.UIRuntime) {
 	if st == nil || st.goalService == nil || st.goal == nil {
 		return
 	}
@@ -329,7 +330,7 @@ func clearGoalAction(st *state, runtime contracts.UIRuntime) {
 // the goal waits, a hover-only clear entry and the ⋯ goal menu. The group is an
 // inline, left-aligned cluster capped at 70% of the reading measure; a blocked
 // goal adds its concrete reason on a quiet second line.
-func buildGoalDock(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+func buildGoalDock(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state) {
 	if st == nil || st.goal == nil {
 		return
 	}
@@ -400,7 +401,7 @@ func buildGoalDock(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 
 // buildGoalResumeButton is the quiet dock action that re-arms an active goal
 // after a restart/Stop or leaves the paused/blocked phase.
-func buildGoalResumeButton(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildGoalResumeButton(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	st *state, goal contracts.Goal) {
 	label := st.tr("继续目标", "Continue goal")
 	button := design.Apply(ui.Button(c.Key("session.goal.resume"), label), t.SecondaryButton()).
@@ -416,7 +417,7 @@ func buildGoalResumeButton(c *ui.Context, t *design.Tokens, runtime contracts.UI
 }
 
 // buildGoalDockMenuButton is the goal strip's ⋯ entry (24 DIP More icon).
-func buildGoalDockMenuButton(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+func buildGoalDockMenuButton(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state) {
 	label := st.tr("目标操作", "Goal actions")
 	uikit.IconButton(c, uikit.IconButtonOptions{
 		Key:      "session.goal.menu",
@@ -432,7 +433,7 @@ func buildGoalDockMenuButton(c *ui.Context, t *design.Tokens, runtime contracts.
 // buildGoalMenu fills the goal strip's menu: pause/resume and complete first,
 // then edit, then the destructive clear in the danger color, separated. The
 // entries reflect the current phase: a complete goal only offers edit/clear.
-func buildGoalMenu(m *ui.Menu, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+func buildGoalMenu(m *ui.Menu, t *design.Tokens, runtime uinative.UIRuntime, st *state) {
 	_ = t
 	if st == nil || st.goal == nil {
 		return
@@ -469,7 +470,7 @@ func buildGoalMenu(m *ui.Menu, t *design.Tokens, runtime contracts.UIRuntime, st
 // buildGoalMenuActions renders the destructive clear through the shared
 // ConfirmDanger dialog: the safe action (取消) is the Default so a stray Enter
 // cancels, and 确认清除 never is (DESIGN.md AP-12).
-func buildGoalMenuActions(c *ui.Context, runtime contracts.UIRuntime, st *state) {
+func buildGoalMenuActions(c *ui.Context, runtime uinative.UIRuntime, st *state) {
 	if st == nil || st.goalConfirm != "clear" {
 		return
 	}

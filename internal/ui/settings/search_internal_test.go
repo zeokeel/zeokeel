@@ -11,7 +11,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
-	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
@@ -23,7 +23,7 @@ func TestSearchPageWithoutSettingsStore(t *testing.T) {
 	// A screen renders the page builder with a kernel context that has no
 	// settings store; the host runtime supplies the theme/locale.
 	state := newSearchState()
-	if _, err := uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := uiRoot.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID:    "test.search",
 		Title: "search",
 		Build: func(c *ui.Context) {

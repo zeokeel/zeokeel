@@ -18,6 +18,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/session"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
@@ -112,7 +113,7 @@ func newReminderHarness(t *testing.T, chat *fakeChat, automation contracts.Autom
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
@@ -413,7 +414,7 @@ func TestReminderListJumpsToAutomationScreen(t *testing.T) {
 	h := newReminderHarness(t, reminderChat(), automation, &fakeSessionNotifier{})
 	// The automation screen is contributed by its own module; the test registers
 	// a stand-in under the stable screen ID.
-	if _, err := h.ui.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := h.ui.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID: "automation", Title: "自动化", Order: 30,
 		Build: func(c *ui.Context) { ui.Text(c, "自动化页") },
 	}); err != nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 func TestNarrowHeaderInspectorTitleReadable(t *testing.T) {
@@ -31,7 +32,7 @@ func TestNarrowHeaderInspectorTitleReadable(t *testing.T) {
 	}
 	h := newAgentSurfaceHarness(t, chat, services)
 	tester := h.tester()
-	if _, err := h.ui.Runtime().RegisterSlotItem(contracts.SlotItem{
+	if _, err := h.ui.Runtime().RegisterSlotItem(uinative.SlotItem{
 		Slot: contracts.SlotSessionPanelRight, ID: "test.inspector", Order: 1,
 		Build: func(c *ui.Context) { ui.Text(c, "检查器内容") },
 	}); err != nil {

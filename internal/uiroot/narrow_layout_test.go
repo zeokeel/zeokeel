@@ -17,6 +17,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 )
 
@@ -24,8 +25,8 @@ import (
 // content column fills its width (so the frame can measure the column), the
 // bottom row stands in for the composer with a working send control, and the
 // column fills the window height.
-func composerScreen(id, title string, sends *int) contracts.ScreenSpec {
-	return contracts.ScreenSpec{
+func composerScreen(id, title string, sends *int) uinative.ScreenSpec {
+	return uinative.ScreenSpec{
 		ID: id, Title: title, Order: 10,
 		Build: func(c *ui.Context) {
 			ui.Column(c).FillWidth().FillHeight().Children(func() {
@@ -50,7 +51,7 @@ func composerScreen(id, title string, sends *int) contracts.ScreenSpec {
 func mustInspector(t *testing.T, r *Root, sends *int) {
 	t.Helper()
 	mustScreen(t, r, composerScreen(sessionScreenID, "会话", sends))
-	mustSlot(t, r, contracts.SlotItem{
+	mustSlot(t, r, uinative.SlotItem{
 		Slot: contracts.SlotSessionPanelRight, ID: "pane", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "inspector-body").FillWidth() },
 	})

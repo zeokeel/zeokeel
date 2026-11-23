@@ -9,6 +9,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
@@ -18,7 +19,7 @@ import (
 // buildScreen renders one frame of the Automation screen: the page header, the
 // inline creation form, the scheduled-task cards and the delete confirmation.
 // Service calls happen in click handlers; Build only reads the list.
-func buildScreen(c *ui.Context, runtime contracts.UIRuntime, navigator contracts.Navigator, cfg Config, st *state) {
+func buildScreen(c *ui.Context, runtime uinative.UIRuntime, navigator contracts.Navigator, cfg Config, st *state) {
 	t := design.Of(c)
 	service, hasService := st.ctx.Get(contracts.KeyAutomation)
 	if !hasService || service == nil {
@@ -136,7 +137,7 @@ func buildScreenHeaderSlot(c *ui.Context, t *design.Tokens, cfg Config, st *stat
 // page's one primary action (New task), beside the host's palette and inspector
 // controls. The button is a toggle while the inline form is open, so the band
 // stays the single place the page's primary action lives.
-func buildScreenActionsSlot(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, cfg Config, st *state) {
+func buildScreenActionsSlot(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, cfg Config, st *state) {
 	label := st.localized(cfg.NewLabel, "新建任务", "New task")
 	if st.formOpen {
 		// The form's own Save is the page's one primary while the form is open;
@@ -203,7 +204,7 @@ func filterAutomationTasks(tasks []contracts.AutomationTask, query, filter strin
 
 // buildTaskToolbar is the list toolbar: the search field and the enable-state
 // filter menu (the filter is session-local state, not persisted).
-func buildTaskToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+func buildTaskToolbar(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state) {
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 		ui.SearchField(c, &st.query).
 			Label(st.tr("搜索任务", "Search tasks")).
@@ -233,7 +234,7 @@ func buildTaskToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIRunti
 // the page). The run history stays an inline disclosure; the list's divider
 // carries the grouping instead of a card, so the page is a list and not a card
 // wall (DESIGN.md §5.2 ListRow).
-func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.AutomationService, runtime contracts.UIRuntime, st *state, task contracts.AutomationTask) {
+func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.AutomationService, runtime uinative.UIRuntime, st *state, task contracts.AutomationTask) {
 	c.Key("automation/" + task.ID)
 	running := st.taskRunning(task)
 	// One task is one card: raised fill + 1px L3 + RadiusLG (B-spec §2 S2), so
@@ -336,7 +337,7 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 // not parse — the unknown-schedule warning with the original value and a Fix
 // action that opens the editor on that task (the backend keeps running the
 // schedule it stored).
-func buildTaskScheduleLine(c *ui.Context, t *design.Tokens, st *state, runtime contracts.UIRuntime, task contracts.AutomationTask) {
+func buildTaskScheduleLine(c *ui.Context, t *design.Tokens, st *state, runtime uinative.UIRuntime, task contracts.AutomationTask) {
 	if human := humanSchedule(st, task.Schedule); human != "" {
 		// A human schedule leads; the raw cron/interval stays available as a
 		// tooltip for people who wrote it.
@@ -376,7 +377,7 @@ func automationRowActionLabel(st *state, action, name string) string {
 // buildTaskRowMenu is the row's trailing ⋯ entry: the task's management menu.
 // The delete action is the menu's danger item, so a row never paints a red
 // button of its own.
-func buildTaskRowMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, task contracts.AutomationTask) {
+func buildTaskRowMenu(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state, task contracts.AutomationTask) {
 	label := automationRowActionLabel(st, st.tr("任务操作", "Task actions"), task.Name)
 	button := uikit.IconButton(c, uikit.IconButtonOptions{
 		Key:     "automation/" + task.ID + "/menu",
@@ -605,7 +606,7 @@ func buildTaskHistory(c *ui.Context, t *design.Tokens, st *state, task contracts
 
 // buildCreateForm is the inline task creation card: a native Form with visible
 // field labels (the old form used placeholders as labels).
-func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.AutomationService, runtime contracts.UIRuntime, st *state) {
+func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.AutomationService, runtime uinative.UIRuntime, st *state) {
 	// Recompute the schedule field's error and its next-run preview from the
 	// draft every frame: typing updates the preview immediately, and the error
 	// clears as soon as the draft becomes valid again.
@@ -1236,7 +1237,7 @@ func buildPermissionSelector(c *ui.Context, st *state) {
 }
 
 // buildDeleteDialog is the native delete confirmation for one task.
-func buildDeleteDialog(c *ui.Context, t *design.Tokens, service contracts.AutomationService, runtime contracts.UIRuntime, st *state) {
+func buildDeleteDialog(c *ui.Context, t *design.Tokens, service contracts.AutomationService, runtime uinative.UIRuntime, st *state) {
 	if !st.deleteOpen {
 		return
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/zeokeel/zeokeel-rig/sandbox/osrunner"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // testConfig is the deterministic host configuration the headless tests use.
@@ -44,7 +45,7 @@ func newTestTester(t *testing.T, r *Root, width, height int) *ui.Tester {
 
 // mustScreen registers a screen and registers its unregister function with
 // t.Cleanup so a failing test still unwinds the registry.
-func mustScreen(t *testing.T, r *Root, spec contracts.ScreenSpec) func() {
+func mustScreen(t *testing.T, r *Root, spec uinative.ScreenSpec) func() {
 	t.Helper()
 	unregister, err := r.Runtime().RegisterScreen(spec)
 	if err != nil {
@@ -55,7 +56,7 @@ func mustScreen(t *testing.T, r *Root, spec contracts.ScreenSpec) func() {
 }
 
 // mustSlot registers a slot item and unwinds it at the end of the test.
-func mustSlot(t *testing.T, r *Root, item contracts.SlotItem) func() {
+func mustSlot(t *testing.T, r *Root, item uinative.SlotItem) func() {
 	t.Helper()
 	unregister, err := r.Runtime().RegisterSlotItem(item)
 	if err != nil {
@@ -66,7 +67,7 @@ func mustSlot(t *testing.T, r *Root, item contracts.SlotItem) func() {
 }
 
 // mustPage registers a settings page and unwinds it at the end of the test.
-func mustPage(t *testing.T, r *Root, page contracts.SettingsPageSpec) func() {
+func mustPage(t *testing.T, r *Root, page uinative.SettingsPageSpec) func() {
 	t.Helper()
 	unregister, err := r.Runtime().RegisterSettingsPage(page)
 	if err != nil {
@@ -78,7 +79,7 @@ func mustPage(t *testing.T, r *Root, page contracts.SettingsPageSpec) func() {
 
 // mustToolRenderer registers a tool renderer and unwinds it at the end of the
 // test.
-func mustToolRenderer(t *testing.T, r *Root, renderer contracts.ToolRenderer) func() {
+func mustToolRenderer(t *testing.T, r *Root, renderer uinative.ToolRenderer) func() {
 	t.Helper()
 	unregister, err := r.Runtime().RegisterToolRenderer(renderer)
 	if err != nil {
@@ -89,7 +90,7 @@ func mustToolRenderer(t *testing.T, r *Root, renderer contracts.ToolRenderer) fu
 }
 
 // mustCommand registers a command and unwinds it at the end of the test.
-func mustCommand(t *testing.T, r *Root, cmd contracts.CommandSpec) func() {
+func mustCommand(t *testing.T, r *Root, cmd uinative.CommandSpec) func() {
 	t.Helper()
 	unregister, err := r.Runtime().RegisterCommand(cmd)
 	if err != nil {
@@ -100,8 +101,8 @@ func mustCommand(t *testing.T, r *Root, cmd contracts.CommandSpec) func() {
 }
 
 // textScreen returns a ScreenSpec whose body shows one marker text.
-func textScreen(id, title, text string, order int) contracts.ScreenSpec {
-	return contracts.ScreenSpec{
+func textScreen(id, title, text string, order int) uinative.ScreenSpec {
+	return uinative.ScreenSpec{
 		ID:    id,
 		Title: title,
 		Order: order,
@@ -110,8 +111,8 @@ func textScreen(id, title, text string, order int) contracts.ScreenSpec {
 }
 
 // textSlotItem returns a SlotItem whose contribution shows one marker text.
-func textSlotItem(slot, id, text string, order int) contracts.SlotItem {
-	return contracts.SlotItem{
+func textSlotItem(slot, id, text string, order int) uinative.SlotItem {
+	return uinative.SlotItem{
 		Slot:  slot,
 		ID:    id,
 		Order: order,
@@ -120,8 +121,8 @@ func textSlotItem(slot, id, text string, order int) contracts.SlotItem {
 }
 
 // textToolRenderer returns a ToolRenderer whose card shows one marker text.
-func textToolRenderer(tool, id, text string, order int) contracts.ToolRenderer {
-	return contracts.ToolRenderer{
+func textToolRenderer(tool, id, text string, order int) uinative.ToolRenderer {
+	return uinative.ToolRenderer{
 		Tool:  tool,
 		ID:    id,
 		Order: order,

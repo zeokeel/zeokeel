@@ -29,6 +29,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -2033,7 +2034,7 @@ func (st *state) killBackgroundJob(jobs contracts.JobService, jobID string) {
 // continuable teammate gets the message input that calls SendChildAgent; a
 // one-shot subagent stays read-only. The header shows the parent > child
 // breadcrumb instead of the title.
-func buildChildView(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, cfg Config) {
+func buildChildView(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state, cfg Config) {
 	children := st.childAgentService()
 	var child contracts.ChildAgent
 	found := false
@@ -2075,7 +2076,7 @@ func buildMissingChildView(c *ui.Context, t *design.Tokens, st *state) {
 // buildChildConversationPane is the child's 对话 tab: the prompt, the run state,
 // the output (or the failure), the activity timeline, and — for a continuable
 // teammate — the send box.
-func buildChildConversationPane(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildChildConversationPane(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	st *state, cfg Config, child contracts.ChildAgent) {
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
 		ui.Scroll(c).FillWidth().Grow(1).TrackScroll(&st.agents.childScroll).Children(func() {
@@ -2333,7 +2334,7 @@ func buildChildMemoryPane(c *ui.Context, t *design.Tokens, st *state, child cont
 // placeholder and the answer note. A bare text field with a small button read as
 // a different product from the parent composer right above it (p2-team-child
 // audit).
-func buildChildComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func buildChildComposer(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	st *state, child contracts.ChildAgent) {
 	children := st.childAgentService()
 	if children == nil {

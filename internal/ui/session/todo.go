@@ -30,6 +30,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 )
@@ -55,7 +56,7 @@ func (st *state) todoService() contracts.TodoService {
 // buildTodoDock draws the conversation's todo list above the composer. It
 // returns false (drawing nothing) without the optional service or on an empty
 // snapshot: an empty dock is chrome, not information.
-func buildTodoDock(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) bool {
+func buildTodoDock(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state) bool {
 	if st == nil {
 		return false
 	}

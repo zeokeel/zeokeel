@@ -12,6 +12,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/home"
 	"github.com/zeokeel/zeokeel/internal/ui/welcome"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
@@ -23,14 +24,14 @@ func newHarness(t *testing.T, language string, info contracts.AppInfo) (*uiroot.
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel", Language: language})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
 	provide(t, ctx, contracts.KeyAppInfo, info)
 
 	registry := module.NewRegistry()
-	registry.AddBuiltin(contracts.KeyUIRuntime).AddBuiltin(contracts.KeyAppInfo).
+	registry.AddBuiltin(uinative.KeyUIRuntime).AddBuiltin(contracts.KeyAppInfo).
 		AddBuiltin(contracts.KeyNavigator)
 	if err := registry.Register(home.Module()); err != nil {
 		t.Fatalf("register home: %v", err)
@@ -64,7 +65,7 @@ func TestWelcomeHeroAndCopyVersionCommand(t *testing.T) {
 	if !tester.HasText("欢迎使用 ZeoKeel") {
 		t.Fatalf("welcome hero missing; texts = %v", tester.Texts())
 	}
-	var copyVersion *contracts.CommandSpec
+	var copyVersion *uinative.CommandSpec
 	for _, spec := range uiRoot.Runtime().Commands() {
 		if spec.ID == "welcome.copy-version" {
 			spec := spec

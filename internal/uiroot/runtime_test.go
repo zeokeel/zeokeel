@@ -8,6 +8,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // TestNewDefaults covers the zero-config Root: the product defaults, the five
@@ -62,7 +63,7 @@ func TestNewDefaults(t *testing.T) {
 // satisfy the contracts modules require.
 func TestInterfaceWiring(t *testing.T) {
 	r := newTestRoot(t)
-	var _ contracts.UIRuntime = r.Runtime()
+	var _ uinative.UIRuntime = r.Runtime()
 	var _ contracts.Navigator = r.Navigator()
 	var _ contracts.ThemeService = r.Theme()
 	var _ contracts.LocaleService = r.Locale()
@@ -80,9 +81,9 @@ func TestNilInputsAreSafe(t *testing.T) {
 	if rt.RenderTool(nil, contracts.ToolCall{Name: "shell"}) {
 		t.Fatal("RenderTool(nil, ...) = true, want false")
 	}
-	r.safeBuild(nil, nil)                                                // nil builder guard
-	r.safeToolBuild(nil, contracts.ToolRenderer{}, contracts.ToolCall{}) // nil renderer guard
-	rt.Post(nil)                                                         // ignored, not queued
+	r.safeBuild(nil, nil)                                               // nil builder guard
+	r.safeToolBuild(nil, uinative.ToolRenderer{}, contracts.ToolCall{}) // nil renderer guard
+	rt.Post(nil)                                                        // ignored, not queued
 	rt.Invalidate()
 	if got := r.Frames(); got != 0 {
 		t.Fatalf("Frames() = %d after no frame, want 0", got)
@@ -124,12 +125,12 @@ func TestScreenConflictsAndUnregister(t *testing.T) {
 	r := newTestRoot(t)
 	rt := r.Runtime()
 
-	if _, err := rt.RegisterScreen(contracts.ScreenSpec{ID: "", Build: func(*ui.Context) {}}); err == nil {
+	if _, err := rt.RegisterScreen(uinative.ScreenSpec{ID: "", Build: func(*ui.Context) {}}); err == nil {
 		t.Fatal("empty screen ID was accepted")
 	} else {
 		requireContains(t, err, "empty ID")
 	}
-	if _, err := rt.RegisterScreen(contracts.ScreenSpec{ID: "no-build"}); err == nil {
+	if _, err := rt.RegisterScreen(uinative.ScreenSpec{ID: "no-build"}); err == nil {
 		t.Fatal("screen with nil Build was accepted")
 	} else {
 		requireContains(t, err, "nil Build")
@@ -170,28 +171,28 @@ func TestSettingsPageOrderingAndConflicts(t *testing.T) {
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
 	rt := r.Runtime()
 
-	if _, err := rt.RegisterSettingsPage(contracts.SettingsPageSpec{ID: "", Build: func(*ui.Context) {}}); err == nil {
+	if _, err := rt.RegisterSettingsPage(uinative.SettingsPageSpec{ID: "", Build: func(*ui.Context) {}}); err == nil {
 		t.Fatal("empty settings page ID was accepted")
 	} else {
 		requireContains(t, err, "empty ID")
 	}
-	if _, err := rt.RegisterSettingsPage(contracts.SettingsPageSpec{ID: "no-build"}); err == nil {
+	if _, err := rt.RegisterSettingsPage(uinative.SettingsPageSpec{ID: "no-build"}); err == nil {
 		t.Fatal("settings page with nil Build was accepted")
 	} else {
 		requireContains(t, err, "nil Build")
 	}
 
-	mustPage(t, r, contracts.SettingsPageSpec{ID: "general-2", Section: "general", Title: "通用二", Order: 20,
+	mustPage(t, r, uinative.SettingsPageSpec{ID: "general-2", Section: "general", Title: "通用二", Order: 20,
 		Build: func(c *ui.Context) { ui.Text(c, "general-2-body") }})
-	mustPage(t, r, contracts.SettingsPageSpec{ID: "general-1", Section: "general", Title: "通用一", Order: 10,
+	mustPage(t, r, uinative.SettingsPageSpec{ID: "general-1", Section: "general", Title: "通用一", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "general-1-body") }})
-	mustPage(t, r, contracts.SettingsPageSpec{ID: "general-1b", Section: "general", Title: "通用一B", Order: 10,
+	mustPage(t, r, uinative.SettingsPageSpec{ID: "general-1b", Section: "general", Title: "通用一B", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "general-1b-body") }})
-	mustPage(t, r, contracts.SettingsPageSpec{ID: "account", Section: "account", Title: "账户", Order: 50,
+	mustPage(t, r, uinative.SettingsPageSpec{ID: "account", Section: "account", Title: "账户", Order: 50,
 		Build: func(c *ui.Context) { ui.Text(c, "account-body") }})
-	mustPage(t, r, contracts.SettingsPageSpec{ID: "zeta", Section: "zeta", Title: "Z页", Order: 1,
+	mustPage(t, r, uinative.SettingsPageSpec{ID: "zeta", Section: "zeta", Title: "Z页", Order: 1,
 		Build: func(c *ui.Context) { ui.Text(c, "zeta-body") }})
-	if _, err := rt.RegisterSettingsPage(contracts.SettingsPageSpec{ID: "account", Section: "general", Title: "重复", Order: 1,
+	if _, err := rt.RegisterSettingsPage(uinative.SettingsPageSpec{ID: "account", Section: "general", Title: "重复", Order: 1,
 		Build: func(*ui.Context) {}}); err == nil {
 		t.Fatal("duplicate settings page ID was accepted")
 	} else {
@@ -211,7 +212,7 @@ func TestSettingsPageOrderingAndConflicts(t *testing.T) {
 	requireNoText(t, tt, "account-body")
 
 	// Unregistering a page removes it from the surface on the next frame.
-	unreg := mustPage(t, r, contracts.SettingsPageSpec{ID: "temp", Section: "general", Title: "临时页", Order: 15,
+	unreg := mustPage(t, r, uinative.SettingsPageSpec{ID: "temp", Section: "general", Title: "临时页", Order: 15,
 		Build: func(c *ui.Context) { ui.Text(c, "temp-body") }})
 	tt.Frame()
 	requireHasText(t, tt, "临时页")
@@ -221,7 +222,7 @@ func TestSettingsPageOrderingAndConflicts(t *testing.T) {
 	requireHasText(t, tt, "通用一")
 
 	// Idempotent unregister: a stale call must not remove a reused ID.
-	if _, err := rt.RegisterSettingsPage(contracts.SettingsPageSpec{ID: "temp", Section: "general", Title: "新临时页", Order: 15,
+	if _, err := rt.RegisterSettingsPage(uinative.SettingsPageSpec{ID: "temp", Section: "general", Title: "新临时页", Order: 15,
 		Build: func(c *ui.Context) { ui.Text(c, "temp-new-body") }}); err != nil {
 		t.Fatalf("re-registering settings page temp: %v", err)
 	}
@@ -237,29 +238,29 @@ func TestCommandOrderingFilteringAndRun(t *testing.T) {
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
 	rt := r.Runtime()
 
-	if _, err := rt.RegisterCommand(contracts.CommandSpec{ID: "", Run: func() error { return nil }}); err == nil {
+	if _, err := rt.RegisterCommand(uinative.CommandSpec{ID: "", Run: func() error { return nil }}); err == nil {
 		t.Fatal("empty command ID was accepted")
 	} else {
 		requireContains(t, err, "empty ID")
 	}
-	if _, err := rt.RegisterCommand(contracts.CommandSpec{ID: "no-run"}); err == nil {
+	if _, err := rt.RegisterCommand(uinative.CommandSpec{ID: "no-run"}); err == nil {
 		t.Fatal("command with nil Run was accepted")
 	} else {
 		requireContains(t, err, "nil Run")
 	}
 
 	var runs counter
-	mustCommand(t, r, contracts.CommandSpec{ID: "run", Title: "执行命令", Order: 5, Run: func() error { runs.Inc(); return nil }})
-	mustCommand(t, r, contracts.CommandSpec{ID: "b", Title: "命令B", Order: 20, Run: func() error { return nil }})
-	mustCommand(t, r, contracts.CommandSpec{ID: "a", Title: "命令A", Order: 10, Run: func() error { return nil }})
-	mustCommand(t, r, contracts.CommandSpec{ID: "a2", Title: "命令A2", Order: 10, Run: func() error { return nil }})
-	mustCommand(t, r, contracts.CommandSpec{ID: "always", Title: "可用命令", Order: 12, Enabled: func() bool { return true },
+	mustCommand(t, r, uinative.CommandSpec{ID: "run", Title: "执行命令", Order: 5, Run: func() error { runs.Inc(); return nil }})
+	mustCommand(t, r, uinative.CommandSpec{ID: "b", Title: "命令B", Order: 20, Run: func() error { return nil }})
+	mustCommand(t, r, uinative.CommandSpec{ID: "a", Title: "命令A", Order: 10, Run: func() error { return nil }})
+	mustCommand(t, r, uinative.CommandSpec{ID: "a2", Title: "命令A2", Order: 10, Run: func() error { return nil }})
+	mustCommand(t, r, uinative.CommandSpec{ID: "always", Title: "可用命令", Order: 12, Enabled: func() bool { return true },
 		Run: func() error { return nil }})
-	mustCommand(t, r, contracts.CommandSpec{ID: "failing", Title: "失败命令", Order: 40,
+	mustCommand(t, r, uinative.CommandSpec{ID: "failing", Title: "失败命令", Order: 40,
 		Run: func() error { return errors.New("command failed") }})
-	mustCommand(t, r, contracts.CommandSpec{ID: "hidden", Title: "隐藏命令", Order: 15, Enabled: func() bool { return false },
+	mustCommand(t, r, uinative.CommandSpec{ID: "hidden", Title: "隐藏命令", Order: 15, Enabled: func() bool { return false },
 		Run: func() error { return nil }})
-	if _, err := rt.RegisterCommand(contracts.CommandSpec{ID: "a", Title: "重复A", Run: func() error { return nil }}); err == nil {
+	if _, err := rt.RegisterCommand(uinative.CommandSpec{ID: "a", Title: "重复A", Run: func() error { return nil }}); err == nil {
 		t.Fatal("duplicate command ID was accepted")
 	} else {
 		requireContains(t, err, "duplicate command ID")
@@ -306,7 +307,7 @@ func TestCommandOrderingFilteringAndRun(t *testing.T) {
 		t.Fatalf("command Run called %d times, want 2", got)
 	}
 
-	unreg := mustCommand(t, r, contracts.CommandSpec{ID: "temp", Title: "临时命令", Order: 30, Run: func() error { return nil }})
+	unreg := mustCommand(t, r, uinative.CommandSpec{ID: "temp", Title: "临时命令", Order: 30, Run: func() error { return nil }})
 	if !hasCommand(rt.Commands(), "temp") {
 		t.Fatal("registered command temp missing from Commands()")
 	}
@@ -317,7 +318,7 @@ func TestCommandOrderingFilteringAndRun(t *testing.T) {
 
 	// A second call is idempotent, and a stale closure cannot remove a
 	// registration that reuses the same ID afterwards.
-	if _, err := rt.RegisterCommand(contracts.CommandSpec{ID: "temp", Title: "新临时命令", Order: 30, Run: func() error { return nil }}); err != nil {
+	if _, err := rt.RegisterCommand(uinative.CommandSpec{ID: "temp", Title: "新临时命令", Order: 30, Run: func() error { return nil }}); err != nil {
 		t.Fatalf("re-registering command temp: %v", err)
 	}
 	unreg()
@@ -327,7 +328,7 @@ func TestCommandOrderingFilteringAndRun(t *testing.T) {
 }
 
 // hasCommand reports whether the command list carries the exact ID.
-func hasCommand(commands []contracts.CommandSpec, id string) bool {
+func hasCommand(commands []uinative.CommandSpec, id string) bool {
 	for _, command := range commands {
 		if command.ID == id {
 			return true
@@ -337,7 +338,7 @@ func hasCommand(commands []contracts.CommandSpec, id string) bool {
 }
 
 // hasCommandPrefix reports whether the command list carries an ID prefix.
-func hasCommandPrefix(commands []contracts.CommandSpec, prefix string) bool {
+func hasCommandPrefix(commands []uinative.CommandSpec, prefix string) bool {
 	for _, command := range commands {
 		if strings.HasPrefix(command.ID, prefix) {
 			return true
@@ -353,17 +354,17 @@ func TestSlotDiagnosticsConflictAndUnregister(t *testing.T) {
 	r := newTestRoot(t)
 	rt := r.Runtime()
 
-	if _, err := rt.RegisterSlotItem(contracts.SlotItem{Slot: "", ID: "x", Build: func(*ui.Context) {}}); err == nil {
+	if _, err := rt.RegisterSlotItem(uinative.SlotItem{Slot: "", ID: "x", Build: func(*ui.Context) {}}); err == nil {
 		t.Fatal("slot item with empty Slot was accepted")
 	} else {
 		requireContains(t, err, "Slot and ID")
 	}
-	if _, err := rt.RegisterSlotItem(contracts.SlotItem{Slot: "sidebar.nav", ID: "", Build: func(*ui.Context) {}}); err == nil {
+	if _, err := rt.RegisterSlotItem(uinative.SlotItem{Slot: "sidebar.nav", ID: "", Build: func(*ui.Context) {}}); err == nil {
 		t.Fatal("slot item with empty ID was accepted")
 	} else {
 		requireContains(t, err, "Slot and ID")
 	}
-	if _, err := rt.RegisterSlotItem(contracts.SlotItem{Slot: "sidebar.nav", ID: "no-build"}); err == nil {
+	if _, err := rt.RegisterSlotItem(uinative.SlotItem{Slot: "sidebar.nav", ID: "no-build"}); err == nil {
 		t.Fatal("slot item with nil Build was accepted")
 	} else {
 		requireContains(t, err, "nil Build")

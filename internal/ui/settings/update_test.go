@@ -17,6 +17,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
 )
 
@@ -396,7 +397,7 @@ const installUpdateCommandID = "uiroot.install-update"
 func registerInstallCommand(t *testing.T, h *harness, run func() error) *atomic.Int32 {
 	t.Helper()
 	calls := &atomic.Int32{}
-	unregister, err := h.uiRoot.Runtime().RegisterCommand(contracts.CommandSpec{
+	unregister, err := h.uiRoot.Runtime().RegisterCommand(uinative.CommandSpec{
 		ID:    installUpdateCommandID,
 		Title: "安装更新并重启",
 		Run: func() error {
@@ -535,7 +536,7 @@ func TestUpdateInstallRegisteredDisabledCommandStillInstalls(t *testing.T) {
 		update, contracts.AppInfo{Version: "1.0.0"})
 	calls := &atomic.Int32{}
 	pending := atomic.Bool{}
-	unregister, err := h.uiRoot.Runtime().RegisterCommand(contracts.CommandSpec{
+	unregister, err := h.uiRoot.Runtime().RegisterCommand(uinative.CommandSpec{
 		ID:      installUpdateCommandID,
 		Title:   "安装更新并重启",
 		Enabled: func() bool { return pending.Load() },
@@ -647,7 +648,7 @@ func TestUpdateInstallRetryAfterCommandFailure(t *testing.T) {
 	h := newHarnessWithUpdate(t, &fakeChat{}, newFakeSettings(nil), settings.Config{},
 		update, contracts.AppInfo{Version: "1.0.0"})
 	var runs atomic.Int32
-	unregister, err := h.uiRoot.Runtime().RegisterCommand(contracts.CommandSpec{
+	unregister, err := h.uiRoot.Runtime().RegisterCommand(uinative.CommandSpec{
 		ID:    installUpdateCommandID,
 		Title: "安装更新并重启",
 		Run: func() error {
@@ -692,7 +693,7 @@ func TestUpdateRecheckRestoresMainInstallAction(t *testing.T) {
 	update.download = updateDownloadFixture()
 	h := newHarnessWithUpdate(t, &fakeChat{}, newFakeSettings(nil), settings.Config{},
 		update, contracts.AppInfo{Version: "1.0.0"})
-	unregister, err := h.uiRoot.Runtime().RegisterCommand(contracts.CommandSpec{
+	unregister, err := h.uiRoot.Runtime().RegisterCommand(uinative.CommandSpec{
 		ID:    installUpdateCommandID,
 		Title: "安装更新并重启",
 		Run:   func() error { return errors.New("install boom") },
@@ -773,7 +774,7 @@ func TestUpdatePendingInstallRetryAfterCommandFailure(t *testing.T) {
 	h := newHarnessWithUpdate(t, &fakeChat{}, newFakeSettings(nil), settings.Config{},
 		update, contracts.AppInfo{Version: "1.0.0"})
 	var runs atomic.Int32
-	unregister, err := h.uiRoot.Runtime().RegisterCommand(contracts.CommandSpec{
+	unregister, err := h.uiRoot.Runtime().RegisterCommand(uinative.CommandSpec{
 		ID:    installUpdateCommandID,
 		Title: "安装更新并重启",
 		Run: func() error {

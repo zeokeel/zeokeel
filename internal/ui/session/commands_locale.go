@@ -7,13 +7,14 @@ package session
 
 import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // commandRegistry owns the session command contributions and keeps them in the
 // host locale. It is only touched on the UI thread.
 type commandRegistry struct {
-	runtime    contracts.UIRuntime
+	runtime    uinative.UIRuntime
 	navigator  contracts.Navigator
 	chat       contracts.ChatService
 	config     Config
@@ -23,7 +24,7 @@ type commandRegistry struct {
 }
 
 // newCommandRegistry builds the registry for one module instance.
-func newCommandRegistry(runtime contracts.UIRuntime, navigator contracts.Navigator,
+func newCommandRegistry(runtime uinative.UIRuntime, navigator contracts.Navigator,
 	chat contracts.ChatService, config Config, st *state) *commandRegistry {
 	return &commandRegistry{runtime: runtime, navigator: navigator, chat: chat, config: config, st: st}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
@@ -170,7 +171,7 @@ func applyStagedFiles(st *state, results []attachmentFileResult, newest bool) {
 // conversation that started the staging (a switch mid-read cannot stage into
 // the wrong chat); onApplied, when set, runs after the apply with the number of
 // files actually staged.
-func stageAttachmentFilesAsync(runtime contracts.UIRuntime, st *state, sessionID string, paths []string, onApplied func(staged int)) {
+func stageAttachmentFilesAsync(runtime uinative.UIRuntime, st *state, sessionID string, paths []string, onApplied func(staged int)) {
 	if st == nil || len(paths) == 0 {
 		return
 	}
@@ -203,7 +204,7 @@ func stageAttachmentFilesAsync(runtime contracts.UIRuntime, st *state, sessionID
 // instead of silently doing nothing. A clipboard without an image gets a
 // one-line hint that the attach menu and drag-and-drop are the supported paths,
 // never a fake success.
-func pasteClipboardImage(st *state, runtime contracts.UIRuntime, services ui.Services) bool {
+func pasteClipboardImage(st *state, runtime uinative.UIRuntime, services ui.Services) bool {
 	if st.attachBusy {
 		return false
 	}
@@ -256,7 +257,7 @@ func stageClipboardImage(st *state, data []byte) {
 // caller, so a synchronous call from a frame would freeze the window; the
 // composer shows a busy attach action until the posted result stages the files.
 // A second click while busy is ignored (the action is disabled as well).
-func startAttachmentPick(runtime contracts.UIRuntime, st *state) {
+func startAttachmentPick(runtime uinative.UIRuntime, st *state) {
 	if st.attachBusy {
 		return
 	}
@@ -368,7 +369,7 @@ func formatAttachmentSize(size int) string {
 
 // buildPendingAttachments renders the staged chips (and the staging error) at
 // the top of the composer card.
-func buildPendingAttachments(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+func buildPendingAttachments(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state) {
 	if len(st.pendingAttachments) == 0 && st.attachErr == "" &&
 		st.commandErr == "" && !st.compacting && !st.attachBusy {
 		return
@@ -429,7 +430,7 @@ func buildPendingAttachments(c *ui.Context, t *design.Tokens, runtime contracts.
 // image chip is a button that opens the message's image gallery (P1), so the
 // reader can see the original behind the 32 DIP thumbnail; a non-image chip
 // stays inert.
-func buildMessageAttachments(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, attachments []contracts.Attachment) {
+func buildMessageAttachments(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state, attachments []contracts.Attachment) {
 	if len(attachments) == 0 {
 		return
 	}
@@ -690,7 +691,7 @@ func galleryImageSize(bitmap *ui.Bitmap, maxW, maxH float32) (float32, float32) 
 // images, the previous/next paging. Modal owns the dialog semantics (focus,
 // Escape, a click on the scrim, the standard look); this file owns only the
 // image content and paging. No image editing is offered.
-func buildAttachmentGallery(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+func buildAttachmentGallery(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime, st *state) {
 	if st == nil {
 		return
 	}

@@ -89,6 +89,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/lib/mcpreload"
@@ -282,7 +283,7 @@ func (state *paneState) sessionTitle(info contracts.ChatSessionInfo) string {
 // Module registers the sidebar slots.
 func Module() *module.Descriptor[Config] {
 	return module.Define("zeokeel-ui/sidebar", func(ctx cordis.Context, cfg Config) error {
-		runtime, err := ctx.Require(contracts.KeyUIRuntime)
+		runtime, err := ctx.Require(uinative.KeyUIRuntime)
 		if err != nil {
 			return err
 		}
@@ -338,7 +339,7 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 
-		primary := contracts.SlotItem{
+		primary := uinative.SlotItem{
 			Slot:  contracts.SlotSidebarPrimary,
 			ID:    "sidebar.primary.new-chat",
 			Order: 10,
@@ -346,7 +347,7 @@ func Module() *module.Descriptor[Config] {
 				buildPrimary(c, design.Of(c), chat, nav, runtime, state)
 			},
 		}
-		navSlot := contracts.SlotItem{
+		navSlot := uinative.SlotItem{
 			Slot:  contracts.SlotSidebarNav,
 			ID:    "sidebar.nav.sessions",
 			Order: 10,
@@ -354,7 +355,7 @@ func Module() *module.Descriptor[Config] {
 				buildSessionList(c, design.Of(c), chat, nav, runtime, state, state.sessionsTitle())
 			},
 		}
-		footer := contracts.SlotItem{
+		footer := uinative.SlotItem{
 			Slot:  contracts.SlotSidebarFooter,
 			ID:    "sidebar.footer.actions",
 			Order: 10,
@@ -362,7 +363,7 @@ func Module() *module.Descriptor[Config] {
 				buildFooter(c, design.Of(c), chat, nav, runtime, state, state.settingsLabel())
 			},
 		}
-		renameDialog := contracts.SlotItem{
+		renameDialog := uinative.SlotItem{
 			Slot:  contracts.SlotOverlayDialogs,
 			ID:    "sidebar.rename.dialog",
 			Order: 20,
@@ -370,14 +371,14 @@ func Module() *module.Descriptor[Config] {
 				buildRenameDialog(c, design.Of(c), renamer, runtime, state)
 			},
 		}
-		for _, item := range []contracts.SlotItem{primary, navSlot, footer, renameDialog} {
+		for _, item := range []uinative.SlotItem{primary, navSlot, footer, renameDialog} {
 			if err := own(ctx, func() (func(), error) { return runtime.RegisterSlotItem(item) }); err != nil {
 				return err
 			}
 		}
 		return nil
 	}).
-		AddRequires(module.Requires(contracts.KeyUIRuntime)).
+		AddRequires(module.Requires(uinative.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeyNavigator)).
 		AddRequires(module.Requires(contracts.KeyChat)).
 		WithName("ZeoKeel sidebar")
@@ -396,7 +397,7 @@ func Module() *module.Descriptor[Config] {
 // The new session binds to the open folder on the agent side; the sidebar itself
 // never switches folders.
 func buildPrimary(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
-	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState) {
+	nav contracts.Navigator, runtime uinative.UIRuntime, state *paneState) {
 	label := state.newChatLabel()
 	// The chord is the product's one formatter, so the cap follows the platform
 	// (Cmd+N on macOS, Ctrl+N elsewhere) and matches the help table and the
@@ -449,7 +450,7 @@ func buildPrimary(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 // the one open folder and nothing else. A host without the workspace backend
 // keeps the plain "会话" list it always had.
 func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
-	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState, title string) {
+	nav contracts.Navigator, runtime uinative.UIRuntime, state *paneState, title string) {
 	ui.Column(c).FillWidth().Gap(design.Space1).Padding(design.Space2, design.Space0, design.Space0, design.Space0).
 		Children(func() {
 			// Generic module-screen destinations: every registered screen the
@@ -648,7 +649,7 @@ type messageSearchFrame struct {
 // cached result of the current query is filtered to the conversations the
 // sidebar shows. A host without a store/searcher keeps the title-only behavior
 // (available false).
-func messageSearchFor(c *ui.Context, runtime contracts.UIRuntime, state *paneState, chat contracts.ChatService, query string, extraHidden map[string]bool) messageSearchFrame {
+func messageSearchFor(c *ui.Context, runtime uinative.UIRuntime, state *paneState, chat contracts.ChatService, query string, extraHidden map[string]bool) messageSearchFrame {
 	if query == "" {
 		state.searchPendingQuery = ""
 		return messageSearchFrame{}
@@ -689,7 +690,7 @@ func messageSearchFor(c *ui.Context, runtime contracts.UIRuntime, state *paneSta
 // typed word costs one read instead of one synchronous SQLite query per
 // keystroke. The frame clock drives the delay (c.After wakes the starting
 // frame), so headless tests stay deterministic with Tester.Advance.
-func scheduleMessageSearch(c *ui.Context, runtime contracts.UIRuntime, state *paneState, searcher contracts.MessageSearcher, query string) {
+func scheduleMessageSearch(c *ui.Context, runtime uinative.UIRuntime, state *paneState, searcher contracts.MessageSearcher, query string) {
 	if state.searchPendingQuery != query {
 		state.searchPendingQuery = query
 		state.searchDue = c.Now().Add(messageSearchDebounce)
@@ -705,7 +706,7 @@ func scheduleMessageSearch(c *ui.Context, runtime contracts.UIRuntime, state *pa
 // result to the UI thread. A newer read or the module's disposal (searchSeq)
 // drops this one, so a result for an abandoned query never replaces the visible
 // hits and a late result after teardown is a quiet no-op.
-func startMessageRead(runtime contracts.UIRuntime, state *paneState, searcher contracts.MessageSearcher, query string) {
+func startMessageRead(runtime uinative.UIRuntime, state *paneState, searcher contracts.MessageSearcher, query string) {
 	state.searchPendingQuery = ""
 	state.searchInFlight = query
 	state.searchSeq++
@@ -735,7 +736,7 @@ func startMessageRead(runtime contracts.UIRuntime, state *paneState, searcher co
 // messageSearchFor, which the session section also read, so the loading of the
 // hits and the sections that show them cannot disagree about the match count.
 func buildMessageSearch(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
-	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState, query string,
+	nav contracts.Navigator, runtime uinative.UIRuntime, state *paneState, query string,
 	search messageSearchFrame) {
 	visibleHits := search.hits
 
@@ -1058,7 +1059,7 @@ func runesMatchAt(runes, needle []rune, at int) bool {
 // handoff, asks it to show that message: the click lands on the matched message
 // instead of the conversation's followed end.
 func activateMessageHit(chat contracts.ChatService, nav contracts.Navigator,
-	focus contracts.SessionFocus, runtime contracts.UIRuntime, hit contracts.MessageSearchHit) {
+	focus contracts.SessionFocus, runtime uinative.UIRuntime, hit contracts.MessageSearchHit) {
 	_ = chat.SetActiveSession(hit.SessionID)
 	if focus != nil {
 		if messageID := strings.TrimSpace(hit.MessageID); messageID != "" {
@@ -1185,7 +1186,7 @@ func sessionLeadingGlyph(c *ui.Context, t *design.Tokens, state *paneState,
 // session. Enter and a double click open the chosen session (the List's
 // Submitted); a single pointer click opens through the row content's observer.
 func buildFlatSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
-	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState,
+	nav contracts.Navigator, runtime uinative.UIRuntime, state *paneState,
 	sessions []contracts.ChatSessionInfo) {
 	active := chat.ActiveSession()
 	// P2-7: mirror the active conversation into the list's choice only while the
@@ -1458,7 +1459,7 @@ func visibleMessageHits(hits []contracts.MessageSearchHit, hidden map[string]boo
 // Enter and a double click); the same menu serves the ⋯ button and the row's
 // right-click, as mygo recommends.
 func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
-	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState,
+	nav contracts.Navigator, runtime uinative.UIRuntime, state *paneState,
 	session contracts.ChatSessionInfo, active, chosen bool, height float32,
 	leadingInPrefix bool) {
 	label := state.sessionTitle(session)
@@ -1700,7 +1701,7 @@ func sessionRowLabel(state *paneState, session contracts.ChatSessionInfo) string
 // frame's host-side native Sidebar reconciliation would otherwise restore the
 // previously selected destination; an already active session is not set again.
 func openSession(chat contracts.ChatService, nav contracts.Navigator,
-	runtime contracts.UIRuntime, state *paneState, sessionID string) {
+	runtime uinative.UIRuntime, state *paneState, sessionID string) {
 	if strings.TrimSpace(sessionID) == "" {
 		return
 	}
@@ -1751,7 +1752,7 @@ func switchSessionWorkspace(chat contracts.ChatService, state *paneState, sessio
 // window-level delete confirmation; session rename/delete live on the row's
 // native popover menu.
 func buildFooter(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
-	nav contracts.Navigator, runtime contracts.UIRuntime,
+	nav contracts.Navigator, runtime uinative.UIRuntime,
 	state *paneState, label string) {
 	// A modal can flip the dialog's open flag while it dismisses itself, after
 	// the builders ran: the frame that sees it already closed must still do the
@@ -1850,7 +1851,7 @@ func buildFooter(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 // dialog opens, Enter saving): the same rules every other dialog in the product
 // has.
 func buildRenameDialog(c *ui.Context, t *design.Tokens, renamer contracts.SessionRenamer,
-	runtime contracts.UIRuntime, state *paneState) {
+	runtime uinative.UIRuntime, state *paneState) {
 	if !state.renameOpen || renamer == nil {
 		return
 	}

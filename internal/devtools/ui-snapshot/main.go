@@ -35,6 +35,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/assembly"
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/hosttools"
 	"github.com/zeokeel/zeokeel/internal/icons"
@@ -2175,7 +2176,7 @@ func boot(baseURL, dataDir string) *app {
 	// boot binds the same context instead of hand-wiring each lookup.
 	uiRoot.SetKernelContext(root)
 	provide(root, contracts.KeyDataDir, dataDir)
-	provide(root, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(root, uinative.KeyUIRuntime, uiRoot.Runtime())
 	// SetKernelContext above already registered the host's toast-placement
 	// service on this root; providing it again would fail the boot.
 	provide(root, contracts.KeyNavigator, uiRoot.Navigator())

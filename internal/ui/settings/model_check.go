@@ -16,6 +16,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
@@ -162,7 +163,7 @@ func modelCheckDetailLabel(locale contracts.LocaleService, count int, names []st
 
 // startModelCheck launches one background check and posts its result to the UI.
 // The running guard makes repeated clicks a no-op.
-func startModelCheck(runtime contracts.UIRuntime, check *modelCheckState,
+func startModelCheck(runtime uinative.UIRuntime, check *modelCheckState,
 	baseURL, apiKey string, locale contracts.LocaleService) {
 	baseURL = strings.TrimSpace(baseURL)
 	if check.running || baseURL == "" {
@@ -210,7 +211,7 @@ func startModelCheck(runtime contracts.UIRuntime, check *modelCheckState,
 // a second action line (2026-11-18 review). It tests the current draft (the Base
 // URL and API key shown in the dialog, with the stored key as the documented
 // "blank keeps it" value) and posts the result back through the UI runtime.
-func catalogTestAction(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+func catalogTestAction(c *ui.Context, t *design.Tokens, runtime uinative.UIRuntime,
 	check *modelCheckState, baseURL, apiKey string, locale contracts.LocaleService) uikit.DialogAction {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	label := localized(locale, "测试连接", "Test connection")

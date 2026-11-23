@@ -16,6 +16,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	sessionui "github.com/zeokeel/zeokeel/internal/ui/session"
 )
 
@@ -42,7 +43,7 @@ func startSessionCommands(t *testing.T, chat contracts.ChatService) *sessionComm
 }
 
 // command looks up one registered command by ID.
-func (s *sessionCommandHarness) command(t *testing.T, id string) contracts.CommandSpec {
+func (s *sessionCommandHarness) command(t *testing.T, id string) uinative.CommandSpec {
 	t.Helper()
 	for _, command := range s.h.ui.Runtime().Commands() {
 		if command.ID == id {
@@ -50,7 +51,7 @@ func (s *sessionCommandHarness) command(t *testing.T, id string) contracts.Comma
 		}
 	}
 	t.Fatalf("command %q is not registered", id)
-	return contracts.CommandSpec{}
+	return uinative.CommandSpec{}
 }
 
 // attachSessionChat adds contracts.AttachmentSender to the fake chat.

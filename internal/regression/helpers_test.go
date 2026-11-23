@@ -28,6 +28,7 @@ import (
 	"github.com/zeokeel/zeokeel-rig/sandbox/osrunner"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
@@ -148,7 +149,7 @@ func newHarnessCoreWith(t *testing.T, dataDir string, withBridges bool, local *m
 	provide(t, ctx, contracts.KeyDataDir, h.dataDir)
 	provide(t, ctx, contracts.KeySettings, provided)
 	provide(t, ctx, contracts.KeyLogger, contracts.Logger(logger))
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
@@ -171,7 +172,7 @@ func (h *harness) tester(width, height int) *ui.Tester {
 // registerScreen installs a minimal screen so frames have a screen body.
 func (h *harness) registerScreen(id, title, text string) {
 	h.t.Helper()
-	if _, err := h.ui.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := h.ui.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID:    id,
 		Title: title,
 		Order: 10,

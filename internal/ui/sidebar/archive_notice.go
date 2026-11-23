@@ -7,6 +7,7 @@ package sidebar
 
 import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // actionNotifier is the optional notifier half that shows one action button on
@@ -19,7 +20,7 @@ type actionNotifier interface {
 // raiseSessionArchivedToast reports one archived conversation. When the host
 // supports action toasts, the toast offers Undo, which unarchives the session
 // again; otherwise it is a plain success toast.
-func raiseSessionArchivedToast(state *paneState, chat contracts.ChatService, runtime contracts.UIRuntime, sessionID, title string) {
+func raiseSessionArchivedToast(state *paneState, chat contracts.ChatService, runtime uinative.UIRuntime, sessionID, title string) {
 	if state == nil || state.notifier == nil {
 		return
 	}

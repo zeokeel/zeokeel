@@ -10,6 +10,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/home"
 )
 
@@ -60,7 +61,7 @@ func TestHomeModelMenuEmptyCatalogDeepLinksModelPage(t *testing.T) {
 	settings := newHomeSettings(nil)
 	chat := &composerChat{fakeChat: &fakeChat{config: contracts.ChatConfig{Model: "test-model"}}}
 	h := newComposerHarness(t, chat, settings, nil)
-	unregister, err := h.ui.Runtime().RegisterSettingsPage(contracts.SettingsPageSpec{
+	unregister, err := h.ui.Runtime().RegisterSettingsPage(uinative.SettingsPageSpec{
 		ID: "other", Section: "general", Title: "其他设置", Order: 10,
 		Build: func(c *ui.Context) { ui.Text(c, "其他设置页正文") },
 	})
@@ -68,7 +69,7 @@ func TestHomeModelMenuEmptyCatalogDeepLinksModelPage(t *testing.T) {
 		t.Fatalf("register settings page: %v", err)
 	}
 	t.Cleanup(unregister)
-	unregisterModel, err := h.ui.Runtime().RegisterSettingsPage(contracts.SettingsPageSpec{
+	unregisterModel, err := h.ui.Runtime().RegisterSettingsPage(uinative.SettingsPageSpec{
 		ID: "model", Section: "general", Title: "模型设置", Order: 20,
 		Build: func(c *ui.Context) { ui.Text(c, "模型设置页正文") },
 	})

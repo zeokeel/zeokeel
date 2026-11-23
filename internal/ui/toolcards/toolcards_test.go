@@ -16,6 +16,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/toolcards"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
@@ -41,7 +42,7 @@ func newHarness(t *testing.T) *harness {
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
@@ -76,7 +77,7 @@ func (h *harness) assertNoTexts(tester *ui.Tester, unwanted ...string) {
 // tool-renderer injection point. It records whether a renderer matched.
 func (h *harness) showCalls(calls []contracts.ToolCall, matched map[string]bool, unknownMatch *bool) {
 	h.t.Helper()
-	_, err := h.ui.Runtime().RegisterScreen(contracts.ScreenSpec{
+	_, err := h.ui.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID:    "test.cards",
 		Title: "工具卡片测试",
 		Build: func(c *ui.Context) {
@@ -425,7 +426,7 @@ func TestFoldStateMapIsBounded(t *testing.T) {
 	activate(t, h.ctx, toolcards.Module(), toolcards.Config{})
 
 	var calls []contracts.ToolCall
-	if _, err := h.ui.Runtime().RegisterScreen(contracts.ScreenSpec{
+	if _, err := h.ui.Runtime().RegisterScreen(uinative.ScreenSpec{
 		ID:    "test.fold-state",
 		Title: "折叠状态",
 		Build: func(c *ui.Context) {

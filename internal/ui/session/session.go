@@ -42,6 +42,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -345,7 +346,7 @@ type state struct {
 	navigator contracts.Navigator
 	// runtime is the host UI runtime, kept so an undo action the host invokes
 	// later can request the frame that shows the restored state.
-	runtime contracts.UIRuntime
+	runtime uinative.UIRuntime
 
 	// settings is the optional settings store: the permission command and the
 	// composer's permission badge read/write contracts.SettingAgentPermission.
@@ -544,7 +545,7 @@ func (st *state) notifyUndo(text, actionLabel string, action func()) {
 // Module registers the conversation screen.
 func Module() *module.Descriptor[Config] {
 	return module.Define(ModuleID, func(ctx cordis.Context, cfg Config) error {
-		runtime, err := ctx.Require(contracts.KeyUIRuntime)
+		runtime, err := ctx.Require(uinative.KeyUIRuntime)
 		if err != nil {
 			return err
 		}
@@ -692,7 +693,7 @@ func Module() *module.Descriptor[Config] {
 		}
 
 		if err := own(ctx, func() (func(), error) {
-			return runtime.RegisterScreen(contracts.ScreenSpec{
+			return runtime.RegisterScreen(uinative.ScreenSpec{
 				ID:    ScreenID,
 				Title: config.Title,
 				Order: 20,
@@ -713,7 +714,7 @@ func Module() *module.Descriptor[Config] {
 		// The item IDs are screen-namespaced so the host keeps them off the other
 		// screens. (The goal strip and the approval banner dock above the
 		// composer; the banner slot itself is rendered by buildScreen.)
-		screenSlots := []contracts.SlotItem{
+		screenSlots := []uinative.SlotItem{
 			{
 				Slot: contracts.SlotScreenHeader, ID: "session.title", Order: 10,
 				Build: func(c *ui.Context) {
@@ -753,7 +754,7 @@ func Module() *module.Descriptor[Config] {
 		moduleState.syncCommandLocale = commands.sync
 		return nil
 	}).
-		AddRequires(module.Requires(contracts.KeyUIRuntime)).
+		AddRequires(module.Requires(uinative.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeyNavigator)).
 		AddRequires(module.Requires(contracts.KeyChat)).
 		WithName("ZeoKeel conversation screen")
@@ -765,7 +766,7 @@ func Module() *module.Descriptor[Config] {
 // there. It only records the target on the UI thread; the build consumes it.
 type sessionFocusHandoff struct {
 	state   *state
-	runtime contracts.UIRuntime
+	runtime uinative.UIRuntime
 }
 
 var _ contracts.SessionFocus = sessionFocusHandoff{}
@@ -960,8 +961,8 @@ func (st *state) permissionLabel(mode string) string {
 // session, fork, export, the permission-mode cycle and settings. The command palette reads these from the
 // UIRuntime command registry; Enabled callbacks expose only the actions that
 // the current session/backends support.
-func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
-	chat contracts.ChatService, config Config, st *state) []contracts.CommandSpec {
+func sessionCommands(runtime uinative.UIRuntime, navigator contracts.Navigator,
+	chat contracts.ChatService, config Config, st *state) []uinative.CommandSpec {
 	_, forkerOK := chat.(contracts.SessionForker)
 	activeSession := func() (contracts.ChatSession, bool) {
 		id := chat.ActiveSession()
@@ -970,7 +971,7 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 		}
 		return chat.Session(id)
 	}
-	commands := []contracts.CommandSpec{
+	commands := []uinative.CommandSpec{
 		{
 			ID:    "zeokeel.session.new",
 			Title: st.tr("新会话", "New conversation"),

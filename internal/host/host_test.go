@@ -64,8 +64,43 @@ func TestMainListProducts(t *testing.T) {
 		t.Fatalf("--list-products exit code = %d, want 0 (stderr %q)", code, stderr.String())
 	}
 	lines := strings.Fields(stdout.String())
-	if len(lines) != 2 || lines[0] != assembly.ProductDesktop || lines[1] != assembly.ProductHeadless {
-		t.Fatalf("--list-products output = %q, want desktop and headless", stdout.String())
+	// serve has no assembly JSON of its own (it reuses headless entries), so it
+	// is enumerated by AllProducts rather than by the embedded file list.
+	want := []string{assembly.ProductDesktop, assembly.ProductHeadless, assembly.ProductServe}
+	if len(lines) != len(want) {
+		t.Fatalf("--list-products output = %q, want %v", stdout.String(), want)
+	}
+	for i, name := range want {
+		if lines[i] != name {
+			t.Fatalf("--list-products output = %q, want %v", stdout.String(), want)
+		}
+	}
+}
+
+// TestServePortFlagValidation covers the --port wiring: it only applies to the
+// gateway product and must reject out-of-range values instead of silently
+// falling back to the default range.
+func TestServePortFlagValidation(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{name: "desktop product", args: []string{"--port", "1234"}},
+		{name: "headless product", args: []string{"--headless", "--port", "1234"}},
+		{name: "explicit desktop", args: []string{"--product", "desktop", "--port", "1234"}},
+		{name: "out of range", args: []string{"--product", "serve", "--port", "70000"}},
+		{name: "negative", args: []string{"--product", "serve", "--port", "-2"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := mainWithStreams(c.args, &stdout, &stderr); code != 2 {
+				t.Fatalf("exit code = %d, want 2 (stdout %q, stderr %q)", code, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "--port") {
+				t.Fatalf("stderr = %q, want it to explain --port", stderr.String())
+			}
+		})
 	}
 }
 
@@ -74,7 +109,7 @@ func TestMainHelp(t *testing.T) {
 	if code := mainWithStreams([]string{"--help"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("--help exit code = %d, want 0", code)
 	}
-	for _, want := range []string{"--product", "--headless", "--data-dir", "--version", "--list-products"} {
+	for _, want := range []string{"--product", "--headless", "--data-dir", "--version", "--list-products", "--port"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("--help output = %q, want it to document %q", stdout.String(), want)
 		}

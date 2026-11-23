@@ -14,6 +14,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/ui/session"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -60,7 +61,7 @@ func compactSessionChat() *compactChat {
 	return chat
 }
 
-func findCompactCommand(t *testing.T, h *harness) contracts.CommandSpec {
+func findCompactCommand(t *testing.T, h *harness) uinative.CommandSpec {
 	t.Helper()
 	for _, command := range h.ui.Runtime().Commands() {
 		if command.ID == "zeokeel.session.compact" {
@@ -68,7 +69,7 @@ func findCompactCommand(t *testing.T, h *harness) contracts.CommandSpec {
 		}
 	}
 	t.Fatalf("compact command not registered; commands = %v", h.ui.Runtime().Commands())
-	return contracts.CommandSpec{}
+	return uinative.CommandSpec{}
 }
 
 func waitCompactNotice(t *testing.T, h *harness, tester *ui.Tester) {
@@ -255,7 +256,7 @@ func newCompactNotifierHarness(t *testing.T, chat contracts.ChatService, notifie
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, uinative.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())

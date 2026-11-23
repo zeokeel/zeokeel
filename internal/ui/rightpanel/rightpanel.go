@@ -39,6 +39,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/lib/openpath"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
@@ -135,7 +136,7 @@ type state struct {
 	// cfg is the resolved module config.
 	cfg Config
 	// runtime registers the page commands and requests frames.
-	runtime contracts.UIRuntime
+	runtime uinative.UIRuntime
 
 	// tab is the active tab index: a fixed page (pageGuide/pageFiles/
 	// pageFixedCount+fileTab. fileTabs are appended in open
@@ -384,7 +385,7 @@ func (st *state) invalidate() {
 // Module registers the right sidebar slot and provides contracts.FilePreviewer.
 func Module() *module.Descriptor[Config] {
 	return module.Define(ModuleID, func(ctx cordis.Context, cfg Config) error {
-		runtime, err := ctx.Require(contracts.KeyUIRuntime)
+		runtime, err := ctx.Require(uinative.KeyUIRuntime)
 		if err != nil {
 			return err
 		}
@@ -421,7 +422,7 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		return own(ctx, func() (func(), error) {
-			return runtime.RegisterSlotItem(contracts.SlotItem{
+			return runtime.RegisterSlotItem(uinative.SlotItem{
 				Slot:  contracts.SlotSessionPanelRight,
 				ID:    SlotItemID,
 				Order: slotOrder,
@@ -441,7 +442,7 @@ func Module() *module.Descriptor[Config] {
 			})
 		})
 	}).
-		AddRequires(module.Requires(contracts.KeyUIRuntime)).
+		AddRequires(module.Requires(uinative.KeyUIRuntime)).
 		AddProvides(module.Provides(contracts.KeyFilePreview)).
 		WithName("ZeoKeel right sidebar")
 }
@@ -453,7 +454,7 @@ func (st *state) registerCommands() error {
 		return nil
 	}
 	st.closeCommands()
-	files, err := st.runtime.RegisterCommand(contracts.CommandSpec{
+	files, err := st.runtime.RegisterCommand(uinative.CommandSpec{
 		ID:       filesOpenCommandID,
 		Title:    st.tr("打开文件页", "Open files page"),
 		Hint:     st.tr("在右侧栏浏览工作区文件", "Browse workspace files in the right sidebar"),

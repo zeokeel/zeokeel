@@ -6,7 +6,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // TestPostFromGoroutineRendersAtNextFrame covers the cross-goroutine Post
@@ -18,7 +18,7 @@ func TestPostFromGoroutineRendersAtNextFrame(t *testing.T) {
 	var state counter
 	var invalidations counter
 	r.SetInvalidator(func() { invalidations.Inc() })
-	mustScreen(t, r, contracts.ScreenSpec{ID: "home", Title: "首页", Order: 10,
+	mustScreen(t, r, uinative.ScreenSpec{ID: "home", Title: "首页", Order: 10,
 		Build: func(c *ui.Context) { ui.Textf(c, "state=%d", state.Load()) }})
 
 	tt := newTestTester(t, r, 1200, 800)
@@ -60,7 +60,7 @@ func TestPostQueueIsFIFO(t *testing.T) {
 	var mu sync.Mutex
 	var order []int
 	latest := 0
-	mustScreen(t, r, contracts.ScreenSpec{ID: "home", Title: "首页", Order: 10,
+	mustScreen(t, r, uinative.ScreenSpec{ID: "home", Title: "首页", Order: 10,
 		Build: func(c *ui.Context) { ui.Textf(c, "latest=%d", latest) }})
 
 	tt := newTestTester(t, r, 1200, 800)
@@ -107,7 +107,7 @@ func TestPostQueueIsFIFO(t *testing.T) {
 func TestPostPanicIsContained(t *testing.T) {
 	r := newTestRoot(t)
 	var state counter
-	mustScreen(t, r, contracts.ScreenSpec{ID: "home", Title: "首页", Order: 10,
+	mustScreen(t, r, uinative.ScreenSpec{ID: "home", Title: "首页", Order: 10,
 		Build: func(c *ui.Context) { ui.Textf(c, "state=%d", state.Load()) }})
 
 	tt := newTestTester(t, r, 1200, 800)
