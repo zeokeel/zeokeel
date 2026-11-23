@@ -525,22 +525,44 @@ func (g *Gateway) runNotificationAction(raw []byte) (any, *protocolError) {
 	if err := decodeParams(raw, &params); err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(params.ID) == "" {
+		return nil, errInvalidParams("id", "is required")
+	}
+	params.ActionID = strings.TrimSpace(params.ActionID)
 	g.mu.Lock()
-	actionID, ok := g.toastActions[params.ID]
+	actionID, known := g.toastActions[params.ID]
 	var action *notificationAction
-	if ok && (params.ActionID == "" || params.ActionID == actionID) {
+	if known && (params.ActionID == "" || params.ActionID == actionID) {
 		action = g.actions[actionID]
+		// Consume both registrations: one notification's action runs once, and a
+		// second click is a parameter error rather than a silent no-op.
 		delete(g.actions, actionID)
 		delete(g.toastActions, params.ID)
 	}
 	g.mu.Unlock()
-	if action == nil {
-		return nil, appError(codeCapabilityUnsupported, "action_unavailable", false)
+	switch {
+	case !known:
+		// Unknown id, or an action this notification never had, or an id already
+		// consumed (the mapping is deleted on use). All three are the client
+		// referring to something that is not there any more.
+		protocolErr := errInvalidParams("id", "no pending action for this notification")
+		protocolErr.Data["name"] = "action_unavailable"
+		return nil, protocolErr
+	case params.ActionID != "" && params.ActionID != actionID:
+		protocolErr := errInvalidParams("actionId", "does not match the pending action")
+		protocolErr.Data["name"] = "action_unavailable"
+		return nil, protocolErr
+	case action == nil:
+		protocolErr := errInvalidParams("id", "no pending action for this notification")
+		protocolErr.Data["name"] = "action_unavailable"
+		return nil, protocolErr
 	}
-	// The action was written for the desktop UI thread; the gateway has no such
-	// thread, and the module that registered it never touches Go UI state.
+	// Run it inline, not in a goroutine: the reply then means "the undo happened",
+	// which is what the client's toast dismissal claims. The actions registered
+	// through contracts.ActionNotifier are plain state changes (the desktop UI
+	// thread they were written for does not exist here), so they do not block.
 	if action.run != nil {
-		go action.run()
+		action.run()
 	}
 	return struct{}{}, nil
 }

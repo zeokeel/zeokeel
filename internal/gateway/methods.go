@@ -406,11 +406,6 @@ func (g *Gateway) sessionSnapshot(ctx context.Context, raw json.RawMessage) (any
 	if strings.TrimSpace(params.SessionID) == "" {
 		return nil, errInvalidParams("sessionId", "is required")
 	}
-	if strings.TrimSpace(params.BeforeMessageID) != "" {
-		// Forward pagination is Stage 2 (§6.4); saying so is better than
-		// silently returning the newest window.
-		return nil, appError(codeCapabilityUnsupported, "capability_not_supported", false)
-	}
 	snapshot, err := g.hub.snapshotSession(ctx, params.SessionID)
 	if err != nil {
 		return nil, internalError(err)
@@ -429,15 +424,33 @@ func (g *Gateway) sessionSnapshot(ctx context.Context, raw json.RawMessage) (any
 	if !ok {
 		return nil, internalError(errors.New("gateway: session snapshot has an unexpected type"))
 	}
-	truncated := false
+	end := len(session.Messages)
+	if cursor := strings.TrimSpace(params.BeforeMessageID); cursor != "" {
+		// Backward paging (§6.4): `beforeMessageId` is the cursor the previous
+		// page returned as oldestMessageId, and the window ENDS just before it.
+		// An unknown cursor is a client mistake, never "start from the newest".
+		index := -1
+		for position := range session.Messages {
+			if session.Messages[position].ID == cursor {
+				index = position
+				break
+			}
+		}
+		if index < 0 {
+			return nil, errInvalidParams("beforeMessageId", "is not a message of this session")
+		}
+		end = index
+	}
+	start := end - tail
+	if start < 0 {
+		start = 0
+	}
+	truncated := start > 0
 	oldest := ""
-	if len(session.Messages) > tail {
-		session.Messages = session.Messages[len(session.Messages)-tail:]
-		truncated = true
+	if end > start {
+		oldest = session.Messages[start].ID
 	}
-	if len(session.Messages) > 0 {
-		oldest = session.Messages[0].ID
-	}
+	session.Messages = session.Messages[start:end]
 	return sessionSnapshotResult{
 		Epoch:           g.epoch,
 		Rev:             snapshot.rev,
@@ -989,15 +1002,24 @@ type contextSnapshotResult struct {
 	Context   *contextDTO `json:"context,omitempty"`
 }
 
-// contextSessionParams is the body of context.snapshot / context.subscribe.
-type contextSessionParams struct {
+// contextSnapshotParams is the body of context.snapshot: a full snapshot of one
+// conversation's context timeline. It has no sinceRev — a snapshot is always
+// whole, and increments are negotiated by context.subscribe. Declaring a
+// parameter the handler ignores is worse than not having it: the stand-ins and
+// the client both start believing it works.
+type contextSnapshotParams struct {
+	SessionID string `json:"sessionId"`
+}
+
+// contextSubscribeParams is the body of context.subscribe.
+type contextSubscribeParams struct {
 	SessionID string `json:"sessionId"`
 	SinceRev  uint64 `json:"sinceRev,omitempty"`
 }
 
 // contextSnapshot serves one conversation's folded context timeline.
 func (g *Gateway) contextSnapshot(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
-	var params contextSessionParams
+	var params contextSnapshotParams
 	if err := decodeParams(raw, &params); err != nil {
 		return nil, err
 	}
@@ -1026,7 +1048,7 @@ func (g *Gateway) contextSnapshot(ctx context.Context, raw json.RawMessage) (any
 // contextSubscribe registers the client on one conversation's context domain
 // and replays its ring.
 func (g *Gateway) contextSubscribe(ctx context.Context, c *client, raw json.RawMessage) (any, *protocolError) {
-	var params contextSessionParams
+	var params contextSubscribeParams
 	if err := decodeParams(raw, &params); err != nil {
 		return nil, err
 	}
@@ -1039,10 +1061,15 @@ func (g *Gateway) contextSubscribe(ctx context.Context, c *client, raw json.RawM
 
 // --- task board ------------------------------------------------------------
 
-// tasksParams is the body of tasks.snapshot / tasks.subscribe: an optional
-// conversation scopes the board to that session when the backend implements
-// contracts.SessionTaskBoard.
-type tasksParams struct {
+// tasksSnapshotParams is the body of tasks.snapshot: a full snapshot of the task
+// board (optionally scoped to one conversation). No sinceRev — see
+// contextSnapshotParams for the reason.
+type tasksSnapshotParams struct {
+	SessionID string `json:"sessionId,omitempty"`
+}
+
+// tasksSubscribeParams is the body of tasks.subscribe.
+type tasksSubscribeParams struct {
 	SessionID string `json:"sessionId,omitempty"`
 	SinceRev  uint64 `json:"sinceRev,omitempty"`
 }
@@ -1086,7 +1113,7 @@ func tasksDomainKey(sessionID string) string {
 
 // tasksSnapshot serves the task board domain.
 func (g *Gateway) tasksSnapshot(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
-	var params tasksParams
+	var params tasksSnapshotParams
 	if len(raw) > 0 {
 		if err := decodeParams(raw, &params); err != nil {
 			return nil, err
@@ -1112,7 +1139,7 @@ func (g *Gateway) tasksSnapshot(ctx context.Context, raw json.RawMessage) (any, 
 // tasksSubscribe registers the client on the board domain (global or
 // per-session) and replays its ring.
 func (g *Gateway) tasksSubscribe(ctx context.Context, c *client, raw json.RawMessage) (any, *protocolError) {
-	var params tasksParams
+	var params tasksSubscribeParams
 	if len(raw) > 0 {
 		if err := decodeParams(raw, &params); err != nil {
 			return nil, err

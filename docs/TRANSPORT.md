@@ -616,9 +616,16 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | 方法 / 通知 | 参数 | 返回 | 幂等 | 契约 | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | `notify.dismiss` | `{id}` | `{}` | Y | `Notifier.Dismiss` `notify.go:51` | 延后 |
-| `notify.action` | `{id,actionId}` | `{}` | N | 替代 `Notification.Action func()` `notify.go:40`（§6.3） | ✅ 已实现 |
+| `notify.action` | `{id,actionId}` | `{}` | Y | 替代 `Notification.Action func()` `notify.go:40`（§6.3） | ✅ 已实现 |
 | ↳ 通知 `toast.posted` | `{Notification 无 Action}` | — | — | `SetHandler` `notify.go:47` | — |
 | `foreground.set` | `{sessionId}` | `{}` | Y | `ForegroundSession` `foreground.go:24`（**方向反转**） | ✅ 已实现 |
+
+> **`notify.action` 的语义（2026-11-23 补死）**：`ActionNotifier.NotifyAction` 注册的回调在
+> 收到本方法时**同步执行一次**（回 `{}` 即代表"撤销已发生"），随后该动作的两份登记都被删除，
+> 所以同一 `id` 的第二次点击、未知 `id`、`actionId` 不匹配一律回
+> `invalid_params`（`data.field` 指 `id` 或 `actionId`，`data.name="action_unavailable"`）——
+> 而不是过去的 `1023 action_unavailable` 或静默 `{}`。**幂等性**体现在"只执行一次"，不是
+> "重复调用都回成功"。
 
 > `foreground.set` 是唯一"客户端→服务端的状态上报"。用途见契约注释：后台 run 完成时，只有"用户正看着的那个会话"才静音（`foreground.go:7-19`）。不实现它，所有后台完成通知都会响。
 
@@ -630,6 +637,10 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `context.subscribe` | `{sessionId, sinceRev}` | `{epoch,rev,resync}` | Y | 同域机制（§6.5） | ✅ 已实现 |
 | ↳ 通知 `context.delta` | `{sessionId, baseRev, rev, found, context?}` | — | — | **整段替换**（见下） | — |
 | `context.archive` | `{sessionId,seq}` | `{messages[],truncated}` | Y | `ContextArchiveService` `contextinspect.go:270+` | 延后 |
+
+> **快照永远是全量，没有 `sinceRev`**（2026-11-23 决定）：增量只由 `context.subscribe` 协商
+> （`sinceRev` 在订阅上有意义）。契约里已把 `sinceRev` 从 `context.snapshot` / `tasks.snapshot`
+> 移除——**声明一个不生效的参数比没有更糟**，它会让替身和客户端都以为存在该能力。
 
 > **域是每会话的**：`context:<sessionId>`。`context?` 与 `found` 一起读：`found:false` 表示
 > 该会话还没有任何上下文记录（冷会话/从未运行），客户端显示空态，**不要编造数字**。
