@@ -24,6 +24,12 @@ npm run dev             # http://127.0.0.1:5178
 
 对着真实网关跑：`ZK_API_URL=http://127.0.0.1:9932 npm run dev`。
 
+### mock 与真网关的差异（只有这一条）
+
+mock 的 WebSocket 接受 `?token=`（供脚本驱动控制面：浏览器无法给握手加请求头）。
+**真网关不接受**——`internal/gateway/auth.go` 只认 cookie 与 `Authorization: Bearer`。
+这是**测试夹具特权**，`src/api/token-query.test.ts` 断言产品代码里不出现 query token。
+
 ### mock 可触发的路径
 
 | 操作 | 观察 |

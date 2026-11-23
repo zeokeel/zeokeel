@@ -17,14 +17,23 @@ import { useT } from '@/i18n';
  */
 export function MessageActions({
   text,
+  role,
   onRegenerate,
   regenerateDisabled = false,
   regenerateHint,
+  onEdit,
+  editDisabled = false,
+  editHint,
 }: {
   text: string;
+  /** Which menu this row gets: a user message can be edited, an answer cannot. */
+  role: 'user' | 'assistant';
   onRegenerate?: () => void;
   regenerateDisabled?: boolean;
   regenerateHint?: string;
+  onEdit?: () => void;
+  editDisabled?: boolean;
+  editHint?: string;
 }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
@@ -40,20 +49,38 @@ export function MessageActions({
     }
   };
 
-  if (!onRegenerate) {
+  const copyButton = (
+    <Tooltip title={copied ? t('action.copied') : t('action.copy')}>
+      <Button
+        size="small"
+        type="text"
+        aria-label={t('action.copy')}
+        icon={<CopyOutlined />}
+        onClick={() => void copy()}
+      />
+    </Tooltip>
+  );
+
+  if (role === 'user') {
+    // Only a user message has an edit target (§4.6: `edit_target_not_user`).
     return (
       <div className="zk-msg-actions">
-        <Tooltip title={copied ? t('action.copied') : t('action.copy')}>
-          <Button
-            size="small"
-            type="text"
-            aria-label={t('action.copy')}
-            icon={<CopyOutlined />}
-            onClick={() => void copy()}
-          />
-        </Tooltip>
+        {copyButton}
+        <Button
+          size="small"
+          type="text"
+          disabled={editDisabled || !onEdit}
+          title={editDisabled ? editHint : undefined}
+          onClick={() => onEdit?.()}
+        >
+          {t('thread.edit')}
+        </Button>
       </div>
     );
+  }
+
+  if (!onRegenerate) {
+    return <div className="zk-msg-actions">{copyButton}</div>;
   }
 
   const item = (
@@ -70,15 +97,7 @@ export function MessageActions({
 
   return (
     <div className="zk-msg-actions">
-      <Tooltip title={copied ? t('action.copied') : t('action.copy')}>
-        <Button
-          size="small"
-          type="text"
-          aria-label={t('action.copy')}
-          icon={<CopyOutlined />}
-          onClick={() => void copy()}
-        />
-      </Tooltip>
+      {copyButton}
       <Dropdown
         trigger={['click']}
         menu={{

@@ -1483,3 +1483,20 @@ body {
   color: var(--zk-text-secondary);
   overflow-wrap: anywhere;
 }
+
+/* Edit dialog (B11): the textarea sits under the warning, above the buttons. */
+.zk-edit-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--zk-space-2);
+}
+
+.zk-edit-dialog p {
+  margin: 0;
+  color: var(--zk-text-secondary);
+}
+
+/* User-row actions align to the bubble's end edge. */
+.zk-transcript__row .zk-msg-actions {
+  justify-content: flex-end;
+}

@@ -4,7 +4,12 @@ import type { DefaultMessageInfo, SSEOutput } from '@ant-design/x-sdk';
 import { loadSnapshot } from '@/api/gateway';
 import type { RunRequest } from '@/api/protocol';
 import { assistantMessage, type ToolStepStatus, type ZeoMessage } from '@/chat/types';
-import { GatewayChatProvider, isRegenerateUnsupported } from './gateway-chat-provider';
+import {
+  GatewayChatProvider,
+  editRefusalOf,
+  isRegenerateUnsupported,
+  type EditRefusal,
+} from './gateway-chat-provider';
 
 /**
  * The conversation runtime: x-sdk's `useXChat` with our provider
@@ -19,11 +24,14 @@ export function useGatewayChat(
     onSnapshotError?: (error: unknown) => void;
     /** The gateway answered "regenerate is not supported" (§4.6). */
     onRegenerateUnsupported?: () => void;
+    /** The gateway refused an edit, and named why (§4.6). */
+    onEditRefused?: (refusal: EditRefusal) => void;
   } = {},
 ) {
   const provider = useMemo(() => new GatewayChatProvider(), []);
   const reportSnapshotError = options.onSnapshotError;
   const reportRegenerateUnsupported = options.onRegenerateUnsupported;
+  const reportEditRefused = options.onEditRefused;
 
   return useXChat<ZeoMessage, ZeoMessage, RunRequest, SSEOutput>({
     provider,
@@ -76,6 +84,13 @@ export function useGatewayChat(
     requestFallback: (_params, { error, messageInfo }) => {
       const partial = messageInfo?.message ?? assistantMessage();
       if (error.name === 'AbortError') {
+        return { ...partial, stopReason: 'aborted' };
+      }
+      const refusal = editRefusalOf((error as { cause?: unknown }).cause ?? error);
+      if (refusal) {
+        // A refusal is an explanation, not a failure: the row stays, the reason
+        // is shown, and the menu entry disables instead of inviting a retry.
+        reportEditRefused?.(refusal);
         return { ...partial, stopReason: 'aborted' };
       }
       if (isRegenerateUnsupported(error)) {

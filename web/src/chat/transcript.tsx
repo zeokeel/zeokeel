@@ -51,6 +51,9 @@ export function Transcript({
   focusIndex,
   onRegenerate,
   regenerateDisabled,
+  onEdit,
+  editDisabled,
+  editHint,
 }: {
   messages: MessageInfo<ZeoMessage>[];
   /** Needed for per-session restoration; omitted where a test does not care. */
@@ -61,6 +64,10 @@ export function Transcript({
   onRegenerate?: () => void;
   /** Set once the gateway has answered "regenerate is not supported". */
   regenerateDisabled?: boolean;
+  /** B11 (edit): only user messages carry it. */
+  onEdit?: (messageId: string, text: string) => void;
+  editDisabled?: boolean;
+  editHint?: string;
 }) {
   const t = useT();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -235,12 +242,24 @@ export function Transcript({
                   // `footer` prop would be silently dropped.
                   contentRender={(content) =>
                     isUser ? (
-                      <span className="zk-user-text">{(content as ZeoMessage).text}</span>
+                      <>
+                        <span className="zk-user-text">{(content as ZeoMessage).text}</span>
+                        {onEdit ? (
+                          <MessageActions
+                            role="user"
+                            text={(content as ZeoMessage).text}
+                            onEdit={() => onEdit(String(info.id), (content as ZeoMessage).text)}
+                            editDisabled={editDisabled}
+                            editHint={editHint}
+                          />
+                        ) : null}
+                      </>
                     ) : (
                       <>
                         <AssistantBody message={content as ZeoMessage} status={info.status} />
                         {info.status === 'loading' ? null : (
                           <MessageActions
+                            role="assistant"
                             text={(content as ZeoMessage).text}
                             onRegenerate={onRegenerate}
                             regenerateDisabled={regenerateDisabled}

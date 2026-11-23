@@ -13,6 +13,8 @@ import { EmptyState } from '@/ui/empty-state';
 import { FindBar } from './find-bar';
 import { PromptQueuePanel } from './prompt-queue-panel';
 import { TaskChip } from './task-chip';
+import { EditMessageDialog } from './edit-message-dialog';
+import type { EditRefusal } from '@/runtime/gateway-chat-provider';
 import { usePromptQueue } from './use-prompt-queue';
 import { useT } from '@/i18n';
 import { describeError } from '@/features/describe-error';
@@ -32,6 +34,14 @@ function focusComposer() {
  * approval claim (L4) and the draft claim (L6) sit above and below, and the
  * arbiter picks by level, never by focus.
  */
+const REFUSAL_KEY = {
+  edit_target_not_found: 'thread.editRefusal.notFound',
+  edit_target_not_user: 'thread.editRefusal.notUser',
+  edit_target_has_attachments: 'thread.editRefusal.attachments',
+  edit_target_compacted: 'thread.editRefusal.compacted',
+  edit_target_moved: 'thread.editRefusal.moved',
+} as const;
+
 export function ThreadScreen({ sessionId }: { sessionId: string }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -43,6 +53,9 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   // advertising no `regenerate` capability, or by answering 1023 on the first
   // attempt (a build whose backend lacks `SessionRegenerator`).
   const [regenerateUnsupported, setRegenerateUnsupported] = useState(false);
+  // B11 edit: the target row, and the gateway's reason if it refused one.
+  const [editTarget, setEditTarget] = useState<{ id: string; text: string } | null>(null);
+  const [editRefusal, setEditRefusal] = useState<EditRefusal | null>(null);
   const [draft, setDraft] = useState('');
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [findOpen, setFindOpen] = useState(false);
@@ -53,6 +66,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
     onSnapshotError: (cause) =>
       setSnapshotError(describeError(cause, t, 'thread.loadFailed')),
     onRegenerateUnsupported: () => setRegenerateUnsupported(true),
+    onEditRefused: (refusal) => setEditRefusal(refusal),
   });
 
   // Set while the current run is being stopped on purpose, so the settle
@@ -150,6 +164,19 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
    * B11: regenerate goes through the same run endpoint with `regenerate:true`
    * and no text (§4.6) — never a second send path. One retry at a time.
    */
+  const startEdit = (messageId: string, text: string) => setEditTarget({ id: messageId, text });
+
+  /**
+   * Commit an edit: same endpoint, third mode (§4.6). The transcript is *not*
+   * patched here — the gateway rewrites history and pushes `msg.reset`.
+   */
+  const submitEdit = (text: string) => {
+    const target = editTarget;
+    setEditTarget(null);
+    if (!target) return;
+    chat.onRequest({ sessionId, editMessageId: target.id, text });
+  };
+
   const regenerate = () => {
     if (chat.isRequesting) return;
     chat.onRequest({ sessionId, regenerate: true });
@@ -248,6 +275,9 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
             focusIndex={matchIndexes.length > 0 ? matchIndexes[cursor] : undefined}
             onRegenerate={regenerate}
             regenerateDisabled={regenerateUnsupported}
+            onEdit={startEdit}
+            editDisabled={editRefusal !== null}
+            editHint={editRefusal ? t(REFUSAL_KEY[editRefusal]) : undefined}
           />
         )}
       </div>
@@ -257,6 +287,15 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
       {/* B12: process-wide board (no sessionId) — tasks are not per-conversation
           unless the gateway scopes them. */}
       <TaskChip />
+
+      {editTarget ? (
+        <EditMessageDialog
+          open
+          initialText={editTarget.text}
+          onCancel={() => setEditTarget(null)}
+          onConfirm={submitEdit}
+        />
+      ) : null}
 
       <PromptQueuePanel
         items={queue.items}

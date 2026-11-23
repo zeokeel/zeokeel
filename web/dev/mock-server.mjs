@@ -1186,9 +1186,11 @@ const cookieToken = (req) => {
 
 const authorized = (req) => {
   if (cookieToken(req) === AUTH_TOKEN) return true;
-  // §3.1 allows non-browser clients to authenticate out of band. A browser
-  // cannot set headers on a WebSocket handshake, so scripts pass `?token=`;
-  // this mirrors the Bearer rule rather than adding a second credential type.
+  // **MOCK-ONLY convenience, not the contract.** The real gateway accepts a
+  // cookie or `Authorization: Bearer` and has no query-token path (`auth.go`).
+  // This exists because a browser cannot set headers on a WebSocket handshake
+  // and the integration tests need to drive the WS plane; product code must
+  // never send it — asserted by `src/api/token-query.test.ts`.
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`);
   const queryToken = url.searchParams.get('token');
   if (queryToken !== null && queryToken === AUTH_TOKEN) return true;

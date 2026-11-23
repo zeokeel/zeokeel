@@ -35,6 +35,18 @@ export class GatewayChatProvider extends AbstractChatProvider<ZeoMessage, RunReq
   ): RunRequest {
     const merged = { ...(options.params ?? {}), ...requestParams };
     if (!merged.sessionId) throw new Error('chat run requires a sessionId');
+    if (merged.editMessageId) {
+      // §4.6: the edit's text IS the new content; empty would mean "delete".
+      if (!merged.text || merged.text.trim() === '') {
+        throw new Error('chat run requires text for an edit');
+      }
+      return {
+        sessionId: merged.sessionId,
+        text: merged.text,
+        editMessageId: merged.editMessageId,
+        clientRunId: merged.clientRunId ?? newClientRunId(),
+      };
+    }
     if (merged.regenerate) {
       // §4.6: `text` must be absent here — the gateway reruns the user message
       // it already holds, and a stray `text` is rejected with invalid_params.
@@ -62,7 +74,10 @@ export class GatewayChatProvider extends AbstractChatProvider<ZeoMessage, RunReq
    * new answer, so an empty user bubble would be a lie about the transcript.
    */
   transformLocalMessage(requestParams: Partial<RunRequest>): ZeoMessage {
-    if (requestParams.regenerate) return assistantMessage();
+    // An edit rewrites an existing row and a regenerate replaces the last
+    // answer; neither adds a user bubble. The transcript is refreshed from the
+    // gateway's `msg.reset`, never patched optimistically.
+    if (requestParams.regenerate || requestParams.editMessageId) return assistantMessage();
     return { ...assistantMessage(), role: 'user', text: requestParams.text ?? '' };
   }
 
@@ -90,6 +105,24 @@ export class GatewayChatProvider extends AbstractChatProvider<ZeoMessage, RunReq
  * (§4.6). The client answers by disabling the menu entry — not by showing the
  * user a failed request they cannot do anything about.
  */
+/** The five edit refusals, as the gateway names them in `data.name` (§4.6). */
+export const EDIT_REFUSALS = [
+  'edit_target_not_found',
+  'edit_target_not_user',
+  'edit_target_has_attachments',
+  'edit_target_compacted',
+  'edit_target_moved',
+] as const;
+
+export type EditRefusal = (typeof EDIT_REFUSALS)[number];
+
+/** Read `data.name` out of a refusal the run stream reported. */
+export function editRefusalOf(payload: unknown): EditRefusal | null {
+  const data = (payload as { data?: { name?: string } } | null)?.data;
+  const name = data?.name;
+  return EDIT_REFUSALS.includes(name as EditRefusal) ? (name as EditRefusal) : null;
+}
+
 export function isRegenerateUnsupported(error: { message?: string }): boolean {
   const message = error.message ?? '';
   return message.includes('regenerate_not_supported') || message.includes('capability_unsupported');

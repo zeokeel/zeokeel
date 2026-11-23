@@ -32,6 +32,11 @@ export interface RunRequest {
    * was removed for exactly that reason).
    */
   regenerate?: boolean;
+  /**
+   * Edit mode: replace this user message's text and rerun from there (§4.6).
+   * Mutually exclusive with `regenerate`, and `text` is required.
+   */
+  editMessageId?: string;
 }
 
 export interface MessageDeltaData {
