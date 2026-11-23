@@ -6,6 +6,24 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-24
+
+### Changed
+
+- **产品形态改为「网关进程 + 浏览器客户端 + 极小原生托盘壳」**：原生桌面 UI（`internal/ui`、`internal/uiroot`、`internal/uikit`，约 16 万行）已删除，最后一个带桌面 UI 的状态保存在 `pre-s4` tag。`--product desktop` 不再存在，会给出可执行提示；默认产品为 `serve`，只保留 `headless` / `serve` 两个。
+- 后端与原生引擎解耦：`internal/gateway`、`internal/contracts`、`internal/modules/**` 对 `github.com/egoist/mygo` 的传递依赖为 0，mygo 只剩托盘壳相关的 5 个包；四条边界断言在 CI 里守着。
+- 传输层：WebSocket 控制面（域快照 + 差值 + 重放环）+ `POST /api/chat/run` 的 SSE 运行流。发送路径只有一条，`message.send` 与 `message.regenerate` 作为独立 WS 方法已移除，改成 run 的模式（`regenerate` / `editMessageId`）。
+
+### Added
+
+- 浏览器客户端（React 19 + antd 6 + Ant Design X 2.10）：25 条路由、46 条验收（24 P0 + 22 P1/P2）、中英双语、虚拟化消息流、审批卡 / Inbox、工具卡、上下文与任务面板、消息编辑与撤销。
+- `internal/gateway/contract.json`：由 Go 源码**生成**的单一契约来源（方法参数、能力清单、run 端点字段与互斥规则），客户端与测试替身都只读它，不再手抄。
+- `tasks` / `context` 两个域；`session.snapshot` 支持 `beforeMessageId` 游标分页；`notify.action` 支持带撤销动作的通知（删除任务后可撤销恢复）。
+
+### Removed
+
+- 桌面产品与原生 UI 工具链：`internal/ui`、`internal/uiroot`、`internal/uikit`、`internal/regression`、`design/conform` 与 `designlint`/`ui-snapshot`/`ui-drive`。
+
 ## [0.2.61] - 2026-11-23
 
 ### Added
