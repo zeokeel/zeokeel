@@ -2,6 +2,10 @@
 
 > 由 `docs/plans/s4-retirement-inventory.md`（只读预研）拆解而来。**分析已做完，S4 只剩执行**：每条给出「改哪个文件 / 哪几行 / 改成什么 / 怎么验证」，按依赖顺序编号，逐步可提交、可回退。
 > 行号以 **2026-11-23 HEAD `59bd7f4`** 为准；动手前用每条的 `grep` 复核一次行号（本文件不含"大概位置"）。
+>
+> **勾选规则（2026-11-23 复盘后加）**：每条勾选**必须指向一个可验证的对象**——提交哈希、测试名、
+> 或命令输出；**不能指向意图**。复盘发现 S3.5 曾勾引用了一个不存在的提交，根因正是"我记得做了"
+> 而不是"我贴了输出"——与 S5 那次"验了工作树没验提交"同源。更正记录保留在对应条目下，不改原文。
 > 前置裁决（已定，不再讨论）：① 托盘与网关同进程、desktop 直接删；② `go.mod` 保留 mygo，允许清单 = `internal/host` + `internal/lib/{openpath,openurl}` + `internal/brand` + `internal/design`；③ `internal/{design,brand,icons}` 保留（web `gen:tokens`/`gen:icons` 依赖）；④ 无头托盘双保险（`--no-tray` + `DISPLAY` 探针）；⑤ regression 的后端覆盖已迁出（15 条 `TestE2E*`，见 `regression-migration.md`）。
 
 ## 0. 开工门（Gate）
@@ -32,10 +36,14 @@
   - 理由：把"窗口"抽象成接口的初衷就是这个——换个实现即可。原计划的签名级替换会牵动 4 个文件 + 6 个测试 fake，收益为零而风险更高。
   - `close_guard.go` **移到 S2 删除**：它只被 `runDesktop` 与 tray 的 close 监听使用，S2 删 `runDesktop` 后自然成为死代码。
   - 验证：`go test ./internal/host -run 'Tray|Hotkey|Notify'` 全绿。
-- [ ] **S1.5** `internal/host/{hotkey.go,notify.go,notification_click.go}`：同样把 `*mygo.Window` 换成 `clientOpener`（热键、通知点击 → `OpenClient()`）。
-  - 位置：`hotkey.go` 7 处、`notify.go` 7 处、`notification_click.go` 10 处 `window` 引用。
-  - 验证：`go test ./internal/host -run 'Hotkey|Notify|NotificationClick'`。
-- [ ] **S1.6** 删除 `internal/host/close_guard.go`（12 处 `window` 引用）+ 其测试：无窗口即无"关闭到托盘"语义。
+- [x] **S1.5 + S1.6（合并；已被上面 S1.4–S1.6 的"改法调整"覆盖）** 原计划：把
+  `internal/host/{hotkey.go,notify.go,notification_click.go}` 的 `*mygo.Window` 换成
+  `clientOpener`，并删 `close_guard.go`。**实际**：签名没改，改用 `BrowserWindow` 适配器实现
+  `hotkeyWindow`（`Show/Restore/Focus` → 打开浏览器 URL），行为等价；`close_guard.go` 在 S2
+  随 `runDesktop` 一起删除。
+  - **（更正 2026-11-23）** 这两条曾被记成"未勾"却又被 line 31 记为"已由调整覆盖"——同一件事
+    两处记账。这里合并成一行，避免读者以为还欠工。
+  - 验证：`go test ./internal/host -run 'Tray|Hotkey|Notify'` 全绿。
   - 连带的**第二处**读取点在 `internal/host/tray.go:81-88 closeToTrayEnabled` + 它喂给 `setupTray(…, closeToTray bool)` 的菜单文案：新世界里没有窗口可关，去掉该参数与 `contracts.SettingCloseToTray` 的读取。
   - `contracts.SettingCloseToTray` 常量本身保留在 contracts（契约不删类型），设置页那一行由 **web 轨**标注「仅桌面端」或移除（跨轨事项，登记后通知）。
   - 验证：`go build ./...`；`grep -rn "CloseToTray" --include=*.go internal | grep -v internal/ui` 只剩 `internal/contracts/interaction.go`。
@@ -229,6 +237,8 @@ S3 唯一能独立绿的部分（`usesUIServices`/`declareUIServices`）也无�
 - [x] **S3.4** `internal/assembly/assembly_test.go`：`:123` 产品列表期望、`:138/:217/:284/:469/:643` 的 `ProductDesktop` 用法全部改到 `ProductServe` 或删除。
   - 验证：`go test ./internal/assembly -count=1`。
 - [x] **S3.5** 提交 `S3: collapse the assembly layer to headless products`。
+  - **（更正 2026-11-23）** 原记的这个提交**不存在**（`git log --all` 无匹配）：S3 已并入 S5。
+    S3.1–S3.4 的工作确实做了，落在 `3a6c14b S5: retire the native UI` 内。
 
 ## 4. 步骤 S4：清掉"后端→UI 层"的最后一根依赖（**必须在删 uikit 之前**）
 
@@ -236,6 +246,9 @@ S3 唯一能独立绿的部分（`usesUIServices`/`declareUIServices`）也无�
   - 为什么进 contracts：它是纯本地化工具，被后端模块使用；**不要**为它新建包。
   - 验证：`go build ./internal/modules/approvals`；`grep -rn "uikit" internal/modules` 为空。
 - [x] **S4.2** `internal/modules/hosttools/{bridges_test.go,goal_dsh_test.go}` 的 `internal/uiroot` import：改成 fake 或直接构造（这两个是测试，`go test ./internal/modules/hosttools` 必须仍绿）。
+  - **（更正 2026-11-23）** `6544558 S4pre` 实际只改了 `contracts` + `approvals` + 本清单，
+    **没动这两个文件**：`bridges_test.go` 是 S5 删除的（它断言的是 uiroot 的桥接实现），
+    `goal_dsh_test.go` 的自带 loader 也是 S5 补的。
   - 验证：`go test ./internal/modules/hosttools -count=1`。
 - [x] **S4.3** 提交 `S4pre: approvals localizes without the UI layer`。**此时 `internal/ui*` 仍然编译通过，随时可退回。**
 
@@ -254,6 +267,9 @@ S3 唯一能独立绿的部分（`usesUIServices`/`declareUIServices`）也无�
 - [x] **S5.5** 删 `audit/demo/**`（非测试包，import uiroot）与 `audit/probes/{ui,ext}/**`（探针测试）；`audit/upstream/*` 各自有 go.mod，不在 `./...`，不动。
   - 验证：`go list ./... | grep audit` 为空。
 - [x] **S5.6** 清扫残留：`grep -rn "internal/uiroot\|internal/uikit\|internal/ui/" --include=*.go . | grep -v "^./.cache"` 必须为空（host 里没有单独的 uiroot 文件，残留只可能是 import 行）。
+  - **（更正 2026-11-23）** S5 当时**并不为零**：还剩 3 处代码注释（`toolkit/settings_tools.go`、
+    `agent/child_notices.go`、`design/registry.go`），直到 `7932b1c` 才清零。当时的准确表述应是
+    "只剩注释级的陈旧引用"。
 - [x] **S5.7** 记录删除行数（`git show --stat` 汇总），提交 `S5: retire the native UI (…lines)`。
   - **回退点**：`git reset --hard <S5^>` 一步回到"UI 仍在"的状态。
 
@@ -301,6 +317,10 @@ S3 唯一能独立绿的部分（`usesUIServices`/`declareUIServices`）也无�
 - [x] **S8.4** 归档（加"已归档 2026-11-23，随原生 UI 退役"头）：`INJECTION-POINTS.md`、`UI-CONFORMANCE.md`、`UI-COMPONENT-MIGRATION.md`、`DESIGN-LINT.md`、`UI-FIX-STATUS-v0.8.3.md`、`AGENT-SURFACES.md`（保留 S4.1 审批触发面章节——它对 web 仍有效，其余归档）、`COVERAGE.md`、`VERIFICATION.md`、`UI-AUDIT-2026-11-11.md`、`DESIGN-REVIEW.md`、`UI-STYLE-DIRECTION-2026-11-11.md`、`UI-UX-UPGRADE-2026-11-15.md`、`SETTINGS-IA-REVIEW-2026-11-16.md`、`USABILITY-REVIEW.md`、`INTERACTION-DEPTH-ROUND.md`、`PRODUCT-BUG-REVIEW-2026-11-11.md`、`ADVERSARIAL-AUDIT.md`。
   - 验证：每个归档文件首行有归档注记；`grep -rn 'S4.1' docs/AGENT-SURFACES.md` 仍在（审批触发面保留）。
 - [x] **S8.5** `docs/plans/s4-retirement-inventory.md` 与本清单本身移到 `docs/archive/`（它们已完成使命）。
+  - **（更正 2026-11-23：决定不移）** 两者仍留在 `docs/plans/`。理由：本清单**仍在被追加**
+    （见文末「S9 之后新增的 T2 投影」），它是活的执行记录而不是退役证据；`archive/` 的语义是
+    "不再更新、仅供参考"。`s4-retirement-inventory.md` 同理（仍被 AGENTS.md §0/§9 引用）。
+    **退役完成后再归档。**
   - 验证：`ls docs/plans/ | grep -c s4-` = 0，`ls docs/archive/ | grep s4-` = 2。
 - [x] **S8.6** 提交 `S8: documentation for the browser-first product`。
 
@@ -319,6 +339,9 @@ S3 唯一能独立绿的部分（`usesUIServices`/`declareUIServices`）也无�
 - [ ] **S9.8** 端到端复跑（浏览器）：`make acceptance-tool` + Lead 的 UI 六步；`make acceptance-check`（plain）、`make acceptance-slow`（断连≠停止）。
 - [ ] **S9.9** web 生成物仍可用：`cd web && npm run gen:tokens && npm run gen:icons && npm run typecheck && npm run build`，再 `make web-client`。
 - [ ] **S9.10** 提交 `S9: post-retirement verification` + 打 tag `post-s4`，报告里给删除总行数与每步提交号。
+  - **（更正 2026-11-23）** 实际没有单独的 S9 提交，而是 `38da7f2`（S9 记录）+
+    `9b28015`（hostbundle 表述修正 + 交叉编译/泄漏/文档漂移记录）；tag 名由 Lead 定为
+    **`post-migration`**（注释 tag，打在 `9b28015`），不是 `post-s4`。
 
 ## 10. 三个"最可能删到一半要回退"的点（预研结论，执行时按此防）
 
