@@ -97,11 +97,13 @@ func (e runEvent) size() int {
 // a rewound-but-not-running session behind whenever the second step is missed.
 // Text is not sent in this mode (the backend already has the prompt).
 type runRequest struct {
-	SessionID   string   `json:"sessionId"`
-	Text        string   `json:"text"`
-	Attachments []string `json:"attachments"`
+	SessionID string `json:"sessionId"`
+	// Text is optional at the struct level because regenerate mode must omit it;
+	// the mode rules in contract.json carry "required unless regenerate".
+	Text        string   `json:"text,omitempty"`
+	Attachments []string `json:"attachments,omitempty"`
 	ClientRunID string   `json:"clientRunId"`
-	Regenerate  bool     `json:"regenerate"`
+	Regenerate  bool     `json:"regenerate,omitempty"`
 	// EditMessageID names the user message being replaced ("" = not an edit).
 	EditMessageID string `json:"editMessageId,omitempty"`
 }

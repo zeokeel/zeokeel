@@ -236,6 +236,54 @@
       "optional": []
     }
   },
+  "endpoints": [
+    {
+      "name": "chat.run",
+      "transport": "sse",
+      "method": "POST",
+      "path": "/api/chat/run",
+      "fields": {
+        "required": [
+          "clientRunId",
+          "sessionId"
+        ],
+        "optional": [
+          "attachments",
+          "editMessageId",
+          "regenerate",
+          "text"
+        ]
+      },
+      "rules": [
+        {
+          "kind": "exclusive",
+          "fields": [
+            "regenerate",
+            "editMessageId"
+          ]
+        },
+        {
+          "kind": "requires",
+          "field": "text",
+          "when": "editMessageId",
+          "nonEmpty": true
+        },
+        {
+          "kind": "forbidden",
+          "field": "text",
+          "when": "regenerate"
+        },
+        {
+          "kind": "requiredUnless",
+          "field": "text",
+          "unless": [
+            "regenerate"
+          ],
+          "nonEmpty": true
+        }
+      ]
+    }
+  ],
   "capabilities": {
     "static": [
       "approvals",

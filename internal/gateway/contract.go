@@ -106,13 +106,84 @@ type contractCapabilities struct {
 	Conditional []conditionalCapability `json:"conditional"`
 }
 
+// contractRule is one machine-checkable rule of an endpoint's request body.
+//
+// The shapes are deliberately flat and JS-friendly (no regexes, no expressions):
+// a stand-in validates with a four-case switch instead of re-implementing the
+// handler's conditionals.
+//
+//	exclusive      the listed fields may not appear together
+//	requires       when `when` is present, `field` must be present (and, with
+//	               nonEmpty, must not be blank)
+//	forbidden      when `when` is present, `field` must be ABSENT
+//	requiredUnless `field` is required unless one of `unless` is present
+type contractRule struct {
+	Kind     string   `json:"kind"`
+	Fields   []string `json:"fields,omitempty"`
+	Field    string   `json:"field,omitempty"`
+	When     string   `json:"when,omitempty"`
+	Unless   []string `json:"unless,omitempty"`
+	NonEmpty bool     `json:"nonEmpty,omitempty"`
+}
+
+// contractEndpoint is one non-JSON-RPC endpoint of the wire surface.
+//
+// Endpoints live OUTSIDE `params`: that map is keyed by JSON-RPC method and
+// TestContractCoversEveryMethod pins its key set to SupportedMethods(), so
+// folding POST /api/chat/run into it would recreate the "contract says a method
+// the gateway does not dispatch" bug this file exists to prevent. The endpoint
+// carries its own transport/method/path instead.
+type contractEndpoint struct {
+	Name      string            `json:"name"`
+	Transport string            `json:"transport"`
+	Method    string            `json:"method"`
+	Path      string            `json:"path"`
+	Fields    contractParamSpec `json:"fields"`
+	Rules     []contractRule    `json:"rules"`
+}
+
 // contractDocument is the whole generated file.
 type contractDocument struct {
 	// ProtocolVersion stamps the contract's shape, so a client can reject a
 	// file it does not understand instead of misreading it.
 	ProtocolVersion int                          `json:"protocolVersion"`
 	Params          map[string]contractParamSpec `json:"params"`
+	Endpoints       []contractEndpoint           `json:"endpoints"`
 	Capabilities    contractCapabilities         `json:"capabilities"`
+}
+
+// runEndpointRules is the mode logic of POST /api/chat/run, expressed once so
+// the stand-ins stop re-implementing it with their own conditionals. It mirrors
+// handleChatRun's validation exactly; the handler keeps the prose reasons.
+var runEndpointRules = []contractRule{
+	// Two different rewrites of the same history.
+	{Kind: "exclusive", Fields: []string{"regenerate", "editMessageId"}},
+	// Edit mode replaces the target message's text, so text IS the new content.
+	{Kind: "requires", Field: "text", When: "editMessageId", NonEmpty: true},
+	// Regenerate re-runs the prompt the backend already holds; sending text
+	// would append a second prompt.
+	{Kind: "forbidden", Field: "text", When: "regenerate"},
+	// A plain send needs the prompt.
+	{Kind: "requiredUnless", Field: "text", Unless: []string{"regenerate"}, NonEmpty: true},
+}
+
+// buildEndpoints derives the non-JSON-RPC endpoints. The field list comes from
+// the very struct the handler decodes (runRequest), so a new field cannot be
+// added without appearing here.
+func buildEndpoints() ([]contractEndpoint, error) {
+	fields, err := paramSpecOf(runRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("runRequest: %w", err)
+	}
+	rules := append([]contractRule(nil), runEndpointRules...)
+	return []contractEndpoint{{
+		Name:      "chat.run",
+		Transport: "sse",
+		Method:    "POST",
+		Path:      "/api/chat/run",
+		Fields:    fields,
+		Rules:     rules,
+	}}, nil
 }
 
 // buildContract derives the contract from the Go declarations above. It is a
@@ -138,6 +209,11 @@ func buildContract() (contractDocument, error) {
 		}
 		document.Params[method] = spec
 	}
+	endpoints, err := buildEndpoints()
+	if err != nil {
+		return contractDocument{}, err
+	}
+	document.Endpoints = endpoints
 	return document, nil
 }
 

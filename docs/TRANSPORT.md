@@ -299,6 +299,34 @@ SIGINT/SIGTERM（signals_unix.go:11）
   生成是确定性的（键排序），**连跑两次 `git diff` 为空**。忘了重生成时的修法就是那一行命令。
 - `TestContractCoversEveryMethod` 断言 contract 的方法集合 == `SupportedMethods()`（37 个），
   所以"新方法忘了进契约"也会红。
+- **`endpoints` 段**：非 JSON-RPC 的端点也在契约里。为什么单独一段而不是塞进 `params`：`params`
+  以 JSON-RPC 方法名为键、且 `TestContractCoversEveryMethod` 把它的键集合钉死为
+  `SupportedMethods()`——把 `POST /api/chat/run` 混进去，等于让契约声明一个网关并不 dispatch
+  的"方法"，正是这个文件要防的那类 bug。所以端点自带 `transport/method/path`。
+
+  目前只有一个端点，它是协议里最复杂的请求体（三种 run 模式 + 互斥字段）：
+
+  ```json
+  {
+    "name": "chat.run", "transport": "sse", "method": "POST", "path": "/api/chat/run",
+    "fields": { "required": ["clientRunId","sessionId"],
+                "optional": ["attachments","editMessageId","regenerate","text"] },
+    "rules": [
+      { "kind": "exclusive", "fields": ["regenerate","editMessageId"] },
+      { "kind": "requires", "field": "text", "when": "editMessageId", "nonEmpty": true },
+      { "kind": "forbidden", "field": "text", "when": "regenerate" },
+      { "kind": "requiredUnless", "field": "text", "unless": ["regenerate"], "nonEmpty": true }
+    ]
+  }
+  ```
+
+  规则只有四种、都是扁平字段（JS 侧一个 switch 就能校验，无需表达式解析）：`exclusive`（列出的
+  字段不得同时出现）、`requires`（`when` 出现时 `field` 必填，`nonEmpty` 则不得为空白）、
+  `forbidden`（`when` 出现时 `field` 必须**缺席**）、`requiredUnless`（`field` 必填，除非列出了
+  `unless` 中的字段）。**替身不该再各写一遍 if**：`web/dev/mock-server.mjs` 曾手写
+  `const {sessionId, text, regenerate} = body` 并**静默丢掉 `editMessageId`**，于是 mock 接受
+  编辑请求却按普通 run 处理（第 12 次"替身比生产宽松"，且发生在最复杂的请求体上）。
+  `TestContractCoversTheRunEndpoint` 钉住字段来自 `runRequest` 的 json tag、且四条规则逐条相等。
 | `epoch` | 客户端记录；重连后 `epoch` 变 → 丢弃全部本地状态（§6.2） |
 | 多标签页 | 每个标签页 = 一条 WS = 一个 `clientId`。网关不做跨标签页状态同步（各自 `session.subscribe`），但**读模型共享**（同一个 rev 序列） |
 
