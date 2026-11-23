@@ -16,6 +16,14 @@ import { GatewayRpc, type ConnectionStatus, gatewayRpc } from './ws/rpc';
 import { exchangeFragmentToken, probeAuthorization } from './ws/auth';
 import { applyPromptsDelta, type QueuedPrompt, type QueuedPromptWire } from './prompt-queue';
 import {
+  applyContextDelta,
+  EMPTY_CONTEXT,
+  normalizeContext,
+  type ContextSnapshotResult,
+  type ContextState,
+  type ContextView,
+} from './context';
+import {
   applyTasksDelta,
   normalizeTask,
   type GatewayTask,
@@ -254,6 +262,7 @@ export function clearConnectionCaches(): void {
   sessionDomains.clear();
   promptsDomains.clear();
   tasksDomains.clear();
+  contextDomains.clear();
 }
 
 /** Fires after each successful handshake (used to re-subscribe). */
@@ -466,6 +475,11 @@ export function handleDelta(method: string, params: unknown): void {
       domain?.applyDelta(delta);
       return;
     }
+    case 'context.delta': {
+      const sessionId = typeof delta.sessionId === 'string' ? delta.sessionId : '';
+      contextDomains.get(sessionId)?.applyDelta(delta);
+      return;
+    }
     case 'tasks.delta': {
       // One board per session, plus the process-wide board (`tasks`). The delta
       // carries no sessionId, so both are offered the row: a row that does not
@@ -650,6 +664,59 @@ export async function setSetting(key: string, value: string): Promise<void> {
 // --------------------------------------------------------------- snapshots --
 
 /** sessionId → its prompt inbox domain (`prompts:<sessionID>`). */
+const contextDomains = new Map<string, SyncedDomain<ContextState>>();
+
+function contextDomain(sessionId: string): SyncedDomain<ContextState> {
+  const existing = contextDomains.get(sessionId);
+  if (existing) return existing;
+  const domain = new SyncedDomain<ContextState>(
+    `context:${sessionId}`,
+    async () => {
+      const result = await client().request<ContextSnapshotResult>('context.snapshot', {
+        sessionId,
+      });
+      return {
+        value: normalizeContext(result),
+        rev: result.rev ?? 0,
+        epoch: result.epoch ?? '',
+      };
+    },
+    // Whole-view replacement (§6.5): there is nothing to merge.
+    (value, delta) => applyContextDelta(value, delta as { found?: boolean; context?: ContextView }),
+  );
+  contextDomains.set(sessionId, domain);
+  return domain;
+}
+
+/**
+ * Subscribe to one session's folded context view.
+ *
+ * The gateway re-folds every ~2 seconds, so a listener is a stream of the
+ * backend's snapshots — not a live cursor (§5.1.9).
+ */
+export async function subscribeContext(
+  sessionId: string,
+  listener: (state: ContextState) => void,
+): Promise<() => void> {
+  routeNotifications();
+  const domain = contextDomain(sessionId);
+  await domain.reload();
+  const unsubscribe = domain.subscribe(listener);
+  const reply = await client().request<{ rev: number; resync?: boolean }>('context.subscribe', {
+    sessionId,
+    sinceRev: domain.rev(),
+  });
+  if (reply.resync) await domain.reload();
+  return unsubscribe;
+}
+
+/** One-off read (the tab's first paint uses the subscription instead). */
+export async function refreshContext(sessionId: string): Promise<ContextState> {
+  const domain = contextDomain(sessionId);
+  await domain.reload();
+  return domain.value() ?? EMPTY_CONTEXT;
+}
+
 /** The process-wide task board is keyed like a session so one code path serves both. */
 const PROCESS_TASKS = '';
 

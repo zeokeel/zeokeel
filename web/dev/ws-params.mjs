@@ -56,6 +56,8 @@ export const WS_PARAMS = {
 
   'workspace.list.snapshot': { allowed: [] },
 
+  'context.snapshot': { allowed: ['sessionId', 'sinceRev'], required: ['sessionId'] },
+  'context.subscribe': { allowed: ['sessionId', 'sinceRev'], required: ['sessionId'] },
   'tasks.snapshot': { allowed: ['sessionId', 'sinceRev'], required: [] },
   'tasks.subscribe': { allowed: ['sessionId', 'sinceRev'], required: [] },
   'task.status': { allowed: ['id', 'status', 'sessionId'], required: ['id', 'status'] },

@@ -6,20 +6,14 @@ import { InboxScreen } from '@/features/inbox/inbox-screen';
 import { InspectorPanel } from '@/features/inspector/inspector-panel';
 import { InsightsScreen } from '@/features/insights/insights-screen';
 import { TeamScreen } from '@/features/team/team-screen';
+import { ContextScreen } from '@/features/thread/context-screen';
 import { NowScreen } from '@/features/now/now-screen';
-import { ROUTES } from '@/features/routes';
 import { SettingsScreen } from '@/features/settings/settings-screen';
-import { NotFoundScreen, StubScreen } from '@/features/stub/stub-screen';
+import { NotFoundScreen } from '@/features/stub/stub-screen';
 import { ChildSessionScreen } from '@/features/thread/child-session-screen';
 import { MemoryScreen } from '@/features/thread/memory-screen';
 import { ThreadScreen } from '@/features/thread/thread-screen';
 import { TrajectoryScreen } from '@/features/thread/trajectory-screen';
-
-const meta = (path: string) => {
-  const found = ROUTES.find((route) => route.path === path);
-  if (!found) throw new Error(`no route metadata for ${path}`);
-  return found;
-};
 
 /**
  * The thread column plus, for the file/guide routes, the right inspector.
@@ -63,7 +57,7 @@ export function AppRoutes() {
       <Route path="/c/:sessionId/memory" element={<MemoryScreen />} />
       <Route
         path="/c/:sessionId/context"
-        element={<StubScreen meta={meta('/c/:sessionId/context')} />}
+        element={<ContextScreen />}
       />
       <Route path="/c/:sessionId/child/:childId" element={<ChildSessionScreen />} />
       <Route path="/c/:sessionId/files" element={<ThreadRoute />} />

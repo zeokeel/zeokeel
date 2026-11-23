@@ -214,6 +214,73 @@ const queueOf = (sessionId) => {
   return promptQueues.get(sessionId);
 };
 
+// -------------------------------------------------------------- context --
+/**
+ * Folded context views. `found:false` for a session with no runs yet — the
+ * honest empty state (a cold session has nothing to fold). The delta replaces
+ * the whole view, never a field patch (§5.1.9).
+ * @type {Map<string, {rev:number, found:boolean, context?:any}>}
+ */
+const contextViews = new Map();
+const contextView = (sessionId) => {
+  if (contextViews.has(sessionId)) return contextViews.get(sessionId);
+  const session = sessions.get(sessionId);
+  const hasRun = (session?.messages ?? []).some((message) => message.role === 'assistant');
+  const view = hasRun
+    ? {
+        rev: 1,
+        found: true,
+        context: {
+          revision: 1,
+          snapshot: {
+            model: 'fakemodel/tier-1',
+            window: 200000,
+            systemPromptTokens: 1820,
+            systemPromptBytes: 7280,
+            sections: [
+              { id: 'agents-md', label: 'AGENTS.md', source: 'file', bytes: 5120, tokens: 1280 },
+              { id: 'tools', label: '工具目录', source: 'builtin', bytes: 2160, tokens: 540 },
+            ],
+            tools: [{ name: 'bash', group: 'shell', tokens: 96 }],
+            history: { messages: 2, user: 1, assistant: 1, tool: 0 },
+            injected: { agentsMd: true, skills: true },
+            estimatedPrompt: 1820,
+            seq: 1,
+          },
+          requests: [
+            {
+              seq: 1,
+              iteration: 1,
+              model: 'fakemodel/tier-1',
+              prompt: 1820,
+              completion: 320,
+              total: 2140,
+              contextTokens: 1820,
+              costUsd: 0.0032,
+              costKnown: true,
+            },
+          ],
+          events: [
+            {
+              seq: 1,
+              kind: 'spill',
+              detail: '超大工具输出落盘',
+              path: '.zk/spill/tool-1.txt',
+              bytes: 40960,
+              saved: 9200,
+            },
+          ],
+          used: 2140,
+          window: 200000,
+          totalCostUsd: 0.0032,
+          costKnown: true,
+        },
+      }
+    : { rev: 1, found: false };
+  contextViews.set(sessionId, view);
+  return view;
+};
+
 // ---------------------------------------------------------------- tasks --
 /**
  * Task boards: the process-wide one (`''`) and one per session. `added` in
@@ -1110,6 +1177,7 @@ const WS_CAPABILITIES = [
   // Conditional halves this build provides (contract.json capabilities.conditional).
   'tasks',
   'regenerate',
+  'context',
 ];
 const wsClients = new Set();
 
@@ -1423,6 +1491,25 @@ const wsDispatch = (client, message) => {
       // The client took a snapshot first; anything it missed can only be
       // honoured when the revision is the one we hold. Otherwise resync.
       return reply({ epoch: WS_EPOCH, rev: promptRev(sessionId), resync: since !== promptRev(sessionId) });
+    }
+    case 'context.snapshot': {
+      const sessionId = String(params.sessionId ?? '');
+      if (!sessions.has(sessionId)) return fail(1001, 'session_not_found');
+      const view = contextView(sessionId);
+      return reply({
+        epoch: WS_EPOCH,
+        rev: view.rev,
+        sessionId,
+        found: view.found,
+        ...(view.found ? { context: view.context } : {}),
+      });
+    }
+    case 'context.subscribe': {
+      const sessionId = String(params.sessionId ?? '');
+      if (!sessions.has(sessionId)) return fail(1001, 'session_not_found');
+      const since = Number(params.sinceRev ?? 0);
+      const view = contextView(sessionId);
+      return reply({ epoch: WS_EPOCH, rev: view.rev, resync: since !== view.rev });
     }
     case 'tasks.snapshot': {
       // Process-wide board when sessionId is absent, per-session otherwise

@@ -32,7 +32,7 @@ export const ROUTES: RouteMeta[] = [
   { path: '/c/:sessionId', ref: 'R3', titleKey: 'thread.untitled' },
   { path: '/c/:sessionId/trajectory', ref: 'R4', titleKey: 'thread.tabs.trajectory' },
   { path: '/c/:sessionId/memory', ref: 'R5', titleKey: 'thread.tabs.memory' },
-  { path: '/c/:sessionId/context', ref: 'R6', titleKey: 'thread.tabs.context', deferral: 'thread.contextUnavailable' },
+  { path: '/c/:sessionId/context', ref: 'R6', titleKey: 'thread.tabs.context' },
   { path: '/c/:sessionId/child/:childId', ref: 'R7', titleKey: 'thread.untitled' },
   { path: '/c/:sessionId/files', ref: 'R8', titleKey: 'thread.untitled' },
   { path: '/c/:sessionId/files/*', ref: 'R9/R10', titleKey: 'thread.untitled' },
@@ -65,4 +65,12 @@ export const THREAD_TABS = [
   { key: 'conversation', labelKey: 'thread.tabs.conversation' as const, suffix: '' },
   { key: 'trajectory', labelKey: 'thread.tabs.trajectory' as const, suffix: '/trajectory' },
   { key: 'memory', labelKey: 'thread.tabs.memory' as const, suffix: '/memory' },
+  { key: 'context', labelKey: 'thread.tabs.context' as const, suffix: '/context' },
 ] as const;
+
+/**
+ * Tabs whose entry is conditional on a gateway capability (§4.2). The context
+ * tab appears only when `initialize` advertised `context` — "missing key ⇒
+ * hidden surface", not "always render and fail".
+ */
+export const TAB_CAPABILITY: Record<string, string> = { context: 'context' };

@@ -70,6 +70,8 @@ const CLIENT_METHODS = [
   'prompts.enqueue',
   'prompts.remove',
   'foreground.set',
+  'context.snapshot',
+  'context.subscribe',
   'tasks.snapshot',
   'tasks.subscribe',
   'task.status',

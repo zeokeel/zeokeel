@@ -69,6 +69,8 @@ export interface FakeState {
    */
   tasks: Record<string, Array<Record<string, unknown>>>;
   taskRevs: Record<string, number>;
+  /** sessionId → folded context view, or `null` for `found:false`. */
+  contexts: Record<string, unknown | null>;
   currentWorkspaceId?: string;
   capabilities: string[];
 }
@@ -93,6 +95,7 @@ export function defaultState(): FakeState {
     prompts: {},
     tasks: { '': [] },
     taskRevs: { '': 1 },
+    contexts: {},
     currentWorkspaceId: 'ws-1',
     capabilities: [
       'session.list',
@@ -400,6 +403,23 @@ export class FakeGateway {
       if (index >= 0) queue.splice(index, 1);
       this.broadcastPrompts(sessionId, [], [String(params.id ?? '')]);
       reply({});
+      return;
+    }
+    if (method === 'context.snapshot') {
+      const sessionId = String(params.sessionId ?? '');
+      const context = this.state.contexts[sessionId] ?? null;
+      reply({
+        epoch: 'fake',
+        rev: 1,
+        sessionId,
+        found: context !== null,
+        ...(context ? { context } : {}),
+      });
+      return;
+    }
+    if (method === 'context.subscribe') {
+      const since = Number(params.sinceRev ?? 0);
+      reply({ epoch: 'fake', rev: 1, resync: since !== 1 });
       return;
     }
     if (method === 'tasks.snapshot') {

@@ -13,7 +13,7 @@
 | B3 | 设置导航搜索定位到项 | 完成 | 本轮补：搜索同时匹配**页名与字段名**，命中字段→`/settings/<page>?focus=<row key>`，表单 `data-focused` 高亮并滚动；`acceptance-p1p2.test.tsx`「finds a field by its label…」 |
 | B4 | 固定页脚唯一 primary、滚动不动 | 完成 | `.zk-settings__footer`（`border-top` + 页面内 flex 底部），每页仅「保存」一个 primary；滚动容器是 `.zk-settings__body` |
 | B5 | 暗色/英文全站跟随、无硬编码 | 部分 | 暗色：`useSystemAppearance()` + `tokens.css` 暗色块，颜色字面量由 ESLint 拦。英文：自建 `src/i18n/{zh,en}.ts` + `t()`（无第三方依赖），语言取 `settings` 域的 `ui.language`（`SETTING_KEYS.uiLanguage`），缺失时按 `navigator.language`；delta 到达即换语言不刷新；`ConfigProvider locale` 跟随 `zh_CN`/`en_US`。扫描测试禁止 i18n 目录外出现 CJK（`i18n.test.tsx`，含"故意注入中文 → 红"的证明）。浏览器实测：`i18n-zh.png` / `i18n-en.png`（侧栏、顶带、composer hint、审批卡全套切换）。**缺（故记部分，而不是完成）**：验收原文是"**全站跟随**"，而自动化/能力/洞察/检查器/设置页字段标签/记忆/子会话等 10 个文件仍在转换中，英文模式下这些屏仍是中文；清单锁在 `i18n.test.tsx` 的 `PENDING_CONVERSION` 里（只减不增，转完必须删条目） |
-| B6 | 会话 Tab 三页可切、有 KeyContext 才显示「上下文」 | 部分 | 对话/轨迹/记忆三页可切（`routes.ts` `THREAD_TABS`、`top-band.tsx`）。「上下文」按 `WEB-CLIENT` R6/B6 由能力门控，网关无 `context.*`、无 `KeyContext` → **按能力隐藏，属已知等价性缺口**；不发明协议 |
+| B6 | 会话 Tab 三页可切、有 KeyContext 才显示「上下文」 | 完成 | 已接：`api/context.ts`（`context.snapshot`/`context.subscribe`，**`context.delta` 整段替换**）+ `gateway.ts` 的 `subscribeContext/refreshContext` + R6 真屏 `features/thread/context-screen.tsx`（模型/窗口占用/折叠版本、提示词分段表、时间线表、模型调用表；`found:false` 显示「还没有上下文记录」**不编数字**；文案明说"每 2 秒重新折叠"不假装实时）。Tab 显隐由 `initialize.capabilities` 的 `context` 决定（`routes.ts` `TAB_CAPABILITY` + `top-band.tsx` 过滤，**没有就不渲染**，不改成常显）。测试：`context-screen.test.tsx` 6 条（无 capability 时无 Tab / 有则渲染折叠视图 / `found:false` 空态且无任何数字 / delta 整段替换后旧段落消失 / 无窗口时不猜比例 / delta 当替换不当合并）。浏览器实测：tabs `["对话","轨迹","记忆","上下文"]`，正文 `模型fakemodel/tier-1 窗口占用2,140/200,000 折叠版本#1 …AGENTS.md 1280 5120 工具目录 540 2160`（`.cache/ui-review/context-tab.png`） |
 | B7 | 窄窗 1024/900 顶栏与发送键可见可点 | 完成 | 本轮补：`global.css` 两个断点——≤1024 侧栏 232px、检查器 320px；≤900 侧栏 200px、检查器改浮层、顶带标题省略号。**headless chromium 实测**（1024/900/460 三档，`overflowX = 0`）：900 视口下侧栏 200px、标题可见、发送键 `x 831→863` 在视口内；460 视口发送键 `x 343→375`、composer 196px 不裁切 |
 | B8 | composer <480 不重叠不裁切 | 完成 | 本轮补：≤480 断点收窄 composer 内边距、hint 换行、审批按钮换行。实测 460 视口：composer `x 200 w 196`、发送键 `x 343→375` 完全在内，`overflowX = 0` |
 | B9 | 工具行点击/键盘展开收起 + 运行 spinner + 完成态 | 完成 | `thought-steps.tsx`：`ThoughtChain` + `onExpand`（点/键盘均可），`status: loading/success/error`，行文案 运行中/完成/失败；运行/失败项默认展开 |
@@ -37,7 +37,7 @@
 
 > B5 由"完成"改判"部分"：验收原文要求"**全站跟随**"，而 10 个文件（自动化/能力/洞察/检查器/设置页标签/记忆/子会话/`api/settings.ts`/`api/inbox.ts`/`tools/registry.tsx`）English 模式下仍是中文。基础设施与主路径已完成、且有扫描闸门防回归，但"全站"未达成——账面按事实记，不按进度记。
 
-未做 0 条；剩余 3 条**部分**：B5（英文覆盖未清）、B6（上下文 Tab 待接线）、B11（编辑无协议方法）。
+未做 0 条；剩余 2 条**部分**：B5（英文覆盖未清）、B11（编辑无协议方法，task-31 待接）。
 
 部分的 3 条：
 - **B6** 三 Tab 完成、「上下文」按能力隐藏（已知等价性缺口，需 Go 侧 `context.*`）；

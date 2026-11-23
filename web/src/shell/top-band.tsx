@@ -1,6 +1,7 @@
 import { Tabs } from 'antd';
 import { matchPath, useLocation, useNavigate } from 'react-router';
-import { THREAD_TABS, routeForPath } from '@/features/routes';
+import { TAB_CAPABILITY, THREAD_TABS, routeForPath } from '@/features/routes';
+import { hasCapability } from '@/api/gateway';
 import { useSessions } from '@/features/sessions/sessions-context';
 import { useT } from '@/i18n';
 import { ConnectionBadge } from './connection-badge';
@@ -42,7 +43,12 @@ export function TopBand() {
         <Tabs
           size="small"
           activeKey={activeKey}
-          items={THREAD_TABS.map((tab) => ({ key: tab.key, label: t(tab.labelKey) }))}
+          items={THREAD_TABS.filter((tab) => {
+            // B6: a tab whose capability the gateway does not advertise is not
+            // rendered at all — "missing key ⇒ hidden surface" (§4.2).
+            const capability = TAB_CAPABILITY[tab.key];
+            return !capability || hasCapability(capability);
+          }).map((tab) => ({ key: tab.key, label: t(tab.labelKey) }))}
           tabBarStyle={{ marginBottom: 0 }}
           onChange={(key) => {
             const target = THREAD_TABS.find((tab) => tab.key === key);
