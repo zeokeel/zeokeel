@@ -15,7 +15,9 @@
     "mock": "node dev/mock-server.mjs",
     "gen:tokens": "node scripts/gen-tokens.mjs",
     "gen:icons": "node scripts/gen-icons.mjs",
-    "gen:settings-keys": "node scripts/gen-settings-keys.mjs"
+    "gen:settings-keys": "node scripts/gen-settings-keys.mjs",
+    "gen:baseline": "node scripts/gen-baseline.mjs",
+    "gen:verify": "node scripts/gen-baseline.mjs --verify"
   },
   "dependencies": {
     "@ant-design/icons": "6.3.4",

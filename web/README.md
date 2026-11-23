@@ -94,6 +94,18 @@ scripts/        gen-tokens.mjs · gen-icons.mjs
   `dev/ws-params.mjs`，mock、测试用的 fake 网关、`alignment.test.ts` 共用它——未知/缺失字段一律
   `invalid_params`，不再静默接受。
 
+### 生成链基线（改 Go 侧设计源之前先做）
+
+```
+npm run gen:baseline   # 采基线：树必须干净（有未提交改动会拒绝），记录生成器真实读到的输入
+npm run gen:verify     # 复跑生成器并比对：输入*消失*才红，数量变化不红
+```
+
+基线存在 `web/.cache/gen-baseline.json`（已 gitignore，不进版本库）。两条纪律：**基线必须在不可逆动作
+开始之前采**，且**采集时树必须冻结**——在删除动作已经落到工作树之后再采，等于拿结果跟结果比。
+输入清单是**从生成器源码解析**出来的（`read('internal/design/tokens.go')`、`readdirSync` 的目录），
+不是按目录名猜的：猜目录会把同一个错误换个地方再犯。
+
 ## 订阅源版本（精确锁定，不要加 `^`）
 
 `antd 6.7.1` · `@ant-design/x` / `x-sdk` / `x-markdown` `2.10.0` · `@ant-design/icons 6.3.4` ·

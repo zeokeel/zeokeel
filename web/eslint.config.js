@@ -11,7 +11,9 @@ import tseslint from 'typescript-eslint';
 const COLOR_LITERAL = String.raw`/(^|[^\w-])(#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\()/`;
 
 export default tseslint.config(
-  { ignores: ['dist', 'node_modules', 'dev', 'scripts'] },
+  // `.cache` holds local artefacts (the generation-chain baseline, and any
+  // throwaway tree used to test the checker) — never lint or ship them.
+  { ignores: ['dist', 'node_modules', 'dev', 'scripts', '.cache'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
