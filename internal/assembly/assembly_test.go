@@ -1,7 +1,7 @@
 package assembly_test
 
 // Assembly-root tests. They exercise the embedded products end to end against a
-// real kernel root: desktop loads the UI group (and needs uiroot's services),
+// real kernel root: the products load the backend modules only,
 // headless loads the backend-only product on a root that has no UI services and
 // no display environment. Everything here is headless-safe: uiroot is pure Go
 // state, and the desktop test never creates a mygo window.
@@ -23,9 +23,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/assembly"
 	"github.com/zeokeel/zeokeel/internal/contracts"
-	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 	"github.com/zeokeel/zeokeel/internal/hosttools"
-	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
 // --- host service fakes (the process host provides these on the root) ---
@@ -96,35 +94,32 @@ func provide[T any](t *testing.T, root cordis.Context, key cordis.ServiceKey[T],
 	}
 }
 
-// provideHostServices provides the services every product's host provides, plus
-// the uiroot services when withUI is true (desktop).
-func provideHostServices(t *testing.T, root cordis.Context, withUI bool) *uiroot.Root {
+// provideHostServices provides the services every product's host provides:
+// data dir, settings and log. The browser transport's own services are the
+// gateway's business (internal/gateway), not this package's.
+func provideHostServices(t *testing.T, root cordis.Context) {
 	t.Helper()
 	provide(t, root, contracts.KeyDataDir, t.TempDir())
 	var settings contracts.SettingsService = newFakeSettings()
 	provide(t, root, contracts.KeySettings, settings)
 	var logger contracts.Logger = &fakeLogger{}
 	provide(t, root, contracts.KeyLogger, logger)
-	if !withUI {
-		return nil
-	}
-	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel test"})
-	provide(t, root, uinative.KeyUIRuntime, uiRoot.Runtime())
-	provide(t, root, contracts.KeyNavigator, uiRoot.Navigator())
-	provide(t, root, contracts.KeyTheme, uiRoot.Theme())
-	provide(t, root, contracts.KeyLocale, uiRoot.Locale())
-	provide(t, root, contracts.KeyScreenLister, uiRoot.ScreenLister())
-	return uiRoot
 }
 
 // --- products and registry ---
 
 func TestProductsAndEntries(t *testing.T) {
-	want := []string{assembly.ProductDesktop, assembly.ProductHeadless}
+	// desktop.json is gone with the native UI: the embedded assemblies are the
+	// backend-only headless one, and serve reuses its entries.
+	want := []string{assembly.ProductHeadless}
 	if got := assembly.Products(); !slices.Equal(got, want) {
 		t.Fatalf("Products() = %v, want %v", got, want)
 	}
-	for _, product := range []string{"desktop", "desktop.json"} {
+	wantAll := []string{assembly.ProductHeadless, assembly.ProductServe}
+	if got := assembly.AllProducts(); !slices.Equal(got, wantAll) {
+		t.Fatalf("AllProducts() = %v, want %v", got, wantAll)
+	}
+	for _, product := range []string{"headless", "headless.json"} {
 		if _, err := assembly.Entries(product); err != nil {
 			t.Fatalf("Entries(%q): %v", product, err)
 		}
@@ -134,39 +129,9 @@ func TestProductsAndEntries(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "unknown product") {
 		t.Fatalf("Entries(unknown product) = %v, want an unknown-product error", err)
 	}
-
-	desktop, err := assembly.Entries(assembly.ProductDesktop)
-	if err != nil {
-		t.Fatalf("Entries(desktop): %v", err)
-	}
-	if len(desktop) != 17 {
-		t.Fatalf("desktop roots = %d, want 17 entries", len(desktop))
-	}
-	_ = desktop
-	wantRoots := []string{
-		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
-		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/hosttools", "zeokeel/memorystore",
-		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer",
-		"zeokeel/modelcatalog", "zeokeel/insights", assembly.GroupModuleID,
-	}
-	for index, root := range desktop {
-		if root.Module != wantRoots[index] {
-			t.Fatalf("desktop root %d = %q, want %q", index, root.Module, wantRoots[index])
-		}
-	}
-	if len(desktop[16].Children) != 12 {
-		t.Fatalf("UI group children = %d, want 12 UI modules", len(desktop[16].Children))
-	}
-	wantChildren := []string{
-		"zeokeel-ui/home", "zeokeel-ui/toolcards",
-		"zeokeel-ui/sidebar", "zeokeel-ui/session", "zeokeel-ui/settings", "zeokeel-ui/approval",
-		"zeokeel-ui/rightpanel", "zeokeel-ui/automation", "zeokeel-ui/insights",
-		"zeokeel-ui/plugins", "zeokeel-ui/interaction", "zeokeel-ui/toasts",
-	}
-	for index, child := range desktop[16].Children {
-		if child.Module != wantChildren[index] {
-			t.Fatalf("UI group child %d = %q, want %q", index, child.Module, wantChildren[index])
-		}
+	// The retired windowed product must not resolve any more.
+	if _, err := assembly.Entries("desktop"); err == nil {
+		t.Fatal("Entries(desktop) still succeeds after the native UI retirement")
 	}
 
 	headless, err := assembly.Entries(assembly.ProductHeadless)
@@ -214,24 +179,14 @@ func TestHeadlessPinsPermissionSensitiveModules(t *testing.T) {
 			t.Errorf("headless %s must set ignorePermissionSetting=true", id)
 		}
 	}
-	desktop, err := assembly.Entries(assembly.ProductDesktop)
-	if err != nil {
-		t.Fatalf("Entries(desktop): %v", err)
-	}
-	for _, id := range []string{"approvals", "toolkit"} {
-		if pinned, _ := configOf(desktop, id)["ignorePermissionSetting"].(bool); pinned {
-			t.Errorf("desktop %s must keep following the live permission preset", id)
-		}
-	}
+	// serve reuses the headless entries with its own overrides; its approvals
+	// override is checked in serve_test.go.
 }
 
 func TestRegistryIsExplicit(t *testing.T) {
 	registry := assembly.Registry()
 	for _, id := range []string{
 		"zeokeel/appinfo",
-		"zeokeel-ui/home",
-		"zeokeel-ui/welcome",
-		"zeokeel-ui/toolcards",
 		"zeokeel/toolkit",
 		"zeokeel/agent",
 		"zeokeel/hosttools",
@@ -241,29 +196,25 @@ func TestRegistryIsExplicit(t *testing.T) {
 		"zeokeel/acp",
 		"zeokeel/modelcatalog",
 		"zeokeel/insights",
-		"zeokeel-ui/interaction",
 		"zeokeel/sessionstore",
 		"zeokeel/goal",
 		"zeokeel/workspace",
 		"zeokeel/skills",
 		"zeokeel/approvals",
 		"zeokeel/sandbox",
-		"zeokeel-ui/sidebar",
-		"zeokeel-ui/session",
-		"zeokeel-ui/settings",
-		"zeokeel-ui/approval",
-		"zeokeel-ui/rightpanel",
-		"zeokeel-ui/automation",
-		"zeokeel-ui/insights",
-		"zeokeel-ui/plugins",
-		assembly.GroupModuleID,
 	} {
 		if !registry.Has(id) {
 			t.Fatalf("Registry() lacks module %q", id)
 		}
 	}
-	if got := len(registry.Modules()); got != 31 {
-		t.Fatalf("Registry() modules = %d, want 31", got)
+	// The native UI's twelve modules are not part of any product any more.
+	for _, id := range []string{"zeokeel-ui/home", "zeokeel-ui/session", "zeokeel-ui/settings"} {
+		if registry.Has(id) {
+			t.Fatalf("Registry() still registers the retired UI module %q", id)
+		}
+	}
+	if got := len(registry.Modules()); got != 18 {
+		t.Fatalf("Registry() modules = %d, want 20", got)
 	}
 }
 
@@ -275,34 +226,29 @@ func TestValidateEmbeddedProducts(t *testing.T) {
 	}
 }
 
-// --- desktop product: UI group loads, contributions register, close unwinds ---
+// --- headless product: backend modules load, close unwinds ---
 
-func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
+// TestHeadlessAssemblyLoadsAndUnwinds is the load/unload contract of the one
+// remaining embedded assembly: every backend module settles, its services are
+// reachable, and Close withdraws them and unregisters every tool the module
+// contributed. (The windowed product's UI group is gone with the native UI.)
+func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 	root := newRoot(t)
-	uiRoot := provideHostServices(t, root, true)
+	provideHostServices(t, root)
 
-	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductDesktop, assembly.BuildInfo{
+	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductHeadless, assembly.BuildInfo{
 		Version:   "9.9.9",
 		Commit:    "deadbeef",
 		BuildTime: "2026-11-06T12:00:00Z",
 	})
 	if err != nil {
-		t.Fatalf("LoadWithBuildInfo(desktop): %v", err)
+		t.Fatalf("LoadWithBuildInfo(headless): %v", err)
 	}
 
-	// Backend modules and the UI group with its eight UI modules are all active
-	// after the synchronous load: the store provider, the toolkit provider, the
-	// approvals provider, the agent consumer and the UI modules settle in
-	// dependency order.
 	instances := loader.Instances()
-	if len(instances) != 29 {
-		t.Fatalf("desktop instances = %d, want 29", len(instances))
-	}
 	wantIDs := []string{
 		"appinfo", "store", "goal", "approvals", "workspace", "skills", "sandbox", "toolkit", "hosttools", "memorystore",
-		"agent", "automation", "update", "importer", "modelcatalog", "insights", "ui",
-		"home", "toolcards", "sidebar", "session", "settings", "approval", "rightpanel",
-		"automation-ui", "insights-ui", "plugins-ui", "interaction", "toasts",
+		"agent", "automation", "update", "importer", "acp",
 	}
 	gotIDs := make([]string, len(instances))
 	for index, instance := range instances {
@@ -312,48 +258,22 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 		}
 	}
 	if !slices.Equal(gotIDs, wantIDs) {
-		t.Fatalf("desktop instance IDs = %v, want %v", gotIDs, wantIDs)
-	}
-	group, ok := loader.Instance("ui")
-	if !ok || group.ModuleID() != assembly.GroupModuleID {
-		t.Fatalf("ui entry = %+v (found=%v), want a %q instance", group, ok, assembly.GroupModuleID)
+		t.Fatalf("headless instance IDs = %v, want %v", gotIDs, wantIDs)
 	}
 	if warnings := loader.Warnings(); len(warnings) != 0 {
-		t.Fatalf("desktop warnings = %v, want none", warnings)
-	}
-
-	// The UI modules registered their contributions during activation: the UI
-	// root has one screen and validates.
-	if err := uiRoot.Validate(); err != nil {
-		t.Fatalf("uiroot Validate after load: %v", err)
-	}
-	if screens := uiRoot.ScreenLister().Screens(); !slices.Equal(screens, []string{"home", "automation", "session", "insights", "plugins"}) {
-		t.Fatalf("screens after load = %v, want [home automation session insights plugins]", screens)
-	}
-	// The modules contributed to the host's reserved slots (ui/welcome, the
-	// right inspector, the overlay dialogs) without the host knowing about them.
-	// The settings header no longer hosts build metadata (it moved to the About
-	// page), so it is not registered in the desktop assembly.
-	slots := uiRoot.Runtime().Slots()
-	for _, want := range []string{
-		contracts.SlotSidebarPrimary,
-		contracts.SlotSidebarNav,
-		contracts.SlotSidebarFooter,
-		contracts.SlotSessionPanelRight,
-		contracts.SlotOverlayDialogs,
-	} {
-		if !slices.Contains(slots, want) {
-			t.Fatalf("registered slots = %v, want it to contain %q", slots, want)
-		}
+		t.Fatalf("headless warnings = %v, want none", warnings)
 	}
 
 	// The toolkit registry is the product's shared tool catalog: the hosttools
-	// module registered its six tools into it during activation.
+	// module registered its host tools into it during activation.
 	toolkitRegistry, ok := root.Get(hosttools.KeyRegistry)
 	if !ok {
 		t.Fatal("tool registry service is not available on the root")
 	}
-	hostToolNames := []string{"ask_user", "create_goal", "exit_plan_mode", "get_goal", "plan_review", "present", "update_goal"}
+	// headless.json sets hosttools interactive=false, so the plan-review pair is
+	// intentionally absent: nothing could approve a plan. serve flips this (see
+	// serve_test.go).
+	hostToolNames := []string{"ask_user", "create_goal", "get_goal", "present", "update_goal"}
 	for _, name := range hostToolNames {
 		found := false
 		for _, spec := range toolkitRegistry.Specs() {
@@ -368,17 +288,14 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	}
 
 	// Goal v2: the durable per-session goal backend is assembled and the DSH
-	// goal trio reaches it through the toolkit registry (desktop product).
+	// goal trio reaches it through the toolkit registry.
 	goalService, ok := root.Get(contracts.KeyGoal)
 	if !ok || goalService == nil {
-		t.Fatal("KeyGoal service is not available on the desktop root")
+		t.Fatal("KeyGoal service is not available on the root")
 	}
-	// A goal only exists for a durable session: the goal backend refuses to
-	// append a goal event for a session row that does not exist (it would
-	// resurrect a deleted conversation).
 	store, ok := root.Get(contracts.KeyStore)
 	if !ok || store == nil {
-		t.Fatal("KeyStore service is not available on the desktop root")
+		t.Fatal("KeyStore service is not available on the root")
 	}
 	if err := store.CreateSession(context.Background(), "sess-goal-assembly", "goal test"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
@@ -399,8 +316,7 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	if !strings.Contains(result.Content, created.ID) {
 		t.Fatalf("get_goal content = %q, want the created goal %q", result.Content, created.ID)
 	}
-	// Deleting the session must not let a later goal round resurrect it: the
-	// goal backend verifies the durable session row before appending an event.
+	// Deleting the session must not let a later goal round resurrect it.
 	if err := store.DeleteSession(context.Background(), "sess-goal-assembly"); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}
@@ -417,10 +333,9 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 		}
 	}
 
-	// The agent also provides the context inspector used by the Context tab: it
-	// is durable-event backed and therefore present in every product.
+	// The agent provides the context inspector the browser's Context tab reads.
 	if inspector, ok := root.Get(contracts.KeyContext); !ok || inspector == nil {
-		t.Fatal("KeyContext service is not available on the desktop root")
+		t.Fatal("KeyContext service is not available on the root")
 	}
 
 	// Build identity from the host was overlaid onto the appinfo module config.
@@ -432,22 +347,14 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 		t.Fatalf("appinfo = %+v, want the injected build identity", info)
 	}
 
-	// Closing the loader disposes the assembly: the appinfo service is
-	// withdrawn, the UI group cascades, and every contribution is unregistered.
+	// Closing the loader disposes the assembly: every service is withdrawn and
+	// every contributed tool is unregistered through its kernel effect.
 	if err := loader.Close(); err != nil {
 		t.Fatalf("loader.Close: %v", err)
 	}
 	if _, ok := root.Get(contracts.KeyAppInfo); ok {
 		t.Fatal("appinfo service survived loader.Close")
 	}
-	if screens := uiRoot.ScreenLister().Screens(); len(screens) != 0 {
-		t.Fatalf("screens after close = %v, want none", screens)
-	}
-	if err := uiRoot.Validate(); err == nil {
-		t.Fatal("uiroot Validate after close succeeded, want no-screen error")
-	}
-	// Module disposal unregistered every host tool through the kernel effect,
-	// leaving only the toolkit module's own tools in the shared registry.
 	for _, spec := range toolkitRegistry.Specs() {
 		if slices.Contains(hostToolNames, spec.Name) {
 			t.Fatalf("host tool %q survived loader.Close", spec.Name)
@@ -460,15 +367,15 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 
 // --- headless product: loads without any UI service or display environment ---
 
-// TestDesktopAssemblyHasNoStubTeamTool is the FR-14 regression: the legacy
+// TestHeadlessAssemblyHasNoStubTeamTool is the FR-14 regression: the legacy
 // hosttools in-memory "team" stub is gone, while the real rig team tools that
 // the agent module registers (against contracts.KeyTeam) stay available.
-func TestDesktopAssemblyHasNoStubTeamTool(t *testing.T) {
+func TestHeadlessAssemblyHasNoStubTeamTool(t *testing.T) {
 	root := newRoot(t)
-	_ = provideHostServices(t, root, true)
-	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductDesktop, assembly.BuildInfo{Version: "test"})
+	provideHostServices(t, root)
+	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductHeadless, assembly.BuildInfo{Version: "test"})
 	if err != nil {
-		t.Fatalf("LoadWithBuildInfo(desktop): %v", err)
+		t.Fatalf("LoadWithBuildInfo(headless): %v", err)
 	}
 	t.Cleanup(func() { _ = loader.Close() })
 	registry, ok := root.Get(hosttools.KeyRegistry)
@@ -491,7 +398,7 @@ func TestDesktopAssemblyHasNoStubTeamTool(t *testing.T) {
 		}
 	}
 	// The remaining host tools are unchanged.
-	for _, name := range []string{"ask_user", "present", "plan_review", "exit_plan_mode", "get_goal", "create_goal", "update_goal"} {
+	for _, name := range []string{"ask_user", "present", "get_goal", "create_goal", "update_goal"} {
 		if !names[name] {
 			t.Fatalf("host tool %q missing", name)
 		}
@@ -501,7 +408,7 @@ func TestDesktopAssemblyHasNoStubTeamTool(t *testing.T) {
 func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	root := newRoot(t)
 	// Deliberately no uiroot: the headless host provides settings and log only.
-	provideHostServices(t, root, false)
+	provideHostServices(t, root)
 
 	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductHeadless, assembly.BuildInfo{Version: "0.1.0"})
 	if err != nil {
@@ -563,8 +470,14 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	}
 	// The product genuinely has no UI: no UI service was provided and the
 	// headless assembly never asks for one.
-	if _, ok := root.Get(uinative.KeyUIRuntime); ok {
-		t.Fatal("headless root unexpectedly has a UI runtime service")
+	// No window-owned service is provided at all any more: the browser
+	// transport provides its own (gateway.Provide), and the process host
+	// contributes only data dir/settings/log.
+	if _, ok := root.Get(contracts.KeyNavigator); ok {
+		t.Fatal("the headless root unexpectedly has a navigator service")
+	}
+	if _, ok := root.Get(contracts.KeyTheme); ok {
+		t.Fatal("the headless root unexpectedly has a theme service")
 	}
 	info, ok := root.Get(contracts.KeyAppInfo)
 	if !ok {
@@ -579,7 +492,10 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 
 func TestPreflightValidationFailures(t *testing.T) {
 	appinfoEntry := module.Entry{ID: "appinfo", Module: "zeokeel/appinfo"}
-	homeEntry := module.Entry{ID: "home", Module: "zeokeel-ui/home"}
+	// The agent requires the session store, the approvals service and the shared
+	// tool registry (the serve host provides the last one): with only the agent
+	// in the tree nothing provides them, which is the missing-provider case.
+	agentEntry := module.Entry{ID: "agent", Module: "zeokeel/agent"}
 
 	tests := []struct {
 		name    string
@@ -601,7 +517,7 @@ func TestPreflightValidationFailures(t *testing.T) {
 		},
 		{
 			name:    "missing provider",
-			entries: []module.Entry{homeEntry},
+			entries: []module.Entry{agentEntry},
 			want:    "no enabled entry in the assembly provides",
 		},
 		{
@@ -635,14 +551,14 @@ func TestPreflightValidationFailures(t *testing.T) {
 // the same root can load the valid product afterwards.
 func TestPreflightFailureLeavesRootUsable(t *testing.T) {
 	root := newRoot(t)
-	provideHostServices(t, root, true)
+	provideHostServices(t, root)
 
-	if err := assembly.ValidateEntries([]module.Entry{{ID: "home", Module: "zeokeel-ui/home"}}); err == nil {
+	if err := assembly.ValidateEntries([]module.Entry{{ID: "ghost", Module: "zeokeel-ui/ghost"}}); err == nil {
 		t.Fatal("invalid entry tree passed validation")
 	}
-	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductDesktop, assembly.BuildInfo{})
+	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductHeadless, assembly.BuildInfo{})
 	if err != nil {
-		t.Fatalf("LoadWithBuildInfo(desktop) after a failed preflight: %v", err)
+		t.Fatalf("LoadWithBuildInfo(headless) after a failed preflight: %v", err)
 	}
 	if err := loader.Close(); err != nil {
 		t.Fatalf("loader.Close: %v", err)

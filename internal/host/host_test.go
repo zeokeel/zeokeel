@@ -17,8 +17,8 @@ func TestOptionsNormalize(t *testing.T) {
 	t.Setenv(dataDirEnv, dir)
 
 	normalized := Options{}.normalize()
-	if normalized.Product != assembly.ProductDesktop {
-		t.Fatalf("default product = %q, want %q", normalized.Product, assembly.ProductDesktop)
+	if normalized.Product != assembly.ProductServe {
+		t.Fatalf("default product = %q, want %q", normalized.Product, assembly.ProductServe)
 	}
 	if normalized.DataDir != dir {
 		t.Fatalf("default data dir = %q, want $%s = %q", normalized.DataDir, dataDirEnv, dir)
@@ -62,7 +62,7 @@ func TestMainListProducts(t *testing.T) {
 	lines := strings.Fields(stdout.String())
 	// serve has no assembly JSON of its own (it reuses headless entries), so it
 	// is enumerated by AllProducts rather than by the embedded file list.
-	want := []string{assembly.ProductDesktop, assembly.ProductHeadless, assembly.ProductServe}
+	want := []string{assembly.ProductHeadless, assembly.ProductServe}
 	if len(lines) != len(want) {
 		t.Fatalf("--list-products output = %q, want %v", stdout.String(), want)
 	}

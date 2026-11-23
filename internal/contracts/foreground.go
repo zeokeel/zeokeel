@@ -14,7 +14,7 @@ import (
 // cannot tell those apart — a session stays "active" while the user is on
 // another screen (insights, settings, another overlay) or away from the window.
 //
-// It is optional: the desktop host provides it (internal/uiroot), and a backend
+// It is optional: the browser transport host provides it, and a backend
 // running without it (headless products, tests) keeps its previous
 // active-session rule.
 type ForegroundSession interface {
@@ -24,7 +24,7 @@ type ForegroundSession interface {
 	ForegroundSession() (sessionID string, ok bool)
 }
 
-// KeyForegroundSession is provided by the desktop UI host (internal/uiroot) and
+// KeyForegroundSession is provided by the browser transport host and
 // consumed by the agent backend when a background run finishes. It is optional:
 // a product without a desktop foreground read model provides nothing.
 var KeyForegroundSession = cordis.NewServiceKey[ForegroundSession]("zeokeel/ui/foreground-session")

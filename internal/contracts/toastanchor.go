@@ -12,7 +12,7 @@ import (
 )
 
 // KeyToastAnchor is the optional toast-placement service the UI host
-// (internal/uiroot) provides on the kernel root context. The toasts module
+// (the browser transport) provides on the kernel root context. The toasts module
 // consumes it when present; a minimal host without the service still renders
 // toasts at the module's own default anchor.
 var KeyToastAnchor = cordis.NewServiceKey[ToastAnchorService]("zeokeel/ui/toast-anchor")

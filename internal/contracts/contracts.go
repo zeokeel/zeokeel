@@ -141,11 +141,11 @@ const (
 // Service keys: the name is the stable contract, the type is checked by the
 // kernel at Provide/Require time and by module.Validate at assembly preflight.
 var (
-	// KeyNavigator is provided by the UI host (internal/uiroot).
+	// KeyNavigator is provided by the browser transport host (gateway.Provide).
 	KeyNavigator = cordis.NewServiceKey[Navigator]("zeokeel/ui/navigator")
-	// KeyTheme is provided by the UI host (internal/uiroot).
+	// KeyTheme is provided by the browser transport host (gateway.Provide).
 	KeyTheme = cordis.NewServiceKey[ThemeService]("zeokeel/ui/theme")
-	// KeyLocale is provided by the UI host (internal/uiroot).
+	// KeyLocale is provided by the browser transport host (gateway.Provide).
 	KeyLocale = cordis.NewServiceKey[LocaleService]("zeokeel/ui/locale")
 	// KeySettings is provided by the process host (internal/host).
 	KeySettings = cordis.NewServiceKey[SettingsService]("zeokeel/settings")

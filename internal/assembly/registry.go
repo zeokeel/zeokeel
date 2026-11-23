@@ -21,19 +21,6 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/toolkit"
 	"github.com/zeokeel/zeokeel/internal/modules/update"
 	"github.com/zeokeel/zeokeel/internal/modules/workspace"
-	"github.com/zeokeel/zeokeel/internal/ui/approval"
-	automationui "github.com/zeokeel/zeokeel/internal/ui/automation"
-	"github.com/zeokeel/zeokeel/internal/ui/home"
-	insightsui "github.com/zeokeel/zeokeel/internal/ui/insights"
-	"github.com/zeokeel/zeokeel/internal/ui/interaction"
-	"github.com/zeokeel/zeokeel/internal/ui/plugins"
-	"github.com/zeokeel/zeokeel/internal/ui/rightpanel"
-	"github.com/zeokeel/zeokeel/internal/ui/session"
-	"github.com/zeokeel/zeokeel/internal/ui/settings"
-	"github.com/zeokeel/zeokeel/internal/ui/sidebar"
-	"github.com/zeokeel/zeokeel/internal/ui/toasts"
-	"github.com/zeokeel/zeokeel/internal/ui/toolcards"
-	"github.com/zeokeel/zeokeel/internal/ui/welcome"
 )
 
 // Registry builds the compile-time registry of every module linked into this
@@ -46,10 +33,9 @@ import (
 // configure) which of these modules a product enables.
 //
 // Registry declares the service contracts the process host provides in every
-// product: settings and log. Product-specific host services (the UI services
-// provided by internal/uiroot) are declared by the loading entry points
-// (Validate/Load/LoadWithBuildInfo) when the assembly actually uses them, so
-// the same registry serves windowed and headless products.
+// product: settings, log and the data dir. The browser transport's services
+// (interaction, artifacts, plans, notifications, foreground session) are
+// provided by whatever runs it (gateway.Provide for --product serve).
 func Registry() *module.Registry {
 	registry := module.NewRegistry()
 	registry.AddBuiltin(contracts.KeySettings)
@@ -75,19 +61,6 @@ func Registry() *module.Registry {
 	mustRegister(registry, modelcatalog.Module())
 	mustRegister(registry, insights.Module())
 	mustRegister(registry, hosttools.Module())
-	mustRegister(registry, home.Module())
-	mustRegister(registry, interaction.Module())
-	mustRegister(registry, toasts.Module())
-	mustRegister(registry, welcome.Module())
-	mustRegister(registry, toolcards.Module())
-	mustRegister(registry, sidebar.Module())
-	mustRegister(registry, session.Module())
-	mustRegister(registry, settings.Module())
-	mustRegister(registry, approval.Module())
-	mustRegister(registry, rightpanel.Module())
-	mustRegister(registry, automationui.Module())
-	mustRegister(registry, insightsui.Module())
-	mustRegister(registry, plugins.Module())
 	mustRegister(registry, GroupModule())
 	return registry
 }

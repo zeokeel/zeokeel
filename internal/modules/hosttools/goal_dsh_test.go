@@ -10,11 +10,41 @@ import (
 	"strings"
 	"testing"
 
+	cordis "github.com/zeokeel/zeokeel-kernel"
+	"github.com/zeokeel/zeokeel-kernel/module"
 	rig "github.com/zeokeel/zeokeel-rig"
+	rigtool "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
-	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
+
+// loadBridgeProductWithGoals loads hosttools with an optional per-session goal
+// service (the DSH goal trio backend) provided on the root.
+//
+// The window-owned bridges (interaction/artifacts/plan) are optional services:
+// this product is interactive=true but provides none of them, which is exactly
+// what the goal trio needs — it reaches the goal service directly.
+func loadBridgeProductWithGoals(t *testing.T, interactive bool, goals contracts.GoalService) *product {
+	t.Helper()
+	root := cordis.Root()
+	t.Cleanup(func() { _ = root.DisposeAll() })
+	if goals != nil {
+		if _, err := root.Provide(contracts.KeyGoal, goals); err != nil {
+			t.Fatalf("provide goal service: %v", err)
+		}
+	}
+	rigRegistry := rigtool.NewRegistry()
+	registry := newKernelRegistry(t, rigRegistry, nil)
+	loader, err := module.Load(root, registry, []module.Entry{
+		{ID: "toolkit", Module: "test/fake-toolkit"},
+		{ID: "hosttools", Module: ModuleID, Config: map[string]any{"interactive": interactive}},
+	})
+	if err != nil {
+		t.Fatalf("load hosttools product: %v", err)
+	}
+	t.Cleanup(func() { _ = loader.Close() })
+	return &product{root: root, loader: loader, registry: rigRegistry}
+}
 
 // goalToolOutput mirrors the Rig goal tool result.
 type goalToolOutput struct {
@@ -66,7 +96,7 @@ func goalCallOK(t *testing.T, product *product, sessionID, origin, name, argumen
 
 func newGoalProduct(t *testing.T, goals contracts.GoalService) *product {
 	t.Helper()
-	return loadBridgeProductWithGoals(t, uiroot.New(uiroot.Config{AppName: "test"}), true, goals)
+	return loadBridgeProductWithGoals(t, true, goals)
 }
 
 // TestGoalTrioReplacesLegacyGoalTool pins the model surface: the DSH trio is

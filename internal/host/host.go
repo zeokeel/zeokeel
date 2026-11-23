@@ -103,13 +103,12 @@ type Options struct {
 }
 
 // normalize fills zero-valued options with their process defaults. Product
-// accepts either the embedded name or its file name ("desktop" or
-// "desktop.json").
+// accepts either the embedded name or its file name ("serve" or "serve.json").
 func (o Options) normalize() Options {
 	o.Product = strings.TrimSpace(o.Product)
 	o.Product = strings.TrimSuffix(o.Product, ".json")
 	if o.Product == "" {
-		o.Product = assembly.ProductDesktop
+		o.Product = assembly.ProductServe
 	}
 	if strings.TrimSpace(o.DataDir) == "" {
 		o.DataDir = defaultDataDir()
@@ -286,13 +285,21 @@ Flags:
   -h, --help         print this help and exit
 `
 
-// Run runs one product until it quits. It blocks: for the desktop product
-// until the mygo event loop stops, for the headless product until SIGINT or
-// SIGTERM.
+// Run runs one product until it quits. It blocks until the product's
+// context ends (SIGINT/SIGTERM for the gateway and headless products).
+//
+// The windowed "desktop" product was retired with the native UI; the name is
+// kept as a readable error so an old script fails with an instruction instead
+// of an unknown-product message.
+// retiredProductDesktop is the removed windowed product's name. It is not an
+// assembly product any more; the constant exists so the CLI can answer a stale
+// `--product desktop` with an instruction.
+const retiredProductDesktop = "desktop"
+
 func Run(opts Options) error {
 	opts = opts.normalize()
 	switch opts.Product {
-	case assembly.ProductDesktop:
+	case retiredProductDesktop:
 		// The windowed product was retired when the browser client became the
 		// main surface (docs/plans/web-client-pivot.md). Fail loudly instead of
 		// starting something the build no longer contains.

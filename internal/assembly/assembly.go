@@ -23,14 +23,10 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
-	"github.com/zeokeel/zeokeel/internal/contracts/uinative"
 )
 
 // Product names shipped in the binary.
 const (
-	// ProductDesktop is the windowed product: the UI group and its modules are
-	// enabled, so the host also provides the uiroot services they require.
-	ProductDesktop = "desktop"
 	// ProductHeadless runs the same registry without UI modules: no window, no
 	// uiroot and therefore no display environment is required.
 	ProductHeadless = "headless"
@@ -197,62 +193,11 @@ func ServeEntries() ([]module.Entry, error) {
 	return entries, nil
 }
 
-// registryFor builds the registry one product needs: the compile-time modules
-// plus the host services that product's assembly actually uses. UI services are
-// only declared when an enabled entry requires one, because a headless host
-// does not provide them (declaring them unconditionally would make the
-// loader's builtin check reject every headless product).
-func registryFor(entries []module.Entry) *module.Registry {
-	registry := Registry()
-	if usesUIServices(registry, entries) {
-		declareUIServices(registry)
-	}
-	return registry
-}
-
-// declareUIServices declares the services internal/uiroot provides on the host
-// root context.
-func declareUIServices(registry *module.Registry) {
-	registry.AddBuiltin(uinative.KeyUIRuntime)
-	registry.AddBuiltin(contracts.KeyNavigator)
-	registry.AddBuiltin(contracts.KeyTheme)
-	registry.AddBuiltin(contracts.KeyLocale)
-	registry.AddBuiltin(contracts.KeyScreenLister)
-}
-
-// uiServiceNames is the set of service names the UI host provides.
-var uiServiceNames = map[string]bool{
-	uinative.KeyUIRuntime.Name():     true,
-	contracts.KeyNavigator.Name():    true,
-	contracts.KeyTheme.Name():        true,
-	contracts.KeyLocale.Name():       true,
-	contracts.KeyScreenLister.Name(): true,
-}
-
-// usesUIServices reports whether any enabled entry's module requires a UI host
-// service. Disabled entries are skipped: pre-flight skips them too, and a
-// product must not be forced to provide UI services it never activates.
-func usesUIServices(registry *module.Registry, entries []module.Entry) bool {
-	var walk func([]module.Entry) bool
-	walk = func(list []module.Entry) bool {
-		for _, entry := range list {
-			if entry.Disabled {
-				continue
-			}
-			if info, ok := registry.Module(entry.Module); ok {
-				for _, requirement := range info.Requires {
-					if uiServiceNames[requirement.Name] {
-						return true
-					}
-				}
-			}
-			if walk(entry.Children) {
-				return true
-			}
-		}
-		return false
-	}
-	return walk(entries)
+// registryFor builds the registry one product needs. There is one registry now:
+// the native UI's host services are gone, and the browser transport's services
+// are provided by the gateway rather than declared as loader builtins.
+func registryFor(_ []module.Entry) *module.Registry {
+	return Registry()
 }
 
 // normalizeProduct accepts a product name or its file name ("desktop" or

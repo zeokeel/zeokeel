@@ -42,6 +42,16 @@
 - [x] **S1.7** 提交 `S1: serve runs the gateway before the tray; tray opens the browser`。
   - 回退点检查：`git revert <S1>` 后 `go build ./...` 应恢复原状（此时 UI 包从未被动过，必然通过）。
 
+### S5 执行记录（2026-11-23，含并入的 S3）
+
+- 删除（git 跟踪）：`internal/ui`(364) + `internal/uiroot`(54) + `internal/uikit`(60) + `internal/devtools/{designlint,ui-snapshot,ui-drive}`(18) + `internal/design/conform`(5) + `internal/design/conformance_test.go` + `internal/regression`(71) + `internal/modules/hosttools/bridges_test.go` + `internal/assembly/assemblies/desktop.json`。合计 **575 文件 / 160,637 行**。
+- 删除（本地、被 `.git/info/exclude` 排除、从不入库）：`audit/demo`、`audit/probes`（`audit/demo/main.go` 与 probes 的 harness 都 import uiroot，S5 后无法编译）。
+- 注册与产品面：registry 去掉 13 个 UI import/注册（剩 18 单元 + group）；`declareUIServices`/`usesUIServices`/`uiServiceNames` 删除，`registryFor` 塌缩为 `Registry()`；`ProductDesktop` 常量与 `desktop.json` 删除，`Products()`=`[headless]`、`AllProducts()`=`[headless, serve]`；`--product` 默认 `serve`；`--product desktop` 保留可读错误（`retiredProductDesktop` 字面量）。
+- 测试重写：`assembly_test.go` 的 desktop 用例整体改写为 headless（products/entries、load-unwind、team-stub、preflight）；`hosttools` 的 bridge 测试删除（UI 未提供时无法断言 artifact/plan 桥），goal 三件套测试改为自带 loader；`boundary_test.go` 删掉已空洞的 `TestNativeUIModelIsQuarantined`（S6 补两档 mygo 断言）。
+- 契约注释更新：`contracts.{go,foreground.go,toastanchor.go}` 里"provided by internal/uiroot"改成"browser transport host (gateway.Provide)"。
+- 验证：gofmt 空 / build / vet OK；全量 `go test ./...` 仅 hostbundle 环境性失败；`--list-products` 亲眼验 = `headless`、`serve`；`--product desktop` 退出码 1；`serve --no-tray --port 9965` 后 `GET /` = 200；`make acceptance-check / acceptance-approval / acceptance-slow` 三跳全 PASS。
+- **回退语义**：`git revert` 这一个提交即可回到"原生 UI 仍在"的状态；`git reset --hard pre-s4` 回到整个迁移前的干净点。两者都不影响 web 轨（它的提交独立）。
+
 ### S4pre 执行记录（2026-11-23）
 
 - `contracts.Language(locale)` 新增（nil → "zh"），`internal/modules/approvals` 的 4 处调用改为 `contracts.Language`，uikit import 删除。
@@ -51,7 +61,7 @@
 
 ### S3 执行记录（2026-11-23）
 
-**未执行，与 S5 合并**（见提交说明）。实测证据：删掉 `Registry()` 里的 13 条 UI
+**与 S5 合并执行**（Lead 已批准）。实测证据：删掉 `Registry()` 里的 13 条 UI
 `mustRegister` 后，`internal/ui/uimodtest` 的 7 条集成测试立刻红
 （`assembly.Load(desktop): module: validation failed`），因为它们用 desktop
 装配断言"所有 UI 模块都激活"。也就是说 **"UI 模块注册" 与 "UI 包/它的测试"
@@ -102,17 +112,17 @@ S3 唯一能独立绿的部分（`usesUIServices`/`declareUIServices`）也无�
 
 ## 3. 步骤 S3：装配层塌缩
 
-- [ ] **S3.1** `internal/assembly/registry.go`：删 `:24-36` 的 13 个 `internal/ui/*` import + `:78-90` 的 13 个 `mustRegister`（home/interaction/toasts/welcome/toolcards/sidebar/session/settings/approval/rightpanel/automationui/insightsui/plugins）。
+- [x] **S3.1** `internal/assembly/registry.go`：删 `:24-36` 的 13 个 `internal/ui/*` import + `:78-90` 的 13 个 `mustRegister`（home/interaction/toasts/welcome/toolcards/sidebar/session/settings/approval/rightpanel/automationui/insightsui/plugins）。
   - 保留 `:62 sessionstore`、`:63 approvals` 及其余后端模块。
   - 验证：`go build ./internal/assembly`；`grep -c "internal/ui/" internal/assembly/registry.go` = 0。
-- [ ] **S3.2** `internal/assembly/assembly.go:33` 删 `ProductDesktop` 常量及其注释 `:31-32`。
+- [x] **S3.2** `internal/assembly/assembly.go:33` 删 `ProductDesktop` 常量及其注释 `:31-32`。
   - 连带 `:53 Products()` / `:72 AllProducts()`：返回集合去掉 desktop（serve/headless/acp 保留）。serve 成为默认。
   - 验证：`go run ./cmd/zeokeel --list-products` 输出不含 desktop；`internal/host/host_test.go` 的期望同步改。
-- [ ] **S3.3** `internal/assembly/assembly.go:207-208` 的 `registryFor` 塌缩为 `Registry()`；删 `:213-221 declareUIServices`、`:223-245 usesUIServices`（`uiServiceNames` 表只在 `:244` 的 `usesUIServices` 内部使用，随它一起删）。
+- [x] **S3.3** `internal/assembly/assembly.go:207-208` 的 `registryFor` 塌缩为 `Registry()`；删 `:213-221 declareUIServices`、`:223-245 usesUIServices`（`uiServiceNames` 表只在 `:244` 的 `usesUIServices` 内部使用，随它一起删）。
   - 验证：`go build ./internal/assembly`；`grep -rn "declareUIServices\|usesUIServices" internal` 为空。
-- [ ] **S3.4** `internal/assembly/assembly_test.go`：`:123` 产品列表期望、`:138/:217/:284/:469/:643` 的 `ProductDesktop` 用法全部改到 `ProductServe` 或删除。
+- [x] **S3.4** `internal/assembly/assembly_test.go`：`:123` 产品列表期望、`:138/:217/:284/:469/:643` 的 `ProductDesktop` 用法全部改到 `ProductServe` 或删除。
   - 验证：`go test ./internal/assembly -count=1`。
-- [ ] **S3.5** 提交 `S3: collapse the assembly layer to headless products`。
+- [x] **S3.5** 提交 `S3: collapse the assembly layer to headless products`。
 
 ## 4. 步骤 S4：清掉"后端→UI 层"的最后一根依赖（**必须在删 uikit 之前**）
 
@@ -125,20 +135,20 @@ S3 唯一能独立绿的部分（`usesUIServices`/`declareUIServices`）也无�
 
 ## 5. 步骤 S5：删除（一次性，一个大提交）
 
-- [ ] **S5.1** 删包：`internal/ui/**`（13 模块 + `uimodtest`）、`internal/uiroot/**`、`internal/uikit/**`。
+- [x] **S5.1** 删包：`internal/ui/**`（13 模块 + `uimodtest`）、`internal/uiroot/**`、`internal/uikit/**`。
   - 一次性删完（三包互相 import，不能逐个删：uikit→ui 29 文件、ui→uiroot 如 session 25 文件）。
   - 验证：`go build ./...`。
-- [ ] **S5.2** 删只服务 UI 的 devtools：`internal/devtools/{designlint,ui-snapshot,ui-drive}`。
+- [x] **S5.2** 删只服务 UI 的 devtools：`internal/devtools/{designlint,ui-snapshot,ui-drive}`。
   - 验证：`grep -rn "devtools/designlint\|devtools/ui-snapshot\|devtools/ui-drive" --include=*.go --include=*.sh --include=Makefile --include=*.yml . | grep -v "^./.cache"` → 只在 S6/S7 待改的脚本里出现。
-- [ ] **S5.3** 删 `internal/design/conform/**` + `internal/design/conformance_test.go`；`internal/design/registry.go:16` 的注释里删掉对 `internal/design/conform` 的提及。
+- [x] **S5.3** 删 `internal/design/conform/**` + `internal/design/conformance_test.go`；`internal/design/registry.go:16` 的注释里删掉对 `internal/design/conform` 的提及。
   - **保留** `internal/design/{tokens.go,components.go,font.go,motion.go,style.go,registry.go,registry.json}`（web `gen:tokens` 按文本解析，`registry.json` 是前端组件规格源）。
   - 验证：`go build ./...`；`go test ./internal/design -count=1`；`cd web && node scripts/gen-tokens.mjs` 仍产出（这是跨轨验收，必须跑）。
-- [ ] **S5.4** 删 `internal/regression/**`（71 文件 / 17,337 行）。后端覆盖已迁出：15 条 `TestE2E*` 在 `internal/gateway/`，对照表见 `docs/plans/regression-migration.md`。
+- [x] **S5.4** 删 `internal/regression/**`（71 文件 / 17,337 行）。后端覆盖已迁出：15 条 `TestE2E*` 在 `internal/gateway/`，对照表见 `docs/plans/regression-migration.md`。
   - 验证：`go build ./... && go test ./internal/gateway -run TestE2E -count=1` 全绿（这正是替代覆盖）。
-- [ ] **S5.5** 删 `audit/demo/**`（非测试包，import uiroot）与 `audit/probes/{ui,ext}/**`（探针测试）；`audit/upstream/*` 各自有 go.mod，不在 `./...`，不动。
+- [x] **S5.5** 删 `audit/demo/**`（非测试包，import uiroot）与 `audit/probes/{ui,ext}/**`（探针测试）；`audit/upstream/*` 各自有 go.mod，不在 `./...`，不动。
   - 验证：`go list ./... | grep audit` 为空。
-- [ ] **S5.6** 清扫残留：`grep -rn "internal/uiroot\|internal/uikit\|internal/ui/" --include=*.go . | grep -v "^./.cache"` 必须为空（host 里没有单独的 uiroot 文件，残留只可能是 import 行）。
-- [ ] **S5.7** 记录删除行数（`git show --stat` 汇总），提交 `S5: retire the native UI (…lines)`。
+- [x] **S5.6** 清扫残留：`grep -rn "internal/uiroot\|internal/uikit\|internal/ui/" --include=*.go . | grep -v "^./.cache"` 必须为空（host 里没有单独的 uiroot 文件，残留只可能是 import 行）。
+- [x] **S5.7** 记录删除行数（`git show --stat` 汇总），提交 `S5: retire the native UI (…lines)`。
   - **回退点**：`git reset --hard <S5^>` 一步回到"UI 仍在"的状态。
 
 ## 6. 步骤 S6：边界断言两档（产品严格 / test 单列）
