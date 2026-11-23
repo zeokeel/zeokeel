@@ -212,12 +212,14 @@ async function runPass(browser, pass) {
   //    run parks one): decide it, then retry — that is what a user does.
   //    `.last()`: during a route transition the outgoing composer is still in
   //    the DOM for a frame; the newest one is the live composer.
-  const input = page.locator('[data-testid="composer-input"]').last();
+  // Decision (b): the input area is `composer`, the textarea inside it is found
+  // by role — `Sender`'s internals (and whether props land on the textarea or its
+  // wrapper) are not our contract.
+  const input = page.getByTestId('composer').getByRole('textbox');
   await input.waitFor({ timeout: 15_000 });
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const enabled = await page.evaluate(() => {
-      const nodes = [...document.querySelectorAll('[data-testid="composer-input"]')];
-      const node = nodes[nodes.length - 1];
+      const node = document.querySelector('[data-testid="composer"] textarea');
       return node instanceof HTMLTextAreaElement && !node.disabled;
     });
     if (enabled) break;
@@ -235,8 +237,7 @@ async function runPass(browser, pass) {
     step('approval.unblocked', { attempt: attempt + 1 });
   }
   const readyToSend = await page.evaluate(() => {
-    const nodes = [...document.querySelectorAll('[data-testid="composer-input"]')];
-    const node = nodes[nodes.length - 1];
+    const node = document.querySelector('[data-testid="composer"] textarea');
     return node instanceof HTMLTextAreaElement && !node.disabled;
   });
   if (!readyToSend) await fail('输入框一直不可用 / composer stayed disabled');
