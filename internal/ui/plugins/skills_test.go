@@ -914,3 +914,39 @@ func TestSkillsDirectoriesDisclosure(t *testing.T) {
 		t.Fatalf("List calls after applying = %d, want a rescan (2)", calls)
 	}
 }
+
+// TestSkillsWorkspaceScopeNote covers the strict per-workspace scoping note: it
+// appears only while a workspace is open and explains where global skills went.
+func TestSkillsWorkspaceScopeNote(t *testing.T) {
+	note := "已打开工作区：只显示该工作区的技能"
+	skills := newFakeSkills()
+	h, _, _ := newSkillsHarness(t, skills, nil)
+	tester := h.tester()
+	h.assertNoTexts(tester, note)
+
+	workspaceRoot := t.TempDir()
+	withWorkspace(t, h, workspaceRoot)
+	tester.Frame()
+	h.assertTexts(tester, note)
+	h.uiRoot.Locale().SetLanguage("en")
+	tester.Frame()
+	h.assertTexts(tester, "A workspace is open: only this workspace's skills are shown")
+}
+
+// TestSkillsWorkspaceEditorSkillIsEditable covers the editor-root fix: a skill
+// created under the open workspace's .zeokeel/skills is editable, unlike the
+// read-only <root>/skills convention directory.
+func TestSkillsWorkspaceEditorSkillIsEditable(t *testing.T) {
+	skills := newFakeSkills()
+	editor := newFakeSkillsEditor(skills)
+	h, _, _ := newSkillsHarness(t, skills, editor)
+	workspaceRoot := t.TempDir()
+	withWorkspace(t, h, workspaceRoot)
+	skills.setList(contracts.Skill{
+		Name: "mine", Description: "Mine",
+		Path: filepath.Join(workspaceRoot, ".zeokeel", "skills", "mine", "SKILL.md"),
+	})
+	tester := h.tester()
+	h.click(tester, "技能操作：mine")
+	h.assertTexts(tester, "编辑技能", "删除技能")
+}

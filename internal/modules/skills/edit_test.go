@@ -221,3 +221,59 @@ func TestModuleProvidesSkillsEditor(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkspaceEditorRoundTripInWorkspaceB(t *testing.T) {
+	isolateHome(t)
+	dataDir := t.TempDir()
+	writeSkill(t, filepath.Join(dataDir, DataDirName), "global", "Global data dir")
+	workspaceRoot := t.TempDir()
+	workspace := &fakeWorkspace{}
+	workspace.setRoot(workspaceRoot)
+	service := newTestService(t, dataDir, Config{}, workspace)
+
+	created, err := service.CreateSkill(context.Background(), contracts.SkillDraft{
+		Name: "ws-skill", Description: "Workspace draft", Body: "First body\n",
+	})
+	if err != nil {
+		t.Fatalf("CreateSkill in workspace: %v", err)
+	}
+	wantPath := filepath.Join(workspaceRoot, ".zeokeel", "skills", "ws-skill", "SKILL.md")
+	if created.Path != wantPath {
+		t.Fatalf("created path = %q, want %q", created.Path, wantPath)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, DataDirName, "ws-skill")); !os.IsNotExist(err) {
+		t.Fatalf("workspace skill was written into the data dir: %v", err)
+	}
+	listed, err := service.List(context.Background())
+	if err != nil || len(listed) != 1 || listed[0].Name != "ws-skill" {
+		t.Fatalf("List after workspace create = %v/%v, want only ws-skill", skillNames(listed), err)
+	}
+
+	if _, err := service.UpdateSkill(context.Background(), "ws-skill", contracts.SkillDraft{
+		Name: "ws-skill", Description: "Updated in B", Body: "Second body\n",
+	}); err != nil {
+		t.Fatalf("UpdateSkill in workspace: %v", err)
+	}
+	loaded, err := service.Read(context.Background(), "ws-skill")
+	if err != nil || loaded.Description != "Updated in B" || !strings.Contains(loaded.Body, "Second body") {
+		t.Fatalf("Read after workspace update = %+v/%v", loaded, err)
+	}
+
+	// The global data-dir skill is not visible or editable in this workspace.
+	if _, err := service.Read(context.Background(), "global"); err == nil {
+		t.Fatal("workspace editor read the global data-dir skill")
+	}
+	if err := service.DeleteSkill(context.Background(), "global"); err == nil {
+		t.Fatal("workspace editor deleted the global data-dir skill")
+	}
+
+	if err := service.DeleteSkill(context.Background(), "ws-skill"); err != nil {
+		t.Fatalf("DeleteSkill in workspace: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspaceRoot, ".zeokeel", "skills", "ws-skill")); !os.IsNotExist(err) {
+		t.Fatalf("workspace skill survived delete: %v", err)
+	}
+	if listed, err := service.List(context.Background()); err != nil || len(listed) != 0 {
+		t.Fatalf("List after workspace delete = %v/%v, want empty", skillNames(listed), err)
+	}
+}

@@ -9,13 +9,26 @@
 // switch or newly created directory is visible immediately without any cache
 // invalidation.
 //
-// Root precedence (S-02/S-03): the current workspace's skill directories win
-// (<root>/skills, <root>/.agents/skills, <root>/.zeokeel/skills), then the
-// user-configured extra directories (settings key skills.dirs), the assembly
-// configured directories, <dataDir>/skills, $ZEOKEEL_SKILLS and finally
-// ~/.zeokeel/skills. A same-named skill in a later root is shadowed and reported
-// through Warnings() instead of disappearing silently; the settings page shows
-// the warning.
+// Root scope is strict (S-02/S-03): when a workspace is open only its skill
+// directories are scanned (<root>/skills, <root>/.agents/skills,
+// <root>/.zeokeel/skills), and every global root - user-configured extra
+// directories (settings key skills.dirs), assembly directories, <dataDir>/skills,
+// $ZEOKEEL_SKILLS and ~/.zeokeel/skills - is ignored. With no workspace open the
+// old global list is scanned (user-configured, assembly, dataDir, env, home).
+// That makes workspaces fully isolated: switching folders swaps the whole skill
+// set, and a skill in another workspace or the data directory is never visible
+// here.
+//
+// The editor writes <root>/.zeokeel/skills while a workspace is open and
+// <dataDir>/skills otherwise; create/update/delete/list/warnings all use the
+// same Roots() view, so an edit is immediately discoverable in its workspace.
+//
+// Legacy migration is explicit, not automatic: pre-existing <dataDir>/skills
+// (and other global) skills remain visible only when no workspace is open. We do
+// not copy or move them on activation (an implicit copy could resurrect deleted
+// skills or surprise the user by writing into a repository); the skills tab shows
+// this note, and "Copy to my skills" provides the deliberate path into the open
+// workspace.
 //
 // Listing is bounded (S-05): List reads only the beginning of each SKILL.md
 // (frontmatter + description + a searchable excerpt), caps the number of listed
@@ -248,11 +261,15 @@ func (s *service) Roots() []string {
 		seen[absolute] = true
 		roots = append(roots, absolute)
 	}
-	// 1. The current workspace's skill directories (highest precedence).
+	// Strict workspace scoping: with a folder open only that workspace's skill
+	// directories are scanned. Global roots (settings/assembly/dataDir/env/home)
+	// stay visible only when no workspace is open, so a skill from another
+	// workspace or the shared data directory can never bleed into this one.
 	if currentRoot, ok := s.currentWorkspaceRoot(); ok {
 		for _, name := range workspaceSkillDirNames {
 			add(filepath.Join(currentRoot, name))
 		}
+		return roots
 	}
 	// 2. User-configured extra directories (settings), then assembly dirs.
 	for _, dir := range s.userDirs() {

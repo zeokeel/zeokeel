@@ -52,7 +52,7 @@ func isolateHome(t *testing.T) (home, envDir string) {
 	return home, envDir
 }
 
-func TestRootsPrecedenceWorkspaceFirstAndWarnings(t *testing.T) {
+func TestWorkspaceRootsIgnoreGlobalFallbacks(t *testing.T) {
 	home, envDir := isolateHome(t)
 	dataDir := t.TempDir()
 	settingsDir := t.TempDir()
@@ -72,22 +72,24 @@ func TestRootsPrecedenceWorkspaceFirstAndWarnings(t *testing.T) {
 	service.settings = &skillSettings{values: map[string]string{contracts.SettingSkillsDirs: settingsDir}}
 
 	roots := service.Roots()
-	wantPrefix := []string{
+	want := []string{
 		filepath.Join(workspaceRoot, WorkspaceDirName),
 		filepath.Join(workspaceRoot, ".agents", "skills"),
 		filepath.Join(workspaceRoot, ".zeokeel", "skills"),
-		settingsDir,
-		assemblyDir,
-		filepath.Join(dataDir, DataDirName),
-		envDir,
-		filepath.Join(home, ".zeokeel", "skills"),
 	}
-	if len(roots) < len(wantPrefix) {
-		t.Fatalf("Roots = %v, want at least %d roots", roots, len(wantPrefix))
+	if len(roots) != len(want) {
+		t.Fatalf("Roots = %v, want exactly %v", roots, want)
 	}
-	for index, want := range wantPrefix {
-		if roots[index] != want {
-			t.Fatalf("Roots[%d] = %q, want %q (all roots: %v)", index, roots[index], want, roots)
+	for index, root := range roots {
+		if root != want[index] {
+			t.Fatalf("Roots[%d] = %q, want %q (all roots: %v)", index, root, want[index], roots)
+		}
+	}
+	for _, global := range []string{settingsDir, assemblyDir, filepath.Join(dataDir, DataDirName), envDir, filepath.Join(home, ".zeokeel", "skills")} {
+		for _, root := range roots {
+			if root == global {
+				t.Fatalf("global root %q leaked into the workspace skill roots %v", global, roots)
+			}
 		}
 	}
 
@@ -100,19 +102,22 @@ func TestRootsPrecedenceWorkspaceFirstAndWarnings(t *testing.T) {
 		byName[skill.Name] = skill
 	}
 	if got := byName["shared"].Description; got != "Workspace version" {
-		t.Fatalf("shared description = %q, want the workspace override", got)
+		t.Fatalf("shared description = %q, want the workspace version", got)
 	}
-	for _, name := range []string{"dsh", "rigws", "envskill", "homeskill"} {
+	for _, name := range []string{"shared", "dsh", "rigws"} {
 		if _, ok := byName[name]; !ok {
-			t.Fatalf("root skill %q not discovered; listed = %v", name, skillNames(listed))
+			t.Fatalf("workspace skill %q not discovered; listed = %v", name, skillNames(listed))
 		}
 	}
-	warnings := service.Warnings()
-	if len(warnings) == 0 {
-		t.Fatal("shadowed skill was not reported in Warnings()")
+	// Global roots are not scanned in a workspace: no env/home/data-dir skill,
+	// and therefore no cross-root shadow warning either.
+	for _, name := range []string{"envskill", "homeskill"} {
+		if _, ok := byName[name]; ok {
+			t.Fatalf("global skill %q leaked into workspace List: %v", name, skillNames(listed))
+		}
 	}
-	if !strings.Contains(strings.Join(warnings, "\n"), `"shared"`) {
-		t.Fatalf("shadow warning does not name the skill: %v", warnings)
+	if warnings := service.Warnings(); len(warnings) != 0 {
+		t.Fatalf("workspace scan warnings = %v, want none (global roots are not scanned)", warnings)
 	}
 }
 

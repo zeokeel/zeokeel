@@ -203,22 +203,19 @@ func TestRootsOrderDedupAndWorkspaceSwitch(t *testing.T) {
 		filepath.Join(dataDir, DataDirName), // already the implicit data dir
 	}}, workspace)
 
-	// S-02: the workspace roots come first (project skills override global);
-	// configured dirs, data dir, env and home follow.
+	// Strict workspace scoping: only the open workspace's three skill roots are
+	// scanned; configured dirs, the data dir and home stay global-only.
 	want := []string{
 		filepath.Join(workspaceOne, WorkspaceDirName),
 		filepath.Join(workspaceOne, ".agents", "skills"),
 		filepath.Join(workspaceOne, ".zeokeel", "skills"),
-		extraAbs,
-		filepath.Join(dataDir, "extra-relative"),
-		filepath.Join(dataDir, DataDirName),
-		filepath.Join(home, ".zeokeel", "skills"),
 	}
 	if got := service.Roots(); strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("Roots = %v, want %v (workspace roots, configured dirs, data dir, home; deduplicated)", got, want)
+		t.Fatalf("Roots = %v, want exactly the workspace roots %v", got, want)
 	}
 
-	// A workspace switch changes the workspace roots immediately (no caching).
+	// A workspace switch swaps the whole skill root set immediately (no caching,
+	// and no global root survives the switch).
 	workspace.setRoot(workspaceTwo)
 	want[0] = filepath.Join(workspaceTwo, WorkspaceDirName)
 	want[1] = filepath.Join(workspaceTwo, ".agents", "skills")
@@ -228,7 +225,7 @@ func TestRootsOrderDedupAndWorkspaceSwitch(t *testing.T) {
 	}
 }
 
-func TestListAndReadMergePrecedence(t *testing.T) {
+func TestWorkspaceListIgnoresGlobalRoots(t *testing.T) {
 	dataDir := t.TempDir()
 	extra := t.TempDir()
 	workspaceRoot := t.TempDir()
@@ -255,16 +252,15 @@ func TestListAndReadMergePrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	wantNames := []string{"note", "task", "other", "pdf"}
+	// Strict workspace scoping: the data-dir and configured-dir skills are global
+	// fallbacks and must not bleed into the open workspace.
+	wantNames := []string{"note", "task"}
 	if got := skillNames(skills); strings.Join(got, ",") != strings.Join(wantNames, ",") {
-		t.Fatalf("List names = %v, want %v (workspace, config, data dir order)", got, wantNames)
+		t.Fatalf("List names = %v, want only the workspace skills %v", got, wantNames)
 	}
 	byName := make(map[string]contracts.Skill, len(skills))
 	for _, skill := range skills {
 		byName[skill.Name] = skill
-	}
-	if got := byName["pdf"].Description; got != "PDF override" {
-		t.Fatalf("pdf description = %q, want the configured dir's override", got)
 	}
 	if got := byName["note"].Description; got != "Workspace note" {
 		t.Fatalf("note description = %q, want the workspace's version", got)
@@ -272,14 +268,10 @@ func TestListAndReadMergePrecedence(t *testing.T) {
 	if got := byName["task"].Description; got != "Task" {
 		t.Fatalf("task description = %q", got)
 	}
-	if !strings.HasPrefix(byName["pdf"].Path, filepath.Join(extra, "pdf")) {
-		t.Fatalf("pdf path = %q, want it below the configured dir", byName["pdf"].Path)
-	}
 
-	// Read hits the merged view and passes unknown/blank errors through.
-	pdf, err := service.Read(context.Background(), "pdf")
-	if err != nil || pdf.Name != "pdf" || pdf.Description != "PDF override" {
-		t.Fatalf("Read(pdf) = %+v/%v", pdf, err)
+	// Global skills are invisible while a workspace is open.
+	if _, err := service.Read(context.Background(), "pdf"); err == nil {
+		t.Fatal("Read(pdf) succeeded although pdf only exists in a global root")
 	}
 	task, err := service.Read(context.Background(), " task ")
 	if err != nil || task.Name != "task" || !strings.Contains(task.Body, "Body of task") {
@@ -394,12 +386,13 @@ func TestConcurrentListAndRead(t *testing.T) {
 				errs <- err
 				return
 			}
-			if len(skills) != 2 {
-				errs <- fmt.Errorf("List returned %d skills, want 2", len(skills))
+			if len(skills) != 1 || skills[0].Name != "work" {
+				errs <- fmt.Errorf("List = %v, want only the workspace skill", skillNames(skills))
 				return
 			}
-			if _, err := service.Read(context.Background(), "base"); err != nil {
-				errs <- err
+			// Strict workspace scoping: the data-dir skill is global-only.
+			if _, err := service.Read(context.Background(), "base"); err == nil {
+				errs <- fmt.Errorf("Read(base) succeeded without a global root")
 			}
 			if _, err := service.Read(context.Background(), "work"); err != nil {
 				errs <- err
@@ -448,8 +441,8 @@ func TestModuleActivation(t *testing.T) {
 		t.Fatal("KeySkills was not provided")
 	}
 	skills, err := service.List(context.Background())
-	if err != nil || len(skills) != 2 {
-		t.Fatalf("List through the module = %v/%v, want base+work", skillNames(skills), err)
+	if err != nil || len(skills) != 1 || skills[0].Name != "work" {
+		t.Fatalf("List through the module = %v/%v, want only the workspace skill", skillNames(skills), err)
 	}
 	if !logger.contains("initialized") {
 		t.Fatalf("startup log missing: %v", logger.lines)
@@ -473,5 +466,41 @@ func TestModuleActivation(t *testing.T) {
 		Config: map[string]any{"dirs": []any{"bad\x00dir"}}}})
 	if err == nil {
 		t.Fatal("module loaded with a NUL skill directory")
+	}
+}
+
+func TestTwoWorkspaceIsolation(t *testing.T) {
+	isolateHome(t)
+	dataDir := t.TempDir()
+	writeSkill(t, filepath.Join(dataDir, DataDirName), "global", "Global data dir")
+	workspaceA := t.TempDir()
+	workspaceB := t.TempDir()
+	writeSkill(t, filepath.Join(workspaceA, ".zeokeel", "skills"), "only-a", "A only")
+	writeSkill(t, filepath.Join(workspaceB, ".zeokeel", "skills"), "only-b", "B only")
+	workspace := &fakeWorkspace{}
+	workspace.setRoot(workspaceA)
+	service := newTestService(t, dataDir, Config{}, workspace)
+
+	listed, err := service.List(context.Background())
+	if err != nil || len(listed) != 1 || listed[0].Name != "only-a" {
+		t.Fatalf("workspace A List = %v/%v, want only only-a", skillNames(listed), err)
+	}
+	if _, err := service.Read(context.Background(), "only-b"); err == nil {
+		t.Fatal("workspace A read workspace B's skill")
+	}
+	if _, err := service.Read(context.Background(), "global"); err == nil {
+		t.Fatal("workspace A read the data-dir/global skill")
+	}
+
+	workspace.setRoot(workspaceB)
+	listed, err = service.List(context.Background())
+	if err != nil || len(listed) != 1 || listed[0].Name != "only-b" {
+		t.Fatalf("workspace B List = %v/%v, want only only-b", skillNames(listed), err)
+	}
+	if _, err := service.Read(context.Background(), "only-a"); err == nil {
+		t.Fatal("workspace B read workspace A's skill")
+	}
+	if _, err := service.Read(context.Background(), "global"); err == nil {
+		t.Fatal("workspace B read the data-dir/global skill")
 	}
 }

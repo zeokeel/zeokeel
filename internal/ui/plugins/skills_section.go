@@ -176,8 +176,16 @@ func skillKey(skill contracts.Skill) string {
 
 // skillEditor returns the optional editor half and the product data directory
 // (the latter also decides which skills the card actions may touch).
+// skillEditor returns the optional editor and the directory it writes below
+// (skills live in <dir>/skills): the open workspace's .zeokeel when one is open
+// (the backend's editor root), else the product data directory. Edit/delete
+// actions must be judged against this directory, not the global data dir, or a
+// skill created in the workspace would look read-only.
 func skillEditor(kctx cordis.Context) (contracts.SkillsEditor, string) {
 	editor, _ := kctx.Get(contracts.KeySkillsEditor)
+	if root := skillWorkspaceRoot(kctx); root != "" {
+		return editor, filepath.Join(root, ".zeokeel")
+	}
 	dataDir, _ := kctx.Get(contracts.KeyDataDir)
 	return editor, strings.TrimSpace(dataDir)
 }
@@ -211,6 +219,15 @@ func buildSkillsTab(c *ui.Context, t *design.Tokens, st *state) {
 			"技能＝给智能体的任务说明书：一个 Markdown 指令包，告诉它如何完成某类任务。",
 			"Skills are task manuals for the agent: Markdown instruction packs that teach it how to do a kind of task.")),
 			t.TextMuted(design.TypeXXS)).MaxLines(2)
+		if workspaceRoot != "" {
+			// Strict workspace scoping (migration note): global skills are not
+			// scanned while a folder is open, so tell the user where they went
+			// instead of letting the inventory look lost.
+			design.Apply(ui.Text(c, st.tr(
+				"已打开工作区：只显示该工作区的技能；全局技能（数据目录、自定义目录等）仅在未打开工作区时可见。",
+				"A workspace is open: only this workspace's skills are shown; global skills (data dir, custom dirs) are visible only when no workspace is open.")),
+				t.TextMuted(design.TypeXXS)).MaxLines(2)
+		}
 		buildSkillsStatus(c, t, p, st)
 		buildSkillsCollectionRow(c, t, p, st, editor)
 		if p.listErr != nil {
@@ -531,14 +548,14 @@ func skillDisplayPath(path, dataDir, workspaceRoot string, roots []string) (sour
 	if strings.TrimSpace(path) == "" {
 		return "", ""
 	}
-	if dataDir != "" {
-		if rel, ok := skillPathWithin(clean, filepath.Join(dataDir, "skills")); ok {
-			return "global", rel
-		}
-	}
 	if workspaceRoot != "" {
 		if rel, ok := skillPathWithin(clean, workspaceRoot); ok {
 			return "workspace", rel
+		}
+	}
+	if dataDir != "" {
+		if rel, ok := skillPathWithin(clean, filepath.Join(dataDir, "skills")); ok {
+			return "global", rel
 		}
 	}
 	for _, root := range roots {
