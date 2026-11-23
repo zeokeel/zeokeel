@@ -162,6 +162,13 @@ class FakeSocket implements SocketLike {
 }
 
 export class FakeGateway {
+  /** Every decision the client sent, in order — `{id, tool, decision}`. */
+  readonly decisions: Array<{ id: string; tool: string; decision: string }> = [];
+  /** Tools whose approval was denied: they must never execute. */
+  readonly deniedTools: string[] = [];
+  /** Tools whose approval was granted. */
+  readonly allowedTools: string[] = [];
+
   readonly state: FakeState;
   readonly calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   readonly sockets: FakeSocket[] = [];
@@ -310,12 +317,30 @@ export class FakeGateway {
     }
     if (method === 'approval.resolve') {
       const approvalId = String(params.id ?? '');
+      const decision = String(params.decision ?? '');
+      // The contract's vocabulary (§5.1.3). A fixture that ignores it makes allow
+      // and deny the same code path, which silently removes half the semantics
+      // from every approval test: "the card went away" cannot tell you whether
+      // the tool ran.
+      if (decision !== 'allow' && decision !== 'allow_always' && decision !== 'deny') {
+        fail(-32602, 'invalid_params');
+        return;
+      }
       const index = this.state.approvals.findIndex((item) => item.id === approvalId);
       if (index < 0) {
         fail(1019, 'approval_not_pending');
         return;
       }
-      this.state.approvals.splice(index, 1);
+      const [resolved] = this.state.approvals.splice(index, 1);
+      // Recorded so a test can assert *which* decision was applied, not merely
+      // that the list shrank.
+      this.decisions.push({ id: approvalId, tool: resolved?.tool ?? '', decision });
+      if (decision === 'deny') {
+        // A denial is a result for the tool, not silence: the call must not run.
+        this.deniedTools.push(resolved?.tool ?? '');
+      } else {
+        this.allowedTools.push(resolved?.tool ?? '');
+      }
       this.broadcastApprovals([], [approvalId]);
       reply({ resolved: true });
       return;
