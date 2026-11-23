@@ -26,6 +26,16 @@ func dedupeURLKey(rawURL string) string {
 // skipped; they never fail activation. Explicitly malformed stdio/http settings
 // rows keep a failure entry so the Plugins screen can show the misconfiguration.
 func mergeMCPServers(assembly []MCPServer, raw string, logf func(format string, args ...any)) []MCPServer {
+	return mergeMCPServersForWorkspace(assembly, raw, "", logf)
+}
+
+// mergeMCPServersForWorkspace merges the assembly servers with the settings
+// rows that belong to workspaceID (a legacy-global row with an empty
+// WorkspaceID stays visible everywhere until the connectors page migrates it).
+// Rows scoped to another workspace are ignored, so one workspace's connectors
+// never leak into another. Assembly rows are product policy and always apply.
+func mergeMCPServersForWorkspace(assembly []MCPServer, raw, workspaceID string,
+	logf func(format string, args ...any)) []MCPServer {
 	merged := append([]MCPServer(nil), assembly...)
 	if strings.TrimSpace(raw) == "" {
 		return merged
@@ -38,7 +48,13 @@ func mergeMCPServers(assembly []MCPServer, raw string, logf func(format string, 
 		logf("[toolkit] parse %s: %v", contracts.SettingMCPServers, err)
 		return merged
 	}
-	return mergeMCPServerRows(merged, rows, contracts.SettingMCPServers, true, logf)
+	scoped := rows[:0]
+	for _, row := range rows {
+		if contracts.MCPServerVisibleInWorkspace(row, workspaceID) {
+			scoped = append(scoped, row)
+		}
+	}
+	return mergeMCPServerRows(merged, scoped, contracts.SettingMCPServers, true, logf)
 }
 
 // mergeMCPServerRows merges parsed rows after base. keepFailures controls whether

@@ -54,6 +54,9 @@ type mcpController struct {
 	settings  contracts.SettingsService
 	maxOutput int
 	load      func() ([]MCPServer, map[string]bool)
+	// workspaceID reports the current workspace scope ("" = no workspace): the
+	// connectors and the disabled switches are per-workspace.
+	workspaceID func() string
 
 	mu         sync.Mutex
 	manager    *manager.Manager
@@ -67,13 +70,16 @@ var _ contracts.MCPReloader = (*mcpController)(nil)
 
 func newMCPController(logf func(string, ...any), registry *rigtool.Registry,
 	plugins *pluginsService, auth *mcpAuthRuntime, settings contracts.SettingsService,
-	maxOutput int, load func() ([]MCPServer, map[string]bool)) *mcpController {
+	maxOutput int, workspaceID func() string, load func() ([]MCPServer, map[string]bool)) *mcpController {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
+	if workspaceID == nil {
+		workspaceID = func() string { return "" }
+	}
 	controller := &mcpController{
 		logf: logf, registry: registry, plugins: plugins, auth: auth,
-		settings: settings, maxOutput: maxOutput, load: load,
+		settings: settings, maxOutput: maxOutput, workspaceID: workspaceID, load: load,
 	}
 	// The auth runtime's authorized callback (installed at construction) calls
 	// controller.reconnectByName; its background refresh loop runs here.
@@ -84,6 +90,14 @@ func newMCPController(logf func(string, ...any), registry *rigtool.Registry,
 // Reload implements contracts.MCPReloader.
 func (c *mcpController) Reload(ctx context.Context) ([]contracts.MCPPlugin, error) {
 	return c.reload(ctx)
+}
+
+// currentWorkspaceID returns the workspace scope of this controller.
+func (c *mcpController) currentWorkspaceID() string {
+	if c == nil || c.workspaceID == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.workspaceID())
 }
 
 var _ contracts.MCPToolCatalog = (*mcpController)(nil)
@@ -105,7 +119,7 @@ func (c *mcpController) Tools(server string) []contracts.MCPTool {
 			break
 		}
 	}
-	disabled := loadDisabledTools(c.settings, c.settings != nil, c.logf)
+	disabled := loadDisabledTools(c.settings, c.settings != nil, c.currentWorkspaceID(), c.logf)
 	c.mu.Unlock()
 	if managerNow == nil || target == nil || target.client == nil {
 		return nil
@@ -139,7 +153,7 @@ func (c *mcpController) SetToolEnabled(ctx context.Context, server, tool string,
 	if c.settings == nil {
 		return errors.New("settings are unavailable")
 	}
-	update := func(key string) error {
+	update := func(key string, remove bool) error {
 		names, err := contracts.ParseStringListJSON(c.settings.Get(key, ""))
 		if err != nil {
 			return fmt.Errorf("parse %s: %w", key, err)
@@ -150,7 +164,7 @@ func (c *mcpController) SetToolEnabled(ctx context.Context, server, tool string,
 				kept = append(kept, name)
 			}
 		}
-		if !enabled {
+		if !remove {
 			kept = append(kept, tool)
 		}
 		sort.Strings(kept)
@@ -160,13 +174,22 @@ func (c *mcpController) SetToolEnabled(ctx context.Context, server, tool string,
 		}
 		return c.settings.Set(key, encoded)
 	}
-	if err := update(contracts.SettingToolsDisabled); err != nil {
+	// The switch is workspace-scoped: one workspace's tool toggles never leak
+	// into another. Enabling also clears the legacy global lists so an old
+	// disable row does not keep the tool off everywhere.
+	scopedKey := contracts.MCPDisabledToolsSettingKey(c.currentWorkspaceID())
+	if err := update(scopedKey, enabled); err != nil {
 		return err
 	}
-	// The legacy MCP-only list must agree, otherwise enabling a tool hidden by
-	// the old key would appear to do nothing.
-	if err := update(contracts.SettingMCPDisabledTools); err != nil {
-		return err
+	if enabled {
+		for _, legacy := range []string{contracts.SettingToolsDisabled, contracts.SettingMCPDisabledTools} {
+			if legacy == scopedKey {
+				continue
+			}
+			if err := update(legacy, true); err != nil {
+				return err
+			}
+		}
 	}
 	_, err := c.reload(ctx)
 	return err
@@ -607,11 +630,12 @@ func loadMCPServers(ctx cordis.Context, cfg Config, settings contracts.SettingsS
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
+	workspaceID := currentMCPWorkspaceID(ctx)
 	raw := ""
 	if hasSettings {
 		raw = settings.Get(contracts.SettingMCPServers, "")
 	}
-	servers := mergeMCPServers(cfg.MCPServers, raw, logf)
+	servers := mergeMCPServersForWorkspace(cfg.MCPServers, raw, workspaceID, logf)
 	workspaceOptIn := false
 	if hasSettings {
 		workspaceOptIn = mcpWorkspaceOptInEnabled(settings.Get(contracts.SettingMCPWorkspaceOptIn, ""))
@@ -625,26 +649,43 @@ func loadMCPServers(ctx cordis.Context, cfg Config, settings contracts.SettingsS
 		}
 	}
 	if hasSettings {
+		disabledKey := contracts.MCPDisabledServersSettingKey(workspaceID)
 		var skipped int
-		servers, skipped = filterDisabledMCPServers(servers,
-			settings.Get(contracts.SettingMCPDisabledServers, ""), logf)
+		servers, skipped = filterDisabledMCPServers(servers, settings.Get(disabledKey, ""), logf)
 		if skipped > 0 {
-			logf("[toolkit] skipped %d disabled MCP server(s) (%s)", skipped, contracts.SettingMCPDisabledServers)
+			logf("[toolkit] skipped %d disabled MCP server(s) (%s)", skipped, disabledKey)
 		}
 	}
-	disabledTools := loadDisabledTools(settings, hasSettings, logf)
+	disabledTools := loadDisabledTools(settings, hasSettings, workspaceID, logf)
 	return servers, disabledTools
+}
+
+// currentMCPWorkspaceID resolves the current workspace scope from the kernel
+// context. No workspace service (headless/tests) means the unscoped keys.
+func currentMCPWorkspaceID(ctx cordis.Context) string {
+	service, ok := ctx.Get(contracts.KeyWorkspace)
+	if !ok || service == nil {
+		return ""
+	}
+	current, has, err := service.Current(context.Background())
+	if err != nil || !has {
+		return ""
+	}
+	return strings.TrimSpace(current.ID)
 }
 
 // loadDisabledTools reads the union of tools.disabled and the legacy
 // mcp.disabledTools list.
-func loadDisabledTools(settings contracts.SettingsService, hasSettings bool,
+func loadDisabledTools(settings contracts.SettingsService, hasSettings bool, workspaceID string,
 	logf func(string, ...any)) map[string]bool {
 	disabled := make(map[string]bool)
 	if !hasSettings {
 		return disabled
 	}
-	for _, key := range []string{contracts.SettingToolsDisabled, contracts.SettingMCPDisabledTools} {
+	// tools.disabled stays the global built-in policy; the MCP-only list is
+	// scoped to the current workspace so tool switches do not leak across them.
+	keys := []string{contracts.SettingToolsDisabled, contracts.MCPDisabledToolsSettingKey(workspaceID)}
+	for _, key := range keys {
 		names, err := contracts.ParseStringListJSON(settings.Get(key, ""))
 		if err != nil {
 			logf("[toolkit] parse %s: %v", key, err)

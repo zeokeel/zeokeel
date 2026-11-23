@@ -15,6 +15,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/lib/mcpreload"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -83,6 +84,7 @@ func buildWorkspaceRailItem(c *ui.Context, t *design.Tokens, workspace contracts
 		}
 		if row.Clicked() {
 			if _, err := workspace.Open(context.Background(), item.ID); err == nil {
+				mcpreload.Trigger(state.ctx)
 				state.switchOpen = false
 				runtime.Invalidate()
 			}

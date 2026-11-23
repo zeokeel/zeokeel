@@ -432,10 +432,7 @@ func (p *connectorsState) saveConnector(st *state, settings contracts.SettingsSe
 	} else {
 		rows = append(rows, row)
 	}
-	encoded, err := contracts.EncodeMCPServersJSON(rows)
-	if err == nil {
-		err = settings.Set(contracts.SettingMCPServers, encoded)
-	}
+	err := p.persistScopedRows(settings, rows)
 	if err != nil {
 		p.servers = previous
 		p.formErr = st.tr("保存失败：", "Save failed: ") + err.Error()
@@ -455,6 +452,35 @@ func (p *connectorsState) saveConnector(st *state, settings contracts.SettingsSe
 	p.formOpen = false
 	p.resetFormDraft()
 	st.requestMCPReload(st.tr("已应用连接器变更", "Connector changes applied"))
+}
+
+// persistScopedRows rewrites only the current workspace's slice of
+// settings.mcp.servers, so editing connectors in one workspace never changes
+// another workspace's rows. Legacy-global rows (empty WorkspaceID) are treated
+// as migrated when a workspace is current.
+func (p *connectorsState) persistScopedRows(settings contracts.SettingsService, scoped []contracts.MCPServerConfig) error {
+	all, err := contracts.ParseMCPServersJSON(settings.Get(contracts.SettingMCPServers, ""))
+	if err != nil {
+		return err
+	}
+	kept := make([]contracts.MCPServerConfig, 0, len(all)+len(scoped))
+	for _, row := range all {
+		rowScope := strings.TrimSpace(row.WorkspaceID)
+		if rowScope == p.workspaceID {
+			continue
+		}
+		if p.workspaceID != "" && rowScope == "" {
+			// Migrated into the scoped slice by loadStorage.
+			continue
+		}
+		kept = append(kept, row)
+	}
+	merged := append(kept, scoped...)
+	encoded, err := contracts.EncodeMCPServersJSON(merged)
+	if err != nil {
+		return err
+	}
+	return settings.Set(contracts.SettingMCPServers, encoded)
 }
 
 // oauthRecordMustBeDropped reports whether editing a connector invalidates its
@@ -493,7 +519,7 @@ func (p *connectorsState) connectorDraft(st *state, checkDuplicates bool) (contr
 		p.formErr = timeoutErr
 		return contracts.MCPServerConfig{}, false
 	}
-	row := contracts.MCPServerConfig{Name: name, TimeoutMs: timeoutMs}
+	row := contracts.MCPServerConfig{Name: name, WorkspaceID: p.workspaceID, TimeoutMs: timeoutMs}
 	if p.editIndex >= 0 && p.editIndex < len(p.servers) {
 		row.Headers = p.servers[p.editIndex].Headers
 	}
@@ -1160,10 +1186,7 @@ func (p *connectorsState) removeConnector(st *state, settings contracts.Settings
 	kept := make([]contracts.MCPServerConfig, 0, len(p.servers)-1)
 	kept = append(kept, p.servers[:index]...)
 	kept = append(kept, p.servers[index+1:]...)
-	encoded, err := contracts.EncodeMCPServersJSON(kept)
-	if err == nil {
-		err = settings.Set(contracts.SettingMCPServers, encoded)
-	}
+	err := p.persistScopedRows(settings, kept)
 	if err != nil {
 		p.servers = previous
 		st.status = st.tr("保存失败：", "Save failed: ") + err.Error()

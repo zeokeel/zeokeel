@@ -105,6 +105,9 @@ type connectorsState struct {
 
 	// loaded marks the one storage read (settings.mcp.servers).
 	loaded bool
+	// workspaceID is the scope the visible rows and new rows belong to ("" =
+	// no workspace; the legacy unscoped rows).
+	workspaceID string
 	// servers is the stored, editable connector list; it is the write source.
 	servers []contracts.MCPServerConfig
 	// parseErr reports a malformed stored JSON (the list stays read-only empty).
@@ -218,6 +221,9 @@ func buildConnectorsTab(c *ui.Context, t *design.Tokens, st *state) {
 	service, hasPlugins := st.ctx.Get(contracts.KeyPlugins)
 	hasPlugins = hasPlugins && service != nil
 
+	// Refresh the workspace scope before reading the per-workspace caches: a
+	// switch that landed while this page was mounted must reload the rows.
+	st.workspaceScopeID()
 	if hasSettings {
 		st.loadDisabledServers(settings, true)
 		if !p.loaded {
@@ -391,15 +397,45 @@ func (p *connectorsState) buildCollectionRow(c *ui.Context, t *design.Tokens, st
 func (p *connectorsState) loadStorage(st *state, settings contracts.SettingsService) {
 	p.loaded = true
 	p.workspaceLoaded = true
+	p.workspaceID = st.workspaceScopeID()
 	rows, err := contracts.ParseMCPServersJSON(settings.Get(contracts.SettingMCPServers, ""))
 	if err != nil {
 		p.parseErr = st.tr("配置解析失败：", "Configuration parse failed: ") + err.Error()
 		p.servers = nil
 	} else {
-		for index := range rows {
-			rows[index] = contracts.NormalizeMCPAuthURL(rows[index])
+		// Legacy-global rows (empty WorkspaceID) migrate to the current
+		// workspace on the first connectors-page load. Without a current
+		// workspace they stay global; with one they stop following every
+		// workspace after this write.
+		if p.workspaceID != "" {
+			migrated := 0
+			for index := range rows {
+				if strings.TrimSpace(rows[index].WorkspaceID) == "" {
+					rows[index].WorkspaceID = p.workspaceID
+					migrated++
+				}
+			}
+			if migrated > 0 {
+				if encoded, encodeErr := contracts.EncodeMCPServersJSON(rows); encodeErr == nil {
+					if writeErr := settings.Set(contracts.SettingMCPServers, encoded); writeErr != nil {
+						st.status = st.tr("旧连接器迁移失败：", "Legacy connector migration failed: ") + writeErr.Error()
+						st.statusErr = true
+					} else {
+						st.status = st.tr("旧连接器已归入当前工作文件夹",
+							"Legacy connectors were moved to the current workspace")
+						st.statusErr = false
+					}
+				}
+			}
 		}
-		p.servers = rows
+		visible := make([]contracts.MCPServerConfig, 0, len(rows))
+		for _, row := range rows {
+			if !contracts.MCPServerVisibleInWorkspace(row, p.workspaceID) {
+				continue
+			}
+			visible = append(visible, contracts.NormalizeMCPAuthURL(row))
+		}
+		p.servers = visible
 	}
 	p.workspaceOptIn = strings.EqualFold(
 		strings.TrimSpace(settings.Get(contracts.SettingMCPWorkspaceOptIn, "false")), "true")

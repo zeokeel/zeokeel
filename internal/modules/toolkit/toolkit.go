@@ -254,7 +254,8 @@ func Module() *module.Descriptor[Config] {
 		// tools.disabled applies to every registry tool; mcp.disabledTools is
 		// kept as a legacy MCP-only alias. MCP connections are rebuilt by the
 		// controller below, which applies the same set to their tools.
-		disabledTools := loadDisabledTools(settingsService, hasSettings, logf)
+		disabledTools := loadDisabledTools(settingsService, hasSettings,
+			currentMCPWorkspaceID(ctx), logf)
 
 		// Optional single LSP server: its tools join the same registry and the
 		// server is closed when the module unloads.
@@ -276,6 +277,7 @@ func Module() *module.Descriptor[Config] {
 			}
 		})
 		controller = newMCPController(logf, registry, plugins, authRuntime, settingsService, cfg.MaxOutputBytes,
+			func() string { return currentMCPWorkspaceID(ctx) },
 			func() ([]MCPServer, map[string]bool) {
 				return loadMCPServers(ctx, cfg, settingsService, hasSettings, logf)
 			})

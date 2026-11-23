@@ -82,12 +82,17 @@ var KeyMCPToolCatalog = cordis.NewServiceKey[MCPToolCatalog]("zeokeel/mcp/tools"
 // Rows with a Command (or Transport "stdio") start a stdio child process; rows
 // with a URL use Streamable HTTP. Existing {name,url} JSON rows stay valid.
 type MCPServerConfig struct {
-	Name      string   `json:"name"`
-	URL       string   `json:"url,omitempty"`
-	Transport string   `json:"transport,omitempty"`
-	Command   string   `json:"command,omitempty"`
-	Args      []string `json:"args,omitempty"`
-	Env       []string `json:"env,omitempty"`
+	Name string `json:"name"`
+	// WorkspaceID scopes the connector to one workspace (the connector form
+	// writes the current workspace ID). An empty WorkspaceID is a legacy-global
+	// row: it stays visible in every workspace until the connectors page
+	// migrates it to the current workspace.
+	WorkspaceID string   `json:"workspaceId,omitempty"`
+	URL         string   `json:"url,omitempty"`
+	Transport   string   `json:"transport,omitempty"`
+	Command     string   `json:"command,omitempty"`
+	Args        []string `json:"args,omitempty"`
+	Env         []string `json:"env,omitempty"`
 	// TimeoutMs bounds one request/handshake for this server (0 = the toolkit
 	// default). A hung endpoint then fails at this budget instead of the 30s
 	// rig request default, so it cannot stall product startup.
@@ -265,6 +270,39 @@ const SettingMCPDisabledServers = "mcp.disabledServers"
 // that should not be registered (the plugins page's per-tool switches; restart
 // applies). It is merged with SettingMCPDisabledTools.
 const SettingToolsDisabled = "tools.disabled"
+
+// MCPServerVisibleInWorkspace reports whether a settings connector row belongs
+// to workspaceID. A row scoped to another workspace is invisible; a
+// legacy-global row (empty WorkspaceID) stays visible everywhere until the
+// connectors page migrates it.
+func MCPServerVisibleInWorkspace(row MCPServerConfig, workspaceID string) bool {
+	scope := strings.TrimSpace(row.WorkspaceID)
+	if scope == "" {
+		return true
+	}
+	return scope == strings.TrimSpace(workspaceID)
+}
+
+// MCPScopeSettingKey scopes one MCP settings key to a workspace: the base key
+// when no workspace is current, "<base>.<workspaceID>" otherwise. Disabled
+// server/tool lists use it so one workspace's switches never leak into another.
+func MCPScopeSettingKey(base, workspaceID string) string {
+	base = strings.TrimSpace(base)
+	if id := strings.TrimSpace(workspaceID); id != "" {
+		return base + "." + id
+	}
+	return base
+}
+
+// MCPDisabledServersSettingKey is the workspace-scoped mcp.disabledServers key.
+func MCPDisabledServersSettingKey(workspaceID string) string {
+	return MCPScopeSettingKey(SettingMCPDisabledServers, workspaceID)
+}
+
+// MCPDisabledToolsSettingKey is the workspace-scoped mcp.disabledTools key.
+func MCPDisabledToolsSettingKey(workspaceID string) string {
+	return MCPScopeSettingKey(SettingMCPDisabledTools, workspaceID)
+}
 
 // ParseStringListJSON decodes a JSON array of strings ("[]"/"" -> nil).
 func ParseStringListJSON(raw string) ([]string, error) {

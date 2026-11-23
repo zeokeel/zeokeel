@@ -137,7 +137,8 @@ func (c *gateChat) Subscribe(func(string)) (func(), error) { return func() {}, n
 
 // gateRoot builds a UI root whose kernel resolves the given workspace (and
 // optional chat), with one screen registered so the shell has a destination.
-func gateRoot(t *testing.T, cfg Config, workspace contracts.WorkspaceService, chat contracts.ChatService) (*Root, *ui.Tester) {
+func gateRoot(t *testing.T, cfg Config, workspace contracts.WorkspaceService, chat contracts.ChatService,
+	extra ...func(cordis.Context)) (*Root, *ui.Tester) {
 	t.Helper()
 	kernel := cordis.Root()
 	t.Cleanup(func() { _ = kernel.DisposeAll() })
@@ -150,6 +151,9 @@ func gateRoot(t *testing.T, cfg Config, workspace contracts.WorkspaceService, ch
 		if _, err := kernel.Provide(contracts.KeyChat, contracts.ChatService(chat)); err != nil {
 			t.Fatalf("provide chat: %v", err)
 		}
+	}
+	for _, provide := range extra {
+		provide(kernel)
 	}
 	cfg.Kernel = kernel
 	cfg.EnableWorkspaceGate = true
@@ -390,4 +394,47 @@ func TestWorkspaceGateEnglishCopy(t *testing.T) {
 			t.Fatalf("English gate does not show %q; texts = %v", want, tester.Texts())
 		}
 	}
+}
+
+// gateMCPReloader records the MCP reloads a gate workspace choice triggers.
+type gateMCPReloader struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (r *gateMCPReloader) Reload(context.Context) ([]contracts.MCPPlugin, error) {
+	r.mu.Lock()
+	r.calls++
+	r.mu.Unlock()
+	return nil, nil
+}
+
+func (r *gateMCPReloader) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
+// TestWorkspaceGateChoiceReloadsMCP pins that the startup gate rebuilds the
+// workspace-scoped MCP connectors for the chosen folder.
+func TestWorkspaceGateChoiceReloadsMCP(t *testing.T) {
+	workspace := newGateWorkspace(gateWorkspaces()...).withCurrent("w1")
+	reloader := &gateMCPReloader{}
+	_, tester := gateRoot(t, Config{}, workspace, &gateChat{}, func(kernel cordis.Context) {
+		if _, err := kernel.Provide(contracts.KeyMCPReloader, contracts.MCPReloader(reloader)); err != nil {
+			t.Fatalf("provide reloader: %v", err)
+		}
+	})
+	// Enter continues with the preselected current folder.
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if reloader.count() >= 1 {
+			return
+		}
+		tester.Frame()
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("MCP reload calls = %d, want >= 1", reloader.count())
 }

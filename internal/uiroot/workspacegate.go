@@ -30,6 +30,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/lib/mcpreload"
 	"github.com/zeokeel/zeokeel/internal/lib/workspacerecent"
 )
 
@@ -136,6 +137,8 @@ func (r *Root) openGateWorkspace(workspace contracts.WorkspaceService, id string
 		r.requestFrame()
 		return
 	}
+	// MCP connectors are workspace-scoped: rebuild them for the chosen folder.
+	mcpreload.Trigger(r.kernelContext)
 	r.confirmWorkspaceGate()
 }
 
@@ -164,6 +167,8 @@ func (r *Root) pickGateWorkspace(workspace contracts.WorkspaceService) {
 		r.requestFrame()
 		return
 	}
+	// MCP connectors are workspace-scoped: rebuild them for the new folder.
+	mcpreload.Trigger(r.kernelContext)
 	r.confirmWorkspaceGate()
 }
 

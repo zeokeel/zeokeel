@@ -74,6 +74,10 @@ type state struct {
 	// trimmed/case-insensitive. The connectors section reads and writes them.
 	disabledServers       map[string]bool
 	disabledServersLoaded bool
+	// workspaceScope is the current workspace ID used to scope connectors and
+	// their switches ("" = no workspace, the unscoped keys).
+	workspaceScope       string
+	workspaceScopeLoaded bool
 
 	// Official Lists for the diagnostic collections below the tabs: the module
 	// inventory and the curated plugin settings rows. The skills and connector

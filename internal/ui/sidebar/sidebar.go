@@ -92,6 +92,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/lib/mcpreload"
 	"github.com/zeokeel/zeokeel/internal/lib/textutil"
 	"github.com/zeokeel/zeokeel/internal/lib/workspacerecent"
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -1356,6 +1357,8 @@ func buildWorkspaceSwitchDialog(c *ui.Context, t *design.Tokens, workspace contr
 		}
 		state.switchErr = ""
 		state.addWorkspaceStatus = ""
+		// MCP connectors are workspace-scoped: rebuild them for the new folder.
+		mcpreload.Trigger(state.ctx)
 		closeDialog()
 	}
 
@@ -2153,7 +2156,10 @@ func switchSessionWorkspace(chat contracts.ChatService, state *paneState, sessio
 	if current, has, err := workspace.Current(context.Background()); err == nil && has && current.ID == target {
 		return
 	}
-	_, _ = workspace.Open(context.Background(), target)
+	if _, err := workspace.Open(context.Background(), target); err == nil {
+		// The agent tools/plugins follow the conversation's folder.
+		mcpreload.Trigger(state.ctx)
+	}
 }
 
 // buildFooter is the docked sidebar footer from the old shell: the settings

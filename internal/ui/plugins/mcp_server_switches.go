@@ -6,13 +6,42 @@ package plugins
 // from settings.mcp.servers (assembly/workspace-only rows cannot be rebuilt).
 
 import (
+	"context"
 	"sort"
 	"strings"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// loadDisabledServers parses mcp.disabledServers once per frame lifecycle.
+// workspaceScopeID resolves the current workspace ID used to scope connector
+// rows and the disabled switches. Empty means no workspace. It is cheap
+// (workspace.Current is an in-memory read) and refreshes the per-workspace
+// caches when a switch lands while the page is mounted, so the connectors tab
+// never keeps showing the previous folder's state.
+func (st *state) workspaceScopeID() string {
+	scope := ""
+	if workspace, ok := st.ctx.Get(contracts.KeyWorkspace); ok && workspace != nil {
+		if current, has, err := workspace.Current(context.Background()); err == nil && has {
+			scope = strings.TrimSpace(current.ID)
+		}
+	}
+	if st.workspaceScopeLoaded && scope != st.workspaceScope {
+		st.disabledServersLoaded = false
+		st.disabledServers = nil
+		st.pendingRestartServers = make(map[string]bool)
+		if st.connectors != nil {
+			st.connectors.loaded = false
+			st.connectors.workspaceLoaded = false
+			st.connectors.workspaceID = ""
+		}
+	}
+	st.workspaceScope = scope
+	st.workspaceScopeLoaded = true
+	return scope
+}
+
+// loadDisabledServers parses the workspace-scoped mcp.disabledServers once per
+// page lifecycle.
 func (st *state) loadDisabledServers(settings contracts.SettingsService, hasSettings bool) {
 	if st.disabledServersLoaded {
 		return
@@ -22,7 +51,8 @@ func (st *state) loadDisabledServers(settings contracts.SettingsService, hasSett
 	if !hasSettings || settings == nil {
 		return
 	}
-	names, err := contracts.ParseStringListJSON(settings.Get(contracts.SettingMCPDisabledServers, ""))
+	names, err := contracts.ParseStringListJSON(
+		settings.Get(contracts.MCPDisabledServersSettingKey(st.workspaceScopeID()), ""))
 	if err != nil {
 		st.status = st.tr("禁用服务器配置无效：", "Invalid disabled-servers configuration: ") + err.Error()
 		st.statusErr = true
@@ -88,7 +118,7 @@ func (st *state) setServerEnabled(name string, enabled bool, settings contracts.
 	encoded, encodeErr := contracts.EncodeStringListJSON(names)
 	var writeErr error
 	if encodeErr == nil {
-		writeErr = settings.Set(contracts.SettingMCPDisabledServers, encoded)
+		writeErr = settings.Set(contracts.MCPDisabledServersSettingKey(st.workspaceScopeID()), encoded)
 	}
 	if failure := encodeErr; failure != nil || writeErr != nil {
 		st.disabledServers = previous
@@ -153,6 +183,9 @@ func (st *state) enabledPendingServerRows(settings contracts.SettingsService,
 	}
 	restored := make([]contracts.MCPPlugin, 0, len(rows))
 	for _, row := range rows {
+		if !contracts.MCPServerVisibleInWorkspace(row, st.workspaceScopeID()) {
+			continue
+		}
 		name := strings.TrimSpace(row.Name)
 		if name == "" || liveNames[strings.ToLower(name)] || st.serverDisabled(name) ||
 			!st.pendingEnabled(name) {
@@ -204,6 +237,9 @@ func (st *state) disabledServerRows(settings contracts.SettingsService, hasSetti
 	}
 	restored := make([]contracts.MCPPlugin, 0, len(rows))
 	for _, row := range rows {
+		if !contracts.MCPServerVisibleInWorkspace(row, st.workspaceScopeID()) {
+			continue
+		}
 		name := strings.TrimSpace(row.Name)
 		if name == "" || liveNames[strings.ToLower(name)] || !st.serverDisabled(name) {
 			continue
