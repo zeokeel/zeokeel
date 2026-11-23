@@ -97,6 +97,15 @@ func (r *Root) view(c *ui.Context) {
 			}
 		}
 	}
+	// The desktop startup workspace gate renders before the shell: every launch
+	// asks which folder this session belongs to, and nothing behind the page is
+	// meaningful yet. A host without the workspace backend (headless, ACP, the
+	// snapshot harness) or an embedder that skipped it keeps the shell.
+	if r.workspaceGateActive() {
+		r.buildWorkspaceGate(c)
+		return
+	}
+
 	r.announceNavigation(c)
 
 	// The window's Escape fallback is declared here, at the frame's root context,

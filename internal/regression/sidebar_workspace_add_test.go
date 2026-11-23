@@ -1,12 +1,12 @@
 package regression
 
-// Adversarial audit: the sidebar's direct "添加工作区" flow. Negative/boundary
-// cases: the native folder picker runs on the add click (no naming dialog and
-// no dialog state to get stuck), Create receives an empty name and the exact
-// picked root (the backend derives the name), a cancelled picker is a no-op, a
-// picker/Create failure is visible, an already registered folder is reported as
-// a quiet switch instead of an error, and a product without a workspace backend
-// hides the action entirely.
+// Adversarial audit: the sidebar's folder picker inside the switch dialog.
+// Negative/boundary cases: the native folder picker runs on the picker click (no
+// naming dialog and no dialog state to get stuck), Create receives an empty name
+// and the exact picked root (the backend derives the name), a cancelled picker
+// is a no-op, a picker/Create failure is visible, an already registered folder
+// is reported as a quiet switch instead of an error, and a product without a
+// workspace backend hides the whole workspace surface.
 
 import (
 	"context"
@@ -154,6 +154,16 @@ func requireHasTexts(t *testing.T, tester *ui.Tester, wants ...string) {
 	}
 }
 
+// pickFolderInDialog opens the switch dialog and clicks its folder picker.
+func pickFolderInDialog(t *testing.T, tester *ui.Tester) {
+	t.Helper()
+	clickSidebar(t, tester, "切换工作文件夹")
+	tester.Frame()
+	tester.Frame()
+	clickSidebar(t, tester, "选择其他文件夹…")
+	tester.Frame()
+}
+
 // clickSidebar clicks one sidebar label and repaints.
 func clickSidebar(t *testing.T, tester *ui.Tester, label string) {
 	t.Helper()
@@ -163,23 +173,23 @@ func clickSidebar(t *testing.T, tester *ui.Tester, label string) {
 	tester.Frame()
 }
 
-// TestSidebarAddWorkspaceDirectPicker covers the happy path: the add button
-// runs the picker itself, Create gets the empty name and the picked folder, the
-// backend-derived workspace appears current and unfolded, and a quiet status is
-// shown. None of the retired naming-dialog controls may appear.
+// TestSidebarAddWorkspaceDirectPicker covers the happy path: the switch dialog's
+// picker runs the native folder dialog itself, Create gets the empty name and
+// the picked folder, the backend-derived workspace becomes the open folder and a
+// quiet status is shown. None of the retired naming-dialog controls may appear.
 func TestSidebarAddWorkspaceDirectPicker(t *testing.T) {
 	workspace := &auditWorkspace{}
 	_, tester := startSidebarUI(t, workspace)
-	requireHasText(t, tester, "添加工作区")
+	requireHasTexts(t, tester, "工作文件夹", "切换工作文件夹")
 
 	var titles []string
 	overrideSidebarPicker(t, func(title string) (string, error) {
 		titles = append(titles, title)
 		return "/tmp/myproj", nil
 	})
-	clickSidebar(t, tester, "添加工作区")
+	pickFolderInDialog(t, tester)
 
-	if len(titles) != 1 || titles[0] != "选择工作区目录" {
+	if len(titles) != 1 || titles[0] != "选择工作文件夹" {
 		t.Fatalf("directory picker calls = %v, want one with the Chinese title", titles)
 	}
 	for _, gone := range []string{"选择目录…", "名称", "目录 输入"} {
@@ -190,15 +200,10 @@ func TestSidebarAddWorkspaceDirectPicker(t *testing.T) {
 		t.Fatalf("Create = calls %d name %q root %q, want the empty name and the exact picked folder",
 			calls, name, root)
 	}
+	// The dialog closed and the header names the new open folder.
 	requireHasTexts(t, tester, "已添加工作区", "myproj")
 	requireNoText(t, tester, "添加工作区失败")
-	// The new workspace is current and unfolded: its tree item is expanded and
-	// its row carries the per-workspace new-chat action.
-	item, ok := tester.AccessByRole(ui.RoleTreeItem, "myproj")
-	if !ok || !item.Expanded {
-		t.Fatalf("new workspace tree item missing or folded: %+v", item)
-	}
-	requireHasText(t, tester, "在“myproj”中新建会话")
+	requireNoText(t, tester, "切换后侧栏、文件、记忆和自动化都跟着这个文件夹。")
 }
 
 // TestSidebarAddWorkspaceNotifier covers the host-toast path: with a notifier
@@ -217,7 +222,7 @@ func TestSidebarAddWorkspaceNotifier(t *testing.T) {
 	tester.Frame()
 
 	overrideSidebarPicker(t, func(string) (string, error) { return "/tmp/dup", nil })
-	clickSidebar(t, tester, "添加工作区")
+	pickFolderInDialog(t, tester)
 	notifier.mu.Lock()
 	delivered := append([]contracts.Notification(nil), notifier.delivered...)
 	notifier.mu.Unlock()
@@ -230,7 +235,8 @@ func TestSidebarAddWorkspaceNotifier(t *testing.T) {
 	workspace.mu.Lock()
 	workspace.createErr = nil
 	workspace.mu.Unlock()
-	clickSidebar(t, tester, "添加工作区")
+	// The failed pick kept the dialog up: click its picker again.
+	clickSidebar(t, tester, "选择其他文件夹…")
 	notifier.mu.Lock()
 	delivered = append([]contracts.Notification(nil), notifier.delivered...)
 	notifier.mu.Unlock()
@@ -247,7 +253,7 @@ func TestSidebarAddWorkspaceCancelIsNoOp(t *testing.T) {
 	workspace := &auditWorkspace{}
 	_, tester := startSidebarUI(t, workspace)
 	overrideSidebarPicker(t, func(string) (string, error) { return "", nil })
-	clickSidebar(t, tester, "添加工作区")
+	pickFolderInDialog(t, tester)
 
 	if calls, _, _ := workspace.createRecord(); calls != 0 {
 		t.Fatalf("cancelled picker called Create %d times", calls)
@@ -263,7 +269,7 @@ func TestSidebarAddWorkspaceErrorsVisible(t *testing.T) {
 	_, tester := startSidebarUI(t, workspace)
 
 	overrideSidebarPicker(t, func(string) (string, error) { return "", errors.New("picker failed") })
-	clickSidebar(t, tester, "添加工作区")
+	pickFolderInDialog(t, tester)
 	requireHasText(t, tester, "无法打开目录选择器：picker failed")
 	if calls, _, _ := workspace.createRecord(); calls != 0 {
 		t.Fatalf("picker failure called Create %d times", calls)
@@ -273,7 +279,7 @@ func TestSidebarAddWorkspaceErrorsVisible(t *testing.T) {
 	workspace.mu.Lock()
 	workspace.createErr = errors.New("workspace exists")
 	workspace.mu.Unlock()
-	clickSidebar(t, tester, "添加工作区")
+	clickSidebar(t, tester, "选择其他文件夹…")
 	requireHasText(t, tester, "添加工作区失败：workspace exists")
 	requireNoText(t, tester, "选择目录…")
 }
@@ -286,14 +292,10 @@ func TestSidebarAddWorkspaceReusesRegisteredFolder(t *testing.T) {
 		{ID: "w-1", Name: "myproj", Root: "/tmp/myproj"},
 	}, currentID: "w-1"}
 	_, tester := startSidebarUI(t, workspace)
-	// Fold the group first: the switch must unfold it.
-	clickSidebar(t, tester, "myproj")
-	if item, ok := tester.AccessByRole(ui.RoleTreeItem, "myproj"); !ok || item.Expanded {
-		t.Fatalf("workspace group did not fold: %+v", item)
-	}
+	requireHasText(t, tester, "myproj")
 
 	overrideSidebarPicker(t, func(string) (string, error) { return "/tmp/myproj/", nil })
-	clickSidebar(t, tester, "添加工作区")
+	pickFolderInDialog(t, tester)
 
 	calls, name, root := workspace.createRecord()
 	if calls != 1 || name != "" || root != "/tmp/myproj/" {
@@ -302,10 +304,8 @@ func TestSidebarAddWorkspaceReusesRegisteredFolder(t *testing.T) {
 	requireHasText(t, tester, "已切换工作区")
 	requireNoText(t, tester, "已添加工作区")
 	requireNoText(t, tester, "添加工作区失败")
-	// The reused workspace is current and unfolded.
-	if item, ok := tester.AccessByRole(ui.RoleTreeItem, "myproj"); !ok || !item.Expanded {
-		t.Fatalf("reused workspace group was not unfolded: %+v", item)
-	}
+	// The reused workspace is the open folder, and its list is shown.
+	requireHasTexts(t, tester, "工作文件夹", "myproj")
 }
 
 // TestSidebarAddWorkspaceHiddenWithoutBackend covers the optional backend: no
@@ -313,6 +313,7 @@ func TestSidebarAddWorkspaceReusesRegisteredFolder(t *testing.T) {
 // session list), and the picker is never reached.
 func TestSidebarAddWorkspaceHiddenWithoutBackend(t *testing.T) {
 	_, tester := startSidebarUI(t, nil)
-	requireNoText(t, tester, "添加工作区")
-	requireNoText(t, tester, "选择目录…")
+	requireNoText(t, tester, "切换工作文件夹")
+	requireNoText(t, tester, "选择其他文件夹…")
+	requireNoText(t, tester, "工作文件夹")
 }

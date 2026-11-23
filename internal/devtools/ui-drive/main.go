@@ -146,7 +146,10 @@ func newDrive(outDir string, quick bool) (*drive, error) {
 func (d *drive) boot() error {
 	d.server = newScriptServer()
 	root := cordis.Root()
-	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
+	// The driver scripts product surfaces, not the launch folder decision: the
+	// startup gate would cover every driven frame (the snapshot harness does the
+	// same; the gate has its own scene there).
+	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel", SkipWorkspaceGate: true})
 	settings := &memSettings{values: map[string]string{
 		contracts.SettingsChatModel:   "drive-model",
 		contracts.SettingsChatBaseURL: d.server.URL(),

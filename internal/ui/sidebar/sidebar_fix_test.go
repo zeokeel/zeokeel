@@ -152,13 +152,18 @@ func TestSidebarDeleteFailureKeepsDialog(t *testing.T) {
 	}
 }
 
-// TestSidebarWorkspaceMoreHitTarget covers UD-08: the workspace row's ⋯
-// button has a ≥24 DIP hit target on both axes (AP-17).
+// TestSidebarWorkspaceMoreHitTarget covers UD-08: the switch dialog's workspace
+// row ⋯ button has a ≥24 DIP hit target on both axes (AP-17).
 func TestSidebarWorkspaceMoreHitTarget(t *testing.T) {
 	workspace := newFakeWorkspace(contracts.Workspace{ID: "w1", Name: "项目一", Root: "/work/one"}).
 		withCurrent(contracts.Workspace{ID: "w1", Name: "项目一", Root: "/work/one"})
 	h := newHarnessWithWorkspace(t, &fakeChat{}, sidebar.Config{}, workspace)
 	tester := h.tester()
+	if err := tester.Click("切换工作文件夹"); err != nil {
+		t.Fatalf("open the switch dialog: %v", err)
+	}
+	tester.Frame()
+	tester.Frame()
 	// The ⋯ action is hover-revealed (Opacity 0 + IgnoreInput at rest), so it
 	// is found by its label rect rather than the access tree; the hit target
 	// must still be ≥24 DIP on both axes.
@@ -171,19 +176,24 @@ func TestSidebarWorkspaceMoreHitTarget(t *testing.T) {
 	}
 }
 
-// TestSidebarWorkspaceEmptyHintNotMicroType covers UD-15: the workspace empty
-// state's hint line is no longer an 11 DIP TypeXXXS sentence; it renders on the
-// EmptyState metadata step (≥18 DIP line).
+// TestSidebarWorkspaceEmptyHintNotMicroType covers UD-15 for the switch
+// dialog's empty registry state: the line renders on the EmptyState metadata
+// step (≥18 DIP), not as an 11 DIP TypeXXXS sentence.
 func TestSidebarWorkspaceEmptyHintNotMicroType(t *testing.T) {
 	h := newHarnessWithWorkspace(t, &fakeChat{}, sidebar.Config{}, newFakeWorkspace())
 	tester := h.tester()
-	h.assertTexts(tester, "还没有工作区", "选择 + 添加工作区")
-	hint, ok := tester.Find("选择 + 添加工作区")
+	if err := tester.Click("切换工作文件夹"); err != nil {
+		t.Fatalf("open the switch dialog: %v", err)
+	}
+	tester.Frame()
+	tester.Frame()
+	h.assertTexts(tester, "还没有工作文件夹")
+	hint, ok := tester.Find("还没有工作文件夹")
 	if !ok {
 		t.Fatalf("workspace empty hint missing; texts = %v", tester.Texts())
 	}
 	if hint.H < 18 {
-		t.Fatalf("UD-15: the empty-state hint is %.1f DIP tall, want the ≥18 DIP EmptyState line (not an 11 DIP TypeXXXS sentence)",
+		t.Fatalf("UD-15: the empty-state line is %.1f DIP tall, want the ≥18 DIP EmptyState line (not an 11 DIP TypeXXXS sentence)",
 			hint.H)
 	}
 }

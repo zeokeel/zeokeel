@@ -1,16 +1,15 @@
 package sidebar
 
-// Sidebar "Add workspace": the 工作区 header's + button opens the native
-// directory picker directly and registers the chosen folder. The workspace
+// Sidebar "choose another folder": the switch dialog's picker opens the native
+// directory dialog directly and registers the chosen folder. The workspace
 // backend derives the name from the folder, so there is no naming dialog: one
-// click, one native folder chooser, and the workspace appears current and
-// unfolded in the tree (its row then carries the per-workspace new-chat
-// action).
+// click, one native folder chooser, and the folder becomes the open one.
 //
 // The result is reported through the host toast bridge when it exists and
-// through the header's quiet status/error rows otherwise. A folder that is
-// already registered is not an error: the backend reuses it and makes it
-// current, which the sidebar reports as a switch rather than a duplicate.
+// through the header's / dialog's quiet status and error rows otherwise. A
+// folder that is already registered is not an error: the backend reuses it and
+// makes it current, which the sidebar reports as a switch rather than a
+// duplicate.
 
 import (
 	"context"
@@ -44,21 +43,23 @@ var DirectoryPicker = func(title string) (string, error) {
 	return paths[0], nil
 }
 
-// addWorkspace runs the direct add flow: the native folder picker, then
-// workspace.Create with an empty name (the backend derives it from the
-// folder). A cancelled picker changes nothing; a failure lands in the header's
-// inline error row or the host's error toast.
-func addWorkspace(state *paneState, workspace contracts.WorkspaceService, runtime contracts.UIRuntime) {
-	dir, err := DirectoryPicker(state.T("选择工作区目录", "Choose workspace folder"))
+// addWorkspace runs the direct pick-and-open flow: the native folder picker,
+// then workspace.Create with an empty name (the backend derives it from the
+// folder and makes it current). A cancelled picker changes nothing; a failure
+// lands in the inline error row or the host's error toast. The returned
+// workspace and ok=false report a cancelled or failed flow, so the switch
+// dialog knows whether to dismiss itself.
+func addWorkspace(state *paneState, workspace contracts.WorkspaceService, runtime contracts.UIRuntime) (contracts.Workspace, bool) {
+	dir, err := DirectoryPicker(state.T("选择工作文件夹", "Choose a workspace folder"))
 	if err != nil {
 		reportWorkspaceActionError(state, runtime,
 			state.T("无法打开目录选择器：", "Could not open the folder picker: ")+err.Error())
-		return
+		return contracts.Workspace{}, false
 	}
 	// A cancelled picker is a no-op: no error, no status change.
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
-		return
+		return contracts.Workspace{}, false
 	}
 	state.addWorkspaceErr = ""
 	// Reporting only: the backend itself reuses an already registered folder.
@@ -67,19 +68,15 @@ func addWorkspace(state *paneState, workspace contracts.WorkspaceService, runtim
 	if err != nil {
 		reportWorkspaceActionError(state, runtime,
 			state.T("添加工作区失败：", "Could not add the workspace: ")+err.Error())
-		return
+		return contracts.Workspace{}, false
 	}
 	state.addWorkspaceErr = ""
-	// The new workspace is current (Create makes it so) and its group may be
-	// folded: open it so its row and new-chat action are visible at once.
-	if id := strings.TrimSpace(created.ID); id != "" {
-		state.tree.Open.Add(workspaceTreeKey(id))
-	}
 	status := state.T("已添加工作区", "Workspace added")
 	if reused {
 		status = state.T("已切换工作区", "Workspace switched")
 	}
 	reportWorkspaceAdded(state, runtime, status)
+	return created, true
 }
 
 // registeredWorkspaceRoot reports whether dir is already one of the

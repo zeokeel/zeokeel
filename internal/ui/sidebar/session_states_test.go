@@ -62,7 +62,7 @@ func TestSessionRowUnreadReply(t *testing.T) {
 	}
 }
 
-func TestCollapsedWorkspaceGroupShowsChildState(t *testing.T) {
+func TestFolderRowKeepsLiveState(t *testing.T) {
 	workspace := contracts.Workspace{ID: "w1", Name: "项目一"}
 	ws := newFakeWorkspace(workspace).withCurrent(workspace)
 	chat := &fakeChat{
@@ -74,17 +74,16 @@ func TestCollapsedWorkspaceGroupShowsChildState(t *testing.T) {
 	h := newHarnessWithWorkspace(t, chat, sidebar.Config{}, ws)
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "等待回复")
 
-	// Folding the group keeps the child's state on the group row.
-	h.click(tester, "项目一")
-	h.assertTexts(tester, "项目一", "等待回复")
-	if _, ok := tester.AccessByRole(ui.RoleTreeItem, "项目一，等待回复"); !ok {
-		t.Fatalf("folded group has no accessible child state; access = %v", tester.AccessAll())
+	// The folder list has no collapsible group any more: the row itself carries
+	// the live state word and its accessible name.
+	h.assertTexts(tester, "等待回复")
+	if _, ok := tester.AccessByRole(ui.RoleListItem, "等待会话，等待回复"); !ok {
+		t.Fatalf("waiting row has no accessible state; access = %v", tester.AccessAll())
 	}
 }
 
-func TestCollapsedWorkspaceGroupShowsUnreadChild(t *testing.T) {
+func TestFolderRowKeepsUnreadState(t *testing.T) {
 	workspace := contracts.Workspace{ID: "w1", Name: "项目一"}
 	ws := newFakeWorkspace(workspace).withCurrent(workspace)
 	chat := &fakeChat{
@@ -97,9 +96,8 @@ func TestCollapsedWorkspaceGroupShowsUnreadChild(t *testing.T) {
 	h := newHarnessWithWorkspace(t, chat, sidebar.Config{}, ws)
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "项目一")
 
-	if _, ok := tester.AccessByRole(ui.RoleTreeItem, "项目一，未读回复"); !ok {
-		t.Fatalf("folded group has no accessible unread state; access = %v", tester.AccessAll())
+	if _, ok := tester.AccessByRole(ui.RoleListItem, "后台完成，未读回复"); !ok {
+		t.Fatalf("unread row has no accessible unread state; access = %v", tester.AccessAll())
 	}
 }

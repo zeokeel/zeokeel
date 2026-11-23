@@ -1,11 +1,12 @@
 package regression
 
-// Adversarial audit: the sidebar's fixed view. The 视图 popover and its
-// persisted sort/group options are gone: with a workspace backend the sidebar
-// always groups by workspace, ordered by recent activity with pinned sessions
-// ahead inside a group, and a stale stored option cannot bring the name sort or
-// the flat mode back. Only a host without a workspace backend gets the flat
-// fallback, which still sorts recent-first and pinned-first.
+// Adversarial audit: the sidebar's fixed single-workspace view. The 视图 popover
+// and its persisted sort/group options are gone, and so is the workspace tree:
+// with a workspace backend the sidebar names the one open folder, lists only its
+// conversations (pinned-first) and offers the switch dialog. A stale stored
+// option cannot bring the name sort, the flat mode or the tree back. Only a host
+// without a workspace backend gets the plain flat list, which still sorts
+// recent-first and pinned-first.
 
 import (
 	"strings"
@@ -74,23 +75,22 @@ func TestSidebarViewMenuIsGone(t *testing.T) {
 		{ID: "s1", Title: "Alpha", WorkspaceID: "w1", UpdatedAt: time.Unix(1_700_000_000, 0)},
 	}}
 	h, tester := startSidebarView(t, chat, workspace)
-	requireHasTexts(t, tester, "工作区", "项目一", "Alpha")
+	requireHasTexts(t, tester, "工作文件夹", "项目一", "切换工作文件夹", "Alpha")
 	for _, gone := range []string{"视图", "排序", "最近活动", "名称", "分组", "按工作区", "平铺"} {
 		requireNoText(t, tester, gone)
 	}
 
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	requireHasTexts(t, tester, "Workspace", "Add workspace", "项目一", "Alpha")
+	requireHasTexts(t, tester, "Workspace", "Switch workspace folder", "项目一", "Alpha")
 	for _, gone := range []string{"View", "Sort", "Recent activity", "Group", "By workspace", "Flat"} {
 		requireNoText(t, tester, gone)
 	}
 }
 
 // TestSidebarStaleViewSettingsIgnored seeds the retired persisted options: the
-// sidebar keeps grouping by workspace (no flat mode) and keeps recent activity
-// ordering with pinned-first inside a group (no name sort), and it never
-// rewrites the stale rows.
+// sidebar keeps the single-workspace scope (one folder only) and pinned-first
+// ordering (no name sort), and it never rewrites the stale rows.
 func TestSidebarStaleViewSettingsIgnored(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0)
 	workspace := &auditWorkspace{
@@ -114,14 +114,13 @@ func TestSidebarStaleViewSettingsIgnored(t *testing.T) {
 	}
 	tester.Frame()
 
-	// Grouping wins over the stale "flat" value.
-	requireHasTexts(t, tester, "项目一", "项目二")
-	// Recent-activity group order: 项目二 (newest session) above 项目一.
-	if order := sidebarOrder(tester, "项目二", "项目一"); !(order[0] >= 0 && order[0] < order[1]) {
-		t.Fatalf("group order = %v; want recent activity first; texts = %v", order, tester.Texts())
-	}
-	// Name sorting does not apply: inside 项目一 the pinned Zulu row comes
-	// before the unpinned Alpha row even though Alpha sorts first by name.
+	// The open folder wins over the stale "flat" value: only its conversations
+	// are listed, the other folder's session is not.
+	requireHasTexts(t, tester, "项目一", "Alpha 旧", "Zulu 置顶")
+	requireNoText(t, tester, "项目二")
+	requireNoText(t, tester, "Beta 新")
+	// Name sorting does not apply: the pinned Zulu row comes before the unpinned
+	// Alpha row even though Alpha sorts first by name.
 	if order := sidebarOrder(tester, "Zulu 置顶", "Alpha 旧"); !(order[0] >= 0 && order[0] < order[1]) {
 		t.Fatalf("pinned-first order lost: %v; texts = %v", order, tester.Texts())
 	}
@@ -134,11 +133,11 @@ func TestSidebarStaleViewSettingsIgnored(t *testing.T) {
 	}
 }
 
-// TestSidebarGroupOrderEmptyWorkspaceCreatedAt covers the boundary of a
-// workspace with no visible sessions: it sorts by its CreatedAt, newest first,
-// so a freshly added workspace stays at the top; an archived session never
-// counts as activity.
-func TestSidebarGroupOrderEmptyWorkspaceCreatedAt(t *testing.T) {
+// TestSidebarSwitchDialogRecentOrdering covers the recency ordering the old
+// group list owned: the switch dialog sorts folders by their newest visible
+// conversation, a folder with none uses its CreatedAt (so a freshly added folder
+// is on top), and an archived session never counts as activity.
+func TestSidebarSwitchDialogRecentOrdering(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0)
 	workspace := &auditWorkspace{
 		created: []contracts.Workspace{
@@ -153,9 +152,15 @@ func TestSidebarGroupOrderEmptyWorkspaceCreatedAt(t *testing.T) {
 		{ID: "s-archived", Title: "归档会话", WorkspaceID: "w-old", Archived: true, UpdatedAt: base.Add(time.Hour)},
 	}}
 	_, tester := startSidebarView(t, chat, workspace)
+	// The open folder's (empty) conversation list, then the dialog's recents.
+	requireHasText(t, tester, "还没有会话")
+	requireNoText(t, tester, "归档会话")
+	clickSidebar(t, tester, "切换工作文件夹")
+	tester.Frame()
+	tester.Frame()
 	requireHasTexts(t, tester, "新建项目", "旧项目")
 	if order := sidebarOrder(tester, "新建项目", "旧项目"); !(order[0] >= 0 && order[0] < order[1]) {
-		t.Fatalf("group order = %v; want the empty workspace by CreatedAt first; texts = %v",
+		t.Fatalf("recent order = %v; want the empty folder by CreatedAt first; texts = %v",
 			order, tester.Texts())
 	}
 	requireNoText(t, tester, "归档会话")

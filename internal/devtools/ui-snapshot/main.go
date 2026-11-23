@@ -1750,6 +1750,12 @@ func main() {
 	a.ui.Theme().SetDark(false)
 	a.tester.Frame()
 
+	// Single-workspace UX (WORKSPACE-UX): the startup folder gate, the flat
+	// sidebar of the open folder and the switch dialog, in both themes. This
+	// runs after every other surface so the extra workspace/session fixtures do
+	// not show up in the earlier frames.
+	renderWorkspaceSnapshots(server.URL(), outDir)
+
 	// Restored-run evidence: a crash left a non-terminal checkpoint behind. Seed
 	// one for a fresh conversation, restart on the same data dir (the agent
 	// restore marks the session Interrupted) and render the notice in light and
@@ -2023,6 +2029,144 @@ func (a *app) waitJobDone(jobID string, timeout time.Duration) bool {
 
 // writeManifest records what produced a snapshot run, so a reviewer can tell
 // whether the PNGs match the working tree they are looking at.
+// renderWorkspaceSnapshots renders the approved single-workspace frames:
+// 01-startup (the folder gate), 02-main (the flat sidebar of one folder) and
+// 03-switch (the switch/manage dialog), each in light and dark.
+//
+// It boots its own product instance on a throwaway data directory: the frames
+// are the "first launch with three known folders" story, and the earlier scenes'
+// fixtures (and the later interrupted/cold-resume scenes' state) are neither
+// disturbed nor visible in them.
+func renderWorkspaceSnapshots(baseURL, outDir string) {
+	dataDir, err := os.MkdirTemp("", "zeokeel-workspace-ux")
+	if err != nil {
+		fmt.Println("workspace UX: temp data dir:", err)
+		return
+	}
+	defer os.RemoveAll(dataDir)
+	demo := boot(baseURL, dataDir)
+	defer demo.cleanup()
+
+	workspace, err := demo.root.Require(contracts.KeyWorkspace)
+	if err != nil {
+		fmt.Println("workspace UX: no workspace backend:", err)
+		return
+	}
+	chat, err := demo.root.Require(contracts.KeyChat)
+	if err != nil {
+		fmt.Println("workspace UX: no chat backend:", err)
+		return
+	}
+	folderRoot, err := os.MkdirTemp("", "zeokeel-workspace-ux-folders")
+	if err != nil {
+		fmt.Println("workspace UX: temp folder dir:", err)
+		return
+	}
+	defer os.RemoveAll(folderRoot)
+
+	// Three project folders, oldest first: the last Create becomes current, and
+	// the sidebar shows its conversations (the approved 02-main content).
+	for _, name := range []string{"notes", "zeokeel", "agent-workspace"} {
+		dir := filepath.Join(folderRoot, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			fail("workspace folder", err)
+			return
+		}
+		if _, err := workspace.Create(context.Background(), name, dir); err != nil {
+			fmt.Println("workspace UX: create", name, err)
+			return
+		}
+	}
+	// A few conversations in the open folder, newest last (the list sorts by
+	// UpdatedAt). The active one gets a real exchange so the frame is a landed
+	// conversation, not an empty hero.
+	titles := []string{"MCP OAuth 调试", "工作区启动页设计", "网络助手常驻形态讨论"}
+	activeID := ""
+	for _, title := range titles {
+		id, newErr := chat.NewSession(title)
+		if newErr != nil {
+			fmt.Println("workspace UX: new session", newErr)
+			return
+		}
+		if title == titles[len(titles)-1] {
+			activeID = id
+		}
+	}
+	if activeID != "" {
+		_ = chat.SetActiveSession(activeID)
+		_ = chat.Send(activeID, "启动软件时候让用户选择工作区，一个文件夹就够了。")
+		waitIdle(chat, activeID, 10*time.Second)
+	}
+
+	// 01-startup: the gate is a shell of its own (a separate root shares this
+	// demo product's workspace and chat services).
+	gateKernel := cordis.Root()
+	defer func() { _ = gateKernel.DisposeAll() }()
+	if _, err := gateKernel.Provide(contracts.KeyWorkspace, workspace); err != nil {
+		fmt.Println("workspace UX: provide workspace:", err)
+		return
+	}
+	if _, err := gateKernel.Provide(contracts.KeyChat, contracts.ChatService(chat)); err != nil {
+		fmt.Println("workspace UX: provide chat:", err)
+		return
+	}
+	gate := uiroot.New(uiroot.Config{AppName: "ZeoKeel", Kernel: gateKernel})
+	gateTester := ui.NewTester(gate.View, 1512, 944)
+	gateTester.Frame()
+	renderTester(gateTester, outDir+"/workspace-startup.png")
+	gate.Theme().SetDark(true)
+	gateTester.Frame()
+	renderTester(gateTester, outDir+"/workspace-startup-dark.png")
+
+	// 02-main: the shell with the flat sidebar of the open folder (the demo
+	// instance is fresh, so the session screen has no navigation history).
+	if err := demo.ui.Navigator().Push("session"); err != nil {
+		fmt.Println("workspace UX: push session:", err)
+		return
+	}
+	demo.tester.Frame()
+	demo.tester.Frame()
+	demo.ui.Theme().SetDark(false)
+	demo.render(outDir + "/workspace-main.png")
+	demo.ui.Theme().SetDark(true)
+	demo.tester.Frame()
+	demo.render(outDir + "/workspace-main-dark.png")
+
+	// 03-switch: the header chevron's dialog, over the shell.
+	demo.ui.Theme().SetDark(false)
+	demo.tester.Frame()
+	if err := demo.tester.Click("切换工作文件夹"); err != nil {
+		fmt.Println("workspace UX: open the switch dialog:", err)
+		return
+	}
+	demo.tester.Frame()
+	demo.tester.Frame()
+	demo.render(outDir + "/workspace-switch.png")
+	demo.ui.Theme().SetDark(true)
+	demo.tester.Frame()
+	demo.render(outDir + "/workspace-switch-dark.png")
+	demo.ui.Theme().SetDark(false)
+	demo.tester.Frame()
+	demo.tester.Key(0, ui.KeyEscape)
+	demo.tester.Frame()
+}
+
+// renderTester writes one tester frame to a PNG (the gate's own root renders
+// outside the booted product, so it cannot use app.render).
+func renderTester(tester *ui.Tester, path string) {
+	tester.Frame()
+	img := tester.Image()
+	file, err := os.Create(path)
+	if err != nil {
+		fail("create "+path, err)
+	}
+	if err := png.Encode(file, img); err != nil {
+		fail("encode "+path, err)
+	}
+	_ = file.Close()
+	fmt.Println("wrote", path, img.Bounds().Size())
+}
+
 func writeManifest(outDir string) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "zeokeel ui-snapshot\n")
@@ -2073,7 +2217,10 @@ func snapshotModelCatalog(baseURL string) string {
 
 func boot(baseURL, dataDir string) *app {
 	root := cordis.Root()
-	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
+	// The snapshot harness renders the shell, not the startup workspace gate: it
+	// drives the product's surfaces directly and the gate would cover every
+	// frame. The workspace UX has its own scenes (renderWorkspaceSnapshots).
+	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel", SkipWorkspaceGate: true})
 	// Mirror the desktop host: the shell reads kernel services (pending
 	// approvals move the toast stack off the decision card), so the headless
 	// boot binds the same context instead of hand-wiring each lookup.

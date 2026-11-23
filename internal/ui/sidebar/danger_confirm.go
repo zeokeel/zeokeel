@@ -47,7 +47,17 @@ func buildDangerConfirm(c *ui.Context, t *design.Tokens, open *bool,
 		}
 	}
 	ui.Modal(c, open, func() {
-		ui.Column(c).Width(dangerConfirmWidth).Gap(design.Space3).Children(func() {
+		panel := ui.Column(c.Key("sidebar.danger-confirm")).Width(dangerConfirmWidth).Gap(design.Space3)
+		// The safe action takes the keyboard from the dialog's second frame, not
+		// its first (the uikit.ConfirmDanger two-frame rule): mygo records the
+		// element that had the focus as an overlay opens, and a confirmation that
+		// opens from inside another modal (the workspace switch dialog) would
+		// otherwise open with NO focused action, so Enter would run whichever
+		// button mygo finds first instead of Cancel (2026-11: the workspace
+		// switch → delete flow deleted on a stray Enter).
+		settled := ui.Local(panel, "settled", func() bool { return false })
+		keyboard := ui.Local(panel, "keyboard", func() bool { return false })
+		panel.Children(func() {
 			design.Apply(ui.Text(c, title), t.Font(design.TypeM)).FontWeight(600).
 				TextColor(t.LabelPrimary)
 			design.Apply(ui.Text(c, message), t.Text(design.TypeS)).
@@ -55,12 +65,14 @@ func buildDangerConfirm(c *ui.Context, t *design.Tokens, open *bool,
 			if errText != "" {
 				uikit.ErrorLine(c, errText)
 			}
+			takeKeyboard := *settled && !*keyboard
+			*keyboard = *keyboard || takeKeyboard
 			uikit.DialogFooter(c, []uikit.DialogAction{
 				// Danger first (left), the safe action last and focused, as
 				// design.DialogFooter orders them. No action is Primary: the
 				// canonical action of a destructive confirmation is Cancel.
 				{Label: confirmLabel, Danger: true, OnClick: closeDialog(true)},
-				{Label: cancelLabel, Default: true, OnClick: closeDialog(false)},
+				{Label: cancelLabel, Default: true, Focus: takeKeyboard, OnClick: closeDialog(false)},
 			})
 		})
 	})

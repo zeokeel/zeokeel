@@ -66,6 +66,11 @@ type Config struct {
 	Kernel cordis.Context
 	// KernelContext is an alias for Kernel.
 	KernelContext cordis.Context
+	// SkipWorkspaceGate dismisses the desktop startup workspace gate. The
+	// desktop host leaves it false (every launch asks which folder the session
+	// belongs to); embedders and the snapshot harness set it so a headless
+	// surface renders the shell directly.
+	SkipWorkspaceGate bool
 	// OnLanguageChange is called on the UI thread after the product language
 	// changes, so the host can mirror it into the framework's own locale: mygo
 	// localizes its native controls, dialogs, menus and assistive-technology
@@ -164,6 +169,17 @@ type Root struct {
 	// with localized titles.
 	hostCommands func()
 	hostLang     string
+
+	// Workspace gate state (workspacegate.go): skipWorkspaceGate is the
+	// embedder's opt-out, workspaceGateDone records that this launch chose a
+	// folder (so the gate never returns), gateSelected is the chosen row of the
+	// recent list, gateList its native list state and workspaceGateErr the last
+	// failure, shown inline on the page.
+	skipWorkspaceGate bool
+	workspaceGateDone bool
+	gateSelected      int
+	gateList          ui.ListState
+	workspaceGateErr  string
 
 	// rightOpen is the host-owned right inspector panel state (the old shell's
 	// right sidebar). It is touched on the UI thread only.
@@ -437,6 +453,9 @@ func New(cfg Config) *Root {
 		artifacts:        newArtifactService(),
 		plan:             newPlanService(),
 		notifier:         newNotifierService(cfg.Settings, cfg.AppName),
+
+		skipWorkspaceGate: cfg.SkipWorkspaceGate,
+		gateSelected:      -1,
 	}
 	r.theme = &themeService{root: r, dark: cfg.Dark}
 	r.locale = &localeService{root: r, lang: cfg.Language}

@@ -115,8 +115,8 @@ func TestPinnedMenuTogglesState(t *testing.T) {
 	}
 }
 
-func TestPinnedSortWithinWorkspaceGroups(t *testing.T) {
-	workspace := newFakeWorkspace(treeWorkspaces()...)
+func TestPinnedSortWithinTheFolder(t *testing.T) {
+	workspace := newFakeWorkspace(treeWorkspaces()...).withCurrent(currentWorkspace())
 	chat := newPinChat(
 		contracts.ChatSessionInfo{ID: "s1", Title: "A 普通", WorkspaceID: "w1"},
 		contracts.ChatSessionInfo{ID: "s2", Title: "B 置顶", WorkspaceID: "w1", Pinned: true},
@@ -129,18 +129,19 @@ func TestPinnedSortWithinWorkspaceGroups(t *testing.T) {
 	tester := h.tester()
 	texts := tester.Texts()
 
-	// w1 group: pinned B, then the unpinned A/D in their original order.
+	// The folder's own rows: pinned B, then the unpinned A/D in their original
+	// order. The other folder's pinned session is not this folder's list.
 	b, a, d := textIndex(texts, "B 置顶"), textIndex(texts, "A 普通"), textIndex(texts, "D 普通")
 	if !(b >= 0 && b < a && a < d) {
-		t.Fatalf("w1 pinned-first order wrong: B=%d A=%d D=%d; texts = %v", b, a, d, texts)
+		t.Fatalf("folder pinned-first order wrong: B=%d A=%d D=%d; texts = %v", b, a, d, texts)
 	}
-	// The ungrouped group also sorts its pinned session first.
+	h.assertNoTexts(tester, "C 置顶")
+	// Conversations without a binding stay reachable in the open folder and sort
+	// pinned-first too.
 	e, f := textIndex(texts, "E 置顶"), textIndex(texts, "F 普通")
 	if !(e >= 0 && e < f) {
-		t.Fatalf("ungrouped pinned-first order wrong: E=%d F=%d; texts = %v", e, f, texts)
+		t.Fatalf("unbound pinned-first order wrong: E=%d F=%d; texts = %v", e, f, texts)
 	}
-	// Counts are unchanged: w1 still reports 3 sessions.
-	h.assertTexts(tester, "3")
 }
 
 func TestPinnedSortAppliesToSearchResults(t *testing.T) {
@@ -173,12 +174,12 @@ func TestPinMenuHiddenWithoutPinner(t *testing.T) {
 	h.assertNoTexts(tester, "置顶会话", "取消置顶")
 }
 
-// TestPinnedRightClickInWorkspaceTree is the user's explicit ask: right-clicking
-// a conversation inside the workspace tree opens the shared row menu, and
-// 置顶会话 pins it so the pinned-first order and the 置顶 badge update.
-func TestPinnedRightClickInWorkspaceTree(t *testing.T) {
+// TestPinnedRightClickInTheFolderList is the user's explicit ask: right-clicking
+// a conversation inside the folder list opens the shared row menu, and 置顶会话
+// pins it so the pinned-first order and the 置顶 badge update.
+func TestPinnedRightClickInTheFolderList(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0)
-	workspace := newFakeWorkspace(treeWorkspaces()...)
+	workspace := newFakeWorkspace(treeWorkspaces()...).withCurrent(currentWorkspace())
 	chat := newPinChat(
 		contracts.ChatSessionInfo{ID: "s1", Title: "普通会话", WorkspaceID: "w1", UpdatedAt: base.Add(-2 * time.Hour)},
 		contracts.ChatSessionInfo{ID: "s2", Title: "待置顶会话", WorkspaceID: "w1", UpdatedAt: base.Add(-time.Hour)},

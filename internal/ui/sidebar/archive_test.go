@@ -217,8 +217,8 @@ func TestArchiveActionFallsBackToPlainToast(t *testing.T) {
 	h.assertNoTexts(tester, "会话一")
 }
 
-func TestArchivedGroupCountsExcludeArchived(t *testing.T) {
-	workspace := newFakeWorkspace(treeWorkspaces()...)
+func TestArchivedSessionHiddenInSingleWorkspace(t *testing.T) {
+	workspace := newFakeWorkspace(treeWorkspaces()...).withCurrent(currentWorkspace())
 	chat := newArchiveChat(
 		contracts.ChatSessionInfo{ID: "s1", Title: "普通一", WorkspaceID: "w1"},
 		contracts.ChatSessionInfo{ID: "s2", Title: "普通二", WorkspaceID: "w1"},
@@ -227,9 +227,9 @@ func TestArchivedGroupCountsExcludeArchived(t *testing.T) {
 	h := newHarnessWithSettingsAndWorkspace(t, chat,
 		newSidebarSettings(map[string]string{contracts.SettingSessionsShowArchived: "true"}), workspace, sidebar.Config{})
 	tester := h.tester()
-	// The workspace's count is the visible sessions only (2), and the archived
-	// one never appears in the tree.
-	h.assertTexts(tester, "2")
+	// The folder list shows the two live conversations; the archived one belongs
+	// to the settings archive page and never renders as a row.
+	h.assertTexts(tester, "普通一", "普通二")
 	h.assertNoTexts(tester, "归档三", "已归档")
 }
 

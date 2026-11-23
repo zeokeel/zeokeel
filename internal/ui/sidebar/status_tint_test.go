@@ -61,9 +61,9 @@ func TestWorkspaceAddedNoticeUsesStatusTint(t *testing.T) {
 	workspace := &recordingWorkspace{fakeWorkspace: newFakeWorkspace()}
 	h := newHarnessWithWorkspace(t, &fakeChat{}, sidebar.Config{}, workspace)
 	overrideSidebarPicker(t, func(string) (string, error) { return "/work/myproj", nil })
+	pickFolderFromDialog(t, h)
 	tester := h.tester()
 
-	h.click(tester, "添加工作区")
 	h.assertTexts(tester, "已添加工作区")
 	assertStatusBadgeTint(t, tester, "已添加工作区", design.Light().Success, 0.08)
 }

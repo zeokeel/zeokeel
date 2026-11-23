@@ -136,7 +136,7 @@
 |---|---|---|
 | `List` + `ListState` / `ListRow` | 虚拟化列表（任意长度、行高可变） | **所有集合的唯一选择**（transcript/轨迹/记忆/日志/文件/设置列表/侧栏）；`Key` 稳定、`Label` 供 a11y、流式 `FollowEnd`、折叠 `HoldPlace`、程序选择行 `ListState.Choose` |
 | `Table` + `TableColumn` | 虚拟化表格（排序/列宽/单元格选择） | 多列可排序数据用 Table；不许 Row 手排 |
-| `Outline` + `OutlineState[K]` | 虚拟化树/大纲 | 文件树、工作区树、可展开层级用 Outline；小树可用 `Tree` |
+| `Outline` + `OutlineState[K]` | 虚拟化树/大纲 | 文件树、可展开层级用 Outline；小树可用 `Tree`（侧栏工作区树已随单工作区模式移除，见 AGENT-SURFACES S12） |
 | `Tree` / `TreeBase` | 静态小树 | 只用于小规模固定树；大集合用 Outline |
 | `GridView` + `GridState` | 虚拟化网格 | 卡片墙式集合用 GridView + State；不许 Row 循环分列 |
 
@@ -155,7 +155,7 @@
 | 组件/API | 用途 | 本项目规则 |
 |---|---|---|
 | `Tabs` / `TabsBase` | 标签页 | 视图切换用 Tabs；不许用 tab 模拟分支/线程 |
-| `Sidebar` / `SidebarSection` / `SidebarItem` | Finder 式源列表 | 侧栏导航/会话/工作区用 Sidebar；徽标用 Children(Badge) |
+| `Sidebar` / `SidebarSection` / `SidebarItem` | Finder 式源列表 | 侧栏导航/会话用 Sidebar；徽标用 Children(Badge) |
 | `Breadcrumbs` / `BackButton` / `ForwardButton` / `Router` | 层级导航/历史 | 文件路径/设置子页用 Breadcrumbs/Router |
 | `Spinner` / `Progress` / `Meter` | 未知/已知进度/水位 | 未知时长用 Spinner；真实进度用 Progress；不许伪造进度 |
 | `Badge` | 状态/类型/计数 pill | 只表达信息，不做普通元数据装饰；禁用全宽胶囊条 |
@@ -536,11 +536,11 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 等待回复 `Running && Waiting` | `icons.Clock` | `等待回复`（`TypeXXXS` 微标签） | 已发送、模型尚无任何输出 |
 | 运行中 `Running && !Waiting` | `ui.Spinner` | `运行中`（`TypeXXXS`） | 已有文本/推理/工具事件 |
 | 后台完成未读 `Unread` | 会话 glyph | 8 DIP `Accent` 圆点 | 标题 `WeightMedium`；行无障碍名带「未读回复」 |
-| 折叠的工作区/未分组分组 | 展开箭头 + 文件夹 | 子会话状态汇总（全等待=等待回复，否则运行中；仅未读=圆点）+ 静默计数 | 分组展开时状态由子行承担 |
+| 侧栏「工作文件夹」头 | 文件夹图标 + `工作文件夹` 微标签 | 当前文件夹名 + 2px 无关的 chevron（`切换工作文件夹`） | 分组树已移除；会话行承担状态，头部只切换文件夹 |
 
 状态词是行内微标签，不是 Badge（避免「中性底 + 状态字」拼法，AP-21）；未读点不是唯一信息载体，`ListState.Label`/行无障碍名同时给出文字。当前会话行不再常显 ⋯（hover/focus 或右键显示），把宽度留给标题与状态。
 
-**树行的前置位（2026-11-14，对齐 DSH 侧栏）**：工作区与工作区内的会话共用同一行解剖——`[选中 2px 左条][层级缩进][一个 16px leading slot][gap]`——leading slot 里放工作区的文件夹（hover 时换成 disclosure chevron，DSH 的 folder→chevron 交换）或会话的运行 glyph（Clock/Spinner/Message）。嵌套会话只缩进 `Space3`（12 DIP），不再多占一格箭头列，因此所有行都以图标开头、标题左缘只有一级小幅缩进（`sidebar.buildTreeRowPrefix`，mygo `OutlineState.Prefix` 实现；`Outline` 仍保留原生树语义、展开/收起、键盘与 a11y）。
+**会话行的前置位（2026-11-14 DSH 对齐；2026-11-23 单工作区收口）**：侧栏会话行统一为 `[选中 2px 左条][一个 16px leading slot][gap][标题][状态]`，leading slot 里放会话的运行 glyph（Clock/Spinner/Message），行尾是状态词/未读点与 hover 显现的 ⋯。工作区树与层级缩进随单工作区模式删除（AGENT-SURFACES S12）：文件夹只出现在头部与启动门/切换对话框里，所以会话没有嵌套层级。
 
 ### 5.3 字号（type scale，`design.TypeRole`）
 

@@ -51,13 +51,13 @@ func TestSidebarHasNoViewMenu(t *testing.T) {
 	tester.Frame()
 	h.assertNoTexts(tester, "View", "Sort", "Recent activity", "Name", "Group", "By workspace", "Flat")
 	// The fixed product labels survive the language switch.
-	h.assertTexts(tester, "Workspace", "Add workspace")
+	h.assertTexts(tester, "Workspace", "Switch workspace folder")
 }
 
-// TestSidebarAlwaysGroupsByWorkspace ignores stale view settings: even a store
-// that still holds retired sort/group keys gets the workspace tree sorted by
-// recent activity, pinned-first inside each group.
-func TestSidebarAlwaysGroupsByWorkspace(t *testing.T) {
+// TestSidebarAlwaysScopesToTheOpenFolder ignores stale view settings: even a
+// store that still holds retired sort/group keys gets the single open folder's
+// list, pinned-first and never the other folders' conversations.
+func TestSidebarAlwaysScopesToTheOpenFolder(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0)
 	settings := newSidebarSettings(map[string]string{
 		"sidebar.sort":  "name",
@@ -69,19 +69,17 @@ func TestSidebarAlwaysGroupsByWorkspace(t *testing.T) {
 		{ID: "s-pin", Title: "Zulu 置顶", WorkspaceID: "w1", Pinned: true, UpdatedAt: base.Add(-4 * time.Hour)},
 		{ID: "s-new", Title: "Beta 新", WorkspaceID: "w2", UpdatedAt: base},
 	}}
+	workspace = workspace.withCurrent(contracts.Workspace{ID: "w1", Name: "项目一", Root: "/work/one"})
 	h := newHarnessWithSettingsAndWorkspace(t, chat, settings, workspace, sidebar.Config{})
 	tester := h.tester()
 
-	// Grouping wins over the stale "flat" value.
-	h.assertTexts(tester, "项目一", "项目二")
+	// The open folder wins over the stale "flat" value: only 项目一's
+	// conversations are listed, the other folder's session is not.
+	h.assertTexts(tester, "项目一", "Alpha 旧", "Zulu 置顶")
+	h.assertNoTexts(tester, "项目二", "Beta 新")
 	texts := tester.Texts()
-	// Recent-activity group order: 项目二 (newest session) above 项目一.
-	two, one := textIndex(texts, "项目二"), textIndex(texts, "项目一")
-	if !(two >= 0 && one >= 0 && two < one) {
-		t.Fatalf("group order = 项目二:%d 项目一:%d; want recent activity first; texts = %v", two, one, texts)
-	}
-	// Name sorting does not apply: inside 项目一 the pinned Zulu row comes
-	// before the unpinned Alpha row even though Alpha sorts first by name.
+	// Name sorting does not apply: the pinned Zulu row comes before the unpinned
+	// Alpha row even though Alpha sorts first by name.
 	pinned, alpha := textIndex(texts, "Zulu 置顶"), textIndex(texts, "Alpha 旧")
 	if !(pinned >= 0 && alpha >= 0 && pinned < alpha) {
 		t.Fatalf("pinned-first order lost: pinned=%d alpha=%d; texts = %v", pinned, alpha, texts)
@@ -215,12 +213,10 @@ func TestSidebarOnlyAutomationSessionsShowsEmptyState(t *testing.T) {
 	h.assertNoTexts(tester, "自动化: 每日摘要")
 }
 
-// TestWorkspaceTreeHidesAutomationSessions: the workspace tree follows the same
-// explicit-provenance rule for its rows, its per-group counts and the synthetic
-// "未分组" group (a hidden run is not a user conversation, so it cannot make an
-// empty ungrouped group appear; a user title with the old convention does not
-// hide its session).
-func TestWorkspaceTreeHidesAutomationSessions(t *testing.T) {
+// TestSingleWorkspaceHidesAutomationSessions: the folder list follows the same
+// explicit-provenance rule (a hidden run is not a user conversation; a user
+// title with the old convention does not hide its session).
+func TestSingleWorkspaceHidesAutomationSessions(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0)
 	workspace := newFakeWorkspace(treeWorkspaces()...)
 	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{
@@ -232,16 +228,12 @@ func TestWorkspaceTreeHidesAutomationSessions(t *testing.T) {
 		// A user conversation titled like a run stays visible.
 		{ID: "s4", Title: "自动化: 我的笔记", WorkspaceID: "w1", UpdatedAt: base},
 	}}
+	workspace = workspace.withCurrent(contracts.Workspace{ID: "w1", Name: "项目一", Root: "/work/one"})
 	h := newHarnessWithWorkspace(t, chat, sidebar.Config{}, workspace)
 	tester := h.tester()
 
 	h.assertTexts(tester, "项目一", "用户会话", "自动化: 我的笔记")
-	h.assertNoTexts(tester, "每日摘要", "后台整理")
-	h.assertNoTexts(tester, "未分组")
-	// The group count counts user sessions only (项目一 holds two visible rows).
-	if got := countText(tester, "2"); got != 1 {
-		t.Fatalf("group count rows showing 2 = %d, want the two user sessions; texts = %v", got, tester.Texts())
-	}
+	h.assertNoTexts(tester, "每日摘要", "后台整理", "未分组")
 }
 
 // TestSidebarFlatFallbackRecentAndPinned covers the only fallback: without a

@@ -1,11 +1,11 @@
 package sidebar_test
 
-// Frame tests for the workspace row's rename action (contracts.WorkspaceRenamer):
-// the ⋯ menu offers "Rename workspace" only when the backend implements the
-// optional renamer, the native dialog's Enter saves and Escape cancels, an empty
-// name is rejected inline, a duplicate name surfaces the backend's localized
-// error, and a successful rename refreshes the tree (and the current workspace
-// title).
+// Frame tests for the workspace rename flow after the single-workspace move:
+// the switch dialog's row menu offers "重命名工作区" only when the backend
+// implements the optional renamer, the native dialog's Enter saves and Escape
+// cancels, an empty name is rejected inline, a duplicate name surfaces the
+// backend's localized error, and a successful rename refreshes the header (and
+// the switch dialog's list).
 
 import (
 	"context"
@@ -55,10 +55,15 @@ func (f *renamingWorkspace) RenameWorkspace(_ context.Context, id, name string) 
 	return contracts.Workspace{}, fmt.Errorf("workspace: not found: %q", id)
 }
 
-// openWorkspaceRename opens one workspace row's menu and chooses its rename
-// entry.
+// openWorkspaceRename opens the switch dialog, one folder's row menu and its
+// rename entry (the single-workspace path to the existing rename dialog).
 func openWorkspaceRename(t *testing.T, tester *ui.Tester, title string) {
 	t.Helper()
+	if err := tester.Click("切换工作文件夹"); err != nil {
+		t.Fatalf("open the switch dialog: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	tester.Frame()
 	openRowMenu(t, tester, title)
 	if err := tester.Click("重命名工作区"); err != nil {
 		t.Fatalf("click 重命名工作区: %v; texts = %v", err, tester.Texts())
@@ -67,17 +72,15 @@ func openWorkspaceRename(t *testing.T, tester *ui.Tester, title string) {
 	tester.Frame()
 }
 
-// TestWorkspaceRenameFromRowMenu covers the happy path: the ⋯ menu offers the
+// TestWorkspaceRenameFromRowMenu covers the happy path: the row menu offers the
 // rename entry only with the renamer present, Enter in the native dialog saves,
-// and the tree plus the current workspace title show the new name.
+// and the header plus the switch dialog show the new name.
 func TestWorkspaceRenameFromRowMenu(t *testing.T) {
 	current := contracts.Workspace{ID: "w1", Name: "项目一", Root: "/work/one"}
 	workspace := &renamingWorkspace{fakeWorkspace: newFakeWorkspace(treeWorkspaces()...).withCurrent(current)}
 	h := newHarnessWithWorkspace(t, treeChat(), sidebar.Config{}, workspace)
 	tester := h.tester()
 
-	openRowMenu(t, tester, "项目一")
-	h.assertTexts(tester, "重命名工作区")
 	openWorkspaceRename(t, tester, "项目一")
 	h.assertTexts(tester, "重命名工作区", "工作区名称", "取消", "保存")
 
@@ -93,14 +96,13 @@ func TestWorkspaceRenameFromRowMenu(t *testing.T) {
 	if len(workspace.renameCalls) != 1 || workspace.renameCalls[0] != "w1=新项目名" {
 		t.Fatalf("RenameWorkspace calls = %v, want [w1=新项目名]", workspace.renameCalls)
 	}
-	// The dialog closed (its controls are gone) and the tree shows the new name;
-	// the success badge "已重命名工作区" contains the menu copy, so the dialog is
-	// asserted by its own controls instead.
+	// The dialog closed (its controls are gone) and the header shows the new
+	// name; the success badge "已重命名工作区" contains the menu copy, so the
+	// dialog is asserted by its own controls instead.
 	h.assertNoTexts(tester, "工作区名称", "保存")
 	h.assertTexts(tester, "新项目名", "已重命名工作区")
 	h.assertNoTexts(tester, "项目一")
-	// The current workspace keeps its identity, so its new title is the current
-	// one (the row label and the live state still belong to w1).
+	// The current workspace keeps its identity, so its new title is the open one.
 	currentAfter, ok, err := workspace.Current(context.Background())
 	if err != nil || !ok || currentAfter.ID != "w1" || currentAfter.Name != "新项目名" {
 		t.Fatalf("current workspace after rename = %+v (%v, %v), want w1 新项目名", currentAfter, ok, err)
@@ -127,7 +129,7 @@ func TestWorkspaceRenameEmptyNameIsRejected(t *testing.T) {
 	if len(workspace.renameCalls) != 0 {
 		t.Fatalf("an empty name reached the backend: %v", workspace.renameCalls)
 	}
-	// Cancelling leaves the registry and the tree untouched.
+	// Cancelling leaves the registry and the header untouched.
 	h.click(tester, "取消")
 	h.assertNoTexts(tester, "重命名工作区")
 	h.assertTexts(tester, "项目一")
@@ -150,6 +152,13 @@ func TestWorkspaceRenameEscapeCancels(t *testing.T) {
 	tester.Frame()
 
 	h.assertNoTexts(tester, "重命名工作区")
+	h.assertTexts(tester, "项目一")
+	// The registry is unchanged: reopening the switch dialog still lists 项目二.
+	if err := tester.Click("切换工作文件夹"); err != nil {
+		t.Fatalf("reopen the switch dialog: %v", err)
+	}
+	tester.Frame()
+	tester.Frame()
 	h.assertTexts(tester, "项目二")
 	if len(workspace.renameCalls) != 0 {
 		t.Fatalf("Escape still renamed: %v", workspace.renameCalls)
@@ -175,21 +184,33 @@ func TestWorkspaceRenameDuplicateIsLocalized(t *testing.T) {
 	if len(workspace.renameCalls) != 1 {
 		t.Fatalf("RenameWorkspace calls = %v, want one rejected attempt", workspace.renameCalls)
 	}
-	// The rejected rename changed nothing: the tree still shows both names.
+	// The rejected rename changed nothing: the header still names 项目一 and the
+	// switch dialog still lists both folders.
 	h.click(tester, "取消")
+	h.assertTexts(tester, "项目一")
+	if err := tester.Click("切换工作文件夹"); err != nil {
+		t.Fatalf("reopen the switch dialog: %v", err)
+	}
+	tester.Frame()
+	tester.Frame()
 	h.assertTexts(tester, "项目一", "项目二")
 }
 
 // TestWorkspaceRenameHiddenWithoutRenamer covers the graceful fallback: a host
-// without contracts.WorkspaceRenamer keeps the open/delete entries and hides
-// only rename.
+// without contracts.WorkspaceRenamer keeps the delete entry and hides only
+// rename.
 func TestWorkspaceRenameHiddenWithoutRenamer(t *testing.T) {
 	workspace := newFakeWorkspace(treeWorkspaces()...).withCurrent(
 		contracts.Workspace{ID: "w1", Name: "项目一", Root: "/work/one"})
 	h := newHarnessWithWorkspace(t, treeChat(), sidebar.Config{}, workspace)
 	tester := h.tester()
 
+	if err := tester.Click("切换工作文件夹"); err != nil {
+		t.Fatalf("open the switch dialog: %v", err)
+	}
+	tester.Frame()
+	tester.Frame()
 	openRowMenu(t, tester, "项目一")
-	h.assertTexts(tester, "打开工作区", "删除工作区")
+	h.assertTexts(tester, "删除工作区")
 	h.assertNoTexts(tester, "重命名工作区")
 }

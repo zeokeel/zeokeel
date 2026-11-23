@@ -24,6 +24,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **单工作区 UX：启动文件夹门 + 平铺侧栏 + 切换对话框（WORKSPACE-UX）**：桌面端每次启动先渲染「打开工作文件夹」全窗口页（最近 3 个文件夹按「最新会话 UpdatedAt、无会话回落 CreatedAt」排序、当前项预选、Enter 继续、点最近项直接打开、`选择其他文件夹…` 走原生目录选择器 + `WorkspaceService.Create("", dir)`；仅在 `contracts.KeyWorkspace` 解析成功时出现，`uiroot.Config.SkipWorkspaceGate` 供嵌入方/ui-snapshot/ui-drive 关闭）。进入 shell 后侧栏只显示当前文件夹的会话：头部是「工作文件夹 + 名称 + 切换 chevron」，原来的工作区树/分组/缩进/每组新建会话删除，搜索、消息搜索、pin/archive/rename/delete/fork 行操作保留（消息命中同样按文件夹收窄；无绑定或文件夹已删除的会话仍显示，避免不可达）；切换对话框列出最近文件夹（当前项打勾）、选择其它文件夹、打开/取消，并复用现有重命名/删除对话框管理选中文件夹。后端多工作区注册表不变；`internal/lib/workspacerecent` 统一两处的最近排序。顺带修复：从切换对话框打开的破坏性确认在无焦点时会由 Enter 触发危险按钮——确认框现在按 uikit 的两帧规则把键盘交给「取消」。测试：uiroot 启动门、sidebar 平铺/切换/重命名/删除/选择器，regression 审计迁移；快照 `.cache/workspace-final/workspace-{startup,main,switch}{,-dark}.png`。
+
 - **最终可用性收尾**（2026-11-23）：team 失败 run 错误进入读模型、启动不再打印 subagent 重复注册；automation 降级横幅支持重试接管；全量 verify（含 -race、regression、desktop/headless/ACP smoke）通过。依赖 `rig v0.37.0`。
 
 - **剩余差异收尾**（2026-11-22）：team 后续 send 的 `Track` 跟踪、快速 spawn 的完成结果、fork 身份；automation 降级状态契约与 UI 提示；MCP 重名 server 显示区分与 FileTokenStore 加密钩子。依赖 `rig v0.36.0`。
