@@ -1,0 +1,273 @@
+{
+  "protocolVersion": 1,
+  "params": {
+    "approval.resolve": {
+      "required": [
+        "decision",
+        "id"
+      ],
+      "optional": []
+    },
+    "approvals.snapshot": {
+      "required": [],
+      "optional": []
+    },
+    "approvals.subscribe": {
+      "required": [],
+      "optional": [
+        "sinceRev"
+      ]
+    },
+    "artifacts.snapshot": {
+      "required": [],
+      "optional": []
+    },
+    "ask.answer": {
+      "required": [
+        "id"
+      ],
+      "optional": [
+        "answer"
+      ]
+    },
+    "ask.cancel": {
+      "required": [
+        "id"
+      ],
+      "optional": [
+        "answer"
+      ]
+    },
+    "ask.snapshot": {
+      "required": [],
+      "optional": []
+    },
+    "ask.subscribe": {
+      "required": [],
+      "optional": [
+        "sinceRev"
+      ]
+    },
+    "context.snapshot": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": [
+        "sinceRev"
+      ]
+    },
+    "context.subscribe": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": [
+        "sinceRev"
+      ]
+    },
+    "foreground.set": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": []
+    },
+    "initialize": {
+      "required": [],
+      "optional": [
+        "capabilities",
+        "clientName",
+        "clientVersion",
+        "protocolVersion"
+      ]
+    },
+    "notify.action": {
+      "required": [
+        "id"
+      ],
+      "optional": [
+        "actionId"
+      ]
+    },
+    "ping": {
+      "required": [],
+      "optional": []
+    },
+    "plan.exit": {
+      "required": [
+        "action"
+      ],
+      "optional": []
+    },
+    "plan.snapshot": {
+      "required": [],
+      "optional": []
+    },
+    "plan.subscribe": {
+      "required": [],
+      "optional": [
+        "sinceRev"
+      ]
+    },
+    "prompts.enqueue": {
+      "required": [
+        "prompt",
+        "sessionId"
+      ],
+      "optional": []
+    },
+    "prompts.remove": {
+      "required": [
+        "id",
+        "sessionId"
+      ],
+      "optional": []
+    },
+    "prompts.snapshot": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": []
+    },
+    "prompts.subscribe": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": [
+        "sinceRev"
+      ]
+    },
+    "ready": {
+      "required": [],
+      "optional": []
+    },
+    "run.cancel": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": []
+    },
+    "session.active.get": {
+      "required": [],
+      "optional": []
+    },
+    "session.create": {
+      "required": [],
+      "optional": [
+        "title"
+      ]
+    },
+    "session.list.snapshot": {
+      "required": [],
+      "optional": []
+    },
+    "session.snapshot": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": [
+        "beforeMessageId",
+        "tail"
+      ]
+    },
+    "session.subscribe": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": [
+        "sinceRev"
+      ]
+    },
+    "session.unsubscribe": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": []
+    },
+    "settings.set": {
+      "required": [
+        "key"
+      ],
+      "optional": [
+        "value"
+      ]
+    },
+    "settings.snapshot": {
+      "required": [],
+      "optional": []
+    },
+    "settings.subscribe": {
+      "required": [],
+      "optional": [
+        "sinceRev"
+      ]
+    },
+    "task.delete": {
+      "required": [
+        "id"
+      ],
+      "optional": [
+        "sessionId"
+      ]
+    },
+    "task.status": {
+      "required": [
+        "id",
+        "status"
+      ],
+      "optional": [
+        "sessionId"
+      ]
+    },
+    "tasks.snapshot": {
+      "required": [],
+      "optional": [
+        "sessionId",
+        "sinceRev"
+      ]
+    },
+    "tasks.subscribe": {
+      "required": [],
+      "optional": [
+        "sessionId",
+        "sinceRev"
+      ]
+    },
+    "workspace.list.snapshot": {
+      "required": [],
+      "optional": []
+    }
+  },
+  "capabilities": {
+    "static": [
+      "approvals",
+      "artifacts",
+      "ask",
+      "foreground",
+      "notify",
+      "plan",
+      "prompts",
+      "run.cancel",
+      "session.create",
+      "session.delta",
+      "session.list",
+      "session.snapshot",
+      "session.subscribe",
+      "settings",
+      "settings.set",
+      "workspace"
+    ],
+    "conditional": [
+      {
+        "name": "context",
+        "when": "KeyContext"
+      },
+      {
+        "name": "regenerate",
+        "when": "SessionRegenerator"
+      },
+      {
+        "name": "tasks",
+        "when": "KeyTaskBoard"
+      }
+    ]
+  }
+}

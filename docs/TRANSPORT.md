@@ -269,6 +269,33 @@ SIGINT/SIGTERM（signals_unix.go:11）
 > 客户端已用到的两项：`session.create`（新建按钮）、`settings.set`（设置可写）。新增能力时
 > 先在这张表登记，再让客户端读——`TestInitializeAdvertisesCapabilities` 会同时钉住静态清单
 > 与三个条件项的双向行为。
+
+#### 4.2.2 机器可读的契约：`internal/gateway/contract.json`【生成物】
+
+`go generate ./internal/gateway` 从 Go 声明生成 `internal/gateway/contract.json`（提交进版本库）：
+
+```json
+{
+  "protocolVersion": 1,
+  "params": { "<method>": { "required": [...], "optional": [...] }, … },
+  "capabilities": {
+    "static": [ … ],
+    "conditional": [ { "name": "context", "when": "KeyContext" }, … ]
+  }
+}
+```
+
+- `params`：字段名来自各 `xxxParams` struct 的 **json tag**；**不带 `,omitempty` = 必填**
+  （handler 会拒绝空值的那一类）。所以"必填"不是另写一份清单，而是 tag 本身的事实。
+- `capabilities.static` 与本节上表**同源**（`serverCapabilities`），`conditional[].when` 是
+  **机器可读标记**（`KeyContext` / `KeyTaskBoard` / `SessionRegenerator`），人话说明在 §4.2.1。
+- **谁读它**：web 侧的三处替身（`dev/ws-params.mjs`、`dev/mock-server.mjs`、
+  `src/test/fake-gateway.ts`）**只读这一份**，禁止手写方法或能力清单。起因是第 9 次
+  "替身比生产宽松"：fake 手写了 `settings.set` 而真网关没有，171 条测试全绿、设置页永远只读。
+- **过期即红**：`TestContractIsUpToDate` 比对生成物与源码，不一致就指出具体方法/能力；
+  生成是确定性的（键排序），**连跑两次 `git diff` 为空**。忘了重生成时的修法就是那一行命令。
+- `TestContractCoversEveryMethod` 断言 contract 的方法集合 == `SupportedMethods()`（37 个），
+  所以"新方法忘了进契约"也会红。
 | `epoch` | 客户端记录；重连后 `epoch` 变 → 丢弃全部本地状态（§6.2） |
 | 多标签页 | 每个标签页 = 一条 WS = 一个 `clientId`。网关不做跨标签页状态同步（各自 `session.subscribe`），但**读模型共享**（同一个 rev 序列） |
 

@@ -46,20 +46,36 @@ var serverCapabilities = []string{
 // capability detection into trial and error.
 func (g *Gateway) gatewayCapabilities() []string {
 	caps := append([]string(nil), serverCapabilities...)
-	if inspector, ok := g.root.Get(contracts.KeyContext); ok && inspector != nil {
-		caps = append(caps, "context")
-	}
-	if chat, err := g.chatService(); err == nil {
-		if _, ok := chat.(contracts.SessionRegenerator); ok {
-			// The "retry the last turn" menu entry (§4.6 regenerate mode).
-			caps = append(caps, "regenerate")
+	for _, conditional := range conditionalCapabilities {
+		if g.hasConditionalCapability(conditional.When) {
+			caps = append(caps, conditional.Name)
 		}
 	}
-	if board, ok := g.root.Get(contracts.KeyTaskBoard); ok && board != nil {
-		// The background-task chip (§5.1.8).
-		caps = append(caps, "tasks")
-	}
 	return caps
+}
+
+// hasConditionalCapability resolves one conditional capability's marker. The
+// markers are the Go symbols conditionalCapabilities names; keeping the switch
+// here (instead of per-capability code in gatewayCapabilities) means the
+// generated contract and the handshake cannot drift.
+func (g *Gateway) hasConditionalCapability(when string) bool {
+	switch when {
+	case "KeyContext":
+		inspector, ok := g.root.Get(contracts.KeyContext)
+		return ok && inspector != nil
+	case "KeyTaskBoard":
+		board, ok := g.root.Get(contracts.KeyTaskBoard)
+		return ok && board != nil
+	case "SessionRegenerator":
+		chat, err := g.chatService()
+		if err != nil {
+			return false
+		}
+		_, ok := chat.(contracts.SessionRegenerator)
+		return ok
+	}
+	// An unknown marker must not silently grant a capability.
+	return false
 }
 
 // limitsDTO is the initialize result's limits block (§4.2).
@@ -71,11 +87,14 @@ type limitsDTO struct {
 }
 
 // initializeParams is the handshake the client must send first.
+// Optional params carry ",omitempty" so the generated contract (contract.json)
+// can tell required from optional from the tag alone: a field without omitempty
+// is one the handler rejects when empty.
 type initializeParams struct {
-	ClientName      string   `json:"clientName"`
-	ClientVersion   string   `json:"clientVersion"`
-	ProtocolVersion int      `json:"protocolVersion"`
-	Capabilities    []string `json:"capabilities"`
+	ClientName      string   `json:"clientName,omitempty"`
+	ClientVersion   string   `json:"clientVersion,omitempty"`
+	ProtocolVersion int      `json:"protocolVersion,omitempty"`
+	Capabilities    []string `json:"capabilities,omitempty"`
 }
 
 // initializeResult is the handshake answer.
@@ -95,8 +114,8 @@ type sessionParams struct {
 // sessionSnapshotParams is the session.snapshot body.
 type sessionSnapshotParams struct {
 	SessionID       string `json:"sessionId"`
-	Tail            int    `json:"tail"`
-	BeforeMessageID string `json:"beforeMessageId"`
+	Tail            int    `json:"tail,omitempty"`
+	BeforeMessageID string `json:"beforeMessageId,omitempty"`
 }
 
 // sessionSnapshotResult is the session.snapshot answer.
@@ -118,7 +137,7 @@ type listSnapshotResult struct {
 // subscribeParams is the session.subscribe body.
 type subscribeParams struct {
 	SessionID string `json:"sessionId"`
-	SinceRev  uint64 `json:"sinceRev"`
+	SinceRev  uint64 `json:"sinceRev,omitempty"`
 }
 
 // subscribeResult is the session.subscribe answer.
@@ -142,7 +161,7 @@ type pingResult struct {
 // askAnswerParams is the ask.answer / ask.cancel body.
 type askAnswerParams struct {
 	ID     string `json:"id"`
-	Answer string `json:"answer"`
+	Answer string `json:"answer,omitempty"`
 }
 
 // planExitParams is the plan.exit body.
@@ -158,7 +177,7 @@ type planExitResult struct {
 // notifyActionParams is the notify.action body.
 type notifyActionParams struct {
 	ID       string `json:"id"`
-	ActionID string `json:"actionId"`
+	ActionID string `json:"actionId,omitempty"`
 }
 
 // foregroundParams is the foreground.set body.
@@ -459,7 +478,7 @@ func (g *Gateway) sessionUnsubscribe(ctx context.Context, c *client, raw json.Ra
 // domainSubscribeParams is the body of a domain subscribe request: only the
 // client's rev, so a reconnect can resume from the replay ring (§6.5).
 type domainSubscribeParams struct {
-	SinceRev uint64 `json:"sinceRev"`
+	SinceRev uint64 `json:"sinceRev,omitempty"`
 }
 
 // domainSubscribeResult is the answer of every *.subscribe method.
@@ -729,11 +748,14 @@ func (g *Gateway) promptsSnapshot(ctx context.Context, raw json.RawMessage) (any
 }
 
 // promptsSubscribe registers the client on one inbox and replays what it missed.
+// promptsSubscribeParams is the prompts.subscribe body.
+type promptsSubscribeParams struct {
+	SessionID string `json:"sessionId"`
+	SinceRev  uint64 `json:"sinceRev,omitempty"`
+}
+
 func (g *Gateway) promptsSubscribe(ctx context.Context, c *client, raw json.RawMessage) (any, *protocolError) {
-	var params struct {
-		SessionID string `json:"sessionId"`
-		SinceRev  uint64 `json:"sinceRev"`
-	}
+	var params promptsSubscribeParams
 	if err := decodeParams(raw, &params); err != nil {
 		return nil, err
 	}
@@ -829,7 +851,7 @@ func (g *Gateway) promptsRemove(raw json.RawMessage) (any, *protocolError) {
 
 // sessionCreateParams is the session.create body.
 type sessionCreateParams struct {
-	Title string `json:"title"`
+	Title string `json:"title,omitempty"`
 }
 
 // sessionCreateResult is the session.create answer.
@@ -900,7 +922,7 @@ const maxSessionTitleRunes = 200
 // settingsSetParams is the settings.set body.
 type settingsSetParams struct {
 	Key   string `json:"key"`
-	Value string `json:"value"`
+	Value string `json:"value,omitempty"`
 }
 
 // settingsSetResult is the settings.set answer.
@@ -963,7 +985,7 @@ type contextSnapshotResult struct {
 // contextSessionParams is the body of context.snapshot / context.subscribe.
 type contextSessionParams struct {
 	SessionID string `json:"sessionId"`
-	SinceRev  uint64 `json:"sinceRev"`
+	SinceRev  uint64 `json:"sinceRev,omitempty"`
 }
 
 // contextSnapshot serves one conversation's folded context timeline.
@@ -1014,8 +1036,8 @@ func (g *Gateway) contextSubscribe(ctx context.Context, c *client, raw json.RawM
 // conversation scopes the board to that session when the backend implements
 // contracts.SessionTaskBoard.
 type tasksParams struct {
-	SessionID string `json:"sessionId"`
-	SinceRev  uint64 `json:"sinceRev"`
+	SessionID string `json:"sessionId,omitempty"`
+	SinceRev  uint64 `json:"sinceRev,omitempty"`
 }
 
 // tasksSnapshotResult is the tasks.snapshot answer.
@@ -1030,13 +1052,13 @@ type tasksSnapshotResult struct {
 type taskStatusParams struct {
 	ID        string `json:"id"`
 	Status    string `json:"status"`
-	SessionID string `json:"sessionId"`
+	SessionID string `json:"sessionId,omitempty"`
 }
 
 // taskDeleteParams is the task.delete body.
 type taskDeleteParams struct {
 	ID        string `json:"id"`
-	SessionID string `json:"sessionId"`
+	SessionID string `json:"sessionId,omitempty"`
 }
 
 // taskWriteResult is the answer of both write methods: the new rev plus the row
