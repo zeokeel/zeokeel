@@ -222,6 +222,18 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"prompts.remove": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.promptsRemove(request.Params)
 		},
+		"tasks.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.tasksSnapshot(ctx, request.Params)
+		},
+		"tasks.subscribe": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.tasksSubscribe(ctx, c, request.Params)
+		},
+		"task.status": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.taskSetStatus(ctx, request.Params)
+		},
+		"task.delete": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.taskDelete(ctx, request.Params)
+		},
 		"session.active.get": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.activeSession()
 		},
@@ -899,6 +911,170 @@ func (g *Gateway) setSetting(ctx context.Context, raw json.RawMessage) (any, *pr
 		rev = snapshot.rev
 	}
 	return settingsSetResult{Epoch: g.epoch, Rev: rev}, nil
+}
+
+// --- task board ------------------------------------------------------------
+
+// tasksParams is the body of tasks.snapshot / tasks.subscribe: an optional
+// conversation scopes the board to that session when the backend implements
+// contracts.SessionTaskBoard.
+type tasksParams struct {
+	SessionID string `json:"sessionId"`
+	SinceRev  uint64 `json:"sinceRev"`
+}
+
+// tasksSnapshotResult is the tasks.snapshot answer.
+type tasksSnapshotResult struct {
+	Epoch     string    `json:"epoch"`
+	Rev       uint64    `json:"rev"`
+	SessionID string    `json:"sessionId,omitempty"`
+	Tasks     []taskDTO `json:"tasks"`
+}
+
+// taskStatusParams is the task.status body (task board status vocabulary).
+type taskStatusParams struct {
+	ID        string `json:"id"`
+	Status    string `json:"status"`
+	SessionID string `json:"sessionId"`
+}
+
+// taskDeleteParams is the task.delete body.
+type taskDeleteParams struct {
+	ID        string `json:"id"`
+	SessionID string `json:"sessionId"`
+}
+
+// taskWriteResult is the answer of both write methods: the new rev plus the row
+// the client just changed (nil for a deletion).
+type taskWriteResult struct {
+	Epoch string   `json:"epoch"`
+	Rev   uint64   `json:"rev"`
+	Task  *taskDTO `json:"task,omitempty"`
+}
+
+// tasksDomainKey maps the optional conversation to a domain key.
+func tasksDomainKey(sessionID string) string {
+	if strings.TrimSpace(sessionID) == "" {
+		return domainTasks
+	}
+	return tasksKey(strings.TrimSpace(sessionID))
+}
+
+// tasksSnapshot serves the task board domain.
+func (g *Gateway) tasksSnapshot(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	var params tasksParams
+	if len(raw) > 0 {
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+	}
+	key := tasksDomainKey(params.SessionID)
+	snapshot, err := g.hub.snapshotDomain(ctx, key)
+	if err != nil {
+		return nil, internalError(err)
+	}
+	payload, ok := snapshot.payload.(tasksSnapshot)
+	if !ok {
+		return nil, internalError(errors.New("gateway: tasks snapshot has an unexpected type"))
+	}
+	return tasksSnapshotResult{
+		Epoch:     g.epoch,
+		Rev:       snapshot.rev,
+		SessionID: payload.SessionID,
+		Tasks:     payload.Tasks,
+	}, nil
+}
+
+// tasksSubscribe registers the client on the board domain (global or
+// per-session) and replays its ring.
+func (g *Gateway) tasksSubscribe(ctx context.Context, c *client, raw json.RawMessage) (any, *protocolError) {
+	var params tasksParams
+	if len(raw) > 0 {
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+	}
+	return g.domainSubscribe(ctx, c, tasksDomainKey(params.SessionID), raw)
+}
+
+// taskSetStatus moves one task to another board status (pending / in_progress /
+// completed). This is the "stop" half of the chip's commands: an in-progress
+// background task goes back to pending. The status vocabulary is the contract's;
+// an unknown value is a parameter error, never a silent no-op.
+func (g *Gateway) taskSetStatus(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	var params taskStatusParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	id := strings.TrimSpace(params.ID)
+	if id == "" {
+		return nil, errInvalidParams("id", "is required")
+	}
+	status := strings.TrimSpace(params.Status)
+	switch status {
+	case contracts.TaskStatusPending, contracts.TaskStatusInProgress, contracts.TaskStatusCompleted:
+	default:
+		return nil, errInvalidParams("status", "must be pending, in_progress or completed")
+	}
+	board := g.taskBoard(strings.TrimSpace(params.SessionID))
+	if board == nil {
+		return nil, appError(codeNotReady, "task_board_unavailable", false)
+	}
+	task, err := board.SetStatus(ctx, id, status)
+	if err != nil {
+		return nil, internalError(err)
+	}
+	return g.publishTaskChange(ctx, params.SessionID, &task)
+}
+
+// taskDelete removes one task from the board (the chip's "cancel").
+func (g *Gateway) taskDelete(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	var params taskDeleteParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	id := strings.TrimSpace(params.ID)
+	if id == "" {
+		return nil, errInvalidParams("id", "is required")
+	}
+	board := g.taskBoard(strings.TrimSpace(params.SessionID))
+	if board == nil {
+		return nil, appError(codeNotReady, "task_board_unavailable", false)
+	}
+	if err := board.Delete(ctx, id); err != nil {
+		return nil, internalError(err)
+	}
+	return g.publishTaskChange(ctx, params.SessionID, nil)
+}
+
+// publishTaskChange refreshes the board domain right after a gateway write, so
+// the caller's reply carries the rev its own change landed on. The board has no
+// change notification (§6.3), so unrelated mutations only reach clients on the
+// next poll.
+func (g *Gateway) publishTaskChange(ctx context.Context, sessionID string, task *contracts.BoardTask) (any, *protocolError) {
+	key := tasksDomainKey(sessionID)
+	if err := g.hub.refreshNow(ctx, key); err != nil {
+		g.logger.Printf("gateway: refresh task board after write: %v", err)
+	}
+	rev := uint64(0)
+	if snapshot, err := g.hub.snapshotDomain(ctx, key); err == nil {
+		rev = snapshot.rev
+	}
+	result := taskWriteResult{Epoch: g.epoch, Rev: rev}
+	if task != nil {
+		result.Task = &taskDTO{
+			ID:          task.ID,
+			Subject:     task.Subject,
+			Description: task.Description,
+			Status:      task.Status,
+			Owner:       task.Owner,
+			BlockedBy:   task.BlockedBy,
+			WriteScopes: task.WriteScopes,
+			Created:     timePointer(task.Created),
+			Updated:     timePointer(task.Updated),
+		}
+	}
+	return result, nil
 }
 
 // maxSettingValueBytes bounds one settings value (the system prompt is the

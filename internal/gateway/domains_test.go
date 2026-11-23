@@ -287,6 +287,7 @@ type domainTestRig struct {
 	approvals *fakeApprovals
 	settings  *fakeSettings
 	workspace *fakeWorkspace
+	tasks     *fakeTaskBoard
 }
 
 // startDomainGateway starts a gateway with the small-domain backends.
@@ -298,8 +299,9 @@ func startDomainGateway(t *testing.T) *domainTestRig {
 	approvals := newFakeApprovals(contracts.PermissionWorkspace)
 	approvals.settings = settings
 	workspace := newFakeWorkspace()
+	board := newFakeTaskBoard()
 
-	root := cordisRootFor(t, chat, approvals, settings, workspace)
+	root := cordisRootFor(t, chat, approvals, settings, workspace, board)
 	gateway, err := New(root, Options{DataDir: t.TempDir(), Port: -1, Logger: testLogger{t: t}, Out: discardWriter{}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -309,7 +311,8 @@ func startDomainGateway(t *testing.T) *domainTestRig {
 		t.Fatalf("Provide: %v", err)
 	}
 	served := serveGateway(t, gateway)
-	return &domainTestRig{runningGateway: served, chat: chat, approvals: approvals, settings: settings, workspace: workspace}
+	return &domainTestRig{runningGateway: served, chat: chat, approvals: approvals,
+		settings: settings, workspace: workspace, tasks: board}
 }
 
 // connect opens an authenticated control-plane connection.
@@ -323,6 +326,79 @@ func (r *domainTestRig) connect(t *testing.T) *testWSConn {
 	resultOf(t, conn.call("initialize", map[string]any{"protocolVersion": ProtocolVersion}))
 	resultOf(t, conn.call("ready", nil))
 	return conn
+}
+
+// --- task board fake -------------------------------------------------------
+
+// fakeTaskBoard is an in-memory contracts.TaskBoard with a manual notify, so a
+// test can mutate it "behind the gateway's back" (which is what the agent's task
+// tools do in production).
+type fakeTaskBoard struct {
+	mu    sync.Mutex
+	tasks []contracts.BoardTask
+	next  int
+	// sessions, when set, makes the fake implement contracts.SessionTaskBoard.
+	sessions map[string][]contracts.BoardTask
+}
+
+// newFakeTaskBoard returns an empty board.
+func newFakeTaskBoard() *fakeTaskBoard { return &fakeTaskBoard{} }
+
+// List implements contracts.TaskBoard.
+func (f *fakeTaskBoard) List(context.Context) ([]contracts.BoardTask, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]contracts.BoardTask(nil), f.tasks...), nil
+}
+
+// Create implements contracts.TaskBoard.
+func (f *fakeTaskBoard) Create(_ context.Context, subject, description string) (contracts.BoardTask, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.next++
+	now := time.Now().UTC().Truncate(time.Second)
+	task := contracts.BoardTask{
+		ID: fmt.Sprintf("t%d", f.next), Subject: subject, Description: description,
+		Status: contracts.TaskStatusPending, Created: now, Updated: now,
+	}
+	f.tasks = append(f.tasks, task)
+	return task, nil
+}
+
+// SetStatus implements contracts.TaskBoard.
+func (f *fakeTaskBoard) SetStatus(_ context.Context, id, status string) (contracts.BoardTask, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for index := range f.tasks {
+		if f.tasks[index].ID == id {
+			f.tasks[index].Status = status
+			f.tasks[index].Updated = time.Now().UTC().Truncate(time.Second)
+			return f.tasks[index], nil
+		}
+	}
+	return contracts.BoardTask{}, fmt.Errorf("task %q not found", id)
+}
+
+// Delete implements contracts.TaskBoard.
+func (f *fakeTaskBoard) Delete(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for index := range f.tasks {
+		if f.tasks[index].ID == id {
+			f.tasks = append(f.tasks[:index], f.tasks[index+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("task %q not found", id)
+}
+
+// seed adds one task directly (the "someone else mutated the board" path).
+func (f *fakeTaskBoard) seed(subject, status string) contracts.BoardTask {
+	task, _ := f.Create(context.Background(), subject, "")
+	if status != "" {
+		task, _ = f.SetStatus(context.Background(), task.ID, status)
+	}
+	return task
 }
 
 // --- delta appliers (client-side) ------------------------------------------
@@ -778,4 +854,125 @@ func decodeItemSetDelta(t *testing.T, params map[string]any) *itemSetDelta {
 		t.Fatalf("decode delta: %v", err)
 	}
 	return &delta
+}
+
+// TestTasksDomainReplayMatchesNextSnapshot is the per-domain replay law for the
+// task board (§5.1.8): a client that took a snapshot, then applied every delta
+// in order, must hold exactly what the next snapshot says.
+//
+// The board has no change notification, so the delta arrives on the poll: the
+// test waits for the real notification instead of refreshing by hand, which is
+// also what the browser experiences.
+func TestTasksDomainReplayMatchesNextSnapshot(t *testing.T) {
+	rig := startDomainGateway(t)
+	defer rig.stop(t)
+	conn := rig.connect(t)
+
+	before := resultOf(t, conn.call("tasks.snapshot", nil))
+	beforeRev := uint64(before["rev"].(float64))
+	items, _ := before["tasks"].([]any)
+	if len(items) != 0 {
+		t.Fatalf("tasks.snapshot = %v, want an empty board", before["tasks"])
+	}
+	subscribed := resultOf(t, conn.call("tasks.subscribe", map[string]any{"sinceRev": beforeRev}))
+	if subscribed["resync"] != false {
+		t.Fatalf("tasks.subscribe from a warm rev = %v, want no resync", subscribed)
+	}
+
+	// Someone else (the agent's task tools) changes the board behind the
+	// gateway's back: one new task, one status change.
+	first := rig.tasks.seed("write the report", contracts.TaskStatusPending)
+	second := rig.tasks.seed("audit the diff", contracts.TaskStatusInProgress)
+	if _, err := rig.tasks.SetStatus(context.Background(), first.ID, contracts.TaskStatusCompleted); err != nil {
+		t.Fatalf("SetStatus: %v", err)
+	}
+
+	// The board has no notification, so one poll covers both mutations: wait for
+	// the delta it publishes and replay it onto the snapshot we took.
+	replayed := items
+	var deltaRev uint64
+	for deltaRev <= beforeRev {
+		delta := conn.receive(func(method string) bool { return method == "tasks.delta" })
+		params, _ := delta["params"].(map[string]any)
+		decoded := decodeItemSetDelta(t, params)
+		replayed = applyItemSet(t, replayed, decoded)
+		deltaRev = uint64(params["rev"].(float64))
+	}
+	_ = second
+
+	after := resultOf(t, conn.call("tasks.snapshot", nil))
+	if uint64(after["rev"].(float64)) != deltaRev {
+		t.Fatalf("tasks.snapshot rev = %v, replayed up to %d", after["rev"], deltaRev)
+	}
+	fresh, _ := after["tasks"].([]any)
+	if len(fresh) != 2 {
+		t.Fatalf("tasks.snapshot after the changes = %v, want two tasks", after["tasks"])
+	}
+	byID := map[string]string{}
+	for _, task := range replayed {
+		row, _ := task.(map[string]any)
+		byID[fmt.Sprint(row["id"])] = fmt.Sprint(row["status"])
+	}
+	for _, task := range fresh {
+		row, _ := task.(map[string]any)
+		id := fmt.Sprint(row["id"])
+		if byID[id] != fmt.Sprint(row["status"]) {
+			t.Fatalf("replayed status of %s = %q, snapshot says %q (replayed=%v snapshot=%v)",
+				id, byID[id], row["status"], replayed, fresh)
+		}
+	}
+	if len(byID) != len(fresh) {
+		t.Fatalf("replayed %d tasks, snapshot has %d", len(byID), len(fresh))
+	}
+}
+
+// TestTaskCommandsDriveTheBoard pins the write half: status moves a task and
+// answers with the new rev + row, delete removes it, and the status vocabulary
+// is validated (an unknown status is a parameter error, never a silent no-op).
+func TestTaskCommandsDriveTheBoard(t *testing.T) {
+	rig := startDomainGateway(t)
+	defer rig.stop(t)
+	conn := rig.connect(t)
+
+	task := rig.tasks.seed("ship it", contracts.TaskStatusPending)
+	before := resultOf(t, conn.call("tasks.snapshot", nil))
+	beforeRev := uint64(before["rev"].(float64))
+
+	reply := resultOf(t, conn.call("task.status", map[string]any{
+		"id": task.ID, "status": contracts.TaskStatusInProgress,
+	}))
+	if uint64(reply["rev"].(float64)) <= beforeRev {
+		t.Fatalf("task.status rev = %v, want > %d", reply["rev"], beforeRev)
+	}
+	row, _ := reply["task"].(map[string]any)
+	if row["status"] != contracts.TaskStatusInProgress {
+		t.Fatalf("task.status row = %v", row)
+	}
+
+	// The delta reaches a subscriber, and the snapshot agrees with the reply.
+	delta := conn.receive(func(method string) bool { return method == "tasks.delta" })
+	if params, _ := delta["params"].(map[string]any); len(params) == 0 {
+		t.Fatalf("task.status produced no delta: %v", delta)
+	}
+	after := resultOf(t, conn.call("tasks.snapshot", nil))
+	rows, _ := after["tasks"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("tasks.snapshot after status = %v", after["tasks"])
+	}
+	if got, _ := rows[0].(map[string]any); got["status"] != contracts.TaskStatusInProgress {
+		t.Fatalf("snapshot status = %v", got["status"])
+	}
+
+	// "cancel" removes the row.
+	resultOf(t, conn.call("task.delete", map[string]any{"id": task.ID}))
+	final := resultOf(t, conn.call("tasks.snapshot", nil))
+	if rows, _ := final["tasks"].([]any); len(rows) != 0 {
+		t.Fatalf("tasks.snapshot after delete = %v, want none", rows)
+	}
+
+	// An unknown status is rejected, and the board keeps its value.
+	protocolErr := errorOf(t, conn.call("task.status", map[string]any{"id": task.ID, "status": "done"}))
+	if protocolErr["message"] == "" {
+		t.Fatalf("task.status unknown status error = %v, want a message", protocolErr)
+	}
 }

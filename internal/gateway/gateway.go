@@ -390,7 +390,10 @@ func (g *Gateway) clientContext() context.Context {
 // (a module, the host, or a settings.set once that lands) is seen up to one poll
 // late. That is a real ceiling, documented in docs/TRANSPORT.md §6.3 — the
 // browser must not assume a settings write echoes back instantly.
-// Workspace: same (§6.2 lists it as "on-demand snapshot + explicit invalidate").
+// Workspace and the task board: same (§6.2 lists both as "on-demand snapshot +
+// explicit invalidate"); the board additionally refreshes its domain right after
+// a gateway-side write, so a client's own task.status/task.delete echoes back
+// without waiting for the poll.
 func (g *Gateway) pollDomains(ctx context.Context) {
 	interval := g.pollInterval
 	if interval <= 0 {
@@ -421,6 +424,11 @@ func (g *Gateway) refreshPolledDomains() {
 	}
 	g.hub.markDomainDirty(domainSettings)
 	g.hub.markDomainDirty(domainWorkspace)
+	// The task board has no change notification either: the agent's task tools
+	// and the browser's own commands both mutate it, and only the latter bump the
+	// rev immediately (taskWriteResult). Everything else shows up within one poll
+	// (§6.3 documents the ceiling).
+	g.hub.markDomainDirty(domainTasks)
 	// Prompt inboxes are per-session and only interesting while a client is
 	// watching one: the backend drains the queue itself (a run settling starts
 	// the next prompt), so the inbox can change without any gateway write.

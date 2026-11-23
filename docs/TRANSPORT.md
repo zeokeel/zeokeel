@@ -479,6 +479,34 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 
 > `foreground.set` 是唯一"客户端→服务端的状态上报"。用途见契约注释：后台 run 完成时，只有"用户正看着的那个会话"才静音（`foreground.go:7-19`）。不实现它，所有后台完成通知都会响。
 
+#### 5.1.8 任务板（taskboard，§6.3 降级）
+
+| 方法 / 通知 | 参数 | 返回 | 幂等 | 契约 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| `tasks.snapshot` | `{sessionId?}` | `{epoch,rev,tasks:[Task]}` | Y | `TaskBoard.List` `tasks.go:43` / `SessionTaskBoard` `:69` | ✅ 已实现 |
+| `tasks.subscribe` | `{sessionId?, sinceRev}` | `{epoch,rev,resync}` | Y | 同域机制（§6.5） | ✅ 已实现 |
+| ↳ 通知 `tasks.delta` | `{baseRev, rev, added:[Task], removed:[id]}` | — | — | `diffTasks`（**按 id upsert**） | — |
+| `task.status` | `{id,status,sessionId?}` | `{epoch,rev,task}` | Y | `TaskBoard.SetStatus` `:45` | ✅ 已实现 |
+| `task.delete` | `{id,sessionId?}` | `{epoch,rev}` | Y | `TaskBoard.Delete` `:46` | ✅ 已实现 |
+| `task.create` | `{subject,description}` | `{task}` | N | `:44` | 延后 |
+| `task.assign` | `{id,owner}` | `{task}` | Y | `TaskAssigner` `:55` | 延后 |
+
+> **域**：`tasks`（进程级看板）与 `tasks:<sessionId>`（后端实现 `SessionTaskBoard` 时按会话隔离；
+> 否则回落进程级）。客户端带 `sessionId` 时落在后者。
+>
+> **delta 形状是 upsert，不是字段级 diff**：看板的 `status`/`owner`/`updatedAt` 会就地变，
+> 而后端没有字段级变更日志，所以**变了的任务整行放进 `added`**，客户端按 `id` upsert；
+> 消失的 id 进 `removed`。这样 `snapshot → 逐个应用 delta == 下一个快照` 的等价性仍然成立
+> （`domains_test.go` 的 `TestTasksDomainReplayMatchesNextSnapshot`）。
+>
+> **延迟上限 2s（降级，不是推送）**：`TaskBoard` 没有变更通知。网关自己的写路径
+> （`task.status`/`task.delete`）成功后会**立即** `refreshNow` 该域并 bump rev，所以调用方
+> 自己的改动是即刻回声的；但**别处**的改动（agent 的 `team_task_*` 工具、另一个客户端）
+> 只能靠与 settings 相同的 2s 轮询发现（§6.3）。客户端不得假设"任务刚变就一定有 delta"。
+>
+> **状态语汇**取契约常量（`pending` / `in_progress` / `completed`），未知值 → `invalid_params`
+> （不是静默 no-op）。`task.delete` 是"取消"，`task.status` 回 `pending` 是"停止"。
+
 ### 5.2 T2：对齐桌面所需（22 键 / 约 48 方法）
 
 #### 5.2.1 编排（team / childagents / taskboard / todo）
@@ -496,11 +524,11 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `agent.child.get` | `{id}` | Y | `:93` |
 | `agent.child.send` | `{id,message}` → `{answer}` | N | `:96` |
 | `agent.subagents` | — → `{items}` | Y | `SubagentActivityLister` `agent_activity.go:65` |
-| `tasks.snapshot` | `{sessionId?}` | Y | `TaskBoard.List` `tasks.go:43` / `SessionTaskBoard` `:69` |
-| `task.create` | `{subject,description}` | N | `:44` |
-| `task.status` | `{id,status}` | Y | `:45` |
-| `task.assign` | `{id,owner}` | Y | `TaskAssigner` `:55` |
-| `task.delete` | `{id}` | Y | `:46` |
+| `tasks.snapshot` | `{sessionId?}` | Y | `TaskBoard.List` `tasks.go:43` / `SessionTaskBoard` `:69` — **已实现，见 §5.1.8** |
+| `task.create` | `{subject,description}` | N | `:44` — 延后 |
+| `task.status` | `{id,status}` | Y | `:45` — **已实现，见 §5.1.8** |
+| `task.assign` | `{id,owner}` | Y | `TaskAssigner` `:55` — 延后 |
+| `task.delete` | `{id}` | Y | `:46` — **已实现，见 §5.1.8** |
 | `todo.snapshot` | — → `{items}` | Y | `TodoService.Todos()` `todo.go:44` |
 
 > `todo` 的诚实限制必须写进客户端：这是**进程级单列表、非按会话**（`todo.go:35-40` 明示）。多标签页看到同一份。
@@ -619,6 +647,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `goal:<id>` | `Goal` 或 null | 目标变更 | `goal.Subscribe` `session.go:676` |
 | `toasts` | 无 rev（单向事件，不重放） | — | `notifier.SetHandler` `toasts.go:222` |
 | `settings` | `{rows}` | 任一行写入 | **无订阅**（§6.3 需新增） |
+| `tasks` / `tasks:<id>` | `{tasks:[Task]}`（进程级 / 按会话） | 看板内容真的变了（网关写路径立即、其余靠轮询） | **无订阅**（`tasks.go`，§6.3 降级，延迟上限 2s） |
 | `workspace.list` | `[]Workspace` + `currentId` | 增删改/切换 | **无订阅**（按需快照 + 客户端显式 invalidate） |
 | 其余（team/tasks/todo/jobs/plugins/insights/skills/memory） | 各自列表 | 网关在每次写方法成功后 +1；读模型本身无订阅 | 请求—响应 + 懒快照 |
 
@@ -678,7 +707,7 @@ onServiceChange(domain):
 > 幂等（成功）。原 web mock 里自造的 REST `/api/sessions/:id/prompts` 不是网关路由，
 > 客户端应改用本域。
 
-> **实现状态（S1c，internal/gateway）**：`settings` 与 `workspace.list` 两个域按"轮询 + 差值"落地，**没有假装是推送**：网关每 2s 读一次 `SettingsService.All()` / `WorkspaceService.List()+Current()`，内容真的变了才 +1 该域 `rev` 并广播 `settings.delta` / `workspace.list.delta`；不变则零流量。因此这两域的**延迟上限是 2s**，客户端不能假设一次设置写入会立刻回声——这是契约没有通知能力的直接后果，不是实现偷懒。副作用是**用户手改 `settings.json` 也能在 2s 内被看到**（比上面"不感知"的原始限制更强）。`approvals` 走真推送（`Approvals.Subscribe`），另外每 2s 也刷新一次，因为审批模式（`mode`）来自 settings 行：模式变化会让该域发 `resync`，客户端重新取快照。
+> **实现状态（S1c，internal/gateway）**：`settings` 与 `workspace.list` 两个域按"轮询 + 差值"落地，**没有假装是推送**：网关每 2s 读一次 `SettingsService.All()` / `WorkspaceService.List()+Current()`，内容真的变了才 +1 该域 `rev` 并广播 `settings.delta` / `workspace.list.delta`；不变则零流量。因此这两域的**延迟上限是 2s**，客户端不能假设一次设置写入会立刻回声——这是契约没有通知能力的直接后果，不是实现偷懒。副作用是**用户手改 `settings.json` 也能在 2s 内被看到**（比上面"不感知"的原始限制更强）。`approvals` 走真推送（`Approvals.Subscribe`），另外每 2s 也刷新一次，因为审批模式（`mode`）来自 settings 行：模式变化会让该域发 `resync`，客户端重新取快照。**任务板（`tasks`）同样按"轮询 + 内容变才 bump"落地**：`task.status`/`task.delete` 这类网关写路径立即刷新并回带新 rev，其余改动（agent 的 `team_task_*` 工具、第二个客户端）延迟上限 **2s**。
 
 ### 6.4 长会话与大数据：分页与裁剪【提案】
 

@@ -36,11 +36,29 @@ const (
 	domainArtifacts = "artifacts"
 	domainSettings  = "settings"
 	domainWorkspace = "workspace.list"
+	domainTasks     = "tasks"
 	// domainPromptsPrefix names one conversation's prompt inbox
 	// ("prompts:<sessionID>"): queued prompts belong to a session, so the domain
 	// is per-session, not global.
 	domainPromptsPrefix = "prompts:"
 )
+
+// domainTasksPrefix names one conversation's task board ("tasks:<sessionID>"):
+// the board is process-wide, but a backend that scopes it by session
+// (contracts.SessionTaskBoard) gives each conversation its own view.
+const domainTasksPrefix = "tasks:"
+
+// tasksKey is the domain key of one conversation's task board.
+func tasksKey(sessionID string) string { return domainTasksPrefix + sessionID }
+
+// tasksSessionID reports whether key addresses a per-session task board and
+// returns its conversation.
+func tasksSessionID(key string) (string, bool) {
+	if strings.HasPrefix(key, domainTasksPrefix) {
+		return strings.TrimPrefix(key, domainTasksPrefix), true
+	}
+	return "", false
+}
 
 // promptsKey is the domain key of one conversation's prompt inbox.
 func promptsKey(sessionID string) string { return domainPromptsPrefix + sessionID }
@@ -189,6 +207,34 @@ func (q queuedPromptDTO) domainID() string { return q.ID }
 type promptsSnapshot struct {
 	SessionID string            `json:"sessionId"`
 	Prompts   []queuedPromptDTO `json:"prompts"`
+}
+
+// --- task board ------------------------------------------------------------
+
+// taskDTO is one shared task-board item (contracts.BoardTask). The board is the
+// process-wide team task board the todo tools mutate; the browser shows it as
+// the background-task chip (a session-scoped view when the backend implements
+// contracts.SessionTaskBoard).
+type taskDTO struct {
+	ID          string     `json:"id"`
+	Subject     string     `json:"subject"`
+	Description string     `json:"description,omitempty"`
+	Status      string     `json:"status"`
+	Owner       string     `json:"owner,omitempty"`
+	BlockedBy   []string   `json:"blockedBy,omitempty"`
+	WriteScopes []string   `json:"writeScopes,omitempty"`
+	Created     *time.Time `json:"createdAt,omitempty"`
+	Updated     *time.Time `json:"updatedAt,omitempty"`
+}
+
+// domainID implements identified.
+func (t taskDTO) domainID() string { return t.ID }
+
+// tasksSnapshot is the domain's cached snapshot. SessionID is "" for the
+// process-wide board.
+type tasksSnapshot struct {
+	SessionID string    `json:"sessionId,omitempty"`
+	Tasks     []taskDTO `json:"tasks"`
 }
 
 // promptsDelta is the prompt inbox delta: appended prompts, removed ids, and —
@@ -629,6 +675,9 @@ func itemID(item any) string {
 
 // itemBytes is the approximate retained size of one delta item.
 func itemBytes(item any) int {
+	if task, ok := item.(taskDTO); ok {
+		return 96 + len(task.Subject) + len(task.Description) + len(task.Owner)
+	}
 	switch value := item.(type) {
 	case approvalDTO:
 		return len(value.Summary) + len(value.Arguments) + 96
@@ -672,6 +721,11 @@ func (s *domainSources) build(key string) (any, error) {
 		return g.buildSettings(context.Background())
 	case domainWorkspace:
 		return g.buildWorkspaces(context.Background())
+	case domainTasks:
+		return g.buildTasks(context.Background(), "")
+	}
+	if sessionID, ok := tasksSessionID(key); ok {
+		return g.buildTasks(context.Background(), sessionID)
 	}
 	if sessionID, ok := promptsSessionID(key); ok {
 		return g.buildPrompts(context.Background(), sessionID)
@@ -745,6 +799,16 @@ func (h *hub) diffDomain(key string, previous, next any) deltaPayload {
 			return delta
 		}
 		return nil
+	case domainTasks:
+		old, oldOK := previous.(tasksSnapshot)
+		fresh, freshOK := next.(tasksSnapshot)
+		if !oldOK || !freshOK {
+			return nil
+		}
+		if delta := diffTasks(old, fresh); delta != nil {
+			return delta
+		}
+		return nil
 	case domainSettings:
 		old, oldOK := previous.(settingsSnapshot)
 		fresh, freshOK := next.(settingsSnapshot)
@@ -762,6 +826,17 @@ func (h *hub) diffDomain(key string, previous, next any) deltaPayload {
 			return nil
 		}
 		if delta := diffWorkspaces(old, fresh); delta != nil {
+			return delta
+		}
+		return nil
+	}
+	if _, ok := tasksSessionID(key); ok {
+		old, oldOK := previous.(tasksSnapshot)
+		fresh, freshOK := next.(tasksSnapshot)
+		if !oldOK || !freshOK {
+			return nil
+		}
+		if delta := diffTasks(old, fresh); delta != nil {
 			return delta
 		}
 		return nil
@@ -801,6 +876,11 @@ func (h *hub) resyncDelta(domain *domainState, base, rev uint64) deltaPayload {
 		return &settingsDelta{BaseRev: base, Rev: rev, Resync: true}
 	case domainWorkspace:
 		return &workspaceDelta{BaseRev: base, Rev: rev, Resync: true}
+	case domainTasks:
+		return &itemSetDelta{method: "tasks.delta", BaseRev: base, Rev: rev, Resync: true}
+	}
+	if _, ok := tasksSessionID(domain.key); ok {
+		return &itemSetDelta{method: "tasks.delta", BaseRev: base, Rev: rev, Resync: true}
 	}
 	if sessionID, ok := promptsSessionID(domain.key); ok {
 		return &promptsDelta{SessionID: sessionID, BaseRev: base, Rev: rev, Resync: true}
@@ -934,6 +1014,114 @@ func (g *Gateway) buildPrompts(ctx context.Context, sessionID string) (any, erro
 		})
 	}
 	return snapshot, nil
+}
+
+// taskBoard resolves the task board a domain reads: the process-wide board, or
+// the per-session view when the caller named a conversation and the backend
+// implements contracts.SessionTaskBoard.
+func (g *Gateway) taskBoard(sessionID string) contracts.TaskBoard {
+	board, ok := g.root.Get(contracts.KeyTaskBoard)
+	if !ok || board == nil {
+		return nil
+	}
+	if sessionID == "" {
+		return board
+	}
+	if scoped, ok := board.(contracts.SessionTaskBoard); ok {
+		return scoped.TaskBoardForSession(sessionID)
+	}
+	return board
+}
+
+// buildTasks reads the task board into a snapshot. A gateway without the toolkit
+// module answers an empty board rather than an error: the chip then simply has
+// nothing to show.
+func (g *Gateway) buildTasks(ctx context.Context, sessionID string) (any, error) {
+	snapshot := tasksSnapshot{SessionID: sessionID, Tasks: []taskDTO{}}
+	board := g.taskBoard(sessionID)
+	if board == nil {
+		return snapshot, nil
+	}
+	list, err := board.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	snapshot.Tasks = make([]taskDTO, 0, len(list))
+	for _, task := range list {
+		snapshot.Tasks = append(snapshot.Tasks, taskDTO{
+			ID:          task.ID,
+			Subject:     task.Subject,
+			Description: task.Description,
+			Status:      task.Status,
+			Owner:       task.Owner,
+			BlockedBy:   task.BlockedBy,
+			WriteScopes: task.WriteScopes,
+			Created:     timePointer(task.Created),
+			Updated:     timePointer(task.Updated),
+		})
+	}
+	return snapshot, nil
+}
+
+// diffTasks compares two board snapshots as an upsert set: the board has mutable
+// fields (status/owner/updated) and no stable per-field change log, so a task
+// that changed goes into "added" whole and the client upserts by id. Mutations
+// come from the agent's task tools and from the browser's own commands, so the
+// id set is usually small enough that re-sending the changed rows is cheaper
+// than a field-level diff.
+func diffTasks(previous, next tasksSnapshot) *itemSetDelta {
+	delta := &itemSetDelta{method: "tasks.delta"}
+	known := make(map[string]taskDTO, len(previous.Tasks))
+	for _, task := range previous.Tasks {
+		known[task.ID] = task
+	}
+	stillPresent := make(map[string]bool, len(next.Tasks))
+	for _, task := range next.Tasks {
+		stillPresent[task.ID] = true
+		if old, existed := known[task.ID]; !existed || !sameTask(old, task) {
+			delta.Added = append(delta.Added, task)
+		}
+	}
+	for _, task := range previous.Tasks {
+		if !stillPresent[task.ID] {
+			delta.Removed = append(delta.Removed, task.ID)
+		}
+	}
+	if len(delta.Added) == 0 && len(delta.Removed) == 0 {
+		return nil
+	}
+	sort.Strings(delta.Removed)
+	return delta
+}
+
+// sameTask reports whether two board rows carry the same client-visible values.
+func sameTask(a, b taskDTO) bool {
+	if a.ID != b.ID || a.Subject != b.Subject || a.Description != b.Description ||
+		a.Status != b.Status || a.Owner != b.Owner {
+		return false
+	}
+	if len(a.BlockedBy) != len(b.BlockedBy) || len(a.WriteScopes) != len(b.WriteScopes) {
+		return false
+	}
+	for index := range a.BlockedBy {
+		if a.BlockedBy[index] != b.BlockedBy[index] {
+			return false
+		}
+	}
+	for index := range a.WriteScopes {
+		if a.WriteScopes[index] != b.WriteScopes[index] {
+			return false
+		}
+	}
+	return sameTimePointer(a.Created, b.Created) && sameTimePointer(a.Updated, b.Updated)
+}
+
+// sameTimePointer compares two optional timestamps.
+func sameTimePointer(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Equal(*b)
 }
 
 // diffPrompts compares two inbox snapshots.
