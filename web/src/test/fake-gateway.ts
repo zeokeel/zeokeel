@@ -162,6 +162,20 @@ class FakeSocket implements SocketLike {
 }
 
 export class FakeGateway {
+  /** Toast id → the action it offers (the gateway keys by toast, not action). */
+  private readonly toastActions = new Map<string, { actionId: string; run: () => void }>();
+  private toastSequence = 0;
+  /** Toasts pushed at the client, newest last — assertable like approvals. */
+  readonly toasts: Array<{ id: string; actionLabel?: string; actionId?: string }> = [];
+
+  /** Push a toast at connected clients and keep it for assertions. */
+  private emitToast(toast: { id: string; actionLabel?: string; actionId?: string }): void {
+    this.toasts.push(toast);
+    for (const socket of this.sockets) {
+      socket.push({ jsonrpc: '2.0', method: 'toast.posted', params: toast });
+    }
+  }
+
   /** Every decision the client sent, in order — `{id, tool, decision}`. */
   readonly decisions: Array<{ id: string; tool: string; decision: string }> = [];
   /** Tools whose approval was denied: they must never execute. */
@@ -201,6 +215,13 @@ export class FakeGateway {
   }
 
   /** Client → gateway dispatch. */
+  /** A socket for tests that drive the dispatch directly (no DOM involved). */
+  openTestSocket(): FakeSocket {
+    const socket = { push: () => undefined, closed: false };
+    this.sockets.push(socket as never);
+    return socket as unknown as FakeSocket;
+  }
+
   receive(socket: FakeSocket, message: Record<string, unknown>): void {
     const method = String(message.method ?? '');
     const params = (message.params ?? {}) as Record<string, unknown>;
@@ -474,8 +495,40 @@ export class FakeGateway {
       const key = this.taskKey(params);
       const board = this.state.tasks[key] ?? [];
       const index = board.findIndex((task) => task.id === params.id);
-      if (index >= 0) board.splice(index, 1);
+      const removed = index >= 0 ? board[index] : null;
+      if (removed) board.splice(index, 1);
       this.broadcastTasks(key, [], [String(params.id ?? '')]);
+      // The gateway offers an undo for every delete: a toast whose action runs
+      // the closure that puts **this** row back. Registered under the toast id,
+      // not under `actionId` — every undo is called `"restore"`, so an actionId
+      // key would make two deletes overwrite each other and undo the wrong task.
+      if (removed) {
+        const toastId = `toast-${this.toastSequence += 1}`;
+        this.toastActions.set(toastId, {
+          actionId: 'restore',
+          run: () => {
+            const current = this.state.tasks[key] ?? [];
+            if (!current.some((task) => task.id === removed.id)) current.push(removed);
+            this.broadcastTasks(key, [removed], []);
+          },
+        });
+        this.emitToast({ id: toastId, actionLabel: '撤销', actionId: 'restore' });
+      }
+      reply({});
+      return;
+    }
+    if (method === 'notify.action') {
+      const toastId = String(params.id ?? '');
+      const actionId = String(params.actionId ?? '');
+      const entry = this.toastActions.get(toastId);
+      // Same vocabulary as the gateway: an action that is gone answers
+      // `action_unavailable` rather than pretending to succeed.
+      if (!entry || entry.actionId !== actionId) {
+        fail(1021, 'action_unavailable');
+        return;
+      }
+      this.toastActions.delete(toastId);
+      entry.run();
       reply({});
       return;
     }

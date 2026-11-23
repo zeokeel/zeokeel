@@ -169,7 +169,7 @@ npm run gen:verify     # 复跑生成器并比对：输入*消失*才红，数�
   `ask.answer` / `ask.cancel` 的 `id` 与 `answer`、`plan.exit.action`、
   `notify.action.id` / `notify.action.actionId`（**toast 的撤销按钮在 mock 里没有对应动作**）。
 - **`UNIMPLEMENTED_METHODS`**（fake 网关未实现）：`approvals.subscribe`、`ask.answer`、
-  `ask.cancel`、`ask.subscribe`、`notify.action`、`plan.exit`、`plan.subscribe`、
+  `ask.cancel`、`ask.subscribe`、`plan.exit`、`plan.subscribe`、
   `session.active.get`、`settings.subscribe`。
 
 新增一条**必须同时**写原因（非空断言）与本文件（README 断言），否则测试红。
