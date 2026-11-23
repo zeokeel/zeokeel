@@ -24,6 +24,13 @@ npm run dev             # http://127.0.0.1:5178
 
 对着真实网关跑：`ZK_API_URL=http://127.0.0.1:9932 npm run dev`。
 
+### 冷状态复现
+
+`npm run e2e:cold` 自己起夹具（`scripts/acceptance/serve-with-fake-model.sh`）、用
+`mktemp -d` 的空数据目录、等 `gateway.json` 出现后跑 `dev/e2e-smoke.mjs`，结束杀掉进程并删目录。
+**这是唯一一条能照抄复现"冷状态"的命令**——`dev/e2e-smoke.mjs` 自身不自举网关，只读
+`E2E_BASE`/`E2E_TOKEN`。
+
 ### mock 与真网关的差异（只有这一条）
 
 mock 的 WebSocket 接受 `?token=`（供脚本驱动控制面：浏览器无法给握手加请求头）。
@@ -68,7 +75,8 @@ npm run gen:icons  # 从 internal/icons/svg 重新生成 src/design/icons.tsx（
 # 端到端（真浏览器，headless chromium）
 npm run mock       # 一个终端：mock 网关（127.0.0.1:8788，token 固定 dev-token）
 npm run dev        # 另一个终端：vite（127.0.0.1:5178，代理 /api /auth /ws）
-npm run e2e        # 默认打 mock：新建会话 → 发一轮 → 审批 → 完成 → 刷新恢复
+npm run e2e        # 默认打 mock（需先 npm run mock + npm run dev）：中英各一轮
+npm run e2e:cold   # 一条命令、自包含：真网关 + fake model + 全新数据目录，跑完自动收尾
 
 # 打真网关时两个变量是必须的：
 #   E2E_BASE=http://127.0.0.1:9932 E2E_TOKEN=<启动行里的 token> npm run e2e
