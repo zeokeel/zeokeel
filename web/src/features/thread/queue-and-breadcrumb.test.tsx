@@ -86,7 +86,8 @@ describe('C5 — the workspace root crumb returns to the tree', () => {
 
     // The preview is open and carries the breadcrumb.
     const inspector = await screen.findByRole('complementary');
-    const crumb = document.querySelector('.zk-inspector__crumb') as HTMLElement;
+    // The crumb is now antd's `Breadcrumb` (task-37 #2): the root item is a link.
+    const crumb = await screen.findByRole('link', { name: '工作区根目录' });
     expect(crumb).toBeTruthy();
     expect(crumb.textContent).toContain('工作区根目录');
     expect(document.querySelector('.zk-inspector__path')?.textContent).toBe('src/chat/composer.tsx');

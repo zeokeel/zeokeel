@@ -1500,3 +1500,9 @@ body {
 .zk-transcript__row .zk-msg-actions {
   justify-content: flex-end;
 }
+
+/* Inspector breadcrumb (task-37 #2): antd owns the list; we only place it. */
+.zk-inspector__breadcrumb {
+  margin: 0;
+  font-size: var(--zk-font-size-sm);
+}

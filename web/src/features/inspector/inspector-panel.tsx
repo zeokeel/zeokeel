@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Segmented, Spin, Tree, Typography } from 'antd';
+import { Breadcrumb, Segmented, Spin, Tree, Typography } from 'antd';
 import type { TreeDataNode } from 'antd';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import {
@@ -9,7 +9,6 @@ import {
   type FileNode,
 } from '@/api/files';
 import { DiffBlock } from '@/chat/tools/sections';
-import { ZkIcon } from '@/design/icons';
 import { useT } from '@/i18n';
 
 /** Flat `a/b/c.ts` paths → antd Tree nodes, directories created as needed. */
@@ -179,18 +178,30 @@ export function InspectorPanel() {
             ) : (
               <>
                 <div className="zk-inspector__preview-header">
-                  {/* C5: the root crumb goes back to the tree and keeps this
-                      tab open — losing the preview would lose the user's place. */}
-                  <button
-                    type="button"
-                    className="zk-inspector__crumb"
-                    onClick={() => navigate(`/c/${sessionId}/files`)}
-                  >
-                    {t('inspector.workspaceRoot')}
-                  </button>
-                  <span className="zk-inspector__crumb-sep">/</span>
-                  <ZkIcon name="file" />
-                  <span className="zk-inspector__path">{selected}</span>
+                  {/* C5 with antd's Breadcrumb (task-37 #2): the separators and
+                      the list are the component's, not ours. The root crumb
+                      navigates back to the tree and keeps this tab open — losing
+                      the preview would lose the user's place. */}
+                  <Breadcrumb
+                    data-testid="inspector-breadcrumb"
+                    className="zk-inspector__breadcrumb"
+                    items={[
+                      {
+                        title: (
+                          <a
+                            href={`/c/${sessionId}/files`}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              navigate(`/c/${sessionId}/files`);
+                            }}
+                          >
+                            {t('inspector.workspaceRoot')}
+                          </a>
+                        ),
+                      },
+                      { title: <span className="zk-inspector__path">{selected}</span> },
+                    ]}
+                  />
                   <Segmented
                     size="small"
                     value={view}
