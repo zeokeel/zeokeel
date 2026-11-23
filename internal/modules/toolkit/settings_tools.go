@@ -71,9 +71,9 @@ func (t maskedSettingsGet) Invoke(ctx context.Context, call rig.ToolCall) (rig.T
 }
 
 // credentialMarkers are the lower-case substrings that mark a setting key (or a
-// JSON object key) as holding a credential. Kept aligned with
-// internal/ui/settings/redact.go so the model-facing and export-facing
-// redaction agree; the backend cannot import the UI module.
+// JSON object key) as holding a credential. The model-facing settings tool and
+// the export path must agree on them; both live in this module so there is no
+// cross-layer duplication.
 var credentialMarkers = []string{
 	"apikey", "api_key", "api-key", "access_key", "private_key",
 	"token", "secret", "password", "authorization",

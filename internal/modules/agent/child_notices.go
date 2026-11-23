@@ -7,9 +7,8 @@ package agent
 // turn and the transcript shows what happened. ZeoKeel keeps the same semantics
 // with the durable child-session store as the source of truth:
 //
-//   - the session UI derives quiet transcript rows from the finished child
-//     records (internal/ui/session, ChatRoleNotice), so a reload shows the same
-//     receipts;
+//   - the client derives quiet transcript rows from the finished child records
+//     (the wire carries ChatRoleNotice), so a reload shows the same receipts;
 //   - the next successful run of the parent session appends one user message per
 //     finished, not-yet-notified child to the history it loads. The receipts are
 //     staged while Rig loads history and committed only after the run succeeds

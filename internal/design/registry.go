@@ -13,7 +13,7 @@ import (
 // The registry is the machine-readable form of the design contract in
 // docs/DESIGN.md: the entry components, the Agent scenarios, the rejected
 // anti-patterns and the registered self-drawn areas (allowlist). It is the
-// single source the lint tooling (internal/design/conform, designlint) and the
+// single source the web generator (web/scripts/gen-tokens.mjs) and the
 // conformance tests read; docs/DESIGN.md is its human-readable mirror.
 //
 // It is JSON rather than the YAML sketch in docs/DESIGN.md appendix A because
