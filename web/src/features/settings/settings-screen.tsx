@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Input, InputNumber, Menu, Radio, Switch, Typography } from 'antd';
-import { useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   changedRows,
   defaultPageKey,
@@ -57,12 +57,35 @@ export function SettingsScreen() {
     }
   }, [pageKey, navigate]);
 
+  // B3: the search matches page names **and field labels**, and a field hit
+  // navigates to its page with `?focus=<row key>` so the form can scroll to it.
+  const matches = useMemo(() => {
+    const needle = navQuery.trim().toLowerCase();
+    const hits = new Map<string, string[]>();
+    for (const page of pages) {
+      if (needle === '') {
+        hits.set(page.key, []);
+        continue;
+      }
+      if (page.label.toLowerCase().includes(needle)) {
+        hits.set(page.key, []);
+        continue;
+      }
+      const fields = page.sections
+        .flatMap((section) => section.fields)
+        .filter((field) => field.label.toLowerCase().includes(needle));
+      if (fields.length > 0) hits.set(page.key, fields.map((field) => field.key));
+    }
+    return hits;
+  }, [pages, navQuery]);
+
   const navItems = useMemo(() => {
     const groups = new Map<
       string,
       { key: string; label: string; rank: number; pages: SettingsPage[] }
     >();
     for (const item of pages) {
+      if (!matches.has(item.key)) continue;
       const group = groups.get(item.group.key) ?? { ...item.group, pages: [] };
       group.pages.push(item);
       groups.set(item.group.key, group);
@@ -73,16 +96,18 @@ export function SettingsScreen() {
         key: group.key,
         label: group.label,
         type: 'group' as const,
-        children: group.pages
-          .filter(
-            (item) =>
-              navQuery.trim() === '' ||
-              item.label.toLowerCase().includes(navQuery.trim().toLowerCase()),
-          )
-          .map((item) => ({ key: item.key, label: item.label })),
+        children: group.pages.map((item) => ({
+          key: item.key,
+          label: item.label,
+          // Field-level hits say which field matched, so 「主题」 lands on 外观
+          // instead of silently showing the whole page.
+          ...(matches.get(item.key)?.length
+            ? { extra: `字段 ${matches.get(item.key)?.length} 项` }
+            : {}),
+        })),
       }))
       .filter((group) => group.children.length > 0);
-  }, [pages, navQuery]);
+  }, [pages, matches]);
 
   return (
     <div className="zk-settings">
@@ -100,7 +125,10 @@ export function SettingsScreen() {
           mode="inline"
           selectedKeys={pageKey ? [pageKey] : []}
           items={navItems}
-          onClick={({ key }) => navigate(`/settings/${key}`)}
+          onClick={({ key }) => {
+            const focus = matches.get(String(key))?.[0];
+            navigate(`/settings/${key}${focus ? `?focus=${encodeURIComponent(focus)}` : ''}`);
+          }}
         />
       </div>
 
@@ -134,6 +162,8 @@ function SettingsPageForm({
   extraRows: string[];
 }) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const focusRef = useFocusField(searchParams.get('focus'));
   const [baseline, setBaseline] = useState<Record<string, string>>(() =>
     pageValues(page, rows),
   );
@@ -174,12 +204,18 @@ function SettingsPageForm({
     });
   }, [rows, savedRows]);
 
+  // B2: Esc inside settings always means "leave this page" — a dirty page asks
+  // first (B1), a clean one just closes instead of swallowing the key.
   useEscClaim({
     id: 'settings-dirty-guard',
     level: 'settingsDirtyGuard',
-    active: dirty,
+    active: true,
     onEscape: () => {
-      setDiscardOpen(true);
+      if (dirty) {
+        setDiscardOpen(true);
+        return true;
+      }
+      navigate('/');
       return true;
     },
   });
@@ -251,6 +287,7 @@ function SettingsPageForm({
               <FieldRow
                 key={field.key}
                 field={field}
+                focusRef={focusRef}
                 value={values[field.key] ?? ''}
                 disabled={!canWrite}
                 onChange={(value) => setValue(field.key, value)}
@@ -309,20 +346,34 @@ function SettingsPageForm({
   );
 }
 
+/** Scroll the field named by `?focus=` into view and mark it briefly (B3). */
+function useFocusField(focusKey: string | null): (node: HTMLElement | null) => void {
+  return useCallback(
+    (node: HTMLElement | null) => {
+      if (!node || !focusKey || node.dataset.fieldKey !== focusKey) return;
+      node.scrollIntoView?.({ block: 'center' });
+      node.dataset.focused = 'true';
+    },
+    [focusKey],
+  );
+}
+
 function FieldRow({
   field,
+  focusRef,
   value,
   disabled,
   onChange,
 }: {
   field: SettingsField;
+  focusRef: (node: HTMLElement | null) => void;
   value: string;
   disabled: boolean;
   onChange: (value: string) => void;
 }) {
   const id = `zk-field-${field.key}`;
   return (
-    <div className="zk-field">
+    <div className="zk-field" data-field-key={field.key} ref={focusRef}>
       <div className="zk-field__label-row">
         <label className="zk-field__label" htmlFor={id}>
           {field.label}

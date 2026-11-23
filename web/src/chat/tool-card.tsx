@@ -17,6 +17,14 @@ export function ToolCardBody({ step }: { step: ToolStep }) {
 
   return (
     <div className="zk-tool-card">
+      {step.error ? (
+        // B10: a failed call shows its error output, expandable like any other
+        // section — and it is open by default because a failure is the thing
+        // the reader came for.
+        <div className="zk-msg-error" role="alert">
+          {step.error}
+        </div>
+      ) : null}
       {renderToolCard(step)}
       {rawArguments ? (
         <Collapse

@@ -1177,3 +1177,108 @@ body {
   cursor: pointer;
   text-decoration: underline;
 }
+
+/* ===================== narrow windows (B7 / B8) ======================== */
+/*
+ * 1024 / 900: the top band title and the send button must stay visible and
+ * clickable; the inspector is the first thing that yields (it is a side panel,
+ * the conversation is the product).
+ */
+@media (max-width: 1024px) {
+  /* The splitter panel owns the width, so the rule must live there (the Sider
+   * inside it is width:100%). */
+  .zk-shell__sidebar-panel {
+    flex: 0 0 232px !important;
+    width: 232px !important;
+    max-width: 232px !important;
+    min-width: 232px !important;
+  }
+
+  .zk-inspector {
+    width: 320px;
+    min-width: 320px;
+  }
+}
+
+@media (max-width: 900px) {
+  .zk-shell__sidebar-panel {
+    flex: 0 0 200px !important;
+    width: 200px !important;
+    max-width: 200px !important;
+    min-width: 200px !important;
+  }
+
+  /* The inspector becomes an overlay above the thread instead of shrinking
+   * both columns until neither is usable. */
+  .zk-inspector {
+    position: fixed;
+    z-index: var(--zk-z-overlay, 40);
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(420px, 92vw);
+    box-shadow: var(--zk-shadow-overlay, 0 8px 32px rgb(0 0 0 / 18%));
+  }
+
+  .zk-topband__title {
+    max-width: 40vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* A very narrow composer (<480) must not overlap or clip its own controls. */
+@media (max-width: 480px) {
+  .zk-composer {
+    padding-inline: var(--zk-space-2);
+  }
+
+  .zk-composer__hint {
+    white-space: normal;
+  }
+
+  .zk-composer .ant-sender {
+    --ant-sender-padding: var(--zk-space-2);
+  }
+
+  .zk-approval__actions {
+    flex-wrap: wrap;
+  }
+}
+
+.zk-field[data-focused='true'] {
+  outline: 2px solid var(--zk-accent);
+  outline-offset: var(--zk-space-1);
+  border-radius: var(--zk-radius-sm);
+}
+
+/* Collapsed sidebar rail (B16): same surface, dots instead of rows. */
+.zk-sidebar[data-collapsed='true'] .zk-sidebar__header {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.zk-sidebar__rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--zk-space-2);
+  padding: var(--zk-space-2) 0;
+}
+
+.zk-sidebar__rail-dot {
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--zk-border-l1);
+  cursor: pointer;
+}
+
+.zk-sidebar__rail-dot[data-active='true'] {
+  background: var(--zk-accent);
+  outline: 2px solid var(--zk-bg-selected);
+  outline-offset: 2px;
+}

@@ -10,10 +10,15 @@ import { SidebarNav } from './sidebar-nav';
  */
 export function Sidebar({
   activeKey,
+  activeSessionId,
+  collapsed = false,
   onSelect,
   onCreate,
 }: {
   activeKey?: string;
+  /** The open conversation; kept on screen as a dot when collapsed. */
+  activeSessionId?: string;
+  collapsed?: boolean;
   onSelect: (sessionId: string) => void;
   onCreate: () => void;
 }) {
@@ -25,24 +30,48 @@ export function Sidebar({
   }));
 
   return (
-    <div className="zk-sidebar">
+    <div className="zk-sidebar" data-collapsed={collapsed ? 'true' : 'false'}>
       <div className="zk-sidebar__header">
-        <span className="zk-sidebar__brand">ZeoKeel</span>
+        {collapsed ? null : <span className="zk-sidebar__brand">ZeoKeel</span>}
         {/* Text, not filled: 新建会话 is on every screen and must not hold an
             Accent fill (rule 10: ≤2 fills / ≤1 primary per screen). */}
-        <Button size="small" type="text" onClick={onCreate} aria-label="新建会话">
-          新建会话
+        <Button
+          size="small"
+          type="text"
+          onClick={onCreate}
+          aria-label="新建会话"
+          title={collapsed ? '新建会话' : undefined}
+        >
+          {collapsed ? '+' : '新建会话'}
         </Button>
       </div>
       <div className="zk-sidebar__nav">
-        <SidebarNav />
+        <SidebarNav collapsed={collapsed} />
       </div>
       <div className="zk-sidebar__list">
-        <Conversations
-          items={items}
-          activeKey={activeKey}
-          onActiveChange={(key) => onSelect(String(key))}
-        />
+        {collapsed ? (
+          // Collapsed: the session list becomes a rail of dots; the open one is
+          // marked so "which conversation am I in" survives the fold (B16).
+          <div className="zk-sidebar__rail" aria-label="会话（已折叠）">
+            {items.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className="zk-sidebar__rail-dot"
+                data-active={item.key === activeSessionId ? 'true' : 'false'}
+                aria-label={item.label}
+                title={item.label}
+                onClick={() => onSelect(item.key)}
+              />
+            ))}
+          </div>
+        ) : (
+          <Conversations
+            items={items}
+            activeKey={activeKey}
+            onActiveChange={(key) => onSelect(String(key))}
+          />
+        )}
         {loading ? <div className="zk-sidebar__empty">正在加载…</div> : null}
         {error ? (
           <div className="zk-sidebar__empty">

@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Layout, Splitter } from 'antd';
 import { matchPath, useLocation, useNavigate } from 'react-router';
 import { useSessions } from '@/features/sessions/sessions-context';
+import { useShortcut } from '@/keyboard/keyboard-provider';
 import { useSystemAppearance } from '@/design/use-system-appearance';
 import { CommandPalette } from '@/features/palette/command-palette';
 import { Sidebar } from './sidebar';
@@ -9,6 +10,8 @@ import { TopBand } from './top-band';
 
 const SIDEBAR_WIDTH_KEY = 'zk.sidebar.width';
 const SIDEBAR_DEFAULT = 264;
+/** Icon rail width when the sidebar is collapsed (Mod+B, B16). */
+const COLLAPSED_WIDTH = 64;
 /** Widths persist across reloads (S-02); the splitter owns the drag itself. */
 function storedSidebarWidth(): number {
   if (typeof localStorage === 'undefined') return SIDEBAR_DEFAULT;
@@ -18,10 +21,10 @@ function storedSidebarWidth(): number {
 }
 
 /**
- * The 4-zone shell (S-01): sidebar, then the content column with its band. The right inspector
- * (S-06) is a route group that this milestone does not build, so there is no
- * empty fourth zone on screen — an empty panel is not a placeholder, it is a
- * bug the user can see.
+ * The 4-zone shell (S-01): sidebar, the content column with its band, and — on
+ * the file routes — the right inspector (S-06). The inspector only exists while
+ * a file route is open, so there is never an empty panel on screen: an empty
+ * panel is not a placeholder, it is a bug the user can see.
  *
  * Splitter owns the draggable width; `Layout.Sider` owns the sidebar surface
  * (fill, edge rule, breakpoint collapse) inside the panel.
@@ -34,6 +37,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   // appearance the ConfigProvider algorithm is using.
   const appearance = useSystemAppearance();
   const [createError, setCreateError] = useState<string | null>(null);
+  // B16: Mod+B folds the sidebar to an icon rail. The width is kept in a ref so
+  // expanding restores the exact splitter size the user had (state not lost).
+  const [collapsed, setCollapsed] = useState(false);
+  // The width the splitter had before folding, so expanding restores it instead
+  // of jumping back to the default (B16: "展开后状态不丢").
+  const [expandedWidth, setExpandedWidth] = useState(() => storedSidebarWidth());
   const activeSessionId = matchPath('/c/:sessionId/*', location.pathname)?.params.sessionId;
 
   const handleCreate = async () => {
@@ -45,6 +54,17 @@ export function AppShell({ children }: { children: ReactNode }) {
       setCreateError(cause instanceof Error ? cause.message : '新建会话失败');
     }
   };
+
+  useShortcut({
+    id: 'toggle-sidebar',
+    mod: true,
+    key: 'b',
+    active: true,
+    run: () => {
+      setCollapsed((was) => !was);
+      return true;
+    },
+  });
 
   return (
     <div className="zk-shell">
@@ -59,13 +79,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             const width = sizes[0];
             if (width && typeof localStorage !== 'undefined') {
               localStorage.setItem(SIDEBAR_WIDTH_KEY, String(Math.round(width)));
+              if (!collapsed) setExpandedWidth(Math.round(width));
             }
           }}
         >
           <Splitter.Panel
-            defaultSize={storedSidebarWidth()}
-            min={200}
-            max={380}
+            defaultSize={collapsed ? COLLAPSED_WIDTH : expandedWidth}
+            size={collapsed ? COLLAPSED_WIDTH : undefined}
+            min={collapsed ? COLLAPSED_WIDTH : 200}
+            max={collapsed ? COLLAPSED_WIDTH : 380}
             className="zk-shell__sidebar-panel"
           >
             <Layout.Sider
@@ -75,6 +97,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             >
               <Sidebar
                 activeKey={activeSessionId}
+                collapsed={collapsed}
+                activeSessionId={activeSessionId}
                 onSelect={(sessionId) => navigate(`/c/${sessionId}`)}
                 onCreate={() => void handleCreate()}
               />

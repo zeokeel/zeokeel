@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -83,11 +84,21 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // C1: two clicks inside 600ms must create one session. The window is on the
+  // action, not the button's disabled state, because the sidebar button and the
+  // `/` composer both funnel here.
+  const createGuard = useRef<{ at: number; promise: Promise<SessionSummary> } | null>(null);
+
   const create = useCallback(async () => {
+    const now = Date.now();
+    const guard = createGuard.current;
+    if (guard && now - guard.at < 600) return guard.promise;
     // `createSession` re-snapshots the `session.list` domain (the gateway
     // rebuilds it before answering), so the new row arrives through the
     // subscription. Adding it here as well would show it twice.
-    return createSession();
+    const promise = createSession();
+    createGuard.current = { at: now, promise };
+    return promise;
   }, []);
 
   const value = useMemo<SessionsApi>(

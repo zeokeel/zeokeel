@@ -11,7 +11,7 @@ import { ZkIcon } from '@/design/icons';
  * cannot find is a feature that does not exist (AGENTS.md §3.17). Only the
  * approvals count is a badge — it is the actionable one.
  */
-export function SidebarNav() {
+export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) {
   const navigate = useNavigate();
   const location = useLocation();
   const { approvals } = useApprovals();
@@ -24,6 +24,9 @@ export function SidebarNav() {
   return (
     <Menu
       mode="inline"
+      // Collapsed (Mod+B): icons only, with the label kept as a tooltip so the
+      // rail is still readable by hover and by screen readers.
+      inlineCollapsed={collapsed}
       selectedKeys={selected ? [selected] : []}
       onClick={({ key }) => navigate(key)}
       items={[
