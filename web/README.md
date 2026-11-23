@@ -46,7 +46,7 @@ npm run dev             # http://127.0.0.1:5178
 | `Mod+Alt+F` | 打开右侧文件检查器 |
 | 刷新 `/c/:id` | 快照恢复（含推理/工具步骤/用量） |
 | 切走再切回会话 | 回到该会话上次的阅读位置；原来贴底则继续跟随，原来上滚则显示「回到最新」 |
-| 运行中再发一条 | 进入队列（「N 条待发送」，可单条取消）；本轮 `done` 后自动发队首；`Esc` 停止时队列保留 |
+| 运行中再发一条 | 进入网关队列（WS `prompts:*` 域，「N 条待发送」，可单条取消）；本轮 `done` 后自动发队首；`Esc` 停止时队列保留 |
 
 ## 命令
 
@@ -87,6 +87,12 @@ scripts/        gen-tokens.mjs · gen-icons.mjs
 - **审批无默认动作**：不用 `Modal.confirm`；裸 `Enter` 不决定；拒绝不是 primary。
 - **不引第二套设计系统**；markdown 只用 `@ant-design/x-markdown`；图表不引库（洞察用表格）。
 - **antd API 先查不猜**：`bash scripts/antd-cli.sh info <Component> --version 6 --format json`。
+- **协议值不进 UI**：`stopReason: "stop"`、`end_turn`、`max_tokens`、`errorKind` 这类线上值只用于
+  分支判断，用户看到的永远是自己的词表（「已停止」「失败」）。渲染原始枚举会把实现细节漏到界面上。
+- **mock 必须和网关同等严格**：mock 宽松一次，就会藏一个只在真网关炸的集成 bug（已发生两次：
+  帧尾 `\n`、`prompts.enqueue` 的 `text` vs `prompt`）。WS 方法的参数契约在
+  `dev/ws-params.mjs`，mock、测试用的 fake 网关、`alignment.test.ts` 共用它——未知/缺失字段一律
+  `invalid_params`，不再静默接受。
 
 ## 订阅源版本（精确锁定，不要加 `^`）
 
@@ -99,7 +105,7 @@ scripts/        gen-tokens.mjs · gen-icons.mjs
 | --- | --- |
 | WS 快照/差值接线 | 权威状态在 WS `session:<id>` 域；当前由 `src/api/{gateway,approvals,inbox,settings,files}.ts` 的 HTTP 桥提供，task-3 落地后只改这些文件。审批队列用 1.5s 轮询桥接（`ApprovalsProvider`），同样只换实现。 |
 | ~~会话切换的滚动位置恢复（A3）~~ | 已完成（task-8）：消息 id + 行内偏移 + 贴底布尔。 |
-| ~~运行中排队（A5/B13）~~ | 已完成（task-8）：队列在网关侧（`/api/sessions/:id/prompts`），客户端镜像 + 取消 + done 后发队首 + abort 保留。 |
+| ~~运行中排队（A5/B13）~~ | 已完成：队列是网关的 WS `prompts:<sessionID>` 域（快照 + 差值 + enqueue/remove 命令），客户端无本地副本、无 REST 路径。 |
 | 消息 `⋯` 菜单（B11）、后台任务 chip（B12） | 本轮范围外。 |
 | 计划/提问/产物三类浮层（S5/S6） | Inbox 能看见并跳回会话；浮层本身属下一轮。 |
 | 设置页的动态记录新增（LSP 服务器添加、归档恢复） | 目录驱动的删除已实现；新增表单未做。 |

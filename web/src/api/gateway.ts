@@ -628,7 +628,8 @@ export async function subscribePrompts(
 
 /** Enqueue one prompt into the session's inbox (command, §5.1.1). */
 export async function enqueuePrompt(sessionId: string, text: string): Promise<{ id: string }> {
-  const result = await client().request<{ id: string }>('prompts.enqueue', { sessionId, text });
+  // The wire field is `prompt` (gateway promptsEnqueueParams), not `text`.
+  const result = await client().request<{ id: string }>('prompts.enqueue', { sessionId, prompt: text });
   // The pushed delta is the truth; the domain folds it in.
   return { id: result.id };
 }

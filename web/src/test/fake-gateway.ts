@@ -7,6 +7,9 @@
  * is fake; every frame is newline-framed JSON-RPC like the wire.
  */
 import { GatewayRpc, setGatewayRpc, type SocketLike } from '@/api/ws/rpc';
+// The mock and this fake share one params table, so a client that sends an
+// unknown field fails here too instead of only against the real gateway.
+import { validateParams } from '../../dev/ws-params.mjs';
 import { SETTING_KEYS } from '@/design/settings-keys';
 
 export interface FakeSessionInfo {
@@ -182,6 +185,22 @@ export class FakeGateway {
     const id = message.id as number | undefined;
     this.calls.push({ method, params });
 
+    const paramsCheck = validateParams(method, params);
+    if (!paramsCheck.ok) {
+      if (id !== undefined) {
+        socket.push({
+          jsonrpc: '2.0',
+          id,
+          error: {
+            code: -32602,
+            message: `invalid params: ${paramsCheck.field} ${paramsCheck.reason}`,
+            data: { name: 'invalid_params', field: paramsCheck.field },
+          },
+        });
+      }
+      return;
+    }
+
     const reply = (result: unknown) => {
       if (id !== undefined) socket.push({ jsonrpc: '2.0', id, result });
     };
@@ -340,7 +359,7 @@ export class FakeGateway {
     }
     if (method === 'prompts.enqueue') {
       const sessionId = String(params.sessionId ?? '');
-      const text = String(params.text ?? '');
+      const text = String(params.prompt ?? params.text ?? '');
       if (!this.state.sessions.some((item) => item.id === sessionId)) {
         fail(1001, 'session_not_found');
         return;

@@ -13,7 +13,7 @@
 | A2 | `/` 输入并发送 → 建会话 → 跳 `/c/:id`，消息进 transcript | **完成** | `app.smoke.test.tsx > creates a session from / …(A2)`；pendingText 一次性消费 |
 | A3 | 侧栏点另一会话 → thread 切换，滚动位置符合恢复规则 | **完成**（task-8） | 锚定「消息 id + 行内偏移 + 是否贴底」存 `sessionStorage`（不存 scrollTop）；`scroll-restore.test.tsx`：A/B 两会话各滚不同位置、**往返三次**位置与跟随状态都对，且窗口重建后仍有行渲染（不白屏不跳顶）；`scroll-anchor.test.ts`（存取/损坏容错/找不到消息回落贴底/坐标网格与实测两种模式） |
 | A4 | 发送 → 用户气泡 → 流式 → 完成态 | **完成** | `app.smoke.test.tsx > sends a turn …`、`sse-run.integration.test.ts`（真 SSE） |
-| A5 | 流式中 composer 变停止；运行态可见且不伪造进度；运行中发送进入队列 | **完成**（task-8 补齐排队） | `Sender loading` + `onStop`；运行中用 Enter 排队（`PromptQueuePanel`「N 条待发送」+ 单条取消 + done 后发队首 + abort 保留队列）；`prompt-queue.test.tsx` 三条用例；队列在后端（`src/api/prompt-queue.ts` 镜像 `contracts/promptqueue.go`，mock 端点 curl 验证 400/404/增删） |
+| A5 | 流式中 composer 变停止；运行态可见且不伪造进度；运行中发送进入队列 | **完成**（task-8 补齐排队） | `Sender loading` + `onStop`；运行中用 Enter 排队（`PromptQueuePanel`「N 条待发送」+ 单条取消 + done 后发队首 + abort 保留队列）；`prompt-queue.test.tsx` 三条用例；队列在后端：WS `prompts:<sessionID>` 域（`prompts.snapshot` / `prompts.delta` / `prompts.enqueue{prompt}` / `prompts.remove`），REST 路径已删除不并存；真网关浏览器验证：enqueue → delta → 「1 条待发送」→ Esc 中止后队列仍在（「发送队首」出现） |
 | A6 | 点停止 → 本轮结束 + 中性「已停止」 | **完成** | `sse-run.integration.test.ts > aborts…`；`AssistantBody` 中性 `已停止` |
 | A7 | 流式中 Esc（焦点在 composer）→ 停止本轮 | **完成** | `esc-chain.test.tsx > E2`（更强：焦点不在任何组件） |
 | A8 | 待审批时 Esc（焦点在侧栏）→ 拒绝 | **完成** | `esc-chain.test.tsx > E1`（真实 keydown on document） |

@@ -16,6 +16,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
+import { validateParams } from './ws-params.mjs';
 import { createHash } from 'node:crypto';
 
 const PORT = Number(process.env.PORT ?? 8788);
@@ -952,6 +953,12 @@ const server = createServer(async (req, res) => {
     return sendJson(res, 200, { ok: true });
   }
 
+  // ----------------------------------------------------------------- run --
+  // The single-turn token stream (§4.6). Authenticated like everything else.
+  if (path === '/api/chat/run' && method === 'POST') {
+    return handleRun(req, res);
+  }
+
   // -------------------------------------------------------- prompt queue --
   // Note: the prompt inbox is a WS domain (`prompts.*`) — it deliberately has
   // no REST shape any more, so the client cannot keep a second path alive.
@@ -1207,6 +1214,21 @@ const wsDispatch = (client, message) => {
   if (method !== 'initialize' && method !== 'ready' && !client.ready) {
     return fail(1024, 'not_ready');
   }
+  // Strict like the gateway: an unknown or missing field is invalid_params, not
+  // something to ignore. This is what keeps a `{text}` vs `{prompt}` mismatch
+  // from surviving into the real gateway.
+  const paramsCheck = validateParams(method, params);
+  if (!paramsCheck.ok) {
+    return wsSend(client, {
+      jsonrpc: '2.0',
+      id,
+      error: {
+        code: -32602,
+        message: `invalid params: ${paramsCheck.field} ${paramsCheck.reason}`,
+        data: { name: 'invalid_params', field: paramsCheck.field, reason: paramsCheck.reason },
+      },
+    });
+  }
 
   switch (method) {
     case 'initialize':
@@ -1316,7 +1338,7 @@ const wsDispatch = (client, message) => {
     }
     case 'prompts.enqueue': {
       const sessionId = String(params.sessionId ?? '');
-      const text = String(params.text ?? '').trim();
+      const text = String(params.prompt ?? params.text ?? '').trim();
       if (!sessions.has(sessionId)) return fail(1001, 'session_not_found');
       if (text === '') return fail(-32602, 'invalid_params');
       const prompt = { id: shortId('q'), sessionId, text };
@@ -1333,6 +1355,27 @@ const wsDispatch = (client, message) => {
       return reply({});
     }
     case 'foreground.set':
+      return reply({});
+    case 'session.active.get': {
+      const active = [...sessions.values()][0];
+      return reply({ sessionId: active?.id ?? '' });
+    }
+    case 'approvals.subscribe':
+    case 'ask.subscribe':
+    case 'plan.subscribe':
+    case 'settings.subscribe':
+    case 'artifacts.subscribe':
+      // Global domains are broadcast to every ready client; the subscribe call
+      // exists for replay after a reconnect, which the mock does not buffer.
+      return reply({
+        epoch: WS_EPOCH,
+        rev: params.sinceRev === undefined ? 0 : Number(params.sinceRev),
+        resync: false,
+      });
+    case 'ask.answer':
+    case 'ask.cancel':
+    case 'plan.exit':
+    case 'notify.action':
       return reply({});
     case 'ask.snapshot':
       return reply({ epoch: WS_EPOCH, rev: wsRevs.ask, pending: null });

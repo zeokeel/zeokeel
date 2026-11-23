@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { WS_PARAMS, validateParams } from '../../../dev/ws-params.mjs';
 
 /**
  * Mock ↔ gateway alignment.
@@ -88,6 +89,30 @@ describe('mock ↔ gateway', () => {
     const handled = new Set(mockMethods());
     const missing = CLIENT_METHODS.filter((name) => !handled.has(name));
     expect(missing).toEqual([]);
+  });
+
+  it('declares a params contract for every method the client sends', () => {
+    const missing = CLIENT_METHODS.filter((name) => !(name in WS_PARAMS));
+    expect(missing).toEqual([]);
+    // Every declared method must also be dispatched, or the table is fiction.
+    const handled = new Set(mockMethods());
+    const undispatched = Object.keys(WS_PARAMS).filter((name) => !handled.has(name));
+    expect(undispatched).toEqual([]);
+  });
+
+  it('rejects an unknown or missing parameter instead of ignoring it', () => {
+    // The `{text}` vs `{prompt}` mismatch that reached the real gateway once.
+    expect(
+      validateParams('prompts.enqueue', { sessionId: 's-1', text: 'wrong field' }),
+    ).toEqual({ ok: false, field: 'text', reason: 'unknown parameter' });
+    expect(validateParams('prompts.enqueue', { sessionId: 's-1' })).toEqual({
+      ok: false,
+      field: 'prompt',
+      reason: 'is required',
+    });
+    expect(validateParams('prompts.enqueue', { sessionId: 's-1', prompt: 'ok' })).toEqual({
+      ok: true,
+    });
   });
 
   it('authenticates like the gateway (§3.1): token exchange and a guarded WS', () => {
