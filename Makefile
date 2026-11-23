@@ -25,7 +25,7 @@ export GOFLAGS := -mod=mod
 # Extra arguments for `make run` (e.g. ARGS=--headless --data-dir /tmp/zk).
 ARGS ?=
 
-.PHONY: all build vet test ci run run-headless clean verify release package icons design-check design-baseline web-client web-client-if-available web-client-fresh
+.PHONY: all build vet test ci run run-headless clean verify release package icons web-client web-client-if-available web-client-fresh
 
 all: build
 
@@ -89,29 +89,16 @@ vet:
 test:
 	$(GO) test ./... -count=1
 
-# Design contract (docs/DESIGN-LINT.md): DS-01/03/06/07/10 AST rules via the
-# designlint command, then the Phase 0 grep probes. Stock violations are
-# grandfathered in .design-baseline.json; new ones fail.
-design-check:
-	$(GO) run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
-	./scripts/design-check.sh
-	$(GO) tool mygo vet .
-
-# Refresh the stock ledger after a migration has removed violations. The
-# baseline may only shrink in normal PRs (DESIGN-LINT §4.2); this target exists
-# for the design-system owner's cleanup commits.
-design-baseline:
-	$(GO) run ./internal/devtools/designlint --write-baseline ./...
-	@echo "updated .design-baseline.json (only remove stale entries in normal PRs)"
-
 # The fast local subset of CI (build+vet+test). The hosted CI additionally runs
-# gofmt, the design contract (designlint/design-check/mygo vet), the import
-# boundary assertion, a targeted -race pass, product smokes, cross-compile and
-# installer packaging (.github/workflows/ci.yml); full local parity: make verify.
+# gofmt, the protocol/implementation consistency test (docs/TRANSPORT.md §5.1 vs
+# the gateway dispatch), the two-tier import-boundary assertions, a targeted
+# -race pass, product smokes, cross-compile and installer packaging
+# (.github/workflows/ci.yml); full local parity: make verify.
 ci: build vet test
 
-# One-command reproducible verification: gofmt/build/vet/test/-race/regression/
-# UI snapshot/three-product smokes (scripts/verify.sh --quick for the fast loop).
+# One-command reproducible verification: gofmt/build/vet/protocol-consistency/
+# test/-race/two-tier boundaries/headless+ACP smokes (scripts/verify.sh --quick
+# for the fast loop).
 verify:
 	./scripts/verify.sh $(ARGS)
 

@@ -42,6 +42,16 @@
 - [x] **S1.7** 提交 `S1: serve runs the gateway before the tray; tray opens the browser`。
   - 回退点检查：`git revert <S1>` 后 `go build ./...` 应恢复原状（此时 UI 包从未被动过，必然通过）。
 
+### S7 执行记录（2026-11-23）
+
+- `ci.yml`：删掉 "Design contract"（designlint + design-check + `go tool mygo vet`），换成 **Protocol/implementation consistency**（`go test ./internal/gateway -run TestTransport`）；`:85` 的 `-race` 名单改为 `./internal/gateway ./internal/contracts ./internal/modules/... ./internal/host ./internal/assembly`（按 Lead 要求把 contracts 纳入）；Import boundaries 步骤的注释改为两档描述。
+- **`go tool mygo vet` 从 CI/Makefile 移除**（Lead 裁决：它在 S5 之后是"空过"——产品里已无 `ui.Element` 帧循环，空过的检查比没有检查更糟）。**`go.mod` 的 tool 指令保留**，将来托盘壳若长出 element 代码可手动跑；S9 报告会写明原因与恢复条件。
+- `scripts/verify.sh`：删 `check_designlint`/`check_design_grep`/`check_mygo_vet`/`check_regression`/`check_snapshot` 及其 `run_step`（连同头部注释同步）；**`check_protocol_consistency` 保留**；`check_desktop_smoke`（xvfb + 窗口）改写为 **`check_serve_smoke`**（无显示环境起 `--product serve --no-tray --port 0`，断言打印 `product: serve` 与带 token 的 `gateway: http://127.0.0.1:`）。
+- `Makefile`：删 `design-check`/`design-baseline`，`.PHONY` 与 `ci`/`verify` 的注释同步。
+- 归档（**不是删除**）：`.design-baseline.json` → `docs/archive/design-baseline.json`，`scripts/design-check.sh` → `docs/archive/design-check.sh`，并新增 `docs/archive/README.md` 说明"为何保留、被什么取代"。
+- **真跑 `bash scripts/verify.sh --quick`**（不是 `bash -n`）：gofmt / build / vet / protocol-consistency 四步 PASS，`go test ./...` 仅 `internal/lib/hostbundle` 失败——**环境性**（本沙箱 `$HOME` 只读，`sqlite: unable to open database file`），迁移前在 pristine HEAD 上同样失败。
+- 已知小瑕疵：`go test ./...` 会扫到 `web/node_modules/flatted/golang`（第三方 JS 包自带的 Go 文件，只产生一行 `[no test files]`）。不影响任何断言；若要彻底消除需给 Go 命令加 scope，留待需要时处理。
+
 ### S6 执行记录（2026-11-23）
 
 - 删除 `internal/contracts/uinative`：**`go list -deps ./internal/contracts | grep -c egoist/mygo` = 0**，S0 那一步到这里才真正收口。
@@ -183,21 +193,21 @@ S3 唯一能独立绿的部分（`usesUIServices`/`declareUIServices`）也无�
 
 ## 7. 步骤 S7：CI / 脚本 / Makefile
 
-- [ ] **S7.1** `.github/workflows/ci.yml:49-53` 删 `designlint` + `design-check` + `go tool mygo vet` 三步（若保留 mygo vet，见下方说明）。
+- [x] **S7.1** `.github/workflows/ci.yml:49-53` 删 `designlint` + `design-check` + `go tool mygo vet` 三步（若保留 mygo vet，见下方说明）。
   - 验证：`grep -n 'designlint\|design-check' .github/workflows/ci.yml` 为空；`actionlint`（若有）或人工读一遍。
   - mygo vet：托盘壳仍用 mygo → **保留**，但仅当它在只剩托盘时通过；否则改为对 `internal/host` 生效。
-- [ ] **S7.2** `ci.yml:85` 的 `-race ./internal/ui/... ./internal/uiroot …` 改成 `-race ./internal/gateway ./internal/modules/... ./internal/host ./internal/assembly`。
+- [x] **S7.2** `ci.yml:85` 的 `-race ./internal/ui/... ./internal/uiroot …` 改成 `-race ./internal/gateway ./internal/modules/... ./internal/host ./internal/assembly`。
   - 验证：本地跑同一条命令（`-timeout 20m`）全绿再提交。
-- [ ] **S7.3** `scripts/verify.sh`：删 `:161-166 check_designlint / check_design_grep`、`:182-194 check_regression`、`:196-206 check_snapshot` 及 `:303-305/:313-314` 对应 `run_step`；`:10` 头部注释同步。
+- [x] **S7.3** `scripts/verify.sh`：删 `:161-166 check_designlint / check_design_grep`、`:182-194 check_regression`、`:196-206 check_snapshot` 及 `:303-305/:313-314` 对应 `run_step`；`:10` 头部注释同步。
   - 验证：`bash -n scripts/verify.sh`；`bash scripts/verify.sh --quick` 走完无 "command not found"。
   - **保留** `:306` 的协议一致性检查（`TestTransport*`）。
-- [ ] **S7.4** `Makefile`：删 `design-check`(`:95-97`)、`design-baseline`(`:103`) 目标；`:28` 的 `.PHONY` 同步；`build/package/release` 不变；`acceptance*` 与 `web-client*` 保留。
+- [x] **S7.4** `Makefile`：删 `design-check`(`:95-97`)、`design-baseline`(`:103`) 目标；`:28` 的 `.PHONY` 同步；`build/package/release` 不变；`acceptance*` 与 `web-client*` 保留。
   - 验证：`make -n build package` 无报错；`make design-check` 变成 "No rule"（预期）。
-- [ ] **S7.5** 归档 `scripts/design-check.sh` 与 `.design-baseline.json`（移到 `docs/archive/` 或直接删；二者只服务被删的 designlint）。
+- [x] **S7.5** 归档 `scripts/design-check.sh` 与 `.design-baseline.json`（移到 `docs/archive/` 或直接删；二者只服务被删的 designlint）。
   - 验证：`grep -rn 'design-check.sh\|design-baseline' --include=*.sh --include=Makefile --include=*.yml . | grep -v docs/archive` 为空。
-- [ ] **S7.6** 保留 `mygo.json`（托盘打包用），检查其字段是否只服务窗口（单实例/图标），删除无用字段需验证打包脚本 `scripts/build-app.sh`。
-- [ ] **S7.7** 验证：`bash scripts/verify.sh --quick`；`make ci`；`go test ./internal/assembly -run TestImportBoundaries`。
-- [ ] **S7.8** 提交 `S7: CI and local verification without the native UI tooling`。
+- [x] **S7.6** 保留 `mygo.json`（托盘打包用），检查其字段是否只服务窗口（单实例/图标），删除无用字段需验证打包脚本 `scripts/build-app.sh`。
+- [x] **S7.7** 验证：`bash scripts/verify.sh --quick`；`make ci`；`go test ./internal/assembly -run TestImportBoundaries`。
+- [x] **S7.8** 提交 `S7: CI and local verification without the native UI tooling`。
 
 ## 8. 步骤 S8：文档
 

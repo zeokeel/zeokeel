@@ -46,18 +46,17 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Design contract
-        run: |
-          go run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
-          bash scripts/design-check.sh
-          go tool mygo vet .
+      - name: Protocol/implementation consistency
+        # docs/TRANSPORT.md §5.1 (the method table) and the gateway's dispatch
+        # table must list the same methods; the design-contract lint that used to
+        # live here retired with the native UI (S7).
+        run: go test ./internal/gateway -count=1 -run 'TestTransport' -v
 
       - name: Import boundaries
-        # The module-boundary allowlist (AGENTS.md §1 / docs/ARCHITECTURE.md §3,
-        # 2026-11 audit AR-07/AR-08) is machine-asserted: UI modules only reach
-        # contracts/uikit/design/icons/brand/lib/*, backend modules never reach
-        # another module implementation or the UI shell, host never reaches
-        # modules directly (AR-22).
+        # The module-boundary allowlist (AGENTS.md §1 / docs/ARCHITECTURE.md §3)
+        # is machine-asserted in two tiers: the native engine is quarantined to
+        # the shell + asset layers, the backend is transitively engine-free, and
+        # host never reaches internal/modules directly (AR-22).
         run: go test ./internal/assembly -run TestImportBoundaries -count=1
 
       - name: Test
@@ -82,7 +81,7 @@ jobs:
           CGO_ENABLED: "1"
           GOFLAGS: -mod=mod -p=1
           GOMEMLIMIT: 4GiB
-        run: go test -race ./internal/ui/... ./internal/uiroot ./internal/modules/agent ./internal/modules/toolkit ./internal/host -count=1 -timeout 20m
+        run: go test -race ./internal/gateway ./internal/contracts ./internal/modules/... ./internal/host ./internal/assembly -count=1 -timeout 20m
 
       - name: Product binary smoke
         run: |

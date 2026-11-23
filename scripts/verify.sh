@@ -7,7 +7,7 @@
 # local Go module cache.
 #
 # Usage:
-#   scripts/verify.sh            # full: fmt/build/vet/designlint/mygo-vet/test/-race/regression/snapshot/smokes
+#   scripts/verify.sh            # full: fmt/build/vet/protocol-consistency/test/-race/boundaries/smokes
 #   scripts/verify.sh --quick    # skip -race and the product smokes (fast inner loop)
 #   scripts/verify.sh --no-smoke # keep -race, skip only the product smokes
 #
@@ -158,20 +158,6 @@ check_gofmt() {
 	return 0
 }
 
-check_designlint() {
-	"$GO" run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
-}
-
-check_design_grep() {
-	./scripts/design-check.sh
-}
-
-# Framework lifetime checks (elements/parts stored in structs, goroutines
-# capturing the UI context) through the go.mod tool directive.
-check_mygo_vet() {
-	"$GO" tool mygo vet .
-}
-
 # Protocol/implementation consistency: docs/TRANSPORT.md §5.1 must list exactly
 # the methods the gateway dispatches (a pure string comparison, so it is cheap
 # enough for the quick loop).
@@ -179,56 +165,17 @@ check_protocol_consistency() {
 	"$GO" test ./internal/gateway -count=1 -run 'TestTransport' >/dev/null
 }
 
-check_regression() {
-	local log
-	log=$(mktemp "${TMPDIR:-/tmp}/zeokeel-regression.XXXXXX")
-	temp_dirs+=("$log")
-	if ! "$GO" test ./internal/regression -count=1 -v >"$log" 2>&1; then
-		tail -n 40 "$log"
-		return 1
-	fi
-	local pass_count skip_count fail_count
-	pass_count=$(grep -cE '^--- PASS' "$log" || true)
-	skip_count=$(grep -cE '^--- SKIP' "$log" || true)
-	fail_count=$(grep -cE '^--- FAIL' "$log" || true)
-	printf '(regression: %s PASS / %s SKIP / %s FAIL) ' "$pass_count" "$skip_count" "$fail_count"
-	[[ "$fail_count" -eq 0 ]]
-}
-
-check_snapshot() {
-	local out_dir log
-	out_dir=$(new_temp_dir)
-	log=$(mktemp "${TMPDIR:-/tmp}/zeokeel-snapshot.XXXXXX")
-	temp_dirs+=("$log")
-	if ! "$GO" run ./internal/devtools/ui-snapshot "$out_dir" >"$log" 2>&1; then
-		tail -n 40 "$log"
-		return 1
-	fi
-	local steps pngs
-	steps=$(grep -c '^wrote ' "$log" || true)
-	pngs=$(find "$out_dir" -type f -name '*.png' | wc -l | tr -d ' ')
-	printf '(snapshot: %s steps / %s PNGs) ' "$steps" "$pngs"
-	[[ "$steps" -gt 0 && "$pngs" -gt 0 ]]
-}
-
-check_desktop_smoke() {
+# The serve product is the desktop replacement: it must start without a display
+# and publish its gateway URL. The old desktop smoke drove a real window under
+# Xvfb; there is no window any more, so this checks the thing the browser needs:
+# the process comes up, loads its modules and prints the URL with a token.
+check_serve_smoke() {
 	local data_dir log
 	data_dir=$(new_temp_dir)
-	log=$(mktemp "${TMPDIR:-/tmp}/zeokeel-desktop.XXXXXX")
+	log=$(mktemp "${TMPDIR:-/tmp}/zeokeel-serve.XXXXXX")
 	temp_dirs+=("$log")
-	if ! command -v xvfb-run >/dev/null 2>&1; then
-		echo "xvfb-run is not installed (needed for the desktop smoke)"
-		return 1
-	fi
-	cat >"$data_dir/settings.json" <<'JSON'
-{"ui.globalHotkey":"CmdOrCtrl+Shift+Space"}
-JSON
-	# Startup under Xvfb + llvmpipe takes ~18 s on this host (the window is up
-	# late because the GL surface initializes on the CPU); the previous 8 s
-	# budget only ever measured the compile+init tail and was flaky. Keep the
-	# smoke focused on "loads without panic", not on a stopwatch.
 	set +e
-	xvfb-run -a timeout -s TERM 40 "$GO" run ./cmd/zeokeel --data-dir "$data_dir" >"$log" 2>&1
+	timeout -s TERM 30 "$GO" run ./cmd/zeokeel --product serve --no-tray --port 0 --data-dir "$data_dir" >"$log" 2>&1
 	local code=$?
 	set -e
 	if [[ $code -ne 0 && $code -ne 124 ]]; then
@@ -239,12 +186,11 @@ JSON
 		tail -n 40 "$log"
 		return 1
 	fi
-	if ! grep -q 'product "desktop" loaded' "$log"; then
+	if ! grep -q 'product: serve' "$log" || ! grep -q 'gateway: http://127.0.0.1:' "$log"; then
 		tail -n 40 "$log"
 		return 1
 	fi
-	printf '(desktop exit %s, tray ready: %s) ' "$code" \
-		"$(grep -c 'system tray ready' "$log" || true)"
+	printf '(serve exit %s, url printed: %s) ' "$code" "$(grep -c 'gateway: http://127.0.0.1:' "$log" || true)"
 }
 
 check_headless_smoke() {
@@ -300,9 +246,6 @@ echo
 run_step "gofmt" check_gofmt
 run_step "go build ./..." "$GO" build ./...
 run_step "go vet ./..." "$GO" vet ./...
-run_step_quiet "designlint (--strict)" check_designlint
-run_step "design-check (phase 0 grep)" check_design_grep
-run_step_quiet "go tool mygo vet" check_mygo_vet
 run_step_quiet "protocol consistency (TRANSPORT §5.1 vs dispatch)" check_protocol_consistency
 run_step_quiet "go test ./... -count=1" "$GO" test ./... -count=1
 if [[ $RACE -eq 1 ]]; then
@@ -310,10 +253,8 @@ if [[ $RACE -eq 1 ]]; then
 else
 	echo "==> go test ./... -count=1 -race ... SKIP (--quick)"
 fi
-run_step "regression (-v)" check_regression
-run_step "ui-snapshot" check_snapshot
 if [[ $SMOKE -eq 1 ]]; then
-	run_step "desktop smoke (xvfb)" check_desktop_smoke
+	run_step "serve smoke (gateway starts without a display)" check_serve_smoke
 	run_step "headless smoke" check_headless_smoke
 	run_step "ACP smoke" check_acp_smoke
 else
