@@ -85,7 +85,8 @@ func sandboxNoteText(locale contracts.LocaleService, mode string) string {
 // permission change lands on the next tool build. There is no switch; a
 // stripped assembly without the module renders the unavailable state. store
 // supplies the global permission mode the status face must reflect (RG-02).
-func buildSandboxSection(c *ui.Context, locale contracts.LocaleService, service contracts.SandboxService, store contracts.SettingsService) {
+func buildSandboxSection(c *ui.Context, locale contracts.LocaleService, service contracts.SandboxService,
+	store contracts.SettingsService, st *behaviorState, uiRuntime contracts.UIRuntime) {
 	t := design.Of(c)
 	mode := contracts.PermissionWorkspace
 	if store != nil {
@@ -105,6 +106,22 @@ func buildSandboxSection(c *ui.Context, locale contracts.LocaleService, service 
 				"会话或自动化的「所有权限」只放宽审批，不解除沙箱；修改在下次构建工具时生效。",
 				"A session or automation-level All permissions only relaxes approval, never lifts the sandbox; a change applies on the next tool build.")),
 				descStyle(t)).MaxLines(2)
+			if store != nil {
+				if !st.writableDirsLoaded {
+					st.writableDirs = store.Get(contracts.SettingSandboxWritableDirs, "")
+					st.writableDirsLoaded = true
+				}
+				ui.Field(c, localized(locale, "额外可写目录（每行一个）", "Extra writable folders (one per line)"), func() {
+					if ui.TextArea(c.Key("settings.sandbox.writable-dirs"), &st.writableDirs).Changed() {
+						saveBehaviorSetting(st, uiRuntime, store, locale,
+							contracts.SettingSandboxWritableDirs, strings.TrimSpace(st.writableDirs))
+					}
+				})
+				design.Apply(ui.Text(c, localized(locale,
+					"只填写工具实际使用的子目录（例如 ~/.dws），不要填写整个 home；敏感目录会被拒绝。",
+					"List only the exact subdirectories a tool uses (for example ~/.dws), never the whole home directory; sensitive paths are rejected.")),
+					descStyle(t)).MaxLines(2)
+			}
 		})
 	})
 }

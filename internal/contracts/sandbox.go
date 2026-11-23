@@ -44,6 +44,13 @@ type SandboxService interface {
 	Status() SandboxStatus
 }
 
+// SettingSandboxWritableDirs is the machine-level extra writable-directory list
+// for the OS sandbox (newline or path-list separated). It exists for tools that
+// keep state in a fixed home directory (for example ~/.dws): grant the exact
+// subdirectory, never the home directory itself. Entries are validated by the
+// SDK policy builder; invalid/sensitive paths are dropped there.
+const SettingSandboxWritableDirs = "sandbox.writableDirs"
+
 // KeySandbox is provided by the sandbox module (zeokeel/sandbox) and consumed
 // by the toolkit (runner injection) and the agent gate (shell auto-allow).
 var KeySandbox = cordis.NewServiceKey[SandboxService]("zeokeel/sandbox")

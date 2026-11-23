@@ -17,6 +17,7 @@ package toolkit
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -97,6 +98,11 @@ type Config struct {
 	// — the same contract the approvals module's ignorePermissionSetting pins
 	// for the approval gate (2026-11 audit).
 	IgnorePermissionSetting bool `json:"ignorePermissionSetting"`
+	// WritableRoots are extra directories the OS sandbox may write beside the
+	// workspace root (machine-level; resolved from sandbox.writableDirs at
+	// activation). Exact tool-state subdirectories only; the SDK drops
+	// sensitive paths and the home directory itself.
+	WritableRoots []string `json:"writableRoots"`
 	// MCPServers are remote MCP servers exposed as tools/resources/prompts.
 	MCPServers []MCPServer `json:"mcpServers"`
 }
@@ -128,6 +134,7 @@ func Module() *module.Descriptor[Config] {
 		policyCfg := cfg
 		policyCfg.MaxOutputBytes = shellMaxOutputBytes(cfg, settingsService, hasSettings)
 		policyCfg.DeniedGlobs = resolveDeniedGlobs(cfg, settingsService, hasSettings, logf)
+		policyCfg.WritableRoots = sandboxWritableRoots(settingsService, hasSettings)
 		// The OS sandbox is optional: an assembly without the sandbox module
 		// keeps the pre-sandbox behavior (nil runner, approval-only boundary).
 		sandboxService, hasSandbox := ctx.Get(contracts.KeySandbox)
@@ -533,6 +540,28 @@ func shellMaxOutputBytes(cfg Config, settings contracts.SettingsService, hasSett
 	return kiB * 1024
 }
 
+// sandboxWritableRoots parses the machine-level extra writable-directory row.
+// Newlines and os.PathListSeparator both separate entries; blanks are ignored.
+func sandboxWritableRoots(settings contracts.SettingsService, hasSettings bool) []string {
+	if !hasSettings || settings == nil {
+		return nil
+	}
+	raw := strings.TrimSpace(settings.Get(contracts.SettingSandboxWritableDirs, ""))
+	if raw == "" {
+		return nil
+	}
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == '\n' || r == '\r' || r == os.PathListSeparator
+	})
+	roots := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if path := strings.TrimSpace(field); path != "" {
+			roots = append(roots, path)
+		}
+	}
+	return roots
+}
+
 // newPolicy builds the sandbox policy from the module config. It is a helper so
 // the shell-policy behavior (allowlist, optional shell grammar) has a direct
 // unit-test seam. mode is the linked OS sandbox mode; cfg.ReadOnly keeps forcing
@@ -540,6 +569,7 @@ func shellMaxOutputBytes(cfg Config, settings contracts.SettingsService, hasSett
 func newPolicy(cfg Config, root string, timeout time.Duration, mode sandbox.Mode) *sandbox.Policy {
 	options := []sandbox.Option{
 		sandbox.WithRoots(root),
+		sandbox.WithWritableRoots(cfg.WritableRoots...),
 		sandbox.WithMode(policyMode(cfg, mode)),
 		sandbox.WithReadOnly(cfg.ReadOnly),
 		sandbox.WithNetwork(cfg.Network),

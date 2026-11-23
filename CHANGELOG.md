@@ -6,6 +6,13 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.61] - 2026-11-23
+
+### Added
+
+- **沙箱额外可写目录**：行为与限额页新增「额外可写目录」（每行一个），写入 `sandbox.writableDirs`，启动时交给 sandbox policy 的 `WithWritableRoots`；用于 `~/.dws` 这类固定状态目录，SDK 会拒绝 home 本身/敏感系统目录。适用于 OS 沙箱 workspace-write。
+- 保留现有 `request_sandbox_access` 运行期路径授权（审批后写入策略）。
+
 ## [0.2.60] - 2026-11-23
 
 ### Changed

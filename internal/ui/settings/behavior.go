@@ -235,6 +235,11 @@ type behaviorState struct {
 	// settings so an edit is not overwritten by a rebuild.
 	agentsFile       string
 	agentsFileLoaded bool
+
+	// writableDirs is the extra OS-sandbox writable directory draft (one per
+	// line), loaded once from settings.
+	writableDirs       string
+	writableDirsLoaded bool
 }
 
 // saveBehaviorSetting persists one immediate-apply settings row and reports the
@@ -286,7 +291,7 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 		// that lets the agent gate auto-allow shell tools. Its live status says
 		// whether this host can enforce it — mode-aware, since full access
 		// passes commands through unconfined (RG-02).
-		buildSandboxSection(c, locale, sandboxService, store)
+		buildSandboxSection(c, locale, sandboxService, store, st, runtime)
 		// Work details: how much of a turn's tool-call steps the transcript shows
 		// and when finished steps fold (DSH-aligned). This stays visible next to
 		// the daily permission choice; it is a display preference, not a
