@@ -366,6 +366,18 @@ export class FakeGateway {
       reply({ resolved: true });
       return;
     }
+    // Global domains: the subscribe call is a replay request; the deltas that
+    // follow arrive through `notify()` on every connected socket (task-38 A).
+    if (
+      method === 'approvals.subscribe' ||
+      method === 'ask.subscribe' ||
+      method === 'plan.subscribe' ||
+      method === 'settings.subscribe'
+    ) {
+      const revKey = method.split('.')[0] as 'approvals' | 'ask' | 'plan' | 'settings';
+      reply({ epoch: this.epoch, rev: this.revs[revKey], resync: false });
+      return;
+    }
     if (method === 'settings.snapshot') {
       reply({ epoch: this.epoch, rev: this.revs.settings, rows: this.state.settings });
       return;

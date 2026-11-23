@@ -48,14 +48,10 @@ export const UNIMPLEMENTED_PARAMS: Record<string, Record<string, string>> = {
  * "the client starts using it" fails here instead of degrading silently.
  */
 export const UNIMPLEMENTED_METHODS: Record<string, string> = {
-  'approvals.subscribe': '未实现：客户端目前只用 approvals.snapshot + delta',
   'ask.answer': '未实现：jsdom 测试里提问由 state.ask 直接构造，不经回答命令',
   'ask.cancel': '未实现：同上，取消由测试直接重置 state.ask 而不发命令',
-  'ask.subscribe': '未实现：提问用快照 + 广播驱动，没有订阅通道',
   'plan.exit': '未实现：测试直接改 state.plan',
-  'plan.subscribe': '同 ask：用快照 + 广播驱动',
   'session.active.get': '未实现：客户端尚未使用',
-  'settings.subscribe': '未实现：settings.snapshot + delta 已覆盖',
 };
 
 /**
@@ -160,9 +156,10 @@ describe('registration lists stay honest', () => {
     // Shrunk from 3 to 1 when the gateway dropped the phantom `sinceRev` fields:
     // the registry follows the contract down, which is the point of it.
     expect(Object.keys(UNIMPLEMENTED_PARAMS).length).toBeLessThanOrEqual(1);
-    // 9 → 8: `notify.action` is implemented (task-38), and `task.delete` now
-    // offers a real undo through it.
-    expect(Object.keys(UNIMPLEMENTED_METHODS).length).toBeLessThanOrEqual(8);
+    // 9 → 8 → 4: `notify.action` (with the delete/undo loop) and the four global
+    // subscribes are implemented; each removal is forced by the "handled methods
+    // must not stay registered" assertion below.
+    expect(Object.keys(UNIMPLEMENTED_METHODS).length).toBeLessThanOrEqual(4);
   });
 });
 
