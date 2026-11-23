@@ -153,3 +153,23 @@ npm run gen:verify     # 复跑生成器并比对：输入*消失*才红，数�
 | 暗色/语言切换的真实生效（B5） | 当前跟随系统 `prefers-color-scheme`；设置值已能保存，尚未驱动外观。 |
 | 终端、图表、插件市场 | 任务书明确不做。 |
 | Playwright / 截图回归 | 环境无 headless 浏览器；以 vitest（E1–E9、真 SSE 集成、520 条虚拟化）替代，**不声称**已在真实浏览器验证滚动帧率。 |
+
+### 夹具契约与已登记缺口（task-34）
+
+对齐断言过去只查"客户端 ↔ 契约"，没有一条查"**替身 ↔ 契约**"——`editMessageId`
+被 mock 静默丢弃、200+ 测试全绿，就是这一层缺失的后果。现在
+`src/api/ws/fixture-contract.test.ts` 两个方向都查，并维护三张**可减不可增**的登记表
+（脚本按 `@format` 之外的纯文本匹配，条目必须逐字出现在本节）：
+
+- **`UNIMPLEMENTED_PARAMS`**（mock 不读的契约字段）：
+  `session.snapshot.beforeMessageId`、`session.snapshot.tail`（历史分页：未实现功能，客户端不发）、
+  `context.snapshot.sinceRev`、`tasks.snapshot.sinceRev`（快照语义下无意义，增量走 subscribe）。
+- **`MOCK_IGNORED_PARAMS`**（mock 接受但 no-op 的入参）：`initialize.clientName` /
+  `clientVersion` / `protocolVersion` / `capabilities`（不校验握手）、
+  `ask.answer` / `ask.cancel` 的 `id` 与 `answer`、`plan.exit.action`、
+  `notify.action.id` / `notify.action.actionId`（**toast 的撤销按钮在 mock 里没有对应动作**）。
+- **`UNIMPLEMENTED_METHODS`**（fake 网关未实现）：`approvals.subscribe`、`ask.answer`、
+  `ask.cancel`、`ask.subscribe`、`notify.action`、`plan.exit`、`plan.subscribe`、
+  `session.active.get`、`settings.subscribe`。
+
+新增一条**必须同时**写原因（非空断言）与本文件（README 断言），否则测试红。
