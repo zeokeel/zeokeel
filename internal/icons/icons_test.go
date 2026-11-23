@@ -75,8 +75,8 @@ func TestIconsParseAndKeepTheirGrid(t *testing.T) {
 		}
 		// Every semantic accessor must resolve: an embedded file with no
 		// accessor is dead weight, and an accessor with no file panics at use.
-		if svg := get(name); svg == nil {
-			t.Fatalf("icon %q resolved to nil", name)
+		if data := SVG(name); len(data) == 0 {
+			t.Fatalf("icon %q did not resolve to any bytes", name)
 		}
 	}
 	if counts["16"] == 0 || counts["24"] == 0 {

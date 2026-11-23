@@ -42,6 +42,21 @@
 - [x] **S1.7** 提交 `S1: serve runs the gateway before the tray; tray opens the browser`。
   - 回退点检查：`git revert <S1>` 后 `go build ./...` 应恢复原状（此时 UI 包从未被动过，必然通过）。
 
+### S6 执行记录（2026-11-23）
+
+- 删除 `internal/contracts/uinative`：**`go list -deps ./internal/contracts | grep -c egoist/mygo` = 0**，S0 那一步到这里才真正收口。
+- `boundary_test.go` 重写为两档 + 一条独立直查：
+  - `TestEngineIsQuarantinedToTheShell`（直查 import）：允许清单 = `internal/host`、`internal/lib/{openpath,openurl}`、`internal/brand`、`internal/design` —— **正好 5 个，未扩张**；双向断言（清单外的 import → 红；清单里的包不再 import → 也红，防陈旧条目）。
+  - `TestBackendIsTransitivelyEngineFree`（传递）：`./internal/gateway`、`./internal/contracts`、`./internal/modules/...` 的 `go list -deps` 里 mygo = 0。
+  - `TestContractsDependsOnNoEngine`：保留。
+  - `TestTestDependenciesStayEngineFree`（test 档）：`go list -deps -test ./internal/gateway` 必须**含** `internal/modules/*`（e2e 需要真模块，断言它确实在用）且**不含** mygo。
+  - `TestImportBoundaries`：保留后端模块/host/contracts 的规则，删掉 ui/uikit/uiroot 分支。
+- **新发现（断言当场抓到的）**：`internal/icons` 也 import `mygo/ui`（把 34 个 SVG 解析成 `ui.SVG` 供原生渲染）。它的消费者（ui/uiroot）已随 S5 删除，所以整个 Go API 成了死代码。处理：**把 icons 收敛成"只嵌入 SVG + FS()/Names()/SVG() 访问器"**，去掉 mygo 依赖（web 的 `gen:icons` 仍从 `svg/*.svg` 读盘，34 个文件未动）；测试改为校验网格/描边不变量 + 每个文件可读。结果：5 包允许清单**不需要第 6 项**。
+- **证明会咬人**（两次，恢复后复绿）：
+  1. 往 `internal/modules/agent` 加一行 `_ "github.com/egoist/mygo/ui"` → `internal/modules/agent imports github.com/egoist/mygo: the native engine is quarantined to [...]` + 传递档报 `./internal/modules/... depends on github.com/egoist/mygo/i18n`。
+  2. 从允许清单里删掉 `internal/brand` → `internal/brand imports github.com/egoist/mygo: ... quarantined to [design host openpath openurl]`。
+- 验证：gofmt 空 / build / vet OK；assembly、host、gateway(35.7s)、icons、contracts 全绿。
+
 ### S5 执行记录（2026-11-23，含并入的 S3）
 
 - 删除（git 跟踪）：`internal/ui`(364) + `internal/uiroot`(54) + `internal/uikit`(60) + `internal/devtools/{designlint,ui-snapshot,ui-drive}`(18) + `internal/design/conform`(5) + `internal/design/conformance_test.go` + `internal/regression`(71) + `internal/modules/hosttools/bridges_test.go` + `internal/assembly/assemblies/desktop.json`。合计 **575 文件 / 160,637 行**。
@@ -153,18 +168,18 @@ S3 唯一能独立绿的部分（`usesUIServices`/`declareUIServices`）也无�
 
 ## 6. 步骤 S6：边界断言两档（产品严格 / test 单列）
 
-- [ ] **S6.1** 重写 `internal/assembly/boundary_test.go`：删 `:99-108 uiModuleAllowed` 与 `:231 TestNativeUIModelIsQuarantined`。
+- [x] **S6.1** 重写 `internal/assembly/boundary_test.go`：删 `:99-108 uiModuleAllowed` 与 `:231 TestNativeUIModelIsQuarantined`。
   - 验证：`go test ./internal/assembly -run 'TestImportBoundaries|TestContractsDependsOnNoEngine'`。
-- [ ] **S6.2** 新断言 **(a) 产品依赖**：`go list -deps` 逐包扫 mygo，允许清单**只有**：`internal/host`、`internal/lib/openpath`、`internal/lib/openurl`、`internal/brand`、`internal/design`。
+- [x] **S6.2** 新断言 **(a) 产品依赖**：`go list -deps` 逐包扫 mygo，允许清单**只有**：`internal/host`、`internal/lib/openpath`、`internal/lib/openurl`、`internal/brand`、`internal/design`。
   - 验证：`go test ./internal/assembly -run TestNativeUIModelIsQuarantined` 改名后的新用例绿；并附一次 `go list -deps ./internal/brand | grep -c mygo` = 1（证明清单里的包确实用它）。
-- [ ] **S6.3** 新断言 **(b) 后端为 0**：`internal/gateway`、`internal/contracts`（含 `uinative` 移除后）、`internal/modules/**` 对 mygo 的**传递**依赖必须为 0。
+- [x] **S6.3** 新断言 **(b) 后端为 0**：`internal/gateway`、`internal/contracts`（含 `uinative` 移除后）、`internal/modules/**` 对 mygo 的**传递**依赖必须为 0。
   - 验证：`go list -deps ./internal/gateway ./internal/contracts ./internal/modules/... | grep -c egoist/mygo` = 0。
-- [ ] **S6.4** 新断言 **(c) test 依赖单列**：用 `go list -deps -test` 单独统计，断言"test 依赖里出现 `internal/modules/*` 是允许的（e2e 要真模块），但**不得出现 mygo**"。注释里写明这是有意分档（避免有人把 e2e 的 test 依赖当红线误判）。
+- [x] **S6.4** 新断言 **(c) test 依赖单列**：用 `go list -deps -test` 单独统计，断言"test 依赖里出现 `internal/modules/*` 是允许的（e2e 要真模块），但**不得出现 mygo**"。注释里写明这是有意分档（避免有人把 e2e 的 test 依赖当红线误判）。
   - 验证：`go list -deps -test ./internal/gateway | grep -c egoist/mygo` = 0 **且** `... | grep -c 'internal/modules/'` > 0（证明分档生效）。
-- [ ] **S6.5** 删除 `internal/contracts/uinative`（**必须等 S2+S3+S5 都完成**：它的消费者是 `internal/ui/**`、`uiroot`、`assembly.go` 的 `declareUIServices`、`host.go` 的 `provideServices` 分支，前两步先改掉这些引用）。
+- [x] **S6.5** 删除 `internal/contracts/uinative`（**必须等 S2+S3+S5 都完成**：它的消费者是 `internal/ui/**`、`uiroot`、`assembly.go` 的 `declareUIServices`、`host.go` 的 `provideServices` 分支，前两步先改掉这些引用）。
   - 验证：`grep -rn "contracts/uinative" --include=*.go internal cmd audit` 为空；`go build ./...`；`go list -deps ./internal/gateway | grep -c uinative` = 0。
-- [ ] **S6.6** **证明会咬人**：临时把 `internal/lib/openurl` 加进一个不在清单的包（或在 `internal/modules/agent` 里 import mygo）→ 断言必须红；恢复后绿。把两次输出记进提交信息。
-- [ ] **S6.7** 提交 `S6: boundary assertions for the post-UI world (product + test tiers)`。
+- [x] **S6.6** **证明会咬人**：临时把 `internal/lib/openurl` 加进一个不在清单的包（或在 `internal/modules/agent` 里 import mygo）→ 断言必须红；恢复后绿。把两次输出记进提交信息。
+- [x] **S6.7** 提交 `S6: boundary assertions for the post-UI world (product + test tiers)`。
 
 ## 7. 步骤 S7：CI / 脚本 / Makefile
 

@@ -1,34 +1,32 @@
 package assembly_test
 
-// Import-boundary assertions (2026-11 audit AR-07/AR-08/AR-22). The module
-// boundaries in AGENTS.md §1 / docs/ARCHITECTURE.md §3 were human-reviewed only
-// until this test: docs/ARCHITECTURE.md claimed "CI 用 go list 断言" while no
-// such assertion existed. This test is that assertion — it shells out to
-// `go list` over the product packages and checks every internal import against
-// the allowlist ruling (AR-07, lead decision):
+// Import-boundary assertions for the browser-first product (S6 of the native-UI
+// retirement; the S0 rules these replace live in the pre-s4 tag).
 //
-//   - UI modules (internal/ui/*) may import only contracts/uikit/design/icons/
-//     brand/lib/* plus third-party modules. brand is open to the UI layer for
-//     the logo assets; internal/{hosttools,memorytools,websearch} are shared
-//     backend libraries, not module implementations.
-//   - Backend modules (internal/modules/*) may import contracts, uikit,
-//     design, lib/* and the shared libraries (docs/ARCHITECTURE.md §3), never
-//     another module implementation, never the UI modules/uiroot/host/
-//     assembly. (approvals localizes its notifications through uikit.Language/
-//     ToolDisplayName — the shared composition layer is below both siblings.)
-//   - host must not reach into internal/modules/* directly (AR-22: the one
-//     such edge, host→modules/update, was removed by moving CompareVersions
-//     into internal/lib/version).
-//   - uikit stays below the UI modules; uiroot (the shell) never imports a UI
-//     module implementation; contracts is the leaf shared surface.
+// The rules, in the same order the tests assert them:
 //
-// Test-only packages (no non-test Go files, e.g. internal/ui/uimodtest and
-// internal/regression) are integration harnesses: their test imports are
-// deliberately wider and are not product code, so the product rules skip them.
+//  1. internal/contracts is the leaf shared surface: it imports no other
+//     internal package and no engine.
+//  2. Backend modules may import contracts, design, lib/* and the shared
+//     libraries; never another module implementation, never host or assembly.
+//  3. host must not reach into internal/modules/* directly.
+//  4. The native UI engine (github.com/egoist/mygo) survives only in the shell:
+//     internal/host (tray/hotkey/OS notifications), internal/lib/{openpath,openurl}
+//     (OS launchers) and the two asset layers the web generator parses
+//     (internal/brand, internal/design). Everything the browser talks to —
+//     gateway, contracts, modules — must stay engine-free, proven both directly
+//     and through the transitive dependency graph.
+//
+// Test dependencies are listed separately on purpose: internal/gateway's e2e
+// tests load the real backend modules, so `go list -deps -test` there contains
+// internal/modules/* and that is intended — the e2e only has value against the
+// real modules. The rule that still holds for tests is the engine one: a test
+// dependency must not drag mygo in either.
 
 import (
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -36,16 +34,26 @@ import (
 
 const modulePath = "github.com/zeokeel/zeokeel/"
 
-// engineModulePath is the native UI engine. Stage 0 of the web-client pivot
-// (docs/plans/stage0-decouple-contracts.md) moves the mygo-bound contribution
-// model into internal/contracts/uinative so that internal/contracts — and every
-// transport that only needs the contracts — stays engine-free.
+// engineModulePath is the native UI engine (github.com/egoist/mygo). The tray
+// shell still uses it; nothing else may.
 const engineModulePath = "github.com/egoist/mygo"
+
+// engineAllowlist is the complete set of packages allowed to import the engine.
+// It is a *decision*, not an observation: adding a package here means the
+// product now carries a native dependency again (docs/plans/s4-execution-checklist.md).
+var engineAllowlist = map[string]bool{
+	"internal/host":         true, // tray icon, global hotkey, OS notifications
+	"internal/lib/openpath": true, // "reveal in file manager"
+	"internal/lib/openurl":  true, // open the browser client / OAuth URLs
+	"internal/brand":        true, // palette + logo colors as mygo colors
+	"internal/design":       true, // design tokens as mygo colors
+}
 
 // boundaryPkg is one package row of `go list`.
 type boundaryPkg struct {
 	path     string   // full import path
 	internal []string // repo-relative internal imports
+	external []string // non-internal imports
 	goFiles  int      // number of non-test Go files
 }
 
@@ -53,26 +61,9 @@ type boundaryPkg struct {
 // root and parses the import rows.
 func listProductPackages(t *testing.T) []boundaryPkg {
 	t.Helper()
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("resolve module root: %v", err)
-	}
-	cmd := exec.Command("go", "list", "-f",
-		"{{.ImportPath}}|{{join .Imports \",\"}}|{{len .GoFiles}}",
-		"./internal/...", "./cmd/...")
-	cmd.Dir = root
-	out, err := cmd.Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			t.Fatalf("go list: %v\n%s", err, exitErr.Stderr)
-		}
-		t.Fatalf("go list: %v", err)
-	}
+	rows := goList(t, "{{.ImportPath}}|{{join .Imports \",\"}}|{{len .GoFiles}}", "./internal/...", "./cmd/...")
 	var pkgs []boundaryPkg
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
-		}
+	for _, line := range rows {
 		parts := strings.SplitN(line, "|", 3)
 		if len(parts) != 3 {
 			t.Fatalf("go list row %q: want path|imports|gofiles", line)
@@ -81,7 +72,9 @@ func listProductPackages(t *testing.T) []boundaryPkg {
 		for _, imp := range strings.Split(parts[1], ",") {
 			if strings.HasPrefix(imp, modulePath) {
 				p.internal = append(p.internal, strings.TrimPrefix(imp, modulePath))
+				continue
 			}
+			p.external = append(p.external, imp)
 		}
 		n, err := strconv.Atoi(parts[2])
 		if err != nil {
@@ -96,32 +89,19 @@ func listProductPackages(t *testing.T) []boundaryPkg {
 	return pkgs
 }
 
-// uiModuleAllowed is the AR-07 allowlist for internal/ui/* product imports.
-// internal/contracts/uinative is the mygo-bound contribution model those
-// modules register into (Stage 0); it is deleted with them in Stage 3.
-func uiModuleAllowed(imp string) bool {
-	switch imp {
-	case "internal/contracts", "internal/contracts/uinative", "internal/uikit", "internal/design", "internal/icons", "internal/brand":
-		return true
-	}
-	return strings.HasPrefix(imp, "internal/lib/")
-}
-
 // backendModuleAllowed is the allowlist for internal/modules/*: contracts,
-// uikit/design (docs/ARCHITECTURE.md §3), lib/* and the three shared backend
-// libraries (AR-07 ruling).
+// design, lib/* and the shared backend libraries (docs/ARCHITECTURE.md §3).
 func backendModuleAllowed(imp string) bool {
 	switch imp {
-	case "internal/contracts", "internal/uikit", "internal/design",
-		"internal/hosttools", "internal/websearch":
+	case "internal/contracts", "internal/design", "internal/hosttools", "internal/websearch", "internal/memorytools":
 		return true
 	}
 	return strings.HasPrefix(imp, "internal/lib/")
 }
 
-// TestImportBoundaries asserts the module-boundary allowlist over the whole
-// product tree. A violation names the package, the forbidden import and the
-// rule it breaks, so the fix is mechanical.
+// TestImportBoundaries asserts the module boundaries over the whole product
+// tree. A violation names the package, the forbidden import and the rule, so the
+// fix is mechanical.
 func TestImportBoundaries(t *testing.T) {
 	for _, p := range listProductPackages(t) {
 		rel := strings.TrimPrefix(p.path, modulePath)
@@ -131,27 +111,9 @@ func TestImportBoundaries(t *testing.T) {
 		for _, imp := range p.internal {
 			var reason string
 			switch {
-			case strings.HasPrefix(rel, "internal/ui/"):
-				if !uiModuleAllowed(imp) {
-					reason = "UI modules may only import contracts/uikit/design/icons/brand/lib/* (AGENTS.md §1, AR-07 allowlist)"
-				}
-			case rel == "internal/uikit":
-				switch {
-				case imp == "internal/contracts" || imp == "internal/design" || imp == "internal/icons":
-				case strings.HasPrefix(imp, "internal/lib/"):
-				default:
-					reason = "uikit is the shared composition layer: it must not depend on UI modules/uiroot/host/modules"
-				}
-			case rel == "internal/uiroot":
-				switch {
-				case imp == "internal/contracts" || imp == "internal/contracts/uinative" || imp == "internal/uikit" || imp == "internal/design" || imp == "internal/icons" || imp == "internal/brand":
-				case strings.HasPrefix(imp, "internal/lib/"):
-				default:
-					reason = "the shell (uiroot) must not import UI module implementations, backend modules or host"
-				}
 			case strings.HasPrefix(rel, "internal/modules/"):
 				if !backendModuleAllowed(imp) {
-					reason = "backend modules may only import contracts/uikit/design/lib/* and the shared libraries hosttools/memorytools/websearch; no other module implementation, no UI modules/uiroot/host/assembly"
+					reason = "backend modules may only import contracts/design/lib/* and the shared libraries; no other module implementation, no host/assembly"
 				}
 			case rel == "internal/host":
 				if strings.HasPrefix(imp, "internal/modules/") {
@@ -164,6 +126,107 @@ func TestImportBoundaries(t *testing.T) {
 				t.Errorf("%s imports %s: %s", rel, imp, reason)
 			}
 		}
+	}
+}
+
+// TestEngineIsQuarantinedToTheShell is rule 4's direct form: a package either
+// imports the native engine and is on the allowlist, or it does not.
+func TestEngineIsQuarantinedToTheShell(t *testing.T) {
+	pkgs := listProductPackages(t)
+	importers := make(map[string]bool, len(engineAllowlist))
+	for _, p := range pkgs {
+		rel := strings.TrimPrefix(p.path, modulePath)
+		importsEngine := false
+		for _, imp := range p.external {
+			if imp == engineModulePath || strings.HasPrefix(imp, engineModulePath+"/") {
+				importsEngine = true
+				break
+			}
+		}
+		if !importsEngine {
+			continue
+		}
+		if !engineAllowlist[rel] {
+			t.Errorf("%s imports %s: the native engine is quarantined to %v (docs/plans/s4-execution-checklist.md S6)",
+				rel, engineModulePath, allowedEnginePackages())
+			continue
+		}
+		importers[rel] = true
+	}
+	if len(importers) == 0 {
+		t.Fatalf("no package imports %s: the quarantine assertion would pass vacuously", engineModulePath)
+	}
+	// Every allowlisted package must still be a real importer, otherwise the
+	// allowlist has gone stale (a package that dropped mygo belongs off it).
+	for name := range engineAllowlist {
+		if !importers[name] {
+			t.Errorf("allowlist entry %q no longer imports %s; drop it from the allowlist", name, engineModulePath)
+		}
+	}
+}
+
+// allowedEnginePackages renders the allowlist for an error message.
+func allowedEnginePackages() []string {
+	names := make([]string, 0, len(engineAllowlist))
+	for name := range engineAllowlist {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// TestContractsDependsOnNoEngine keeps the S0 invariant: a transport can depend
+// on the contracts without dragging the engine into its binary.
+func TestContractsDependsOnNoEngine(t *testing.T) {
+	assertNoEngine(t, "./internal/contracts")
+}
+
+// TestBackendIsTransitivelyEngineFree is rule 4's transitive form: the browser
+// transport and every backend module must have no mygo anywhere in their
+// dependency graph, not merely no direct import.
+func TestBackendIsTransitivelyEngineFree(t *testing.T) {
+	for _, pattern := range []string{"./internal/gateway", "./internal/contracts", "./internal/modules/..."} {
+		assertNoEngine(t, pattern)
+	}
+}
+
+// assertNoEngine fails when the dependency graph below one package contains the
+// native engine.
+func assertNoEngine(t *testing.T, pattern string) {
+	t.Helper()
+	deps := goList(t, "{{.ImportPath}}", "-deps", pattern)
+	if len(deps) == 0 {
+		t.Fatalf("go list -deps %s returned no packages", pattern)
+	}
+	for _, dep := range deps {
+		if dep == engineModulePath || strings.HasPrefix(dep, engineModulePath+"/") {
+			t.Errorf("%s depends on %s: the browser transport and the backend must stay engine-free (S6 rule 4)", pattern, dep)
+		}
+	}
+}
+
+// TestTestDependenciesStayEngineFree documents and enforces the test tier.
+//
+// internal/gateway's e2e tests deliberately load the real backend modules, so
+// its `go list -deps -test` graph contains internal/modules/* — that is the
+// point of the e2e and is NOT a boundary violation. What must still hold is the
+// engine rule: no test dependency may pull mygo into the test binary.
+func TestTestDependenciesStayEngineFree(t *testing.T) {
+	deps := goList(t, "{{.ImportPath}}", "-deps", "-test", "./internal/gateway")
+	if len(deps) == 0 {
+		t.Fatal("go list -deps -test ./internal/gateway returned no packages")
+	}
+	sawModule := false
+	for _, dep := range deps {
+		if dep == engineModulePath || strings.HasPrefix(dep, engineModulePath+"/") {
+			t.Errorf("the gateway test binary depends on %s: e2e may load internal/modules/*, but never the native engine", dep)
+		}
+		if strings.HasPrefix(dep, modulePath+"internal/modules/") {
+			sawModule = true
+		}
+	}
+	if !sawModule {
+		t.Error("the gateway e2e test graph no longer contains internal/modules/*: if the e2e stopped using the real modules, say so explicitly here")
 	}
 }
 
@@ -198,21 +261,4 @@ func goList(t *testing.T, format string, patterns ...string) []string {
 		}
 	}
 	return lines
-}
-
-// TestContractsDependsOnNoEngine is the Stage 0 machine assertion: the
-// dependency graph of internal/contracts must not contain the native UI engine,
-// so a transport (the gateway, ACP) can depend on the contracts without
-// dragging github.com/egoist/mygo into its binary.
-func TestContractsDependsOnNoEngine(t *testing.T) {
-	deps := goList(t, "{{.ImportPath}}", "-deps", "./internal/contracts")
-	if len(deps) == 0 {
-		t.Fatal("go list -deps ./internal/contracts returned no packages")
-	}
-	for _, dep := range deps {
-		if dep == engineModulePath || strings.HasPrefix(dep, engineModulePath+"/") {
-			t.Errorf("internal/contracts depends on %s: the contracts surface must stay engine-free "+
-				"(move mygo-bound types into internal/contracts/uinative; docs/plans/stage0-decouple-contracts.md)", dep)
-		}
-	}
 }
