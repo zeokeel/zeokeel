@@ -44,10 +44,18 @@ export const ROUTES: RouteMeta[] = [
   { path: '/team', ref: 'R26', titleKey: 'shell.team' },
 ];
 
-/** The nearest matching entry for a pathname (exact match, longest wins). */
+/**
+ * The nearest matching entry for a pathname.
+ *
+ * An exact route always beats a splat, and only then does the longer path win.
+ * Both rules are load-bearing: react-router lets a splat match the empty rest,
+ * so `/c/:id/files/*` also matches `/c/:id/files` — sorting on length alone
+ * handed the file-tree URL to the preview entry (found by `routes.test.ts`).
+ */
 export function routeForPath(pathname: string): RouteMeta | undefined {
+  const rank = (route: RouteMeta) => (route.path.includes('*') ? 0 : 1_000) + route.path.length;
   return ROUTES.filter((route) => matchPath({ path: route.path, end: true }, pathname)).sort(
-    (a, b) => b.path.length - a.path.length,
+    (a, b) => rank(b) - rank(a),
   )[0];
 }
 
