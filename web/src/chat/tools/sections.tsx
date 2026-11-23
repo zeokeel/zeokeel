@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { CodeHighlighter } from '@ant-design/x';
 import { parseUnifiedDiff, type DiffLine } from '@/api/files';
+import { useT } from '@/i18n';
 
 /**
  * The section primitives every tool card is built from. One anatomy for all 26
@@ -53,6 +54,7 @@ export function CodeBlock({
   lang?: string;
   maxLines?: number;
 }) {
+  const t = useT();
   const lines = text.split('\n');
   const clipped = maxLines && lines.length > maxLines;
   const shown = clipped ? lines.slice(0, maxLines).join('\n') : text;
@@ -62,7 +64,9 @@ export function CodeBlock({
         {shown}
       </CodeHighlighter>
       {clipped ? (
-        <div className="zk-tool-truncated">已截断，仅显示前 {maxLines} 行（共 {lines.length} 行）</div>
+        <div className="zk-tool-truncated">
+          {t('thread.truncated', { max: maxLines, total: lines.length })}
+        </div>
       ) : null}
     </div>
   );
@@ -109,10 +113,11 @@ export function numberDiffLines(lines: DiffLine[]) {
 }
 
 export function DiffBlock({ unified }: { unified: string }) {
+  const t = useT();
   const rows = numberDiffLines(parseUnifiedDiff(unified));
 
   return (
-    <div className="zk-diff" role="group" aria-label="文件改动">
+    <div className="zk-diff" role="group" aria-label={t('thread.fileDiff')}>
       {rows.map((row, index) => (
         <div key={index} className={`zk-diff__line zk-diff__line--${row.kind}`}>
           <span className="zk-diff__gutter">{row.number ?? ''}</span>

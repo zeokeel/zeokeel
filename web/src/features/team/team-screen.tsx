@@ -1,6 +1,7 @@
 import { Button } from 'antd';
 import { useNavigate } from 'react-router';
 import { EmptyState } from '@/ui/empty-state';
+import { useT } from '@/i18n';
 
 /**
  * R25 · 团队 — the entry that must exist before the data does.
@@ -17,16 +18,14 @@ import { EmptyState } from '@/ui/empty-state';
  */
 export function TeamScreen() {
   const navigate = useNavigate();
+  const t = useT();
 
   return (
     <div className="zk-team">
-      <EmptyState
-        title="还没有队友或子任务"
-        description="团队和子代理会在需要时出现在这里；现在没有正在协作的任务。"
-      />
+      <EmptyState title={t('team.empty.title')} description={t('team.empty.description')} />
       <div className="zk-team__actions">
         <Button size="small" onClick={() => navigate('/')}>
-          回到现在
+          {t('team.back')}
         </Button>
       </div>
     </div>

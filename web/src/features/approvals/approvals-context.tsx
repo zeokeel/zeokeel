@@ -60,7 +60,7 @@ export function ApprovalsProvider({ children }: { children: ReactNode }) {
     try {
       await resolveApproval(id, decision);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '审批未能提交');
+      setError(cause instanceof Error ? cause.message : 'approval.submitFailed');
     }
   }, []);
 

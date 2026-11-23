@@ -1045,6 +1045,7 @@ const settingsRows = new Map([
   ['toolkit.shellTimeoutSeconds', '120'],
   ['toolkit.shellMaxOutputKiB', '256'],
   ['ui.theme.mode', 'system'],
+  ['ui.language', 'zh'],
   ['ui.chatFontSize', '14'],
   ['ui.workSteps.mode', 'standard'],
   ['ui.workSteps.collapse', 'completion'],

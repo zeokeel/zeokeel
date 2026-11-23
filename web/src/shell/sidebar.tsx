@@ -2,6 +2,7 @@ import { Button } from 'antd';
 import { Conversations } from '@ant-design/x';
 import { useSessions } from '@/features/sessions/sessions-context';
 import { SidebarNav } from './sidebar-nav';
+import { useT } from '@/i18n';
 
 /**
  * The session list. `Conversations` owns the list semantics (selection, item
@@ -23,26 +24,27 @@ export function Sidebar({
   onCreate: () => void;
 }) {
   const { sessions, loading, error, reload } = useSessions();
+  const t = useT();
 
   const items = sessions.map((session) => ({
     key: session.id,
-    label: session.title || '未命名会话',
+    label: session.title || t('shell.sessions.untitled'),
   }));
 
   return (
     <div className="zk-sidebar" data-collapsed={collapsed ? 'true' : 'false'}>
       <div className="zk-sidebar__header">
-        {collapsed ? null : <span className="zk-sidebar__brand">ZeoKeel</span>}
+        {collapsed ? null : <span className="zk-sidebar__brand">{t('app.name')}</span>}
         {/* Text, not filled: 新建会话 is on every screen and must not hold an
             Accent fill (rule 10: ≤2 fills / ≤1 primary per screen). */}
         <Button
           size="small"
           type="text"
           onClick={onCreate}
-          aria-label="新建会话"
-          title={collapsed ? '新建会话' : undefined}
+          aria-label={t('shell.newSession')}
+          title={collapsed ? t('shell.newSession') : undefined}
         >
-          {collapsed ? '+' : '新建会话'}
+          {collapsed ? '+' : t('shell.newSession')}
         </Button>
       </div>
       <div className="zk-sidebar__nav">
@@ -52,7 +54,7 @@ export function Sidebar({
         {collapsed ? (
           // Collapsed: the session list becomes a rail of dots; the open one is
           // marked so "which conversation am I in" survives the fold (B16).
-          <div className="zk-sidebar__rail" aria-label="会话（已折叠）">
+          <div className="zk-sidebar__rail" aria-label={t('shell.sessions.rail')}>
             {items.map((item) => (
               <button
                 key={item.key}
@@ -72,19 +74,19 @@ export function Sidebar({
             onActiveChange={(key) => onSelect(String(key))}
           />
         )}
-        {loading ? <div className="zk-sidebar__empty">正在加载…</div> : null}
+        {loading ? <div className="zk-sidebar__empty">{t('shell.sessions.loading')}</div> : null}
         {error ? (
           <div className="zk-sidebar__empty">
-            <span>会话列表加载失败：{error}</span>
+            <span>{t('shell.sessions.failed', { error })}</span>
             <div>
               <Button size="small" type="link" onClick={() => void reload()}>
-                重试
+                {t('shell.sessions.retry')}
               </Button>
             </div>
           </div>
         ) : null}
         {!loading && !error && sessions.length === 0 ? (
-          <div className="zk-sidebar__empty">还没有会话。在右侧输入一句话即可开始。</div>
+          <div className="zk-sidebar__empty">{t('shell.sessions.empty')}</div>
         ) : null}
       </div>
     </div>

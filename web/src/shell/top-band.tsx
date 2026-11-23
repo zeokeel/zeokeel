@@ -2,6 +2,7 @@ import { Tabs } from 'antd';
 import { matchPath, useLocation, useNavigate } from 'react-router';
 import { THREAD_TABS, routeForPath } from '@/features/routes';
 import { useSessions } from '@/features/sessions/sessions-context';
+import { useT } from '@/i18n';
 import { ConnectionBadge } from './connection-badge';
 
 /**
@@ -13,14 +14,18 @@ export function TopBand() {
   const location = useLocation();
   const navigate = useNavigate();
   const { sessions } = useSessions();
+  const t = useT();
 
   const threadMatch = matchPath('/c/:sessionId/*', location.pathname);
   const sessionId = threadMatch?.params.sessionId;
   const route = routeForPath(location.pathname);
 
   const session = sessionId ? sessions.find((item) => item.id === sessionId) : undefined;
-  const title =
-    (sessionId ? session?.title || '会话' : route?.title) ?? 'ZeoKeel';
+  const title = sessionId
+    ? session?.title || t('thread.untitled')
+    : route
+      ? t(route.titleKey)
+      : t('app.name');
 
   const activeTab = THREAD_TABS.find(
     (tab) => tab.suffix !== '' && location.pathname.endsWith(tab.suffix),
@@ -28,7 +33,7 @@ export function TopBand() {
   const activeKey = activeTab?.key ?? 'conversation';
 
   return (
-    <header className="zk-topband" role="banner" aria-label="顶栏">
+    <header className="zk-topband" role="banner" aria-label={t('thread.banner')}>
       <div className="zk-topband__row">
         <h1 className="zk-topband__title">{title}</h1>
         <ConnectionBadge />
@@ -37,7 +42,7 @@ export function TopBand() {
         <Tabs
           size="small"
           activeKey={activeKey}
-          items={THREAD_TABS.map((tab) => ({ key: tab.key, label: tab.label }))}
+          items={THREAD_TABS.map((tab) => ({ key: tab.key, label: t(tab.labelKey) }))}
           tabBarStyle={{ marginBottom: 0 }}
           onChange={(key) => {
             const target = THREAD_TABS.find((tab) => tab.key === key);

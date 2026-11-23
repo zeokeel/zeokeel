@@ -13,6 +13,7 @@ import { EmptyState } from '@/ui/empty-state';
 import { FindBar } from './find-bar';
 import { PromptQueuePanel } from './prompt-queue-panel';
 import { usePromptQueue } from './use-prompt-queue';
+import { useT } from '@/i18n';
 
 function focusComposer() {
   document.querySelector<HTMLTextAreaElement>('.zk-composer textarea')?.focus();
@@ -32,6 +33,7 @@ function focusComposer() {
 export function ThreadScreen({ sessionId }: { sessionId: string }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const t = useT();
   const { reload, create } = useSessions();
   const { approvals } = useApprovals();
   const queue = usePromptQueue(sessionId);
@@ -43,7 +45,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
 
   const chat = useGatewayChat(sessionId, {
     onSnapshotError: (cause) =>
-      setSnapshotError(cause instanceof Error ? cause.message : '会话加载失败'),
+      setSnapshotError(cause instanceof Error ? cause.message : t('thread.loadFailed')),
   });
 
   // Set while the current run is being stopped on purpose, so the settle
@@ -162,17 +164,17 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   const commands: SlashCommand[] = [
     {
       name: 'new',
-      description: '新建会话',
+      description: t('palette.newSession'),
       run: async () => {
         const session = await create();
         navigate(`/c/${session.id}`);
       },
     },
-    { name: 'stop', description: '停止本轮', run: () => chat.abort(), keepDraft: true },
-    { name: 'files', description: '打开文件检查器', run: () => navigate(`/c/${sessionId}/files`) },
-    { name: 'inbox', description: '打开收件箱', run: () => navigate('/inbox') },
-    { name: 'settings', description: '打开设置', run: () => navigate('/settings/model') },
-    { name: 'clear', description: '清空草稿', run: () => setDraft(''), keepDraft: true },
+    { name: 'stop', description: t('thread.stopRun'), run: () => chat.abort(), keepDraft: true },
+    { name: 'files', description: t('thread.openFiles'), run: () => navigate(`/c/${sessionId}/files`) },
+    { name: 'inbox', description: t('now.command.inbox'), run: () => navigate('/inbox') },
+    { name: 'settings', description: t('now.command.settings'), run: () => navigate('/settings/model') },
+    { name: 'clear', description: t('now.command.clear'), run: () => setDraft(''), keepDraft: true },
   ];
 
   const matchIndexes =
@@ -215,14 +217,14 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
       <div className="zk-thread__body">
         {snapshotError ? (
           <div className="zk-msg-error" role="alert">
-            会话加载失败：{snapshotError}
+            {t('thread.loadFailedDetail', { error: snapshotError })}
           </div>
         ) : chat.isDefaultMessagesRequesting ? (
           <div className="zk-empty">
             <Spin />
           </div>
         ) : empty ? (
-          <EmptyState title="开始这一轮" description="说出你想让 ZeoKeel 做的事。" />
+          <EmptyState title={t('thread.start.title')} description={t('thread.start.description')} />
         ) : (
           <Transcript
             messages={chat.parsedMessages}
@@ -248,7 +250,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
         onStop={stopRun}
         running={chat.isRequesting}
         disabled={approvals.length > 0}
-        placeholder={approvals.length > 0 ? '先处理上面的审批…' : undefined}
+        placeholder={approvals.length > 0 ? t('composer.placeholder.approval') : undefined}
         commands={commands}
       />
     </div>

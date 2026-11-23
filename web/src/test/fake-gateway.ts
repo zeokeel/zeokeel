@@ -72,7 +72,13 @@ export function defaultState(): FakeState {
     messages: { 's-1': [] },
     approvals: [],
     approvalMode: 'workspace',
-    settings: { [SETTING_KEYS.themeMode]: 'system', [SETTING_KEYS.agentPermission]: 'workspace' },
+    // The language row decides the UI locale; tests that assert Chinese copy
+    // pin it here instead of depending on the machine's navigator.language.
+    settings: {
+      [SETTING_KEYS.themeMode]: 'system',
+      [SETTING_KEYS.agentPermission]: 'workspace',
+      [SETTING_KEYS.uiLanguage]: 'zh',
+    },
     ask: null,
     plan: { state: 'idle', content: '' },
     artifacts: [],

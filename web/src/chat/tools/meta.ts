@@ -1,4 +1,5 @@
 import type { IconName } from '@/design/icons';
+import type { MessageKey } from '@/i18n';
 
 /**
  * Tool metadata: the 26 tool names that ship a dedicated card (mirrors
@@ -12,48 +13,51 @@ import type { IconName } from '@/design/icons';
 export type ToolCategory = 'shell' | 'file' | 'web' | 'job' | 'team' | 'plan' | 'skill' | 'other';
 
 export interface ToolMeta {
-  /** Friendly name for the card header; the protocol id stays in the title. */
-  label: string;
+  /**
+   * Copy key for the friendly name; the protocol id stays in the title. A key,
+   * not a string: tool names are protocol values and their *labels* are copy.
+   */
+  labelKey: MessageKey;
   icon: IconName;
   category: ToolCategory;
 }
 
 export const TOOL_META: Record<string, ToolMeta> = {
   // shell / files
-  bash: { label: '执行命令', icon: 'terminal', category: 'shell' },
-  read_file: { label: '读取文件', icon: 'file', category: 'file' },
-  write_file: { label: '写入文件', icon: 'file', category: 'file' },
-  edit_file: { label: '编辑文件', icon: 'pencil', category: 'file' },
-  str_replace_editor: { label: '编辑器替换', icon: 'pencil', category: 'file' },
-  list_dir: { label: '列出目录', icon: 'folder', category: 'file' },
-  glob: { label: '匹配文件', icon: 'search', category: 'file' },
-  grep: { label: '搜索内容', icon: 'search', category: 'file' },
-  read_image: { label: '查看图片', icon: 'image', category: 'file' },
+  bash: { labelKey: 'tool.bash', icon: 'terminal', category: 'shell' },
+  read_file: { labelKey: 'tool.readFile', icon: 'file', category: 'file' },
+  write_file: { labelKey: 'tool.writeFile', icon: 'file', category: 'file' },
+  edit_file: { labelKey: 'tool.editFile', icon: 'pencil', category: 'file' },
+  str_replace_editor: { labelKey: 'tool.replaceEditor', icon: 'pencil', category: 'file' },
+  list_dir: { labelKey: 'tool.listDir', icon: 'folder', category: 'file' },
+  glob: { labelKey: 'tool.glob', icon: 'search', category: 'file' },
+  grep: { labelKey: 'tool.grep', icon: 'search', category: 'file' },
+  read_image: { labelKey: 'tool.other', icon: 'image', category: 'file' },
   // web
-  web_fetch: { label: '抓取网页', icon: 'globe', category: 'web' },
-  web_search: { label: '搜索网页', icon: 'search', category: 'web' },
+  web_fetch: { labelKey: 'tool.other', icon: 'globe', category: 'web' },
+  web_search: { labelKey: 'tool.other', icon: 'search', category: 'web' },
   // jobs / terminals
-  job_start: { label: '启动后台任务', icon: 'activity', category: 'job' },
-  job_output: { label: '读取任务输出', icon: 'activity', category: 'job' },
-  terminal_send: { label: '向终端输入', icon: 'terminal', category: 'job' },
-  terminal_read: { label: '读取终端', icon: 'terminal', category: 'job' },
+  job_start: { labelKey: 'tool.other', icon: 'activity', category: 'job' },
+  job_output: { labelKey: 'tool.other', icon: 'activity', category: 'job' },
+  terminal_send: { labelKey: 'tool.other', icon: 'terminal', category: 'job' },
+  terminal_read: { labelKey: 'tool.other', icon: 'terminal', category: 'job' },
   // worktrees
-  enter_worktree: { label: '进入工作树', icon: 'data', category: 'team' },
-  list_worktrees: { label: '列出工作树', icon: 'folder-open', category: 'team' },
+  enter_worktree: { labelKey: 'tool.other', icon: 'data', category: 'team' },
+  list_worktrees: { labelKey: 'tool.other', icon: 'folder-open', category: 'team' },
   // orchestration
-  subagent: { label: '子代理', icon: 'users', category: 'team' },
-  workflow: { label: '工作流', icon: 'activity', category: 'team' },
-  ralph: { label: 'Ralph 迭代', icon: 'reload', category: 'team' },
+  subagent: { labelKey: 'tool.other', icon: 'users', category: 'team' },
+  workflow: { labelKey: 'tool.other', icon: 'activity', category: 'team' },
+  ralph: { labelKey: 'tool.other', icon: 'reload', category: 'team' },
   // team tasks / planning
-  team_task_create: { label: '新建团队任务', icon: 'plus', category: 'team' },
-  team_task_update: { label: '更新团队任务', icon: 'pencil', category: 'team' },
-  todo: { label: '待办', icon: 'check', category: 'plan' },
-  todo_write: { label: '写入待办', icon: 'check', category: 'plan' },
-  plan_review: { label: '计划审阅', icon: 'sparkles', category: 'plan' },
+  team_task_create: { labelKey: 'tool.other', icon: 'plus', category: 'team' },
+  team_task_update: { labelKey: 'tool.other', icon: 'pencil', category: 'team' },
+  todo: { labelKey: 'tool.other', icon: 'check', category: 'plan' },
+  todo_write: { labelKey: 'tool.other', icon: 'check', category: 'plan' },
+  plan_review: { labelKey: 'tool.other', icon: 'sparkles', category: 'plan' },
   // skills
-  skill: { label: '技能', icon: 'plugin', category: 'skill' },
+  skill: { labelKey: 'tool.other', icon: 'plugin', category: 'skill' },
   // host capability probe
-  demo: { label: '示例卡片', icon: 'sparkles', category: 'other' },
+  demo: { labelKey: 'tool.other', icon: 'sparkles', category: 'other' },
 };
 
 export const TOOL_NAMES = Object.keys(TOOL_META);

@@ -9,7 +9,7 @@ describe('tool card dispatch', () => {
     expect(TOOL_NAMES).toHaveLength(27);
     for (const name of TOOL_NAMES) {
       expect(TOOL_RENDERERS[name], `missing renderer for ${name}`).toBeTypeOf('function');
-      expect(toolMeta(name).label).not.toBe(name);
+      expect(toolMeta(name).labelKey).not.toBe(name);
     }
   });
 

@@ -1,5 +1,6 @@
 import { Input } from 'antd';
 import { ZkIcon } from '@/design/icons';
+import { useT } from '@/i18n';
 
 /**
  * L2 of the Escape chain and K11: a transcript-scoped find bar. `Mod+F` opens
@@ -25,8 +26,9 @@ export function FindBar({
   onPrev: () => void;
   onClose: () => void;
 }) {
+  const t = useT();
   return (
-    <div className="zk-find" role="search" aria-label="在会话中查找">
+    <div className="zk-find" role="search" aria-label={t('thread.findLabel')}>
       <ZkIcon name="search" />
       <Input
         autoFocus
@@ -40,20 +42,20 @@ export function FindBar({
             else onNext();
           }
         }}
-        placeholder="在会话中查找…"
-        aria-label="查找内容"
+        placeholder={t('thread.findLabel')}
+        aria-label={t('thread.findContent')}
         allowClear
       />
       <span className="zk-find__count" aria-live="polite">
-        {query.trim() === '' ? '' : matchCount === 0 ? '无匹配' : `${activeMatch + 1}/${matchCount}`}
+        {query.trim() === '' ? '' : matchCount === 0 ? t('thread.noMatch') : `${activeMatch + 1}/${matchCount}`}
       </span>
-      <button type="button" className="zk-icon-button" aria-label="上一个" onClick={onPrev}>
+      <button type="button" className="zk-icon-button" aria-label={t('thread.previousMatch')} onClick={onPrev}>
         <ZkIcon name="chevron-down" style={{ transform: 'rotate(180deg)' }} />
       </button>
-      <button type="button" className="zk-icon-button" aria-label="下一个" onClick={onNext}>
+      <button type="button" className="zk-icon-button" aria-label={t('thread.nextMatch')} onClick={onNext}>
         <ZkIcon name="chevron-down" />
       </button>
-      <button type="button" className="zk-icon-button" aria-label="关闭查找" onClick={onClose}>
+      <button type="button" className="zk-icon-button" aria-label={t('thread.closeFind')} onClick={onClose}>
         <ZkIcon name="x" />
       </button>
     </div>

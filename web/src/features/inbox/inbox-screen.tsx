@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button, Empty, Tag } from 'antd';
 import { useNavigate } from 'react-router';
 import {
-  INBOX_KIND_LABEL,
   buildInboxItems,
   inboxActionKind,
   type InboxKind,
@@ -10,6 +9,16 @@ import {
 import { subscribeArtifacts, subscribeAsk, subscribePlan } from '@/api/gateway';
 import { useApprovals } from '@/features/approvals/approvals-context';
 import { ZkIcon } from '@/design/icons';
+import { useT } from '@/i18n';
+
+/** Kind → copy key, so the label lives in the catalogs, not in the data layer. */
+const KIND_KEY = {
+  approval: 'inbox.kind.approval',
+  ask: 'inbox.kind.ask',
+  plan: 'inbox.kind.plan',
+  artifact: 'inbox.kind.artifact',
+  completion: 'inbox.kind.completion',
+} as const;
 
 const KIND_ICON: Record<InboxKind, React.ComponentProps<typeof ZkIcon>['name']> = {
   approval: 'shield',
@@ -27,6 +36,7 @@ const KIND_ICON: Record<InboxKind, React.ComponentProps<typeof ZkIcon>['name']> 
 export function InboxScreen() {
   const navigate = useNavigate();
   const { approvals, resolve } = useApprovals();
+  const t = useT();
   const [ask, setAsk] = useState<{ id: string; text: string; options?: string[] } | null>(null);
   const [plan, setPlan] = useState<{ state: string; content: string } | null>(null);
   const [artifacts, setArtifacts] = useState<
@@ -54,12 +64,14 @@ export function InboxScreen() {
       {/* The top band already names the screen; this line is the count only. */}
       <div className="zk-inbox__header">
         <span className="zk-inbox__count">
-          {items.length === 0 ? '没有等你处理的事' : `${items.length} 项等待你`}
+          {items.length === 0
+            ? t('inbox.empty')
+            : t('inbox.count', { count: items.length })}
         </span>
       </div>
 
       {items.length === 0 ? (
-        <Empty description="没有等你处理的事" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <Empty description={t('inbox.empty')} image={Empty.PRESENTED_IMAGE_SIMPLE} />
       ) : (
         <ul className="zk-inbox__list">
           {items.map((item) => (
@@ -69,7 +81,7 @@ export function InboxScreen() {
               </span>
               <div className="zk-inbox__body">
                 <div className="zk-inbox__title">
-                  <Tag variant="filled">{INBOX_KIND_LABEL[item.kind]}</Tag>
+                  <Tag variant="filled">{t(KIND_KEY[item.kind])}</Tag>
                   <span>{item.title}</span>
                 </div>
                 {item.detail ? <div className="zk-inbox__detail">{item.detail}</div> : null}
@@ -90,7 +102,7 @@ export function InboxScreen() {
                       else if (inboxActionKind(item) === 'artifact') navigate('/inbox');
                     }}
                   >
-                    查看
+                    {t('inbox.open')}
                   </Button>
                 )}
               </div>
@@ -107,13 +119,14 @@ export function InboxScreen() {
  * the Inbox never suggests a default (docs/WEB-CLIENT.md A9).
  */
 function ApprovalActions({ onDecide }: { onDecide: (decision: 'allow' | 'deny') => void }) {
+  const t = useT();
   return (
     <span className="zk-inbox__decision">
       <Button size="small" onClick={() => onDecide('deny')}>
-        拒绝
+        {t('inbox.deny')}
       </Button>
       <Button size="small" onClick={() => onDecide('allow')}>
-        允许一次
+        {t('inbox.allowOnce')}
       </Button>
     </span>
   );

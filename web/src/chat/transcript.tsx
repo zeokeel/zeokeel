@@ -12,6 +12,7 @@ import {
   type AnchorStore,
 } from './scroll-anchor';
 import type { ZeoMessage } from './types';
+import { useT } from '@/i18n';
 
 const FALLBACK_ROWS = 40;
 const SAVE_THROTTLE_MS = 150;
@@ -54,6 +55,7 @@ export function Transcript({
   /** Scroll target requested by the find bar. */
   focusIndex?: number;
 }) {
+  const t = useT();
   const scrollRef = useRef<HTMLDivElement>(null);
   // Follow state is decided *before* the first commit: a session left detached
   // must not flash the bottom (or scroll there) while its anchor is restored.
@@ -245,7 +247,7 @@ export function Transcript({
               virtualizer.scrollToIndex(messages.length - 1, { align: 'end' });
             }}
           >
-            回到最新
+            {t('thread.backToLatest')}
           </Button>
         </div>
       )}

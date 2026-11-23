@@ -1,6 +1,7 @@
 import { Collapse } from 'antd';
 import type { ToolStep } from '@/chat/types';
 import { renderToolCard } from './tools/registry';
+import { useT } from '@/i18n';
 import { valueText } from './tools/sections';
 
 /**
@@ -13,6 +14,7 @@ import { valueText } from './tools/sections';
  * the transcript's job.
  */
 export function ToolCardBody({ step }: { step: ToolStep }) {
+  const t = useT();
   const rawArguments = valueText(step.input);
 
   return (
@@ -33,7 +35,7 @@ export function ToolCardBody({ step }: { step: ToolStep }) {
           items={[
             {
               key: 'raw',
-              label: '原始参数',
+              label: t('thread.rawArguments'),
               children: <pre className="zk-tool-io">{rawArguments}</pre>,
             },
           ]}

@@ -12,7 +12,7 @@
 | B2 | 设置内 Esc（脏则先守卫） | 完成 | 本轮补：`useEscClaim` 常驻，干净时 `navigate('/')`、脏时开守卫；`acceptance-p1p2.test.tsx`「closes the page when nothing was edited」 |
 | B3 | 设置导航搜索定位到项 | 完成 | 本轮补：搜索同时匹配**页名与字段名**，命中字段→`/settings/<page>?focus=<row key>`，表单 `data-focused` 高亮并滚动；`acceptance-p1p2.test.tsx`「finds a field by its label…」 |
 | B4 | 固定页脚唯一 primary、滚动不动 | 完成 | `.zk-settings__footer`（`border-top` + 页面内 flex 底部），每页仅「保存」一个 primary；滚动容器是 `.zk-settings__body` |
-| B5 | 暗色/英文全站跟随、无硬编码 | 部分 | 暗色：`useSystemAppearance()` + `tokens.css` 暗色块，`src/` 无颜色字面量（ESLint 强制）。**英文**：产品无本地化服务（`XProvider` 只吃 antd 语言包），文案为源码内中文常量 → 切英文不做，属已知缺口；不自行引入 i18n 方案 |
+| B5 | 暗色/英文全站跟随、无硬编码 | 部分 | 暗色：`useSystemAppearance()` + `tokens.css` 暗色块，颜色字面量由 ESLint 拦。英文：自建 `src/i18n/{zh,en}.ts` + `t()`（无第三方依赖），语言取 `settings` 域的 `ui.language`（`SETTING_KEYS.uiLanguage`），缺失时按 `navigator.language`；delta 到达即换语言不刷新；`ConfigProvider locale` 跟随 `zh_CN`/`en_US`。扫描测试禁止 i18n 目录外出现 CJK（`i18n.test.tsx`，含"故意注入中文 → 红"的证明）。浏览器实测：`i18n-zh.png` / `i18n-en.png`（侧栏、顶带、composer hint、审批卡全套切换）。**缺（故记部分，而不是完成）**：验收原文是"**全站跟随**"，而自动化/能力/洞察/检查器/设置页字段标签/记忆/子会话等 10 个文件仍在转换中，英文模式下这些屏仍是中文；清单锁在 `i18n.test.tsx` 的 `PENDING_CONVERSION` 里（只减不增，转完必须删条目） |
 | B6 | 会话 Tab 三页可切、有 KeyContext 才显示「上下文」 | 部分 | 对话/轨迹/记忆三页可切（`routes.ts` `THREAD_TABS`、`top-band.tsx`）。「上下文」按 `WEB-CLIENT` R6/B6 由能力门控，网关无 `context.*`、无 `KeyContext` → **按能力隐藏，属已知等价性缺口**；不发明协议 |
 | B7 | 窄窗 1024/900 顶栏与发送键可见可点 | 完成 | 本轮补：`global.css` 两个断点——≤1024 侧栏 232px、检查器 320px；≤900 侧栏 200px、检查器改浮层、顶带标题省略号。**headless chromium 实测**（1024/900/460 三档，`overflowX = 0`）：900 视口下侧栏 200px、标题可见、发送键 `x 831→863` 在视口内；460 视口发送键 `x 343→375`、composer 196px 不裁切 |
 | B8 | composer <480 不重叠不裁切 | 完成 | 本轮补：≤480 断点收窄 composer 内边距、hint 换行、审批按钮换行。实测 460 视口：composer `x 200 w 196`、发送键 `x 343→375` 完全在内，`overflowX = 0` |
@@ -35,12 +35,13 @@
 
 **完成 16 / 部分 4 / 未做 2**（22 条）
 
+> B5 由"完成"改判"部分"：验收原文要求"**全站跟随**"，而 10 个文件（自动化/能力/洞察/检查器/设置页标签/记忆/子会话/`api/settings.ts`/`api/inbox.ts`/`tools/registry.tsx`）English 模式下仍是中文。基础设施与主路径已完成、且有扫描闸门防回归，但"全站"未达成——账面按事实记，不按进度记。
+
 未做的 2 条与原因（都等 Go 轨的域投影，不由 web 侧发明协议）：
 - **B11 消息菜单**：`message.regenerate` 在 TRANSPORT §5.1 状态为"延后"，且没有编辑方法；只做复制等于半截菜单。
 - **B12 后台任务 chip**：`contracts/tasks.go` 有 5 个类型，但网关未投影 `tasks` 域 → 未投影，不是不存在。
 
-部分的 4 条：
-- **B5** 暗色完成、英文缺本地化服务（产品尚无 i18n）；
+部分的 3 条：
 - **B6** 三 Tab 完成、「上下文」按能力隐藏（已知等价性缺口，需 Go 侧 `context.*`）；
 - **B13** 队列查看/取消可用，形态是常显面板而非弹层（打磨项）；
 - **C5** 回树可用，缺显式「工作区根目录」面包屑。

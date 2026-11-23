@@ -3,6 +3,7 @@ import { Sender } from '@ant-design/x';
 import { loadFileTree } from '@/api/files';
 import { useEscClaim } from '@/keyboard/keyboard-provider';
 import { filterSlashCommands, parseSlashDraft, type SlashCommand } from './slash-commands';
+import { useT } from '@/i18n';
 
 /** The `@file` token the draft is currently typing, if any (A17). */
 export function parseMentionDraft(value: string): string | null {
@@ -41,9 +42,10 @@ export function Composer({
   onStop,
   running = false,
   disabled = false,
-  placeholder = '给 ZeoKeel 发消息…',
+  placeholder,
   commands,
 }: ComposerProps) {
+  const t = useT();
   const [highlight, setHighlight] = useState(0);
   const [dismissedQuery, setDismissedQuery] = useState<string | null>(null);
   const [filePaths, setFilePaths] = useState<string[] | null>(null);
@@ -204,7 +206,7 @@ export function Composer({
   return (
     <div className="zk-composer">
       {menuOpen ? (
-        <div className="zk-slash" role="listbox" aria-label="斜杠命令">
+        <div className="zk-slash" role="listbox" aria-label={t('composer.slash')}>
           {matches.map((command, index) => (
             <div
               key={command.name}
@@ -222,12 +224,12 @@ export function Composer({
               <span className="zk-slash__desc">{command.description}</span>
             </div>
           ))}
-          <div className="zk-slash__hint">Enter 执行 · Tab 补全 · Esc 关闭</div>
+          <div className="zk-slash__hint">{t('composer.slashHint')}</div>
         </div>
       ) : null}
 
       {mentionOpen ? (
-        <div className="zk-slash" role="listbox" aria-label="文件候选">
+        <div className="zk-slash" role="listbox" aria-label={t('thread.fileCandidates')}>
           {mentionMatches.map((path, index) => (
             <div
               key={path}
@@ -243,7 +245,7 @@ export function Composer({
               <span className="zk-slash__name">@{path}</span>
             </div>
           ))}
-          <div className="zk-slash__hint">Enter 选择 · Tab 补全 · Esc 关闭</div>
+          <div className="zk-slash__hint">{t('composer.slashHint')}</div>
         </div>
       ) : null}
 
@@ -255,18 +257,18 @@ export function Composer({
         loading={running}
         onCancel={onStop}
         disabled={disabled}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t('composer.placeholder')}
         autoSize={{ minRows: 2, maxRows: 6 }}
         submitType="enter"
         // Sender forwards aria-* to its textarea (X reads restProps through
         // pickAttrs); these props are not in SenderProps' type surface.
-        {...{ 'aria-label': '消息输入框' }}
+        {...{ 'aria-label': t('composer.inputLabel') }}
       />
       <div className="zk-composer__hint">
         {running
-          ? 'Enter 排队发送 · Esc 停止本轮 · Shift+Enter 换行'
-          : 'Enter 或 Cmd/Ctrl+Enter 发送 · Shift+Enter 换行 · Esc 清空草稿'}
-        {commands && commands.length > 0 ? ' · / 命令' : ''}
+          ? t('composer.hint.running')
+          : t('composer.hint.idle')}
+        {commands && commands.length > 0 ? t('composer.hint.commands') : ''}
       </div>
     </div>
   );

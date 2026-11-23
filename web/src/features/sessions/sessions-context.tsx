@@ -52,7 +52,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     // settings/workspace can lag 2s, but a min without any snapshot is a fault.
     const timer = setTimeout(() => {
       setLoading((wasLoading) => {
-        if (wasLoading) setError('网关未在 20 秒内回应');
+        if (wasLoading) setError('shell.timeout');
         return false;
       });
     }, 20_000);
@@ -78,7 +78,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       setSessions(list);
       setError(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '会话列表加载失败');
+      setError(cause instanceof Error ? cause.message : 'shell.sessions.failedShort');
     } finally {
       setLoading(false);
     }

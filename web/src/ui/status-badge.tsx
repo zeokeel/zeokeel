@@ -8,11 +8,11 @@ import type { ReactNode } from 'react';
 export type StatusTone = 'running' | 'success' | 'error' | 'neutral' | 'warning';
 
 const TONE_LABEL: Record<StatusTone, string> = {
-  running: '运行中',
-  success: '完成',
-  error: '失败',
-  neutral: '已取消',
-  warning: '需要处理',
+  running: 'thread.status.running',
+  success: 'thread.status.done',
+  error: 'thread.status.failed',
+  neutral: 'ui.status.cancelled',
+  warning: 'ui.status.needsAction',
 };
 
 export function StatusBadge({

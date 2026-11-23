@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 import { ConfigProvider } from 'antd';
+import zhCN from 'antd/locale/zh_CN';
+import enUS from 'antd/locale/en_US';
 import { XProvider } from '@ant-design/x';
 import { AppRoutes } from '@/features/app-routes';
 import { ApprovalsProvider } from '@/features/approvals/approvals-context';
@@ -7,6 +9,7 @@ import { SessionsProvider } from '@/features/sessions/sessions-context';
 import { KeyboardProvider } from '@/keyboard/keyboard-provider';
 import { AppShell } from '@/shell/app-shell';
 import { Toasts } from '@/features/toasts/toasts';
+import { I18nProvider, useI18n } from '@/i18n';
 import { zkThemeConfig } from '@/design/theme';
 import { useSystemAppearance } from '@/design/use-system-appearance';
 import { startGateway, stopGateway } from '@/api/gateway';
@@ -36,7 +39,19 @@ export function App() {
   }, []);
 
   return (
-    <ConfigProvider theme={zkThemeConfig(appearance)}>
+    <I18nProvider>
+      <AppWithLocale appearance={appearance} />
+    </I18nProvider>
+  );
+}
+
+/** Locale-aware shell body: antd's own strings follow the same choice as ours. */
+function AppWithLocale({ appearance }: { appearance: 'light' | 'dark' }) {
+  const { locale } = useI18n();
+  const antdLocale = locale === 'en' ? enUS : zhCN;
+
+  return (
+    <ConfigProvider theme={zkThemeConfig(appearance)} locale={antdLocale}>
       <XProvider>
         <KeyboardProvider>
           <SessionsProvider>

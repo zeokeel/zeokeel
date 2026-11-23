@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Spin } from 'antd';
 import { connectionStatus, onConnectionStatus } from '@/api/gateway';
 import type { ConnectionStatus } from '@/api/ws/rpc';
+import { useT } from '@/i18n';
 
 /**
  * Connection state in the top band (docs/WEB-CLIENT.md §6, rule 7).
@@ -14,6 +15,7 @@ import type { ConnectionStatus } from '@/api/ws/rpc';
  */
 export function ConnectionBadge() {
   const [status, setStatus] = useState<ConnectionStatus>(connectionStatus());
+  const t = useT();
 
   useEffect(() => onConnectionStatus(setStatus), []);
 
@@ -22,13 +24,13 @@ export function ConnectionBadge() {
   if (status === 'unauthorized') {
     return (
       <span className="zk-connection zk-connection--stale" role="alert">
-        <span>授权链接已失效，请从托盘或终端重新打开</span>
+        <span>{t('shell.connection.stale')}</span>
         <button
           type="button"
           className="zk-connection__retry"
           onClick={() => window.location.reload()}
         >
-          重新加载
+          {t('shell.connection.reload')}
         </button>
       </span>
     );
@@ -39,12 +41,12 @@ export function ConnectionBadge() {
       {status === 'connecting' ? (
         <>
           <Spin size="small" />
-          <span>正在连接网关…</span>
+          <span>{t('shell.connection.connecting')}</span>
         </>
       ) : (
         <>
           <span className="zk-connection__dot" aria-hidden="true" />
-          <span>连接已断开，正在重连…</span>
+          <span>{t('shell.connection.offline')}</span>
         </>
       )}
     </span>

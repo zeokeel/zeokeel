@@ -6,6 +6,7 @@ import { ApprovalDock } from '@/features/approvals/approval-dock';
 import { useApprovals } from '@/features/approvals/approvals-context';
 import { useSessions } from '@/features/sessions/sessions-context';
 import { EmptyState } from '@/ui/empty-state';
+import { useT } from '@/i18n';
 
 /**
  * R1 · Now — the landing surface (and the only content of `/`).
@@ -15,6 +16,7 @@ import { EmptyState } from '@/ui/empty-state';
  * native "first send creates a session" behaviour (home/composer.go:1-6).
  */
 export function NowScreen() {
+  const t = useT();
   const navigate = useNavigate();
   const { create } = useSessions();
   const { approvals } = useApprovals();
@@ -24,11 +26,15 @@ export function NowScreen() {
   const [creating, setCreating] = useState(false);
 
   const commands: SlashCommand[] = [
-    { name: 'new', description: '新建会话并聚焦输入框', run: () => undefined, keepDraft: true },
-    { name: 'inbox', description: '打开收件箱', run: () => navigate('/inbox') },
-    { name: 'settings', description: '打开设置', run: () => navigate('/settings/model') },
-    { name: 'capabilities', description: '打开能力', run: () => navigate('/capabilities') },
-    { name: 'clear', description: '清空草稿', run: () => setDraft(''), keepDraft: true },
+    { name: 'new', description: t('palette.newSession'), run: () => undefined, keepDraft: true },
+    { name: 'inbox', description: t('now.command.inbox'), run: () => navigate('/inbox') },
+    { name: 'settings', description: t('now.command.settings'), run: () => navigate('/settings/model') },
+    {
+      name: 'capabilities',
+      description: t('now.command.capabilities'),
+      run: () => navigate('/capabilities'),
+    },
+    { name: 'clear', description: t('now.command.clear'), run: () => setDraft(''), keepDraft: true },
   ];
 
   const send = async () => {
@@ -41,7 +47,7 @@ export function NowScreen() {
       setDraft('');
       navigate(`/c/${session.id}`, { state: { pendingText: text } });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '新建会话失败');
+      setError(cause instanceof Error ? cause.message : t('shell.createFailed'));
     } finally {
       setCreating(false);
     }
@@ -50,10 +56,7 @@ export function NowScreen() {
   return (
     <div className="zk-thread">
       <div className="zk-thread__body">
-        <EmptyState
-          title="现在，说点什么"
-          description="首条消息会创建一个新会话。"
-        />
+        <EmptyState title={t('now.prompt.empty')} description={t('now.prompt.description')} />
       </div>
       {error ? (
         <div className="zk-msg-error" role="alert">
@@ -66,7 +69,9 @@ export function NowScreen() {
         onChange={setDraft}
         onSubmit={() => void send()}
         disabled={creating || approvalPending}
-        placeholder={approvalPending ? '先处理上面的审批…' : '给 ZeoKeel 发消息…（Enter 发送）'}
+        placeholder={
+          approvalPending ? t('composer.placeholder.approval') : t('composer.placeholder')
+        }
         commands={commands}
       />
     </div>

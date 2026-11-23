@@ -4,6 +4,7 @@ import { useParams } from 'react-router';
 import { loadSnapshot, type SnapshotMessage } from '@/api/gateway';
 import { toolMeta } from '@/chat/tools/meta';
 import { ZkIcon } from '@/design/icons';
+import { useT } from '@/i18n';
 
 interface Row {
   key: string;
@@ -15,6 +16,7 @@ interface Row {
 
 /** R4 · Trajectory — the tool/reasoning timeline of one session. */
 export function TrajectoryScreen() {
+  const t = useT();
   const { sessionId } = useParams<{ sessionId: string }>();
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,9 +28,9 @@ export function TrajectoryScreen() {
       try {
         const snapshot = await loadSnapshot(sessionId);
         if (cancelled) return;
-        setRows(flatten(snapshot.messages));
+        setRows(flatten(snapshot.messages, t));
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : '轨迹加载失败');
+        if (!cancelled) setError(cause instanceof Error ? cause.message : t('trajectory.loadFailed'));
       }
     })();
     return () => {
@@ -39,8 +41,8 @@ export function TrajectoryScreen() {
   return (
     <div className="zk-screen">
       <header className="zk-screen__header">
-        <h1 className="zk-screen__title">轨迹</h1>
-        <p className="zk-screen__note">这一轮里 agent 调用了什么、结果如何。</p>
+        <h1 className="zk-screen__title">{t('thread.tabs.trajectory')}</h1>
+        <p className="zk-screen__note">{t('trajectory.note')}</p>
       </header>
       {error ? (
         <div className="zk-msg-error" role="alert">
@@ -51,7 +53,7 @@ export function TrajectoryScreen() {
           <Spin />
         </div>
       ) : rows.length === 0 ? (
-        <Typography.Text type="secondary">这个会话还没有工具调用。</Typography.Text>
+        <Typography.Text type="secondary">{t('trajectory.empty')}</Typography.Text>
       ) : (
         <Timeline
           items={rows.map((row) => ({
@@ -74,7 +76,7 @@ export function TrajectoryScreen() {
   );
 }
 
-function flatten(messages: SnapshotMessage[]): Row[] {
+function flatten(messages: SnapshotMessage[], t: ReturnType<typeof useT>): Row[] {
   const rows: Row[] = [];
   messages.forEach((message, messageIndex) => {
     (message.steps ?? []).forEach((step, stepIndex) => {
@@ -82,7 +84,7 @@ function flatten(messages: SnapshotMessage[]): Row[] {
       rows.push({
         key: `${message.id}-${step.callId}-${stepIndex}`,
         time: `#${messageIndex + 1}`,
-        title: `${toolMeta(step.name).label} · ${step.name}`,
+        title: `${t(toolMeta(step.name).labelKey)} · ${step.name}`,
         detail:
           step.error ??
           (step.output === undefined

@@ -1,4 +1,5 @@
 import { matchPath } from 'react-router';
+import type { MessageKey } from '@/i18n';
 
 /**
  * The static route table (docs/WEB-CLIENT.md §3.2 C2): `screenId → component`
@@ -15,7 +16,8 @@ export interface RouteMeta {
   path: string;
   /** R-number in docs/WEB-CLIENT.md §1.2. */
   ref: string;
-  title: string;
+  /** Copy key for the top band (`i18n/zh.ts`), never a literal. */
+  titleKey: MessageKey;
   /**
    * Why a route is unreachable. Only R6 has one today — every other route has
    * a real screen, and claiming otherwise in this field is how the comment
@@ -25,21 +27,21 @@ export interface RouteMeta {
 }
 
 export const ROUTES: RouteMeta[] = [
-  { path: '/', ref: 'R1', title: '现在' },
-  { path: '/inbox', ref: 'R2', title: '收件箱' },
-  { path: '/c/:sessionId', ref: 'R3', title: '会话' },
-  { path: '/c/:sessionId/trajectory', ref: 'R4', title: '轨迹' },
-  { path: '/c/:sessionId/memory', ref: 'R5', title: '记忆' },
-  { path: '/c/:sessionId/context', ref: 'R6', title: '上下文', deferral: '后端无 KeyContext 前该 Tab 不出现' },
-  { path: '/c/:sessionId/child/:childId', ref: 'R7', title: '子会话' },
-  { path: '/c/:sessionId/files', ref: 'R8', title: '文件' },
-  { path: '/c/:sessionId/files/*path', ref: 'R9/R10', title: '文件预览' },
-  { path: '/c/:sessionId/guide', ref: 'R11', title: '开始' },
-  { path: '/settings/:page', ref: 'R13–R21', title: '设置' },
-  { path: '/automation', ref: 'R22', title: '自动化' },
-  { path: '/capabilities', ref: 'R23', title: '能力' },
-  { path: '/insights', ref: 'R24', title: '洞察' },
-  { path: '/team', ref: 'R26', title: '团队' },
+  { path: '/', ref: 'R1', titleKey: 'now.title' },
+  { path: '/inbox', ref: 'R2', titleKey: 'inbox.title' },
+  { path: '/c/:sessionId', ref: 'R3', titleKey: 'thread.untitled' },
+  { path: '/c/:sessionId/trajectory', ref: 'R4', titleKey: 'thread.tabs.trajectory' },
+  { path: '/c/:sessionId/memory', ref: 'R5', titleKey: 'thread.tabs.memory' },
+  { path: '/c/:sessionId/context', ref: 'R6', titleKey: 'thread.tabs.context', deferral: 'thread.contextUnavailable' },
+  { path: '/c/:sessionId/child/:childId', ref: 'R7', titleKey: 'thread.untitled' },
+  { path: '/c/:sessionId/files', ref: 'R8', titleKey: 'thread.untitled' },
+  { path: '/c/:sessionId/files/*path', ref: 'R9/R10', titleKey: 'thread.untitled' },
+  { path: '/c/:sessionId/guide', ref: 'R11', titleKey: 'thread.untitled' },
+  { path: '/settings/:page', ref: 'R13–R21', titleKey: 'settings.title' },
+  { path: '/automation', ref: 'R22', titleKey: 'shell.automation' },
+  { path: '/capabilities', ref: 'R23', titleKey: 'shell.capabilities' },
+  { path: '/insights', ref: 'R24', titleKey: 'shell.insights' },
+  { path: '/team', ref: 'R26', titleKey: 'shell.team' },
 ];
 
 /** The nearest matching entry for a pathname (exact match, longest wins). */
@@ -52,7 +54,7 @@ export function routeForPath(pathname: string): RouteMeta | undefined {
 /** Thread sub-tabs. `context` is missing on purpose: R6 only appears when the
  * backend registers KeyContext, and the mock does not (docs/WEB-CLIENT.md §8.2 B6). */
 export const THREAD_TABS = [
-  { key: 'conversation', label: '对话', suffix: '' },
-  { key: 'trajectory', label: '轨迹', suffix: '/trajectory' },
-  { key: 'memory', label: '记忆', suffix: '/memory' },
+  { key: 'conversation', labelKey: 'thread.tabs.conversation' as const, suffix: '' },
+  { key: 'trajectory', labelKey: 'thread.tabs.trajectory' as const, suffix: '/trajectory' },
+  { key: 'memory', labelKey: 'thread.tabs.memory' as const, suffix: '/memory' },
 ] as const;

@@ -3,6 +3,7 @@ import { ThoughtChain } from '@ant-design/x';
 import type { ThoughtChainItemType } from '@ant-design/x';
 import { ZkIcon } from '@/design/icons';
 import { ToolCardBody } from './tool-card';
+import { useT } from '@/i18n';
 import { toolMeta } from './tools/meta';
 import type { ToolStep } from './types';
 
@@ -24,20 +25,21 @@ export function ThoughtSteps({
   steps: ToolStep[];
   streaming: boolean;
 }) {
+  const t = useT();
   const [userExpanded, setUserExpanded] = useState<string[] | null>(null);
 
   const items: ThoughtChainItemType[] = [];
   if (reasoning) {
     items.push({
       key: 'reasoning',
-      title: '推理',
+      title: t('thread.reasoning'),
       icon: <ZkIcon name="sparkles" />,
       status: streaming ? 'loading' : 'success',
       collapsible: true,
       content: <div className="zk-reasoning-text">{reasoning}</div>,
     });
   }
-  steps.forEach((step) => items.push(toolItem(step)));
+  steps.forEach((step) => items.push(toolItem(step, t)));
 
   if (items.length === 0) return null;
 
@@ -59,9 +61,15 @@ export function ThoughtSteps({
   );
 }
 
-function toolItem(step: ToolStep): ThoughtChainItemType {
+function toolItem(step: ToolStep, t: ReturnType<typeof useT>): ThoughtChainItemType {
   const meta = toolMeta(step.name);
-  const state = step.status === 'running' ? '运行中' : step.status === 'ok' ? '完成' : '失败';
+  // Protocol status → the user's own words; never the raw enum.
+  const state =
+    step.status === 'running'
+      ? t('thread.status.running')
+      : step.status === 'ok'
+        ? t('thread.status.done')
+        : t('thread.status.failed');
   const summary = toolSummaryLine(step);
 
   return {
@@ -69,7 +77,7 @@ function toolItem(step: ToolStep): ThoughtChainItemType {
     title: (
       <span className="zk-tool-title">
         <ZkIcon name={meta.icon} />
-        <span>{meta.label}</span>
+        <span>{t(meta.labelKey)}</span>
         <span className="zk-tool-title__id" title={step.name}>
           {step.name}
         </span>

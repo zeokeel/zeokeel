@@ -2,6 +2,7 @@ import { Badge, Menu } from 'antd';
 import { useLocation, useNavigate } from 'react-router';
 import { useApprovals } from '@/features/approvals/approvals-context';
 import { ZkIcon } from '@/design/icons';
+import { useT } from '@/i18n';
 
 /**
  * The sidebar's navigation (S-02 `sidebar.nav`): Inbox, capabilities,
@@ -15,6 +16,7 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
   const navigate = useNavigate();
   const location = useLocation();
   const { approvals } = useApprovals();
+  const t = useT();
 
   const selected =
     ['/inbox', '/capabilities', '/automation', '/insights', '/team'].find((path) =>
@@ -35,25 +37,25 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
           icon: <ZkIcon name="message" />,
           label: (
             <span className="zk-nav-label">
-              收件箱
+               {t('shell.inbox')}
               {approvals.length > 0 ? (
                 <Badge
                   count={approvals.length}
                   size="small"
-                  title={`待审批 ${approvals.length}`}
-                  aria-label={`待审批 ${approvals.length}`}
+                  title={t('shell.approvalsBadge', { count: approvals.length })}
+                  aria-label={t('shell.approvalsBadge', { count: approvals.length })}
                 />
               ) : null}
             </span>
           ),
         },
-        { key: '/capabilities', icon: <ZkIcon name="plugin" />, label: '能力' },
-        { key: '/automation', icon: <ZkIcon name="clock" />, label: '自动化' },
-        { key: '/insights', icon: <ZkIcon name="activity" />, label: '洞察' },
+        { key: '/capabilities', icon: <ZkIcon name="plugin" />, label: t('shell.capabilities') },
+        { key: '/automation', icon: <ZkIcon name="clock" />, label: t('shell.automation') },
+        { key: '/insights', icon: <ZkIcon name="activity" />, label: t('shell.insights') },
         // C6: always visible, and never with a `0` badge — zero state is an
         // empty surface inside, not a count on the entry.
-        { key: '/team', icon: <ZkIcon name="users" />, label: '团队' },
-        { key: '/settings/model', icon: <ZkIcon name="sliders" />, label: '设置' },
+        { key: '/team', icon: <ZkIcon name="users" />, label: t('shell.team') },
+        { key: '/settings/model', icon: <ZkIcon name="sliders" />, label: t('shell.settings') },
       ]}
     />
   );

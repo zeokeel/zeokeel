@@ -1,5 +1,6 @@
 import { Modal, Button } from 'antd';
 import type { ReactNode } from 'react';
+import { useT } from '@/i18n';
 
 /**
  * The danger confirmation (B15, AGENTS.md §3.9): the cancel button is the
@@ -10,7 +11,7 @@ export function ConfirmDanger({
   open,
   title,
   description,
-  confirmLabel = '删除',
+  confirmLabel,
   onConfirm,
   onCancel,
 }: {
@@ -21,6 +22,7 @@ export function ConfirmDanger({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   return (
     <Modal
       open={open}
@@ -29,10 +31,10 @@ export function ConfirmDanger({
       keyboard={false}
       footer={[
         <Button key="cancel" autoFocus onClick={onCancel}>
-          取消
+          {t('ui.cancel')}
         </Button>,
         <Button key="confirm" danger onClick={onConfirm}>
-          {confirmLabel}
+          {confirmLabel ?? t('ui.delete')}
         </Button>,
       ]}
     >

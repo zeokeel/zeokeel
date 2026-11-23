@@ -43,7 +43,7 @@ export function usePromptQueue(sessionId: string): PromptQueueApi {
         else unsubscribe = stop;
       })
       .catch((cause: unknown) => {
-        if (!cancelled) setError(messageOf(cause, '待发送队列加载失败'));
+        if (!cancelled) setError(messageOf(cause, 'thread.queue.loadFailed'));
       });
     return () => {
       cancelled = true;
@@ -58,7 +58,7 @@ export function usePromptQueue(sessionId: string): PromptQueueApi {
       setError(null);
       return next;
     } catch (cause) {
-      setError(messageOf(cause, '待发送队列加载失败'));
+      setError(messageOf(cause, 'thread.queue.loadFailed'));
       return [];
     }
   }, [sessionId]);
@@ -85,7 +85,7 @@ export function usePromptQueue(sessionId: string): PromptQueueApi {
       try {
         await removeQueuedPrompt(sessionId, id);
       } catch (cause) {
-        setError(messageOf(cause, '取消失败'));
+        setError(messageOf(cause, 'thread.queue.cancelFailed'));
         await refresh();
       }
     },

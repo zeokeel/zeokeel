@@ -1,4 +1,5 @@
 import { MarkdownBody } from './markdown';
+import { useT } from '@/i18n';
 import { ThoughtSteps } from './thought-steps';
 import type { MessageStatus, ZeoMessage } from './types';
 
@@ -17,6 +18,7 @@ export function AssistantBody({
   message: ZeoMessage;
   status: MessageStatus;
 }) {
+  const t = useT();
   const streaming = status === 'loading' || status === 'updating';
   const stopped = !streaming && message.stopReason === 'aborted' && !message.error;
 
@@ -30,13 +32,14 @@ export function AssistantBody({
           {message.error.code ? `（${message.error.code}）` : ''}
         </div>
       ) : null}
-      {stopped ? <div className="zk-msg-stopped">已停止</div> : null}
+      {stopped ? <div className="zk-msg-stopped">{t('thread.stopped')}</div> : null}
       <MessageMeta message={message} status={status} />
     </>
   );
 }
 
 function MessageMeta({ message, status }: { message: ZeoMessage; status: MessageStatus }) {
+  const t = useT();
   const usage = message.usage;
   const hasUsage =
     usage !== undefined && (usage.inputTokens !== undefined || usage.outputTokens !== undefined);
@@ -60,7 +63,10 @@ function MessageMeta({ message, status }: { message: ZeoMessage; status: Message
     <div className="zk-msg-meta">
       {hasUsage ? (
         <span>
-          {formatTokens(usage.inputTokens)} 入 · {formatTokens(usage.outputTokens)} 出
+          {t('thread.usage', {
+            in: formatTokens(usage.inputTokens),
+            out: formatTokens(usage.outputTokens),
+          })}
         </span>
       ) : null}
     </div>
