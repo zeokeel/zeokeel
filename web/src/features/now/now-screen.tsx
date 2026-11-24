@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Composer } from '@/chat/composer';
-import { ComposerStatus, useComposerSettings } from '@/chat/composer-status';
+import { ComposerFooter, ComposerPickers, useComposerSettings } from '@/chat/composer-status';
 import { setSetting } from '@/api/gateway';
 import type { SlashCommand } from '@/chat/slash-commands';
 import { ApprovalDock } from '@/features/approvals/approval-dock';
@@ -69,17 +69,26 @@ export function NowScreen() {
       ) : null}
       <AskDialog />
       <ApprovalDock />
-      <ComposerStatus
-        sessionId=""
-        permission={composerSettings.permission}
-        model={composerSettings.model}
-        thinkingMode=""
-        running={false}
-        usage={undefined}
-        onSetting={(key, value) => void setSetting(key, value)}
-        onInterject={() => undefined}
-      />
       <Composer
+        prefix={
+          <ComposerPickers
+            sessionId=""
+            permission={composerSettings.permission}
+            model={composerSettings.model}
+            thinkingMode=""
+            onSetting={(key, value) => void setSetting(key, value)}
+          />
+        }
+        footer={
+          <ComposerFooter
+            sessionId=""
+            permission={composerSettings.permission}
+            model={composerSettings.model}
+            thinkingMode=""
+            usage={composerSettings.usage}
+            onSetting={(key, value) => void setSetting(key, value)}
+          />
+        }
         value={draft}
         onChange={setDraft}
         onSubmit={() => void send()}

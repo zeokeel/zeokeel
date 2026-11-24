@@ -27,6 +27,13 @@ interface ComposerProps {
   placeholder?: string;
   /** Slash commands for this screen; omitted means no slash menu. */
   commands?: SlashCommand[];
+  /**
+   * The Sender's own slots (antd X `prefix`/`footer`), not a hand-rolled bar next
+   * to it: the framework component owns the input's box, so controls that belong
+   * to the input live inside it.
+   */
+  prefix?: React.ReactNode;
+  footer?: React.ReactNode;
 }
 
 /**
@@ -90,6 +97,8 @@ export function Composer({
   disabled = false,
   placeholder,
   commands,
+  prefix,
+  footer,
 }: ComposerProps) {
   const t = useT();
   const [highlight, setHighlight] = useState(0);
@@ -312,6 +321,8 @@ export function Composer({
         placeholder={placeholder ?? t('composer.placeholder')}
         autoSize={{ minRows: 2, maxRows: 6 }}
         submitType="enter"
+        prefix={prefix}
+        footer={footer}
         // Sender forwards aria-* to its textarea (X reads restProps through
         // pickAttrs); these props are not in SenderProps' type surface.
         {...{ 'aria-label': t('composer.inputLabel'), 'data-testid': 'composer-input' }}

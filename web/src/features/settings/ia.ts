@@ -34,6 +34,12 @@ export interface SettingsField {
 export interface SettingsSection {
   titleKey?: MessageKey;
   fields: SettingsField[];
+  /**
+   * A section rendered by a dedicated component instead of generic fields.
+   * The model catalog needs list + add/edit/delete against one JSON row; a textarea
+   * of raw JSON was the placeholder this replaces.
+   */
+  component?: 'modelCatalog';
 }
 
 export interface SettingsPage {
@@ -98,10 +104,13 @@ export const SETTINGS_PAGES: SettingsPage[] = [
     sections: [
       {
         titleKey: 'settings.ia.modelCatalog',
-        fields: [
-          json('modelcatalog.models', 'settings.ia.modelCatalog', 'settings.ia.help.modelCatalog'),
-          json('presets.agents', 'settings.ia.agentPresets', 'settings.ia.help.presets'),
-        ],
+        component: 'modelCatalog',
+        // Declared for the IA honesty test and for search; the component renders it.
+        fields: [json(K.modelCatalogModels, 'settings.ia.modelCatalog', 'settings.ia.help.modelCatalog')],
+      },
+      {
+        titleKey: 'settings.ia.agentPresets',
+        fields: [json(K.agentPresets, 'settings.ia.agentPresets', 'settings.ia.help.presets')],
       },
       {
         // The `chat.*` rows the backend stores: without them the model page
@@ -137,7 +146,7 @@ export const SETTINGS_PAGES: SettingsPage[] = [
             ],
             'settings.ia.help.permission',
           ),
-          json('sandbox.writableDirs', 'settings.ia.writableDirs', 'settings.ia.help.writableDirs'),
+          json(K.sandboxWritableDirs, 'settings.ia.writableDirs', 'settings.ia.help.writableDirs'),
           text(K.agentMode, 'settings.ia.agentMode'),
           text(K.agentsFile, 'settings.ia.agentsFile', 'settings.ia.help.agentsFile'),
         ],
@@ -264,7 +273,8 @@ export const SETTINGS_PAGES: SettingsPage[] = [
         fields: [
           bool(K.lspActive, 'settings.ia.lspActive'),
           json(K.lspServers, 'settings.ia.languageServer', 'settings.ia.help.agentsJson'),
-          json('lsp.workspace_config', 'settings.ia.workspaceConfig', 'settings.ia.help.workspaceOverrides'),
+          json(K.lspWorkspaceConfig, 'settings.ia.workspaceConfig', 'settings.ia.help.workspaceOverrides'),
+          text(K.lspServer, 'settings.ia.lspServer', 'settings.ia.help.lspServer'),
         ],
       },
     ],
@@ -277,7 +287,7 @@ export const SETTINGS_PAGES: SettingsPage[] = [
     sections: [
       {
         titleKey: 'settings.ia.sessions',
-        fields: [bool('ui.sessions.showArchived', 'settings.ia.showArchived')],
+        fields: [bool(K.sessionsShowArchived, 'settings.ia.showArchived')],
       },
     ],
   },
@@ -290,11 +300,13 @@ export const SETTINGS_PAGES: SettingsPage[] = [
       {
         titleKey: 'settings.ia.toolsAndSkills',
         fields: [
-          json('tools.disabled', 'settings.ia.disabledTools', 'settings.ia.help.jsonStringArray'),
-          json('skills.disabled', 'settings.ia.disabledSkills', 'settings.ia.help.jsonStringArray'),
-          json('skills.dirs', 'settings.ia.skillCatalog', 'settings.ia.help.jsonStringArray'),
-          json('mcp.servers', 'settings.ia.mcpServers', 'settings.ia.help.mcpJson'),
-          json('mcp.disabledServers', 'settings.ia.disabledMcp', 'settings.ia.help.jsonStringArray'),
+          json(K.toolsDisabled, 'settings.ia.disabledTools', 'settings.ia.help.jsonStringArray'),
+          json(K.skillsDisabled, 'settings.ia.disabledSkills', 'settings.ia.help.jsonStringArray'),
+          json(K.skillsDirs, 'settings.ia.skillCatalog', 'settings.ia.help.jsonStringArray'),
+          json(K.mcpServers, 'settings.ia.mcpServers', 'settings.ia.help.mcpJson'),
+          json(K.mcpDisabledServers, 'settings.ia.disabledMcp', 'settings.ia.help.jsonStringArray'),
+          json(K.mcpDisabledTools, 'settings.ia.disabledMcpTools', 'settings.ia.help.jsonStringArray'),
+          text(K.mcpWorkspaceOptIn, 'settings.ia.mcpWorkspaceOptIn', 'settings.ia.help.mcpWorkspaceOptIn'),
         ],
       },
     ],

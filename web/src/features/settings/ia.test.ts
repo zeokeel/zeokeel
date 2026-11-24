@@ -61,10 +61,17 @@ const EXTRA_ROWS = new Set([
   'lsp.workspace_config',
 ]);
 
+/**
+ * Rows the backend declares but nothing reads (no `settings.Get` outside contracts).
+ * They are not given a control: a field that writes a row nobody reads is exactly
+ * the dishonest UI this file exists to prevent. The list is the visible debt.
+ */
+const UNREAD_ROWS = ['prompt.presets'];
+
 describe('settings IA × generated SETTING_KEYS', () => {
   it('lists every generated row somewhere', () => {
     const listed = new Set(iaRowKeys());
-    const missing = generatedKeys().filter((key) => !listed.has(key));
+    const missing = generatedKeys().filter((key) => !listed.has(key) && !UNREAD_ROWS.includes(key));
     expect(missing, 'backend 有、IA 没有（会出现"有值但没页面显示"的设置行）').toEqual([]);
   });
 

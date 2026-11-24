@@ -1,47 +1,51 @@
 import { useEffect, useState } from 'react';
-import { Button, Popover, Select, Space, Tag, Typography } from 'antd';
-import {
-  loadModels,
-  type ModelRow,
-} from '@/api/read-models';
-import { removeQueuedPrompt, subscribeContext, subscribePrompts, subscribeSettings } from '@/api/gateway';
+import { Select, Space, Typography } from 'antd';
+import { loadModels, type ModelRow } from '@/api/read-models';
+import { subscribeContext, subscribeSettings } from '@/api/gateway';
 import type { SettingsRows } from '@/api/gateway';
 import type { ContextView } from '@/api/context';
-import type { QueuedPrompt } from '@/api/prompt-queue';
-import { useI18n } from '@/i18n';
+import { useI18n, useT } from '@/i18n';
 import { SETTING_KEYS } from '@/design/settings-keys';
 
 /**
- * The composer's small components: the mode (permission), model and thinking
- * pickers, the prompt queue, and the session usage line — the same information the
- * DeepSeek client puts around its input box.
+ * The composer's small components, as the framework's own slots.
  *
- * Every control writes the settings row the backend already reads on each turn
- * (`agent.permission`, `chat.model`, the per-session thinking key), so switching is
- * immediate and nothing is mirrored client-side.
+ * antd X `Sender` owns the input box and exposes `prefix` (left of the input) and
+ * `footer` (under it). The DeepSeek client puts the mode, model and thinking chips
+ * in the prefix and the queue plus the usage line in the footer; this file is the
+ * same split, so the composer stays one framework component instead of a stack of
+ * boxes next to one.
+ *
+ * Every picker writes the settings row the backend reads on each turn
+ * (`agent.permission`, `chat.model`, the per-session thinking key) — nothing is
+ * mirrored client-side.
  */
 
 export const PERMISSION_VALUES = ['read-only', 'workspace', 'full'] as const;
 export type PermissionValue = (typeof PERMISSION_VALUES)[number];
 
-export interface ComposerStatusProps {
+export interface ComposerSlotProps {
   sessionId: string;
-  /** Current values, from the settings snapshot the shell already holds. */
   permission: string;
   model: string;
   thinkingMode: string;
-  /** Write one settings row (agent.permission / chat.model / thinking key). */
   onSetting: (key: string, value: string) => void;
-  /** Deliver a message immediately, interrupting the active run ("插话"). */
-  onInterject: (text: string) => void;
-  running: boolean;
-  /** The session usage line: turns, steps, tokens, cached share, context %. */
-  usage?: { turns?: number; steps?: number; tokens?: number; cached?: number; prompt?: number; context?: number; window?: number };
+  running?: boolean;
+  onInterject?: (text: string) => void;
+  usage?: {
+    turns?: number;
+    steps?: number;
+    tokens?: number;
+    cached?: number;
+    prompt?: number;
+    context?: number;
+    window?: number;
+  };
 }
 
 /**
- * The settings + context the composer bar needs, read from the same domains the rest
- * of the shell uses. One hook so the thread and the landing composer cannot drift.
+ * The settings + context the composer needs, read from the same domains the rest of
+ * the shell uses. One hook so the thread and the landing composer cannot drift.
  */
 export function useComposerSettings(sessionId: string) {
   const [rows, setRows] = useState<SettingsRows>({});
@@ -96,10 +100,10 @@ export function thinkingSettingKey(sessionId: string, model: string): string {
   return `session.${sessionId}.model.${model}.thinking`;
 }
 
-export function ComposerStatus(props: ComposerStatusProps) {
+/** `Sender.prefix`: the permission preset, the model and its thinking effort. */
+export function ComposerPickers(props: ComposerSlotProps) {
   const { t, locale } = useI18n();
   const [models, setModels] = useState<ModelRow[]>([]);
-  const [queued, setQueued] = useState<QueuedPrompt[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -115,82 +119,21 @@ export function ComposerStatus(props: ComposerStatusProps) {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    let off: (() => void) | undefined;
-    if (!props.sessionId) return;
-    void subscribePrompts(props.sessionId, (items) => {
-      if (!cancelled) setQueued(items);
-    })
-      .then((unsubscribe) => {
-        if (cancelled) unsubscribe();
-        else off = unsubscribe;
-      })
-      .catch(() => {
-        if (!cancelled) setQueued([]);
-      });
-    return () => {
-      cancelled = true;
-      off?.();
-    };
-  }, [props.sessionId]);
-
   const current = models.find((row) => row.id === props.model);
   const modes = current?.thinkingModes ?? [];
-  // An empty session has no queue: derived, so no setState in an effect.
-  const items = props.sessionId ? queued : [];
-  const usage = props.usage ?? {};
-  const contextPercent =
-    usage.context && usage.window ? Math.min(100, Math.round((usage.context / usage.window) * 100)) : undefined;
-
-  const queueContent = (
-    <div className="zk-queue">
-      <ul className="zk-queue__list">
-        {items.map((item) => (
-          <li key={item.id} className="zk-queue__row">
-            <Typography.Text ellipsis style={{ maxWidth: 320 }}>
-              {item.text}
-            </Typography.Text>
-            <Space size={4}>
-              {props.running ? (
-                <Button
-                  size="small"
-                  type="text"
-                  onClick={() => {
-                    void removeQueuedPrompt(props.sessionId, item.id);
-                    props.onInterject(item.text);
-                  }}
-                  data-testid="queue-interject"
-                >
-                  {t('composer.queue.interject')}
-                </Button>
-              ) : null}
-              <Button
-                size="small"
-                type="text"
-                onClick={() => void removeQueuedPrompt(props.sessionId, item.id)}
-                data-testid="queue-remove"
-              >
-                {t('composer.queue.remove')}
-              </Button>
-            </Space>
-          </li>
-        ))}
-      </ul>
-      <Typography.Text type="secondary">{t('composer.queue.hint')}</Typography.Text>
-    </div>
-  );
 
   return (
-    <div className="zk-composer-status" data-testid="composer-status">
-      <Space size={6} wrap>
+    <div className="zk-composer-pickers" data-testid="composer-pickers">
+      <Space size={2} wrap>
         <Select
           size="small"
           variant="borderless"
           popupMatchSelectWidth={false}
-          value={(PERMISSION_VALUES as readonly string[]).includes(props.permission)
-            ? (props.permission as PermissionValue)
-            : undefined}
+          value={
+            (PERMISSION_VALUES as readonly string[]).includes(props.permission)
+              ? (props.permission as PermissionValue)
+              : undefined
+          }
           onChange={(value: PermissionValue) => props.onSetting(SETTING_KEYS.agentPermission, value)}
           options={PERMISSION_VALUES.map((value) => ({ value, label: t(`composer.permission.${value}`) }))}
           data-testid="composer-permission"
@@ -221,27 +164,30 @@ export function ComposerStatus(props: ComposerStatusProps) {
             data-testid="composer-thinking"
           />
         ) : null}
-        {items.length > 0 ? (
-          <Popover trigger="click" placement="topLeft" content={queueContent} title={t('composer.queue.title')}>
-            <Button size="small" type="text" icon={<Tag color="blue">{items.length}</Tag>} data-testid="composer-queue">
-              {t('composer.queue.chip')}
-            </Button>
-          </Popover>
-        ) : null}
       </Space>
-      <Space size={8}>
-        {usage.turns !== undefined ? (
-          <Typography.Text type="secondary" data-testid="composer-usage">
-            {t('composer.usage', {
-              turns: usage.turns ?? 0,
-              steps: usage.steps ?? 0,
-              tokens: formatCompact(usage.tokens ?? 0),
-              cached: usage.prompt ? Math.round(((usage.cached ?? 0) / usage.prompt) * 100) : 0,
-              context: contextPercent ?? 0,
-            })}
-          </Typography.Text>
-        ) : null}
-      </Space>
+    </div>
+  );
+}
+
+/** `Sender.footer`: the session usage line (the queue has its own B13 panel). */
+export function ComposerFooter(props: ComposerSlotProps) {
+  const t = useT();
+  const usage = props.usage ?? {};
+  const contextPercent =
+    usage.context && usage.window ? Math.min(100, Math.round((usage.context / usage.window) * 100)) : undefined;
+  if (usage.turns === undefined) return null;
+
+  return (
+    <div className="zk-composer-meters" data-testid="composer-meters">
+      <Typography.Text type="secondary" data-testid="composer-usage">
+        {t('composer.usage', {
+          turns: usage.turns ?? 0,
+          steps: usage.steps ?? 0,
+          tokens: formatCompact(usage.tokens ?? 0),
+          cached: usage.prompt ? Math.round(((usage.cached ?? 0) / usage.prompt) * 100) : 0,
+          context: contextPercent ?? 0,
+        })}
+      </Typography.Text>
     </div>
   );
 }

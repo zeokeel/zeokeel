@@ -12,6 +12,8 @@ export const SETTING_KEYS = {
   agentMode: 'agent.mode',
   /** SettingAgentPermission */
   agentPermission: 'agent.permission',
+  /** SettingAgentPresets */
+  agentPresets: 'presets.agents',
   /** SettingAgentsFile */
   agentsFile: 'agent.agentsFile',
   /** SettingAgentSubagentMaxConcurrent */
@@ -30,14 +32,32 @@ export const SETTING_KEYS = {
   globalHotkey: 'ui.globalHotkey',
   /** SettingLSPActive */
   lspActive: 'lsp.active',
+  /** SettingLSPServer */
+  lspServer: 'lsp.server',
   /** SettingLSPServers */
   lspServers: 'lsp.servers',
+  /** SettingLSPWorkspaceConfig */
+  lspWorkspaceConfig: 'lsp.workspace_config',
+  /** SettingMCPDisabledServers */
+  mcpDisabledServers: 'mcp.disabledServers',
+  /** SettingMCPDisabledTools */
+  mcpDisabledTools: 'mcp.disabledTools',
+  /** SettingMCPServers */
+  mcpServers: 'mcp.servers',
+  /** SettingMCPWorkspaceOptIn */
+  mcpWorkspaceOptIn: 'mcp.workspaceOptIn',
+  /** SettingModelCatalogModels */
+  modelCatalogModels: 'modelcatalog.models',
   /** SettingNetNoProxy */
   netNoProxy: 'net.noProxy',
   /** SettingNetProxy */
   netProxy: 'net.proxy',
   /** SettingNotifications */
   notifications: 'ui.notifications',
+  /** SettingPromptPresets */
+  promptPresets: 'prompt.presets',
+  /** SettingSandboxWritableDirs */
+  sandboxWritableDirs: 'sandbox.writableDirs',
   /** SettingsChatAPIKey */
   chatAPIKey: 'chat.apiKey',
   /** SettingsChatBaseURL */
@@ -48,6 +68,12 @@ export const SETTING_KEYS = {
   chatModel: 'chat.model',
   /** SettingsChatSystemPrompt */
   chatSystemPrompt: 'chat.systemPrompt',
+  /** SettingSessionsShowArchived */
+  sessionsShowArchived: 'ui.sessions.showArchived',
+  /** SettingSkillsDirs */
+  skillsDirs: 'skills.dirs',
+  /** SettingSkillsDisabled */
+  skillsDisabled: 'skills.disabled',
   /** SettingsUILanguage */
   uiLanguage: 'ui.language',
   /** SettingsUIShortcutCommandPalette */
@@ -66,6 +92,8 @@ export const SETTING_KEYS = {
   toolkitShellMaxOutputKiB: 'toolkit.shellMaxOutputKiB',
   /** SettingToolkitShellTimeoutSeconds */
   toolkitShellTimeoutSeconds: 'toolkit.shellTimeoutSeconds',
+  /** SettingToolsDisabled */
+  toolsDisabled: 'tools.disabled',
   /** SettingWebSearchAPIKey */
   webSearchAPIKey: 'web.search.apiKey',
   /** SettingWebSearchEndpoint */
@@ -86,8 +114,15 @@ export const SETTING_KEY_PREFIXES = [
   'agent.',
   'chat.',
   'lsp.',
+  'mcp.',
+  'modelcatalog.',
   'net.',
+  'presets.',
+  'prompt.',
+  'sandbox.',
+  'skills.',
   'toolkit.',
+  'tools.',
   'ui.',
   'web.',
 ] as const;

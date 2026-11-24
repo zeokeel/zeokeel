@@ -20,6 +20,7 @@ import {
 import { useEscClaim } from '@/keyboard/keyboard-provider';
 import { ZkIcon } from '@/design/icons';
 import { ConfirmDanger } from '@/ui/confirm-danger';
+import { ModelCatalogEditor } from './model-catalog';
 import { describeError } from '@/features/describe-error';
 import { useT } from '@/i18n';
 import type { MessageKey } from '@/i18n';
@@ -289,7 +290,10 @@ function SettingsPageForm({
             {section.fields.length === 0 ? (
               <Typography.Text type="secondary">{t('settings.pageEmpty')}</Typography.Text>
             ) : null}
-            {section.fields.map((field) => (
+            {section.component === 'modelCatalog' ? (
+              <ModelCatalogEditor />
+            ) : null}
+            {section.component ? null : section.fields.map((field) => (
               <FieldRow
                 key={field.key}
                 field={field}

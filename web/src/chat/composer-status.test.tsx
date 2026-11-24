@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ComposerStatus, thinkingSettingKey } from '@/chat/composer-status';
+import { ComposerFooter, ComposerPickers, thinkingSettingKey } from '@/chat/composer-status';
 import { SETTING_KEYS } from '@/design/settings-keys';
 
 /**
@@ -58,7 +58,7 @@ describe('composer status', () => {
   it('shows the permission preset and writes it back', async () => {
     stubFetch();
     const user = userEvent.setup();
-    render(<ComposerStatus {...baseProps} />);
+    render(<ComposerPickers {...baseProps} />);
 
     const picker = await screen.findByTestId('composer-permission');
     expect(picker.textContent).toContain('工作区内修改');
@@ -70,7 +70,7 @@ describe('composer status', () => {
   it('lists the catalog models and writes chat.model', async () => {
     stubFetch();
     const user = userEvent.setup();
-    render(<ComposerStatus {...baseProps} />);
+    render(<ComposerPickers {...baseProps} />);
 
     const picker = await screen.findByTestId('composer-model');
     await waitFor(() => expect(picker.textContent).toContain('DeepSeek V4'));
@@ -82,7 +82,7 @@ describe('composer status', () => {
   it('writes the per-session thinking mode when the model offers choices', async () => {
     stubFetch();
     const user = userEvent.setup();
-    render(<ComposerStatus {...baseProps} />);
+    render(<ComposerPickers {...baseProps} />);
 
     const picker = await screen.findByTestId('composer-thinking');
     await user.click(picker);
@@ -94,7 +94,7 @@ describe('composer status', () => {
 
   it('hides the thinking picker when the model has a single mode', async () => {
     stubFetch(MODELS);
-    render(<ComposerStatus {...baseProps} model="qwen3" />);
+    render(<ComposerPickers {...baseProps} model="qwen3" />);
     await screen.findByTestId('composer-model');
     await waitFor(() => expect(screen.queryByTestId('composer-thinking')).toBeNull());
   });
@@ -102,7 +102,7 @@ describe('composer status', () => {
   it('renders the usage line from the context numbers', async () => {
     stubFetch();
     render(
-      <ComposerStatus
+      <ComposerFooter
         {...baseProps}
         usage={{ turns: 3, steps: 7, tokens: 12956, cached: 9000, prompt: 10000, context: 12877, window: 131072 }}
       />,

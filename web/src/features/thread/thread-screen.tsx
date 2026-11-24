@@ -7,7 +7,7 @@ import { Transcript } from '@/chat/transcript';
 import { ApprovalDock } from '@/features/approvals/approval-dock';
 import { AskDialog } from '@/features/thread/ask-dialog';
 import { PlanDialog } from '@/features/thread/plan-dialog';
-import { ComposerStatus, useComposerSettings } from '@/chat/composer-status';
+import { ComposerFooter, ComposerPickers, useComposerSettings } from '@/chat/composer-status';
 import { setSetting } from '@/api/gateway';
 import { useApprovals } from '@/features/approvals/approvals-context';
 import { useSessions } from '@/features/sessions/sessions-context';
@@ -320,22 +320,31 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
         onSendHead={() => void sendQueueHead()}
       />
 
-      <ComposerStatus
-        sessionId={sessionId}
-        permission={composerSettings.permission}
-        model={composerSettings.model}
-        thinkingMode={composerSettings.thinkingMode}
-        running={chat.isRequesting}
-        usage={composerSettings.usage}
-        onSetting={(key, value) => void setSetting(key, value)}
-        onInterject={(text) => {
-          // 插话: the queue only drains between turns, so steering a running turn
-          // means stopping it and starting the new turn immediately.
-          stopRun();
-          chat.onRequest({ sessionId, text });
-        }}
-      />
       <Composer
+        prefix={
+          <ComposerPickers
+            sessionId={sessionId}
+            permission={composerSettings.permission}
+            model={composerSettings.model}
+            thinkingMode={composerSettings.thinkingMode}
+            onSetting={(key: string, value: string) => void setSetting(key, value)}
+          />
+        }
+        footer={
+          <ComposerFooter
+            sessionId={sessionId}
+            permission={composerSettings.permission}
+            model={composerSettings.model}
+            thinkingMode={composerSettings.thinkingMode}
+            running={chat.isRequesting}
+            usage={composerSettings.usage}
+            onSetting={(key: string, value: string) => void setSetting(key, value)}
+            onInterject={(text: string) => {
+              stopRun();
+              chat.onRequest({ sessionId, text });
+            }}
+          />
+        }
         value={draft}
         onChange={setDraft}
         onSubmit={send}

@@ -249,7 +249,9 @@ describe('E1–E9 layered Escape arbiter', () => {
 
   it('E5: a dirty settings page opens the discard guard and does not close', async () => {
     const user = await renderAt('/settings/model');
-    const field = await screen.findByLabelText('模型目录');
+    // The model catalog is a list editor now, so the dirtyable field on this page
+    // is the system prompt (same page, same guard).
+    const field = await screen.findByLabelText('系统提示词');
     await user.clear(field);
     await user.type(field, 'changed');
 
@@ -271,7 +273,9 @@ describe('E1–E9 layered Escape arbiter', () => {
 
   it('E7: with the palette open over a dirty settings page, Esc closes the palette only', async () => {
     const user = await renderAt('/settings/model');
-    const field = await screen.findByLabelText('模型目录');
+    // The model catalog is a list editor now, so the dirtyable field on this page
+    // is the system prompt (same page, same guard).
+    const field = await screen.findByLabelText('系统提示词');
     await user.clear(field);
     await user.type(field, 'changed');
 

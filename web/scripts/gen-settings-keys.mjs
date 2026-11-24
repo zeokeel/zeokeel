@@ -25,7 +25,10 @@ const contractsDir = resolve(repo, 'internal/contracts');
 const target = resolve(here, '../src/design/settings-keys.ts');
 
 // const SettingFoo = "some.key"
-const declaration = /^\s*(Setting[A-Za-z0-9_]+)\s*=\s*"([^"]+)"/;
+// `const SettingX = "k"` on one line is as valid as a `Name = "k"` inside a
+// const block: modelcatalog.models was missing from the generated table because
+// only the block form matched.
+const declaration = /^\s*(?:const\s+)?(Setting[A-Za-z0-9_]+)\s*=\s*"([^"]+)"/;
 
 const files = readdirSync(contractsDir)
   .filter((name) => name.endsWith('.go') && !name.endsWith('_test.go'))
