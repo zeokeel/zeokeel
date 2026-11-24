@@ -22,7 +22,12 @@ case ":$PATH:" in
 *) export PATH="/usr/local/go/bin:$PATH" ;;
 esac
 export GO="${GO:-go}"
-export GOFMT="${GOFMT:-gofmt}"
+# gofmt must come from the toolchain Go will actually build with, not from
+# whatever `gofmt` happens to be first on PATH: the two disagree across Go
+# releases (1.26 vs 1.27 format the same file differently), so a "fmt is clean"
+# verdict from the wrong binary is why CI's first step failed on a tag whose
+# local gate was green.
+export GOFMT="${GOFMT:-$("$GO" env GOROOT)/bin/gofmt}"
 export GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
 export GOSUMDB="${GOSUMDB:-sum.golang.org}"
 export GOFLAGS="${GOFLAGS:--mod=mod}"

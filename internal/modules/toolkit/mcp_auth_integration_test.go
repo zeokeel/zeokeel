@@ -37,13 +37,13 @@ func newOAuthFakeAS(t *testing.T) *oauthFakeAS {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/oauth-authorization-server", func(w http.ResponseWriter, r *http.Request) {
 		writeToolkitJSON(t, w, map[string]any{
-			"issuer":                           as.base,
-			"authorization_endpoint":           as.base + "/authorize",
-			"token_endpoint":                   as.base + "/token",
-			"registration_endpoint":            as.base + "/register",
-			"revocation_endpoint":              as.base + "/revoke",
-			"scopes_supported":                 []string{"files:read"},
-			"code_challenge_methods_supported": []string{"S256"},
+			"issuer":                                         as.base,
+			"authorization_endpoint":                         as.base + "/authorize",
+			"token_endpoint":                                 as.base + "/token",
+			"registration_endpoint":                          as.base + "/register",
+			"revocation_endpoint":                            as.base + "/revoke",
+			"scopes_supported":                               []string{"files:read"},
+			"code_challenge_methods_supported":               []string{"S256"},
 			"authorization_response_iss_parameter_supported": true,
 		})
 	})
