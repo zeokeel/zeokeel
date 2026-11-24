@@ -24,6 +24,7 @@ export function ThoughtSteps({
   durationMs,
   mode = 'standard',
   collapse = 'completion',
+  isLatest = true,
 }: {
   reasoning: string;
   steps: ToolStep[];
@@ -34,6 +35,8 @@ export function ThoughtSteps({
   mode?: WorkStepsMode;
   /** 设置 → 外观 → 收起时机: fold on settle, or only when the next turn starts. */
   collapse?: WorkStepsCollapse;
+  /** Whether this is the last row: "next-input" folds once a newer one exists. */
+  isLatest?: boolean;
 }) {
   const t = useT();
   const [userExpanded, setUserExpanded] = useState<string[] | null>(null);
@@ -85,11 +88,12 @@ export function ThoughtSteps({
   const visibleSteps = compactMode && !streaming ? actionable : steps;
   visibleSteps.forEach((step) => items.push(toolItem(step, t)));
 
-  if (compactMode && !streaming && actionable.length === 0 && steps.length > 0) {
+  const hiddenSuccesses = compactMode ? steps.length - visibleSteps.length : 0;
+  if (compactMode && !streaming && hiddenSuccesses > 0) {
     // Nothing to act on: say how much work happened instead of listing it.
     items.push({
       key: 'concise-summary',
-      title: t('thread.steps.summary', { count: steps.length }),
+      title: t('thread.steps.summary', { count: hiddenSuccesses }),
       ...(durationMs ? { desc: formatDuration(durationMs) } : {}),
       icon: <ZkIcon name="check" />,
       status: 'success',
@@ -100,11 +104,20 @@ export function ThoughtSteps({
   if (items.length === 0) return null;
 
   const wantsAllOpen = mode === 'detailed' || mode === 'verbose';
-  const keepOpen = collapse === 'next-input' && !streaming;
+  // `next-input` folds a settled turn only once a newer row exists; before that
+  // it stays readable even after the run ends (it used to stay open forever,
+  // because nothing told it that the conversation had moved on).
+  const keepOpen = collapse === 'next-input' ? !streaming && isLatest : false;
+  const expandedByMode = wantsAllOpen
+    ? items
+        .filter((item) => mode === 'verbose' || item.key !== 'reasoning')
+        .map((item) => item.key)
+        .filter((key): key is string => typeof key === 'string')
+    : null;
   const autoExpanded = keepOpen
     ? items.map((item) => item.key).filter((key): key is string => typeof key === 'string')
-    : wantsAllOpen
-      ? items.map((item) => item.key).filter((key): key is string => typeof key === 'string')
+    : expandedByMode
+      ? expandedByMode
       : items
           .filter((item) => item.status === 'loading' || item.status === 'error')
           .map((item) => item.key)

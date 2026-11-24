@@ -492,6 +492,8 @@ export const en: Catalog = {
   'settings.ia.approvalTimeout': 'Approval timeout (s)',
   'settings.ia.fontSize': 'Conversation font size',
   'settings.ia.workspaceConfig': 'Workspace configuration',
+  'settings.ia.help.stepDisplay': 'Brief lists only steps that need you; Detailed opens tool cards; Fully expanded also opens reasoning.',
+  'settings.ia.help.collapseWhen': 'Fold as soon as the answer ends, or keep it until your next message.',
   'settings.ia.stepDisplay': 'How work steps are shown',
   'settings.ia.toolsAndSkills': 'Tools and skills',
   'settings.ia.group.common': 'Common',

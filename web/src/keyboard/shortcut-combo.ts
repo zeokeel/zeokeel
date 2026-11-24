@@ -60,6 +60,9 @@ export function parseShortcut(text: string): ShortcutCombo | null {
     combo.key = NAMED_KEYS[lower] ?? (part.length === 1 ? part.toLowerCase() : '');
   }
   if (combo.key === '') return null;
+  // A bare letter is not a shortcut: binding `K` makes the palette open while
+  // the user types in the composer (round-3 wire audit). A modifier is required.
+  if (!combo.mod && !combo.shift && !combo.alt) return null;
   return combo;
 }
 

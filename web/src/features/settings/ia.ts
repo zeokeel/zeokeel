@@ -262,20 +262,35 @@ export const SETTINGS_PAGES: SettingsPage[] = [
           ),
           bool(K.uiThemeDark, 'settings.ia.themeDarkPreference'),
           { key: K.chatFontSize, labelKey: 'settings.ia.fontSize', kind: 'number', unit: 'px' },
-          radio(
-            K.workStepsMode,
-            'settings.ia.stepDisplay',
-            [
-              { value: 'compact', labelKey: 'settings.ia.verbosityBrief' },
-              { value: 'standard', labelKey: 'settings.ia.verbosityStandard' },
-              { value: 'detailed', labelKey: 'settings.ia.verbosityDetailed' },
-              { value: 'verbose', labelKey: 'settings.ia.alwaysExpanded' },
-            ],
-          ),
-          radio(K.workStepsCollapse, 'settings.ia.collapseWhen', [
-            { value: 'completion', labelKey: 'settings.ia.afterAnswer' },
-            { value: 'next-input', labelKey: 'settings.ia.onNewMessage' },
-          ]),
+          // Both rows default to what the renderer falls back to, so the radio
+          // group shows the effective value instead of "nothing selected"
+          // (round-3 wire audit). Display-only: an untouched row writes nothing.
+          {
+            ...radio(
+              K.workStepsMode,
+              'settings.ia.stepDisplay',
+              [
+                { value: 'compact', labelKey: 'settings.ia.verbosityBrief' },
+                { value: 'standard', labelKey: 'settings.ia.verbosityStandard' },
+                { value: 'detailed', labelKey: 'settings.ia.verbosityDetailed' },
+                { value: 'verbose', labelKey: 'settings.ia.alwaysExpanded' },
+              ],
+              'settings.ia.help.stepDisplay',
+            ),
+            defaultValue: 'standard',
+          },
+          {
+            ...radio(
+              K.workStepsCollapse,
+              'settings.ia.collapseWhen',
+              [
+                { value: 'completion', labelKey: 'settings.ia.afterAnswer' },
+                { value: 'next-input', labelKey: 'settings.ia.onNewMessage' },
+              ],
+              'settings.ia.help.collapseWhen',
+            ),
+            defaultValue: 'completion',
+          },
           text(
             K.globalHotkey,
             'settings.ia.hotkeys',

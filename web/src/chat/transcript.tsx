@@ -267,7 +267,14 @@ export function Transcript({
                       </>
                     ) : (
                       <>
-                        <AssistantBody message={content as ZeoMessage} status={info.status} />
+                        <AssistantBody
+                          message={content as ZeoMessage}
+                          status={info.status}
+                          // "Fold when the next message arrives" needs to know
+                          // whether a newer row exists; the transcript is the
+                          // only place that does (round-3 wire audit).
+                          isLatest={row.index === messages.length - 1}
+                        />
                         {info.status === 'loading' ? null : (
                           <MessageActions
                             role="assistant"

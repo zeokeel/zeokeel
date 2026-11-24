@@ -496,6 +496,8 @@ export const zh = {
   'settings.ia.approvalTimeout': '审批超时（秒）',
   'settings.ia.fontSize': '对话字号',
   'settings.ia.workspaceConfig': '工作区配置',
+  'settings.ia.help.stepDisplay': '简洁只列需要你处理的步骤；详细展开工具卡；完全展开连思考一起展开。',
+  'settings.ia.help.collapseWhen': '回答结束后立即收起，或留到你说下一句再收起。',
   'settings.ia.stepDisplay': '工作步骤展示',
   'settings.ia.toolsAndSkills': '工具与技能',
   'settings.ia.group.common': '常用',

@@ -19,7 +19,8 @@ describe('parseShortcut', () => {
 
   it('refuses what it cannot bind', () => {
     expect(parseShortcut('')).toBeNull();
-    expect(parseShortcut('K')).toEqual({ mod: false, shift: false, alt: false, key: 'k' });
+    // A bare key would swallow typing; it is refused (see the parser).
+    expect(parseShortcut('K')).toBeNull();
     expect(parseShortcut('Mod+K+J')).toBeNull();
     expect(parseShortcut('Mod+')).toBeNull();
     expect(parseShortcut('Mod+SomeLongName')).toBeNull();

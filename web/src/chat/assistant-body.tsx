@@ -18,9 +18,12 @@ import type { MessageStatus, ZeoMessage } from './types';
 export function AssistantBody({
   message,
   status,
+  isLatest = true,
 }: {
   message: ZeoMessage;
   status: MessageStatus;
+  /** No newer row follows this one (see `ui.workSteps.collapse`). */
+  isLatest?: boolean;
 }) {
   const t = useT();
   const workSteps = useWorkSteps();
@@ -36,6 +39,7 @@ export function AssistantBody({
         durationMs={message.usage?.durationMs}
         mode={workSteps.mode}
         collapse={workSteps.collapse}
+        isLatest={isLatest}
       />
       {message.text ? <MarkdownBody text={message.text} streaming={streaming} /> : null}
       {message.error ? <ProviderErrorRow error={message.error} /> : null}
