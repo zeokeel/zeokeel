@@ -26,6 +26,7 @@ import {
   type AutomationTask,
 } from '@/api/read-models';
 import { useT } from '@/i18n';
+import { scheduleProblem } from './schedule-hint';
 import { describeError } from '@/features/describe-error';
 
 /**
@@ -265,9 +266,18 @@ export function AutomationScreen() {
             name="schedule"
             label={t('screen.automation.field.schedule')}
             extra={t('screen.automation.field.scheduleHelp')}
-            rules={[{ required: true, whitespace: true }]}
+            rules={[
+              { required: true, whitespace: true },
+              {
+                validator: (_, value: string) => {
+                  const problem = scheduleProblem(value ?? '');
+                  if (!problem) return Promise.resolve();
+                  return Promise.reject(new Error(t(`screen.automation.err.${problem}`)));
+                },
+              },
+            ]}
           >
-            <Input placeholder="0 8 * * *" />
+            <Input placeholder="daily 09:00" />
           </Form.Item>
           <Form.Item name="enabled" label={t('screen.automation.field.enabled')} valuePropName="checked">
             <Switch />
