@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/zeokeel/zeokeel/internal/gateway/webclient"
 	"net"
 	"os"
 	"path/filepath"
@@ -53,6 +54,12 @@ type Info struct {
 	StartedAt     string `json:"startedAt"`
 	Product       string `json:"product"`
 	Version       string `json:"version"`
+	// BundleSHA256 / BundleBuiltAt identify the browser client this binary
+	// serves. Commit times and build times drift (a bundle can be built before
+	// the commit that ships it), so verification compares content, not timestamps
+	// (round-4 conn audit, note 1).
+	BundleSHA256  string `json:"bundleSha256,omitempty"`
+	BundleBuiltAt string `json:"bundleBuiltAt,omitempty"`
 }
 
 // Origin is the exact scheme+host+port the browser client is served from. Host
@@ -198,7 +205,13 @@ func (e *alreadyRunningError) Unwrap() error { return errAlreadyRunning }
 
 // newInfo builds the published description of this process.
 func newInfo(epoch string, port int, token, product, version string) Info {
+	bundleSha, bundleBuiltAt := "", ""
+	if info, ok := webclient.Fingerprint(); ok {
+		bundleSha, bundleBuiltAt = info.SHA256, info.BuiltAt
+	}
 	return Info{
+		BundleSHA256:  bundleSha,
+		BundleBuiltAt: bundleBuiltAt,
 		SchemaVersion: InfoSchemaVersion,
 		Epoch:         epoch,
 		PID:           os.Getpid(),

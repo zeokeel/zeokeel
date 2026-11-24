@@ -359,7 +359,14 @@ export function CapabilitiesScreen() {
                         width: '38%',
                         ellipsis: true,
                       },
-                      { title: t('screen.capabilities.col.description'), dataIndex: 'description' },
+                      {
+                        title: t('screen.capabilities.col.description'),
+                        dataIndex: 'description',
+                        // The fixed layout keeps rows one line tall, so the
+                        // description is clipped — it needs a title to be
+                        // readable at all (round-4 conn audit R4-1).
+                        ellipsis: { showTitle: true },
+                      },
                       {
                         title: t('screen.capabilities.col.source'),
                         dataIndex: 'source',
