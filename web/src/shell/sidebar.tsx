@@ -53,12 +53,15 @@ export function Sidebar({
   // `focus()` on it fails silently and the keyboard user lands on BODY
   // (round-5 session audit F2f).
   const lastSessionId = useRef<string | null>(null);
+  // Until when a restore is allowed. Any pointer/keyboard gesture outside our
+  // own controls cancels it, so a user who clicks another conversation (or just
+  // the page) is never pulled back into the sidebar (round-7 session audit F2g).
+  const pendingFocusUntil = useRef(0);
 
   // Bounded retry: a pin/unpin re-orders the rows on the *next* delta, so a
   // single rAF fires while the old node is still being replaced. Retrying for
   // ~1.5s is enough for the reorder to land and costs nothing when it does not.
   const focusSessionTrigger = (sessionId: string | null) => {
-    const deadline = Date.now() + 2000;
     const attempt = () => {
       // Give up only if the user moved focus somewhere of their own accord: a
       // re-order lands as a later delta, so "focus once" always loses.
@@ -79,7 +82,7 @@ export function Sidebar({
         (selector ? document.querySelector<HTMLElement>(selector) : null) ??
         document.querySelector<HTMLElement>('[data-testid="session-menu"]');
       target?.focus();
-      if (Date.now() < deadline) window.setTimeout(attempt, 80);
+      if (Date.now() < pendingFocusUntil.current) window.setTimeout(attempt, 80);
     };
     window.requestAnimationFrame(attempt);
   };
@@ -175,12 +178,32 @@ export function Sidebar({
   // action is too early: the node is replaced and focus falls to BODY. Whenever
   // the list changes and focus is nowhere, put it back on the trigger that owns
   // the menu (round-5 session audit F2f).
+  const listKey = sessions
+    .map((session) => `${session.id}:${session.pinned ? 1 : 0}:${session.archived ? 1 : 0}`)
+    .join('|');
+
   useEffect(() => {
     if (!lastSessionId.current) return;
-    // Only when the list change ate the focus (a row moved or vanished).
+    if (Date.now() > pendingFocusUntil.current) return;
     if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) return;
     focusSessionTrigger(lastSessionId.current);
-  }, [visible]);
+  }, [listKey]);
+
+  useEffect(() => {
+    const onUserGesture = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('.ant-dropdown, [data-testid="session-menu"]')) {
+        return; // choosing an item or pressing our own trigger is not "user left"
+      }
+      pendingFocusUntil.current = 0;
+    };
+    window.addEventListener('pointerdown', onUserGesture, true);
+    window.addEventListener('keydown', onUserGesture, true);
+    return () => {
+      window.removeEventListener('pointerdown', onUserGesture, true);
+      window.removeEventListener('keydown', onUserGesture, true);
+    };
+  }, []);
 
   // Esc closes the dropdown natively; without this the focus dies with it.
   useEffect(() => {
@@ -195,6 +218,7 @@ export function Sidebar({
   }, []);
 
   const handleMenu = async (key: string, sessionId: string, title: string) => {
+    pendingFocusUntil.current = Date.now() + 2000;
     try {
       if (key === 'rename') {
         const next = await promptRename(title);
