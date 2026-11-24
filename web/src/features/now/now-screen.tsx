@@ -7,7 +7,6 @@ import { setSetting } from '@/api/gateway';
 import type { SlashCommand } from '@/chat/slash-commands';
 import { ApprovalDock } from '@/features/approvals/approval-dock';
 import { AskDialog } from '@/features/thread/ask-dialog';
-import { useApprovals } from '@/features/approvals/approvals-context';
 import { useSessions } from '@/features/sessions/sessions-context';
 import { EmptyState } from '@/ui/empty-state';
 import { useT } from '@/i18n';
@@ -23,8 +22,6 @@ export function NowScreen() {
   const t = useT();
   const navigate = useNavigate();
   const { create } = useSessions();
-  const { approvals } = useApprovals();
-  const approvalPending = approvals.length > 0;
   const composerSettings = useComposerSettings('');
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<StagedAttachment[]>([]);
@@ -122,10 +119,9 @@ export function NowScreen() {
         value={draft}
         onChange={setDraft}
         onSubmit={() => void send()}
-        disabled={creating || approvalPending}
-        placeholder={
-          approvalPending ? t('composer.placeholder.approval') : t('composer.placeholder')
-        }
+        // Starting a conversation is never blocked by an approval parked in some
+        // other session; the dock above still shows it and links to its thread.
+        disabled={creating}
         commands={commands}
       />
     </div>

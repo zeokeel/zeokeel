@@ -120,6 +120,12 @@ export function ModelCatalogEditor() {
           {t('settings.model.broken')}
         </div>
       ) : null}
+      {catalog.length === 0 && !raw.trim() ? (
+        // "Nothing here" is a state, not an absence: say what the list is for and
+        // what happens after the first row (round-2 S2/F-6 — the composer's
+        // model picker stays empty until a row exists).
+        <p className="zk-model-empty">{t('settings.model.empty')}</p>
+      ) : null}
       <ul className="zk-model-list">
         {catalog.map((row) => (
           <li key={row.id} className="zk-model-row" data-testid="model-row">

@@ -1,5 +1,12 @@
-import { useRef, useState, type KeyboardEvent } from 'react';
+import {
+  useRef,
+  useState,
+  type ComponentRef,
+  type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import { Sender } from '@ant-design/x';
+import { ArrowUpOutlined } from '@ant-design/icons';
 import { Button, Tag, Typography } from 'antd';
 import { formatBytes, type StagedAttachment } from '@/api/blobs';
 import { loadFileTree } from '@/api/files';
@@ -41,6 +48,16 @@ interface ComposerProps {
   /** A file was picked or pasted; the screen uploads it. */
   onAttachFiles?: (files: File[]) => void;
   onRemoveAttachment?: (id: string) => void;
+  /**
+   * Why the composer is disabled, shown as a notice **above** the card.
+   *
+   * A disabled input explained only by a placeholder is an input whose reason
+   * is invisible the moment the user starts looking for the cause: the text
+   * sits at 1.8:1 contrast and disappears as soon as anything is typed. The
+   * reason belongs next to the control, in a sentence the user can act on
+   * (docs/audit/2026-11-24/FIELD-DESIGN.md §4).
+   */
+  notice?: string;
 }
 
 /**
@@ -109,9 +126,11 @@ export function Composer({
   attachments,
   onAttachFiles,
   onRemoveAttachment,
+  notice,
 }: ComposerProps) {
   const t = useT();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const senderRef = useRef<ComponentRef<typeof Sender> | null>(null);
   const [highlight, setHighlight] = useState(0);
   const [dismissedQuery, setDismissedQuery] = useState<string | null>(null);
   const [filePaths, setFilePaths] = useState<string[] | null>(null);
@@ -208,6 +227,13 @@ export function Composer({
   };
 
   const handleKeyDown = (event: KeyboardEvent) => {
+    // A composing IME owns Enter and Escape: the candidate window's Enter picks
+    // a candidate, and sending the raw pinyin instead is how a Chinese user
+    // posts "nihao" mid-sentence (AUDIT round 2, F-5). 229 is the legacy
+    // keyCode Firefox/Safari report for the same state.
+    const native = event.nativeEvent as unknown as { isComposing?: boolean; keyCode?: number };
+    if (native.isComposing || native.keyCode === 229) return undefined;
+
     if (mentionOpen) {
       if (event.key === 'ArrowDown') {
         event.preventDefault();
@@ -273,10 +299,68 @@ export function Composer({
     return undefined;
   };
 
+  const empty = value.trim() === '';
+  const hintKey =
+    resolvedPhase === 'connecting'
+      ? ('composer.hint.connecting' as const)
+      : resolvedPhase === 'running'
+        ? ('composer.hint.running' as const)
+        : ('composer.hint.idle' as const);
+
+  // Clicking the card's empty space returns the caret to the draft, the way
+  // every desktop composer behaves. Clicks on a control are left alone.
+  const focusInputOnBlank = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (
+      target.closest(
+        'button, a, input, textarea, .ant-select, [role="option"], [data-testid="composer-attachments"]',
+      )
+    ) {
+      return;
+    }
+    event.preventDefault();
+    senderRef.current?.focus?.();
+  };
+
+  const attach = onAttachFiles ? (
+    <>
+      <Button
+        size="small"
+        type="text"
+        shape="circle"
+        className="zk-composer__tool"
+        aria-label={t('composer.attach')}
+        title={t('composer.attach')}
+        data-testid="composer-attach"
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <PlusIcon />
+      </Button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        hidden
+        data-testid="composer-file-input"
+        accept="image/*,text/*,application/pdf,application/json"
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          event.target.value = '';
+          if (files.length > 0) onAttachFiles(files);
+        }}
+      />
+    </>
+  ) : null;
+
   return (
     // `data-testid="composer"` marks the **input area boundary**, not the input:
     // the textarea is reached by role inside it (task-37 #1, decision (b)).
-    <div className="zk-composer" data-testid="composer">
+    <div
+      className="zk-composer"
+      data-testid="composer"
+      data-disabled={disabled ? 'true' : 'false'}
+      onMouseDown={focusInputOnBlank}
+    >
       {menuOpen ? (
         <div className="zk-slash" role="listbox" aria-label={t('composer.slash')}>
           {matches.map((command, index) => (
@@ -321,12 +405,20 @@ export function Composer({
         </div>
       ) : null}
 
+      {notice ? (
+        <div className="zk-composer__notice" role="status" data-testid="composer-notice">
+          <InfoIcon />
+          <span>{notice}</span>
+        </div>
+      ) : null}
+
       {attachments && attachments.length > 0 ? (
         <div className="zk-composer__attachments" data-testid="composer-attachments">
           {attachments.map((item) => (
             <Tag
               key={item.id}
               closable
+              className="zk-attach"
               onClose={(event) => {
                 event.preventDefault();
                 onRemoveAttachment?.(item.id);
@@ -336,14 +428,17 @@ export function Composer({
               {item.mime.startsWith('image/') && item.previewUrl ? (
                 <img className="zk-attach__thumb" src={item.previewUrl} alt={item.name} />
               ) : null}
-              <Typography.Text>{item.name}</Typography.Text>
-              <Typography.Text type="secondary">{formatBytes(item.bytes)}</Typography.Text>
+              <span className="zk-attach__text">
+                <Typography.Text ellipsis>{item.name}</Typography.Text>
+                <Typography.Text type="secondary">{formatBytes(item.bytes)}</Typography.Text>
+              </span>
             </Tag>
           ))}
         </div>
       ) : null}
 
       <Sender
+        ref={senderRef}
         value={value}
         onChange={handleChange}
         onSubmit={submit}
@@ -352,40 +447,53 @@ export function Composer({
         onCancel={onStop}
         disabled={disabled}
         placeholder={placeholder ?? t('composer.placeholder')}
-        autoSize={{ minRows: 2, maxRows: 6 }}
+        // One line until the draft actually needs more: a two-line floor made an
+        // empty composer 96px tall and pushed the buttons away from the text they
+        // act on (round-2 F-14). 14 rows is DSH's cap, so the card scrolls before
+        // it covers the transcript.
+        autoSize={{ minRows: 1, maxRows: 14 }}
         submitType="enter"
-        prefix={
-          onAttachFiles ? (
-            <span className="zk-composer__attach">
-              <Button
-                size="small"
-                type="text"
-                aria-label={t('composer.attach')}
-                data-testid="composer-attach"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                +
-              </Button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                hidden
-                data-testid="composer-file-input"
-                accept="image/*,text/*,application/pdf,application/json"
-                onChange={(event) => {
-                  const files = Array.from(event.target.files ?? []);
-                  event.target.value = '';
-                  if (files.length > 0) onAttachFiles(files);
-                }}
-              />
+        // The tool row lives **under** the draft, not beside it: controls in
+        // `prefix` pushed the text column 250px to the right and made the
+        // placeholder look like it floated in the middle (round-2 C-05/F-14).
+        // Sender still owns the submit keymap (Enter) and the `submitDisabled`
+        // bookkeeping the send button feeds; its own action stack stays mounted
+        // but hidden (`.zk-composer__actions`), and the visible send / stop pair
+        // lives in the toolbar with a name a screen reader can read
+        // (round-2 F-12/C-11).
+        footer={
+          <div className="zk-composer__toolbar">
+            <div className="zk-composer__tools">
+              {attach}
               {prefix}
-            </span>
-          ) : (
-            prefix
-          )
+            </div>
+            <div className="zk-composer__aside">
+              {running ? (
+                <Button
+                  shape="circle"
+                  className="zk-composer__stop"
+                  icon={<StopIcon />}
+                  onClick={onStop}
+                  aria-label={t('composer.stop')}
+                  title={t('composer.stop')}
+                  data-testid="composer-stop"
+                />
+              ) : (
+                <Button
+                  type="primary"
+                  shape="circle"
+                  className="zk-composer__send"
+                  icon={<ArrowUpOutlined />}
+                  disabled={empty || disabled}
+                  onClick={submit}
+                  aria-label={t('composer.send')}
+                  title={t('composer.send')}
+                  data-testid="composer-send"
+                />
+              )}
+            </div>
+          </div>
         }
-        footer={footer}
         // Sender forwards aria-* to its textarea (X reads restProps through
         // pickAttrs); these props are not in SenderProps' type surface.
         {...{ 'aria-label': t('composer.inputLabel'), 'data-testid': 'composer-input' }}
@@ -393,14 +501,56 @@ export function Composer({
       {/* `data-phase` is the machine-readable form of the same state: localized
           copy is for people, the phase is for tests and for e2e, which must not
           match on a translated sentence. */}
-      <div className="zk-composer__hint" data-testid="composer-hint" data-phase={resolvedPhase}>
-        {resolvedPhase === 'connecting'
-          ? t('composer.hint.connecting')
-          : resolvedPhase === 'running'
-            ? t('composer.hint.running')
-            : t('composer.hint.idle')}
-        {commands && commands.length > 0 ? t('composer.hint.commands') : ''}
+      <div className="zk-composer__foot">
+        {/* While the composer is blocked the notice already says why: keeping
+            the key hints here would promise actions the disabled input cannot
+            take (the old copy told the user to press Enter and Esc at once). */}
+        <div
+          className="zk-composer__hint"
+          data-testid="composer-hint"
+          data-phase={resolvedPhase}
+          hidden={Boolean(notice)}
+        >
+          {t(hintKey)}
+          {commands && commands.length > 0 ? t('composer.hint.commands') : ''}
+        </div>
+        {footer ? <div className="zk-composer__meters">{footer}</div> : null}
       </div>
     </div>
+  );
+}
+
+/** A dashed-outline plus, matching the 16px icon grid. */
+function PlusIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
+      <path
+        d="M7 2.5v9M2.5 7h9"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        fill="none"
+      />
+    </svg>
+  );
+}
+
+/** The stop glyph is a square, not a spinner: "loading" and "stop" are different. */
+function StopIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
+      <rect x="2" y="2" width="10" height="10" rx="2.5" fill="currentColor" />
+    </svg>
+  );
+}
+
+/** The disabled-reason notice's marker. */
+function InfoIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
+      <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.2" fill="none" />
+      <path d="M7 6.2v4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="7" cy="4.1" r="0.8" fill="currentColor" />
+    </svg>
   );
 }

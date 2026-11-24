@@ -598,6 +598,203 @@ body {
   position: relative;
 }
 
+/* The card: one raised surface, 16px radius (the composer is the only 16 in the
+ * radius scale), a hairline border instead of antd's 1px grey, and a 2px accent
+ * ring on focus — the input is the most important focusable thing on the screen
+ * and it used to have no focus style at all (round-2 C-10). */
+.zk-composer .ant-sender {
+  border-radius: var(--zk-radius-xl);
+  border-color: var(--zk-border-l3);
+  background: var(--zk-bg-raised);
+  transition:
+    border-color var(--zk-duration-fast, 120ms) ease,
+    box-shadow var(--zk-duration-fast, 120ms) ease;
+}
+
+.zk-composer .ant-sender:focus-within {
+  border-color: var(--zk-accent);
+  box-shadow: 0 0 0 2px var(--zk-focus);
+}
+
+/* The draft owns the full card width: controls live in the toolbar below, so the
+ * text column never moves when a picker comes or goes. */
+.zk-composer .ant-sender-content {
+  align-items: stretch;
+  gap: 0;
+  padding: 10px 12px 6px;
+}
+
+.zk-composer .ant-sender-footer {
+  padding: 0 8px 8px;
+}
+
+.zk-composer .ant-sender textarea {
+  font-size: var(--zk-type-body);
+  line-height: var(--zk-type-body-line);
+}
+
+/* Placeholder: one line, the caption colour, starting where the text starts. */
+.zk-composer .ant-sender textarea::placeholder {
+  color: var(--zk-label-tertiary);
+}
+
+.zk-composer .ant-sender-actions-list {
+  display: none;
+}
+
+.zk-composer__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--zk-space-2);
+  width: 100%;
+  min-width: 0;
+}
+
+.zk-composer__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--zk-space-1);
+  min-width: 0;
+}
+
+.zk-composer__aside {
+  display: flex;
+  align-items: center;
+  gap: var(--zk-space-2);
+  margin-inline-start: auto;
+  min-width: 0;
+  color: var(--zk-label-tertiary);
+}
+
+/* Icon-sized tool button inside the toolbar (28px, the compact control height). */
+.zk-composer__tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--zk-radius-max);
+  color: var(--zk-label-secondary);
+}
+
+.zk-composer__tool:hover {
+  background: var(--zk-bg-hover);
+  color: var(--zk-label-primary);
+}
+
+/* Send / stop: 34px circles, one accent fill on the whole screen. Stop is the
+ * same slot with a square glyph, so "loading" and "stop" stop looking alike. */
+.zk-composer .ant-btn.zk-composer__send,
+.zk-composer .ant-btn.zk-composer__stop {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  border-radius: var(--zk-radius-max);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.zk-composer .zk-composer__stop.ant-btn {
+  /* Stop is an action, not a disabled send: ink fill + white glyph reads as
+     "press me" while the accent fill stays reserved for sending. */
+  background: var(--zk-label-primary);
+  border-color: transparent;
+  color: var(--zk-bg-base);
+}
+
+.zk-composer .zk-composer__stop.ant-btn:hover {
+  background: var(--zk-label-secondary);
+  color: var(--zk-bg-base);
+}
+
+.zk-composer .zk-composer__send.ant-btn:disabled {
+  background: var(--zk-bg-strong);
+  border-color: transparent;
+  color: var(--zk-label-tertiary);
+}
+
+/* Why the composer cannot take input. It sits above the card and is readable at
+ * a glance, instead of a 1.8:1 placeholder the user has to hunt for. */
+.zk-composer__foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--zk-space-3);
+  margin-top: var(--zk-space-1);
+}
+
+.zk-composer__meters {
+  margin-inline-start: auto;
+  color: var(--zk-label-tertiary);
+  font-size: var(--zk-type-xxs);
+  line-height: var(--zk-type-xxs-line);
+  white-space: nowrap;
+}
+
+.zk-composer__notice {
+  display: flex;
+  align-items: center;
+  gap: var(--zk-space-2);
+  margin-bottom: var(--zk-space-2);
+  padding: var(--zk-space-2) var(--zk-space-3);
+  border-radius: var(--zk-radius-md);
+  background: var(--zk-bg-strong);
+  color: var(--zk-label-secondary);
+  font-size: var(--zk-type-xxs);
+  line-height: var(--zk-type-xxs-line);
+}
+
+.zk-composer__notice svg {
+  flex: none;
+  color: var(--zk-warning);
+}
+
+/* Attachments: fixed 64px thumbnails with a 20px radius, as the reference
+ * composer does — before this they rendered at the image's natural size and
+ * pushed the draft off the card (round-2 F-7). */
+.zk-composer__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--zk-space-2);
+  margin-bottom: var(--zk-space-2);
+}
+
+.zk-composer .zk-attach.ant-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--zk-space-2);
+  margin: 0;
+  padding: 4px 8px 4px 4px;
+  border-radius: var(--zk-radius-md);
+  max-width: 320px;
+}
+
+.zk-composer .zk-attach__thumb {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: var(--zk-radius-md);
+  flex: none;
+}
+
+.zk-composer .zk-attach__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+  line-height: var(--zk-type-xxs-line);
+}
+
+/* The slash / mention menu anchors to the card, not to the whole column: it used
+ * to span 1176px while the caret sat 250px to the right of its left edge. */
+.zk-slash {
+  inset-inline: 0;
+  max-width: 560px;
+}
+
 .zk-slash {
   position: absolute;
   inset-inline: 0;
@@ -887,10 +1084,14 @@ body {
   gap: var(--zk-space-2);
 }
 
+/* One field: label (what it is) → control (the value) → help (why / what if
+ * empty). 4px between the parts, 20px between fields; the width of the control
+ * encodes how long the value can be (docs/audit/2026-11-24/FIELD-DESIGN.md). */
 .zk-field {
   display: flex;
   flex-direction: column;
   gap: var(--zk-space-1);
+  margin-bottom: var(--zk-space-5);
 }
 
 .zk-field__label-row {
@@ -899,14 +1100,31 @@ body {
   gap: var(--zk-space-2);
 }
 
+/* The heading above already carries the name; keep the label for AT only. */
+.zk-field__label-row[data-sr-only='true'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .zk-field__label {
-  font-size: var(--zk-type-xs);
-  font-weight: var(--zk-type-xs-weight);
+  font-size: var(--zk-type-body);
+  line-height: var(--zk-type-body-line);
+  font-weight: 500;
+  color: var(--zk-label-primary);
 }
 
 .zk-field__help {
+  margin: var(--zk-space-1) 0 0;
   font-size: var(--zk-type-xxs);
   line-height: var(--zk-type-xxs-line);
+  font-weight: var(--zk-type-xxs-weight);
   color: var(--zk-label-tertiary);
 }
 
@@ -914,7 +1132,97 @@ body {
   display: flex;
   align-items: center;
   gap: var(--zk-space-2);
-  max-width: 720px;
+  min-width: 0;
+}
+
+/* A switch reads as a row: name on the left, control on the right. */
+.zk-field[data-kind='switch'] {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--zk-space-4);
+}
+
+.zk-field[data-kind='switch'] .zk-field__label-row {
+  min-width: 0;
+}
+
+.zk-field[data-kind='switch'] .zk-field__help {
+  margin-top: var(--zk-space-0);
+}
+
+/* Width = value domain. */
+.zk-field[data-kind='number'] .ant-input-number {
+  width: 128px;
+}
+
+.zk-field[data-kind='number'] .zk-field__unit {
+  font-size: var(--zk-type-xxs);
+  color: var(--zk-label-tertiary);
+}
+
+.zk-field[data-kind='text'] .ant-input,
+.zk-field[data-kind='text'] .ant-input-affix-wrapper {
+  max-width: 360px;
+}
+
+.zk-field[data-kind='secret'] .ant-input-affix-wrapper {
+  max-width: 480px;
+}
+
+.zk-field[data-kind='textarea'] .ant-input-textarea,
+.zk-field[data-kind='json'] .ant-input-textarea {
+  width: 100%;
+  max-width: 100%;
+}
+
+.zk-field[data-kind='json'] .ant-input,
+.zk-field[data-kind='json'] .ant-input-textarea textarea {
+  font-family: var(--zk-font-mono);
+  font-size: var(--zk-type-xxs);
+  line-height: var(--zk-type-xxs-line);
+}
+
+.zk-field[data-kind='radio'] .ant-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--zk-space-2) var(--zk-space-5);
+}
+
+.zk-model-empty {
+  margin: 0 0 var(--zk-space-3);
+  font-size: var(--zk-type-xxs);
+  line-height: var(--zk-type-xxs-line);
+  color: var(--zk-label-tertiary);
+}
+
+/* The catalog rows used to render as a bare browser list (disc bullets, 40px
+ * indent, buttons hugging the text). One row per model: identity on the left,
+ * actions on the right. */
+.zk-model-list {
+  list-style: none;
+  margin: 0 0 var(--zk-space-3);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--zk-space-2);
+}
+
+.zk-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--zk-space-4);
+  padding: var(--zk-space-2) var(--zk-space-3);
+  border: 1px solid var(--zk-border-l2);
+  border-radius: var(--zk-radius-md);
+}
+
+.zk-model-row__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 /* =============================== inspector ============================== */

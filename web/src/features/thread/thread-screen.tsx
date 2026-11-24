@@ -10,7 +10,7 @@ import { rememberStaged, uploadBlob, type StagedAttachment } from '@/api/blobs';
 import { formatRate } from '@/chat/stream-rate';
 import { PlanDialog } from '@/features/thread/plan-dialog';
 import { ComposerFooter, ComposerPickers, useComposerSettings } from '@/chat/composer-status';
-import { setSetting } from '@/api/gateway';
+import { cancelRun, setSetting } from '@/api/gateway';
 import { useApprovals } from '@/features/approvals/approvals-context';
 import { useSessions } from '@/features/sessions/sessions-context';
 import { useEscClaim, useShortcut } from '@/keyboard/keyboard-provider';
@@ -54,6 +54,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   const t = useT();
   const { reload, create } = useSessions();
   const { approvals } = useApprovals();
+  const sessionApprovalPending = approvals.some((request) => request.sessionId === sessionId);
   const queue = usePromptQueue(sessionId);
   // B11: the menu item is enabled unless the gateway says otherwise — either by
   // advertising no `regenerate` capability, or by answering 1023 on the first
@@ -146,6 +147,10 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
 
   const stopRun = () => {
     stoppedByUser.current = true;
+    // `chat.abort()` only closes the client's stream: the gateway keeps running
+    // and the next send is a 409 ("a run is active"). Cancel server-side first,
+    // then drop the local stream so the UI reacts without waiting for the ack.
+    void cancelRun(sessionId).catch(() => undefined);
     chat.abort();
   };
 
@@ -481,8 +486,11 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
         // The 30 s blackhole in v0.3.0 sat in "connecting" silently showing the
         // idle hint; now it says so.
         phase={resolveComposerPhase(chat.isRequesting, turnFrames)}
-        disabled={approvals.length > 0}
-        placeholder={approvals.length > 0 ? t('composer.placeholder.approval') : undefined}
+        // Only this conversation's approvals block its own composer: a request
+        // parked in another session used to disable every input in the product
+        // (round-2 F-3 / C-01).
+        disabled={sessionApprovalPending}
+        notice={sessionApprovalPending ? t('composer.notice.approval') : undefined}
         commands={commands}
       />
     </div>

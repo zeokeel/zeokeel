@@ -13,7 +13,14 @@ import type { SettingsRows } from '@/api/gateway';
 import { SETTING_KEYS as K } from '@/design/settings-keys';
 import type { MessageKey } from '@/i18n';
 
-export type SettingsFieldKind = 'text' | 'secret' | 'textarea' | 'number' | 'radio' | 'switch';
+export type SettingsFieldKind =
+  | 'text'
+  | 'secret'
+  | 'textarea'
+  | 'number'
+  | 'radio'
+  | 'switch'
+  | 'json';
 
 export interface SettingsField {
   /** The real row key (`agent.permission`, …). */
@@ -29,6 +36,12 @@ export interface SettingsField {
   example?: string;
   /** Applied when the row is absent, so a switch does not read as "off" blindly. */
   defaultValue?: string;
+  /**
+   * The unit a numeric row is measured in (`tokens`, `px`, `s`). Rendered inside
+   * the control: a bare number with no unit is a field the user has to guess
+   * the shape of (round-2 S09).
+   */
+  unit?: string;
 }
 
 export interface SettingsSection {
@@ -73,7 +86,10 @@ const text = (
 const json = (key: string, labelKey: MessageKey, helpKey?: MessageKey): SettingsField => ({
   key,
   labelKey,
-  kind: 'textarea',
+  // Structured rows are edited as JSON today; the kind lets the field render in
+  // the code face at full width, and names the surface a structured editor
+  // (key/value rows) will replace (round-2 S07 / FIELD-DESIGN §3).
+  kind: 'json',
   ...(helpKey ? { helpKey } : {}),
 });
 
@@ -127,7 +143,7 @@ export const SETTINGS_PAGES: SettingsPage[] = [
           text(K.chatModel, 'settings.ia.model'),
           text(K.chatBaseURL, 'settings.ia.baseUrl', 'settings.ia.help.baseUrl'),
           secret(K.chatAPIKey, 'settings.ia.apiKey'),
-          { key: K.chatContextBudget, labelKey: 'settings.ia.contextBudget', kind: 'number' },
+          { key: K.chatContextBudget, labelKey: 'settings.ia.contextBudget', kind: 'number', unit: 'tokens' },
           { key: K.chatMode, labelKey: 'settings.ia.chatMode', kind: 'text' },
           json(K.chatSystemPrompt, 'settings.ia.systemPrompt', 'settings.ia.help.systemPrompt'),
         ],
@@ -163,9 +179,9 @@ export const SETTINGS_PAGES: SettingsPage[] = [
         fields: [
           { key: K.agentSubagentMaxConcurrent, labelKey: 'settings.ia.subagentConcurrency', kind: 'number' },
           { key: K.agentTeamMaxConcurrent, labelKey: 'settings.ia.teamConcurrency', kind: 'number' },
-          { key: K.agentApprovalTimeoutSeconds, labelKey: 'settings.ia.approvalTimeout', kind: 'number' },
-          { key: K.toolkitShellTimeoutSeconds, labelKey: 'settings.ia.shellTimeout', kind: 'number' },
-          { key: K.toolkitShellMaxOutputKiB, labelKey: 'settings.ia.shellMaxOutput', kind: 'number' },
+          { key: K.agentApprovalTimeoutSeconds, labelKey: 'settings.ia.approvalTimeout', kind: 'number', unit: 's' },
+          { key: K.toolkitShellTimeoutSeconds, labelKey: 'settings.ia.shellTimeout', kind: 'number', unit: 's' },
+          { key: K.toolkitShellMaxOutputKiB, labelKey: 'settings.ia.shellMaxOutput', kind: 'number', unit: 'KiB' },
           json(K.toolkitDeniedGlobs, 'settings.ia.deniedPatterns', 'settings.ia.help.jsonGlobArray'),
         ],
       },
@@ -206,7 +222,7 @@ export const SETTINGS_PAGES: SettingsPage[] = [
             'settings.ia.help.theme',
           ),
           bool(K.uiThemeDark, 'settings.ia.themeDarkPreference'),
-          { key: K.chatFontSize, labelKey: 'settings.ia.fontSize', kind: 'number' },
+          { key: K.chatFontSize, labelKey: 'settings.ia.fontSize', kind: 'number', unit: 'px' },
           radio(
             K.workStepsMode,
             'settings.ia.stepDisplay',

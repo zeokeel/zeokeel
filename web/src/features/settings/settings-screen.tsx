@@ -304,6 +304,10 @@ function SettingsPageForm({
                 focusRef={focusRef}
                 value={values[field.key] ?? ''}
                 disabled={!canWrite}
+                // A one-field section whose heading repeats the label prints the
+                // same words twice ("语言" over "语言"). The heading keeps the
+                // word; the label stays in the DOM for screen readers only.
+                hideLabel={section.titleKey === field.labelKey}
                 onChange={(value) => setValue(field.key, value)}
               />
             ))}
@@ -387,12 +391,15 @@ function FieldRow({
   focusRef,
   value,
   disabled,
+  hideLabel = false,
   onChange,
 }: {
   field: SettingsField;
   focusRef: (node: HTMLElement | null) => void;
   value: string;
   disabled: boolean;
+  /** The section heading already names this field (see the call site). */
+  hideLabel?: boolean;
   onChange: (value: string) => void;
 }) {
   const t = useT();
@@ -400,17 +407,15 @@ function FieldRow({
   return (
     <div
       className="zk-field"
+      data-kind={field.kind}
       data-field-key={field.key}
       data-testid={`settings-field-${field.key}`}
       ref={focusRef}
     >
-      <div className="zk-field__label-row">
+      <div className="zk-field__label-row" data-sr-only={hideLabel ? 'true' : 'false'}>
         <label className="zk-field__label" htmlFor={id}>
           {t(field.labelKey)}
         </label>
-        {field.helpKey ? (
-          <span className="zk-field__help">{t(field.helpKey)}</span>
-        ) : null}
       </div>
       <div className="zk-field__control">
         {field.kind === 'text' ? (
@@ -432,12 +437,13 @@ function FieldRow({
             onChange={(event) => onChange(event.target.value)}
           />
         ) : null}
-        {field.kind === 'textarea' ? (
+        {field.kind === 'textarea' || field.kind === 'json' ? (
           <Input.TextArea
             id={id}
             value={value}
             disabled={disabled}
-            autoSize={{ minRows: 2, maxRows: 8 }}
+            autoSize={field.kind === 'json' ? { minRows: 3, maxRows: 12 } : { minRows: 2, maxRows: 8 }}
+            spellCheck={field.kind === 'json' ? false : undefined}
             onChange={(event) => onChange(event.target.value)}
           />
         ) : null}
@@ -446,6 +452,7 @@ function FieldRow({
             id={id}
             value={value === '' ? null : Number(value)}
             disabled={disabled}
+            suffix={field.unit ? <span className="zk-field__unit">{field.unit}</span> : undefined}
             onChange={(next) => onChange(next === null || next === undefined ? '' : String(next))}
           />
         ) : null}
@@ -471,6 +478,11 @@ function FieldRow({
           />
         ) : null}
       </div>
+      {/* The explanation sits under the control it explains, one size and one
+          tone below the label. Sharing the label's line made the two read as a
+          single run-on sentence ("语言 语言 界面语言；缺失时跟随浏览器。") and left
+          the input with no room to describe itself (round-2 S06/S07). */}
+      {field.helpKey ? <p className="zk-field__help">{t(field.helpKey)}</p> : null}
     </div>
   );
 }
