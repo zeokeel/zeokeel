@@ -50,6 +50,21 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 - **插话不是真正的轮内插入**：后端队列只在轮次结束排空（rig 的 `TurnHook` 只有 BeforeRun/AfterRun/BeforeTool/AfterTool，没有逐迭代钩子），所以「插话」是"停止当前轮并立刻开始这一轮"。真正的轮内 steering 需要改 rig 钩子。
 
+## [0.3.5] - 2026-11-24
+
+### Added
+
+- **附件与图片输入**：输入框的「＋」可选中图片/文件，上传即出 chip（名称 + 大小），发送时随 run 以 blob id 携带；消息气泡按名字显示附件。网关新增 `POST /api/blobs`（≤10 MiB，随机 128-bit id）与 `GET /api/blobs/{id}`，未知 id 直接 400 而不是少发文件。实机：附图提问，模型收到图片并回答。
+- **实时输出速率**：会话页输入框下方显示 `~N tok/s`，由流式字符数与时间估算（中途没有 token 计数，故标 `~`），结束后的精确数字仍来自 usage。
+- **`run.interject`（插话）**：协议级"取消当前轮并立刻新开一轮"，网关内原子完成，客户端不会与 409 抢跑。**限制写得明白**：rig 的 agent 每轮只加载一次历史、`TurnHook` 没有逐轮注入的接缝，所以这是"重启式 steering"，不是轮内插入。
+- **MCP over HTTP 验证**：仓库内新增 `scripts/acceptance/mcp-http-fixture.py`（最小 MCP HTTP 服务器），实测连接器 `transport=http`、列出 1 个工具，真实模型经 `tool_search` 激活后调用返回标记。
+
+### Changed
+
+- 输入框占位提示改为「给 ZeoKeel 发消息，/ 调用指令，@ 文件或对话」，与 `@` 提及、`/` 命令的既有能力对齐。
+- 思考步骤显示本轮实测耗时（`usage.durationMs`，原生的「用时」）。
+- 一轮结束后转录切回持久化快照（附件名、结算工具态、服务端改写都以快照为准；快照更短时保持现状，绝不删消息）。
+
 ## [Unreleased]
 
 ## [0.3.0] - 2026-11-24
