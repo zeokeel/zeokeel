@@ -1498,6 +1498,34 @@ const wsDispatch = (client, message) => {
       return reply({ epoch: WS_EPOCH, rev: wsRevs.list, resync: since < wsRevs.list });
     case 'session.unsubscribe':
       return reply({});
+    case 'session.rename': {
+      const target = sessions.get(String(params.sessionId ?? ''));
+      if (target) target.title = String(params.title ?? target.title);
+      publishList();
+      return reply({});
+    }
+    case 'session.delete': {
+      const sessionId = String(params.sessionId ?? '');
+      sessions.delete(sessionId);
+      publishList();
+      return reply({});
+    }
+    case 'session.archive': {
+      const target = sessions.get(String(params.sessionId ?? ''));
+      if (target) target.archived = Boolean(params.archived);
+      publishList();
+      return reply({});
+    }
+    case 'session.pin': {
+      const target = sessions.get(String(params.sessionId ?? ''));
+      if (target) target.pinned = Boolean(params.pinned);
+      publishList();
+      return reply({});
+    }
+    case 'mcp.reload': {
+      const disabled = Array.isArray(params.disabled) ? params.disabled.map(String) : [];
+      return reply({ connectors: [], disabled });
+    }
     case 'session.create': {
       const created = session(params.title || '新会话');
       publishList();
@@ -1718,6 +1746,18 @@ const wsDispatch = (client, message) => {
       queueOf(sessionId).push(prompt);
       publishPrompts(sessionId);
       return reply({ id: prompt.id });
+    }
+    case 'prompts.move': {
+      const sessionId = String(params.sessionId ?? '');
+      const queue = queueOf(sessionId);
+      const from = queue.findIndex((item) => item.id === params.id);
+      if (from >= 0) {
+        const [moved] = queue.splice(from, 1);
+        const target = Math.max(0, Math.min(Number(params.index ?? 0), queue.length));
+        queue.splice(target, 0, moved);
+      }
+      publishPrompts(sessionId);
+      return reply({});
     }
     case 'prompts.remove': {
       const sessionId = String(params.sessionId ?? '');

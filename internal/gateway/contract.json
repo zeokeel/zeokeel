@@ -83,6 +83,12 @@
         "protocolVersion"
       ]
     },
+    "mcp.reload": {
+      "required": [],
+      "optional": [
+        "disabled"
+      ]
+    },
     "notify.action": {
       "required": [
         "id"
@@ -114,6 +120,14 @@
     "prompts.enqueue": {
       "required": [
         "prompt",
+        "sessionId"
+      ],
+      "optional": []
+    },
+    "prompts.move": {
+      "required": [
+        "id",
+        "index",
         "sessionId"
       ],
       "optional": []
@@ -168,15 +182,45 @@
       "required": [],
       "optional": []
     },
+    "session.archive": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": [
+        "archived"
+      ]
+    },
     "session.create": {
       "required": [],
       "optional": [
         "title"
       ]
     },
+    "session.delete": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": []
+    },
     "session.list.snapshot": {
       "required": [],
       "optional": []
+    },
+    "session.pin": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": [
+        "pinned"
+      ]
+    },
+    "session.rename": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": [
+        "title"
+      ]
     },
     "session.snapshot": {
       "required": [

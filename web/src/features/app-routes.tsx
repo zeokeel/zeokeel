@@ -1,9 +1,10 @@
-import { Route, Routes, useLocation, useParams } from 'react-router';
+import { Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { Splitter } from 'antd';
 import { AutomationScreen } from '@/features/automation/automation-screen';
 import { CapabilitiesScreen } from '@/features/capabilities/capabilities-screen';
 import { InboxScreen } from '@/features/inbox/inbox-screen';
 import { InspectorPanel } from '@/features/inspector/inspector-panel';
+import { useMediaQuery } from '@/design/use-system-appearance';
 import { InsightsScreen } from '@/features/insights/insights-screen';
 import { TeamScreen } from '@/features/team/team-screen';
 import { ContextScreen } from '@/features/thread/context-screen';
@@ -25,10 +26,23 @@ import { TrajectoryScreen } from '@/features/thread/trajectory-screen';
 function ThreadRoute() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const location = useLocation();
+  const navigate = useNavigate();
+  // Two 360/280 panels do not fit a phone: at 390 the conversation column was
+  // 10px wide and the composer 0px (round-1 tails audit F3). Below 900 the
+  // inspector takes the whole width and owns the way back.
+  const narrow = useMediaQuery('(max-width: 899px)');
   if (!sessionId) return <NotFoundScreen />;
 
-  const inspector = /\/(files|guide)(\/|$)/.test(location.pathname);
-  if (!inspector) return <ThreadScreen key={sessionId} sessionId={sessionId} />;
+  const inspectorRoute = /\/(files|guide)(\/|$)/.test(location.pathname);
+  if (!inspectorRoute) return <ThreadScreen key={sessionId} sessionId={sessionId} />;
+
+  if (narrow) {
+    return (
+      <div className="zk-thread-split zk-thread-split--narrow">
+        <InspectorPanel onBack={() => navigate(`/c/${sessionId}`)} />
+      </div>
+    );
+  }
 
   return (
     <Splitter className="zk-thread-split">

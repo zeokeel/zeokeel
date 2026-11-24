@@ -28,8 +28,14 @@ export function TopBand({ onOpenSidebar }: { onOpenSidebar?: () => void } = {}) 
       ? t(route.titleKey)
       : t('app.name');
 
+  // Suffix match has to tolerate a path *below* the surface: `/c/:id/files/a.ts`
+  // was marked as 对话 (its suffix is empty) and 对话 could not be left
+  // (round-1 tails audit F2).
+  const withinThread = location.pathname.replace(/^\/c\/[^/]+/, '');
   const activeTab = THREAD_TABS.find(
-    (tab) => tab.suffix !== '' && location.pathname.endsWith(tab.suffix),
+    (tab) =>
+      tab.suffix !== '' &&
+      (withinThread === tab.suffix || withinThread.startsWith(`${tab.suffix}/`)),
   );
   const activeKey = activeTab?.key ?? 'conversation';
 

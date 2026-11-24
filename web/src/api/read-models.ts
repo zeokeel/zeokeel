@@ -77,7 +77,20 @@ export interface Insights {
 }
 
 async function readJson<T>(res: Response, what: string): Promise<T> {
-  if (!res.ok) throw new Error(`${what} failed: ${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    // The gateway answers `{error:{code,message,data}}`; dropping the message
+    // left users with "400 Bad Request" while the server had said exactly what
+    // was wrong with the schedule (round-1 tails audit).
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as { error?: { message?: string } | string };
+      const message = typeof body.error === 'string' ? body.error : body.error?.message;
+      if (typeof message === 'string' && message.trim() !== '') detail = message;
+    } catch {
+      // Not JSON: keep the status line.
+    }
+    throw new Error(`${what} failed: ${detail}`);
+  }
   return (await res.json()) as T;
 }
 

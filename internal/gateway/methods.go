@@ -519,6 +519,16 @@ func (g *Gateway) initialize(c *client, raw json.RawMessage) (any, *protocolErro
 	}, nil
 }
 
+// mcpReloadParams is the mcp.reload body.
+//
+// The disabled list is written by the gateway, not the client: the key is
+// workspace-scoped (`mcp.disabledServers.<wsId>`) and the browser does not know
+// the workspace id, so a client-side write landed on a key the toolkit never
+// reads and the switch did nothing (round-3 conn audit F1).
+type mcpReloadParams struct {
+	Disabled *[]string `json:"disabled,omitempty"`
+}
+
 // reloadConnectors rebuilds the MCP connections from the stored settings and
 // answers the fresh connector list.
 //
@@ -532,13 +542,7 @@ func (g *Gateway) reloadConnectors(ctx context.Context, raw json.RawMessage) (an
 	if !ok || reloader == nil {
 		return nil, appError(codeInternalError, "mcp_unavailable", false)
 	}
-	var params struct {
-		// The disabled list is written here rather than by the client: the key is
-		// workspace-scoped (`mcp.disabledServers.<wsId>`) and the browser does not
-		// know the workspace id, so a client-side write landed on a key the
-		// toolkit never reads and the switch did nothing (round-3 conn audit F1).
-		Disabled *[]string `json:"disabled,omitempty"`
-	}
+	var params mcpReloadParams
 	if len(raw) > 0 {
 		if err := decodeParams(raw, &params); err != nil {
 			return nil, err
@@ -1236,10 +1240,20 @@ type sessionRenameParams struct {
 	Title     string `json:"title,omitempty"`
 }
 
-// sessionFlagParams is the body of session.archive / session.pin.
-type sessionFlagParams struct {
+// sessionDeleteParams is the body of session.delete.
+type sessionDeleteParams struct {
+	SessionID string `json:"sessionId"`
+}
+
+// sessionArchiveParams is the body of session.archive.
+type sessionArchiveParams struct {
 	SessionID string `json:"sessionId"`
 	Archived  bool   `json:"archived,omitempty"`
+}
+
+// sessionPinParams is the body of session.pin.
+type sessionPinParams struct {
+	SessionID string `json:"sessionId"`
 	Pinned    bool   `json:"pinned,omitempty"`
 }
 
@@ -1276,7 +1290,7 @@ func (g *Gateway) renameSession(ctx context.Context, raw json.RawMessage) (any, 
 
 // deleteSession removes a conversation and its transcript.
 func (g *Gateway) deleteSession(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
-	var params sessionRenameParams
+	var params sessionDeleteParams
 	if err := decodeParams(raw, &params); err != nil {
 		return nil, err
 	}
@@ -1303,27 +1317,38 @@ func (g *Gateway) deleteSession(ctx context.Context, raw json.RawMessage) (any, 
 
 // setSessionFlag archives/restores or pins/unpins one session.
 func (g *Gateway) setSessionFlag(ctx context.Context, raw json.RawMessage, kind string) (any, *protocolError) {
-	var params sessionFlagParams
-	if err := decodeParams(raw, &params); err != nil {
-		return nil, err
-	}
-	sessionID, protocolErr := requireSessionID(params.SessionID)
-	if protocolErr != nil {
-		return nil, protocolErr
-	}
+	var (
+		sessionID string
+		applyErr  error
+	)
 	chat, err := g.chatService()
 	if err != nil {
 		return nil, internalError(err)
 	}
-	var applyErr error
 	switch kind {
 	case "archive":
+		var params sessionArchiveParams
+		if decodeErr := decodeParams(raw, &params); decodeErr != nil {
+			return nil, decodeErr
+		}
+		sessionID, applyErr = strings.TrimSpace(params.SessionID), nil
+		if sessionID == "" {
+			return nil, errInvalidParams("sessionId", "is required")
+		}
 		archiver, ok := chat.(contracts.SessionArchiver)
 		if !ok {
 			return nil, appError(codeInternalError, "archive_unavailable", false)
 		}
 		applyErr = archiver.SetSessionArchived(sessionID, params.Archived)
 	case "pin":
+		var params sessionPinParams
+		if decodeErr := decodeParams(raw, &params); decodeErr != nil {
+			return nil, decodeErr
+		}
+		sessionID, applyErr = strings.TrimSpace(params.SessionID), nil
+		if sessionID == "" {
+			return nil, errInvalidParams("sessionId", "is required")
+		}
 		pinner, ok := chat.(contracts.SessionPinner)
 		if !ok {
 			return nil, appError(codeInternalError, "pin_unavailable", false)

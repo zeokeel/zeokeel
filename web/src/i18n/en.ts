@@ -280,6 +280,7 @@ export const en: Catalog = {
   // --------------------------------------------------------------- toasts --
   'inspector.loadFailed': 'Could not load the file tree',
   'inspector.fileLoadFailed': 'Could not load the file',
+  'inspector.backToConversation': 'Back to conversation',
   'inspector.guideTab': 'Start',
   'inspector.filesTab': 'Files',
   'inspector.title': 'Inspector',
@@ -359,7 +360,7 @@ export const en: Catalog = {
   'screen.automation.cancel': 'Cancel',
   'screen.automation.field.title': 'Name',
   'screen.automation.field.prompt': 'Prompt',
-  'screen.automation.field.scheduleHelp': 'Accepted: @hourly, @daily, daily 09:00, weekly mon 09:00, every 24h, after 2h, cron 0 8 * * *. A bare five-field cron needs the cron prefix.',
+  'screen.automation.field.scheduleHelp': 'Examples: @hourly, @daily, daily 09:00, weekly mon 09:00, every 24h, after 2h, cron 0 8 * * *, 0 8 * * *, at 2026-12-01T09:30:00+08:00. The gateway validates it and the dialog shows its reason.',
   'screen.automation.err.format': 'That schedule is not valid. Try @hourly, @daily, daily 09:00, weekly mon 09:00, every 24h, after 2h, cron 0 8 * * *.',
   'screen.automation.err.clock': 'Times are HH:MM (e.g. 09:30).',
   'screen.automation.err.needsCronPrefix': 'A five-field cron needs the cron prefix, e.g. cron 0 8 * * *.',

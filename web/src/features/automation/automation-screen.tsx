@@ -26,7 +26,6 @@ import {
   type AutomationTask,
 } from '@/api/read-models';
 import { useT } from '@/i18n';
-import { scheduleProblem } from './schedule-hint';
 import { describeError } from '@/features/describe-error';
 
 /**
@@ -42,6 +41,7 @@ export function AutomationScreen() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<AutomationTask | null>(null);
   const [creating, setCreating] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [history, setHistory] = useState<AutomationTask | null>(null);
   const [form] = Form.useForm<AutomationInput>();
 
@@ -105,14 +105,22 @@ export function AutomationScreen() {
   };
 
   const submit = async () => {
-    const values = await form.validateFields();
+    let values: { title: string; prompt: string; schedule: string; enabled?: boolean };
+    try {
+      values = await form.validateFields();
+    } catch {
+      return; // per-field messages are already under the inputs
+    }
+    setFormError(null);
     try {
       if (editing) await updateAutomation(editing.id, values);
       else await createAutomation(values);
       setCreating(false);
       await reload();
     } catch (cause) {
-      setError(describeError(cause, t, 'screen.automation.saveFailed'));
+      // The gateway's reason, inside the dialog: the form is still open, so the
+      // page-level banner would be behind it (round-1 tails audit F9).
+      setFormError(describeError(cause, t, 'screen.automation.saveFailed'));
     }
   };
 
@@ -149,7 +157,8 @@ export function AutomationScreen() {
         <div className="zk-msg-error" role="alert">
           {error}
         </div>
-      ) : tasks === null ? (
+      ) : null}
+      {tasks === null ? (
         <div className="zk-empty">
           <Spin />
         </div>
@@ -247,6 +256,11 @@ export function AutomationScreen() {
         cancelText={t('screen.automation.cancel')}
         destroyOnHidden
       >
+        {formError ? (
+          <div className="zk-msg-error" role="alert" data-testid="automation-form-error">
+            {formError}
+          </div>
+        ) : null}
         <Form form={form} layout="vertical" preserve={false}>
           <Form.Item
             name="title"
@@ -266,16 +280,11 @@ export function AutomationScreen() {
             name="schedule"
             label={t('screen.automation.field.schedule')}
             extra={t('screen.automation.field.scheduleHelp')}
-            rules={[
-              { required: true, whitespace: true },
-              {
-                validator: (_, value: string) => {
-                  const problem = scheduleProblem(value ?? '');
-                  if (!problem) return Promise.resolve();
-                  return Promise.reject(new Error(t(`screen.automation.err.${problem}`)));
-                },
-              },
-            ]}
+            // No client-side grammar: the gateway owns `ParseAutomationSchedule`
+            // and a mirror here rejected forms it accepts (`0 8 * * *`,
+            // `*/15 * * * *`, `daily 09:00:00`) while letting through ones it
+            // refuses. The server's answer is shown in the dialog instead.
+            rules={[{ required: true, whitespace: true }]}
           >
             <Input placeholder="daily 09:00" />
           </Form.Item>

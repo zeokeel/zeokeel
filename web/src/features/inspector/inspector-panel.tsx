@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Breadcrumb, Segmented, Spin, Tree, Typography } from 'antd';
 import type { TreeDataNode } from 'antd';
-import { useNavigate, useParams, useSearchParams } from 'react-router';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   loadFileContent,
   loadFileDiff,
@@ -57,10 +57,11 @@ export function buildFileTree(nodes: FileNode[], changedLabel = ''): TreeDataNod
  * §1.3), so a file is deep-linkable and a refresh restores it. History entries
  * are written only for a user's own navigation.
  */
-export function InspectorPanel() {
+export function InspectorPanel({ onBack }: { onBack?: () => void } = {}) {
   const t = useT();
   const { sessionId } = useParams<{ sessionId: string; '*': string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const relative = useParams()['*'] ?? '';
   const [nodes, setNodes] = useState<FileNode[] | null>(null);
@@ -118,10 +119,25 @@ export function InspectorPanel() {
   }, [selected, view]);
 
   const treeData = useMemo(() => buildFileTree(nodes ?? [], t('inspector.changed')), [nodes, t]);
-  const guide = relative === '' && !searchParams.get('view');
+  // The tab follows the *route*, not the splat: `/c/:id/files` and `/c/:id/guide`
+  // both have an empty splat, so the old check called the files page "guide" and
+  // its 文件 button navigated to the URL it was already on (round-1 tails audit
+  // F1: the tree was still unreachable).
+  const onGuideRoute = location.pathname.endsWith('/guide');
+  const guide = onGuideRoute && relative === '' && !searchParams.get('view');
 
   return (
     <aside className="zk-inspector" aria-label={t('inspector.title')}>
+      {onBack ? (
+        <button
+          type="button"
+          className="zk-inspector__back"
+          onClick={onBack}
+          data-testid="inspector-back"
+        >
+          ← {t('inspector.backToConversation')}
+        </button>
+      ) : null}
       <div className="zk-inspector__tabs" role="tablist" aria-label={t('inspector.pages')}>
         <button
           type="button"
@@ -162,6 +178,7 @@ export function InspectorPanel() {
               <Spin size="small" />
             ) : (
               <Tree
+                showIcon
                 treeData={treeData}
                 virtual
                 height={520}
