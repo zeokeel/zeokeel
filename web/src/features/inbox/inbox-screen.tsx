@@ -103,9 +103,17 @@ export function InboxScreen() {
                   <Button
                     size="small"
                     type="text"
+                    // An artifact row with no session used to call
+                    // navigate('/inbox') — the route it is already on, so the
+                    // click did nothing (AUDIT-2026-11-24 C). Say so instead.
+                    disabled={!item.sessionId && inboxActionKind(item) === 'artifact'}
+                    title={
+                      !item.sessionId && inboxActionKind(item) === 'artifact'
+                        ? t('inbox.artifactNoPreview')
+                        : undefined
+                    }
                     onClick={() => {
                       if (item.sessionId) navigate(`/c/${item.sessionId}`);
-                      else if (inboxActionKind(item) === 'artifact') navigate('/inbox');
                     }}
                   >
                     {t('inbox.open')}

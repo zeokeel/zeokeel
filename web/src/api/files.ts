@@ -1,5 +1,7 @@
 /** Workspace files, previews and diffs for the right inspector (R8–R11). */
 
+import { authedFetch } from './http';
+
 export interface FileNode {
   key: string;
   path: string;
@@ -33,19 +35,19 @@ async function readJson<T>(res: Response, what: string): Promise<T> {
 }
 
 export async function loadFileTree(): Promise<FileTree> {
-  const res = await fetch('/api/files/tree', { headers: { Accept: 'application/json' } });
+  const res = await authedFetch('/api/files/tree', { headers: { Accept: 'application/json' } });
   return readJson<FileTree>(res, 'file tree');
 }
 
 export async function loadFileContent(path: string): Promise<FileContent> {
-  const res = await fetch(`/api/files/content?path=${encodeURIComponent(path)}`, {
+  const res = await authedFetch(`/api/files/content?path=${encodeURIComponent(path)}`, {
     headers: { Accept: 'application/json' },
   });
   return readJson<FileContent>(res, 'file content');
 }
 
 export async function loadFileDiff(path: string): Promise<FileDiff> {
-  const res = await fetch(`/api/files/diff?path=${encodeURIComponent(path)}`, {
+  const res = await authedFetch(`/api/files/diff?path=${encodeURIComponent(path)}`, {
     headers: { Accept: 'application/json' },
   });
   return readJson<FileDiff>(res, 'file diff');

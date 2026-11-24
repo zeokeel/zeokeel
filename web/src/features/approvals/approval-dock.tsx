@@ -14,9 +14,20 @@ import { useSessions } from '@/features/sessions/sessions-context';
 export function ApprovalDock({ currentSessionId }: { currentSessionId?: string }) {
   const navigate = useNavigate();
   const { sessions } = useSessions();
-  const { approvals, resolve } = useApprovals();
+  const { approvals, resolve, error } = useApprovals();
   const oldest = approvals[0];
-  if (!oldest) return null;
+  if (!oldest) {
+    // A failed decision with an empty queue still has to say so: the request was
+    // put back, but if the delta already removed it the card is gone and the
+    // error would otherwise have no renderer (AUDIT-2026-11-24 B-6).
+    return error ? (
+      <div className="zk-dock">
+        <p role="alert" className="zk-dock__error">
+          {error}
+        </p>
+      </div>
+    ) : null;
+  }
 
   const originTitle = oldest.sessionId
     ? sessions.find((item) => item.id === oldest.sessionId)?.title
@@ -25,6 +36,11 @@ export function ApprovalDock({ currentSessionId }: { currentSessionId?: string }
   return (
     <div className="zk-dock">
       <ApprovalCard
+        // Keyed by the request: without it React reuses the card for the next
+        // approval in the queue and keeps the previous one's "once / this
+        // session" choice, so the user's habitual click silently grants a
+        // session-wide permission (AUDIT-2026-11-24 B-5).
+        key={oldest.id}
         request={oldest}
         pending={approvals.length}
         sessionTitle={originTitle}
@@ -33,6 +49,11 @@ export function ApprovalDock({ currentSessionId }: { currentSessionId?: string }
         onOpenSession={oldest.sessionId ? () => navigate(`/c/${oldest.sessionId}`) : undefined}
         onResolve={(decision) => void resolve(oldest.id, decision)}
       />
+      {error ? (
+        <p role="alert" className="zk-dock__error">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

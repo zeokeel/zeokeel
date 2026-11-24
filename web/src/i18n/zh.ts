@@ -55,6 +55,7 @@ export const zh = {
   'inbox.kind.completion': '完成回执',
   'inbox.askOptions': '可选：{options}',
   'inbox.planTitle': '计划待审阅',
+  'inbox.artifactNoPreview': '该产物暂无预览位置',
   'inbox.open': '查看',
   'inbox.allowOnce': '允许一次',
   'inbox.deny': '拒绝',
@@ -125,6 +126,8 @@ export const zh = {
   'thread.queue.cancel': '取消待发送：{text}',
   'thread.queue.sendHead': '发送队首',
   'thread.queue.loadFailed': '待发送队列加载失败',
+  'thread.queue.enqueueFailed': '加入待发送队列失败，草稿已保留',
+  'thread.composer.attachmentsWhileRunning': '本轮运行中只能排队文本：请等本轮结束后再发送附件',
   'thread.queue.removeFailed': '取消失败',
 
   // ------------------------------------------------------------ composer --
@@ -507,6 +510,7 @@ export const zh = {
   'notFound.title': '这个地址没有页面',
   'notFound.description': '链接可能已经失效，或者页面还没做。',
   'notFound.back': '回到现在',
+  'ask.submitFailed': '提交失败，请重试',
   'ask.title': '需要你的确认',
   'ask.cancel': '取消',
   'ask.submit': '提交',

@@ -1,5 +1,7 @@
 /** Read models for the remaining screens: capabilities (R23), automation (R22), insights (R24). */
 
+import { authedFetch } from './http';
+
 export interface SkillSummary {
   id: string;
   name: string;
@@ -70,12 +72,12 @@ async function readJson<T>(res: Response, what: string): Promise<T> {
 }
 
 export async function loadCapabilities(): Promise<Capabilities> {
-  const res = await fetch('/api/capabilities', { headers: { Accept: 'application/json' } });
+  const res = await authedFetch('/api/capabilities', { headers: { Accept: 'application/json' } });
   return readJson<Capabilities>(res, 'capabilities');
 }
 
 export async function loadAutomation(): Promise<AutomationTask[]> {
-  const res = await fetch('/api/automation', { headers: { Accept: 'application/json' } });
+  const res = await authedFetch('/api/automation', { headers: { Accept: 'application/json' } });
   const body = await readJson<{ tasks: AutomationTask[] }>(res, 'automation');
   return body.tasks;
 }
@@ -84,7 +86,7 @@ export async function updateAutomation(
   id: string,
   patch: Partial<AutomationInput>,
 ): Promise<AutomationTask> {
-  const res = await fetch(`/api/automation/${encodeURIComponent(id)}`, {
+  const res = await authedFetch(`/api/automation/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(patch),
@@ -94,7 +96,7 @@ export async function updateAutomation(
 }
 
 export async function createAutomation(input: AutomationInput): Promise<AutomationTask> {
-  const res = await fetch('/api/automation', {
+  const res = await authedFetch('/api/automation', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(input),
@@ -104,12 +106,12 @@ export async function createAutomation(input: AutomationInput): Promise<Automati
 }
 
 export async function deleteAutomation(id: string): Promise<void> {
-  const res = await fetch(`/api/automation/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  const res = await authedFetch(`/api/automation/${encodeURIComponent(id)}`, { method: 'DELETE' });
   await readJson<{ ok: boolean }>(res, 'automation delete');
 }
 
 export async function runAutomationNow(id: string): Promise<void> {
-  const res = await fetch(`/api/automation/${encodeURIComponent(id)}/run`, { method: 'POST' });
+  const res = await authedFetch(`/api/automation/${encodeURIComponent(id)}/run`, { method: 'POST' });
   await readJson<{ ok: boolean }>(res, 'automation run');
 }
 
@@ -119,7 +121,7 @@ export async function setAutomationEnabled(id: string, enabled: boolean): Promis
 }
 
 export async function loadInsights(range: 7 | 30): Promise<Insights> {
-  const res = await fetch(`/api/insights?range=${range}`, {
+  const res = await authedFetch(`/api/insights?range=${range}`, {
     headers: { Accept: 'application/json' },
   });
   return readJson<Insights>(res, 'insights');
@@ -135,7 +137,7 @@ export interface MemoryEntry {
 }
 
 export async function loadMemory(sessionId: string): Promise<MemoryEntry[]> {
-  const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/memory`, {
+  const res = await authedFetch(`/api/sessions/${encodeURIComponent(sessionId)}/memory`, {
     headers: { Accept: 'application/json' },
   });
   const body = await readJson<{ entries: MemoryEntry[] }>(res, 'session memory');
@@ -163,7 +165,7 @@ export interface ModelsView {
 }
 
 export async function loadModels(): Promise<ModelsView> {
-  const res = await fetch('/api/models', { headers: { Accept: 'application/json' } });
+  const res = await authedFetch('/api/models', { headers: { Accept: 'application/json' } });
   const body = await readJson<ModelsView>(res, 'models');
   return { models: body.models ?? [], defaultModel: body.defaultModel };
 }

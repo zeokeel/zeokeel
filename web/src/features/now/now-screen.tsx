@@ -110,7 +110,14 @@ export function NowScreen() {
           })();
         }}
         onRemoveAttachment={(id) =>
-          setAttachments((current) => current.filter((item) => item.id !== id))
+          setAttachments((current) => {
+            // Release the preview object URL like the thread's composer does;
+            // without it every attachment preview leaked until reload
+            // (AUDIT-2026-11-24 C).
+            const removed = current.find((item) => item.id === id);
+            if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+            return current.filter((item) => item.id !== id);
+          })
         }
         value={draft}
         onChange={setDraft}

@@ -68,6 +68,8 @@ export interface RpcOptions {
   createSocket?: (url: string) => SocketLike;
   /** Injected for deterministic backoff in tests. */
   setTimeout?: (handler: () => void, ms: number) => unknown;
+  /** The cancel counterpart of setTimeout (injected with it in tests). */
+  clearTimeout?: (id: unknown) => void;
 }
 
 function defaultUrl(): string {
@@ -119,6 +121,7 @@ export class GatewayRpc {
   private authGate: (() => Promise<boolean>) | null = null;
   private gatePromise: Promise<boolean> | null = null;
   private reconnectTimer: unknown = null;
+  private reconnectClear: ((id: unknown) => void) | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private buffer = '';
 
@@ -477,6 +480,7 @@ export class GatewayRpc {
     const delay = exponential * (0.8 + Math.random() * 0.4);
     const schedule: (handler: () => void, ms: number) => unknown =
       this.options.setTimeout ?? ((handler, ms) => setTimeout(handler, ms));
+    if (this.options.setTimeout) this.reconnectClear = this.options.clearTimeout ?? null;
     this.reconnectTimer = schedule(() => {
       this.reconnectTimer = null;
       this.connect();
@@ -498,6 +502,16 @@ export class GatewayRpc {
 
   private clearTimers(): void {
     this.clearPing();
+    // A queued reconnect used to survive stop(): the timer fired later and
+    // re-opened a socket nobody owns (AUDIT-2026-11-24 C). Unauthorized is a
+    // terminal state and so is a deliberate stop, so both must cancel it.
+    if (this.reconnectTimer) {
+      (this.reconnectClear ?? ((id) => clearTimeout(id as ReturnType<typeof setTimeout>)))(
+        this.reconnectTimer,
+      );
+      this.reconnectTimer = null;
+      this.reconnectClear = null;
+    }
   }
 
   private setStatus(status: ConnectionStatus): void {

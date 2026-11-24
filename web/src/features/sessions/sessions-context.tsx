@@ -68,12 +68,22 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     // "retry" in the error state.
     setLoading(true);
     try {
+      // Subscribe once and stop exactly once. The old shape assigned `stop`
+      // after subscribing, but a synced domain calls the listener synchronously
+      // when it already holds a snapshot — so `stop` was still the no-op and the
+      // subscription leaked, one per finished turn (AUDIT-2026-11-24 C).
       const list = await new Promise<SessionSummary[]>((resolve) => {
-        let stop = () => {};
-        stop = subscribeSessions((value) => {
-          stop();
+        const subscription: { stop: (() => void) | null } = { stop: null };
+        let settled = false;
+        const stop = subscribeSessions((value) => {
+          if (settled) return;
+          settled = true;
+          // Deferred: the domain may deliver from inside subscribeSessions(),
+          // before it has returned the unsubscribe function.
+          queueMicrotask(() => subscription.stop?.());
           resolve(value);
         });
+        if (!settled) subscription.stop = stop;
       });
       setSessions(list);
       setError(null);

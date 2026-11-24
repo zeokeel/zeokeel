@@ -150,7 +150,12 @@ export function DiffBlock({ unified }: { unified: string }) {
         <div key={index} className={`zk-diff__line zk-diff__line--${row.kind}`}>
           <span className="zk-diff__gutter">{row.number ?? ''}</span>
           <span className="zk-diff__sign">{DIFF_LABEL[row.kind]}</span>
-          <span className="zk-diff__text">{row.text.replace(/^[+-]/, '')}</span>
+          <span className="zk-diff__text">
+            {/* Only content lines lose their marker; a meta line ("+++ b/app.ts")
+                is shown whole, or it reads as a two-character prefix
+                (AUDIT-2026-11-24 C). */}
+            {row.kind === 'add' || row.kind === 'del' ? row.text.replace(/^[+-]/, '') : row.text}
+          </span>
         </div>
       ))}
     </div>

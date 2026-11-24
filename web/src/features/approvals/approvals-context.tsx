@@ -55,12 +55,31 @@ export function ApprovalsProvider({ children }: { children: ReactNode }) {
 
   const resolve = useCallback(async (id: string, decision: ApprovalDecision) => {
     // Optimistic removal: the card must disappear on the click; the
-    // authoritative `approvals.delta` follows immediately.
-    setApprovals((current) => current.filter((request) => request.id !== id));
+    // authoritative `approvals.delta` follows immediately. A failed resolve puts
+    // the request back where it was — without that the card vanished, the error
+    // had no renderer, and the run stayed parked on an approval the user
+    // believed they had answered (AUDIT-2026-11-24 B-6).
+    const removed: { value: { request: ApprovalRequest; index: number } | null } = { value: null };
+    setApprovals((current) => {
+      const index = current.findIndex((request) => request.id === id);
+      if (index < 0) return current;
+      removed.value = { request: current[index], index };
+      return current.filter((request) => request.id !== id);
+    });
     try {
       await resolveApproval(id, decision);
+      setError(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'approval.submitFailed');
+      const failure = cause instanceof Error ? cause.message : 'approval.submitFailed';
+      if (removed.value) {
+        const restored = removed.value;
+        setApprovals((current) =>
+          current.some((request) => request.id === id)
+            ? current
+            : [...current.slice(0, restored.index), restored.request, ...current.slice(restored.index)],
+        );
+      }
+      setError(failure);
     }
   }, []);
 

@@ -21,6 +21,7 @@ export function AskDialog({ sessionId }: { sessionId?: string }) {
   const [custom, setCustom] = useState(false);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
 
   // The domain pushes on every revision (a delta, a resync), not only when the
   // question changes: reset the draft only when the question is actually a new one,
@@ -56,6 +57,11 @@ export function AskDialog({ sessionId }: { sessionId?: string }) {
     try {
       await answerAsk(pending.id, value);
       setPending(null);
+    } catch (cause) {
+      // Without this the rejection was unhandled, the dialog stayed open and
+      // retrying failed silently: the user could not tell a dead session from a
+      // dropped connection (AUDIT-2026-11-24 C).
+      setFailure(cause instanceof Error ? cause.message : t('ask.submitFailed'));
     } finally {
       setSending(false);
     }
@@ -93,6 +99,11 @@ export function AskDialog({ sessionId }: { sessionId?: string }) {
       data-session-id={sessionId}
     >
       <Typography.Paragraph>{pending.text}</Typography.Paragraph>
+      {failure ? (
+        <Typography.Paragraph type="danger" role="alert">
+          {failure}
+        </Typography.Paragraph>
+      ) : null}
       {custom ? (
         <Input.TextArea
           autoFocus

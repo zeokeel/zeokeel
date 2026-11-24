@@ -156,7 +156,9 @@ export function InspectorPanel() {
         <div className="zk-inspector__split">
           <div className="zk-inspector__tree">
             {error ? <div className="zk-msg-error">{error}</div> : null}
-            {nodes === null ? (
+            {/* A failed load keeps `nodes` null, so the spinner used to spin
+                forever next to the error (AUDIT-2026-11-24 C). */}
+            {error ? null : nodes === null ? (
               <Spin size="small" />
             ) : (
               <Tree

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Layout, Splitter } from 'antd';
 import { matchPath, useLocation, useNavigate } from 'react-router';
 import { useSessions } from '@/features/sessions/sessions-context';
@@ -9,6 +9,8 @@ import { Sidebar } from './sidebar';
 import { TopBand } from './top-band';
 import { describeError } from '@/features/describe-error';
 import { useT } from '@/i18n';
+import { subscribeSettings } from '@/api/gateway';
+import { SETTING_KEYS } from '@/design/settings-keys';
 
 const SIDEBAR_WIDTH_KEY = 'zk.sidebar.width';
 const SIDEBAR_DEFAULT = 264;
@@ -39,6 +41,19 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Layout.Sider defaults to its own dark surface; keep it aligned with the
   // appearance the ConfigProvider algorithm is using.
   const appearance = useSystemAppearance();
+  // 对话字号 (ui.chatFontSize) had no consumer either: the setting was stored and
+  // ignored (AUDIT-2026-11-24 C). It lands on one CSS variable the transcript
+  // reads, clamped to the readable range.
+  useEffect(() => {
+    const apply = (rows: Record<string, string>) => {
+      const raw = Number.parseInt(rows[SETTING_KEYS.chatFontSize] ?? '', 10);
+      const size = Number.isFinite(raw) ? Math.min(20, Math.max(12, raw)) : null;
+      const root = document.documentElement;
+      if (size === null) root.style.removeProperty('--zk-chat-font-size');
+      else root.style.setProperty('--zk-chat-font-size', `${size}px`);
+    };
+    return subscribeSettings(apply);
+  }, []);
   const [createError, setCreateError] = useState<string | null>(null);
   // B16: Mod+B folds the sidebar to an icon rail. The width is kept in a ref so
   // expanding restores the exact splitter size the user had (state not lost).

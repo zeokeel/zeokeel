@@ -326,6 +326,13 @@ body {
   padding: 0 var(--zk-space-6);
 }
 
+/* A decision that failed to submit: the card is back, and this says why. */
+.zk-dock__error {
+  margin: 0 0 var(--zk-space-2);
+  font-size: var(--zk-type-xs);
+  color: var(--zk-danger);
+}
+
 .zk-approval {
   display: flex;
   flex-direction: column;
@@ -557,6 +564,9 @@ body {
 .zk-transcript {
   position: relative;
   height: 100%;
+  /* The settings screen's 对话字号 lands here (see AppShell); the token value is
+   * the default when the user never touched it. */
+  font-size: var(--zk-chat-font-size, var(--zk-font-size));
 }
 
 .zk-transcript__scroll {
@@ -1093,6 +1103,12 @@ body {
 
 /* ============================ prompt queue ============================== */
 
+.zk-queue__error {
+  margin: 0 0 var(--zk-space-2);
+  font-size: var(--zk-type-xs);
+  color: var(--zk-danger);
+}
+
 .zk-queue {
   margin: 0 var(--zk-space-6) var(--zk-space-2);
   padding: var(--zk-space-1) var(--zk-space-2);
@@ -1217,7 +1233,7 @@ body {
     right: 0;
     bottom: 0;
     width: min(420px, 92vw);
-    box-shadow: var(--zk-shadow-overlay, 0 8px 32px rgb(0 0 0 / 18%));
+    box-shadow: 0 8px 32px color-mix(in srgb, var(--zk-scrim) 55%, transparent);
   }
 
   .zk-topband__title {
@@ -1504,5 +1520,5 @@ body {
 /* Inspector breadcrumb (task-37 #2): antd owns the list; we only place it. */
 .zk-inspector__breadcrumb {
   margin: 0;
-  font-size: var(--zk-font-size-sm);
+  font-size: var(--zk-type-xs);
 }

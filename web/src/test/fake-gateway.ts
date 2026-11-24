@@ -466,6 +466,10 @@ export class FakeGateway {
       });
       return;
     }
+    if (method === 'prompts.unsubscribe') {
+      reply({});
+      return;
+    }
     if (method === 'prompts.enqueue') {
       const sessionId = String(params.sessionId ?? '');
       const text = String(params.prompt ?? params.text ?? '');
@@ -509,6 +513,10 @@ export class FakeGateway {
     if (method === 'context.subscribe') {
       const since = Number(params.sinceRev ?? 0);
       reply({ epoch: 'fake', rev: 1, resync: since !== 1 });
+      return;
+    }
+    if (method === 'context.unsubscribe') {
+      reply({});
       return;
     }
     if (method === 'run.interject') {
@@ -567,6 +575,10 @@ export class FakeGateway {
         rev: this.state.taskRevs[key] ?? 1,
         resync: since !== (this.state.taskRevs[key] ?? 1),
       });
+      return;
+    }
+    if (method === 'tasks.unsubscribe') {
+      reply({});
       return;
     }
     if (method === 'task.status') {

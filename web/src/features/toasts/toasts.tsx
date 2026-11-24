@@ -48,6 +48,10 @@ export function Toasts({ children }: { children: React.ReactNode }) {
           message: toast.text,
           // 4 seconds for a receipt; an error waits for the user.
           duration: toastDuration(toast.level),
+          // A toast that dismisses itself must free its id too: the set only
+          // grew before, one entry per toast for the life of the page
+          // (AUDIT-2026-11-24 C).
+
           // Top-right: bottom-right is where the composer and its send button
           // live, and a toast must never sit on the thing you are typing into.
           placement: 'topRight',

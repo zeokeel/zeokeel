@@ -51,6 +51,7 @@ export const en: Catalog = {
   'inbox.kind.completion': 'Completion receipt',
   'inbox.askOptions': 'Options: {options}',
   'inbox.planTitle': 'Plan to review',
+  'inbox.artifactNoPreview': 'This artifact has no preview yet',
   'inbox.open': 'Open',
   'inbox.allowOnce': 'Allow once',
   'inbox.deny': 'Deny',
@@ -120,7 +121,9 @@ export const en: Catalog = {
   'thread.queue.count': '{count} queued',
   'thread.queue.cancel': 'Cancel queued: {text}',
   'thread.queue.sendHead': 'Send the first one',
-  'thread.queue.loadFailed': 'Could not load the queue',
+  'thread.queue.loadFailed': 'Failed to load the queue',
+  'thread.queue.enqueueFailed': 'Could not queue the message; the draft is still here',
+  'thread.composer.attachmentsWhileRunning': 'Only text can be queued while a turn runs; send the attachments after it finishes',
   'thread.queue.removeFailed': 'Could not cancel it',
 
   // ------------------------------------------------------------ composer --
@@ -503,6 +506,7 @@ export const en: Catalog = {
   'notFound.title': 'No page at this address',
   'notFound.description': 'The link may be stale, or the page is not built yet.',
   'notFound.back': 'Back to Now',
+  'ask.submitFailed': 'Could not submit the answer; try again',
   'ask.title': 'Your confirmation is needed',
   'ask.cancel': 'Cancel',
   'ask.submit': 'Submit',

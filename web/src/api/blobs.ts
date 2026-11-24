@@ -4,6 +4,8 @@
  * reloaded conversation still shows what was attached.
  */
 
+import { authedFetch } from './http';
+
 export interface StagedAttachment {
   /** Blob id from the upload. */
   id: string;
@@ -21,7 +23,7 @@ export async function uploadBlob(file: File): Promise<StagedAttachment> {
   if (file.size > ATTACHMENT_MAX_BYTES) {
     throw new Error('attachment_too_large');
   }
-  const res = await fetch(`/api/blobs?name=${encodeURIComponent(file.name)}`, {
+  const res = await authedFetch(`/api/blobs?name=${encodeURIComponent(file.name)}`, {
     method: 'POST',
     headers: { 'Content-Type': file.type || 'application/octet-stream', Accept: 'application/json' },
     body: file,

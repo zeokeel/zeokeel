@@ -78,6 +78,19 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   // Set while the current run is being stopped on purpose, so the settle
   // handler knows *why* it ended and keeps the queue instead of draining it.
   const stoppedByUser = useRef(false);
+  // The interject retry loop and the session it belongs to, so leaving the
+  // conversation cancels it instead of posting into the wrong one.
+  const interjectTimer = useRef<number | null>(null);
+  const sessionRef = useRef(sessionId);
+  useEffect(() => {
+    sessionRef.current = sessionId;
+    return () => {
+      if (interjectTimer.current !== null) {
+        window.clearTimeout(interjectTimer.current);
+        interjectTimer.current = null;
+      }
+    };
+  }, [sessionId]);
 
   const composerSettings = useComposerSettings(sessionId);
   // Live rate: characters streamed since the first frame of this turn, over wall
@@ -258,7 +271,24 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   const deliver = (text: string): boolean => {
     if (!text.trim()) return false;
     if (chat.isRequesting) {
-      void queue.enqueue(text);
+      // The queue carries text only (prompts.enqueue has no attachments field),
+      // so sending attachments here would silently park them in the composer
+      // until the next message picked them up — attaching them to a message the
+      // user did not mean (AUDIT-2026-11-24 B-7). Refuse and say why.
+      if (attachments.length > 0) {
+        setAttachError(t('thread.composer.attachmentsWhileRunning'));
+        return false;
+      }
+      // A failed enqueue used to be a void'd rejection with the draft already
+      // cleared: the user's text vanished with no message (B-8).
+      const pendingText = text;
+      setDraft('');
+      void queue
+        .enqueue(pendingText)
+        .then(() => setAttachError(null))
+        .catch(() => {
+          setDraft((current) => (current === '' ? pendingText : current));
+        });
       return true;
     }
     const ids = attachments.map((item) => item.id);
@@ -389,6 +419,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
       <PromptQueuePanel
         items={queue.items}
         running={chat.isRequesting}
+        error={queue.error}
         onCancel={(id) => void queue.remove(id)}
         onSendHead={() => void sendQueueHead()}
       />
@@ -424,13 +455,17 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
               stopRun();
               const deadline = Date.now() + 3000;
               const trySend = () => {
+                interjectTimer.current = null;
                 if (chat.isRequesting && Date.now() < deadline) {
-                  setTimeout(trySend, 100);
+                  interjectTimer.current = window.setTimeout(trySend, 100);
                   return;
                 }
+                // Switched conversation while waiting: send nothing, the old
+                // session's run is already stopped (AUDIT-2026-11-24 C).
+                if (sessionRef.current !== sessionId) return;
                 chat.onRequest({ sessionId, text });
               };
-              setTimeout(trySend, 100);
+              interjectTimer.current = window.setTimeout(trySend, 100);
             }}
           />
         }

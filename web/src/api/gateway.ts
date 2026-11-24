@@ -751,7 +751,17 @@ export async function subscribeContext(
     sinceRev: domain.rev(),
   });
   if (reply.resync) await domain.reload();
-  return unsubscribe;
+  // Tell the gateway too, not just this tab: a subscription it keeps for a
+  // conversation nobody is looking at is rebuilt on every poll tick.
+  return () => {
+    unsubscribe();
+    void client()
+      .request('context.unsubscribe', { sessionId })
+      .catch(() => {
+        // The domain is already detached locally; a failed unsubscribe only
+        // costs the gateway one idle refresh cycle.
+      });
+  };
 }
 
 /** One-off read (the tab's first paint uses the subscription instead). */
@@ -809,7 +819,14 @@ export async function subscribeTasks(
     sinceRev: domain.rev(),
   });
   if (reply.resync) await domain.reload();
-  return unsubscribe;
+  return () => {
+    unsubscribe();
+    void client()
+      .request('tasks.unsubscribe', sessionId ? { sessionId } : {})
+      .catch(() => {
+        // See subscribeContext: local detach already happened.
+      });
+  };
 }
 
 /** Re-read the board once (the chip refreshes on demand, never on a timer). */
@@ -883,7 +900,14 @@ export async function subscribePrompts(
     sinceRev: domain.rev(),
   });
   if (reply.resync) await domain.reload();
-  return unsubscribe;
+  return () => {
+    unsubscribe();
+    void client()
+      .request('prompts.unsubscribe', { sessionId })
+      .catch(() => {
+        // See subscribeContext: local detach already happened.
+      });
+  };
 }
 
 /** Enqueue one prompt into the session's inbox (command, §5.1.1). */

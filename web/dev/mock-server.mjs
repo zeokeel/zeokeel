@@ -1566,6 +1566,8 @@ const wsDispatch = (client, message) => {
       // honoured when the revision is the one we hold. Otherwise resync.
       return reply({ epoch: WS_EPOCH, rev: promptRev(sessionId), resync: since !== promptRev(sessionId) });
     }
+    case 'prompts.unsubscribe':
+      return reply({});
     case 'context.snapshot': {
       const sessionId = String(params.sessionId ?? '');
       if (!sessions.has(sessionId)) return fail(1001, 'session_not_found');
@@ -1585,6 +1587,10 @@ const wsDispatch = (client, message) => {
       const view = contextView(sessionId);
       return reply({ epoch: WS_EPOCH, rev: view.rev, resync: since !== view.rev });
     }
+    case 'context.unsubscribe':
+      // Dropping a subscription is not an error for a conversation this fixture
+      // is not tracking: the real gateway answers {} either way.
+      return reply({});
     case 'run.interject': {
       // Offline fixture: no real run to steer, so acknowledge and record the request.
       const sessionId = String(params.sessionId ?? '').trim();
@@ -1657,6 +1663,8 @@ const wsDispatch = (client, message) => {
       const board = taskBoard(sessionId);
       return reply({ epoch: WS_EPOCH, rev: board.rev, resync: since !== board.rev });
     }
+    case 'tasks.unsubscribe':
+      return reply({});
     case 'task.status': {
       const sessionId = params.sessionId === undefined ? '' : String(params.sessionId);
       const status = String(params.status ?? '');

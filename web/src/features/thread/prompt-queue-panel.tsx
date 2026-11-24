@@ -16,11 +16,14 @@ import { useT } from '@/i18n';
 export function PromptQueuePanel({
   items,
   running,
+  error,
   onCancel,
   onSendHead,
 }: {
   items: QueuedPrompt[];
   running: boolean;
+  /** A failed enqueue/remove: shown here so the text is never silently lost. */
+  error?: string | null;
   onCancel: (id: string) => void;
   onSendHead: () => void;
 }) {
@@ -29,6 +32,11 @@ export function PromptQueuePanel({
 
   const content = (
     <div className="zk-queue">
+      {error ? (
+        <p role="alert" className="zk-queue__error">
+          {error}
+        </p>
+      ) : null}
       <ul className="zk-queue__list">
         {items.map((item, index) => (
           <li key={item.id} className="zk-queue__row">
