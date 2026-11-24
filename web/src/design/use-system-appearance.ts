@@ -49,6 +49,30 @@ export function resolveChoice(rows: Record<string, string>): Appearance | null {
   return null;
 }
 
+/**
+ * A boolean media query, live.
+ *
+ * The shell uses it for the one structural breakpoint (narrow → the sidebar
+ * becomes a drawer). jsdom has no matchMedia, so the fallback is "false" and
+ * tests keep the desktop layout they were written against.
+ */
+export function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia(query).matches
+      : false,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia(query);
+    const onChange = () => setMatches(media.matches);
+    onChange();
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
+  }, [query]);
+  return matches;
+}
+
 function currentAppearance(): Appearance {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'light';
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';

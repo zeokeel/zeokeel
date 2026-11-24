@@ -4,11 +4,19 @@
  * Regenerate: npm run gen:tokens   (docs/WEB-CLIENT.md §9.1 rule T1)
  *
  * This is the only file in web/src allowed to carry colour literals (§9.2).
- * Both appearances are emitted; the dark block follows the system preference
- * because this milestone ships no appearance setting yet (that is R15).
+ *
+ * Appearance has exactly one source: the `data-theme` attribute the app writes
+ * from the user's 设置 → 外观 choice (falling back to the OS). The media query is
+ * a **pre-hydration** fallback only — it applies while no attribute exists, so
+ * the first paint matches the OS, and it can never disagree with antd's
+ * `algorithm`, which reads the same resolved value (round-2 SYS-01: the CSS
+ * used to follow the OS exclusively while antd followed the setting, which made
+ * "dark on a light system" white text on a white page).
  */
 
-:root {
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
   --zk-bg-base: #ffffff;
   --zk-bg-sidebar: #f7f8fa;
   --zk-bg-raised: #ffffff;
@@ -72,36 +80,70 @@
   --zk-brand-row-height: 56px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
+:root[data-theme='dark'] {
+  color-scheme: dark;
   --zk-bg-base: #111118;
-    --zk-bg-sidebar: #0b0b10;
-    --zk-bg-raised: #1b1b26;
-    --zk-bg-overlay: #23232f;
-    --zk-bg-strong: #272736;
-    --zk-bg-hover: rgba(255, 255, 255, 0.06);
-    --zk-bg-selected: rgba(55, 231, 254, 0.13);
-    --zk-label-primary: #f9fafb;
-    --zk-label-secondary: #c7cad9;
-    --zk-label-tertiary: #a3abbb;
-    --zk-border-l1: rgba(255, 255, 255, 0.07);
-    --zk-border-l2: rgba(255, 255, 255, 0.1);
-    --zk-border-l3: rgba(255, 255, 255, 0.16);
-    --zk-accent: #3cbbfa;
-    --zk-accent-hover: #2eccfb;
-    --zk-accent-pressed: #37e7fe;
-    --zk-accent-text: #0f1115;
-    --zk-on-primary: #0f1115;
-    --zk-success: #22c55e;
-    --zk-success-text: #4ade80;
-    --zk-danger: #f87171;
-    --zk-danger-text: #fca5a5;
-    --zk-warning: #f59e0b;
-    --zk-warning-text: #e9a24c;
-    --zk-focus: rgba(55, 231, 254, 0.7);
-    --zk-scrim: rgba(0, 0, 0, 0.55);
-    --zk-selection: rgba(60, 187, 250, 0.3);
-    --zk-scrollbar: rgba(255, 255, 255, 0.24);
-    --zk-border-subtle: rgba(255, 255, 255, 0.07);
+  --zk-bg-sidebar: #0b0b10;
+  --zk-bg-raised: #1b1b26;
+  --zk-bg-overlay: #23232f;
+  --zk-bg-strong: #272736;
+  --zk-bg-hover: rgba(255, 255, 255, 0.06);
+  --zk-bg-selected: rgba(55, 231, 254, 0.13);
+  --zk-label-primary: #f9fafb;
+  --zk-label-secondary: #c7cad9;
+  --zk-label-tertiary: #a3abbb;
+  --zk-border-l1: rgba(255, 255, 255, 0.07);
+  --zk-border-l2: rgba(255, 255, 255, 0.1);
+  --zk-border-l3: rgba(255, 255, 255, 0.16);
+  --zk-accent: #3cbbfa;
+  --zk-accent-hover: #2eccfb;
+  --zk-accent-pressed: #37e7fe;
+  --zk-accent-text: #0f1115;
+  --zk-on-primary: #0f1115;
+  --zk-success: #22c55e;
+  --zk-success-text: #4ade80;
+  --zk-danger: #f87171;
+  --zk-danger-text: #fca5a5;
+  --zk-warning: #f59e0b;
+  --zk-warning-text: #e9a24c;
+  --zk-focus: rgba(55, 231, 254, 0.7);
+  --zk-scrim: rgba(0, 0, 0, 0.55);
+  --zk-selection: rgba(60, 187, 250, 0.3);
+  --zk-scrollbar: rgba(255, 255, 255, 0.24);
+  --zk-border-subtle: rgba(255, 255, 255, 0.07);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+  --zk-bg-base: #111118;
+      --zk-bg-sidebar: #0b0b10;
+      --zk-bg-raised: #1b1b26;
+      --zk-bg-overlay: #23232f;
+      --zk-bg-strong: #272736;
+      --zk-bg-hover: rgba(255, 255, 255, 0.06);
+      --zk-bg-selected: rgba(55, 231, 254, 0.13);
+      --zk-label-primary: #f9fafb;
+      --zk-label-secondary: #c7cad9;
+      --zk-label-tertiary: #a3abbb;
+      --zk-border-l1: rgba(255, 255, 255, 0.07);
+      --zk-border-l2: rgba(255, 255, 255, 0.1);
+      --zk-border-l3: rgba(255, 255, 255, 0.16);
+      --zk-accent: #3cbbfa;
+      --zk-accent-hover: #2eccfb;
+      --zk-accent-pressed: #37e7fe;
+      --zk-accent-text: #0f1115;
+      --zk-on-primary: #0f1115;
+      --zk-success: #22c55e;
+      --zk-success-text: #4ade80;
+      --zk-danger: #f87171;
+      --zk-danger-text: #fca5a5;
+      --zk-warning: #f59e0b;
+      --zk-warning-text: #e9a24c;
+      --zk-focus: rgba(55, 231, 254, 0.7);
+      --zk-scrim: rgba(0, 0, 0, 0.55);
+      --zk-selection: rgba(60, 187, 250, 0.3);
+      --zk-scrollbar: rgba(255, 255, 255, 0.24);
+      --zk-border-subtle: rgba(255, 255, 255, 0.07);
   }
 }

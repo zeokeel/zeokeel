@@ -11,7 +11,7 @@ import { ConnectionBadge } from './connection-badge';
  * URL (R4/R5), never in component memory, so a refresh keeps the surface
  * (docs/WEB-CLIENT.md §1.2).
  */
-export function TopBand() {
+export function TopBand({ onOpenSidebar }: { onOpenSidebar?: () => void } = {}) {
   const location = useLocation();
   const navigate = useNavigate();
   const { sessions } = useSessions();
@@ -36,6 +36,21 @@ export function TopBand() {
   return (
     <header className="zk-topband" role="banner" aria-label={t('thread.banner')}>
       <div className="zk-topband__row">
+        {/* Narrow viewports keep the sidebar in a drawer; the band owns the only
+            way to open it (a 40px hit target, named for screen readers). */}
+        {onOpenSidebar ? (
+          <button
+            type="button"
+            className="zk-topband__menu"
+            aria-label={t('shell.openSidebar')}
+            data-testid="open-sidebar"
+            onClick={onOpenSidebar}
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+              <path d="M3 5h12M3 9h12M3 13h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+          </button>
+        ) : null}
         <h1 className="zk-topband__title">{title}</h1>
         <ConnectionBadge />
       </div>

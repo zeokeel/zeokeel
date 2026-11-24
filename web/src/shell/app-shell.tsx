@@ -1,9 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Layout, Splitter } from 'antd';
+import { Drawer, Layout, Splitter } from 'antd';
 import { matchPath, useLocation, useNavigate } from 'react-router';
 import { useSessions } from '@/features/sessions/sessions-context';
 import { useShortcut } from '@/keyboard/keyboard-provider';
-import { useSystemAppearance } from '@/design/use-system-appearance';
+import { useMediaQuery, useSystemAppearance } from '@/design/use-system-appearance';
 import { CommandPalette } from '@/features/palette/command-palette';
 import { Sidebar } from './sidebar';
 import { TopBand } from './top-band';
@@ -58,6 +58,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   // B16: Mod+B folds the sidebar to an icon rail. The width is kept in a ref so
   // expanding restores the exact splitter size the user had (state not lost).
   const [collapsed, setCollapsed] = useState(false);
+  // One structural breakpoint (docs/audit/2026-11-24/INTERACTION.md P0-2): below
+  // it the sidebar cannot share the width with the content — 264 + 126 px left
+  // the transcript one character wide. There it becomes a drawer the band opens.
+  const narrow = useMediaQuery('(max-width: 1023px)');
+  // The drawer is open *for a pathname*: navigating anywhere closes it without
+  // an effect (a synchronous setState in an effect re-renders the whole shell).
+  const [drawerFor, setDrawerFor] = useState<string | null>(null);
+  const drawerOpen = narrow && drawerFor === location.pathname;
+  const closeDrawer = () => setDrawerFor(null);
   // The width the splitter had before folding, so expanding restores it instead
   // of jumping back to the default (B16: "展开后状态不丢").
   const [expandedWidth, setExpandedWidth] = useState(() => storedSidebarWidth());
@@ -84,12 +93,54 @@ export function AppShell({ children }: { children: ReactNode }) {
     },
   });
 
+  const sidebar = (
+    <Sidebar
+      activeKey={activeSessionId}
+      collapsed={narrow ? false : collapsed}
+      activeSessionId={activeSessionId}
+      onSelect={(sessionId) => navigate(`/c/${sessionId}`)}
+      onCreate={() => void handleCreate()}
+    />
+  );
+
+  const column = (
+    <div className="zk-column">
+      <TopBand onOpenSidebar={narrow ? () => setDrawerFor(location.pathname) : undefined} />
+      <main id="zk-main" className="zk-content">
+        {createError ? (
+          <div className="zk-msg-error" role="alert">
+            {createError}
+          </div>
+        ) : null}
+        {children}
+      </main>
+    </div>
+  );
+
   return (
-    <div className="zk-shell">
+    <div className="zk-shell" data-narrow={narrow ? 'true' : 'false'}>
       <CommandPalette />
       <a className="zk-skip-link" href="#zk-main">
         跳到主内容
       </a>
+      {narrow ? (
+        <Layout className="zk-shell__body">
+          <Drawer
+            open={drawerOpen}
+            placement="left"
+            width={280}
+            onClose={closeDrawer}
+            className="zk-sidebar-drawer"
+            styles={{ body: { padding: 0 } }}
+            title={null}
+            closable={false}
+            data-testid="sidebar-drawer"
+          >
+            {sidebar}
+          </Drawer>
+          <div className="zk-column zk-column--narrow">{column}</div>
+        </Layout>
+      ) : (
       <Layout className="zk-shell__body">
         <Splitter
           className="zk-split"
@@ -113,33 +164,18 @@ export function AppShell({ children }: { children: ReactNode }) {
               theme={appearance === 'dark' ? 'dark' : 'light'}
               className="zk-sidebar-sider"
             >
-              <Sidebar
-                activeKey={activeSessionId}
-                collapsed={collapsed}
-                activeSessionId={activeSessionId}
-                onSelect={(sessionId) => navigate(`/c/${sessionId}`)}
-                onCreate={() => void handleCreate()}
-              />
+              {sidebar}
             </Layout.Sider>
           </Splitter.Panel>
           <Splitter.Panel>
             {/* The band sits in the content column, beside the sidebar — the
                 native frame's shape, and the order keyboard users tab through
                 (sidebar → band → content, WEB-CLIENT §5.3). */}
-            <div className="zk-column">
-              <TopBand />
-              <main id="zk-main" className="zk-content">
-                {createError ? (
-                  <div className="zk-msg-error" role="alert">
-                    {createError}
-                  </div>
-                ) : null}
-                {children}
-              </main>
-            </div>
+            {column}
           </Splitter.Panel>
         </Splitter>
       </Layout>
+      )}
     </div>
   );
 }

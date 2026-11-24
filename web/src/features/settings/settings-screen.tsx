@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Input, InputNumber, Menu, Radio, Switch, Typography } from 'antd';
+import { Button, Input, InputNumber, Menu, Radio, Select, Switch, Typography } from 'antd';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   changedRows,
@@ -20,6 +20,7 @@ import {
 import { useEscClaim } from '@/keyboard/keyboard-provider';
 import { ZkIcon } from '@/design/icons';
 import { ConfirmDanger } from '@/ui/confirm-danger';
+import { useMediaQuery } from '@/design/use-system-appearance';
 import { UpdateStatus } from './update-status';
 import { ModelCatalogEditor } from './model-catalog';
 import { describeError } from '@/features/describe-error';
@@ -44,6 +45,10 @@ export function SettingsScreen() {
   const [connected, setConnected] = useState(false);
   const [navQuery, setNavQuery] = useState('');
   const canWrite = hasCapability('settings.set');
+  // Below 900 the 220px navigation column and the form cannot share the width
+  // (390 − 220 = 170px of form). The navigation becomes one picker above the
+  // page instead (round-2 S11 / P0-2).
+  const narrow = useMediaQuery('(max-width: 899px)');
 
   useEffect(() => {
     const unsubscribe = subscribeSettings((value) => {
@@ -115,8 +120,31 @@ export function SettingsScreen() {
       .filter((group) => group.children.length > 0);
   }, [pages, matches]);
 
+  const pageOptions = pages.map((item) => ({ value: item.key, label: t(item.labelKey) }));
+
   return (
-    <div className="zk-settings">
+    <div className="zk-settings" data-narrow={narrow ? 'true' : 'false'}>
+      {narrow ? (
+        <div className="zk-settings__page-picker">
+          <Select
+            value={pageKey}
+            options={pageOptions}
+            onChange={(key) => navigate(`/settings/${key}`)}
+            aria-label={t('settings.title')}
+            popupMatchSelectWidth={false}
+            data-testid="settings-page-picker"
+          />
+          <Input
+            size="small"
+            prefix={<ZkIcon name="search" />}
+            placeholder={t('settings.search')}
+            aria-label={t('settings.search')}
+            value={navQuery}
+            onChange={(event) => setNavQuery(event.target.value)}
+            allowClear
+          />
+        </div>
+      ) : null}
       <div className="zk-settings__nav">
         <Input
           size="small"

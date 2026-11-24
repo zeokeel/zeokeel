@@ -13,6 +13,7 @@ export const zh = {
 
   // ---------------------------------------------------------------- shell --
   'shell.skipToContent': '跳到主内容',
+  'shell.openSidebar': '打开侧栏',
   'shell.newSession': '新建会话',
   'shell.inbox': '收件箱',
   'shell.approvalsBadge': '待审批 {count}',

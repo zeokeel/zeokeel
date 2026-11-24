@@ -9,6 +9,7 @@ export const en: Catalog = {
 
   // ---------------------------------------------------------------- shell --
   'shell.skipToContent': 'Skip to main content',
+  'shell.openSidebar': 'Open sidebar',
   'shell.newSession': 'New session',
   'shell.inbox': 'Inbox',
   'shell.approvalsBadge': '{count} waiting',

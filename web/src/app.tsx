@@ -29,6 +29,18 @@ import { startGateway, stopGateway } from '@/api/gateway';
 export function App() {
   const appearance = useSystemAppearance();
 
+  // The CSS tokens and antd's algorithm must read the same value. The tokens
+  // key off `html[data-theme]` (tokens.css emits one block per appearance), so
+  // the resolved appearance is published here, once, before anything paints in
+  // the new scheme. `color-scheme` rides along so form controls and the
+  // scrollbar follow too (round-2 SYS-01: setting dark on a light OS used to
+  // give white text on a white page).
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.theme = appearance;
+    root.style.colorScheme = appearance;
+  }, [appearance]);
+
   // One control-plane connection for the whole app (§4.2). Providers below
   // subscribe through it; nothing else opens a socket.
   useEffect(() => {
