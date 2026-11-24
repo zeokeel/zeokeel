@@ -542,10 +542,10 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `session.active.get` | — | `{sessionId}` | Y | `chat.go:562` | ✅ 已实现 |
 | `session.activate` | `{sessionId}` | `{sessionId}` | Y* | `chat.go:564` | 延后 |
 | `session.create` | `{title}` | `{sessionId}` | N | `chat.go:566` | ✅ 已实现 |
-| `session.delete` | `{sessionId}` | `{}` | Y | `chat.go:569` | 延后 |
-| `session.rename` | `{sessionId,title}` | `{}` | Y | `SessionRenamer` `chat.go:585` | 延后 |
-| `session.pin` | `{sessionId,pinned}` | `{}` | Y | `SessionPinner` `chat.go:516` | 延后 |
-| `session.archive` | `{sessionId,archived}` | `{}` | Y | `SessionArchiver` `chat.go:501` | 延后 |
+| `session.delete` | `{sessionId}` | `{epoch,rev}` | Y | `chat.go:569`；**已接线**（网关 `deleteSession`，删后刷新列表域） | ✅ 已实现 |
+| `session.rename` | `{sessionId,title}` | `{epoch,rev}` | Y | `SessionRenamer` `chat.go:585`；标题走与 `session.create` 相同的 200 字符/控制字符校验 | ✅ 已实现 |
+| `session.pin` | `{sessionId,pinned}` | `{epoch,rev}` | Y | `SessionPinner` `chat.go:516` | ✅ 已实现 |
+| `session.archive` | `{sessionId,archived}` | `{epoch,rev}` | Y | `SessionArchiver` `chat.go:501` | ✅ 已实现 |
 | `session.fork` | `{sessionId}` | `{sessionId}` | N | `SessionForker` `chat.go:544` | 延后 |
 | `session.model.set` | `{sessionId,model}` | `{}` | Y | `SessionModelSwitcher` `chat.go:467` | 延后 |
 | `session.thinking.set` | `{sessionId,modelId,modeId}` | `{}` | Y | 组合 settings 行 `thinking.go:306-313` | 延后 |

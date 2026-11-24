@@ -685,6 +685,26 @@ export async function reloadConnectors(
   return { connectors: result.connectors ?? [], disabled: result.disabled ?? [] };
 }
 
+/** Rename a conversation (`session.rename`, TRANSPORT §5.1.1). */
+export async function renameSession(sessionId: string, title: string): Promise<void> {
+  await client().request('session.rename', { sessionId, title });
+}
+
+/** Delete a conversation and its transcript (`session.delete`). */
+export async function deleteSession(sessionId: string): Promise<void> {
+  await client().request('session.delete', { sessionId });
+}
+
+/** Archive or restore a conversation (`session.archive`). */
+export async function archiveSession(sessionId: string, archived: boolean): Promise<void> {
+  await client().request('session.archive', { sessionId, archived });
+}
+
+/** Pin or unpin a conversation (`session.pin`). */
+export async function pinSession(sessionId: string, pinned: boolean): Promise<void> {
+  await client().request('session.pin', { sessionId, pinned });
+}
+
 export async function cancelRun(sessionId: string): Promise<void> {
   await client().request('run.cancel', { sessionId });
 }

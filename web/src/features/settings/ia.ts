@@ -297,7 +297,12 @@ export const SETTINGS_PAGES: SettingsPage[] = [
       {
         titleKey: 'settings.ia.verbosity',
         fields: [
-          bool(K.notifications, 'settings.ia.inAppNotifications'),
+          {
+            ...bool(K.notifications, 'settings.ia.inAppNotifications'),
+            // The toast gate treats an absent row as "on" (`?? 'true'`); a switch
+            // that reads absent as "off" contradicted it (round-3 mobile N3).
+            defaultValue: 'true',
+          },
           bool(K.systemNotifications, 'settings.ia.systemNotifications'),
           bool(K.autostart, 'settings.ia.launchAtLogin'),
           bool(K.closeToTray, 'settings.ia.minimizeToTray'),

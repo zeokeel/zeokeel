@@ -118,6 +118,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       collapsed={narrow ? false : collapsed}
       activeSessionId={activeSessionId}
       onSelect={(sessionId) => navigate(`/c/${sessionId}`)}
+      onCleared={() => navigate('/')}
       onCreate={() => void handleCreate()}
     />
   );

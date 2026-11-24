@@ -237,6 +237,18 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"session.create": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.createSession(ctx, request.Params)
 		},
+		"session.rename": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.renameSession(ctx, request.Params)
+		},
+		"session.delete": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.deleteSession(ctx, request.Params)
+		},
+		"session.archive": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.setSessionFlag(ctx, request.Params, "archive")
+		},
+		"session.pin": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.setSessionFlag(ctx, request.Params, "pin")
+		},
 		"mcp.reload": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.reloadConnectors(ctx, request.Params)
 		},
@@ -1162,6 +1174,140 @@ func (g *Gateway) createSession(ctx context.Context, raw json.RawMessage) (any, 
 		g.logger.Printf("gateway: warm new session domain: %v", snapErr)
 	}
 	return sessionCreateResult{Epoch: g.epoch, SessionID: sessionID, Rev: listRev}, nil
+}
+
+// sessionMutateResult is the answer of the session mutators: the list revision
+// the change produced, so the caller can tell its own update from an older one.
+type sessionMutateResult struct {
+	Epoch string `json:"epoch"`
+	Rev   uint64 `json:"rev"`
+}
+
+// sessionRenameParams is the body of session.rename.
+type sessionRenameParams struct {
+	SessionID string `json:"sessionId"`
+	Title     string `json:"title,omitempty"`
+}
+
+// sessionFlagParams is the body of session.archive / session.pin.
+type sessionFlagParams struct {
+	SessionID string `json:"sessionId"`
+	Archived  bool   `json:"archived,omitempty"`
+	Pinned    bool   `json:"pinned,omitempty"`
+}
+
+// renameSession sets a session's display title (TRANSPORT §5.1.1).
+//
+// Renaming is a sidebar concern, so the answer carries the list revision and
+// the change reaches every client through the list delta.
+func (g *Gateway) renameSession(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	var params sessionRenameParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	sessionID, protocolErr := requireSessionID(params.SessionID)
+	if protocolErr != nil {
+		return nil, protocolErr
+	}
+	title, protocolErr := validateSessionTitle(params.Title)
+	if protocolErr != nil {
+		return nil, protocolErr
+	}
+	chat, err := g.chatService()
+	if err != nil {
+		return nil, internalError(err)
+	}
+	renamer, ok := chat.(contracts.SessionRenamer)
+	if !ok {
+		return nil, appError(codeInternalError, "rename_unavailable", false)
+	}
+	if err := renamer.RenameSession(sessionID, title); err != nil {
+		return nil, internalError(err)
+	}
+	return g.publishSessionChange(ctx, sessionID)
+}
+
+// deleteSession removes a conversation and its transcript.
+func (g *Gateway) deleteSession(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	var params sessionRenameParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	sessionID, protocolErr := requireSessionID(params.SessionID)
+	if protocolErr != nil {
+		return nil, protocolErr
+	}
+	chat, err := g.chatService()
+	if err != nil {
+		return nil, internalError(err)
+	}
+	if err := chat.DeleteSession(sessionID); err != nil {
+		return nil, internalError(err)
+	}
+	// Keep the cached domain: it is rebuilt from the store, which no longer has
+	// the session, so watchers get a resync instead of a stale transcript.
+	return g.publishSessionChange(ctx, sessionID)
+}
+
+// setSessionFlag archives/restores or pins/unpins one session.
+func (g *Gateway) setSessionFlag(ctx context.Context, raw json.RawMessage, kind string) (any, *protocolError) {
+	var params sessionFlagParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	sessionID, protocolErr := requireSessionID(params.SessionID)
+	if protocolErr != nil {
+		return nil, protocolErr
+	}
+	chat, err := g.chatService()
+	if err != nil {
+		return nil, internalError(err)
+	}
+	var applyErr error
+	switch kind {
+	case "archive":
+		archiver, ok := chat.(contracts.SessionArchiver)
+		if !ok {
+			return nil, appError(codeInternalError, "archive_unavailable", false)
+		}
+		applyErr = archiver.SetSessionArchived(sessionID, params.Archived)
+	case "pin":
+		pinner, ok := chat.(contracts.SessionPinner)
+		if !ok {
+			return nil, appError(codeInternalError, "pin_unavailable", false)
+		}
+		applyErr = pinner.SetSessionPinned(sessionID, params.Pinned)
+	default:
+		return nil, errInvalidParams("kind", "is unknown")
+	}
+	if applyErr != nil {
+		return nil, internalError(applyErr)
+	}
+	return g.publishSessionChange(ctx, sessionID)
+}
+
+// publishSessionChange rebuilds the list (and the session, when it still
+// exists) and answers with the list revision.
+func (g *Gateway) publishSessionChange(ctx context.Context, sessionID string) (any, *protocolError) {
+	if sessionID != "" {
+		g.hub.markDirty(sessionID)
+	}
+	rev := uint64(0)
+	if err := g.hub.refreshNow(ctx, listDomain); err != nil {
+		g.logger.Printf("gateway: refresh session list after mutation: %v", err)
+	} else if snapshot, snapErr := g.hub.snapshotDomain(ctx, listDomain); snapErr == nil {
+		rev = snapshot.rev
+	}
+	return sessionMutateResult{Epoch: g.epoch, Rev: rev}, nil
+}
+
+// requireSessionID is the shared "sessionId is required" guard.
+func requireSessionID(raw string) (string, *protocolError) {
+	sessionID := strings.TrimSpace(raw)
+	if sessionID == "" {
+		return "", errInvalidParams("sessionId", "is required")
+	}
+	return sessionID, nil
 }
 
 // validateSessionTitle applies the protocol's own guard rails. The contract

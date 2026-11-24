@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Button } from 'antd';
+import { App as AntApp, Button, Input } from 'antd';
 import { Conversations } from '@ant-design/x';
-import { subscribeSettings, type SettingsRows } from '@/api/gateway';
+import {
+  archiveSession,
+  deleteSession,
+  pinSession,
+  renameSession,
+  subscribeSettings,
+  type SettingsRows,
+} from '@/api/gateway';
 import { SETTING_KEYS } from '@/design/settings-keys';
 import { useSessions } from '@/features/sessions/sessions-context';
 import { SidebarNav } from './sidebar-nav';
@@ -18,6 +25,7 @@ export function Sidebar({
   collapsed = false,
   onSelect,
   onCreate,
+  onCleared,
 }: {
   activeKey?: string;
   /** The open conversation; kept on screen as a dot when collapsed. */
@@ -25,9 +33,47 @@ export function Sidebar({
   collapsed?: boolean;
   onSelect: (sessionId: string) => void;
   onCreate: () => void;
+  /** The open conversation was deleted or archived: leave the thread view. */
+  onCleared?: () => void;
 }) {
   const { sessions, loading, error, reload } = useSessions();
   const t = useT();
+  const { modal } = AntApp.useApp();
+
+  const promptRename = (current: string) =>
+    new Promise<string | null>((resolve) => {
+      let draft = current;
+      modal.confirm({
+        title: t('shell.sessions.renameTitle'),
+        content: (
+          <Input
+            defaultValue={current}
+            maxLength={200}
+            autoFocus
+            onChange={(event) => {
+              draft = event.target.value;
+            }}
+          />
+        ),
+        okText: t('shell.sessions.save'),
+        cancelText: t('settings.revert'),
+        onOk: () => resolve(draft),
+        onCancel: () => resolve(null),
+      });
+    });
+
+  const confirmDelete = (title: string) =>
+    new Promise<boolean>((resolve) => {
+      modal.confirm({
+        title: t('shell.sessions.deleteTitle', { title }),
+        content: t('shell.sessions.deleteBody'),
+        okText: t('shell.sessions.delete'),
+        cancelText: t('settings.revert'),
+        okButtonProps: { danger: true },
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      });
+    });
 
   // `ui.sessions.showArchived` is a real switch: the list only carried archived
   // conversations when the row said so, and the row said nothing at all before
@@ -41,6 +87,36 @@ export function Sidebar({
     key: session.id,
     label: session.title || t('shell.sessions.untitled'),
   }));
+
+  const handleMenu = async (key: string, sessionId: string, title: string) => {
+    try {
+      if (key === 'rename') {
+        const next = await promptRename(title);
+        if (next === null || next.trim() === '' || next === title) return;
+        await renameSession(sessionId, next.trim());
+        return;
+      }
+      if (key === 'pin') {
+        const session = sessions.find((item) => item.id === sessionId);
+        await pinSession(sessionId, session?.pinned !== true);
+        return;
+      }
+      if (key === 'archive') {
+        await archiveSession(sessionId, true);
+        if (sessionId === activeSessionId) onCleared?.();
+        return;
+      }
+      if (key === 'delete') {
+        const confirmed = await confirmDelete(title || t('shell.sessions.untitled'));
+        if (!confirmed) return;
+        await deleteSession(sessionId);
+        if (sessionId === activeSessionId) onCleared?.();
+      }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      void modal.error({ title: t('shell.sessions.actionFailed'), content: message });
+    }
+  };
 
   return (
     <div className="zk-sidebar" data-collapsed={collapsed ? 'true' : 'false'}>
@@ -82,6 +158,32 @@ export function Sidebar({
         ) : (
           <Conversations
             items={items}
+            // The row menu is a list-level prop in @ant-design/x: a per-item
+            // `menu` is ignored, which is why the first attempt showed nothing
+            // when hovered.
+            menu={(conversation) => {
+              const session = sessions.find((item) => item.id === conversation.key);
+              return {
+                items: [
+                  { key: 'rename', label: t('shell.sessions.rename') },
+                  {
+                    key: 'pin',
+                    label: session?.pinned ? t('shell.sessions.unpin') : t('shell.sessions.pin'),
+                  },
+                  { key: 'archive', label: t('shell.sessions.archive') },
+                  { type: 'divider' as const },
+                  { key: 'delete', label: t('shell.sessions.delete'), danger: true },
+                ],
+                onClick: (info) => {
+                  info.domEvent.stopPropagation();
+                  void handleMenu(
+                    String(info.key),
+                    String(conversation.key),
+                    String(conversation.label ?? ''),
+                  );
+                },
+              };
+            }}
             activeKey={activeKey}
             onActiveChange={(key) => onSelect(String(key))}
           />
