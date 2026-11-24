@@ -63,6 +63,10 @@ export const THREAD_TABS = [
   { key: 'trajectory', labelKey: 'thread.tabs.trajectory' as const, suffix: '/trajectory' },
   { key: 'memory', labelKey: 'thread.tabs.memory' as const, suffix: '/memory' },
   { key: 'context', labelKey: 'thread.tabs.context' as const, suffix: '/context' },
+  // The file inspector had no visible way in: the route rendered, but reaching
+  // it needed a keyboard command nobody could discover (round-2 P0-5). It is a
+  // tab, like the other thread surfaces.
+  { key: 'files', labelKey: 'thread.tabs.files' as const, suffix: '/files' },
 ] as const;
 
 /**

@@ -82,6 +82,7 @@ export const zh = {
   'thread.tabs.conversation': '对话',
   'thread.tabs.trajectory': '轨迹',
   'thread.tabs.memory': '记忆',
+  'thread.tabs.files': '文件',
   'thread.tabs.context': '上下文',
   'thread.untitled': '会话',
   'trajectory.empty': '这个会话还没有工具调用。',

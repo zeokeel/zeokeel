@@ -78,6 +78,7 @@ export const en: Catalog = {
   'thread.tabs.conversation': 'Conversation',
   'thread.tabs.trajectory': 'Trajectory',
   'thread.tabs.memory': 'Memory',
+  'thread.tabs.files': 'Files',
   'thread.tabs.context': 'Context',
   'thread.untitled': 'Session',
   'trajectory.empty': 'This conversation has no tool calls yet.',
