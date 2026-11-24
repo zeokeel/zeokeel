@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -67,17 +68,42 @@ func (a *auth) checkHost(r *http.Request) *protocolError {
 // checkOrigin enforces C3: a present Origin must be our own; an absent Origin
 // means a non-browser client and then requires a Bearer token.
 func (a *auth) checkOrigin(r *http.Request) *protocolError {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		if a.hasBearer(r) {
+	// An explicit Origin is authoritative: a request that names another site is
+	// cross-site whatever credential it carries.
+	if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
+		if !strings.EqualFold(origin, a.origin) {
+			return appError(codeBadOrigin, "bad_origin", false)
+		}
+		return nil
+	}
+	// Without an Origin, a bearer header is enough: it is secret the page itself
+	// holds and another site cannot attach it (curl, the acceptance scripts, the
+	// protocol tests). The cookie is different — the browser attaches it by itself
+	// — so the cookie path below has to prove same-origin.
+	if a.hasBearer(r) {
+		return nil
+	}
+	// Browsers omit Origin on same-origin GETs (a fetch of a read model, an <img>,
+	// a navigation), so requiring it refused every cookie-authenticated GET.
+	// Sec-Fetch-Site is the browser's own statement about the request's
+	// provenance and is set on the very requests that lack Origin.
+	if site := strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")); site != "" {
+		if strings.EqualFold(site, "same-origin") {
 			return nil
 		}
-		return appError(codeUnauthorized, "unauthorized", false)
-	}
-	if !strings.EqualFold(origin, a.origin) {
 		return appError(codeBadOrigin, "bad_origin", false)
 	}
-	return nil
+	// Older browsers send neither header on GET but do send Referer.
+	if referer := strings.TrimSpace(r.Header.Get("Referer")); referer != "" {
+		if parsed, err := url.Parse(referer); err == nil &&
+			strings.EqualFold(parsed.Scheme+"://"+parsed.Host, a.origin) {
+			return nil
+		}
+		return appError(codeBadOrigin, "bad_origin", false)
+	}
+	// Nothing proves where this came from: an unprovable ambient credential is
+	// exactly what CSRF looks like.
+	return appError(codeUnauthorized, "unauthorized", false)
 }
 
 // checkToken enforces C4: the cookie or a Bearer header must carry the process
