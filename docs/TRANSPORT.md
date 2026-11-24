@@ -801,6 +801,16 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
   以免每个测试网关都去访问 GitHub。
 - capability：`update`（来自 `KeyUpdate`，headless 与 serve 都装配了 update 模块）。
 
+#### 5.1.9 连接器（`mcp`，能力页）
+
+| 方法 | 参数 | 返回 | 幂等 | 契约 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| `mcp.reload` | — | `{connectors:[{id,name,transport,tools,status,state,error}]}` | N | `MCPReloader.Reload` `plugins.go:56`；连接器页保存 `mcp.servers` 后调用，免重启生效 | ✅ 已实现 |
+
+> 连接器页是**唯一**写 `mcp.servers` 的地方，而 toolkit 只在装配时建连，所以保存后必须
+> 显式 `mcp.reload`——否则界面显示「已保存」而连接器永远不出现（round-2 C-03）。
+> 返回行里的 `state` 是 `connected|failed|idle`，`error` 是失败原因；客户端不再按中文字符串比较。
+
 ### 5.2 T2：对齐桌面所需（22 键 / 约 48 方法）
 
 #### 5.2.1 编排（team / childagents / taskboard / todo）
@@ -863,7 +873,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 |---|---|---|---|
 | `plugins.snapshot` | — → `{servers:[MCPPlugin]}` | Y | `MCP()` `plugins.go:37` |
 | `plugins.refresh` | — | N | `:40` |
-| `mcp.reload` | — | N | `MCPReloader.Reload` `:56` |
+| `mcp.reload` | — → `{connectors:[…]}` | N | `MCPReloader.Reload` `:56`；**已接线**（网关 `reloadConnectors`，连接器页保存后调用，免重启生效） |
 | `mcp.tools` | `{server}` → `{tools:[MCPTool]}` | Y | `MCPToolCatalog.Tools` `:74` |
 | `mcp.tool.enable` | `{server,tool,enabled}` | Y | `:75` |
 | `mcp.auth.status` | `{cfg}` | Y | `MCPAuthService.Status` `:182`（同步、无 I/O） |

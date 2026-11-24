@@ -28,12 +28,20 @@ type capabilitySkillDTO struct {
 }
 
 // capabilityConnectorDTO is one MCP server row.
+//
+// `State`/`Error` are the fields clients switch on; `Status` stays as the
+// human-readable sentence for compatibility. The web client compared
+// `status === "connected"` against a Chinese sentence and therefore rendered
+// every connector — healthy or broken — as idle (round-2 C-04), so the state is
+// derived once, here, instead of being guessed in the renderer.
 type capabilityConnectorDTO struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Transport string `json:"transport"`
 	Tools     int    `json:"tools"`
 	Status    string `json:"status"`
+	State     string `json:"state"`
+	Error     string `json:"error,omitempty"`
 }
 
 type capabilitiesDTO struct {
@@ -60,22 +68,53 @@ func (g *Gateway) handleCapabilities(ctx context.Context) (any, *protocolError) 
 	}
 
 	if plugins, ok := g.root.Get(contracts.KeyPlugins); ok && plugins != nil {
-		for _, plugin := range plugins.MCP() {
-			transport := "http"
-			if plugin.URL == "" {
-				transport = "stdio"
-			}
-			payload.Connectors = append(payload.Connectors, capabilityConnectorDTO{
-				ID:        plugin.Name,
-				Name:      plugin.Name,
-				Transport: transport,
-				Tools:     plugin.Tools,
-				Status:    plugin.Status,
-			})
-		}
+		payload.Connectors = connectorDTOs(plugins.MCP())
 	}
 
 	return payload, nil
+}
+
+// connectorDTOs projects the toolkit's connector rows onto the wire shape.
+func connectorDTOs(plugins []contracts.MCPPlugin) []capabilityConnectorDTO {
+	out := make([]capabilityConnectorDTO, 0, len(plugins))
+	for _, plugin := range plugins {
+		transport := "http"
+		if plugin.URL == "" {
+			transport = "stdio"
+		}
+		state, reason := connectorState(plugin.Status)
+		out = append(out, capabilityConnectorDTO{
+			ID:        plugin.Name,
+			Name:      plugin.Name,
+			Transport: transport,
+			Tools:     plugin.Tools,
+			Status:    plugin.Status,
+			State:     state,
+			Error:     reason,
+		})
+	}
+	return out
+}
+
+// connectorState maps the toolkit's status sentence onto a state a client can
+// switch on. The toolkit owns the wording (`plugins.go` statusConnected /
+// statusConnectFailed); this is the single place it is interpreted.
+func connectorState(status string) (state string, reason string) {
+	trimmed := strings.TrimSpace(status)
+	switch {
+	case trimmed == "":
+		return "idle", ""
+	case strings.HasPrefix(trimmed, "已连接"), strings.EqualFold(trimmed, "connected"):
+		return "connected", ""
+	case strings.HasPrefix(trimmed, "连接失败"):
+		rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "连接失败"))
+		rest = strings.TrimSpace(strings.TrimPrefix(rest, ":"))
+		rest = strings.TrimSpace(strings.TrimPrefix(rest, "："))
+		return "failed", rest
+	default:
+		// An unknown sentence is still information: keep it as the reason.
+		return "idle", trimmed
+	}
 }
 
 // skillDirectory is the folder one skill file lives in — the row's "source".

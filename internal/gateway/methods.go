@@ -237,6 +237,9 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"session.create": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.createSession(ctx, request.Params)
 		},
+		"mcp.reload": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.reloadConnectors(ctx)
+		},
 		"approvals.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.approvalsSnapshot(ctx)
 		},
@@ -499,6 +502,28 @@ func (g *Gateway) initialize(c *client, raw json.RawMessage) (any, *protocolErro
 			DeltaRingBytes:      DeltaRingBytes,
 		},
 	}, nil
+}
+
+// reloadConnectors rebuilds the MCP connections from the stored settings and
+// answers the fresh connector list.
+//
+// The settings page writes `mcp.servers` and the toolkit only builds its
+// connections at activation, so without this method a saved connector needed a
+// gateway restart to exist — while the page said 已保存 (round-2 C-03). The
+// reloader is optional: a composition without MCP answers a plain error instead
+// of pretending.
+func (g *Gateway) reloadConnectors(ctx context.Context) (any, *protocolError) {
+	reloader, ok := g.root.Get(contracts.KeyMCPReloader)
+	if !ok || reloader == nil {
+		return nil, appError(codeInternalError, "mcp_unavailable", false)
+	}
+	plugins, err := reloader.Reload(ctx)
+	if err != nil {
+		return nil, internalError(err)
+	}
+	return struct {
+		Connectors []capabilityConnectorDTO `json:"connectors"`
+	}{Connectors: connectorDTOs(plugins)}, nil
 }
 
 // sessionListSnapshot returns the sidebar list.
