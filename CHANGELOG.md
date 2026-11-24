@@ -71,6 +71,12 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 - **CI 的 race 检测失败**：0.3.5 新增的 `run.interject` 测试替身把 `busy` 状态跨 goroutine 读写（`Cancel` 里起协程结算），竞态在 CI 的 `-race` 上暴露。产品代码没有问题，替身补了锁；本地 `go test -race` 复验通过。
 
+## [0.3.7] - 2026-11-24
+
+### Fixed
+
+- **刚发出的消息里附件显示为 blob id**：乐观气泡只拿得到上传 id（名字要等持久化快照）。现在名字未知时显示「附件」，一轮结束后由快照换成真实文件名（实测 `zk-test.png`）。同时清理了 `run.interject` 测试替身的临时探针代码。
+
 ## [Unreleased]
 
 ## [0.3.0] - 2026-11-24

@@ -247,7 +247,9 @@ export function Transcript({
                           <span className="zk-attachments" data-testid="message-attachments">
                             {(content as ZeoMessage).attachments!.map((item) => (
                               <Tag key={item.id} className="zk-attachments__item">
-                                {item.name}
+                                {/* The optimistic row only knows the upload id; the
+                                    durable snapshot brings the real name. */}
+                                {item.name && item.name !== item.id ? item.name : t('composer.attachment')}
                               </Tag>
                             ))}
                           </span>
