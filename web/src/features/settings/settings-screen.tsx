@@ -249,6 +249,10 @@ function SettingsPageForm({
     level: 'settingsDirtyGuard',
     active: true,
     onEscape: () => {
+      // A modal, popover or select dropdown owns Esc while it is open: letting
+      // the guard also fire navigated away from the page (or stacked a discard
+      // prompt) on top of closing the overlay (round-3 model audit P1-B).
+      if (overlayOwnsEscape()) return false;
       if (dirty) {
         setDiscardOpen(true);
         return true;
@@ -399,6 +403,26 @@ function SettingsPageForm({
         }}
       />
     </div>
+  );
+}
+
+/**
+ * True when a portal overlay is on screen and should consume Esc itself.
+ *
+ * antd listens on the overlay element (bubble phase), so the guard declining the
+ * key is enough: the overlay still closes, and the page stays put.
+ */
+function overlayOwnsEscape(): boolean {
+  if (typeof document === 'undefined') return false;
+  const visible = (element: Element | null): boolean => {
+    if (!element) return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  };
+  return (
+    visible(document.querySelector('.ant-modal-wrap')) ||
+    visible(document.querySelector('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')) ||
+    visible(document.querySelector('.ant-popover:not(.ant-popover-hidden)'))
   );
 }
 

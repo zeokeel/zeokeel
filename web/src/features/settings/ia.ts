@@ -383,6 +383,11 @@ export function fieldValue(field: SettingsField, rows: SettingsRows): string {
 export function pageValues(page: SettingsPage, rows: SettingsRows): Record<string, string> {
   const values: Record<string, string> = {};
   for (const section of page.sections) {
+    // A section rendered by its own component owns its rows: it writes them as
+    // the user acts, and a page draft that also carried them would write the
+    // snapshot back over the component's newer value (round-3 model audit P0-A:
+    // the footer 保存 resurrected deleted models and rolled back renames).
+    if (section.component) continue;
     for (const field of section.fields) values[field.key] = fieldValue(field, rows);
   }
   return values;
@@ -396,6 +401,7 @@ export function changedRows(
 ): Array<{ key: string; value: string }> {
   const changed: Array<{ key: string; value: string }> = [];
   for (const section of page.sections) {
+    if (section.component) continue;
     for (const field of section.fields) {
       const next = values[field.key] ?? '';
       if (next !== fieldValue(field, rows)) changed.push({ key: field.key, value: next });

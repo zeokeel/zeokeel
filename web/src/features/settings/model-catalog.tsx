@@ -55,9 +55,21 @@ function parseRows(raw: string): Parsed {
   if (!raw.trim()) return { rows: [], broken: false };
   try {
     const decoded = JSON.parse(raw);
-    return Array.isArray(decoded)
-      ? { rows: decoded as CatalogRow[], broken: false }
-      : { rows: [], broken: true };
+    if (!Array.isArray(decoded)) return { rows: [], broken: true };
+    // `[null]`, `[{}]` and `[1,2,3]` are valid JSON but not rows: rendering
+    // them crashed the whole settings tree on `row.id` (round-3 P0-B). A row
+    // needs an object with a non-empty string id; anything else is reported as
+    // broken so the user gets the recovery action instead of a white page.
+    const rows: CatalogRow[] = [];
+    for (const entry of decoded) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        return { rows: [], broken: true };
+      }
+      const id = (entry as Record<string, unknown>).id;
+      if (typeof id !== 'string' || id.trim() === '') return { rows: [], broken: true };
+      rows.push(entry as CatalogRow);
+    }
+    return { rows, broken: false };
   } catch {
     return { rows: [], broken: true };
   }
@@ -153,9 +165,10 @@ export function ModelCatalogEditor() {
   const remove = async (row: CatalogRow) => {
     const next = catalog.filter((item) => item.id !== row.id);
     await save(next);
-    if (String(row.id) === current) {
-      await setDefault(next[0] ? String(next[0].id) : '');
-    }
+    // Whatever was default stops existing in two cases: the deleted row was the
+    // default, or the default was already stale and this was the last row.
+    const stillExists = next.some((item) => item.id === current);
+    if (!stillExists) await setDefault(next[0] ? String(next[0].id) : '');
   };
 
   return (
@@ -227,7 +240,9 @@ export function ModelCatalogEditor() {
                       row.id,
                       (row.baseURL as string) || t('settings.model.inheritProvider'),
                       row.apiKey ? t('settings.model.keySet') : t('settings.model.keyMissing'),
-                      row.contextWindow ? `${Math.round(row.contextWindow / 1024)}k` : '',
+                      typeof row.contextWindow === 'number' && Number.isFinite(row.contextWindow) && row.contextWindow > 0
+                        ? `${Math.round(row.contextWindow / 1024)}k`
+                        : '',
                       row.family ? `${t('settings.model.family')}: ${row.family}` : '',
                     ]
                       .filter(Boolean)
@@ -353,7 +368,7 @@ export function ModelCatalogEditor() {
               {
                 validator: (_, value: number | undefined) => {
                   if (value === undefined || value === null || value === 0) return Promise.resolve();
-                  return value >= 1024 && value <= 2_000_000
+                  return Number.isInteger(value) && value >= 1024 && value <= 2_000_000
                     ? Promise.resolve()
                     : Promise.reject(new Error(t('settings.model.err.contextWindow')));
                 },
@@ -374,6 +389,9 @@ export function ModelCatalogEditor() {
                 validator: (_, value: number | undefined) => {
                   const window = Number(getFieldValue('contextWindow') ?? 0);
                   if (!value || !window) return Promise.resolve();
+                  if (!Number.isInteger(value)) {
+                    return Promise.reject(new Error(t('settings.model.err.integer')));
+                  }
                   return value <= window
                     ? Promise.resolve()
                     : Promise.reject(new Error(t('settings.model.err.maxTokens')));
