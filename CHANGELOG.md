@@ -6,6 +6,16 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-11-24
+
+### Fixed
+
+- **本地 `gofmt` 与 CI 的 `gofmt` 不是同一个二进制**：`scripts/verify.sh` 用的是 PATH 上第一个
+  `gofmt`（本机是 Go 1.26.5），而 `go.mod` 钉的是 1.27.3，两者对同一处对齐的格式化结果不同——于是
+  本地门禁绿、v0.3.8 的 CI 第一步红。现在 `verify.sh` 默认取 `$(go env GOROOT)/bin/gofmt`，即真正
+  用来构建的那个 toolchain；该文件也按 1.27.3 重新格式化。
+
+
 ## [0.3.8] - 2026-11-24
 
 ### Added
