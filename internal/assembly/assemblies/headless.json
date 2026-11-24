@@ -32,6 +32,11 @@
       "config": {}
     },
     {
+      "id": "insights",
+      "module": "zeokeel/insights",
+      "config": {}
+    },
+    {
       "id": "skills",
       "module": "zeokeel/skills",
       "config": {}

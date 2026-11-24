@@ -140,6 +140,7 @@ func TestProductsAndEntries(t *testing.T) {
 	}
 	wantHeadless := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
+		"zeokeel/insights",
 		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/hosttools", "zeokeel/memorystore",
 		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
 	}
@@ -247,7 +248,7 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 
 	instances := loader.Instances()
 	wantIDs := []string{
-		"appinfo", "store", "goal", "approvals", "workspace", "skills", "sandbox", "toolkit", "hosttools", "memorystore",
+		"appinfo", "store", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "hosttools", "memorystore",
 		"agent", "automation", "update", "importer", "acp",
 	}
 	gotIDs := make([]string, len(instances))
@@ -421,8 +422,8 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	}()
 
 	instances := loader.Instances()
-	if len(instances) != 15 {
-		t.Fatalf("headless instances = %d, want 15", len(instances))
+	if len(instances) != 16 {
+		t.Fatalf("headless instances = %d, want 16", len(instances))
 	}
 	instance := instances[0]
 	if instance.ID() != "appinfo" || instance.ModuleID() != "zeokeel/appinfo" {
@@ -431,9 +432,10 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	if state := instance.State(); state != cordis.Active {
 		t.Fatalf("appinfo state = %s, want Active", state)
 	}
-	hostInstance := instances[8]
+	// insights follows workspace, so hosttools shifts to index 9.
+	hostInstance := instances[9]
 	if hostInstance.ID() != "hosttools" || hostInstance.ModuleID() != "zeokeel/hosttools" {
-		t.Fatalf("headless instance[8] = %s/%s, want hosttools/zeokeel/hosttools",
+		t.Fatalf("headless instance[9] = %s/%s, want hosttools/zeokeel/hosttools",
 			hostInstance.ID(), hostInstance.ModuleID())
 	}
 	if state := hostInstance.State(); state != cordis.Active {
@@ -574,4 +576,36 @@ func TestMain(m *testing.M) {
 		return
 	}
 	os.Exit(m.Run())
+}
+
+// A module can be registered and never composed. That is exactly how the Insights
+// screen died: `zeokeel/insights` was in Registry() but in no product's entries, so
+// `KeyInsights` was never provided at runtime and the screen's endpoint answered
+// with zeros. This test makes the gap impossible to leave silently.
+func TestEveryRegisteredModuleIsComposedIntoAProduct(t *testing.T) {
+	entries, err := assembly.Entries(assembly.ProductHeadless)
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	composed := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		composed[entry.Module] = true
+	}
+	// Registered on purpose, composed on purpose never: nothing consumes
+	// KeyModelCatalog (the agent reads the modelcatalog.models settings row
+	// directly), so composing it would add a settings migration with no reader.
+	intentionallyUncomposed := map[string]string{
+		"zeokeel/modelcatalog": "no consumer of KeyModelCatalog: the agent reads the modelcatalog.models settings row directly",
+		"zeokeel/host/group":   "a no-op container that only carries an Entry.Children subtree; no product nests one since the UI group retired",
+	}
+	for _, info := range assembly.Registry().Modules() {
+		if composed[info.ID] {
+			continue
+		}
+		if reason, ok := intentionallyUncomposed[info.ID]; ok && reason != "" {
+			continue
+		}
+		t.Fatalf("module %q is registered but composed into no product; either add it to "+
+			"assemblies/headless.json or record why it is intentionally uncomposed", info.ID)
+	}
 }
