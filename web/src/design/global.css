@@ -1378,6 +1378,14 @@ body {
   width: 100%;
 }
 
+/* A long name must not wrap to five lines; the tooltip keeps it readable. */
+.zk-skills-table td,
+.zk-skills-table th {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .zk-connector-list {
   list-style: none;
   margin: 0;

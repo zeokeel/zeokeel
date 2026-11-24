@@ -403,7 +403,7 @@ export const zh = {
   'screen.capabilities.err.nameLong': '名称最多 80 个字符',
   'screen.capabilities.err.nameTaken': '已经有同名连接器',
   'screen.capabilities.err.notApplied': '「{name}」没有生效：同名或同地址的连接器已存在，网关会跳过重复项。',
-  'screen.capabilities.noSkills.hint': '技能来自宿主的技能目录（仓库内 .agents/skills 或数据目录下的 skills/）；放进新技能后刷新即可被列出。',
+  'screen.capabilities.noSkills.hint': '技能来自工作区根下的 skills/、.agents/skills、.zeokeel/skills（没有打开工作区时用数据目录下的 skills/）；放进新技能后刷新即可被列出。',
   'screen.capabilities.err.name': '请填写名称',
   'screen.capabilities.err.command': '请填写要运行命令',
   'screen.capabilities.err.url': '需要以 http:// 或 https:// 开头，且不能包含空格',

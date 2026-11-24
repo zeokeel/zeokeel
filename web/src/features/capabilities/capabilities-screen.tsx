@@ -240,7 +240,13 @@ export function CapabilitiesScreen() {
     // silently; the row would sit at 空闲 forever with no explanation (F5). The
     // reload from persist is authoritative — a second call rebuilt every
     // connection again for the same save (N4).
-    if (result && !result.connectors.some((item) => item.name === row.name)) {
+    if (
+      result &&
+      // A disabled connector is *supposed* to be absent from the live list, so
+      // its absence is only a failure when it is not in the disabled list either.
+      !result.disabled.includes(row.name) &&
+      !result.connectors.some((item) => item.name === row.name)
+    ) {
       setNotice(null);
       setError(t('screen.capabilities.err.notApplied', { name: row.name }));
     }
@@ -278,7 +284,14 @@ export function CapabilitiesScreen() {
               {t('screen.capabilities.addConnector')}
             </Button>
           ) : null}
-          <Button onClick={() => void refresh()} loading={busy} data-testid="capabilities-refresh">
+          <Button
+            onClick={() => void refresh()}
+            loading={busy}
+            // Reloading from a broken row would rebuild the connections from a
+            // value nobody can read, silently dropping the live ones (R3-3).
+            disabled={parsed.broken}
+            data-testid="capabilities-refresh"
+          >
             {t('screen.capabilities.refresh')}
           </Button>
         </div>
@@ -337,12 +350,20 @@ export function CapabilitiesScreen() {
                     className="zk-skills-table"
                     dataSource={data.skills}
                     columns={[
-                      { title: t('screen.capabilities.col.name'), dataIndex: 'name', width: 160 },
+                      // Percentages, not fixed pixels: with `table-layout: fixed`
+                      // a 160 + 200 sum wider than the container squeezes the only
+                      // automatic column (说明) to 0px (round-3 conn audit F2@390).
+                      {
+                        title: t('screen.capabilities.col.name'),
+                        dataIndex: 'name',
+                        width: '38%',
+                        ellipsis: true,
+                      },
                       { title: t('screen.capabilities.col.description'), dataIndex: 'description' },
                       {
                         title: t('screen.capabilities.col.source'),
                         dataIndex: 'source',
-                        width: 200,
+                        width: '34%',
                         // Absolute paths used to widen the column until the
                         // description was one character per line (round-2 C-08).
                         render: (value: string) => (

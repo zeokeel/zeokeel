@@ -399,7 +399,7 @@ export const en: Catalog = {
   'screen.capabilities.err.nameLong': 'Name is at most 80 characters',
   'screen.capabilities.err.nameTaken': 'A connector with this name already exists',
   'screen.capabilities.err.notApplied': '"{name}" did not take effect: a connector with the same name or endpoint already exists and the gateway skips duplicates.',
-  'screen.capabilities.noSkills.hint': 'Skills come from the host skill directories (.agents/skills in the repo, or skills/ in the data directory); a newly added skill appears after a refresh.',
+  'screen.capabilities.noSkills.hint': 'Skills come from skills/, .agents/skills and .zeokeel/skills under the workspace root (the data directory when no workspace is open); a newly added skill appears after a refresh.',
   'screen.capabilities.err.name': 'Give the connector a name',
   'screen.capabilities.err.command': 'Give the command to run',
   'screen.capabilities.err.url': 'Must start with http:// or https:// and contain no spaces',
