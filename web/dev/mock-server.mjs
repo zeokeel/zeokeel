@@ -321,6 +321,8 @@ const broadcastSessionReset = (session) => {
 const taskBoards = new Map();
 /** Team fixture: the browser's team screen reads these. */
 const mockTeam = { members: [], activities: [] };
+/** Last interjections, so the fixture behaves like the gateway without inventing a run. */
+const intercepted = [];
 const taskBoard = (sessionId) => {
   if (!taskBoards.has(sessionId)) taskBoards.set(sessionId, { rev: 1, tasks: [] });
   return taskBoards.get(sessionId);
@@ -1582,6 +1584,16 @@ const wsDispatch = (client, message) => {
       const since = Number(params.sinceRev ?? 0);
       const view = contextView(sessionId);
       return reply({ epoch: WS_EPOCH, rev: view.rev, resync: since !== view.rev });
+    }
+    case 'run.interject': {
+      // Offline fixture: no real run to steer, so acknowledge and record the request.
+      const sessionId = String(params.sessionId ?? '').trim();
+      const text = String(params.text ?? '').trim();
+      if (!sessionId) return fail(1003, 'sessionId is required');
+      if (!text) return fail(1003, 'text is required');
+      const attachments = Array.isArray(params.attachments) ? params.attachments.length : 0;
+      intercepted.push({ sessionId, text, attachments });
+      return reply({ ok: true });
     }
     case 'team.snapshot': {
       return reply({ members: mockTeam.members.slice(), activities: mockTeam.activities.slice() });

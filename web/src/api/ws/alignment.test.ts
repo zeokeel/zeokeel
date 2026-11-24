@@ -72,6 +72,7 @@ const CLIENT_METHODS = [
   'plan.snapshot',
   'artifacts.snapshot',
   'run.cancel',
+  'run.interject',
   'prompts.snapshot',
   'prompts.subscribe',
   'prompts.enqueue',

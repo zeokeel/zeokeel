@@ -67,6 +67,8 @@ export interface FakeState {
   approvals: FakeApproval[];
   approvalMode: string;
   teamMembers: Array<Record<string, unknown>>;
+  /** Interjected texts, recorded so a test can assert the steering reached the gateway. */
+  interjected: string[];
   teamActivities: Array<Record<string, unknown>>;
   settings: Record<string, string>;
   ask: { id: string; text: string; options?: string[]; answer?: string } | null;
@@ -96,6 +98,7 @@ export function defaultState(): FakeState {
     approvals: [],
     approvalMode: 'workspace',
     teamMembers: [],
+    interjected: [],
     teamActivities: [],
     // The language row decides the UI locale; tests that assert Chinese copy
     // pin it here instead of depending on the machine's navigator.language.
@@ -506,6 +509,11 @@ export class FakeGateway {
     if (method === 'context.subscribe') {
       const since = Number(params.sinceRev ?? 0);
       reply({ epoch: 'fake', rev: 1, resync: since !== 1 });
+      return;
+    }
+    if (method === 'run.interject') {
+      this.state.interjected = [...(this.state.interjected ?? []), String(params.text ?? '')];
+      reply({ ok: true });
       return;
     }
     if (method === 'team.snapshot') {
