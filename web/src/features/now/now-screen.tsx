@@ -62,7 +62,25 @@ export function NowScreen() {
   return (
     <div className="zk-thread">
       <div className="zk-thread__body">
+        <div className="zk-now__welcome">
         <EmptyState title={t('now.prompt.empty')} description={t('now.prompt.description')} />
+        {/* Three concrete starts: an empty landing screen with one placeholder
+            asks the user to invent the first move (round-2 composer audit). A
+            click fills the composer and leaves the decision to edit or send. */}
+        <div className="zk-now__suggestions" data-testid="now-suggestions">
+          {(['explain', 'review', 'automate'] as const).map((key) => (
+            <button
+              key={key}
+              type="button"
+              className="zk-now__suggestion"
+              data-testid={`now-suggestion-${key}`}
+              onClick={() => setDraft(t(`now.suggest.${key}`))}
+            >
+              {t(`now.suggest.${key}`)}
+            </button>
+          ))}
+        </div>
+        </div>
       </div>
       {error ? (
         <div className="zk-msg-error" role="alert">

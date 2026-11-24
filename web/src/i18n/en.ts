@@ -48,6 +48,9 @@ export const en: Catalog = {
   // ----------------------------------------------------------------- now --
   'now.title': 'Now',
   'now.placeholder': 'Say something…',
+  'now.suggest.explain': 'Explain this repository and which files I should read first',
+  'now.suggest.review': 'Review the latest changes for obvious problems',
+  'now.suggest.automate': 'Summarise my unread items every morning',
   'now.prompt.empty': 'What is on your mind?',
   'now.prompt.description': 'Type a sentence to start. I will stop and ask when approval is needed.',
   'now.command.inbox': 'Open the inbox',
@@ -677,5 +680,6 @@ export const en: Catalog = {
   'composer.attachTooLarge': 'Attachment exceeds 10 MB',
   'composer.attachFailed': 'Could not upload the attachment',
   'composer.rate': '~{rate} tok/s',
+  'composer.dropHint': 'Drop to attach',
   'composer.attachment': 'Attachment',
 };

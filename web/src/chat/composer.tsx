@@ -4,6 +4,8 @@ import {
   type ComponentRef,
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type ClipboardEvent as ReactClipboardEvent,
+  type DragEvent as ReactDragEvent,
 } from 'react';
 import { Sender } from '@ant-design/x';
 import { ArrowUpOutlined } from '@ant-design/icons';
@@ -299,6 +301,42 @@ export function Composer({
     return undefined;
   };
 
+  const [dragging, setDragging] = useState(false);
+
+  const attachFromList = (files: File[]) => {
+    if (files.length === 0 || !onAttachFiles) return;
+    onAttachFiles(files);
+  };
+
+  const handlePaste = (event: ReactClipboardEvent<HTMLDivElement>) => {
+    const files = Array.from(event.clipboardData?.files ?? []);
+    if (files.length === 0) return;
+    // Prevent the browser from also pasting the image's markup/text.
+    event.preventDefault();
+    attachFromList(files);
+  };
+
+  const handleDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer?.types.includes('Files')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setDragging(true);
+  };
+
+  const handleDragLeave = (event: ReactDragEvent<HTMLDivElement>) => {
+    // Leaving for a child element must not clear the overlay.
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    setDragging(false);
+  };
+
+  const handleDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    const files = Array.from(event.dataTransfer?.files ?? []);
+    setDragging(false);
+    if (files.length === 0) return;
+    event.preventDefault();
+    attachFromList(files);
+  };
+
   const empty = value.trim() === '';
   const hintKey =
     resolvedPhase === 'connecting'
@@ -359,8 +397,21 @@ export function Composer({
       className="zk-composer"
       data-testid="composer"
       data-disabled={disabled ? 'true' : 'false'}
+      data-dragging={dragging ? 'true' : 'false'}
       onMouseDown={focusInputOnBlank}
+      // Paste and drop are how people actually attach things: a screenshot goes
+      // through the clipboard and a file through the window. Neither was wired,
+      // so the only path was the paperclip (round-2 composer audit).
+      onPaste={handlePaste}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
+      {dragging ? (
+        <div className="zk-composer__drop" aria-hidden="true">
+          {t('composer.dropHint')}
+        </div>
+      ) : null}
       {menuOpen ? (
         <div className="zk-slash" role="listbox" aria-label={t('composer.slash')}>
           {matches.map((command, index) => (

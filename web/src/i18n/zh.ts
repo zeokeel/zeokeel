@@ -52,6 +52,9 @@ export const zh = {
   // ----------------------------------------------------------------- now --
   'now.title': '现在',
   'now.placeholder': '说点什么…',
+  'now.suggest.explain': '说说这个仓库的结构，以及我应该先看哪几个文件',
+  'now.suggest.review': '检查最近的改动有没有明显问题',
+  'now.suggest.automate': '每天早上帮我汇总一次未读事项',
   'now.prompt.empty': '现在，说点什么',
   'now.prompt.description': '输入一句话开始；需要审批时我会停下来问你。',
   'now.command.inbox': '打开收件箱',
@@ -681,6 +684,7 @@ export const zh = {
   'composer.attachTooLarge': '附件超过 10 MB',
   'composer.attachFailed': '附件上传失败',
   'composer.rate': '~{rate} tok/s',
+  'composer.dropHint': '松手即添加附件',
   'composer.attachment': '附件',
 } as const;
 
