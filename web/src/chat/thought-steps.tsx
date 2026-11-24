@@ -122,25 +122,48 @@ function toolItem(step: ToolStep, t: ReturnType<typeof useT>): ThoughtChainItemT
   };
 }
 
+/**
+ * The wire carries `input` as the arguments **text** the model produced, so a
+ * preview that treats it as an object sees nothing, and one that stringifies it
+ * again shows `"{\"command\":…}"` — escaped quotes and `\uXXXX` instead of the
+ * command. Parse once; a string that is not JSON stays a string.
+ */
+export function parsedToolInput(input: unknown): unknown {
+  if (typeof input !== 'string') return input;
+  const text = input.trim();
+  if (!text.startsWith('{') && !text.startsWith('[')) return input;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return input;
+  }
+}
+
 /** One-line preview: the target of the call, clipped, from its arguments. */
 function toolSummaryLine(step: ToolStep): string {
   if (!step.input) return '';
-  const input = step.input as Record<string, unknown>;
-  for (const key of [
-    'command',
-    'path',
-    'pattern',
-    'query',
-    'url',
-    'description',
-    'subject',
-    'name',
-  ]) {
-    const value = input[key];
-    if (typeof value === 'string' && value.trim() !== '') return clip(value);
+  const parsed = parsedToolInput(step.input);
+  if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const input = parsed as Record<string, unknown>;
+    for (const key of [
+      'command',
+      'path',
+      'pattern',
+      'query',
+      'url',
+      'description',
+      'subject',
+      'name',
+    ]) {
+      const value = input[key];
+      if (typeof value === 'string' && value.trim() !== '') return clip(value);
+    }
   }
+  // Not an object we know how to read: show the arguments as they are. A string
+  // is already text (never stringify it again); anything else is JSON.
+  if (typeof parsed === 'string') return clip(parsed);
   try {
-    return clip(JSON.stringify(step.input));
+    return clip(JSON.stringify(parsed));
   } catch {
     return '';
   }

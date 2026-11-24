@@ -173,7 +173,21 @@ export function KeyValueList({ entries }: { entries: Array<[string, string]> }) 
 /** Any value as display text: strings verbatim, everything else as JSON. */
 export function valueText(value: unknown): string {
   if (value === null || value === undefined) return '';
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') {
+    // Tool arguments arrive as JSON text. Printed verbatim, a Chinese payload reads
+    // `\u7528\u6237…` and every quote is escaped; decoded, it reads like the JSON the
+    // model actually wrote. Anything that is not JSON stays verbatim — a shell
+    // command is not improved by quoting it.
+    const text = value.trim();
+    if (text.startsWith('{') || text.startsWith('[')) {
+      try {
+        return JSON.stringify(JSON.parse(text), null, 2);
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
   try {
     return JSON.stringify(value, null, 2);
   } catch {
