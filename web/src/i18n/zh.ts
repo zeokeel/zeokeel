@@ -507,6 +507,21 @@ export const zh = {
   'notFound.title': '这个地址没有页面',
   'notFound.description': '链接可能已经失效，或者页面还没做。',
   'notFound.back': '回到现在',
+  'ask.title': '需要你的确认',
+  'ask.cancel': '取消',
+  'ask.submit': '提交',
+  'ask.other': '其他…',
+  'ask.field': '自定义回答',
+  'ask.hint': 'Esc = 取消 · 选择选项即可提交 · 「其他…」可自定义回答',
+  'screen.automation.openSession': '打开会话',
+  'team.inheritModel': '跟随父会话',
+  'plan.title': '计划待审阅',
+  'plan.approve': '批准',
+  'plan.cancel': '取消计划',
+  'plan.continue': '继续规划',
+  'plan.field': '告诉 agent 计划需要怎么改…',
+  'plan.hint': '输入反馈后按 Enter = 继续规划 · 点击「批准」批准计划 · Esc 不会取消计划',
+  'plan.approvedContinue': '计划已批准，开始执行。',
 } as const;
 
 export type MessageKey = keyof typeof zh;

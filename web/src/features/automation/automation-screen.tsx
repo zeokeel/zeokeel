@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import {
   Button,
   Empty,
@@ -290,6 +291,15 @@ export function AutomationScreen() {
                   {run.startedAt ? new Date(run.startedAt).toLocaleString() : '—'}
                 </Typography.Text>
                 <Typography.Text>{run.error ? run.error : (run.summary ?? '')}</Typography.Text>
+                {run.sessionId ? (
+                  <Link
+                    to={`/c/${run.sessionId}`}
+                    onClick={() => setHistory(null)}
+                    data-testid="automation-run-session"
+                  >
+                    {t('screen.automation.openSession')}
+                  </Link>
+                ) : null}
               </li>
             ))}
           </ul>

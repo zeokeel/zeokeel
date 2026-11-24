@@ -100,7 +100,9 @@ export function TeamMemberDetail({ memberId }: { memberId: string }) {
       </Space>
 
       <Descriptions size="small" column={1} style={{ marginTop: 12 }}>
-        <Descriptions.Item label={t('team.col.model')}>{member.model ?? '—'}</Descriptions.Item>
+        <Descriptions.Item label={t('team.col.model')}>
+          {member.model || t('team.inheritModel')}
+        </Descriptions.Item>
         <Descriptions.Item label={t('team.detail.created')}>
           {member.created ? new Date(member.created).toLocaleString() : '—'}
         </Descriptions.Item>

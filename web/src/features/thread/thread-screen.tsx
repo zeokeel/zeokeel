@@ -5,6 +5,8 @@ import { Composer, resolveComposerPhase } from '@/chat/composer';
 import type { SlashCommand } from '@/chat/slash-commands';
 import { Transcript } from '@/chat/transcript';
 import { ApprovalDock } from '@/features/approvals/approval-dock';
+import { AskDialog } from '@/features/thread/ask-dialog';
+import { PlanDialog } from '@/features/thread/plan-dialog';
 import { useApprovals } from '@/features/approvals/approvals-context';
 import { useSessions } from '@/features/sessions/sessions-context';
 import { useEscClaim, useShortcut } from '@/keyboard/keyboard-provider';
@@ -182,19 +184,23 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
     chat.onRequest({ sessionId, regenerate: true });
   };
 
+  // One delivery rule for every text this screen sends (composer, plan approval):
+  // while a run is active the gateway rejects a second one (409), so the text goes
+  // into the backend queue and runs right after — the same path the composer takes.
+  const deliver = (text: string): boolean => {
+    if (!text.trim()) return false;
+    if (chat.isRequesting) {
+      void queue.enqueue(text);
+      return true;
+    }
+    chat.onRequest({ sessionId, text });
+    return true;
+  };
+
   const send = () => {
     const text = draft.trim();
-    if (!text) return;
-    if (chat.isRequesting) {
-      // A5/B13: a prompt typed during a run waits in the backend queue. If this
-      // gateway serves the inbox as the WS `prompts` domain and the client is
-      // not switched over yet, keep the text and say so — never drop it.
-      setDraft('');
-      void queue.enqueue(text);
-      return;
-    }
+    if (!deliver(text)) return;
     setDraft('');
-    chat.onRequest({ sessionId, text });
   };
 
   const sendQueueHead = async () => {
@@ -286,6 +292,8 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
         )}
       </div>
 
+      <PlanDialog onContinue={deliver} />
+      <AskDialog sessionId={sessionId} />
       <ApprovalDock currentSessionId={sessionId} />
 
       {/* B12: process-wide board (no sessionId) — tasks are not per-conversation

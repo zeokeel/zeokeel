@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { Composer } from '@/chat/composer';
 import type { SlashCommand } from '@/chat/slash-commands';
 import { ApprovalDock } from '@/features/approvals/approval-dock';
+import { AskDialog } from '@/features/thread/ask-dialog';
 import { useApprovals } from '@/features/approvals/approvals-context';
 import { useSessions } from '@/features/sessions/sessions-context';
 import { EmptyState } from '@/ui/empty-state';
@@ -63,6 +64,7 @@ export function NowScreen() {
           {error}
         </div>
       ) : null}
+      <AskDialog />
       <ApprovalDock />
       <Composer
         value={draft}

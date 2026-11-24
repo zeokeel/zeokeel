@@ -529,6 +529,29 @@ export function subscribeWorkspaces(listener: (value: WorkspaceSnapshot) => void
   return workspacesDomain.subscribe(listener);
 }
 
+/**
+ * Answer a pending ask (§5.1.5). The gateway resolves the tool call with the text,
+ * so the model sees exactly what the user picked — including a custom answer.
+ */
+export async function answerAsk(id: string, answer: string): Promise<void> {
+  await client().request('ask.answer', { id, ...(answer ? { answer } : {}) });
+}
+
+/** Cancel a pending ask: the tool resolves as cancelled, the run keeps going. */
+export async function cancelAsk(id: string): Promise<void> {
+  await client().request('ask.cancel', { id });
+}
+
+/**
+ * Exit one plan review (§5.1.6). `action` is "approve", "cancel" or "status";
+ * "continue with feedback" is not a plan action — it is a normal message that
+ * starts the revision run.
+ */
+export async function exitPlan(action: 'approve' | 'cancel' | 'status'): Promise<PlanState> {
+  const result = await client().request<{ state?: string }>('plan.exit', { action });
+  return { state: result?.state ?? '', content: '' };
+}
+
 export function subscribeAsk(listener: (pending: AskPending | null) => void): () => void {
   routeNotifications();
   client().start();

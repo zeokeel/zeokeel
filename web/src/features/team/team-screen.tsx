@@ -167,7 +167,7 @@ export function TeamScreen() {
               title: t('team.col.model'),
               dataIndex: 'model',
               width: 200,
-              render: (value: string | undefined) => value ?? '—',
+              render: (value: string | undefined) => value || t('team.inheritModel'),
             },
             {
               title: t('team.col.last'),
