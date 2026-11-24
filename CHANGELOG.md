@@ -65,6 +65,12 @@ All notable changes to ZeoKeel are documented here. The format follows
 - 思考步骤显示本轮实测耗时（`usage.durationMs`，原生的「用时」）。
 - 一轮结束后转录切回持久化快照（附件名、结算工具态、服务端改写都以快照为准；快照更短时保持现状，绝不删消息）。
 
+## [0.3.6] - 2026-11-24
+
+### Fixed
+
+- **CI 的 race 检测失败**：0.3.5 新增的 `run.interject` 测试替身把 `busy` 状态跨 goroutine 读写（`Cancel` 里起协程结算），竞态在 CI 的 `-race` 上暴露。产品代码没有问题，替身补了锁；本地 `go test -race` 复验通过。
+
 ## [Unreleased]
 
 ## [0.3.0] - 2026-11-24
