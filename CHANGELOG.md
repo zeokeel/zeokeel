@@ -6,6 +6,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-24
+
 ### Added
 
 - **GitHub Releases 自动更新**（TRANSPORT §5.1.12）：更新后端（检查 GitHub Releases、校验并暂存本平台资产、
