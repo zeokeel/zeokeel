@@ -1385,6 +1385,18 @@ body {
   color: var(--zk-danger-text) !important;
 }
 
+/* Solid destructive buttons: antd fills them with `--ant-color-error`, which is
+ * white-text 3.27:1 in light and 4.24:1 in dark. The palette's AA danger colour
+ * is the fill, and the page background plays the text colour — 6.47:1 light,
+ * ~10:1 dark, both from tokens. */
+.ant-btn-dangerous.ant-btn-primary,
+.ant-btn-dangerous.ant-btn-primary:hover,
+.ant-btn-dangerous.ant-btn-primary:active {
+  background: var(--zk-danger-text) !important;
+  border-color: var(--zk-danger-text) !important;
+  color: var(--zk-bg-base) !important;
+}
+
 .zk-session-pin {
   display: inline-flex;
   align-items: center;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { App as AntApp, Button, Input } from 'antd';
 import { Conversations } from '@ant-design/x';
 import {
@@ -39,23 +39,35 @@ export function Sidebar({
   const { sessions, loading, error, reload } = useSessions();
   const t = useT();
   const { modal } = AntApp.useApp();
+  // The trigger that opened the menu, so focus can come back to it: antd closes
+  // the dropdown on Esc/selection and leaves the document focused on BODY
+  // (round-3 session audit F2b).
+  const lastTrigger = useRef<HTMLButtonElement | null>(null);
 
   const promptRename = (current: string) =>
     new Promise<string | null>((resolve) => {
       let draft = current;
-      modal.confirm({
-        title: t('shell.sessions.renameTitle'),
-        content: (
+      // Controlled: the field must show what will be stored. A plain maxLength
+      // counts UTF-16 units (100 emoji looked like the limit) and an onChange
+      // that only truncated the draft let the input display 201 characters while
+      // saving 200 (round-3 session audit, note).
+      const RenameField = ({ onDraft }: { onDraft: (value: string) => void }) => {
+        const [text, setText] = useState(current);
+        return (
           <Input
-            defaultValue={current}
+            value={text}
             autoFocus
-            // maxLength counts UTF-16 units, so 100 emoji looked like the limit;
-            // the gateway counts runes (round-3 session audit, note).
             onChange={(event) => {
-              draft = [...event.target.value].slice(0, 200).join('');
+              const next = [...event.target.value].slice(0, 200).join('');
+              setText(next);
+              onDraft(next);
             }}
           />
-        ),
+        );
+      };
+      modal.confirm({
+        title: t('shell.sessions.renameTitle'),
+        content: <RenameField onDraft={(value) => { draft = value; }} />,
         okText: t('shell.sessions.save'),
         cancelText: t('settings.revert'),
         onOk: () => resolve(draft),
@@ -107,6 +119,18 @@ export function Sidebar({
         }
       : {}),
   }));
+
+  // Esc closes the dropdown natively; without this the focus dies with it.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      const open = document.querySelector('.ant-dropdown:not(.ant-dropdown-hidden)');
+      if (!open) return;
+      window.requestAnimationFrame(() => lastTrigger.current?.focus());
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, []);
 
   const handleMenu = async (key: string, sessionId: string, title: string) => {
     try {
@@ -218,9 +242,19 @@ export function Sidebar({
                     className="zk-conv-menu-btn"
                     aria-label={t('shell.sessions.menu')}
                     data-testid="session-menu"
+                    ref={(node) => {
+                      if (node) lastTrigger.current = node;
+                    }}
+                    aria-haspopup="menu"
                     onKeyDown={(event) => {
                       if (event.key !== 'ArrowDown' && event.key !== 'Enter' && event.key !== ' ') {
                         return;
+                      }
+                      if (event.key === 'ArrowDown') {
+                        // The Dropdown opens on click only; ArrowDown has to be
+                        // the same gesture or the key does nothing at all (F2a).
+                        event.preventDefault();
+                        event.currentTarget.click();
                       }
                       // Enter/Space already open it through the click handler;
                       // ArrowDown needs the same treatment. Either way focus has
@@ -251,6 +285,7 @@ export function Sidebar({
                     String(conversation.key),
                     target?.title ?? '',
                   );
+                  window.requestAnimationFrame(() => lastTrigger.current?.focus());
                 },
               };
             }}
