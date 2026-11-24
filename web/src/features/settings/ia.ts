@@ -12,6 +12,7 @@
 import type { SettingsRows } from '@/api/gateway';
 import { SETTING_KEYS as K } from '@/design/settings-keys';
 import type { MessageKey } from '@/i18n';
+import { parseShortcut } from '@/keyboard/shortcut-combo';
 
 export type SettingsFieldKind =
   | 'text'
@@ -49,6 +50,13 @@ export interface SettingsField {
    * connectors on the next refresh).
    */
   readOnly?: boolean;
+  /**
+   * A draft-level check the renderer shows under the field. Returns a catalogue
+   * key when the value cannot work, null when it can. It does not block saving:
+   * the runtime falls back to a default, and the point of the line is to say so
+   * instead of letting a typo live silently in the store (round-3 wire audit).
+   */
+  validate?: (value: string) => MessageKey | null;
 }
 
 export interface SettingsSection {
@@ -297,8 +305,14 @@ export const SETTINGS_PAGES: SettingsPage[] = [
             'settings.ia.help.trayOnly',
             'CmdOrCtrl+Shift+Space',
           ),
-          text(K.uiShortcutCommandPalette, 'settings.ia.shortcutPalette', undefined, 'Mod+K'),
-          text(K.uiShortcutToggleSidebar, 'settings.ia.shortcutSidebar', undefined, 'Mod+B'),
+          {
+            ...text(K.uiShortcutCommandPalette, 'settings.ia.shortcutPalette', 'settings.ia.help.shortcutForm', 'Mod+K'),
+            validate: shortcutValueCheck,
+          },
+          {
+            ...text(K.uiShortcutToggleSidebar, 'settings.ia.shortcutSidebar', 'settings.ia.help.shortcutForm', 'Mod+B'),
+            validate: shortcutValueCheck,
+          },
         ],
       },
     ],
@@ -435,6 +449,12 @@ export function fieldValue(field: SettingsField, rows: SettingsRows): string {
 }
 
 /** Draft map for one page (row key → string value). */
+/** The two shortcut rows share one rule: a modifier plus one key. */
+function shortcutValueCheck(value: string): MessageKey | null {
+  if (value.trim() === '') return null;
+  return parseShortcut(value) ? null : 'settings.ia.err.shortcut';
+}
+
 export function pageValues(page: SettingsPage, rows: SettingsRows): Record<string, string> {
   const values: Record<string, string> = {};
   for (const section of page.sections) {

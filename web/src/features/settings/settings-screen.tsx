@@ -21,6 +21,8 @@ import { useEscClaim } from '@/keyboard/keyboard-provider';
 import { ZkIcon } from '@/design/icons';
 import { ConfirmDanger } from '@/ui/confirm-danger';
 import { useMediaQuery } from '@/design/use-system-appearance';
+import { SETTING_KEYS } from '@/design/settings-keys';
+import { formatShortcut, parseShortcut } from '@/keyboard/shortcut-combo';
 import { UpdateStatus } from './update-status';
 import { ModelCatalogEditor } from './model-catalog';
 import { describeError } from '@/features/describe-error';
@@ -267,6 +269,15 @@ function SettingsPageForm({
   };
 
   const changes = changedRows(page, values, rows);
+  // Two rows bound to one combo silently disable the first; the note is the only
+  // place the page can say so (the runtime falls back to the default).
+  const shortcutConflict = (() => {
+    const a = parseShortcut(values[SETTING_KEYS.uiShortcutCommandPalette] ?? '');
+    const b = parseShortcut(values[SETTING_KEYS.uiShortcutToggleSidebar] ?? '');
+    if (!a || !b) return null;
+    const same = a.mod === b.mod && a.shift === b.shift && a.alt === b.alt && a.key === b.key;
+    return same ? formatShortcut(a) : null;
+  })();
 
   const save = async () => {
     if (changes.length === 0) return;
@@ -313,6 +324,12 @@ function SettingsPageForm({
       {notice ? (
         <div className="zk-notice" role="status">
           {notice}
+        </div>
+      ) : null}
+
+      {shortcutConflict ? (
+        <div className="zk-settings__warn" role="status">
+          {t('settings.ia.warn.shortcutConflict', { combo: shortcutConflict })}
         </div>
       ) : null}
 
@@ -534,6 +551,11 @@ function FieldRow({
           tone below the label. Sharing the label's line made the two read as a
           single run-on sentence ("语言 语言 界面语言；缺失时跟随浏览器。") and left
           the input with no room to describe itself (round-2 S06/S07). */}
+      {field.validate?.(value) ? (
+        <p className="zk-field__error" role="alert">
+          {t(field.validate(value)!)}
+        </p>
+      ) : null}
       {field.helpKey ? (
         <p className="zk-field__help">
           {t(field.helpKey)}
