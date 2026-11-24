@@ -431,7 +431,21 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
         items={queue.items}
         running={chat.isRequesting}
         error={queue.error}
-        onCancel={(id) => void queue.remove(id)}
+        onCancel={(id) => {
+          // Cancelling a queued prompt gives the text back: dropping it silently
+          // was the one action in the queue that destroyed what the user typed
+          // (round-2 composer audit: 队列回滚).
+          const item = queue.items.find((entry) => entry.id === id);
+          void queue.remove(id).then(() => {
+            if (!item) return;
+            const restored =
+              draft.trim() === ''
+                ? item.text
+                : `${draft.replace(/\s+$/, '')}\n${item.text}`;
+            setDraft(restored);
+            focusComposer();
+          });
+        }}
         onSendHead={() => void sendQueueHead()}
       />
 
