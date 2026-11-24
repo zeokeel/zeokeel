@@ -97,7 +97,7 @@ describe('tasks delta is an upsert, not a patch', () => {
 describe('B12 — the chip', () => {
   it('shows the unfinished count and nothing when the board is empty', async () => {
     const user = renderThread();
-    const chip = await screen.findByRole('button', { name: '1 个后台任务' });
+    const chip = await screen.findByRole('button', { name: /1 进行中 · 0 待处理/ });
     expect(chip).toBeInTheDocument();
 
     await user.click(chip);
@@ -110,12 +110,12 @@ describe('B12 — the chip', () => {
   it('renders no chip at all for an empty board', async () => {
     renderThread([]);
     await screen.findByRole('textbox');
-    expect(screen.queryByRole('button', { name: /个后台任务/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /已完成 ·/ })).toBeNull();
   });
 
   it('stops a running task with status=pending and cancels with task.delete', async () => {
     const user = renderThread();
-    await user.click(await screen.findByRole('button', { name: '1 个后台任务' }));
+    await user.click(await screen.findByRole('button', { name: /1 进行中 · 0 待处理/ }));
     await waitFor(() => expect(document.querySelector('.ant-popover')).not.toBeNull());
 
     await user.click(screen.getByRole('button', { name: '停止' }));
@@ -134,7 +134,7 @@ describe('B12 — the chip', () => {
 
   it('follows a pushed delta (a change made elsewhere)', async () => {
     renderThread();
-    await screen.findByRole('button', { name: '1 个后台任务' });
+    await screen.findByRole('button', { name: /1 进行中 · 0 待处理/ });
 
     gateway?.gateway.notify('tasks.delta', {
       baseRev: 1,
@@ -143,6 +143,7 @@ describe('B12 — the chip', () => {
       removed: [],
     });
 
-    expect(await screen.findByRole('button', { name: '2 个后台任务' })).toBeInTheDocument();
+    // task-1 was in_progress and the delta adds a second in-progress row.
+    expect(await screen.findByRole('button', { name: /0 已完成 · 2 进行中 · 0 待处理/ })).toBeInTheDocument();
   });
 });

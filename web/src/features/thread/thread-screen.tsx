@@ -7,6 +7,8 @@ import { Transcript } from '@/chat/transcript';
 import { ApprovalDock } from '@/features/approvals/approval-dock';
 import { AskDialog } from '@/features/thread/ask-dialog';
 import { PlanDialog } from '@/features/thread/plan-dialog';
+import { ComposerStatus, useComposerSettings } from '@/chat/composer-status';
+import { setSetting } from '@/api/gateway';
 import { useApprovals } from '@/features/approvals/approvals-context';
 import { useSessions } from '@/features/sessions/sessions-context';
 import { useEscClaim, useShortcut } from '@/keyboard/keyboard-provider';
@@ -74,6 +76,8 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   // Set while the current run is being stopped on purpose, so the settle
   // handler knows *why* it ended and keeps the queue instead of draining it.
   const stoppedByUser = useRef(false);
+
+  const composerSettings = useComposerSettings(sessionId);
 
   const stopRun = () => {
     stoppedByUser.current = true;
@@ -316,6 +320,21 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
         onSendHead={() => void sendQueueHead()}
       />
 
+      <ComposerStatus
+        sessionId={sessionId}
+        permission={composerSettings.permission}
+        model={composerSettings.model}
+        thinkingMode={composerSettings.thinkingMode}
+        running={chat.isRequesting}
+        usage={composerSettings.usage}
+        onSetting={(key, value) => void setSetting(key, value)}
+        onInterject={(text) => {
+          // 插话: the queue only drains between turns, so steering a running turn
+          // means stopping it and starting the new turn immediately.
+          stopRun();
+          chat.onRequest({ sessionId, text });
+        }}
+      />
       <Composer
         value={draft}
         onChange={setDraft}

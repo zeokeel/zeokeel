@@ -46,6 +46,13 @@ export function TaskChip({ sessionId }: { sessionId?: string }) {
 
   const active = activeTaskCount(tasks);
   if (error || tasks.length === 0) return null;
+  // A summary, not a single count: the board is a plan, and "how much is left"
+  // alone hides whether anything finished at all.
+  const summary = {
+    completed: tasks.filter((task) => task.status === 'completed').length,
+    inProgress: tasks.filter((task) => task.status === 'in_progress').length,
+    pending: tasks.filter((task) => task.status === 'pending').length,
+  };
 
   const content = (
     <div className="zk-tasks">
@@ -81,8 +88,13 @@ export function TaskChip({ sessionId }: { sessionId?: string }) {
   return (
     <div className="zk-task-chip" role="group" aria-label={t('task.title')}>
       <Popover trigger="click" placement="topLeft" content={content} title={t('task.title')}>
-        <Button size="small" type="text" icon={<ZkIcon name="clock" />}>
-          {t('task.count', { count: active })}
+        <Button size="small" type="text" icon={<ZkIcon name="clock" />} data-testid="task-chip">
+          {t('task.summary', {
+            completed: summary.completed,
+            inProgress: summary.inProgress,
+            pending: summary.pending,
+            count: active,
+          })}
         </Button>
       </Popover>
     </div>

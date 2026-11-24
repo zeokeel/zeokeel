@@ -141,3 +141,29 @@ export async function loadMemory(sessionId: string): Promise<MemoryEntry[]> {
   const body = await readJson<{ entries: MemoryEntry[] }>(res, 'session memory');
   return body.entries;
 }
+
+/** One model the composer can switch to (GET /api/models). */
+export interface ModelThinking {
+  id: string;
+  nameZh: string;
+  nameEN: string;
+}
+
+export interface ModelRow {
+  id: string;
+  name: string;
+  note?: string;
+  contextWindow?: number;
+  thinkingModes: ModelThinking[];
+}
+
+export interface ModelsView {
+  models: ModelRow[];
+  defaultModel?: string;
+}
+
+export async function loadModels(): Promise<ModelsView> {
+  const res = await fetch('/api/models', { headers: { Accept: 'application/json' } });
+  const body = await readJson<ModelsView>(res, 'models');
+  return { models: body.models ?? [], defaultModel: body.defaultModel };
+}

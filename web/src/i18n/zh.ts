@@ -522,6 +522,17 @@ export const zh = {
   'plan.field': '告诉 agent 计划需要怎么改…',
   'plan.hint': '输入反馈后按 Enter = 继续规划 · 点击「批准」批准计划 · Esc 不会取消计划',
   'plan.approvedContinue': '计划已批准，开始执行。',
+  'composer.permission.read-only': '只读',
+  'composer.permission.workspace': '工作区内修改',
+  'composer.permission.full': '完全访问',
+  'composer.model.placeholder': '选择模型',
+  'composer.queue.title': '排队中的消息',
+  'composer.queue.chip': '排队',
+  'composer.queue.hint': '本轮结束后按顺序发送。',
+  'composer.queue.remove': '移除',
+  'composer.queue.interject': '插话',
+  'composer.usage': '{turns} 轮 {steps} 步 · {tokens} tok · 缓存 {cached}% · 上下文 {context}%',
+  'task.summary': '{completed} 已完成 · {inProgress} 进行中 · {pending} 待处理',
 } as const;
 
 export type MessageKey = keyof typeof zh;

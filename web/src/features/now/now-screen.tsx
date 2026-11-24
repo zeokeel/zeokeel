@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Composer } from '@/chat/composer';
+import { ComposerStatus, useComposerSettings } from '@/chat/composer-status';
+import { setSetting } from '@/api/gateway';
 import type { SlashCommand } from '@/chat/slash-commands';
 import { ApprovalDock } from '@/features/approvals/approval-dock';
 import { AskDialog } from '@/features/thread/ask-dialog';
@@ -22,6 +24,7 @@ export function NowScreen() {
   const { create } = useSessions();
   const { approvals } = useApprovals();
   const approvalPending = approvals.length > 0;
+  const composerSettings = useComposerSettings('');
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -66,6 +69,16 @@ export function NowScreen() {
       ) : null}
       <AskDialog />
       <ApprovalDock />
+      <ComposerStatus
+        sessionId=""
+        permission={composerSettings.permission}
+        model={composerSettings.model}
+        thinkingMode=""
+        running={false}
+        usage={undefined}
+        onSetting={(key, value) => void setSetting(key, value)}
+        onInterject={() => undefined}
+      />
       <Composer
         value={draft}
         onChange={setDraft}
