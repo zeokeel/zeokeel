@@ -303,6 +303,9 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"prompts.remove": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.promptsRemove(request.Params)
 		},
+		"prompts.move": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.promptsMove(request.Params)
+		},
 		"context.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.contextSnapshot(ctx, request.Params)
 		},
@@ -1093,6 +1096,50 @@ func (g *Gateway) promptsEnqueue(raw json.RawMessage) (any, *protocolError) {
 }
 
 // promptsRemove removes one queued prompt (idempotent, per the contract).
+// promptsMoveParams is the prompts.move body.
+type promptsMoveParams struct {
+	SessionID string `json:"sessionId"`
+	ID        string `json:"id"`
+	Index     int    `json:"index"`
+}
+
+// promptsMove reorders one queued prompt, keeping its id (TRANSPORT §5.1.4).
+func (g *Gateway) promptsMove(raw json.RawMessage) (any, *protocolError) {
+	var params promptsMoveParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	sessionID := strings.TrimSpace(params.SessionID)
+	if sessionID == "" {
+		return nil, errInvalidParams("sessionId", "is required")
+	}
+	if strings.TrimSpace(params.ID) == "" {
+		return nil, errInvalidParams("id", "is required")
+	}
+	if params.Index < 0 {
+		return nil, errInvalidParams("index", "must not be negative")
+	}
+	chat, err := g.chatService()
+	if err != nil {
+		return nil, internalError(err)
+	}
+	if _, found := chat.Session(sessionID); !found {
+		return nil, appError(codeSessionNotFound, "session_not_found", false)
+	}
+	mover, ok := chat.(contracts.PromptMover)
+	if !ok {
+		return nil, appError(codeCapabilityUnsupported, "prompts_move_not_supported", false)
+	}
+	if err := mover.MoveQueuedPrompt(context.Background(), sessionID, params.ID, params.Index); err != nil {
+		if errors.Is(err, contracts.ErrQueueDraining) {
+			return nil, appError(codeNotReady, "queue_draining", true)
+		}
+		return nil, internalError(err)
+	}
+	g.hub.markDomainDirty(promptsKey(sessionID))
+	return struct{}{}, nil
+}
+
 func (g *Gateway) promptsRemove(raw json.RawMessage) (any, *protocolError) {
 	var params promptsRemoveParams
 	if err := decodeParams(raw, &params); err != nil {

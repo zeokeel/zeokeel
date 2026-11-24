@@ -447,6 +447,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
           });
         }}
         onSendHead={() => void sendQueueHead()}
+        onMove={(id, index) => void queue.move(id, index)}
       />
 
       {attachError ? (

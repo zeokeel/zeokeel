@@ -958,6 +958,15 @@ export async function enqueuePrompt(sessionId: string, text: string): Promise<{ 
 }
 
 /** Remove one queued prompt. Idempotent on the backend (repeat removes succeed). */
+/** Reorder one queued prompt (`prompts.move`); the id is preserved. */
+export async function moveQueuedPrompt(
+  sessionId: string,
+  id: string,
+  index: number,
+): Promise<void> {
+  await client().request('prompts.move', { sessionId, id, index });
+}
+
 export async function removeQueuedPrompt(sessionId: string, id: string): Promise<void> {
   await client().request('prompts.remove', { sessionId, id });
 }

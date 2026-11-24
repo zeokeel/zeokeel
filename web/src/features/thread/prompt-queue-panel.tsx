@@ -19,6 +19,7 @@ export function PromptQueuePanel({
   error,
   onCancel,
   onSendHead,
+  onMove,
 }: {
   items: QueuedPrompt[];
   running: boolean;
@@ -26,6 +27,8 @@ export function PromptQueuePanel({
   error?: string | null;
   onCancel: (id: string) => void;
   onSendHead: () => void;
+  /** Move one row to another zero-based position (`prompts.move`). */
+  onMove: (id: string, index: number) => void;
 }) {
   const t = useT();
   if (items.length === 0) return null;
@@ -42,6 +45,32 @@ export function PromptQueuePanel({
           <li key={item.id} className="zk-queue__row">
             <span className="zk-queue__index">#{index + 1}</span>
             <span className="zk-queue__text">{item.text}</span>
+            <span className="zk-queue__moves">
+              <button
+                type="button"
+                className="zk-icon-button"
+                aria-label={t('thread.queue.moveUp', { text: item.text })}
+                disabled={index === 0}
+                onClick={() => onMove(item.id, index - 1)}
+                data-testid="queue-move-up"
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                  <path d="M6 9.5V3M3.2 5.2 6 2.4l2.8 2.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="zk-icon-button"
+                aria-label={t('thread.queue.moveDown', { text: item.text })}
+                disabled={index === items.length - 1}
+                onClick={() => onMove(item.id, index + 1)}
+                data-testid="queue-move-down"
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                  <path d="M6 2.5V9M3.2 6.8 6 9.6l2.8-2.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </span>
             <button
               type="button"
               className="zk-icon-button"

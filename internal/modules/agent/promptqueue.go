@@ -144,6 +144,71 @@ func (s *service) EnqueuePrompt(ctx context.Context, sessionID, prompt string) (
 	return queuedPrompt(sessionID, entry), nil
 }
 
+// MoveQueuedPrompt implements contracts.PromptMover: it reorders one entry while
+// keeping every ID, so the client that is rendering those IDs keeps working.
+//
+// The inbox only offers Enqueue/List/Remove/Requeue/Drop, where Requeue *prepends*
+// and preserves the ID. A reorder is therefore: clear, then requeue in reverse —
+// each prepend puts its entry back at the front, so the final order is the
+// requested one. A reorder while the session is idle is refused: the queue drains
+// at settle, and rebuilding during that would race with Take.
+func (s *service) MoveQueuedPrompt(ctx context.Context, sessionID, id string, index int) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	id = strings.TrimSpace(id)
+	if sessionID == "" || id == "" {
+		return nil
+	}
+	if s.sessionIdle(sessionID) {
+		return contracts.ErrQueueDraining
+	}
+	entries, err := s.inbox.List(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	from := -1
+	for position, entry := range entries {
+		if entry.ID == id {
+			from = position
+			break
+		}
+	}
+	if from < 0 {
+		return nil
+	}
+	ordered := make([]inbox.Entry, 0, len(entries))
+	for position, entry := range entries {
+		if position != from {
+			ordered = append(ordered, entry)
+		}
+	}
+	target := index
+	if target < 0 {
+		target = 0
+	}
+	if target > len(ordered) {
+		target = len(ordered)
+	}
+	ordered = append(ordered[:target], append([]inbox.Entry{entries[from]}, ordered[target:]...)...)
+	for _, entry := range entries {
+		if err := s.inbox.Remove(ctx, sessionID, entry.ID); err != nil {
+			return err
+		}
+	}
+	for position := len(ordered) - 1; position >= 0; position-- {
+		if err := s.inbox.Requeue(ctx, sessionID, ordered[position]); err != nil {
+			return err
+		}
+	}
+	s.notify(sessionID)
+	return nil
+}
+
 // QueuedPrompts implements contracts.PromptQueue: the session inbox in send
 // order. The returned slice is a copy the caller may retain.
 func (s *service) QueuedPrompts(sessionID string) []contracts.QueuedPrompt {

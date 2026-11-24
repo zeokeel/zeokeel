@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   enqueuePrompt,
+  moveQueuedPrompt,
   refreshPrompts,
   removeQueuedPrompt,
   subscribePrompts,
@@ -14,6 +15,7 @@ export interface PromptQueueApi {
   refresh: () => Promise<QueuedPrompt[]>;
   enqueue: (text: string) => Promise<QueuedPrompt>;
   remove: (id: string) => Promise<void>;
+  move: (id: string, index: number) => Promise<void>;
 }
 
 const messageOf = (cause: unknown, fallback: string) =>
@@ -92,5 +94,19 @@ export function usePromptQueue(sessionId: string): PromptQueueApi {
     [sessionId, refresh],
   );
 
-  return { items, error, refresh, enqueue, remove };
+  const move = useCallback(
+    async (id: string, index: number) => {
+      try {
+        await moveQueuedPrompt(sessionId, id, index);
+      } catch (cause) {
+        setError(messageOf(cause, 'thread.queue.moveFailed'));
+        // The domain is authoritative: a refused move (the queue drained, or a
+        // race) is corrected by re-reading instead of guessing the order.
+        await refresh();
+      }
+    },
+    [sessionId, refresh],
+  );
+
+  return { items, error, refresh, enqueue, remove, move };
 }

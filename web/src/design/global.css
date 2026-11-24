@@ -1915,6 +1915,13 @@ body {
   font-size: var(--zk-type-xxs);
 }
 
+.zk-queue__moves {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
 .zk-queue__text {
   flex: 1;
   min-width: 0;
@@ -2231,6 +2238,13 @@ body {
 .zk-queue__index {
   color: var(--zk-text-tertiary);
   font-variant-numeric: tabular-nums;
+}
+
+.zk-queue__moves {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
 }
 
 .zk-queue__text {

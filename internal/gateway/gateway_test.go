@@ -253,6 +253,34 @@ func (f *fakeChat) RemoveQueuedPrompt(_ context.Context, sessionID, id string) e
 	return nil
 }
 
+// MoveQueuedPrompt implements contracts.PromptMover (reorder keeping the id).
+func (f *fakeChat) MoveQueuedPrompt(_ context.Context, sessionID, id string, index int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	items := f.prompts[sessionID]
+	from := -1
+	for i, item := range items {
+		if item.ID == id {
+			from = i
+			break
+		}
+	}
+	if from < 0 {
+		return nil
+	}
+	moved := items[from]
+	rest := append(append([]contracts.QueuedPrompt(nil), items[:from]...), items[from+1:]...)
+	if index < 0 {
+		index = 0
+	}
+	if index > len(rest) {
+		index = len(rest)
+	}
+	next := append(append(append([]contracts.QueuedPrompt(nil), rest[:index]...), moved), rest[index:]...)
+	f.prompts[sessionID] = next
+	return nil
+}
+
 // queuePrompts appends a prompt directly through the backend (bypassing the
 // gateway), to prove the polling degradation notices backend-side changes.
 func (f *fakeChat) queuePrompts(sessionID, text string) contracts.QueuedPrompt {

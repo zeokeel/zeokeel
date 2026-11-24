@@ -597,3 +597,72 @@ func TestPromptInboxReplaysALegacySnapshot(t *testing.T) {
 		t.Fatalf("replayed entry CreatedAt = %v", queued[0].CreatedAt)
 	}
 }
+
+// The reorder keeps entry IDs: the client renders them.
+func TestMoveQueuedPromptReordersAndKeepsIDs(t *testing.T) {
+	provider := newGatedProvider()
+	svc := newQueueService(t, newFakeStore(), nil, provider)
+	sessionID, err := svc.NewSession("reorder")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := svc.Send(sessionID, "first turn"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	waitFor(t, "the first run to reach the provider", func() bool {
+		provider.mu.Lock()
+		defer provider.mu.Unlock()
+		return provider.calls > 0
+	})
+
+	ctx := context.Background()
+	first, err := svc.EnqueuePrompt(ctx, sessionID, "first")
+	if err != nil {
+		t.Fatalf("enqueue first: %v", err)
+	}
+	second, err := svc.EnqueuePrompt(ctx, sessionID, "second")
+	if err != nil {
+		t.Fatalf("enqueue second: %v", err)
+	}
+	third, err := svc.EnqueuePrompt(ctx, sessionID, "third")
+	if err != nil {
+		t.Fatalf("enqueue third: %v", err)
+	}
+
+	ids := func() []string {
+		queued := svc.QueuedPrompts(sessionID)
+		out := make([]string, 0, len(queued))
+		for _, item := range queued {
+			out = append(out, item.ID)
+		}
+		return out
+	}
+	assertOrder := func(want []string, step string) {
+		got := ids()
+		if len(got) != len(want) {
+			t.Fatalf("%s: got %v want %v", step, got, want)
+		}
+		for index := range want {
+			if got[index] != want[index] {
+				t.Fatalf("%s: got %v want %v", step, got, want)
+			}
+		}
+	}
+
+	if err := svc.MoveQueuedPrompt(ctx, sessionID, third.ID, 0); err != nil {
+		t.Fatalf("move to front: %v", err)
+	}
+	assertOrder([]string{third.ID, first.ID, second.ID}, "move to front")
+
+	if err := svc.MoveQueuedPrompt(ctx, sessionID, third.ID, 99); err != nil {
+		t.Fatalf("move past the end: %v", err)
+	}
+	assertOrder([]string{first.ID, second.ID, third.ID}, "move to end")
+
+	if err := svc.MoveQueuedPrompt(ctx, sessionID, "no-such-id", 0); err != nil {
+		t.Fatalf("moving an unknown id must be a no-op: %v", err)
+	}
+	assertOrder([]string{first.ID, second.ID, third.ID}, "unknown id")
+
+	provider.releaseNow()
+}

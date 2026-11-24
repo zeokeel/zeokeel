@@ -174,3 +174,38 @@ func TestDiffPromptsReorder(t *testing.T) {
 		t.Fatalf("add/remove delta = %+v", delta)
 	}
 }
+
+// prompts.move reorders the inbox and keeps every id.
+func TestPromptsMoveReorders(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession("s1", "First", "hello")
+	rig := &domainTestRig{runningGateway: startTestGateway(t, chat), chat: chat}
+	defer rig.stop(t)
+	conn := rig.connect(t)
+
+	first := resultOf(t, conn.call("prompts.enqueue", map[string]any{"sessionId": "s1", "prompt": "one"}))
+	second := resultOf(t, conn.call("prompts.enqueue", map[string]any{"sessionId": "s1", "prompt": "two"}))
+	third := resultOf(t, conn.call("prompts.enqueue", map[string]any{"sessionId": "s1", "prompt": "three"}))
+	_ = first
+	_ = second
+
+	conn.call("prompts.move", map[string]any{"sessionId": "s1", "id": third["id"], "index": 0})
+
+	after := promptsOf(t, resultOf(t, conn.call("prompts.snapshot", map[string]any{"sessionId": "s1"})))
+	texts := make([]string, 0, len(after))
+	for _, item := range after {
+		row, _ := item.(map[string]any)
+		if text, ok := row["text"].(string); ok {
+			texts = append(texts, text)
+		}
+	}
+	want := []string{"three", "one", "two"}
+	if len(texts) != len(want) {
+		t.Fatalf("inbox after move = %v, want %v", texts, want)
+	}
+	for index := range want {
+		if texts[index] != want[index] {
+			t.Fatalf("inbox after move = %v, want %v", texts, want)
+		}
+	}
+}

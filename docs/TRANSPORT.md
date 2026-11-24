@@ -561,6 +561,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `prompts.snapshot` | `{sessionId}` | `{prompts:[QueuedPrompt]}` | Y | `PromptQueue` `promptqueue.go:38` | ✅ 已实现 |
 | `prompts.enqueue` | `{sessionId,prompt}` | `{id}` | N | `promptqueue.go:36` | ✅ 已实现 |
 | `prompts.remove` | `{sessionId,id}` | `{}` | Y | `promptqueue.go:40` | ✅ 已实现 |
+| `prompts.move` | `{sessionId,id,index}` | `{}` | Y | `PromptMover.MoveQueuedPrompt`；保留条目 id，越界索引夹到两端；会话已空闲（队列即将被消费）返回 `1024 queue_draining` | ✅ 已实现 |
 | `prompts.subscribe` | `{sessionId, sinceRev}` | `{rev, resync:bool}` | Y | 域订阅（`prompts:<sessionId>`） | ✅ 已实现 |
 | `prompts.unsubscribe` | `{sessionId}` | `{}` | Y | 同上（取消；不调用则网关一直为该会话轮询重建域） | ✅ 已实现 |
 | `session.subscribe` | `{sessionId, sinceRev}` | `{rev, resync:bool}` | Y | `ChatService.Subscribe` `chat.go:577` | ✅ 已实现 |

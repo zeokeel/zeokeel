@@ -13,8 +13,14 @@ package contracts
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+// ErrQueueDraining is returned when a reorder arrives after the session went
+// idle: the queue is about to be consumed, so there is nothing to reorder. The
+// gateway maps it to a retryable not-ready error.
+var ErrQueueDraining = errors.New("prompt queue is being drained")
 
 // QueuedPrompt is one human prompt waiting in a session's inbox.
 type QueuedPrompt struct {
@@ -38,4 +44,13 @@ type PromptQueue interface {
 	QueuedPrompts(sessionID string) []QueuedPrompt
 	// RemoveQueuedPrompt removes one queued prompt by ID (idempotent).
 	RemoveQueuedPrompt(ctx context.Context, sessionID, id string) error
+}
+
+// PromptMover is the optional reorder half. It is a separate interface so a host
+// that only implements PromptQueue keeps compiling; the gateway type-asserts it
+// and answers `prompts.move` only when it is present.
+type PromptMover interface {
+	// MoveQueuedPrompt puts the prompt at the given zero-based position in the
+	// session inbox, keeping its ID. An out-of-range index clamps to the ends.
+	MoveQueuedPrompt(ctx context.Context, sessionID, id string, index int) error
 }
