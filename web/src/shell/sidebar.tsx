@@ -83,9 +83,15 @@ export function Sidebar({
   const showArchived = String(rows[SETTING_KEYS.sessionsShowArchived] ?? 'false') === 'true';
   const visible = showArchived ? sessions : sessions.filter((session) => !session.archived);
 
-  const items = visible.map((session) => ({
+  // Pinned first, then the gateway's own order. The pin flag lived only in a
+  // settings row before: the menu said 取消置顶 and nothing on screen changed
+  // (round-3 session audit F1).
+  const ordered = [...visible].sort((a, b) => Number(b.pinned === true) - Number(a.pinned === true));
+  const items = ordered.map((session) => ({
     key: session.id,
-    label: session.title || t('shell.sessions.untitled'),
+    label: session.pinned
+      ? `${session.title || t('shell.sessions.untitled')} · ${t('shell.sessions.pinnedMark')}`
+      : session.title || t('shell.sessions.untitled'),
   }));
 
   const handleMenu = async (key: string, sessionId: string, title: string) => {
@@ -102,8 +108,10 @@ export function Sidebar({
         return;
       }
       if (key === 'archive') {
-        await archiveSession(sessionId, true);
-        if (sessionId === activeSessionId) onCleared?.();
+        const session = sessions.find((item) => item.id === sessionId);
+        const archived = session?.archived !== true;
+        await archiveSession(sessionId, archived);
+        if (archived && sessionId === activeSessionId) onCleared?.();
         return;
       }
       if (key === 'delete') {
@@ -170,10 +178,35 @@ export function Sidebar({
                     key: 'pin',
                     label: session?.pinned ? t('shell.sessions.unpin') : t('shell.sessions.pin'),
                   },
-                  { key: 'archive', label: t('shell.sessions.archive') },
+                  {
+                    key: 'archive',
+                    // An archived row must offer the way back; the old menu only
+                    // ever sent `archived: true` (round-3 session audit F3).
+                    label: session?.archived
+                      ? t('shell.sessions.unarchive')
+                      : t('shell.sessions.archive'),
+                  },
                   { type: 'divider' as const },
                   { key: 'delete', label: t('shell.sessions.delete'), danger: true },
                 ],
+                // A real button, not antd's hover-only icon: the row itself is
+                // not focusable (`li` has no tabindex) and the default trigger is
+                // `tabindex="-1"` + `opacity: 0` until hover, so keyboard and
+                // touch users could not open the menu at all (F2/F6).
+                trigger: (
+                  <button
+                    type="button"
+                    className="zk-conv-menu-btn"
+                    aria-label={t('shell.sessions.menu')}
+                    data-testid="session-menu"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                      <circle cx="8" cy="3.5" r="1.3" fill="currentColor" />
+                      <circle cx="8" cy="8" r="1.3" fill="currentColor" />
+                      <circle cx="8" cy="12.5" r="1.3" fill="currentColor" />
+                    </svg>
+                  </button>
+                ),
                 onClick: (info) => {
                   info.domEvent.stopPropagation();
                   void handleMenu(

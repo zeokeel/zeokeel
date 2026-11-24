@@ -15,6 +15,16 @@ export const accent: Record<Appearance, string> = {
   dark: '#3cbbfa',
 };
 
+/**
+ * The WCAG-AA danger *text* colour per appearance. antd derives its own error
+ * hues, and in dark they land at 3.9:1 on the menu surface — below AA for the
+ * small 14px labels a destructive menu item uses.
+ */
+export const dangerText: Record<Appearance, string> = {
+  light: '#b91c1c',
+  dark: '#fca5a5',
+};
+
 export const fontFamily = `-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif`;
 
 export const monoFontFamily = `"SF Mono", "JetBrains Mono", "Fira Code", Consolas, "Liberation Mono", Menlo, Courier, "PingFang SC", "Microsoft YaHei"`;

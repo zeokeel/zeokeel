@@ -1244,6 +1244,11 @@ func (g *Gateway) deleteSession(ctx context.Context, raw json.RawMessage) (any, 
 	if err := chat.DeleteSession(sessionID); err != nil {
 		return nil, internalError(err)
 	}
+	// The session's own settings rows (pinned / archived / unread /
+	// allowedTools / model / preset) are keyed by its id and outlive the
+	// conversation otherwise: deleting 7 conversations left 65 rows behind
+	// (round-3 session audit F4).
+	g.purgeSessionSettings(sessionID)
 	// Keep the cached domain: it is rebuilt from the store, which no longer has
 	// the session, so watchers get a resync instead of a stale transcript.
 	return g.publishSessionChange(ctx, sessionID)
@@ -1284,6 +1289,30 @@ func (g *Gateway) setSessionFlag(ctx context.Context, raw json.RawMessage, kind 
 		return nil, internalError(applyErr)
 	}
 	return g.publishSessionChange(ctx, sessionID)
+}
+
+// purgeSessionSettings drops every `session.<id>.*` row for a deleted session.
+func (g *Gateway) purgeSessionSettings(sessionID string) {
+	service, ok := g.root.Get(contracts.KeySettings)
+	if !ok || service == nil {
+		return
+	}
+	prefix := "session." + sessionID + "."
+	deleter, canDelete := service.(contracts.SettingsDeleter)
+	for key := range service.All() {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		if canDelete {
+			if err := deleter.Delete(key); err != nil {
+				g.logger.Printf("gateway: purge %s: %v", key, err)
+			}
+			continue
+		}
+		if err := service.Set(key, ""); err != nil {
+			g.logger.Printf("gateway: purge %s: %v", key, err)
+		}
+	}
 }
 
 // publishSessionChange rebuilds the list (and the session, when it still

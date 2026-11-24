@@ -1,5 +1,5 @@
 import { theme, type ThemeConfig } from 'antd';
-import { accent, fontFamily, type Appearance } from './antd-theme';
+import { accent, dangerText, fontFamily, type Appearance } from './antd-theme';
 
 /**
  * The whole theme: `algorithm` + `colorPrimary` + `fontFamily`
@@ -16,6 +16,15 @@ export function zkThemeConfig(appearance: Appearance): ThemeConfig {
     token: {
       colorPrimary: accent[appearance],
       fontFamily,
+    },
+    components: {
+      Menu: {
+        // Destructive menu rows (删除会话, 删除连接器) inherit antd's error hue,
+        // which is 3.9:1 on dark surfaces; the palette's AA text colour is not.
+        dangerItemColor: dangerText[appearance],
+        dangerItemHoverColor: dangerText[appearance],
+        dangerItemSelectedColor: dangerText[appearance],
+      },
     },
   };
 }

@@ -2,6 +2,17 @@ import { afterEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 
+// The app persists a few things in localStorage on purpose (the draft per
+// session, the language, the sidebar width). Tests share one jsdom, so a value
+// written by one test would steer the next one — clear it with the DOM.
+afterEach(() => {
+  try {
+    localStorage.clear();
+  } catch {
+    // No storage in this environment; nothing to clear.
+  }
+});
+
 // antd (and @ant-design/x) query media queries on mount; jsdom ships no
 // implementation, so every component test needs this stub before rendering.
 if (!window.matchMedia) {

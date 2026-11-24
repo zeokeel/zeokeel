@@ -1367,6 +1367,32 @@ body {
   min-width: 0;
 }
 
+/* The conversation row menu trigger: visible without hover, focusable, 24px. */
+.zk-conv-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--zk-radius-sm);
+  background: transparent;
+  color: var(--zk-label-tertiary);
+  cursor: pointer;
+}
+
+.zk-conv-menu-btn:hover,
+.zk-conv-menu-btn:focus-visible {
+  background: var(--zk-bg-hover);
+  color: var(--zk-label-primary);
+}
+
+.zk-conv-menu-btn:focus-visible {
+  outline: 2px solid var(--zk-focus);
+  outline-offset: 1px;
+}
+
 /* Connector rows: one server per row, state dot + name + transport, actions on
  * the right. The page used to be a read-only table (round-2 C-01). */
 .zk-skills-table {

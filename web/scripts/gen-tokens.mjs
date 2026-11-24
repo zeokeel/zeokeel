@@ -257,6 +257,16 @@ export const accent: Record<Appearance, string> = {
   dark: '${darkPalette.get('Accent')}',
 };
 
+/**
+ * The WCAG-AA danger *text* colour per appearance. antd derives its own error
+ * hues, and in dark they land at 3.9:1 on the menu surface — below AA for the
+ * small 14px labels a destructive menu item uses.
+ */
+export const dangerText: Record<Appearance, string> = {
+  light: '${lightPalette.get('DangerText')}',
+  dark: '${darkPalette.get('DangerText')}',
+};
+
 export const fontFamily = \`${systemFont}\`;
 
 export const monoFontFamily = \`${monoFont}\`;

@@ -73,6 +73,10 @@ const (
 	// maxTitleRunes is the length the first prompt is truncated to when a
 	// session has no title yet.
 	maxTitleRunes = 32
+
+	// maxRenameRunes is the longest title a rename may carry. It matches the
+	// gateway's protocol limit (200), so the two cannot disagree.
+	maxRenameRunes = 200
 	// maxToolSummaryRunes caps a tool result summary carried in the read
 	// model. The transcript's expanded output shows this text whole (bounded
 	// and scrollable in the UI), so it is large enough for a real command
@@ -1569,7 +1573,11 @@ func (s *service) configForSessionLocked(sessionID string) contracts.ChatConfig 
 // RenameSession updates a session's display title in the read model and, when a
 // store is wired, in the durable session row.
 func (s *service) RenameSession(sessionID, title string) error {
-	title = truncateTitle(strings.TrimSpace(title))
+	// A rename is the user's own text: truncating it to the auto-title length
+	// silently dropped everything after 32 runes while the transport accepted
+	// 200, so "my very long name" came back as "my very long name…" with no
+	// explanation (round-3 session audit F5). Cap at the transport's limit.
+	title = truncateTo(strings.TrimSpace(title), maxRenameRunes)
 	if title == "" {
 		return errors.New("agent: session title must not be empty")
 	}
@@ -3954,6 +3962,15 @@ func (s *service) notify(sessionID string) {
 // --- helpers ---------------------------------------------------------------
 
 // truncateTitle turns the first prompt into a session title of ~32 runes.
+// truncateTo keeps at most n runes, appending an ellipsis only when it cut.
+func truncateTo(value string, n int) string {
+	runes := []rune(value)
+	if len(runes) <= n {
+		return value
+	}
+	return string(runes[:n]) + "…"
+}
+
 func truncateTitle(prompt string) string {
 	runes := []rune(strings.Join(strings.Fields(prompt), " "))
 	if len(runes) <= maxTitleRunes {

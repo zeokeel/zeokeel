@@ -10,6 +10,7 @@ import { rememberStaged, uploadBlob, type StagedAttachment } from '@/api/blobs';
 import { formatRate } from '@/chat/stream-rate';
 import { PlanDialog } from '@/features/thread/plan-dialog';
 import { ComposerFooter, ComposerPickers, useComposerSettings } from '@/chat/composer-status';
+import { useDraft } from '@/chat/use-draft';
 import { cancelRun, setSetting } from '@/api/gateway';
 import { useApprovals } from '@/features/approvals/approvals-context';
 import { useSessions } from '@/features/sessions/sessions-context';
@@ -63,7 +64,9 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   // B11 edit: the target row, and the gateway's reason if it refused one.
   const [editTarget, setEditTarget] = useState<{ id: string; text: string } | null>(null);
   const [editRefusal, setEditRefusal] = useState<EditRefusal | null>(null);
-  const [draft, setDraft] = useState('');
+  const draftStore = useDraft(sessionId);
+  const draft = draftStore.value;
+  const setDraft = draftStore.set;
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState('');
@@ -292,7 +295,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
         .enqueue(pendingText)
         .then(() => setAttachError(null))
         .catch(() => {
-          setDraft((current) => (current === '' ? pendingText : current));
+          if (draftStore.value === '') setDraft(pendingText);
         });
       return true;
     }
