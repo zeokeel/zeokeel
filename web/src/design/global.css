@@ -1632,20 +1632,14 @@ body {
 
 /* ===================== narrow windows (B7 / B8) ======================== */
 /*
- * 1024 / 900: the top band title and the send button must stay visible and
- * clickable; the inspector is the first thing that yields (it is a side panel,
- * the conversation is the product).
+ * The shell's own breakpoint is 1024 (app-shell.tsx: `(max-width: 1023px)`).
+ * These rules start at 1023 for the same reason — at exactly 1024 the JS keeps
+ * the splitter, and a 1024 media query used to pin the panel with !important,
+ * so the drag reported Δ0 and still wrote the width to localStorage
+ * (round-3 mobile audit F2). The sidebar's width belongs to the splitter now;
+ * these rules only handle the panels that cannot shrink.
  */
-@media (max-width: 1024px) {
-  /* The splitter panel owns the width, so the rule must live there (the Sider
-   * inside it is width:100%). */
-  .zk-shell__sidebar-panel {
-    flex: 0 0 232px !important;
-    width: 232px !important;
-    max-width: 232px !important;
-    min-width: 232px !important;
-  }
-
+@media (max-width: 1023px) {
   .zk-inspector {
     width: 320px;
     min-width: 320px;
@@ -1653,13 +1647,6 @@ body {
 }
 
 @media (max-width: 900px) {
-  .zk-shell__sidebar-panel {
-    flex: 0 0 200px !important;
-    width: 200px !important;
-    max-width: 200px !important;
-    min-width: 200px !important;
-  }
-
   /* The inspector becomes an overlay above the thread instead of shrinking
    * both columns until neither is usable. */
   .zk-inspector {
@@ -1672,36 +1659,19 @@ body {
     box-shadow: 0 8px 32px color-mix(in srgb, var(--zk-scrim) 55%, transparent);
   }
 
-  .zk-topband__menu {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 40px;
-  height: 40px;
-  margin-inline-start: calc(-1 * var(--zk-space-2));
-  padding: 0;
-  border: 0;
-  border-radius: var(--zk-radius-md);
-  background: transparent;
-  color: var(--zk-label-secondary);
-  cursor: pointer;
-}
-
-.zk-topband__menu:hover {
-  background: var(--zk-bg-hover);
-  color: var(--zk-label-primary);
-}
-
-.zk-topband__menu:focus-visible {
-  outline: 2px solid var(--zk-focus);
-  outline-offset: 1px;
-}
-
-.zk-topband__title {
+  .zk-topband__title {
     max-width: 40vw;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Two columns of data do not fit in a phone; stack them, and let a table
+     scroll rather than break its dates into two lines. */
+  .zk-insights__tables {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .zk-insights__tables .ant-table-cell {
     white-space: nowrap;
   }
 }

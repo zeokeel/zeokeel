@@ -62,11 +62,22 @@ export function AppShell({ children }: { children: ReactNode }) {
   // it the sidebar cannot share the width with the content — 264 + 126 px left
   // the transcript one character wide. There it becomes a drawer the band opens.
   const narrow = useMediaQuery('(max-width: 1023px)');
-  // The drawer is open *for a pathname*: navigating anywhere closes it without
-  // an effect (a synchronous setState in an effect re-renders the whole shell).
-  const [drawerFor, setDrawerFor] = useState<string | null>(null);
-  const drawerOpen = narrow && drawerFor === location.pathname;
-  const closeDrawer = () => setDrawerFor(null);
+  // The drawer is transient chrome, not part of the history entry: *any*
+  // navigation closes it, including browser Back. Keying it on the pathname (two
+  // rounds ago) or on the history key both re-opened it when Back returned to the
+  // entry it was opened on (round-3 mobile audit F1). The state is adjusted
+  // during render — React's documented "reset state when an input changes"
+  // pattern — because a synchronous setState in an effect cascades renders.
+  const [drawer, setDrawer] = useState<{ openedFor: string | null; seenKey: string }>({
+    openedFor: null,
+    seenKey: location.key,
+  });
+  if (drawer.seenKey !== location.key) {
+    setDrawer({ openedFor: null, seenKey: location.key });
+  }
+  const drawerOpen = narrow && drawer.openedFor !== null && drawer.openedFor === location.key;
+  const openDrawer = () => setDrawer({ openedFor: location.key, seenKey: location.key });
+  const closeDrawer = () => setDrawer((prev) => ({ ...prev, openedFor: null }));
   // The width the splitter had before folding, so expanding restores it instead
   // of jumping back to the default (B16: "展开后状态不丢").
   const [expandedWidth, setExpandedWidth] = useState(() => storedSidebarWidth());
@@ -105,7 +116,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const column = (
     <div className="zk-column">
-      <TopBand onOpenSidebar={narrow ? () => setDrawerFor(location.pathname) : undefined} />
+      <TopBand onOpenSidebar={narrow ? openDrawer : undefined} />
       <main id="zk-main" className="zk-content">
         {createError ? (
           <div className="zk-msg-error" role="alert">
