@@ -107,6 +107,7 @@ export const zh = {
   'thread.providerError.openSettings': '打开设置',
   'thread.providerError.details': '详情',
   'thread.stopped': '已停止',
+  'thread.steps.summary': '已完成 {count} 个步骤',
   'thread.reasoning': '推理',
   'thread.rawArguments': '原始参数',
   'thread.backToLatest': '回到最新',

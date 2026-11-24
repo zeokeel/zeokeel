@@ -4,6 +4,7 @@ import type { ThoughtChainItemType } from '@ant-design/x';
 import { ZkIcon } from '@/design/icons';
 import { ToolCardBody } from './tool-card';
 import { useT } from '@/i18n';
+import type { WorkStepsCollapse, WorkStepsMode } from './use-work-steps';
 import { toolMeta } from './tools/meta';
 import type { ToolStep } from './types';
 
@@ -21,12 +22,18 @@ export function ThoughtSteps({
   steps,
   streaming,
   durationMs,
+  mode = 'standard',
+  collapse = 'completion',
 }: {
   reasoning: string;
   steps: ToolStep[];
   streaming: boolean;
   /** The turn's measured wall time, when the backend reported one. */
   durationMs?: number;
+  /** 设置 → 外观 → 工作步骤展示 (concise / standard / detailed / expanded). */
+  mode?: WorkStepsMode;
+  /** 设置 → 外观 → 收起时机: fold on settle, or only when the next turn starts. */
+  collapse?: WorkStepsCollapse;
 }) {
   const t = useT();
   const [userExpanded, setUserExpanded] = useState<string[] | null>(null);
@@ -71,14 +78,37 @@ export function ThoughtSteps({
       content: <div className="zk-reasoning-text">{reasoning}</div>,
     });
   }
-  steps.forEach((step) => items.push(toolItem(step, t)));
+  // 简洁 shows what the user has to act on (a running or failed step) and hides
+  // the successes behind one line; the other modes keep every step.
+  const compactMode = mode === 'compact';
+  const actionable = steps.filter((step) => step.status !== 'ok');
+  const visibleSteps = compactMode && !streaming ? actionable : steps;
+  visibleSteps.forEach((step) => items.push(toolItem(step, t)));
+
+  if (compactMode && !streaming && actionable.length === 0 && steps.length > 0) {
+    // Nothing to act on: say how much work happened instead of listing it.
+    items.push({
+      key: 'concise-summary',
+      title: t('thread.steps.summary', { count: steps.length }),
+      ...(durationMs ? { desc: formatDuration(durationMs) } : {}),
+      icon: <ZkIcon name="check" />,
+      status: 'success',
+      collapsible: false,
+    });
+  }
 
   if (items.length === 0) return null;
 
-  const autoExpanded = items
-    .filter((item) => item.status === 'loading' || item.status === 'error')
-    .map((item) => item.key)
-    .filter((key): key is string => typeof key === 'string');
+  const wantsAllOpen = mode === 'detailed' || mode === 'verbose';
+  const keepOpen = collapse === 'next-input' && !streaming;
+  const autoExpanded = keepOpen
+    ? items.map((item) => item.key).filter((key): key is string => typeof key === 'string')
+    : wantsAllOpen
+      ? items.map((item) => item.key).filter((key): key is string => typeof key === 'string')
+      : items
+          .filter((item) => item.status === 'loading' || item.status === 'error')
+          .map((item) => item.key)
+          .filter((key): key is string => typeof key === 'string');
 
   return (
     <div className="zk-thought">

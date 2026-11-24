@@ -3,6 +3,7 @@ import { Input, Modal } from 'antd';
 import { useNavigate } from 'react-router';
 import { useSessions } from '@/features/sessions/sessions-context';
 import { useEscClaim, useShortcut } from '@/keyboard/keyboard-provider';
+import { useShortcutSettings } from '@/keyboard/use-shortcut-settings';
 import { ZkIcon, type IconName } from '@/design/icons';
 import { useT } from '@/i18n';
 
@@ -106,7 +107,15 @@ export function CommandPalette() {
     return true;
   };
 
-  useShortcut({ id: 'palette-open', mod: true, key: 'k', active: !open, run: openPalette });
+  // The palette and the sidebar fold are configurable rows (设置 → 外观 →
+  // 快捷键). They used to be hard-coded while the rows sat there doing nothing.
+  const combos = useShortcutSettings();
+  useShortcut({
+    id: 'palette-open',
+    ...combos.palette,
+    active: !open,
+    run: openPalette,
+  });
   useShortcut({
     id: 'palette-open-alias',
     mod: true,

@@ -3,6 +3,7 @@ import { Drawer, Layout, Splitter } from 'antd';
 import { matchPath, useLocation, useNavigate } from 'react-router';
 import { useSessions } from '@/features/sessions/sessions-context';
 import { useShortcut } from '@/keyboard/keyboard-provider';
+import { useShortcutSettings } from '@/keyboard/use-shortcut-settings';
 import { useMediaQuery, useSystemAppearance } from '@/design/use-system-appearance';
 import { CommandPalette } from '@/features/palette/command-palette';
 import { Sidebar } from './sidebar';
@@ -101,10 +102,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   };
 
+  const shortcuts = useShortcutSettings();
   useShortcut({
     id: 'toggle-sidebar',
-    mod: true,
-    key: 'b',
+    ...shortcuts.sidebar,
     active: true,
     run: () => {
       setCollapsed((was) => !was);

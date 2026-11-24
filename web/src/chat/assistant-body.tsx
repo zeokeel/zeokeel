@@ -4,6 +4,7 @@ import { classifyProviderFailure } from '@/features/provider-error';
 import { MarkdownBody } from './markdown';
 import { useT } from '@/i18n';
 import { ThoughtSteps } from './thought-steps';
+import { useWorkSteps } from './use-work-steps';
 import type { MessageStatus, ZeoMessage } from './types';
 
 /**
@@ -22,6 +23,7 @@ export function AssistantBody({
   status: MessageStatus;
 }) {
   const t = useT();
+  const workSteps = useWorkSteps();
   const streaming = status === 'loading' || status === 'updating';
   const stopped = !streaming && message.stopReason === 'aborted' && !message.error;
 
@@ -32,6 +34,8 @@ export function AssistantBody({
         steps={message.steps}
         streaming={streaming}
         durationMs={message.usage?.durationMs}
+        mode={workSteps.mode}
+        collapse={workSteps.collapse}
       />
       {message.text ? <MarkdownBody text={message.text} streaming={streaming} /> : null}
       {message.error ? <ProviderErrorRow error={message.error} /> : null}

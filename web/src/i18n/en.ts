@@ -103,6 +103,7 @@ export const en: Catalog = {
   'thread.providerError.openSettings': 'Open settings',
   'thread.providerError.details': 'Details',
   'thread.stopped': 'Stopped',
+  'thread.steps.summary': 'Completed {count} steps',
   'thread.reasoning': 'Reasoning',
   'thread.rawArguments': 'Raw arguments',
   'thread.backToLatest': 'Back to latest',
