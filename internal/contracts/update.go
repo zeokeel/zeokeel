@@ -2,6 +2,12 @@ package contracts
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 )
@@ -78,4 +84,52 @@ type UpdateInstaller interface {
 	ScheduleInstall(download UpdateDownload) (UpdateInstallPlan, error)
 	// PendingInstall reports the scheduled install (ok=false when none).
 	PendingInstall() (UpdateInstallPlan, bool)
+}
+
+// installNowMarkerName is the file the gateway writes when the user asks to
+// install a staged update and restart. The host checks it after the gateway
+// stops: the marker is how "install now" crosses the process boundary without
+// the gateway running the installer itself (it holds the executable open).
+const installNowMarkerName = "install-now"
+
+// UpdateInstallNowPath is the marker path inside <dataDir>/updates, or "" when
+// dataDir is unknown.
+func UpdateInstallNowPath(dataDir string) string {
+	trimmed := strings.TrimSpace(dataDir)
+	if trimmed == "" {
+		return ""
+	}
+	return filepath.Join(trimmed, "updates", installNowMarkerName)
+}
+
+// RequestUpdateInstallNow records "install the staged update at this shutdown".
+func RequestUpdateInstallNow(dataDir string) error {
+	path := UpdateInstallNowPath(dataDir)
+	if path == "" {
+		return errors.New("update: data directory is required to request an install")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("update: create the install marker directory: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o600); err != nil {
+		return fmt.Errorf("update: write the install marker: %w", err)
+	}
+	return nil
+}
+
+// UpdateInstallNowRequested reports whether an install-and-restart was asked for.
+func UpdateInstallNowRequested(dataDir string) bool {
+	path := UpdateInstallNowPath(dataDir)
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// ClearUpdateInstallNow removes the marker (best effort: a missing file is fine).
+func ClearUpdateInstallNow(dataDir string) {
+	if path := UpdateInstallNowPath(dataDir); path != "" {
+		_ = os.Remove(path)
+	}
 }

@@ -6,6 +6,20 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **GitHub Releases 自动更新**（TRANSPORT §5.1.12）：更新后端（检查 GitHub Releases、校验并暂存本平台资产、
+  「下次启动安装」计划、宿主的替换/重启）一直存在，但**浏览器到它的这一段线从来没有**——没有方法、没有
+  capability、也没有自动检查，所以从客户端看这个产品"不会更新"。现在：
+  - 四个协议方法 `update.status` / `update.check` / `update.download` / `update.install`（会阻塞的三个走各自
+    goroutine，`$/cancel` 可取消），capability `update` 由 `KeyUpdate` 派生；
+  - 检查失败**不是**"已是最新"：`error` 字段带原文，页面照实显示；
+  - `update.install` 支持 `restart:true`：网关写 `<dataDir>/updates/install-now` 标记后自行关闭，宿主在
+    可执行文件句柄释放后执行安装并拉起新版本（不写标记则保持"下次启动安装"）；
+  - serve 产品开启**自动检查**：启动 30s 后一次、此后每 6h，发现新版本发一条通知，同一版本只通知一次
+    （e2e 夹具不开启，避免每个测试网关都去访问 GitHub）；
+  - 设置 → 关于页从空 section 变成真实的更新面：当前/最新版本、上次检查时间、release notes、三个按钮。
+
 ## [0.3.9] - 2026-11-24
 
 ### Fixed

@@ -39,7 +39,7 @@ export interface SettingsSection {
    * The model catalog needs list + add/edit/delete against one JSON row; a textarea
    * of raw JSON was the placeholder this replaces.
    */
-  component?: 'modelCatalog';
+  component?: 'modelCatalog' | 'updateStatus';
 }
 
 export interface SettingsPage {
@@ -323,7 +323,15 @@ export const SETTINGS_PAGES: SettingsPage[] = [
     labelKey: 'settings.ia.about',
     order: 10,
     group: ABOUT,
-    sections: [{ titleKey: 'settings.ia.version', fields: [] }],
+    sections: [
+      {
+        titleKey: 'settings.ia.version',
+        fields: [],
+        // The version page is the update surface: current version, the release
+        // the gateway last saw, its notes, and check/download/install.
+        component: 'updateStatus',
+      },
+    ],
   },
 ];
 

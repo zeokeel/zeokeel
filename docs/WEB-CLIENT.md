@@ -53,7 +53,7 @@
 | R18 | `/settings/lsp` | 设置 · LSP (`settings.go:888`) | 服务器列表增删 | ✅ | 同上 |
 | R19 | `/settings/archive` | 设置 · 归档 (`settings.go:921`) | 归档会话恢复/删除 | ✅ | 同上 |
 | R20 | `/settings/data-privacy` | 设置 · 数据与隐私 (`settings.go:930`) | 导入/清除/文件隐藏 | ✅ | 同上 |
-| R21 | `/settings/about` | 设置 · 关于 (`settings.go:961`) | 版本/更新/诊断 | ✅ | 同上 |
+| R21 | `/settings/about` | 设置 · 关于 | 当前版本 / 最新版本 / 更新说明 / 检查 / 下载 / 安装并重启（`update.*`，TRANSPORT §5.1.12） | ✅ | 页面此前是空 section（`fields: []`），更新面就是把它填上 |
 | R22 | `/automation` | 自动化屏 (`automation.go:178`) | 定时任务 | ✅ | — |
 | R23 | `/capabilities` | 能力屏 (`plugins.go:159`) | 技能 / MCP 连接器 | ✅ | Tab 在 URL query `?tab=skills\|connectors` |
 | R24 | `/insights` | 洞察屏 (`insights.go:125`) | 跨会话用量（只读） | ✅ | 范围 `?range=7\|30` 在 URL |

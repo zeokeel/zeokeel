@@ -36,7 +36,7 @@ import (
 func main() {
 	addr := flag.String("addr", "127.0.0.1:9932", "gateway host:port")
 	token := flag.String("token", os.Getenv("ZK_TOKEN"), "gateway token (default $ZK_TOKEN)")
-	mode := flag.String("mode", "plain", "plain | approval | cancel | slow")
+	mode := flag.String("mode", "plain", "plain | approval | cancel | slow | update")
 	text := flag.String("text", "", "prompt text (default per mode)")
 	timeout := flag.Duration("timeout", 90*time.Second, "overall deadline")
 	flag.Parse()
@@ -65,8 +65,10 @@ func main() {
 		err = probe.runCancel(ctx)
 	case "slow":
 		err = probe.runSlow(ctx)
+	case "update":
+		err = probe.runUpdate()
 	default:
-		fatalf("unknown mode %q (plain | approval | cancel | slow)", *mode)
+		fatalf("unknown mode %q (plain | approval | cancel | slow | update)", *mode)
 	}
 	if err != nil {
 		fatalf("mode %s: %v", *mode, err)
@@ -509,4 +511,42 @@ func readJSONFrame(reader *bufio.Reader) (map[string]any, error) {
 		return nil, err
 	}
 	return frame, nil
+}
+
+// runUpdate exercises the update surface (docs/TRANSPORT.md §5.1.12) end to end:
+// the four methods exist, `update.status` reports the running version, and a
+// check answers — with a result or with `error`, never with a protocol error.
+//
+// It deliberately does not require a release to be available: whether GitHub is
+// reachable decides `available`/`error`, and both are legitimate answers. What
+// is asserted is that the browser's path to the update backend is wired.
+func (p *probe) runUpdate() error {
+	status, err := p.callResult("update.status", nil)
+	if err != nil {
+		return fmt.Errorf("update.status: %w", err)
+	}
+	current, _ := status["currentVersion"].(string)
+	if current == "" {
+		return fmt.Errorf("update.status returned no currentVersion: %v", status)
+	}
+	fmt.Printf("update.status: current=%s latest=%v staged=%v\n", current, status["latestVersion"], status["staged"] != nil)
+
+	checked, err := p.callResult("update.check", nil)
+	if err != nil {
+		// A protocol error here means the method is missing or the backend is not
+		// wired: that is the failure this probe exists to catch.
+		return fmt.Errorf("update.check: %w", err)
+	}
+	if got, _ := checked["currentVersion"].(string); got != current {
+		return fmt.Errorf("update.check reported currentVersion %q, update.status said %q", got, current)
+	}
+	if failure, _ := checked["error"].(string); failure != "" {
+		fmt.Printf("update.check: could not reach the release feed (%s); surface is wired\n", failure)
+		return nil
+	}
+	fmt.Printf("update.check: latest=%v available=%v\n", checked["latestVersion"], checked["available"])
+	if slot, ok := checked["staged"]; ok && slot != nil {
+		fmt.Printf("update.check: a staged update is already waiting: %v\n", slot)
+	}
+	return nil
 }

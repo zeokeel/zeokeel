@@ -1240,3 +1240,48 @@ export async function loadTeamActivity(limit = 50): Promise<TeamActivityRow[]> {
   const result = await client().request<{ items?: TeamActivityRow[] }>('team.activity', { limit });
   return Array.isArray(result?.items) ? result.items : [];
 }
+
+// ------------------------------------------------------------------ updates --
+
+/**
+ * What the gateway knows about releases (TRANSPORT §5.1.12). `staged` is the
+ * install-on-restart plan the host will apply, so the button state cannot
+ * disagree with what a restart would actually do.
+ */
+export interface UpdateStatus {
+  currentVersion: string;
+  latestVersion?: string;
+  available: boolean;
+  notes?: string;
+  url?: string;
+  sha256?: string;
+  size?: number;
+  checkedAt?: string;
+  /** The last check's failure, in the backend's wording. Never "up to date". */
+  error?: string;
+  staged?: { version: string; sha256?: string; kind?: string };
+}
+
+/** The last known status, without touching the network. */
+export async function fetchUpdateStatus(): Promise<UpdateStatus> {
+  return client().request<UpdateStatus>('update.status');
+}
+
+/** Check GitHub Releases now. A failure comes back in `error`, not as a throw. */
+export async function checkForUpdate(): Promise<UpdateStatus> {
+  return client().request<UpdateStatus>('update.check');
+}
+
+/** Download, verify and stage this platform's asset. */
+export async function downloadUpdate(): Promise<UpdateStatus> {
+  return client().request<UpdateStatus>('update.download');
+}
+
+/**
+ * Keep the staged update for the next start, or (restart) ask the host to
+ * install it now: the gateway writes the handoff marker and stops, the host
+ * installs and relaunches.
+ */
+export async function installUpdate(restart: boolean): Promise<UpdateStatus> {
+  return client().request<UpdateStatus>('update.install', restart ? { restart: true } : {});
+}

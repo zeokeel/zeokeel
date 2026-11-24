@@ -1601,6 +1601,28 @@ const wsDispatch = (client, message) => {
       intercepted.push({ sessionId, text, attachments });
       return reply({ ok: true });
     }
+    // The update surface (§5.1.12). The mock cannot reach GitHub, so it
+    // reports a fixed "you are current" — the point is that the client's four
+    // calls have a dispatcher, not that the fixture invents releases.
+    case 'update.status':
+      return reply({
+        currentVersion: '0.0.0-mock',
+        checkedAt: new Date().toISOString(),
+      });
+    case 'update.check':
+      return reply({
+        currentVersion: '0.0.0-mock',
+        checkedAt: new Date().toISOString(),
+      });
+    case 'update.download':
+      return reply({ currentVersion: '0.0.0-mock', error: 'mock 不下载更新包' });
+    case 'update.install':
+      // `restart` selects install-now vs install-on-next-start; the mock has
+      // nothing staged, so it only acknowledges the shape.
+      return reply({
+        currentVersion: '0.0.0-mock',
+        ...(params.restart === true ? { error: 'mock 没有已下载的更新' } : {}),
+      });
     case 'team.snapshot': {
       return reply({ members: mockTeam.members.slice(), activities: mockTeam.activities.slice() });
     }

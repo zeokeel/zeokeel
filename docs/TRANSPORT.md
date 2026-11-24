@@ -286,6 +286,8 @@ SIGINT/SIGTERM（signals_unix.go:11）
 | `regenerate` | 聊天后端实现 `contracts.SessionRegenerator` | 「⋯」菜单里的「重新生成」（§4.6 regenerate 模式） |
 | `edit` | 聊天后端实现 `contracts.SessionEditor` | 「⋯」菜单里的「编辑并重发」（§4.6 editMessageId 模式） |
 | `tasks` | 装配提供 `contracts.KeyTaskBoard` | 后台任务 chip（`tasks.snapshot/subscribe`、`task.status/delete`，§5.1.8） |
+| `team` | 装配提供 `contracts.KeyTeam` | 团队屏（`team.*`，§5.1.11） |
+| `update` | 装配提供 `contracts.KeyUpdate` | 设置 → 关于 的更新面（`update.status/check/download/install`，§5.1.12） |
 
 > 能力名**全小写、无前缀**，与 `context`/`plan`/`ask` 同风格。`regenerate` 是**运行模式**而不是
 > 方法名——客户端读它决定菜单项的禁用态与 tooltip（文案 `thread.regenerateUnsupported`），
@@ -755,6 +757,49 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `team.interrupt` | `{id}` | `{ok}` | Y | `:148` | ✅ 已实现 |
 | `team.close` | `{id}` | `{ok}` | Y | `:150` | ✅ 已实现 |
 | `team.activity` | `{limit?}` | `{items:[TeamActivity]}` | Y | `TeamActivityLister` `team.go:127` | ✅ 已实现 |
+
+#### 5.1.12 更新（`update`，GitHub Releases）
+
+更新后端（`internal/modules/update`）从模块化时代就有：`contracts.UpdateService.Check` 读 GitHub Releases、
+比对版本、选本平台资产，`UpdateDownloader` 校验 SHA-256/大小后暂存，`UpdateInstaller` 写"下次启动安装"
+的计划，宿主 `internal/host/install*.go` 负责真正的替换与重启。**缺的一直是浏览器到它的这段线**：
+没有方法、没有 capability、也没有自动检查，所以从客户端看这个产品"不会更新"。
+
+| 方法 | 参数 | 返回 | 幂等 | 契约 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| `update.status` | — | `UpdateStatus`（见下） | Y | 网关内存中的最近一次结果 + `PendingInstall()` | ✅ 已实现 |
+| `update.check` | — | `UpdateStatus` | Y | `UpdateService.Check` `update.go:194` | ✅ 已实现 |
+| `update.download` | — | `UpdateStatus`（带 `staged`） | Y | `UpdateDownloader.Download` + `UpdateInstaller.ScheduleInstall` | ✅ 已实现 |
+| `update.install` | `{restart?}` | `UpdateStatus` | N | `UpdateInstaller.PendingInstall` + 宿主安装 | ✅ 已实现 |
+
+`UpdateStatus`：
+
+```jsonc
+{
+  "currentVersion": "0.3.9",
+  "latestVersion": "0.3.10",   // 空 = 还没检查过
+  "available": true,
+  "notes": "…",                 // release notes（Markdown）
+  "url": "https://…",           // 本平台资产的下载地址
+  "sha256": "…", "size": 12345,
+  "checkedAt": "2026-11-24T10:00:00Z",
+  "error": "…",                 // 最近一次检查失败的原因；**不**会把失败说成"已是最新"
+  "staged": { "version": "0.3.10", "sha256": "…", "kind": "appimage" }
+}
+```
+
+规则：
+
+- **`update.check` / `update.download` / `update.install` 属于会阻塞的少数方法**（网络、磁盘），它们跑在各自
+  的 goroutine 上，`$/cancel` 可取消（§4.4）。
+- 检查失败**不是**协议错误：`error` 字段带原文，界面照实说"连不上 GitHub"。
+- `update.install` 在没有暂存包时返回 `1024 update_not_downloaded`，不会重启到同一个版本。
+- `restart: true` 时网关写 `<dataDir>/updates/install-now` 标记后关闭自己；宿主在此后才执行安装
+  （此时可执行文件句柄已释放），成功则拉起新版本。`restart` 省略 = 保持"下次启动安装"。
+- **自动检查**由产品开启（`gateway.Options.AutoCheckUpdates`，serve 产品打开）：启动 30s 后一次，此后每 6h
+  一次；发现新版本时发一条通知（`发现新版本 x.y.z（当前 a.b.c）…`），同一版本只通知一次。e2e 夹具不开启，
+  以免每个测试网关都去访问 GitHub。
+- capability：`update`（来自 `KeyUpdate`，headless 与 serve 都装配了 update 模块）。
 
 ### 5.2 T2：对齐桌面所需（22 键 / 约 48 方法）
 

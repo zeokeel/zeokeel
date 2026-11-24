@@ -121,6 +121,7 @@ make ci                       # build+vet+test
 make acceptance-check         # 纯文本一轮：create → run → SSE → done
 make acceptance-approval      # 审批链：run → approvals.delta → resolve → tool.result → done
 make acceptance-slow          # 断连 ≠ 停止
+make acceptance-update        # 更新面：update.status/check 真的接到后端（不要求有新版本）
 # 想在浏览器里手动验：make acceptance / make acceptance-tool（打印带 token 的 URL）
 ```
 

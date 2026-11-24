@@ -74,6 +74,14 @@ type Options struct {
 	Logger contracts.Logger
 	// Out receives the one-line "open this URL" message. Defaults to io.Discard.
 	Out io.Writer
+	// AutoCheckUpdates makes the gateway check the release feed on its own
+	// (startup delay + interval below) and announce a newer release. Off by
+	// default: the e2e fixtures run real gateways and must not reach for GitHub.
+	AutoCheckUpdates bool
+	// UpdateCheckStartupDelay and UpdateCheckInterval override the schedule
+	// (tests; zero = 30s and 6h).
+	UpdateCheckStartupDelay time.Duration
+	UpdateCheckInterval     time.Duration
 }
 
 // Gateway is one running gateway process.
@@ -130,6 +138,13 @@ type Gateway struct {
 	// Run streams for POST /api/chat/run, keyed by clientRunId (idempotency).
 	runMu sync.Mutex
 	runs  map[string]*runStream
+
+	// updateMu guards update, the last update check this process made (see
+	// update_surface.go). announcedUpdate remembers which version already produced
+	// a "new release" toast, so the periodic check does not repeat it.
+	updateMu        sync.Mutex
+	update          updateState
+	announcedUpdate string
 
 	// inFlight tracks the control-plane requests that run on their own goroutine
 	// because they may block (team.wait, team.send, run.interject), keyed by the
@@ -276,6 +291,8 @@ func (g *Gateway) Serve(ctx context.Context) error {
 	// gateway polls them and publishes a delta when the content actually
 	// changed — the rev only moves on a real change, so an idle poll is free.
 	go g.pollDomains(ctx)
+	// Update checks are off unless the product turns them on (see Options).
+	g.startUpdateChecks(ctx)
 
 	g.server = &http.Server{
 		Handler:           g.handler(),

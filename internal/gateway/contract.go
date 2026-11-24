@@ -78,6 +78,10 @@ var contractParams = map[string]any{
 	"tasks.unsubscribe":       tasksUnsubscribeParams{},
 	"task.status":             taskStatusParams{},
 	"task.delete":             taskDeleteParams{},
+	"update.status":           struct{}{},
+	"update.check":            struct{}{},
+	"update.download":         struct{}{},
+	"update.install":          updateInstallParams{},
 	"team.snapshot":           struct{}{},
 	"team.spawn":              teamSpawnParams{},
 	"team.send":               teamSendParams{},
@@ -104,6 +108,7 @@ var conditionalCapabilities = []conditionalCapability{
 	{Name: "regenerate", When: "SessionRegenerator"},
 	{Name: "edit", When: "SessionEditor"},
 	{Name: "team", When: "KeyTeam"},
+	{Name: "update", When: "KeyUpdate"},
 }
 
 // contractParamSpec is one method's parameter contract.

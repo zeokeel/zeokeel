@@ -61,6 +61,9 @@ func runServe(ctx context.Context, opts Options, out io.Writer) error {
 			logger.Printf("%s: autostart: %v", appName, err)
 		}
 	})
+	// A marker left by a crash between "install now" and the install must not
+	// install anything on a start where nobody asked.
+	clearStaleInstallMarker(opts.DataDir, logger)
 	// The gateway runs the same long-lived agent backend, so a scheduled update
 	// installs here too (failures are logged and keep the pending plan).
 	applyPendingUpdateOnStartup(opts.DataDir, opts.AppVersion, logger)
@@ -77,12 +80,13 @@ func runServe(ctx context.Context, opts Options, out io.Writer) error {
 		return err
 	}
 	gw, err := gateway.New(root, gateway.Options{
-		DataDir: opts.DataDir,
-		Port:    opts.Port,
-		Product: assembly.ProductServe,
-		Version: opts.AppVersion,
-		Logger:  logger,
-		Out:     out,
+		DataDir:          opts.DataDir,
+		Port:             opts.Port,
+		Product:          assembly.ProductServe,
+		Version:          opts.AppVersion,
+		Logger:           logger,
+		Out:              out,
+		AutoCheckUpdates: true,
 	})
 	if err != nil {
 		return err
@@ -144,6 +148,12 @@ func runServe(ctx context.Context, opts Options, out io.Writer) error {
 	} else {
 		err = runServeWithTray(ctx, opts, root, gw, settings, logger, serveErr, cancelServe)
 	}
+	// The gateway stops before the installer runs: that is the whole point of
+	// the marker handoff (a running executable cannot replace itself, and the
+	// listener and data directory must be free). Failures are logged and keep
+	// the plan for the next start.
+	maybeInstallRequestedUpdate(opts.DataDir, logger)
+
 	if err != nil && errors.Is(err, gateway.ErrAlreadyRunning) {
 		// A second launch is not an error: report where the running gateway is
 		// and let the process exit 0 (desktop second-instance behaviour).

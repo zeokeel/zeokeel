@@ -301,6 +301,24 @@
       ],
       "optional": []
     },
+    "update.check": {
+      "required": [],
+      "optional": []
+    },
+    "update.download": {
+      "required": [],
+      "optional": []
+    },
+    "update.install": {
+      "required": [],
+      "optional": [
+        "restart"
+      ]
+    },
+    "update.status": {
+      "required": [],
+      "optional": []
+    },
     "workspace.list.snapshot": {
       "required": [],
       "optional": []
@@ -393,6 +411,10 @@
       {
         "name": "team",
         "when": "KeyTeam"
+      },
+      {
+        "name": "update",
+        "when": "KeyUpdate"
       }
     ]
   }

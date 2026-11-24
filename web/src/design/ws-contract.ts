@@ -57,6 +57,10 @@ export const WS_METHODS = [
   'team.snapshot',
   'team.spawn',
   'team.wait',
+  'update.check',
+  'update.download',
+  'update.install',
+  'update.status',
   'workspace.list.snapshot',
 ] as const;
 
@@ -110,6 +114,10 @@ export const WS_PARAMS: Record<WsMethod, MethodParams> = {
   'team.snapshot': { required: [], optional: [] },
   'team.spawn': { required: ['name', 'prompt'], optional: ['model'] },
   'team.wait': { required: ['id'], optional: [] },
+  'update.check': { required: [], optional: [] },
+  'update.download': { required: [], optional: [] },
+  'update.install': { required: [], optional: ['restart'] },
+  'update.status': { required: [], optional: [] },
   'workspace.list.snapshot': { required: [], optional: [] },
 };
 
@@ -144,6 +152,7 @@ export const CONDITIONAL_CAPABILITIES = [
   { name: 'regenerate', when: 'SessionRegenerator' },
   { name: 'tasks', when: 'KeyTaskBoard' },
   { name: 'team', when: 'KeyTeam' },
+  { name: 'update', when: 'KeyUpdate' },
 ] as const;
 
 export const PROTOCOL_VERSION = 1;

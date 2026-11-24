@@ -524,6 +524,12 @@ export class FakeGateway {
       reply({ ok: true });
       return;
     }
+    if (method.startsWith('update.')) {
+      // Fixed current version: the About page's four calls need a dispatcher,
+      // not a release feed.
+      reply({ currentVersion: '0.0.0-fake', checkedAt: new Date().toISOString() });
+      return;
+    }
     if (method === 'team.snapshot') {
       reply({
         members: this.state.teamMembers ?? [],

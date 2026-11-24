@@ -67,6 +67,9 @@ func (g *Gateway) hasConditionalCapability(when string) bool {
 	case "KeyTeam":
 		team, ok := g.root.Get(contracts.KeyTeam)
 		return ok && team != nil
+	case "KeyUpdate":
+		update, ok := g.root.Get(contracts.KeyUpdate)
+		return ok && update != nil
 	case "KeyTaskBoard":
 		board, ok := g.root.Get(contracts.KeyTaskBoard)
 		return ok && board != nil
@@ -330,6 +333,18 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"task.delete": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.taskDelete(ctx, request.Params)
 		},
+		"update.status": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.updateStatus(), nil
+		},
+		"update.check": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.updateCheck(ctx)
+		},
+		"update.download": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.updateDownload(ctx)
+		},
+		"update.install": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.updateInstall(request.Params)
+		},
 		"session.active.get": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.activeSession()
 		},
@@ -387,9 +402,12 @@ func requestKey(id json.RawMessage) string {
 // the connection (ping, run.cancel, the next request); `$/cancel` cancels them
 // by request id (AUDIT-2026-11-24 B-12, TRANSPORT §4.4).
 var blockingMethods = map[string]bool{
-	"team.wait":     true,
-	"team.send":     true,
-	"run.interject": true,
+	"team.wait":       true,
+	"team.send":       true,
+	"run.interject":   true,
+	"update.check":    true,
+	"update.download": true,
+	"update.install":  true,
 }
 
 // isBlocking reports whether a method must run on its own goroutine.

@@ -20,6 +20,7 @@ import {
 import { useEscClaim } from '@/keyboard/keyboard-provider';
 import { ZkIcon } from '@/design/icons';
 import { ConfirmDanger } from '@/ui/confirm-danger';
+import { UpdateStatus } from './update-status';
 import { ModelCatalogEditor } from './model-catalog';
 import { describeError } from '@/features/describe-error';
 import { useT } from '@/i18n';
@@ -287,12 +288,15 @@ function SettingsPageForm({
         {page.sections.map((section, index) => (
           <section key={index} className="zk-settings__section">
             {section.titleKey ? <h2 className="zk-settings__section-title">{t(section.titleKey)}</h2> : null}
-            {section.fields.length === 0 ? (
+            {/* "This page has no settings" is only true when nothing else renders
+                the section: 关于 carries the update surface instead of rows. */}
+            {section.fields.length === 0 && !section.component ? (
               <Typography.Text type="secondary">{t('settings.pageEmpty')}</Typography.Text>
             ) : null}
             {section.component === 'modelCatalog' ? (
               <ModelCatalogEditor />
             ) : null}
+            {section.component === 'updateStatus' ? <UpdateStatus /> : null}
             {section.component ? null : section.fields.map((field) => (
               <FieldRow
                 key={field.key}

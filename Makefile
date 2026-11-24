@@ -49,7 +49,7 @@ web-client-if-available:
 # client sources. Compares against web/src, web/index.html and web/package.json.
 # Acceptance fixture: the real gateway plus a deterministic OpenAI-compatible
 # model, so the end-to-end flow runs without a provider key.
-.PHONY: acceptance acceptance-tool acceptance-check acceptance-approval acceptance-slow
+.PHONY: acceptance acceptance-tool acceptance-check acceptance-approval acceptance-slow acceptance-update
 acceptance:
 	bash scripts/acceptance/serve-with-fake-model.sh
 
@@ -66,6 +66,12 @@ acceptance-approval:
 
 acceptance-slow:
 	bash scripts/acceptance/serve-with-fake-model.sh --slow --probe slow
+
+# The update surface (TRANSPORT §5.1.12) against a real gateway. Reachability of
+# GitHub decides available/error; the probe asserts the wiring, so it is safe to
+# run offline too.
+acceptance-update:
+	bash scripts/acceptance/serve-with-fake-model.sh --plain --probe update
 
 web-client-fresh: web-client
 	@newer=""; \
