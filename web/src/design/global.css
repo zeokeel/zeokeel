@@ -1370,14 +1370,19 @@ body {
 /* antd paints a destructive dropdown item with its derived error hue, which is
  * 3.9:1 in dark and 3.3:1 in light. The Menu token does not reach this rule —
  * it is a Dropdown surface — so the fix lives here, against the AA token. */
+/* antd's own rule for this class is `.ant-dropdown .ant-dropdown-menu
+ * .ant-dropdown-menu-item-danger` — same class count, injected after our sheet,
+ * so it wins on order. `!important` is the honest tool for a third-party
+ * override; the value still comes from the token file. */
 .ant-dropdown-menu-item-danger,
 .ant-dropdown-menu-item-danger:hover,
-.ant-dropdown-menu-item-danger:focus {
-  color: var(--zk-danger-text);
+.ant-dropdown-menu-item-danger:focus,
+.ant-dropdown-menu-item-danger a {
+  color: var(--zk-danger-text) !important;
 }
 
 .ant-btn-dangerous:not(.ant-btn-primary) {
-  color: var(--zk-danger-text);
+  color: var(--zk-danger-text) !important;
 }
 
 .zk-session-pin {
