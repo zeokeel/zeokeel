@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Composer } from '@/chat/composer';
 import { ComposerFooter, ComposerPickers, useComposerSettings } from '@/chat/composer-status';
+import { uploadBlob, type StagedAttachment } from '@/api/blobs';
 import { setSetting } from '@/api/gateway';
 import type { SlashCommand } from '@/chat/slash-commands';
 import { ApprovalDock } from '@/features/approvals/approval-dock';
@@ -26,6 +27,7 @@ export function NowScreen() {
   const approvalPending = approvals.length > 0;
   const composerSettings = useComposerSettings('');
   const [draft, setDraft] = useState('');
+  const [attachments, setAttachments] = useState<StagedAttachment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -49,7 +51,10 @@ export function NowScreen() {
     try {
       const session = await create();
       setDraft('');
-      navigate(`/c/${session.id}`, { state: { pendingText: text } });
+      navigate(`/c/${session.id}`, {
+        state: { pendingText: text, ...(attachments.length > 0 ? { pendingAttachments: attachments } : {}) },
+      });
+      setAttachments([]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t('shell.createFailed'));
     } finally {
@@ -88,6 +93,24 @@ export function NowScreen() {
             usage={composerSettings.usage}
             onSetting={(key, value) => void setSetting(key, value)}
           />
+        }
+        attachments={attachments}
+        onAttachFiles={(files) => {
+          void (async () => {
+            for (const file of files) {
+              try {
+                const staged = await uploadBlob(file);
+                setAttachments((current) => [...current, staged]);
+              } catch (cause) {
+                setError(cause instanceof Error && cause.message === 'attachment_too_large'
+                  ? t('composer.attachTooLarge')
+                  : t('composer.attachFailed'));
+              }
+            }
+          })();
+        }}
+        onRemoveAttachment={(id) =>
+          setAttachments((current) => current.filter((item) => item.id !== id))
         }
         value={draft}
         onChange={setDraft}

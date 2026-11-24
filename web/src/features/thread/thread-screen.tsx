@@ -6,6 +6,7 @@ import type { SlashCommand } from '@/chat/slash-commands';
 import { Transcript } from '@/chat/transcript';
 import { ApprovalDock } from '@/features/approvals/approval-dock';
 import { AskDialog } from '@/features/thread/ask-dialog';
+import { rememberStaged, uploadBlob, type StagedAttachment } from '@/api/blobs';
 import { PlanDialog } from '@/features/thread/plan-dialog';
 import { ComposerFooter, ComposerPickers, useComposerSettings } from '@/chat/composer-status';
 import { setSetting } from '@/api/gateway';
@@ -78,6 +79,28 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   const stoppedByUser = useRef(false);
 
   const composerSettings = useComposerSettings(sessionId);
+  // Staged attachments: uploaded as soon as they are picked, so sending only names
+  // their blob ids (TRANSPORT §6.4).
+  const [attachments, setAttachments] = useState<StagedAttachment[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const attachFiles = async (files: File[]) => {
+    for (const file of files) {
+      try {
+        const staged = await uploadBlob(file);
+        setAttachments((current) => [...current, staged]);
+      } catch (cause) {
+        const tooLarge = cause instanceof Error && cause.message === 'attachment_too_large';
+        setAttachError(tooLarge ? t('composer.attachTooLarge') : t('composer.attachFailed'));
+      }
+    }
+  };
+  const removeAttachment = (id: string) => {
+    setAttachments((current) => {
+      const target = current.find((item) => item.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return current.filter((item) => item.id !== id);
+    });
+  };
 
   const stopRun = () => {
     stoppedByUser.current = true;
@@ -134,21 +157,33 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
 
   // Sending from `/` hands the text over in router state; send it exactly once,
   // then clear the state so a refresh cannot replay it.
-  const pendingText = (location.state as { pendingText?: string } | null)?.pendingText;
+  const handoff = (location.state as {
+    pendingText?: string;
+    pendingAttachments?: StagedAttachment[];
+  } | null) ?? null;
+  const pendingText = handoff?.pendingText;
   const pendingSent = useRef(false);
   useEffect(() => {
     if (!pendingText || pendingSent.current) return;
     if (chat.isDefaultMessagesRequesting) return;
     pendingSent.current = true;
     navigate(location.pathname, { replace: true, state: null });
-    chat.onRequest({ sessionId, text: pendingText });
-  }, [pendingText, chat, sessionId, navigate, location.pathname]);
+    const staged = handoff?.pendingAttachments ?? [];
+    chat.onRequest({
+      sessionId,
+      text: pendingText,
+      ...(staged.length > 0 ? { attachments: staged.map((item) => item.id) } : {}),
+    });
+  }, [pendingText, handoff, chat, sessionId, navigate, location.pathname]);
 
   // Settle: refresh the session list (the title may have changed) and, unless
   // the user stopped the run, send the queue head. An abort keeps the queue.
   const wasRequesting = useRef(false);
   useEffect(() => {
     if (wasRequesting.current && !chat.isRequesting) {
+      // The optimistic rows were placeholders: the durable snapshot is the truth
+      // (attachment names, settled tool states, any server-side rewrite).
+      void chat.refresh?.();
       void reload();
       const aborted = stoppedByUser.current;
       stoppedByUser.current = false;
@@ -197,7 +232,16 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
       void queue.enqueue(text);
       return true;
     }
-    chat.onRequest({ sessionId, text });
+    const ids = attachments.map((item) => item.id);
+    const meta = attachments.map(({ id, name, mime, bytes }) => ({ id, name, mime, bytes }));
+    rememberStaged(meta);
+    attachments.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
+    setAttachments([]);
+    chat.onRequest({
+      sessionId,
+      text,
+      ...(ids.length > 0 ? { attachments: ids, attachmentMeta: meta } : {}),
+    });
     return true;
   };
 
@@ -320,6 +364,11 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
         onSendHead={() => void sendQueueHead()}
       />
 
+      {attachError ? (
+        <div className="zk-msg-error" role="alert">
+          {attachError}
+        </div>
+      ) : null}
       <Composer
         prefix={
           <ComposerPickers
@@ -345,6 +394,9 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
             }}
           />
         }
+        attachments={attachments}
+        onAttachFiles={(files) => void attachFiles(files)}
+        onRemoveAttachment={removeAttachment}
         value={draft}
         onChange={setDraft}
         onSubmit={send}

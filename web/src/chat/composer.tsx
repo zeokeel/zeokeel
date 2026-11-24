@@ -1,5 +1,7 @@
-import { useState, type KeyboardEvent } from 'react';
+import { useRef, useState, type KeyboardEvent } from 'react';
 import { Sender } from '@ant-design/x';
+import { Button, Tag, Typography } from 'antd';
+import { formatBytes, type StagedAttachment } from '@/api/blobs';
 import { loadFileTree } from '@/api/files';
 import { useEscClaim } from '@/keyboard/keyboard-provider';
 import { filterSlashCommands, parseSlashDraft, type SlashCommand } from './slash-commands';
@@ -34,6 +36,11 @@ interface ComposerProps {
    */
   prefix?: React.ReactNode;
   footer?: React.ReactNode;
+  /** Staged attachments (already uploaded); the screen owns them. */
+  attachments?: StagedAttachment[];
+  /** A file was picked or pasted; the screen uploads it. */
+  onAttachFiles?: (files: File[]) => void;
+  onRemoveAttachment?: (id: string) => void;
 }
 
 /**
@@ -99,8 +106,12 @@ export function Composer({
   commands,
   prefix,
   footer,
+  attachments,
+  onAttachFiles,
+  onRemoveAttachment,
 }: ComposerProps) {
   const t = useT();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [highlight, setHighlight] = useState(0);
   const [dismissedQuery, setDismissedQuery] = useState<string | null>(null);
   const [filePaths, setFilePaths] = useState<string[] | null>(null);
@@ -310,6 +321,28 @@ export function Composer({
         </div>
       ) : null}
 
+      {attachments && attachments.length > 0 ? (
+        <div className="zk-composer__attachments" data-testid="composer-attachments">
+          {attachments.map((item) => (
+            <Tag
+              key={item.id}
+              closable
+              onClose={(event) => {
+                event.preventDefault();
+                onRemoveAttachment?.(item.id);
+              }}
+              data-testid="composer-attachment"
+            >
+              {item.mime.startsWith('image/') && item.previewUrl ? (
+                <img className="zk-attach__thumb" src={item.previewUrl} alt={item.name} />
+              ) : null}
+              <Typography.Text>{item.name}</Typography.Text>
+              <Typography.Text type="secondary">{formatBytes(item.bytes)}</Typography.Text>
+            </Tag>
+          ))}
+        </div>
+      ) : null}
+
       <Sender
         value={value}
         onChange={handleChange}
@@ -321,7 +354,37 @@ export function Composer({
         placeholder={placeholder ?? t('composer.placeholder')}
         autoSize={{ minRows: 2, maxRows: 6 }}
         submitType="enter"
-        prefix={prefix}
+        prefix={
+          onAttachFiles ? (
+            <span className="zk-composer__attach">
+              <Button
+                size="small"
+                type="text"
+                aria-label={t('composer.attach')}
+                data-testid="composer-attach"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                +
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                hidden
+                data-testid="composer-file-input"
+                accept="image/*,text/*,application/pdf,application/json"
+                onChange={(event) => {
+                  const files = Array.from(event.target.files ?? []);
+                  event.target.value = '';
+                  if (files.length > 0) onAttachFiles(files);
+                }}
+              />
+              {prefix}
+            </span>
+          ) : (
+            prefix
+          )
+        }
         footer={footer}
         // Sender forwards aria-* to its textarea (X reads restProps through
         // pickAttrs); these props are not in SenderProps' type surface.

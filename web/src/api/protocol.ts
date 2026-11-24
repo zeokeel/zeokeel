@@ -25,6 +25,12 @@ export interface RunRequest {
    */
   text?: string;
   attachments?: string[];
+  /**
+   * Client-side only: the staged chips for the message this request creates. It is
+   * never sent — `transformParams` builds the POST body field by field — but the
+   * optimistic user bubble needs the names, not just upload ids.
+   */
+  attachmentMeta?: Array<{ id: string; name: string; mime: string; bytes: number }>;
   clientRunId: string;
   /**
    * Retry the last turn: the gateway rolls the tail back and reruns it, in one

@@ -568,6 +568,9 @@ export const zh = {
   'settings.ia.disabledMcpTools': '禁用的 MCP 工具',
   'settings.ia.mcpWorkspaceOptIn': '允许工作区级 MCP 配置',
   'settings.ia.help.mcpWorkspaceOptIn': '1 表示允许工作区自己的 MCP 配置生效。',
+  'composer.attach': '添加附件',
+  'composer.attachTooLarge': '附件超过 10 MB',
+  'composer.attachFailed': '附件上传失败',
 } as const;
 
 export type MessageKey = keyof typeof zh;

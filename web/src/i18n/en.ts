@@ -564,4 +564,7 @@ export const en: Catalog = {
   'settings.ia.disabledMcpTools': 'Disabled MCP tools',
   'settings.ia.mcpWorkspaceOptIn': 'Allow workspace-level MCP config',
   'settings.ia.help.mcpWorkspaceOptIn': '1 lets a workspace\'s own MCP config apply.',
+  'composer.attach': 'Attach',
+  'composer.attachTooLarge': 'Attachment exceeds 10 MB',
+  'composer.attachFailed': 'Could not upload the attachment',
 };

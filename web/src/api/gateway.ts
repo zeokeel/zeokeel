@@ -70,6 +70,7 @@ export interface SnapshotMessage {
   role: string;
   text: string;
   reasoning?: string;
+  attachments?: Array<{ id: string; name: string; mime: string; bytes: number }>;
   steps?: SnapshotStep[];
   usage?: { inputTokens?: number; outputTokens?: number };
   stopReason?: string;
@@ -907,6 +908,7 @@ export async function loadSnapshot(sessionId: string): Promise<SessionSnapshot> 
         text: string;
         reasoning?: string;
         streaming?: boolean;
+        attachments?: Array<{ id: string; name: string; mime: string; bytes: number }>;
         error?: string;
         usage?: { promptTokens?: number; completionTokens?: number };
         tools?: Array<{
@@ -934,6 +936,9 @@ export async function loadSnapshot(sessionId: string): Promise<SessionSnapshot> 
       role: message.role,
       text: message.text ?? '',
       reasoning: message.reasoning ?? '',
+      ...(message.attachments && message.attachments.length > 0
+        ? { attachments: message.attachments }
+        : {}),
       steps: (message.tools ?? []).map((tool) => ({
         callId: tool.id,
         name: tool.name,

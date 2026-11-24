@@ -1,3 +1,4 @@
+import { lookupStaged } from '@/api/blobs';
 import { AbstractChatProvider, type TransformMessage } from '@ant-design/x-sdk';
 import type { SSEOutput, XRequestOptions } from '@ant-design/x-sdk';
 import { createRunRequest, type RunRequestClient } from '@/api/run-stream';
@@ -23,6 +24,15 @@ import { assistantMessage, type ToolStep, type ZeoMessage } from '@/chat/types';
  * the stock `XRequest`; state, per-conversation isolation, streaming
  * coalescing and abort all belong to x-sdk.
  */
+/** The chips for the optimistic bubble: explicit metadata, else the staged ids. */
+function attachmentChips(requestParams: Partial<RunRequest>) {
+  if (requestParams.attachmentMeta && requestParams.attachmentMeta.length > 0) {
+    return requestParams.attachmentMeta;
+  }
+  return (requestParams.attachments ?? [])
+    .map((id) => lookupStaged(id) ?? { id, name: id, mime: '', bytes: 0 });
+}
+
 export class GatewayChatProvider extends AbstractChatProvider<ZeoMessage, RunRequest, SSEOutput> {
   constructor(request: RunRequestClient = createRunRequest()) {
     super({ request });
@@ -78,7 +88,14 @@ export class GatewayChatProvider extends AbstractChatProvider<ZeoMessage, RunReq
     // answer; neither adds a user bubble. The transcript is refreshed from the
     // gateway's `msg.reset`, never patched optimistically.
     if (requestParams.regenerate || requestParams.editMessageId) return assistantMessage();
-    return { ...assistantMessage(), role: 'user', text: requestParams.text ?? '' };
+    return {
+      ...assistantMessage(),
+      role: 'user',
+      text: requestParams.text ?? '',
+      ...(attachmentChips(requestParams).length > 0
+        ? { attachments: attachmentChips(requestParams) }
+        : {}),
+    };
   }
 
   /**

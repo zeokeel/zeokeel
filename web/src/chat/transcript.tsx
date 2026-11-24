@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button } from 'antd';
+import { Button, Tag } from 'antd';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { MessageInfo } from '@ant-design/x-sdk';
 import { Bubble } from '@ant-design/x';
@@ -243,6 +243,15 @@ export function Transcript({
                   contentRender={(content) =>
                     isUser ? (
                       <>
+                        {(content as ZeoMessage).attachments?.length ? (
+                          <span className="zk-attachments" data-testid="message-attachments">
+                            {(content as ZeoMessage).attachments!.map((item) => (
+                              <Tag key={item.id} className="zk-attachments__item">
+                                {item.name}
+                              </Tag>
+                            ))}
+                          </span>
+                        ) : null}
                         <span className="zk-user-text">{(content as ZeoMessage).text}</span>
                         {onEdit ? (
                           <MessageActions

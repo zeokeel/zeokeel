@@ -37,6 +37,16 @@ export interface ZeoMessage {
   error?: MessageError;
   /** Event names this client did not understand (C3 degrade, kept for diagnosis). */
   unknownEvents?: string[];
+  /** Files/images the user attached to this turn (metadata only; bytes are blobs). */
+  attachments?: MessageAttachment[];
+}
+
+/** One attachment as the transcript shows it (TRANSPORT §6.4: metadata, no bytes). */
+export interface MessageAttachment {
+  id: string;
+  name: string;
+  mime: string;
+  bytes: number;
 }
 
 export function userMessage(text: string): ZeoMessage {
