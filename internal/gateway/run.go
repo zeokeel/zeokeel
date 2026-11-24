@@ -125,6 +125,12 @@ type runStream struct {
 	// this stream; without this the prompt is emitted as `message.delta` and the
 	// browser renders it a second time as the answer's first tokens.
 	notBody map[string]bool
+	// startedTools remembers which calls already got their `tool.start`. A call the
+	// stream first observes **already settled** (finished inside one coalescing
+	// window) still needs that frame: without it the client has no tool name or
+	// input and renders the step as a bare call id (the orphan `tool.result` a live
+	// coding run produced), and TRANSPORT §4.6 promises start precedes result.
+	startedTools map[string]bool
 
 	mu       sync.Mutex
 	log      []runEvent
@@ -642,12 +648,20 @@ func (s *runStream) emitMessageStart(message messageDTO) {
 	}
 }
 
-// emitTool emits tool.start while a call runs and tool.result when it settles.
+// emitTool emits tool.start the first time a call is seen and tool.result once it
+// settles. A call that arrives already settled still gets its start first, so the
+// client always knows the tool's name and arguments (TRANSPORT §4.6).
 func (s *runStream) emitTool(tool toolCallDTO) {
-	if tool.Status == "running" {
+	if !s.startedTools[tool.ID] {
+		if s.startedTools == nil {
+			s.startedTools = make(map[string]bool, 4)
+		}
+		s.startedTools[tool.ID] = true
 		s.emit(runEvent{name: sseToolStart, data: map[string]any{
 			"callId": tool.ID, "name": tool.Name, "input": tool.Arguments,
 		}})
+	}
+	if tool.Status == "running" {
 		return
 	}
 	data := map[string]any{

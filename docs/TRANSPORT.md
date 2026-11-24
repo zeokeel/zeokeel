@@ -427,12 +427,14 @@ Accept: text/event-stream
 | `message.delta` | `{ turnId, text }` | 正文增量（合并窗口与服务端其他流一致） |
 | `reasoning.delta` | `{ turnId, text }` | 推理增量 |
 | `tool.start` | `{ callId, name, input }` | 工具开始（对应 `ThoughtChain` 的节点创建） |
-| `tool.result` | `{ callId, ok, output?, error? }` | 工具结束 |
+| `tool.result` | `{ callId, name?, ok, output?, error? }` | 工具结束（`name` 供客户端给结果行命名，见下方顺序保证） |
 | `usage` | `{ inputTokens, outputTokens, ... }` | 用量（状态条使用） |
 | `done` | `{ turnId, stopReason }` | 正常结束；随后关闭连接 |
 | `error` | `{ code, message }` | 终止性错误；随后关闭连接 |
 
 事件顺序保证：`tool.start` 必在同一 `callId` 的 `tool.result` 之前；`done`/`error` 必为最后一个事件。
+
+**一个调用若在流第一次看到它时已经结束**（合窗内完成），网关仍先补发它的 `tool.start`（带 `name` 与 `input`）再发 `tool.result`——客户端按 `callId` 建节点，缺了 start 就只能拿 callId 当工具名显示。
 
 #### 编辑并重发（`editMessageId` 模式，2026-11-23）
 

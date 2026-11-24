@@ -163,7 +163,10 @@ function applyEvent(base: ZeoMessage, event: RunEvent): ZeoMessage {
       const exists = base.steps.some((step) => step.callId === result.callId);
       const settled: ToolStep = {
         callId: result.callId,
-        name: result.callId,
+        // The frame's own name. A call id is not a tool name: naming the step with it
+        // put `call_93bca2c6ab4b478f9fa84247` in front of the reader. Without a name the
+        // card falls back to the generic tool label.
+        name: result.name ?? '',
         input: undefined,
         output: result.output,
         error: result.error,

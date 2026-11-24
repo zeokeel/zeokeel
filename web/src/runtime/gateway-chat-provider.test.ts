@@ -201,3 +201,29 @@ describe('transformMessage wiring', () => {
     expect(onUpdate).not.toHaveBeenCalled();
   });
 });
+/**
+ * A `tool.result` whose `tool.start` never reached the client (a replayed run, or a
+ * result for a step the transcript had not created yet) used to name the step with
+ * the raw call id, so the reader saw `call_93bca2c6ab4b478f9fa84247` where a tool
+ * name belongs. The name comes from the frame; when it is absent, the step stays
+ * nameless and the card falls back to its generic label.
+ */
+describe('tool.result without a start', () => {
+  it('uses the frame name when present', () => {
+    const after = applyChunk(
+      assistantMessage(),
+      chunk('tool.result', { callId: 'call-9', name: 'bash', ok: true, output: 'ok' }),
+    );
+    expect(after.steps.at(-1)?.name).toBe('bash');
+  });
+
+  it('never uses the call id as the tool name', () => {
+    const after = applyChunk(
+      assistantMessage(),
+      chunk('tool.result', { callId: 'call-9', ok: true, output: 'ok' }),
+    );
+    const step = after.steps.at(-1);
+    expect(step?.callId).toBe('call-9');
+    expect(step?.name).not.toContain('call-9');
+  });
+});

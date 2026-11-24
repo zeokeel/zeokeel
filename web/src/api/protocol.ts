@@ -57,6 +57,9 @@ export interface ToolStartData {
 
 export interface ToolResultData {
   callId: string;
+  /** The tool's name; the gateway sends it so a result that lost its start frame can
+   * still be labelled with the tool instead of the raw call id. */
+  name?: string;
   ok: boolean;
   output?: unknown;
   error?: string;
