@@ -11,7 +11,7 @@ package assembly_test
 //     libraries; never another module implementation, never host or assembly.
 //  3. host must not reach into internal/modules/* directly.
 //  4. The native UI engine (github.com/egoist/mygo) survives only in the shell:
-//     internal/host (tray/hotkey/OS notifications), internal/lib/{openpath,openurl}
+//     internal/host (tray/hotkey/OS notifications), internal/lib/openurl
 //     (OS launchers) and the two asset layers the web generator parses
 //     (internal/brand, internal/design). Everything the browser talks to —
 //     gateway, contracts, modules — must stay engine-free, proven both directly
@@ -42,11 +42,10 @@ const engineModulePath = "github.com/egoist/mygo"
 // It is a *decision*, not an observation: adding a package here means the
 // product now carries a native dependency again (docs/plans/s4-execution-checklist.md).
 var engineAllowlist = map[string]bool{
-	"internal/host":         true, // tray icon, global hotkey, OS notifications
-	"internal/lib/openpath": true, // "reveal in file manager"
-	"internal/lib/openurl":  true, // open the browser client / OAuth URLs
-	"internal/brand":        true, // palette + logo colors as mygo colors
-	"internal/design":       true, // design tokens as mygo colors
+	"internal/host":        true, // tray icon, global hotkey, OS notifications
+	"internal/lib/openurl": true, // open the browser client / OAuth URLs
+	"internal/brand":       true, // palette + logo colors as mygo colors
+	"internal/design":      true, // design tokens as mygo colors
 }
 
 // boundaryPkg is one package row of `go list`.
@@ -54,19 +53,25 @@ type boundaryPkg struct {
 	path     string   // full import path
 	internal []string // repo-relative internal imports
 	external []string // non-internal imports
-	goFiles  int      // number of non-test Go files
+	// testExternal are the imports of the package's _test.go files. Go's
+	// `.Imports` does not include them, which is how a `_test.go` could import
+	// the native engine with every boundary green (AUDIT-2026-11-24 B-10).
+	testExternal []string
+	goFiles      int // number of non-test Go files
 }
 
 // listProductPackages runs `go list` over the product tree from the module
 // root and parses the import rows.
 func listProductPackages(t *testing.T) []boundaryPkg {
 	t.Helper()
-	rows := goList(t, "{{.ImportPath}}|{{join .Imports \",\"}}|{{len .GoFiles}}", "./internal/...", "./cmd/...")
+	rows := goList(t,
+		"{{.ImportPath}}|{{join .Imports \",\"}}|{{join .TestImports \",\"}}|{{len .GoFiles}}",
+		"./internal/...", "./cmd/...")
 	var pkgs []boundaryPkg
 	for _, line := range rows {
-		parts := strings.SplitN(line, "|", 3)
-		if len(parts) != 3 {
-			t.Fatalf("go list row %q: want path|imports|gofiles", line)
+		parts := strings.SplitN(line, "|", 4)
+		if len(parts) != 4 {
+			t.Fatalf("go list row %q: want path|imports|testimports|gofiles", line)
 		}
 		p := boundaryPkg{path: parts[0]}
 		for _, imp := range strings.Split(parts[1], ",") {
@@ -76,9 +81,14 @@ func listProductPackages(t *testing.T) []boundaryPkg {
 			}
 			p.external = append(p.external, imp)
 		}
-		n, err := strconv.Atoi(parts[2])
+		for _, imp := range strings.Split(parts[2], ",") {
+			if imp != "" && !strings.HasPrefix(imp, modulePath) {
+				p.testExternal = append(p.testExternal, imp)
+			}
+		}
+		n, err := strconv.Atoi(parts[3])
 		if err != nil {
-			t.Fatalf("go list row %q: gofiles %q: %v", line, parts[2], err)
+			t.Fatalf("go list row %q: gofiles %q: %v", line, parts[3], err)
 		}
 		p.goFiles = n
 		pkgs = append(pkgs, p)
@@ -165,6 +175,32 @@ func TestEngineIsQuarantinedToTheShell(t *testing.T) {
 	}
 }
 
+// TestEngineIsQuarantinedToTheShellInTests closes the `_test.go` hole: the main
+// scan reads `.Imports`, which Go does not fill with test-only imports, so a
+// test file anywhere could import the engine with every boundary green
+// (AUDIT-2026-11-24 B-10). The allowlist is the same one: the shell and the
+// asset packages may use the engine in their tests too (they own it), nothing
+// else may.
+func TestEngineIsQuarantinedToTheShellInTests(t *testing.T) {
+	seen := 0
+	for _, p := range listProductPackages(t) {
+		rel := strings.TrimPrefix(p.path, modulePath)
+		for _, imp := range p.testExternal {
+			if imp != engineModulePath && !strings.HasPrefix(imp, engineModulePath+"/") {
+				continue
+			}
+			seen++
+			if !engineAllowlist[rel] {
+				t.Errorf("%s (test files) imports %s: the native engine is quarantined to %v (S6)",
+					rel, imp, allowedEnginePackages())
+			}
+		}
+	}
+	if seen == 0 {
+		t.Errorf("no test file imports %s: the quarantine assertion would pass vacuously", engineModulePath)
+	}
+}
+
 // allowedEnginePackages renders the allowlist for an error message.
 func allowedEnginePackages() []string {
 	names := make([]string, 0, len(engineAllowlist))
@@ -244,7 +280,10 @@ func moduleRoot(t *testing.T) string {
 // non-empty output lines.
 func goList(t *testing.T, format string, patterns ...string) []string {
 	t.Helper()
-	args := append([]string{"list", "-e", "-f", format}, patterns...)
+	// No `-e`: a package that fails to load must fail the assertion, not vanish
+	// from it (AUDIT-2026-11-24 B-10: `-e` printed nothing for a broken package
+	// and every boundary kept passing).
+	args := append([]string{"list", "-f", format}, patterns...)
 	cmd := exec.Command("go", args...)
 	cmd.Dir = moduleRoot(t)
 	out, err := cmd.Output()

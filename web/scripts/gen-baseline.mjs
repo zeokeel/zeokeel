@@ -231,9 +231,39 @@ function capture() {
   );
 }
 
+// verifyWithoutBaseline is the mode a fresh checkout runs: there is no frozen
+// baseline to compare against (web/.cache is gitignored, and a committed
+// baseline would go stale on every input change), so the check is the one that
+// still means something anywhere — re-run the generators and prove the
+// committed artefacts are byte-for-byte what they produce.
+function verifyWithoutBaseline() {
+  const before = collectOutputs();
+  runGenerators();
+  const after = collectOutputs();
+  const problems = [];
+  for (const [file, value] of Object.entries(after)) {
+    const previous = before[file];
+    if (previous === null) {
+      problems.push(`生成物缺失（生成器会新写一份）: ${file}`);
+      continue;
+    }
+    if (previous !== value) problems.push(`生成物与生成器不一致（手改过或忘了重跑生成器）: ${file}`);
+  }
+  if (problems.length > 0) {
+    console.error('gen-verify: FAIL（无冻结基线，按"生成物 == 生成器输出"判定）');
+    for (const problem of problems) console.error(`  ✗ ${problem}`);
+    console.error('  修法: npm run gen:tokens && npm run gen:icons（或对应 gen:*），再提交生成物。');
+    process.exit(1);
+  }
+  console.log('gen-verify: OK（无冻结基线：生成物与生成器输出逐字节一致）');
+  for (const file of Object.keys(after)) console.log(`  ✓ ${file}`);
+  console.log('  提示: 想额外校验"哪些输入变了"，先 npm run gen:baseline 冻结一份基线。');
+}
+
 function verify() {
   if (!existsSync(baselinePath)) {
-    fail('没有基线。先跑 npm run gen:baseline（并确保当时树是冻结的）。');
+    verifyWithoutBaseline();
+    return;
   }
   const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
   const problems = [];

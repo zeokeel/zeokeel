@@ -65,6 +65,23 @@ jobs:
         # host never reaches internal/modules directly (AR-22).
         run: go test ./internal/assembly -run TestImportBoundaries -count=1
 
+      - name: Web client checks
+        # AGENTS.md §5 requires typecheck + lint + test for every web change, and
+        # until now CI only *built* the client: a type error in a module the
+        # bundle happens to tree-shake, or an eslint error, could land green.
+        # The web-client action above already installed web/node_modules.
+        run: |
+          npm --prefix web run typecheck
+          npm --prefix web run lint
+          npm --prefix web run test
+
+      - name: Generated artefacts match their generators
+        # web/src/design/{tokens.css,antd-theme.ts,icons.tsx,settings-keys.ts,
+        # ws-contract.ts} are generator output; hand edits are a hard boundary
+        # violation (AGENTS.md §7). The check needs no frozen baseline: it
+        # re-runs the generators and compares byte for byte.
+        run: npm --prefix web run gen:verify
+
       - name: Test
         # The hosted 2-vCPU runner was repeatedly shut down while several UI
         # test binaries rendered frames in parallel (exit 143 / "runner received

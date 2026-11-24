@@ -55,6 +55,12 @@ mkdir -p "$GOTMPDIR" "$data_dir" "$repo_root/.cache/bin"
 echo "== building the fixture binaries"
 go build -o "$repo_root/.cache/bin/fakemodel" ./internal/devtools/fakemodel
 go build -o "$repo_root/.cache/bin/zeokeel-acceptance" ./cmd/zeokeel
+# The probe is built here, once, so `make acceptance-check|approval|slow` works on
+# a fresh clone: it used to be assumed present at .cache/bin/gwprobe with nothing
+# in the repository creating it.
+if [ -n "$probe" ]; then
+	go build -o "$repo_root/.cache/bin/gwprobe" ./internal/devtools/gwprobe
+fi
 
 # The settings file is the product's own store: writing it before startup is the
 # same path the settings screen takes, not a special "test mode".

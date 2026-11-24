@@ -47,5 +47,17 @@ export default defineConfig({
     setupFiles: ['./vitest.setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     css: false,
+    // Vitest's 5 s default is a load test, not a correctness test: on a busy
+    // machine (or CI's 2 vCPU) component tests that import antd/antd X took
+    // 5–37 s and 20 of them failed as "timed out" with no assertion involved
+    // (AUDIT-2026-11-24 C). 20 s still fails a genuinely hung test quickly.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
+    // Cap the workers: these suites mount antd/antd X in jsdom, and the
+    // timing-sensitive ones (scroll restoration, the app smoke) passed alone but
+    // failed inside a swarm of workers on a big machine — a scheduling artefact,
+    // not an assertion. Two workers keeps the suite under 2 minutes while
+    // matching what a 2 vCPU CI runner does anyway.
+    maxWorkers: 2,
   },
 });
