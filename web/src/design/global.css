@@ -1793,8 +1793,10 @@ body {
 
 .zk-tree-changed {
   display: inline-block;
-  width: 6px;
-  height: 6px;
+  /* 8px reads as a mark at 100% zoom; 6px looked like a rendering artefact
+     (round-2 tails audit R2-5). */
+  width: 8px;
+  height: 8px;
   border-radius: var(--zk-radius-max);
   background: var(--zk-warning);
   margin-inline-start: var(--zk-space-1);
@@ -1943,6 +1945,23 @@ body {
   font-size: var(--zk-type-xxs);
 }
 
+.zk-msg-error__dismiss {
+  margin-inline-start: auto;
+  padding: 0 var(--zk-space-1);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: var(--zk-type-s);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.zk-msg-error {
+  display: flex;
+  align-items: baseline;
+  gap: var(--zk-space-2);
+}
+
 .zk-queue__moves {
   display: inline-flex;
   align-items: center;
@@ -2007,17 +2026,16 @@ body {
   }
 }
 
-@media (max-width: 900px) {
-  /* The inspector becomes an overlay above the thread instead of shrinking
-   * both columns until neither is usable. */
+@media (max-width: 899px) {
+  /* The narrow shell (app-routes) renders the inspector as the only column, so it
+   * must fill that column — a fixed overlay from an older layout covered the top
+   * band and swallowed the tab clicks (round-2 tails audit R2-1). The breakpoint
+   * matches the JS one (899) instead of fighting it at 900. */
   .zk-inspector {
-    position: fixed;
-    z-index: var(--zk-z-overlay, 40);
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: min(420px, 92vw);
-    box-shadow: 0 8px 32px color-mix(in srgb, var(--zk-scrim) 55%, transparent);
+    position: static;
+    width: 100%;
+    min-width: 0;
+    box-shadow: none;
   }
 
   .zk-topband__title {
@@ -2266,6 +2284,23 @@ body {
 .zk-queue__index {
   color: var(--zk-text-tertiary);
   font-variant-numeric: tabular-nums;
+}
+
+.zk-msg-error__dismiss {
+  margin-inline-start: auto;
+  padding: 0 var(--zk-space-1);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: var(--zk-type-s);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.zk-msg-error {
+  display: flex;
+  align-items: baseline;
+  gap: var(--zk-space-2);
 }
 
 .zk-queue__moves {

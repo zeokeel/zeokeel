@@ -78,6 +78,7 @@ export function AutomationScreen() {
     );
     try {
       await setAutomationEnabled(task.id, enabled);
+      setError(null);
     } catch (cause) {
       // Roll back: the switch must never claim a state the gateway rejected.
       setTasks((current) =>
@@ -88,12 +89,14 @@ export function AutomationScreen() {
   };
 
   const openCreate = () => {
+    setFormError(null);
     setEditing(null);
     form.setFieldsValue({ title: '', prompt: '', schedule: '', enabled: true });
     setCreating(true);
   };
 
   const openEdit = (task: AutomationTask) => {
+    setFormError(null);
     setEditing(task);
     form.setFieldsValue({
       title: task.title,
@@ -155,7 +158,16 @@ export function AutomationScreen() {
       </header>
       {error ? (
         <div className="zk-msg-error" role="alert">
-          {error}
+          <span>{error}</span>
+          <button
+            type="button"
+            className="zk-msg-error__dismiss"
+            aria-label={t('screen.automation.dismissError')}
+            onClick={() => setError(null)}
+            data-testid="automation-error-dismiss"
+          >
+            ×
+          </button>
         </div>
       ) : null}
       {tasks === null ? (
@@ -286,7 +298,7 @@ export function AutomationScreen() {
             // refuses. The server's answer is shown in the dialog instead.
             rules={[{ required: true, whitespace: true }]}
           >
-            <Input placeholder="daily 09:00" />
+            <Input placeholder="daily 09:00:00" />
           </Form.Item>
           <Form.Item name="enabled" label={t('screen.automation.field.enabled')} valuePropName="checked">
             <Switch />

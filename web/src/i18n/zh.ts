@@ -364,10 +364,11 @@ export const zh = {
   'screen.automation.cancel': '取消',
   'screen.automation.field.title': '任务名称',
   'screen.automation.field.prompt': '提示词',
-  'screen.automation.field.scheduleHelp': '示例：@hourly、@daily、daily 09:00、weekly mon 09:00、every 24h、after 2h、cron 0 8 * * *、0 8 * * *、at 2026-12-01T09:30:00+08:00。校验由网关完成，写错时弹窗里会给出原因。',
+  'screen.automation.field.scheduleHelp': '示例：@hourly、@daily、daily 09:00:00、weekly 09:00:00 1、every 86400s、after 120s、cron 0 8 * * *、0 8 * * *、at 2026-12-01T09:30:00+08:00。校验由网关完成，写错时弹窗里会给出原因。',
   'screen.automation.err.format': '这个计划表达式不合法。可用：@hourly、@daily、daily 09:00、weekly mon 09:00、every 24h、after 2h、cron 0 8 * * *。',
   'screen.automation.err.clock': '时间要写成 HH:MM（例如 09:30）。',
   'screen.automation.err.needsCronPrefix': '五段 cron 需要 cron 前缀，例如 cron 0 8 * * *。',
+  'screen.automation.dismissError': '关闭错误提示',
   'screen.automation.field.schedule': '计划表达式',
 
   'screen.automation.field.enabled': '启用',

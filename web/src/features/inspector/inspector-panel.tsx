@@ -180,6 +180,9 @@ export function InspectorPanel({ onBack }: { onBack?: () => void } = {}) {
               <Tree
                 showIcon
                 treeData={treeData}
+                // A deep link has to reveal where the file lives, or the panel
+                // shows a collapsed tree with nothing selected in sight.
+                defaultExpandAll={Boolean(selected)}
                 virtual
                 height={520}
                 selectedKeys={selected ? [selected] : []}
