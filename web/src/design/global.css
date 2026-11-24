@@ -745,17 +745,32 @@ body {
  * composer. Rather than leave suggestions that are painted under the approval
  * card and cannot be clicked, they step aside; the composer stays whole. */
 @media (max-height: 560px) {
-  .zk-now__suggestions {
-    display: none;
-  }
-
+  /* A short window scrolls the column, and the composer sticks to the bottom:
+     pinning it is what keeps the send button on screen on the first frame
+     instead of 69px below the viewport (round-3 composer audit R3-1). */
   .zk-thread {
     overflow-y: auto;
+  }
+
+  .zk-composer {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    padding-bottom: var(--zk-space-2);
+    background: var(--zk-bg-base);
   }
 
   .zk-now__welcome {
     height: auto;
     padding-bottom: var(--zk-space-4);
+  }
+}
+
+/* Only a narrow *and* short window has to give the suggestions up; a wide but
+ * short one still has the room beside the approval card (R3-2). */
+@media (max-height: 560px) and (max-width: 480px) {
+  .zk-now__suggestions {
+    display: none;
   }
 }
 
@@ -2047,17 +2062,32 @@ body {
  * composer. Rather than leave suggestions that are painted under the approval
  * card and cannot be clicked, they step aside; the composer stays whole. */
 @media (max-height: 560px) {
-  .zk-now__suggestions {
-    display: none;
-  }
-
+  /* A short window scrolls the column, and the composer sticks to the bottom:
+     pinning it is what keeps the send button on screen on the first frame
+     instead of 69px below the viewport (round-3 composer audit R3-1). */
   .zk-thread {
     overflow-y: auto;
+  }
+
+  .zk-composer {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    padding-bottom: var(--zk-space-2);
+    background: var(--zk-bg-base);
   }
 
   .zk-now__welcome {
     height: auto;
     padding-bottom: var(--zk-space-4);
+  }
+}
+
+/* Only a narrow *and* short window has to give the suggestions up; a wide but
+ * short one still has the room beside the approval card (R3-2). */
+@media (max-height: 560px) and (max-width: 480px) {
+  .zk-now__suggestions {
+    display: none;
   }
 }
 
