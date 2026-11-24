@@ -731,12 +731,23 @@ type modelThinkingDTO struct {
 	NameEN string `json:"nameEn"`
 }
 
-// modelRowDTO is one model the composer can switch to.
+// modelRowDTO is one catalog row: what the composer picker shows and what the model
+// editor edits. The API key itself never travels — only whether one is set.
 type modelRowDTO struct {
 	ID            string             `json:"id"`
 	Name          string             `json:"name"`
 	Note          string             `json:"note,omitempty"`
 	ContextWindow int                `json:"contextWindow,omitempty"`
+	BaseURL       string             `json:"baseURL,omitempty"`
+	APIKeySet     bool               `json:"apiKeySet"`
+	Family        string             `json:"family,omitempty"`
+	DefaultThink  string             `json:"defaultThinking,omitempty"`
+	Temperature   *float64           `json:"temperature,omitempty"`
+	TopP          *float64           `json:"topP,omitempty"`
+	MaxTokens     int                `json:"maxTokens,omitempty"`
+	InputPrice    float64            `json:"inputPricePerMillion,omitempty"`
+	CachedPrice   float64            `json:"cachedInputPricePerMillion,omitempty"`
+	OutputPrice   float64            `json:"outputPricePerMillion,omitempty"`
 	ThinkingModes []modelThinkingDTO `json:"thinkingModes"`
 }
 
@@ -760,7 +771,14 @@ func (g *Gateway) handleModels(ctx context.Context) (any, *protocolError) {
 	}
 	payload.DefaultModel = strings.TrimSpace(settings.Get(contracts.SettingsChatModel, ""))
 	for _, info := range catalog {
-		row := modelRowDTO{ID: info.ID, Name: info.Name, Note: info.Note, ContextWindow: info.ContextWindow}
+		row := modelRowDTO{
+			ID: info.ID, Name: info.Name, Note: info.Note, ContextWindow: info.ContextWindow,
+			BaseURL: info.BaseURL, APIKeySet: strings.TrimSpace(info.APIKey) != "",
+			Family: info.Family, DefaultThink: info.DefaultThinking,
+			Temperature: info.Temperature, TopP: info.TopP, MaxTokens: info.MaxTokens,
+			InputPrice: info.InputPricePerMillion, CachedPrice: info.CachedInputPricePerMillion,
+			OutputPrice: info.OutputPricePerMillion,
+		}
 		for _, mode := range contracts.ThinkingModesForModel(info) {
 			row.ThinkingModes = append(row.ThinkingModes, modelThinkingDTO{
 				ID: mode.ID, NameZH: mode.DisplayName(false), NameEN: mode.DisplayName(true),
