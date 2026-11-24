@@ -14,7 +14,15 @@ export interface ConnectorSummary {
   name: string;
   transport: string;
   tools: number;
+  /** Localized sentence, kept for display next to the state dot. */
   status: string;
+  /**
+   * What the client switches on. The gateway derives it from the toolkit's
+   * sentence so no component has to compare localized strings (round-2 C-04).
+   */
+  state?: 'connected' | 'failed' | 'idle';
+  /** The provider's failure reason when `state === 'failed'`. */
+  error?: string;
 }
 
 export interface Capabilities {

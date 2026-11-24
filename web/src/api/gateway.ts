@@ -15,6 +15,7 @@
 import { GatewayRpc, type ConnectionStatus, gatewayRpc } from './ws/rpc';
 import { exchangeFragmentToken, probeAuthorization } from './ws/auth';
 import { ApiError, isMethodUnsupported } from './errors';
+import type { ConnectorSummary } from './read-models';
 import { applyPromptsDelta, type QueuedPrompt, type QueuedPromptWire } from './prompt-queue';
 import {
   applyContextDelta,
@@ -664,6 +665,19 @@ export async function resolveApproval(
   decision: 'allow' | 'allow_always' | 'deny',
 ): Promise<void> {
   await client().request('approval.resolve', { id, decision });
+}
+
+/**
+ * Rebuild the MCP connections from the stored settings and return the fresh
+ * rows (`mcp.reload`, TRANSPORT §5.1.9).
+ *
+ * Saving `mcp.servers` only writes a settings row; the toolkit connects at
+ * activation. Without this call the connectors page says 已保存 and the
+ * connector never appears (round-2 C-03).
+ */
+export async function reloadConnectors(): Promise<ConnectorSummary[]> {
+  const result = await client().request<{ connectors?: ConnectorSummary[] }>('mcp.reload', {});
+  return result.connectors ?? [];
 }
 
 export async function cancelRun(sessionId: string): Promise<void> {
