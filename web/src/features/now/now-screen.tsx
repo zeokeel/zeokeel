@@ -27,6 +27,7 @@ export function NowScreen() {
   const [attachments, setAttachments] = useState<StagedAttachment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [focusRequest, setFocusRequest] = useState(0);
 
   const commands: SlashCommand[] = [
     { name: 'new', description: t('palette.newSession'), run: () => undefined, keepDraft: true },
@@ -74,7 +75,13 @@ export function NowScreen() {
               type="button"
               className="zk-now__suggestion"
               data-testid={`now-suggestion-${key}`}
-              onClick={() => setDraft(t(`now.suggest.${key}`))}
+              onClick={() => {
+                const text = t(`now.suggest.${key}`);
+                // Never throw away what the user typed: append on a new line
+                // instead of replacing, then put the caret in the composer.
+                setDraft((current) => (current.trim() === '' ? text : `${current}\n${text}`));
+                setFocusRequest((current) => current + 1);
+              }}
             >
               {t(`now.suggest.${key}`)}
             </button>
@@ -115,6 +122,9 @@ export function NowScreen() {
             for (const file of files) {
               try {
                 const staged = await uploadBlob(file);
+                // A successful attach means the earlier failure no longer
+                // describes the state of the composer.
+                setError(null);
                 setAttachments((current) => [...current, staged]);
               } catch (cause) {
                 setError(cause instanceof Error && cause.message === 'attachment_too_large'
@@ -135,6 +145,7 @@ export function NowScreen() {
           })
         }
         value={draft}
+        focusRequest={focusRequest}
         onChange={setDraft}
         onSubmit={() => void send()}
         // Starting a conversation is never blocked by an approval parked in some

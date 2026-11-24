@@ -698,8 +698,11 @@ body {
   gap: var(--zk-space-4);
   height: 100%;
   /* The composer floats over the bottom of this area; without the reserve the
-     suggestion row lands underneath it and cannot be clicked. */
+     suggestion row lands underneath it and cannot be clicked. The column scrolls
+     so a short window with an approval card can still reach the last row. */
   padding: 0 var(--zk-space-4) 140px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .zk-now__welcome .zk-empty {
@@ -1979,8 +1982,11 @@ body {
   gap: var(--zk-space-4);
   height: 100%;
   /* The composer floats over the bottom of this area; without the reserve the
-     suggestion row lands underneath it and cannot be clicked. */
+     suggestion row lands underneath it and cannot be clicked. The column scrolls
+     so a short window with an approval card can still reach the last row. */
   padding: 0 var(--zk-space-4) 140px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .zk-now__welcome .zk-empty {

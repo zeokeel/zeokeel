@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useRef,
   useState,
   type ComponentRef,
@@ -60,6 +61,11 @@ interface ComposerProps {
    * (docs/audit/2026-11-24/FIELD-DESIGN.md §4).
    */
   notice?: string;
+  /**
+   * Bumped by the caller to ask for the caret ("fill the draft for me"). A
+   * counter rather than a boolean so two clicks in a row both land.
+   */
+  focusRequest?: number;
 }
 
 /**
@@ -129,6 +135,7 @@ export function Composer({
   onAttachFiles,
   onRemoveAttachment,
   notice,
+  focusRequest,
 }: ComposerProps) {
   const t = useT();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -303,12 +310,21 @@ export function Composer({
 
   const [dragging, setDragging] = useState(false);
 
+  useEffect(() => {
+    if (!focusRequest) return;
+    senderRef.current?.focus?.();
+  }, [focusRequest]);
+
   const attachFromList = (files: File[]) => {
     if (files.length === 0 || !onAttachFiles) return;
     onAttachFiles(files);
   };
 
   const handlePaste = (event: ReactClipboardEvent<HTMLDivElement>) => {
+    // A blocked composer (approval pending) must not stage files either: the
+    // attachments survived the approval and appeared afterwards (round-1
+    // composer audit, checklist 7).
+    if (disabled) return;
     const files = Array.from(event.clipboardData?.files ?? []);
     if (files.length === 0) return;
     // Prevent the browser from also pasting the image's markup/text.
@@ -317,6 +333,7 @@ export function Composer({
   };
 
   const handleDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (disabled) return;
     if (!event.dataTransfer?.types.includes('Files')) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
@@ -330,12 +347,35 @@ export function Composer({
   };
 
   const handleDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (disabled) {
+      setDragging(false);
+      return;
+    }
     const files = Array.from(event.dataTransfer?.files ?? []);
     setDragging(false);
     if (files.length === 0) return;
     event.preventDefault();
     attachFromList(files);
   };
+
+  /**
+   * A file dropped anywhere else would make the browser open it, replacing the
+   * app with `file://…`. The window-level guard swallows those drops; the card's
+   * own handler still receives the ones aimed at it.
+   */
+  useEffect(() => {
+    const guard = (event: DragEvent) => {
+      if (!event.dataTransfer?.types.includes('Files')) return;
+      event.preventDefault();
+      if (event.type === 'drop') setDragging(false);
+    };
+    window.addEventListener('dragover', guard);
+    window.addEventListener('drop', guard);
+    return () => {
+      window.removeEventListener('dragover', guard);
+      window.removeEventListener('drop', guard);
+    };
+  }, []);
 
   const empty = value.trim() === '';
   const hintKey =
@@ -404,6 +444,7 @@ export function Composer({
       // so the only path was the paperclip (round-2 composer audit).
       onPaste={handlePaste}
       onDragOver={handleDragOver}
+      onDragEnter={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
