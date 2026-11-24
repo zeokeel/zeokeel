@@ -43,6 +43,16 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request) {
 		g.handleQuit(w, r)
 	case r.URL.Path == "/api/chat/run" && r.Method == http.MethodPost:
 		g.handleChatRun(w, r)
+	case r.URL.Path == "/api/capabilities" && r.Method == http.MethodGet:
+		// Read models the screens have always fetched (capabilities R23, insights
+		// R24, automation R22, the session Memory tab). They answered 404 until now.
+		g.serveReadModel(w, r, g.handleCapabilities)
+	case r.URL.Path == "/api/insights" && r.Method == http.MethodGet:
+		g.handleInsightsHTTP(w, r)
+	case r.URL.Path == "/api/automation" || strings.HasPrefix(r.URL.Path, "/api/automation/"):
+		g.handleAutomation(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/sessions/") && r.Method == http.MethodGet:
+		g.handleSessionReadModel(w, r)
 	case strings.HasPrefix(r.URL.Path, "/api/files/") &&
 		(r.Method == http.MethodGet || r.Method == http.MethodHead):
 		// Workspace files for the right inspector (R8–R10) and the composer's `@`
