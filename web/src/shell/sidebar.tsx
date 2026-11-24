@@ -48,6 +48,37 @@ export function Sidebar({
   // the dropdown on Esc/selection and leaves the document focused on BODY
   // (round-3 session audit F2b).
   const lastTrigger = useRef<HTMLButtonElement | null>(null);
+  // Also remember *which* session the menu belonged to: pinning re-orders the
+  // list, React rebuilds the rows, and the remembered node becomes detached —
+  // `focus()` on it fails silently and the keyboard user lands on BODY
+  // (round-5 session audit F2f).
+  const lastSessionId = useRef<string | null>(null);
+
+  // Bounded retry: a pin/unpin re-orders the rows on the *next* delta, so a
+  // single rAF fires while the old node is still being replaced. Retrying for
+  // ~1.5s is enough for the reorder to land and costs nothing when it does not.
+  const focusSessionTrigger = (sessionId: string | null) => {
+    const deadline = Date.now() + 2000;
+    const attempt = () => {
+      // Give up only if the user moved focus somewhere of their own accord: a
+      // re-order lands as a later delta, so "focus once" always loses.
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active !== document.body && active.isConnected) {
+        const isOurTrigger = active.getAttribute('data-testid') === 'session-menu';
+        if (!isOurTrigger) return;
+        if (sessionId && active.getAttribute('data-session-id') === sessionId) return;
+      }
+      const selector = sessionId
+        ? `[data-session-id="${CSS.escape(sessionId)}"] [data-testid="session-menu"]`
+        : null;
+      const target =
+        (selector ? document.querySelector<HTMLElement>(selector) : null) ??
+        document.querySelector<HTMLElement>('[data-testid="session-menu"]');
+      target?.focus();
+      if (Date.now() < deadline) window.setTimeout(attempt, 80);
+    };
+    window.requestAnimationFrame(attempt);
+  };
 
   const promptRename = (current: string) =>
     new Promise<string | null>((resolve) => {
@@ -78,7 +109,7 @@ export function Sidebar({
         cancelText: t('shell.sessions.cancel'),
         onOk: () => resolve(draft),
         onCancel: () => resolve(null),
-        afterClose: () => lastTrigger.current?.focus(),
+        afterClose: () => focusSessionTrigger(lastSessionId.current),
       }),
       );
     });
@@ -98,7 +129,7 @@ export function Sidebar({
         autoFocusButton: 'cancel',
         onOk: () => resolve(true),
         onCancel: () => resolve(false),
-        afterClose: () => lastTrigger.current?.focus(),
+        afterClose: () => focusSessionTrigger(lastSessionId.current),
       }),
       );
     });
@@ -134,6 +165,18 @@ export function Sidebar({
         }
       : {}),
   }));
+
+  // A re-order (pin/unpin) rebuilds the rows *after* the action's promise
+  // resolves — the delta arrives later — so focusing once right after the
+  // action is too early: the node is replaced and focus falls to BODY. Whenever
+  // the list changes and focus is nowhere, put it back on the trigger that owns
+  // the menu (round-5 session audit F2f).
+  useEffect(() => {
+    if (!lastSessionId.current) return;
+    // Only when the list change ate the focus (a row moved or vanished).
+    if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) return;
+    focusSessionTrigger(lastSessionId.current);
+  }, [visible]);
 
   // Esc closes the dropdown natively; without this the focus dies with it.
   useEffect(() => {
@@ -257,18 +300,21 @@ export function Sidebar({
                     className="zk-conv-menu-btn"
                     aria-label={t('shell.sessions.menu')}
                     data-testid="session-menu"
+                    data-session-id={String(conversation.key)}
                     aria-haspopup="menu"
                     onClick={(event) => {
                       // Which row opened the menu: a ref callback would run for
                       // every row and leave the last one, so focus came back to
                       // the wrong conversation (round-4 session audit F2c).
                       lastTrigger.current = event.currentTarget;
+                      lastSessionId.current = String(conversation.key);
                     }}
                     onKeyDown={(event) => {
                       if (event.key !== 'ArrowDown' && event.key !== 'Enter' && event.key !== ' ') {
                         return;
                       }
                       lastTrigger.current = event.currentTarget;
+                      lastSessionId.current = String(conversation.key);
                       if (event.key === 'ArrowDown') {
                         // The Dropdown opens on click only; ArrowDown has to be
                         // the same gesture or the key does nothing at all (F2a).
@@ -299,12 +345,12 @@ export function Sidebar({
                 onClick: (info) => {
                   info.domEvent.stopPropagation();
                   const target = sessions.find((item) => item.id === conversation.key);
+                  lastSessionId.current = String(conversation.key);
                   void handleMenu(
                     String(info.key),
                     String(conversation.key),
                     target?.title ?? '',
-                  );
-                  window.requestAnimationFrame(() => lastTrigger.current?.focus());
+                  ).finally(() => focusSessionTrigger(lastSessionId.current));
                 },
               };
             }}
