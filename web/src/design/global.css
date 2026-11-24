@@ -2019,12 +2019,10 @@ body {
  * (round-3 mobile audit F2). The sidebar's width belongs to the splitter now;
  * these rules only handle the panels that cannot shrink.
  */
-@media (max-width: 1023px) {
-  .zk-inspector {
-    width: 320px;
-    min-width: 320px;
-  }
-}
+/* The inspector's width belongs to the splitter panel it lives in (380 default).
+ * Pinning it to 320 here left a 60px blank strip at 900–1023 while the panel kept
+ * its 380 (round-3 tails audit R3-1). Below 899 it is a full-width column. */
+
 
 @media (max-width: 899px) {
   /* The narrow shell (app-routes) renders the inspector as the only column, so it
