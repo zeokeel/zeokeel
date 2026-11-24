@@ -31,7 +31,15 @@ import (
 )
 
 // agentIdentity is the first line of every run's system prompt.
-const agentIdentity = "You are ZeoKeel, a native desktop AI coding agent."
+//
+// It describes the product as it is: the browser client is the product's face, and
+// a run that calls itself a desktop application is wrong about the machine it is on
+// (the native UI was retired in the S4 migration). Stated positively on purpose — a
+// "do not say desktop" clause would only put the phrase in front of the model.
+const agentIdentity = "You are ZeoKeel, an AI coding agent. You run as a local gateway " +
+	"process on the user's machine, and the user talks to you through ZeoKeel's web client " +
+	"in a browser: everything the user sees is rendered by that browser client, and the " +
+	"process itself has no window of its own."
 
 // legacyApprovalsAuto is the approvals service's legacy alias of the "full"
 // policy (contracts.PermissionFull); the service reports it from Mode().

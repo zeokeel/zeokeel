@@ -283,7 +283,10 @@ func TestRunSystemPromptHasEnvironmentAndGuidance(t *testing.T) {
 	waitIdle(t, svc, sessionID)
 
 	system := requestSystemText(t, provider.lastRequest())
-	if !strings.HasPrefix(system, "You are ZeoKeel, a native desktop AI coding agent.") {
+	// The identity is pinned by its own tests; the string must not be duplicated
+	// here, or updating the product description turns into a two-file edit that
+	// silently leaves one copy stale.
+	if !strings.HasPrefix(system, agentIdentity) {
 		t.Fatalf("system prompt does not start with the identity: %q", system)
 	}
 	if !strings.Contains(system, "Environment: "+runtime.GOOS+"/"+runtime.GOARCH+".") {
