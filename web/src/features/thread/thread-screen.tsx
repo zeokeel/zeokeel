@@ -7,6 +7,7 @@ import { Transcript } from '@/chat/transcript';
 import { ApprovalDock } from '@/features/approvals/approval-dock';
 import { AskDialog } from '@/features/thread/ask-dialog';
 import { rememberStaged, uploadBlob, type StagedAttachment } from '@/api/blobs';
+import { formatRate } from '@/chat/stream-rate';
 import { PlanDialog } from '@/features/thread/plan-dialog';
 import { ComposerFooter, ComposerPickers, useComposerSettings } from '@/chat/composer-status';
 import { setSetting } from '@/api/gateway';
@@ -79,6 +80,34 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   const stoppedByUser = useRef(false);
 
   const composerSettings = useComposerSettings(sessionId);
+  // Live rate: characters streamed since the first frame of this turn, over wall
+  // time. It is an estimate (no token counts arrive mid-turn) and says so.
+  const firstFrameAt = useRef<number | null>(null);
+  // The streaming text lives in the chat store, which changes on every delta: read
+  // it through a ref so the sampling interval is created once per turn instead of
+  // being torn down by each delta.
+  const latestText = useRef(0);
+  useEffect(() => {
+    const last = chat.parsedMessages[chat.parsedMessages.length - 1];
+    latestText.current = last?.message.text?.length ?? 0;
+  }, [chat.parsedMessages]);
+  const [rateText, setRateText] = useState('');
+  useEffect(() => {
+    if (!chat.isRequesting) {
+      firstFrameAt.current = null;
+      return;
+    }
+    const timer = setInterval(() => {
+      const chars = latestText.current;
+      if (chars === 0) {
+        setRateText('');
+        return;
+      }
+      if (firstFrameAt.current === null) firstFrameAt.current = Date.now();
+      setRateText(formatRate({ chars, elapsedMs: Date.now() - firstFrameAt.current }));
+    }, 400);
+    return () => clearInterval(timer);
+  }, [chat.isRequesting]);
   // Staged attachments: uploaded as soon as they are picked, so sending only names
   // their blob ids (TRANSPORT §6.4).
   const [attachments, setAttachments] = useState<StagedAttachment[]>([]);
@@ -386,6 +415,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
             model={composerSettings.model}
             thinkingMode={composerSettings.thinkingMode}
             running={chat.isRequesting}
+            rate={chat.isRequesting ? rateText : ''}
             usage={composerSettings.usage}
             onSetting={(key: string, value: string) => void setSetting(key, value)}
             onInterject={(text: string) => {

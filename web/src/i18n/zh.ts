@@ -571,6 +571,7 @@ export const zh = {
   'composer.attach': '添加附件',
   'composer.attachTooLarge': '附件超过 10 MB',
   'composer.attachFailed': '附件上传失败',
+  'composer.rate': '~{rate} tok/s',
 } as const;
 
 export type MessageKey = keyof typeof zh;

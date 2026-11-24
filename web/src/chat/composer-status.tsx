@@ -31,6 +31,8 @@ export interface ComposerSlotProps {
   thinkingMode: string;
   onSetting: (key: string, value: string) => void;
   running?: boolean;
+  /** Live output rate while a turn streams ("232"), measured from the deltas. */
+  rate?: string;
   onInterject?: (text: string) => void;
   usage?: {
     turns?: number;
@@ -175,10 +177,15 @@ export function ComposerFooter(props: ComposerSlotProps) {
   const usage = props.usage ?? {};
   const contextPercent =
     usage.context && usage.window ? Math.min(100, Math.round((usage.context / usage.window) * 100)) : undefined;
-  if (usage.turns === undefined) return null;
+  if (usage.turns === undefined && !props.rate) return null;
 
   return (
     <div className="zk-composer-meters" data-testid="composer-meters">
+      {props.rate ? (
+        <Typography.Text type="secondary" data-testid="composer-rate">
+          {t('composer.rate', { rate: props.rate })}
+        </Typography.Text>
+      ) : null}
       <Typography.Text type="secondary" data-testid="composer-usage">
         {t('composer.usage', {
           turns: usage.turns ?? 0,

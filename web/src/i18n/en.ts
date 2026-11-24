@@ -567,4 +567,5 @@ export const en: Catalog = {
   'composer.attach': 'Attach',
   'composer.attachTooLarge': 'Attachment exceeds 10 MB',
   'composer.attachFailed': 'Could not upload the attachment',
+  'composer.rate': '~{rate} tok/s',
 };
