@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 
@@ -169,6 +170,19 @@ func TestTeamMethodsValidateParams(t *testing.T) {
 		if problem := call(); problem == nil {
 			t.Fatal("a missing id must be refused")
 		}
+	}
+}
+
+// The handshake must advertise `team` when the backend exists: the client gates the
+// whole screen on this capability, so a missing entry hides a working feature.
+func TestTeamCapabilityIsAdvertisedWhenTheBackendExists(t *testing.T) {
+	gw := newTeamGateway(t, &fakeTeam{})
+	if !slices.Contains(gw.gatewayCapabilities(), "team") {
+		t.Fatalf("capabilities = %v, want team", gw.gatewayCapabilities())
+	}
+	withoutBackend := newTeamGateway(t, nil)
+	if slices.Contains(withoutBackend.gatewayCapabilities(), "team") {
+		t.Fatalf("team advertised without a backend")
 	}
 }
 

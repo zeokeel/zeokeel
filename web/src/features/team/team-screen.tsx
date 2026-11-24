@@ -4,6 +4,7 @@ import { TeamMemberDetail } from './member-detail';
 import {
   closeTeammate,
   hasCapability,
+  onGatewayReady,
   interruptTeammate,
   loadTeam,
   sendToTeammate,
@@ -25,7 +26,15 @@ import { describeError } from '@/features/describe-error';
  */
 export function TeamScreen() {
   const t = useT();
-  const supported = hasCapability('team');
+  // `hasCapability` reads the handshake's capability set, which lands after the
+  // first paint: subscribe so a late handshake flips the screen from "unsupported"
+  // to the real surface instead of leaving it wrong.
+  const [supported, setSupported] = useState(() => hasCapability('team'));
+  useEffect(() => {
+    const sync = () => setSupported(hasCapability('team'));
+    sync();
+    return onGatewayReady(sync);
+  }, []);
   const [members, setMembers] = useState<TeamMember[] | null>(null);
   const [activities, setActivities] = useState<TeamActivityRow[]>([]);
   const [error, setError] = useState<string | null>(null);
