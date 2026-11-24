@@ -215,12 +215,19 @@ func (g *Gateway) handleChatRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(body.Attachments) > 0 {
-		// Attachments travel as blob ids; the blob endpoints are not part of
-		// this stage (§6.4). Refuse instead of silently dropping the files.
-		// (Regenerate cannot carry attachments either: the retried turn reuses
-		// the attachments the original message already had.)
-		writeProtocolError(w, http.StatusBadRequest, appError(codeCapabilityUnsupported, "attachments_not_supported", false))
-		return
+		// Attachments travel as blob ids uploaded to POST /api/blobs (§6.4). An
+		// unknown id is refused rather than sending a turn with fewer files.
+		// Regenerate cannot carry them: the retried turn reuses the ones the
+		// original message already had.
+		if body.Regenerate || body.EditMessageID != "" {
+			writeProtocolError(w, http.StatusBadRequest,
+				appError(codeCapabilityUnsupported, "attachments_not_supported", false))
+			return
+		}
+		if _, problem := g.resolveAttachments(body.Attachments); problem != nil {
+			writeProtocolError(w, http.StatusBadRequest, problem)
+			return
+		}
 	}
 
 	stream, replay, protocolErr := g.beginRun(r.Context(), body)
@@ -346,9 +353,23 @@ func (g *Gateway) startTurn(chat contracts.ChatService, body runRequest) error {
 		}
 		return regenerator.Regenerate(body.SessionID)
 	default:
-		return chat.Send(body.SessionID, body.Text)
+		if len(body.Attachments) == 0 {
+			return chat.Send(body.SessionID, body.Text)
+		}
+		sender, ok := chat.(contracts.AttachmentSender)
+		if !ok {
+			return errAttachmentsUnsupported
+		}
+		attachments, problem := g.resolveAttachments(body.Attachments)
+		if problem != nil {
+			return errAttachmentsUnsupported
+		}
+		return sender.SendWithAttachments(body.SessionID, body.Text, attachments)
 	}
 }
+
+// errAttachmentsUnsupported reports a backend without AttachmentSender.
+var errAttachmentsUnsupported = errors.New("gateway: the chat backend cannot attach files")
 
 // errEditUnsupported reports a backend without the edit half.
 var errEditUnsupported = errors.New("gateway: the chat backend cannot edit messages")

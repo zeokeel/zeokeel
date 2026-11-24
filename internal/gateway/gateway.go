@@ -83,6 +83,9 @@ type Gateway struct {
 	token string
 	info  Info
 	auth  *auth
+	// blobs holds uploaded attachments between POST /api/blobs and the run that
+	// names them (TRANSPORT §6.4).
+	blobs *blobStore
 
 	root     cordis.Context
 	serveCtx context.Context
@@ -168,6 +171,7 @@ func New(root cordis.Context, opts Options) (*Gateway, error) {
 		toastActions:       make(map[string]*notificationAction),
 		foregroundByClient: make(map[string]foregroundEntry),
 		shutdown:           make(chan struct{}),
+		blobs:              newBlobStore(),
 	}
 	// The host creates the data directory before calling New; a standalone
 	// embedder (or a first run) may not have, and failing here must be a clear
