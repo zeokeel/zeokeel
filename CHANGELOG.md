@@ -6,6 +6,8 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-11-24
+
 ### Added
 
 - **`prompts.unsubscribe` / `context.unsubscribe` / `tasks.unsubscribe`（协议方法，TRANSPORT §5.1）**：per-session 域此前只能订阅、无法退订，网关会为每个"曾经打开过"的会话每 2s 重建一次域（`context:` 的重建要重折叠 durable 事件日志），CPU/IO 随访问过的会话数线性增长。客户端在 effect cleanup 里调用它们。
