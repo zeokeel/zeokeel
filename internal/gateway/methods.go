@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -325,6 +326,9 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		},
 		"run.cancel": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.cancelRun(request.Params)
+		},
+		"run.interject": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.interjectRun(ctx, request.Params)
 		},
 		"ask.answer": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.answerQuestion(request.Params)
@@ -1340,6 +1344,68 @@ func (g *Gateway) activeSession() (any, *protocolError) {
 	return activeSessionResult{SessionID: chat.ActiveSession()}, nil
 }
 
+// interjectRun stops the in-flight turn of a session and immediately starts a new one
+// with the interjected text — "插话".
+//
+// This is steering by restart, not mid-turn injection: the rig agent loads history
+// once per run and its TurnHook has no per-iteration seam, so a message cannot be
+// slipped into the running conversation. Cancelling and resending gives the model the
+// partial answer plus the new instruction, which is what a user needs, and does it in
+// one hop so the client cannot race the cancel with a 409.
+func (g *Gateway) interjectRun(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	var params runInterjectParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(params.SessionID) == "" {
+		return nil, errInvalidParams("sessionId", "is required")
+	}
+	if strings.TrimSpace(params.Text) == "" {
+		return nil, errInvalidParams("text", "is required")
+	}
+	chat, err := g.chatService()
+	if err != nil {
+		return nil, internalError(err)
+	}
+	var attachments []contracts.Attachment
+	if len(params.Attachments) > 0 {
+		resolved, problem := g.resolveAttachments(params.Attachments)
+		if problem != nil {
+			return nil, problem
+		}
+		attachments = resolved
+	}
+	if err := chat.Cancel(params.SessionID); err != nil {
+		return nil, internalError(err)
+	}
+	// The cancel is a request: wait (briefly) for the backend to settle, then start
+	// the new turn. A run that refuses to stop is reported, not silently doubled.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var sendErr error
+		if len(attachments) > 0 {
+			sender, ok := chat.(contracts.AttachmentSender)
+			if !ok {
+				return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "attachments_not_supported")
+			}
+			sendErr = sender.SendWithAttachments(params.SessionID, params.Text, attachments)
+		} else {
+			sendErr = chat.Send(params.SessionID, params.Text)
+		}
+		if sendErr == nil {
+			return map[string]any{"ok": true}, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, internalError(sendErr)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, internalError(ctx.Err())
+		case <-time.After(80 * time.Millisecond):
+		}
+	}
+}
+
 // cancelRun requests that the in-flight run of a session stops. The stop is
 // only confirmed by the session delta's running:false (§4.4).
 func (g *Gateway) cancelRun(raw json.RawMessage) (any, *protocolError) {
@@ -1401,4 +1467,11 @@ func (entry ringEntry) encode() ([]byte, error) {
 		return nil, errors.New("gateway: empty replay entry")
 	}
 	return encodeNotification(entry.payload.notification(), entry.payload)
+}
+
+// runInterjectParams is run.interject's body: the text to steer the session with.
+type runInterjectParams struct {
+	SessionID   string   `json:"sessionId"`
+	Text        string   `json:"text"`
+	Attachments []string `json:"attachments,omitempty"`
 }

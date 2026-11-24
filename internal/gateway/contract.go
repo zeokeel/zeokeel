@@ -47,6 +47,7 @@ var contractParams = map[string]any{
 	"session.create":          sessionCreateParams{},
 	"session.active.get":      struct{}{},
 	"run.cancel":              sessionParams{},
+	"run.interject":           runInterjectParams{},
 	"approvals.snapshot":      struct{}{},
 	"approvals.subscribe":     domainSubscribeParams{},
 	"approval.resolve":        approvalResolveParams{},

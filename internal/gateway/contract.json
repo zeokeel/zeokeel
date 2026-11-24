@@ -143,6 +143,15 @@
       ],
       "optional": []
     },
+    "run.interject": {
+      "required": [
+        "sessionId",
+        "text"
+      ],
+      "optional": [
+        "attachments"
+      ]
+    },
     "session.active.get": {
       "required": [],
       "optional": []

@@ -538,6 +538,18 @@ export async function answerAsk(id: string, answer: string): Promise<void> {
   await client().request('ask.answer', { id, ...(answer ? { answer } : {}) });
 }
 
+/**
+ * 插话: stop the running turn and start a new one with this text (§5.1.10).
+ *
+ * The gateway method does it atomically; the browser uses `abort + wait + send`
+ * instead so the new turn streams through the SSE connection this client owns —
+ * a turn started by the gateway would only reach the transcript through the WS
+ * session domain, without live deltas.
+ */
+export async function interjectRun(sessionId: string, text: string): Promise<void> {
+  await client().request('run.interject', { sessionId, text });
+}
+
 /** Cancel a pending ask: the tool resolves as cancelled, the run keeps going. */
 export async function cancelAsk(id: string): Promise<void> {
   await client().request('ask.cancel', { id });

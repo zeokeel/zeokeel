@@ -419,8 +419,18 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
             usage={composerSettings.usage}
             onSetting={(key: string, value: string) => void setSetting(key, value)}
             onInterject={(text: string) => {
+              // 插话: abort, wait for the turn to actually end (the abort is a
+              // request), then send. Sending into a live turn is a 409.
               stopRun();
-              chat.onRequest({ sessionId, text });
+              const deadline = Date.now() + 3000;
+              const trySend = () => {
+                if (chat.isRequesting && Date.now() < deadline) {
+                  setTimeout(trySend, 100);
+                  return;
+                }
+                chat.onRequest({ sessionId, text });
+              };
+              setTimeout(trySend, 100);
             }}
           />
         }

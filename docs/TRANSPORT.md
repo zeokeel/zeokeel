@@ -695,6 +695,18 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 > **状态语汇**取契约常量（`pending` / `in_progress` / `completed`），未知值 → `invalid_params`
 > （不是静默 no-op）。`task.delete` 是"取消"，`task.status` 回 `pending` 是"停止"。
 
+#### 5.1.10 运行控制（`run`）
+
+| 方法 | 参数 | 返回 | 幂等 | 契约 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| `run.cancel` | `{sessionId}` | `{}` | Y | `ChatService.Cancel` `chat.go:611` | ✅ 已实现 |
+| `run.interject` | `{sessionId, text, attachments?}` | `{ok}` | N | 取消 + 立即新开一轮 | ✅ 已实现 |
+
+> `run.interject` 是**插话**（"steering"）：rig 的 agent 每次运行只加载一次历史，
+> `TurnHook` 只有 BeforeRun/AfterRun/BeforeTool/AfterTool，没有逐轮注入的接缝，所以
+> 无法把消息塞进正在跑的对话。这里的语义是**取消当前轮并立刻用新消息开一轮**——模型能看到
+> 已经产生的那半段回答和新的指令，且整个过程在网关内一次完成，客户端不会与 409 抢跑。
+
 #### 5.1.9 团队（`team`，`team.go:134`）
 
 浏览器客户端的团队屏。后端 `contracts.TeamService` 早已齐备，此前没有任何传输方法：
