@@ -720,3 +720,61 @@ func teamMemberDTOOf(member contracts.TeamMember) teamMemberDTO {
 	}
 	return row
 }
+
+// --- models (the composer's model + thinking pickers) -------------------------
+
+// modelThinkingDTO is one selectable thinking preset; both labels travel so the
+// client picks the one matching the UI language (no language logic on the wire).
+type modelThinkingDTO struct {
+	ID     string `json:"id"`
+	NameZH string `json:"nameZh"`
+	NameEN string `json:"nameEn"`
+}
+
+// modelRowDTO is one model the composer can switch to.
+type modelRowDTO struct {
+	ID            string             `json:"id"`
+	Name          string             `json:"name"`
+	Note          string             `json:"note,omitempty"`
+	ContextWindow int                `json:"contextWindow,omitempty"`
+	ThinkingModes []modelThinkingDTO `json:"thinkingModes"`
+}
+
+type modelsDTO struct {
+	Models       []modelRowDTO `json:"models"`
+	DefaultModel string        `json:"defaultModel,omitempty"`
+}
+
+// handleModels serves GET /api/models: the catalog rows with each model's effective
+// thinking modes, plus the current default. The client must not re-derive these
+// rules — the family table and the user's own modes live in contracts.
+func (g *Gateway) handleModels(ctx context.Context) (any, *protocolError) {
+	payload := modelsDTO{Models: []modelRowDTO{}}
+	settings, ok := g.root.Get(contracts.KeySettings)
+	if !ok || settings == nil {
+		return payload, nil
+	}
+	catalog, err := contracts.ParseModelInfoList(settings.Get(contracts.SettingModelCatalogModels, ""))
+	if err != nil {
+		return nil, internalError(err)
+	}
+	payload.DefaultModel = strings.TrimSpace(settings.Get(contracts.SettingsChatModel, ""))
+	for _, info := range catalog {
+		row := modelRowDTO{ID: info.ID, Name: info.Name, Note: info.Note, ContextWindow: info.ContextWindow}
+		for _, mode := range contracts.ThinkingModesForModel(info) {
+			row.ThinkingModes = append(row.ThinkingModes, modelThinkingDTO{
+				ID: mode.ID, NameZH: mode.DisplayName(false), NameEN: mode.DisplayName(true),
+			})
+		}
+		if row.ThinkingModes == nil {
+			row.ThinkingModes = []modelThinkingDTO{}
+		}
+		payload.Models = append(payload.Models, row)
+	}
+	return payload, nil
+}
+
+// handleModelsHTTP serves GET /api/models.
+func (g *Gateway) handleModelsHTTP(w http.ResponseWriter, r *http.Request) {
+	g.serveReadModel(w, r, g.handleModels)
+}

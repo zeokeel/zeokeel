@@ -47,6 +47,8 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request) {
 		// Read models the screens have always fetched (capabilities R23, insights
 		// R24, automation R22, the session Memory tab). They answered 404 until now.
 		g.serveReadModel(w, r, g.handleCapabilities)
+	case r.URL.Path == "/api/models" && r.Method == http.MethodGet:
+		g.handleModelsHTTP(w, r)
 	case r.URL.Path == "/api/insights" && r.Method == http.MethodGet:
 		g.handleInsightsHTTP(w, r)
 	case r.URL.Path == "/api/automation" || strings.HasPrefix(r.URL.Path, "/api/automation/"):
