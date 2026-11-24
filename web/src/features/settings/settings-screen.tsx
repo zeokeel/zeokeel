@@ -418,6 +418,16 @@ function FieldRow({
             onChange={(event) => onChange(event.target.value)}
           />
         ) : null}
+        {field.kind === 'secret' ? (
+          <Input.Password
+            id={id}
+            value={value}
+            disabled={disabled}
+            autoComplete="off"
+            placeholder={field.example}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        ) : null}
         {field.kind === 'textarea' ? (
           <Input.TextArea
             id={id}

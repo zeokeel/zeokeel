@@ -13,7 +13,7 @@ import type { SettingsRows } from '@/api/gateway';
 import { SETTING_KEYS as K } from '@/design/settings-keys';
 import type { MessageKey } from '@/i18n';
 
-export type SettingsFieldKind = 'text' | 'textarea' | 'number' | 'radio' | 'switch';
+export type SettingsFieldKind = 'text' | 'secret' | 'textarea' | 'number' | 'radio' | 'switch';
 
 export interface SettingsField {
   /** The real row key (`agent.permission`, …). */
@@ -49,6 +49,13 @@ export interface SettingsPage {
   group: { key: string; labelKey: MessageKey; rank: number };
   sections: SettingsSection[];
 }
+
+const secret = (key: string, labelKey: MessageKey, helpKey?: MessageKey): SettingsField => ({
+  key,
+  labelKey,
+  kind: 'secret',
+  helpKey,
+});
 
 const text = (
   key: string,
@@ -119,7 +126,7 @@ export const SETTINGS_PAGES: SettingsPage[] = [
         fields: [
           text(K.chatModel, 'settings.ia.model'),
           text(K.chatBaseURL, 'settings.ia.baseUrl', 'settings.ia.help.baseUrl'),
-          text(K.chatAPIKey, 'settings.ia.apiKey'),
+          secret(K.chatAPIKey, 'settings.ia.apiKey'),
           { key: K.chatContextBudget, labelKey: 'settings.ia.contextBudget', kind: 'number' },
           { key: K.chatMode, labelKey: 'settings.ia.chatMode', kind: 'text' },
           json(K.chatSystemPrompt, 'settings.ia.systemPrompt', 'settings.ia.help.systemPrompt'),
@@ -258,7 +265,7 @@ export const SETTINGS_PAGES: SettingsPage[] = [
       },
       {
         titleKey: 'settings.ia.search',
-        fields: [text(K.webSearchEndpoint, 'settings.ia.searchEndpoint'), text(K.webSearchAPIKey, 'settings.ia.apiKey')],
+        fields: [text(K.webSearchEndpoint, 'settings.ia.searchEndpoint'), secret(K.webSearchAPIKey, 'settings.ia.apiKey')],
       },
     ],
   },
