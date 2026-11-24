@@ -766,10 +766,19 @@ body {
   }
 }
 
-/* Only a narrow *and* short window has to give the suggestions up; a wide but
- * short one still has the room beside the approval card (R3-2). */
+/* A narrow *and* short window has to give the suggestions up (R3-2), and so does
+ * any short window whose approval card is on screen: the card sits over the
+ * welcome column, and once the suggestion row wraps, its second line lands
+ * behind the card — visible but not clickable, and not scrollable either
+ * (round-4 composer audit R4-1). Without a card a short window keeps them. */
 @media (max-height: 560px) and (max-width: 480px) {
   .zk-now__suggestions {
+    display: none;
+  }
+}
+
+@media (max-height: 560px) {
+  .zk-thread:has(.zk-approval) .zk-now__suggestions {
     display: none;
   }
 }
@@ -2083,10 +2092,19 @@ body {
   }
 }
 
-/* Only a narrow *and* short window has to give the suggestions up; a wide but
- * short one still has the room beside the approval card (R3-2). */
+/* A narrow *and* short window has to give the suggestions up (R3-2), and so does
+ * any short window whose approval card is on screen: the card sits over the
+ * welcome column, and once the suggestion row wraps, its second line lands
+ * behind the card — visible but not clickable, and not scrollable either
+ * (round-4 composer audit R4-1). Without a card a short window keeps them. */
 @media (max-height: 560px) and (max-width: 480px) {
   .zk-now__suggestions {
+    display: none;
+  }
+}
+
+@media (max-height: 560px) {
+  .zk-thread:has(.zk-approval) .zk-now__suggestions {
     display: none;
   }
 }
