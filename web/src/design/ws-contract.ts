@@ -46,6 +46,13 @@ export const WS_METHODS = [
   'task.status',
   'tasks.snapshot',
   'tasks.subscribe',
+  'team.activity',
+  'team.close',
+  'team.interrupt',
+  'team.send',
+  'team.snapshot',
+  'team.spawn',
+  'team.wait',
   'workspace.list.snapshot',
 ] as const;
 
@@ -88,6 +95,13 @@ export const WS_PARAMS: Record<WsMethod, MethodParams> = {
   'task.status': { required: ['id', 'status'], optional: ['sessionId'] },
   'tasks.snapshot': { required: [], optional: ['sessionId'] },
   'tasks.subscribe': { required: [], optional: ['sessionId', 'sinceRev'] },
+  'team.activity': { required: [], optional: ['limit'] },
+  'team.close': { required: ['id'], optional: [] },
+  'team.interrupt': { required: ['id'], optional: [] },
+  'team.send': { required: ['id', 'message'], optional: ['async'] },
+  'team.snapshot': { required: [], optional: [] },
+  'team.spawn': { required: ['name', 'prompt'], optional: ['model'] },
+  'team.wait': { required: ['id'], optional: [] },
   'workspace.list.snapshot': { required: [], optional: [] },
 };
 
@@ -121,6 +135,7 @@ export const CONDITIONAL_CAPABILITIES = [
   { name: 'edit', when: 'SessionEditor' },
   { name: 'regenerate', when: 'SessionRegenerator' },
   { name: 'tasks', when: 'KeyTaskBoard' },
+  { name: 'team', when: 'KeyTeam' },
 ] as const;
 
 export const PROTOCOL_VERSION = 1;

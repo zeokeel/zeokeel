@@ -1098,3 +1098,81 @@ function mapDeltaMessage(raw: unknown): SnapshotMessage | null {
     remoteError: typeof message.error === 'string' ? message.error : undefined,
   };
 }
+
+// --- team (TRANSPORT §5.1.9) --------------------------------------------------
+//
+// A teammate runs in the backend manager, not in this client, and the service has
+// no change hook: the screen refreshes this snapshot after every action and polls
+// while it is open.
+
+export interface TeamMember {
+  id: string;
+  name: string;
+  status: string;
+  runState: string;
+  model?: string;
+  created?: string;
+  last?: string;
+  error?: string;
+}
+
+export interface TeamActivityRow {
+  id: string;
+  memberId?: string;
+  kind: string;
+  text?: string;
+  at?: string;
+}
+
+export interface TeamSnapshot {
+  members: TeamMember[];
+  activities: TeamActivityRow[];
+}
+
+export async function loadTeam(): Promise<TeamSnapshot> {
+  const result = await client().request<Partial<TeamSnapshot>>('team.snapshot', {});
+  return {
+    members: Array.isArray(result?.members) ? result.members : [],
+    activities: Array.isArray(result?.activities) ? result.activities : [],
+  };
+}
+
+export async function spawnTeammate(input: {
+  name: string;
+  prompt: string;
+  model?: string;
+}): Promise<TeamMember> {
+  const result = await client().request<{ member: TeamMember }>('team.spawn', input);
+  return result.member;
+}
+
+export async function sendToTeammate(
+  id: string,
+  message: string,
+  options: { async?: boolean } = {},
+): Promise<string | undefined> {
+  const result = await client().request<{ answer?: string; ok?: boolean }>('team.send', {
+    id,
+    message,
+    ...(options.async ? { async: true } : {}),
+  });
+  return result?.answer;
+}
+
+export async function waitTeammate(id: string): Promise<string | undefined> {
+  const result = await client().request<{ answer?: string }>('team.wait', { id });
+  return result?.answer;
+}
+
+export async function interruptTeammate(id: string): Promise<void> {
+  await client().request('team.interrupt', { id });
+}
+
+export async function closeTeammate(id: string): Promise<void> {
+  await client().request('team.close', { id });
+}
+
+export async function loadTeamActivity(limit = 50): Promise<TeamActivityRow[]> {
+  const result = await client().request<{ items?: TeamActivityRow[] }>('team.activity', { limit });
+  return Array.isArray(result?.items) ? result.items : [];
+}

@@ -66,6 +66,22 @@ beforeEach(() => {
   state.sessions = [{ id: 's-1', title: '会话一', updatedAt: '2026-11-23T00:00:00Z' }];
   state.messages = { 's-1': [] };
   state.approvals = [approval() as never];
+  // R7's child route now renders a teammate's detail (the team backend replaced the
+  // mock-only child-session endpoint); the member carries the text the test asserts.
+  state.teamMembers = [
+    {
+      id: 'child-1',
+      name: '研究员',
+      status: 'active',
+      runState: 'idle',
+      model: 'fake-model',
+      last: '子会话里的话',
+      error: '',
+    },
+  ];
+  state.teamActivities = [
+    { id: 'act-1', memberId: 'child-1', kind: 'spawn', text: '派发研究员', at: '2026-11-23T00:00:00Z' },
+  ];
   gateway = installFakeGateway(state);
   // `approval.resolve` is a WS command now; record what the card decided.
   const originalReceive = gateway.gateway.receive.bind(gateway.gateway);

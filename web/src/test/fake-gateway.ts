@@ -57,7 +57,7 @@ export interface FakeQueuedPrompt {
  * `conditional[].name`**, not by a written-out list, so a new conditional half
  * is a deliberate choice here rather than a silent gap.
  */
-export const FAKED_CONDITIONAL: string[] = ['context', 'tasks', 'regenerate'].filter((name) =>
+export const FAKED_CONDITIONAL: string[] = ['context', 'tasks', 'regenerate', 'team'].filter((name) =>
   CONDITIONAL_CAPABILITIES.some((item) => item.name === name),
 );
 
@@ -66,6 +66,8 @@ export interface FakeState {
   messages: Record<string, FakeMessage[]>;
   approvals: FakeApproval[];
   approvalMode: string;
+  teamMembers: Array<Record<string, unknown>>;
+  teamActivities: Array<Record<string, unknown>>;
   settings: Record<string, string>;
   ask: { id: string; text: string; options?: string[]; answer?: string } | null;
   /** The session the client is looking at; `session.active.get` reports it. */
@@ -93,6 +95,8 @@ export function defaultState(): FakeState {
     messages: { 's-1': [] },
     approvals: [],
     approvalMode: 'workspace',
+    teamMembers: [],
+    teamActivities: [],
     // The language row decides the UI locale; tests that assert Chinese copy
     // pin it here instead of depending on the machine's navigator.language.
     settings: {
@@ -502,6 +506,44 @@ export class FakeGateway {
     if (method === 'context.subscribe') {
       const since = Number(params.sinceRev ?? 0);
       reply({ epoch: 'fake', rev: 1, resync: since !== 1 });
+      return;
+    }
+    if (method === 'team.snapshot') {
+      reply({
+        members: this.state.teamMembers ?? [],
+        activities: this.state.teamActivities ?? [],
+      });
+      return;
+    }
+    if (method === 'team.spawn') {
+      const member = {
+        id: `member-${(this.state.teamMembers ?? []).length + 1}`,
+        name: String(params.name ?? ''),
+        status: 'active',
+        runState: 'idle',
+        model: params.model ?? '',
+        created: new Date().toISOString(),
+        last: '',
+        error: '',
+      };
+      this.state.teamMembers = [...(this.state.teamMembers ?? []), member];
+      reply({ member });
+      return;
+    }
+    if (method === 'team.send') {
+      reply(params.async ? { ok: true } : { answer: '' });
+      return;
+    }
+    if (method === 'team.wait') {
+      reply({ answer: '' });
+      return;
+    }
+    if (method === 'team.interrupt' || method === 'team.close') {
+      reply({ ok: true });
+      return;
+    }
+    if (method === 'team.activity') {
+      reply({ items: this.state.teamActivities ?? [] });
       return;
     }
     if (method === 'tasks.snapshot') {

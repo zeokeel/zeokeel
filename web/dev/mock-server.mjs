@@ -319,6 +319,8 @@ const broadcastSessionReset = (session) => {
  * @type {Map<string, {rev:number, tasks:Array<any>}>}
  */
 const taskBoards = new Map();
+/** Team fixture: the browser's team screen reads these. */
+const mockTeam = { members: [], activities: [] };
 const taskBoard = (sessionId) => {
   if (!taskBoards.has(sessionId)) taskBoards.set(sessionId, { rev: 1, tasks: [] });
   return taskBoards.get(sessionId);
@@ -1580,6 +1582,55 @@ const wsDispatch = (client, message) => {
       const since = Number(params.sinceRev ?? 0);
       const view = contextView(sessionId);
       return reply({ epoch: WS_EPOCH, rev: view.rev, resync: since !== view.rev });
+    }
+    case 'team.snapshot': {
+      return reply({ members: mockTeam.members.slice(), activities: mockTeam.activities.slice() });
+    }
+    case 'team.spawn': {
+      const name = String(params.name ?? '').trim();
+      const prompt = String(params.prompt ?? '').trim();
+      if (!name || !prompt) return fail(1003, 'name and prompt are required');
+      const member = {
+        id: `member-${mockTeam.members.length + 1}`,
+        name,
+        status: 'active',
+        runState: 'idle',
+        model: String(params.model ?? ''),
+        created: new Date().toISOString(),
+        last: '',
+        error: '',
+      };
+      mockTeam.members.push(member);
+      mockTeam.activities.push({ id: `act-${mockTeam.activities.length + 1}`, memberId: member.id, kind: 'spawn', text: `spawned ${name}`, at: member.created });
+      return reply({ member });
+    }
+    case 'team.send': {
+      const id = String(params.id ?? '');
+      const message = String(params.message ?? '').trim();
+      if (!message) return fail(1003, 'message is required');
+      if (!mockTeam.members.some((m) => m.id === id)) return fail(1001, 'member_not_found');
+      mockTeam.activities.push({
+        id: `act-${mockTeam.activities.length + 1}`,
+        memberId: id,
+        kind: 'message',
+        text: message,
+        at: new Date().toISOString(),
+      });
+      return reply(params.async ? { ok: true } : { answer: '' });
+    }
+    case 'team.wait': {
+      return reply({ answer: '' });
+    }
+    case 'team.interrupt':
+    case 'team.close': {
+      const id = String(params.id ?? '');
+      if (!mockTeam.members.some((m) => m.id === id)) return fail(1001, 'member_not_found');
+      return reply({ ok: true });
+    }
+    case 'team.activity': {
+      const limit = Number(params.limit ?? 50);
+      const items = mockTeam.activities.slice(-Math.max(1, limit));
+      return reply({ items });
     }
     case 'tasks.snapshot': {
       // Process-wide board when sessionId is absent, per-session otherwise
