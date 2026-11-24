@@ -78,6 +78,15 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // The document's own language follows the UI language: an English interface
+  // announced as `lang="zh-CN"` makes a screen reader read it with the wrong
+  // pronunciation rules (round-3 mobile audit O4).
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = locale === 'en' ? 'en' : 'zh-CN';
+    }
+  }, [locale]);
+
   const value = useMemo<I18nApi>(
     () => ({ locale, t: (key, params) => translate(locale, key, params) }),
     [locale],

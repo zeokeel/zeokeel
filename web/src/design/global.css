@@ -804,14 +804,18 @@ body {
  * a glance, instead of a 1.8:1 placeholder the user has to hunt for. */
 .zk-composer__foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--zk-space-3);
+  gap: var(--zk-space-1) var(--zk-space-3);
   margin-top: var(--zk-space-1);
 }
 
 .zk-composer__meters {
   margin-inline-start: auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--zk-label-tertiary);
   font-size: var(--zk-type-xxs);
   line-height: var(--zk-type-xxs-line);

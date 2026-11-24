@@ -68,15 +68,20 @@ export function AppShell({ children }: { children: ReactNode }) {
   // entry it was opened on (round-3 mobile audit F1). The state is adjusted
   // during render — React's documented "reset state when an input changes"
   // pattern — because a synchronous setState in an effect cascades renders.
-  const [drawer, setDrawer] = useState<{ openedFor: string | null; seenKey: string }>({
-    openedFor: null,
-    seenKey: location.key,
-  });
-  if (drawer.seenKey !== location.key) {
-    setDrawer({ openedFor: null, seenKey: location.key });
+  const [drawer, setDrawer] = useState<{
+    openedFor: string | null;
+    seenKey: string;
+    seenNarrow: boolean;
+  }>({ openedFor: null, seenKey: location.key, seenNarrow: narrow });
+  // Both inputs reset the drawer: a new history entry, and a breakpoint flip.
+  // Without the second one, widening the window (drawer unmounts) and narrowing
+  // it again brought the drawer back by itself (round-3 mobile audit F5).
+  if (drawer.seenKey !== location.key || drawer.seenNarrow !== narrow) {
+    setDrawer({ openedFor: null, seenKey: location.key, seenNarrow: narrow });
   }
   const drawerOpen = narrow && drawer.openedFor !== null && drawer.openedFor === location.key;
-  const openDrawer = () => setDrawer({ openedFor: location.key, seenKey: location.key });
+  const openDrawer = () =>
+    setDrawer({ openedFor: location.key, seenKey: location.key, seenNarrow: narrow });
   const closeDrawer = () => setDrawer((prev) => ({ ...prev, openedFor: null }));
   // The width the splitter had before folding, so expanding restores it instead
   // of jumping back to the default (B16: "展开后状态不丢").
@@ -132,7 +137,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="zk-shell" data-narrow={narrow ? 'true' : 'false'}>
       <CommandPalette />
       <a className="zk-skip-link" href="#zk-main">
-        跳到主内容
+        {t('shell.skipToContent')}
       </a>
       {narrow ? (
         <Layout className="zk-shell__body">
