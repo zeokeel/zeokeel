@@ -48,14 +48,20 @@ type ConnectorRow = Record<string, unknown> & {
   workspaceId?: string;
 };
 
-export function parseConnectors(raw: string): ConnectorRow[] {
-  if (!raw.trim()) return [];
+export function parseConnectors(raw: string): { rows: ConnectorRow[]; broken: boolean } {
+  if (!raw.trim()) return { rows: [], broken: false };
   try {
     const decoded = JSON.parse(raw);
-    if (!Array.isArray(decoded)) return [];
-    return decoded.filter((row): row is ConnectorRow => Boolean(row) && typeof row === 'object');
+    if (!Array.isArray(decoded)) return { rows: [], broken: true };
+    const rows = decoded.filter(
+      (row): row is ConnectorRow => Boolean(row) && typeof row === 'object' && !Array.isArray(row),
+    );
+    // Anything that is not a row at all means the value was hand-edited into
+    // something this page will never produce: say so instead of showing an
+    // empty list and calling it a day (round-3 conn audit N3).
+    return { rows, broken: rows.length !== decoded.length };
   } catch {
-    return [];
+    return { rows: [], broken: true };
   }
 }
 
@@ -107,10 +113,11 @@ export function CapabilitiesScreen() {
     };
   }, [t]);
 
-  const configured = useMemo(
+  const parsed = useMemo(
     () => parseConnectors(String(rows[SETTING_KEYS.mcpServers] ?? '')),
     [rows],
   );
+  const configured = parsed.rows;
   // The gateway owns the key (`mcp.disabledServers.<workspaceId>`) because the
   // browser does not know the workspace id; writing the bare key from here made
   // the switch a no-op (round-3 conn audit F1).
@@ -121,23 +128,34 @@ export function CapabilitiesScreen() {
     return map;
   }, [data]);
 
-  const persist = async (next: ConnectorRow[], disabled?: string[]) => {
+  const persist = async (
+    next: ConnectorRow[],
+    disabled?: string[],
+  ): Promise<{ connectors: ConnectorSummary[]; disabled: string[] } | null> => {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
+      // Names that no longer belong to a row are dropped here: an orphan in the
+      // disabled list makes a later connector with that name look switched off
+      // the moment it is created (round-3 conn audit N1).
+      const known = new Set(next.map((row) => row.name));
+      const scoped = disabled?.filter((name) => known.has(name));
       await setSetting(SETTING_KEYS.mcpServers, JSON.stringify(next));
       // The write is only half the change: the toolkit connects on reload, and
       // the disabled list travels with the reload so the gateway writes it under
       // the key it actually reads.
-      const result = await reloadConnectors(disabled);
+      const result = await reloadConnectors(scoped);
       setData((current) => ({
         skills: current?.skills ?? data?.skills ?? [],
         connectors: result.connectors,
         disabled: result.disabled,
       }));
       setNotice(t('screen.capabilities.saved'));
+      return result;
     } catch (cause) {
       setError(describeError(cause, t, 'screen.capabilities.saveFailed'));
+      return null;
     } finally {
       setBusy(false);
     }
@@ -210,15 +228,21 @@ export function CapabilitiesScreen() {
     const next = editing
       ? configured.map((item) => (item.name === editing.name ? row : item))
       : [...configured, row];
+    // A rename carries the switch with it: the list is keyed by name, so leaving
+    // the old name behind silently re-enabled a disabled connector (N1).
+    const disabledNext =
+      editing && editing.name !== row.name && disabledNames.includes(editing.name)
+        ? disabledNames.map((name) => (name === editing.name ? row.name : name))
+        : disabledNames;
     setFormOpen(false);
-    await persist(next);
+    const result = await persist(next, disabledNext);
     // The gateway dedupes servers by endpoint (`assembly wins`) and skips them
-    // silently; the row would sit at 空闲 forever with no explanation (F5).
-    if (!editing) {
-      const result = await reloadConnectors().catch(() => null);
-      if (result && !result.connectors.some((item) => item.name === row.name)) {
-        setError(t('screen.capabilities.err.notApplied', { name: row.name }));
-      }
+    // silently; the row would sit at 空闲 forever with no explanation (F5). The
+    // reload from persist is authoritative — a second call rebuilt every
+    // connection again for the same save (N4).
+    if (result && !result.connectors.some((item) => item.name === row.name)) {
+      setNotice(null);
+      setError(t('screen.capabilities.err.notApplied', { name: row.name }));
     }
   };
 
@@ -271,6 +295,16 @@ export function CapabilitiesScreen() {
         </div>
       ) : null}
 
+      {parsed.broken ? (
+        <div className="zk-model-broken" role="alert" data-testid="connectors-broken">
+          <p>{t('screen.capabilities.broken')}</p>
+          <p className="zk-model-broken__hint">{t('screen.capabilities.brokenHint')}</p>
+          <Button size="small" onClick={() => void persist([], [])} data-testid="connectors-reset">
+            {t('settings.model.restore')}
+          </Button>
+        </div>
+      ) : null}
+
       {data === null ? (
         <div className="zk-empty">
           <Spin />
@@ -295,11 +329,12 @@ export function CapabilitiesScreen() {
                     size="small"
                     rowKey="id"
                     pagination={false}
-                    // Without a fixed layout the source column takes its content
-                    // width and the name column is squeezed to one character per
-                    // line — the ellipsis never engages (round-3 conn audit F2).
+                    // `tableLayout="fixed"` alone is not enough: `scroll.x`
+                    // makes antd measure columns by content again, which put the
+                    // source column at 1103px and pushed the table out of its
+                    // container (round-3 conn audit F2, second pass).
                     tableLayout="fixed"
-                    scroll={{ x: 'max-content' }}
+                    className="zk-skills-table"
                     dataSource={data.skills}
                     columns={[
                       { title: t('screen.capabilities.col.name'), dataIndex: 'name', width: 160 },

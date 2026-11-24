@@ -1369,6 +1369,15 @@ body {
 
 /* Connector rows: one server per row, state dot + name + transport, actions on
  * the right. The page used to be a read-only table (round-2 C-01). */
+.zk-skills-table {
+  width: 100%;
+}
+
+.zk-skills-table table {
+  table-layout: fixed;
+  width: 100%;
+}
+
 .zk-connector-list {
   list-style: none;
   margin: 0;

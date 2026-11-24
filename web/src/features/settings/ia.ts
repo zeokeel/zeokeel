@@ -167,16 +167,23 @@ export const SETTINGS_PAGES: SettingsPage[] = [
           // unknown value used to be normalized silently — a free-text field
           // therefore stored a value the UI then displayed as if it were real
           // (round-3 model audit P2).
-          radio(
-            K.chatMode,
-            'settings.ia.chatMode',
-            [
-              { value: 'standard', labelKey: 'settings.ia.mode.standard' },
-              { value: 'minimal', labelKey: 'settings.ia.mode.minimal' },
-              { value: 'creator', labelKey: 'settings.ia.mode.creator' },
-            ],
-            'settings.ia.help.chatMode',
-          ),
+          // `defaultValue` mirrors what the gateway does when the row is absent
+          // (`plan_mode.go` falls back to standard): showing three unselected
+          // radios implied "not decided", which is not the state (audit O1).
+          // It is display-only — an untouched field still writes nothing.
+          {
+            ...radio(
+              K.chatMode,
+              'settings.ia.chatMode',
+              [
+                { value: 'standard', labelKey: 'settings.ia.mode.standard' },
+                { value: 'minimal', labelKey: 'settings.ia.mode.minimal' },
+                { value: 'creator', labelKey: 'settings.ia.mode.creator' },
+              ],
+              'settings.ia.help.chatMode',
+            ),
+            defaultValue: 'standard',
+          },
           json(K.chatSystemPrompt, 'settings.ia.systemPrompt', 'settings.ia.help.systemPrompt'),
         ],
       },
