@@ -369,6 +369,14 @@ func (g *rebindGroup) recordJobStarted(ctx context.Context, scoped *rootScoped, 
 	}
 	g.jobOwners[id] = scoped
 	if sessionID != "" {
+		// close() sets these maps to nil; a job that finishes its bookkeeping
+		// during teardown used to panic with "assignment to entry in nil map" —
+		// in a goroutine that is not covered by request recovery, so it took the
+		// process down while session writes were still in flight
+		// (AUDIT-2026-11-24 C).
+		if g.jobSessions == nil {
+			g.jobSessions = make(map[string]string)
+		}
 		g.jobSessions[id] = sessionID
 	}
 	g.mu.Unlock()
@@ -398,6 +406,9 @@ func (g *rebindGroup) recordTerminalOpened(ctx context.Context, scoped *rootScop
 	}
 	g.terminalOwners[id] = scoped
 	if sessionID != "" {
+		if g.terminalSessions == nil {
+			g.terminalSessions = make(map[string]string)
+		}
 		g.terminalSessions[id] = sessionID
 	}
 	g.mu.Unlock()

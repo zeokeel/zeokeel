@@ -577,7 +577,11 @@ func parseAutomationClock(text string) (hour, minute, second, millis int, err er
 		values[index] = value
 	}
 	hour, minute, second = values[0], values[1], values[2]
-	if hour > 23 || minute > 59 || second > 59 {
+	// Lower bounds too: "daily -1:00:00" used to pass validation, then Next()
+	// could never produce an instant, so creating the task failed with "the
+	// schedule has no upcoming run" — an error that names the wrong problem
+	// (AUDIT-2026-11-24 B-16).
+	if hour < 0 || minute < 0 || second < 0 || hour > 23 || minute > 59 || second > 59 {
 		return 0, 0, 0, 0, fmt.Errorf("time %q is not a real 24-hour clock time", clock)
 	}
 	return hour, minute, second, millis, nil

@@ -73,6 +73,12 @@ func translateCheckError(err error) error {
 		return fmt.Errorf("%w: %w", ErrInsecureURL, err)
 	case errors.Is(err, rigupdate.ErrNoAsset):
 		return fmt.Errorf("%w: %w", ErrNoAsset, err)
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// A cancelled check is not a malformed manifest: the caller needs the
+		// cancellation back so the UI can say "cancelled" instead of "the update
+		// manifest is invalid" (AUDIT-2026-11-24 B-15). download.go already
+		// preserves it this way.
+		return err
 	default:
 		return fmt.Errorf("%w: %w", ErrManifest, err)
 	}

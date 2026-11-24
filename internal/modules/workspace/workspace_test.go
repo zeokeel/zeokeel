@@ -943,3 +943,40 @@ func TestRenameWorkspaceValidation(t *testing.T) {
 		t.Fatalf("names after the rejected renames = %v, want alpha/beta", names)
 	}
 }
+
+// TestRegistryWritesReloadBeforeMutating is the regression form of
+// AUDIT-2026-11-24 A-1: the registry is "whole document in memory, whole
+// document rewritten", and a second process sharing the data directory (a
+// headless run next to the served gateway, or ACP creating a workspace per
+// session) rewrote it from its own startup snapshot — silently dropping every
+// workspace the other process had added since.
+//
+// Two services over one data directory stand in for the two processes.
+func TestRegistryWritesReloadBeforeMutating(t *testing.T) {
+	dataDir := t.TempDir()
+	first := newDirectService(t, dataDir, Config{})
+	second := newDirectService(t, dataDir, Config{})
+
+	// The second process starts and reads the (still empty) registry.
+	if list, err := second.List(context.Background()); err != nil || len(list) != 0 {
+		t.Fatalf("second.List at startup = %+v/%v, want empty", list, err)
+	}
+	// The first process adds a workspace after that read.
+	added := mustCreate(t, first, "from-first", makeDir(t, t.TempDir(), "one"))
+
+	// The second process adds one of its own: the write must be based on the
+	// registry as it is now, not on what it read at startup.
+	mustCreate(t, second, "from-second", makeDir(t, t.TempDir(), "two"))
+
+	list, err := first.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	ids := make(map[string]bool, len(list))
+	for _, workspace := range list {
+		ids[workspace.ID] = true
+	}
+	if len(list) != 2 || !ids[added.ID] {
+		t.Fatalf("registry after the second process wrote = %+v, want both workspaces", list)
+	}
+}

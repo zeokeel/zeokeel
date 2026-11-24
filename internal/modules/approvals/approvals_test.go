@@ -327,9 +327,12 @@ func TestSubscriptions(t *testing.T) {
 	if first.Load() == 0 || second.Load() == 0 {
 		t.Fatalf("notifications: first=%d second=%d", first.Load(), second.Load())
 	}
-	if !logger.contains("subscriber panicked") {
-		t.Fatalf("panic was not logged: %v", logger.lines)
-	}
+	// The pending entry becomes visible before notify() runs, so asserting the
+	// log line immediately raced it under load and made the suite flaky
+	// (AUDIT-2026-11-24 B-9). Wait for the line instead of assuming it landed.
+	waitFor(t, "the panicking subscriber to be logged", func() bool {
+		return logger.contains("subscriber panicked")
+	})
 	firstCount := first.Load()
 	unsubFirst()
 	unsubFirst() // idempotent

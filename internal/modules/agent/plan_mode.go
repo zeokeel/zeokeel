@@ -142,9 +142,6 @@ func filterToolsForMode(tools []rig.Tool, mode string) []rig.Tool {
 	if len(allowed) == 0 {
 		return tools
 	}
-	if len(allowed) == 0 {
-		return tools
-	}
 	return surface.OnlyNames(tools, allowed)
 }
 

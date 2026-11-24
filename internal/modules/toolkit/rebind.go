@@ -511,6 +511,13 @@ func (g *rebindGroup) forRoot() *rootScoped {
 	mode, runner := g.sandboxState()
 	key := g.buildKey(root, mode, runner)
 	g.mu.Lock()
+	// closed: a tool call still finishing during teardown must not build a new
+	// set of managers — close() has already run CloseAll on the builds it knew
+	// about, so this one's jobs would never be reaped (AUDIT-2026-11-24 C).
+	if g.closed {
+		g.mu.Unlock()
+		return nil
+	}
 	if current := g.current; current.matches(key) {
 		g.mu.Unlock()
 		return current
@@ -541,6 +548,10 @@ func (g *rebindGroup) forRootValue(root string) *rootScoped {
 	mode, runner := g.sandboxState()
 	key := g.buildKey(root, mode, runner)
 	g.mu.Lock()
+	if g.closed {
+		g.mu.Unlock()
+		return nil
+	}
 	if current := g.current; current.matches(key) {
 		g.mu.Unlock()
 		return current
@@ -692,16 +703,29 @@ func newUndoTracker(root, dataDir string, hidden []string, logf func(string, ...
 		return nil
 	}
 	stateDir := filepath.Join(dataDir, "undo", undoStateKey(root))
-	if git, err := undo.IsGitRepo(context.Background(), root); err != nil {
+	ctx := context.Background()
+	if git, err := undo.IsGitRepo(ctx, root); err != nil {
 		if logf != nil {
 			logf("[toolkit] undo: git probe failed for %q (%v); using the file backend", root, err)
 		}
 	} else if git {
-		// Hidden patterns that reduce to a literal name/prefix (see
-		// undoIgnoreRules) are excluded from the snapshot report and the revert;
-		// wildcard basenames cannot be expressed in the SDK's ignore syntax and
-		// stay in the snapshot. Best effort, not a boundary.
-		return undo.NewTracker(root, undo.Options{Retain: 32, Dir: stateDir, Ignore: undoIgnoreRules(hidden)})
+		// A workspace root that is itself git-ignored by the enclosing repository
+		// cannot be snapshotted through git: the SDK stages the root's relative
+		// path, and `git add -A -- <ignored path>` exits 1, so every turn's
+		// snapshot failed and `undo` was silently unavailable ("repo/build",
+		// "repo/dist" — the ordinary case of opening a build directory)
+		// (AUDIT-2026-11-24 A-5). Detect it once and use the file backend.
+		if ignored, detail := gitRootIgnored(ctx, root); ignored {
+			if logf != nil {
+				logf("[toolkit] undo: %q is inside a git repository but ignored by it (%s); using the file backend", root, detail)
+			}
+		} else {
+			// Hidden patterns that reduce to a literal name/prefix (see
+			// undoIgnoreRules) are excluded from the snapshot report and the revert;
+			// wildcard basenames cannot be expressed in the SDK's ignore syntax and
+			// stay in the snapshot. Best effort, not a boundary.
+			return undo.NewTracker(root, undo.Options{Retain: 32, Dir: stateDir, Ignore: undoIgnoreRules(hidden)})
+		}
 	}
 	tracker, err := undo.NewFileTracker(root, undo.FileOptions{
 		Dir:      stateDir,
@@ -757,6 +781,56 @@ func undoIgnoreRules(patterns []string) []string {
 
 // undoStateKey derives a stable, filesystem-safe directory name for one
 // workspace root's snapshot store.
+// gitRootIgnored reports whether root lies inside a git repository but is
+// excluded by that repository's ignore rules, which breaks git-based snapshots.
+//
+// The check is `git check-ignore` on the root's path relative to the repository
+// top level; a root that IS the top level is never ignored. Any git failure is
+// reported as "not ignored" so the caller keeps the git backend it would have
+// used before.
+func gitRootIgnored(ctx context.Context, root string) (bool, string) {
+	top, err := gitOutputAt(ctx, root, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return false, ""
+	}
+	top = strings.TrimSpace(top)
+	if top == "" {
+		return false, ""
+	}
+	resolvedTop, topErr := filepath.EvalSymlinks(top)
+	if topErr != nil {
+		resolvedTop = filepath.Clean(top)
+	}
+	resolvedRoot := filepath.Clean(root)
+	if resolvedTop == resolvedRoot {
+		return false, ""
+	}
+	relative, relErr := filepath.Rel(resolvedTop, resolvedRoot)
+	if relErr != nil || relative == "." || strings.HasPrefix(relative, "..") {
+		return false, ""
+	}
+	output, err := gitOutputAt(ctx, root, "check-ignore", "-v", "--", filepath.ToSlash(relative))
+	if err == nil && strings.TrimSpace(output) != "" {
+		return true, strings.TrimSpace(output)
+	}
+	return false, ""
+}
+
+// gitOutputAt runs one read-only git command at dir and returns its stdout.
+func gitOutputAt(ctx context.Context, dir string, args ...string) (string, error) {
+	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	command := exec.CommandContext(runCtx, "git", args...)
+	command.Dir = dir
+	var out, errOut strings.Builder
+	command.Stdout = &out
+	command.Stderr = &errOut
+	if err := command.Run(); err != nil {
+		return "", fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(errOut.String()))
+	}
+	return out.String(), nil
+}
+
 func undoStateKey(root string) string {
 	sum := sha256.Sum256([]byte(filepath.Clean(root)))
 	return hex.EncodeToString(sum[:8])

@@ -24,6 +24,7 @@ type switchChat struct {
 	permission    string
 	workspaceErr  error
 	permissionErr error
+	modelErr      error
 }
 
 func newSwitchChat() *switchChat { return &switchChat{fakeChat: newFakeChat()} }
@@ -46,7 +47,7 @@ func (c *switchChat) SetSessionModel(sessionID, model string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.order = append(c.order, "model")
-	return nil
+	return c.modelErr
 }
 func (c *switchChat) calls() []string {
 	c.mu.Lock()
@@ -112,35 +113,94 @@ func TestRunTaskAppliesWorkspaceAndPermission(t *testing.T) {
 	}
 }
 
-func TestRunTaskSwitchFailuresAreWarnings(t *testing.T) {
+// TestRunTaskSwitchFailuresFailTheRun covers the audit rule (2026-11-24 B-2):
+// the workspace and permission overrides ARE the task's authorization boundary,
+// so a switch that cannot be applied must fail the run — running anyway would
+// use the current workspace and the global permission (with `full`, silently
+// dropping the boundary the user configured) and the user would only find out
+// from a log line.
+func TestRunTaskSwitchFailuresFailTheRun(t *testing.T) {
+	for _, testCase := range []struct {
+		name  string
+		task  contracts.AutomationTask
+		apply func(*switchChat)
+	}{
+		{
+			name:  "workspace",
+			task:  contracts.AutomationTask{ID: "task-1", Name: "run", Prompt: "hello", WorkspaceID: "ws"},
+			apply: func(chat *switchChat) { chat.workspaceErr = errors.New("workspace boom") },
+		},
+		{
+			name:  "permission",
+			task:  contracts.AutomationTask{ID: "task-1", Name: "run", Prompt: "hello", Permission: "never"},
+			apply: func(chat *switchChat) { chat.permissionErr = errors.New("permission boom") },
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			chat := newSwitchChat()
+			testCase.apply(chat)
+			logger := &fakeLogger{}
+			service, err := newService(t.TempDir(), Config{TickMs: 3600000}, logger, chat, nil)
+			if err != nil {
+				t.Fatalf("newService: %v", err)
+			}
+			t.Cleanup(service.Close)
+			if _, err := service.runTask(testCase.task); err == nil {
+				t.Fatalf("runTask continued after a %s override failed", testCase.name)
+			}
+			if sends := chat.sendCount(); sends != 0 {
+				t.Fatalf("prompt was sent (%d) although the override failed", sends)
+			}
+		})
+	}
+}
+
+// TestRunTaskModelOverrideStaysBestEffort: the model is a preference, not a
+// boundary — a model switch failure must not fail the run.
+func TestRunTaskModelOverrideStaysBestEffort(t *testing.T) {
 	chat := newSwitchChat()
-	chat.workspaceErr = errors.New("workspace boom")
-	chat.permissionErr = errors.New("permission boom")
+	chat.modelErr = errors.New("model boom")
 	logger := &fakeLogger{}
 	service, err := newService(t.TempDir(), Config{TickMs: 3600000}, logger, chat, nil)
 	if err != nil {
 		t.Fatalf("newService: %v", err)
 	}
 	t.Cleanup(service.Close)
-	if _, err := service.runTask(contracts.AutomationTask{ID: "task-1", Name: "run", Prompt: "hello", WorkspaceID: "ws", Permission: "never"}); err != nil {
-		t.Fatalf("runTask should continue after switch failures: %v", err)
+	if _, err := service.runTask(contracts.AutomationTask{ID: "task-1", Name: "run", Prompt: "hello", Model: "m1"}); err != nil {
+		t.Fatalf("runTask should continue after a model switch failure: %v", err)
 	}
-	logged := strings.Join(logger.linesSnapshot(), "\n")
-	if !strings.Contains(logged, "workspace") || !strings.Contains(logged, "permission") {
-		t.Fatalf("missing warnings: %v", logger.linesSnapshot())
+	if !strings.Contains(strings.Join(logger.linesSnapshot(), "\n"), "model") {
+		t.Fatalf("missing model warning: %v", logger.linesSnapshot())
 	}
 }
 
+// TestRunTaskWithoutSwitchersIsSafe: a task that configures no override needs no
+// switching capability at all.
 func TestRunTaskWithoutSwitchersIsSafe(t *testing.T) {
 	chat := newFakeChat()
 	service := newTestService(t, t.TempDir(), Config{TickMs: 3600000}, plainChat{chat})
-	if _, err := service.runTask(contracts.AutomationTask{ID: "task-1", Name: "run", Prompt: "hello", WorkspaceID: "ws", Permission: "full"}); err != nil {
-		t.Fatalf("runTask without switchers = %v", err)
+	if _, err := service.runTask(contracts.AutomationTask{ID: "task-1", Name: "run", Prompt: "hello"}); err != nil {
+		t.Fatalf("runTask without overrides = %v", err)
 	}
 	select {
 	case <-chat.calls:
 	default:
 		t.Fatal("prompt was not sent")
+	}
+}
+
+// TestRunTaskWithoutSwitcherCapabilityFails: an override with no capability to
+// apply it is a failed run, not a silent downgrade.
+func TestRunTaskWithoutSwitcherCapabilityFails(t *testing.T) {
+	chat := newFakeChat()
+	service := newTestService(t, t.TempDir(), Config{TickMs: 3600000}, plainChat{chat})
+	if _, err := service.runTask(contracts.AutomationTask{ID: "task-1", Name: "run", Prompt: "hello", WorkspaceID: "ws"}); err == nil {
+		t.Fatal("runTask accepted a workspace override with no switcher")
+	}
+	select {
+	case <-chat.calls:
+		t.Fatal("prompt was sent although the override could not be applied")
+	default:
 	}
 }
 

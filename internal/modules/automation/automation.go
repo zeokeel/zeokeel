@@ -177,8 +177,12 @@ type service struct {
 
 	// nameSeq numbers generated "自动化 N" names.
 	nameSeq int
-	// notified dedupes completion notifications per delivery.
-	notified map[string]bool
+	// notified dedupes completion notifications per delivery. It is bounded: a
+	// long-lived process that runs automation with NewSessionPerRun adds one key
+	// per run, and an unbounded map is a slow leak that also lengthens the lock
+	// section of every settlement (AUDIT-2026-11-24 C).
+	notified      map[string]bool
+	notifiedOrder []string
 
 	// chatUnsub releases the chat-session subscription on Close.
 	chatUnsub func()
@@ -478,6 +482,24 @@ func (s *service) logRegistryRecovery() {
 	}
 }
 
+// closeWaitTimeout bounds how long Close waits for in-flight runs.
+const closeWaitTimeout = 3 * time.Second
+
+// waitRuns waits for the run counter to drain, reporting whether it did.
+func (s *service) waitRuns(timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		s.runs.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
 // Close stops the scheduler loop, releases the chat subscription, waits for the
 // loop to exit and then waits for any in-flight executions and run settlements
 // to finish their registry writes. It is idempotent.
@@ -496,7 +518,14 @@ func (s *service) Close() {
 		if scheduler != nil {
 			scheduler.Stop()
 		}
-		s.runs.Wait()
+		// Bounded: each in-flight run ends with a registry write (fsync + directory
+		// fsync), and an unbounded wait on a slow disk blocked shutdown and kept
+		// the cross-process registry lock held, so the next instance could only
+		// start degraded (AUDIT-2026-11-24 B-1). The wait still covers the normal
+		// path; a straggler is reported and the lock is released anyway.
+		if !s.waitRuns(closeWaitTimeout) {
+			s.logger.Printf("%s: close: in-flight runs did not settle within %s; releasing the registry lock anyway", ModuleID, closeWaitTimeout)
+		}
 		if store != nil {
 			// Release the cross-process registry lock so the next instance can
 			// take ownership (tests and host restarts rely on this).
@@ -1034,6 +1063,9 @@ func (s *service) settle(_ context.Context, core rigautomation.Task, deliveryID 
 	return status, detail, settled
 }
 
+// maxNotifiedKeys bounds the completion-notification dedupe table.
+const maxNotifiedKeys = 1024
+
 // notifySettledOnce reports one terminal run to the optional host notifier.
 func (s *service) notifySettledOnce(deliveryID, taskName, sessionID, status, detail string) {
 	key := strings.TrimSpace(deliveryID)
@@ -1049,6 +1081,14 @@ func (s *service) notifySettledOnce(deliveryID, taskName, sessionID, status, det
 		return
 	}
 	s.notified[key] = true
+	s.notifiedOrder = append(s.notifiedOrder, key)
+	// Keep the newest maxNotifiedKeys entries; the oldest are the least likely to
+	// be re-settled again (the SDK settles a delivery once).
+	for len(s.notifiedOrder) > maxNotifiedKeys {
+		oldest := s.notifiedOrder[0]
+		s.notifiedOrder = s.notifiedOrder[1:]
+		delete(s.notified, oldest)
+	}
 	s.mu.Unlock()
 	s.notifyRunSettled(taskName, sessionID, status, detail)
 }
@@ -1097,6 +1137,12 @@ func (s *service) chatSessionRunning(sessionID string) (running, exists bool) {
 	return false, false
 }
 
+// errOverrideUnavailable reports a task whose authorization override cannot be
+// applied because the chat service lacks the capability.
+func errOverrideUnavailable(what, capability string) error {
+	return fmt.Errorf("automation: task requires %s override, but the chat service has no %s", what, capability)
+}
+
 // runTask delivers one run through the chat service. The product handlers below
 // are unchanged from the pre-SDK implementation; the scheduler owns recording.
 func (s *service) runTask(task contracts.AutomationTask) (runDelivery, error) {
@@ -1115,23 +1161,29 @@ func (s *service) runTask(task contracts.AutomationTask) (runDelivery, error) {
 		// origin, not by its title (audit F6).
 		s.recordSessionOrigin(task.ID, sessionID)
 	}
+	// The workspace and permission overrides are the task's authorization
+	// boundary, not preferences: running without them would use the current
+	// workspace and the global permission — with `full` that silently removes the
+	// boundary the user configured, and with `workspace` it parks on an approval
+	// nobody is watching (AUDIT-2026-11-24 B-2). A failure here fails the run.
 	if workspaceID := strings.TrimSpace(task.WorkspaceID); workspaceID != "" {
-		if switcher, ok := s.chat.(contracts.SessionWorkspaceSwitcher); ok {
-			if err := switcher.SetSessionWorkspace(sessionID, workspaceID); err != nil {
-				// The workspace binding is best effort: warn and still run.
-				s.logger.Printf("%s: run %s: set session workspace %q: %v", ModuleID, task.ID, workspaceID, err)
-			}
-		} else {
-			s.logger.Printf("%s: run %s: chat service lacks session workspace switching; using the current workspace", ModuleID, task.ID)
+		switcher, ok := s.chat.(contracts.SessionWorkspaceSwitcher)
+		if !ok {
+			return runDelivery{SessionID: sessionID, Created: created}, errOverrideUnavailable("workspace", "session workspace switching")
+		}
+		if err := switcher.SetSessionWorkspace(sessionID, workspaceID); err != nil {
+			s.logger.Printf("%s: run %s: set session workspace %q: %v", ModuleID, task.ID, workspaceID, err)
+			return runDelivery{SessionID: sessionID, Created: created}, fmt.Errorf("set session workspace %q: %w", workspaceID, err)
 		}
 	}
 	if permission := strings.TrimSpace(task.Permission); permission != "" {
-		if switcher, ok := s.chat.(contracts.SessionPermissionSwitcher); ok {
-			if err := switcher.SetSessionPermission(sessionID, permission); err != nil {
-				s.logger.Printf("%s: run %s: set session permission %q: %v", ModuleID, task.ID, permission, err)
-			}
-		} else {
-			s.logger.Printf("%s: run %s: chat service lacks session permission switching; using the global permission", ModuleID, task.ID)
+		switcher, ok := s.chat.(contracts.SessionPermissionSwitcher)
+		if !ok {
+			return runDelivery{SessionID: sessionID, Created: created}, errOverrideUnavailable("permission", "session permission switching")
+		}
+		if err := switcher.SetSessionPermission(sessionID, permission); err != nil {
+			s.logger.Printf("%s: run %s: set session permission %q: %v", ModuleID, task.ID, permission, err)
+			return runDelivery{SessionID: sessionID, Created: created}, fmt.Errorf("set session permission %q: %w", permission, err)
 		}
 	}
 	if model := strings.TrimSpace(task.Model); model != "" {

@@ -1,13 +1,14 @@
 // Package contracts is ZeoKeel's only shared surface between the host and its
 // modules. It holds service keys, host service interfaces, and the value types
-// a UI module contributes.
+// a client contributes.
 //
 // It is engine-agnostic: it must not import github.com/egoist/mygo, so any
-// transport can depend on it without dragging the native UI engine in. The
-// mygo-bound contribution model (screens, slots, settings pages, tool
-// renderers, commands and the UI runtime) lives in the uinative subpackage. A
-// module may import contracts, uikit, design and lib/*, never another module or
-// the host.
+// transport (the gateway's WS/SSE surface included) can depend on it without
+// dragging the native UI engine in. The mygo-bound contribution model (screens,
+// slots, settings pages, tool renderers, commands and the UI runtime) retired
+// with the native UI (S5) and no longer exists in this package tree; what is
+// left is the transport-neutral surface the browser client consumes. A module
+// may import contracts, design and lib/*, never another module or the host.
 package contracts
 
 import (

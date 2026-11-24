@@ -339,3 +339,27 @@ func TestAutomationRunRecordJSONCompatibility(t *testing.T) {
 		t.Fatal("interrupted record does not report terminal")
 	}
 }
+
+// TestAutomationScheduleRejectsNegativeClockFields covers AUDIT-2026-11-24 B-16:
+// only the upper bound was checked, so "daily -1:00:00" validated as a schedule
+// whose Next() could never be computed.
+func TestAutomationScheduleRejectsNegativeClockFields(t *testing.T) {
+	invalid := []string{
+		"daily -1:00:00",
+		"daily 09:-30:00",
+		"daily 09:30:-5",
+		"weekly -1:00:00 Asia/Shanghai 1",
+	}
+	for _, schedule := range invalid {
+		if err := ValidateAutomationSchedule(schedule); err == nil {
+			t.Fatalf("ValidateAutomationSchedule(%q) = nil error, want a clock-time error", schedule)
+		}
+	}
+	// The boundaries that must stay legal.
+	valid := []string{"daily 00:00:00", "daily 23:59:59", "every 90s"}
+	for _, schedule := range valid {
+		if err := ValidateAutomationSchedule(schedule); err != nil {
+			t.Fatalf("ValidateAutomationSchedule(%q) = %v, want it accepted", schedule, err)
+		}
+	}
+}

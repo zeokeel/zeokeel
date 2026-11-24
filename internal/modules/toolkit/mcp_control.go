@@ -280,7 +280,13 @@ func (c *mcpController) reload(ctx context.Context) ([]contracts.MCPPlugin, erro
 		_ = mgr.Close()
 		c.manager = nil
 		c.plans = plans
-		c.rows = rows
+		// The teardown above already unregistered the previous manager's tools, so
+		// the read model must be rebuilt here too: returning the pre-teardown
+		// snapshot left the UI showing "connected, N tools" while the model had
+		// none to call (AUDIT-2026-11-24 C).
+		c.rows = markRowsFailed(rows, err)
+		c.bindPluginsLocked()
+		c.plugins.replace(c.buildEntriesLocked())
 		return c.plugins.MCP(), err
 	}
 	c.plans = plans
@@ -724,3 +730,16 @@ func loadDisabledTools(settings contracts.SettingsService, hasSettings bool, wor
 	}
 	return disabled
 }
+
+// markRowsFailed stamps every row that never started with the manager-level
+// failure, so the rebuilt read model can say why instead of looking healthy.
+func markRowsFailed(rows []*mcpRow, err error) []*mcpRow {
+	for _, row := range rows {
+		if row != nil && row.startErr == nil && row.client == nil {
+			row.startErr = err
+		}
+	}
+	return rows
+}
+
+// reload rebuilds the MCP manager and the read model.

@@ -21,6 +21,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
@@ -77,6 +79,12 @@ var (
 	ErrWorkspaceNotFound = rigworkspace.ErrWorkspaceNotFound
 	// ErrPathOutsideRoot reports a path escaping the workspace root.
 	ErrPathOutsideRoot = rigworkspace.ErrPathOutsideRoot
+	// ErrRegistryBusy reports that another process held the registry write lock
+	// for longer than registryLockTimeout.
+	ErrRegistryBusy = errors.New("workspace: the registry is locked by another process")
+	// ErrRegistryUnwritable reports a registry path that cannot be persisted to
+	// (a directory, a full or read-only filesystem).
+	ErrRegistryUnwritable = errors.New("workspace: the registry cannot be written")
 	// ErrNotDirectory reports a root or directory argument that is not a
 	// directory.
 	ErrNotDirectory = rigworkspace.ErrNotDirectory
@@ -146,7 +154,18 @@ func validateConfig(cfg Config) error {
 // Service adapts the Rig SDK workspace service to contracts.WorkspaceService
 // and adds the product-only git differ.
 type Service struct {
+	// mu guards service: a mutation re-reads the registry (so the write is based
+	// on what is on disk, not on this process's startup snapshot) and swaps the
+	// reloaded service in.
+	mu           sync.RWMutex
 	service      *rigworkspace.Service
+	dataDir      string
+	rigConfig    rigworkspace.Config
+	registryPath string
+	// lastMod/lastSize are the registry file's stamp at the last load, so a read
+	// can notice another process's write without re-reading on every call.
+	lastMod      time.Time
+	lastSize     int64
 	maxChanges   int
 	maxDiffBytes int
 
@@ -189,14 +208,100 @@ func newService(dataDir string, cfg Config, logger contracts.Logger) (*Service, 
 	}
 	return &Service{
 		service:      service,
+		dataDir:      dataDir,
+		rigConfig:    rigworkspace.Config{Path: cfg.Path, ReadLimitBytes: cfg.ReadLimitBytes, SearchDepth: cfg.SearchDepth, Logger: logf},
+		registryPath: service.Path(),
+		lastMod:      statStamp(service.Path()).mod,
+		lastSize:     statStamp(service.Path()).size,
 		maxChanges:   maxChanges,
 		maxDiffBytes: maxDiffBytes,
 		logger:       logger,
 	}, nil
 }
 
+// registryLockTimeout bounds how long a mutation waits for another process's
+// registry write.
+const registryLockTimeout = 2 * time.Second
+
+// active returns the current SDK service.
+func (s *Service) active() *rigworkspace.Service {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.service
+}
+
+// mutate runs one registry mutation under the cross-process lock, on a service
+// freshly reloaded from disk.
+//
+// The registry is "whole document in memory, whole document rewritten", so a
+// second process sharing the data directory (a headless run next to the served
+// gateway, or the ACP server creating a workspace per session) lost every change
+// the first one made after its own startup read — silently, with no backup
+// (AUDIT-2026-11-24 A-1). Reload-then-write under an flock makes the write
+// based on what is actually on disk.
+func (s *Service) mutate(fn func(*rigworkspace.Service) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	unlock, err := lockRegistryFile(s.registryPath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	// A registry path that is not a regular file is a write failure, not a file
+	// to quarantine and start over from: the reload below would otherwise turn
+	// "cannot persist" into a silently empty registry.
+	if info, statErr := os.Stat(s.registryPath); statErr == nil && !info.Mode().IsRegular() {
+		return fmt.Errorf("%s: registry %q is not a regular file: %w", ModuleID, s.registryPath, ErrRegistryUnwritable)
+	}
+	fresh, err := rigworkspace.New(s.dataDir, s.rigConfig)
+	if err != nil {
+		return err
+	}
+	if err := fn(fresh); err != nil {
+		// The mutation failed: the on-disk registry is unchanged, so keep the
+		// service this process already had rather than a reload that may have
+		// quarantined nothing and lost nothing.
+		return err
+	}
+	s.service = fresh
+	stamp := statStamp(s.registryPath)
+	s.lastMod, s.lastSize = stamp.mod, stamp.size
+	return nil
+}
+
+// fileStamp is a registry file's modification stamp.
+type fileStamp struct {
+	mod  time.Time
+	size int64
+}
+
+// statStamp reads the registry's stamp, zero when it does not exist yet.
+func statStamp(path string) fileStamp {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fileStamp{}
+	}
+	return fileStamp{mod: info.ModTime(), size: info.Size()}
+}
+
+// refresh reloads the registry when another process has written it since this
+// process last loaded it. Reads call it so a list or a "current workspace" is
+// not permanently stuck on this process's startup view; the stat is cheap and
+// the reload only happens on an actual change.
+func (s *Service) refresh() {
+	stamp := statStamp(s.registryPath)
+	s.mu.RLock()
+	current := stamp.mod.Equal(s.lastMod) && stamp.size == s.lastSize
+	s.mu.RUnlock()
+	if current {
+		return
+	}
+	// A no-op mutation is exactly "reload under the lock and swap".
+	_ = s.mutate(func(*rigworkspace.Service) error { return nil })
+}
+
 // Path returns the resolved registry file path (diagnostics and tests).
-func (s *Service) Path() string { return s.service.Path() }
+func (s *Service) Path() string { return s.registryPath }
 
 // contractWorkspace converts one SDK workspace to the product type.
 func contractWorkspace(workspace rigworkspace.Workspace) contracts.Workspace {
@@ -245,7 +350,8 @@ func contextErr(ctx context.Context) error {
 
 // List implements contracts.WorkspaceService in insertion order.
 func (s *Service) List(ctx context.Context) ([]contracts.Workspace, error) {
-	workspaces, err := s.service.List(ctx)
+	s.refresh()
+	workspaces, err := s.active().List(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +360,8 @@ func (s *Service) List(ctx context.Context) ([]contracts.Workspace, error) {
 
 // Current implements contracts.WorkspaceService.
 func (s *Service) Current(ctx context.Context) (contracts.Workspace, bool, error) {
-	workspace, ok, err := s.service.Current(ctx)
+	s.refresh()
+	workspace, ok, err := s.active().Current(ctx)
 	if err != nil || !ok {
 		return contracts.Workspace{}, false, err
 	}
@@ -265,8 +372,12 @@ func (s *Service) Current(ctx context.Context) (contracts.Workspace, bool, error
 // directory; an already registered canonical root is reused and becomes
 // current.
 func (s *Service) Create(ctx context.Context, name, root string) (contracts.Workspace, error) {
-	workspace, err := s.service.Create(ctx, name, root)
-	if err != nil {
+	var workspace rigworkspace.Workspace
+	if err := s.mutate(func(service *rigworkspace.Service) error {
+		created, err := service.Create(ctx, name, root)
+		workspace = created
+		return err
+	}); err != nil {
 		return contracts.Workspace{}, err
 	}
 	return contractWorkspace(workspace), nil
@@ -275,8 +386,12 @@ func (s *Service) Create(ctx context.Context, name, root string) (contracts.Work
 // Open implements contracts.WorkspaceService: it makes an existing workspace
 // current.
 func (s *Service) Open(ctx context.Context, id string) (contracts.Workspace, error) {
-	workspace, err := s.service.Open(ctx, id)
-	if err != nil {
+	var workspace rigworkspace.Workspace
+	if err := s.mutate(func(service *rigworkspace.Service) error {
+		opened, err := service.Open(ctx, id)
+		workspace = opened
+		return err
+	}); err != nil {
 		return contracts.Workspace{}, err
 	}
 	return contractWorkspace(workspace), nil
@@ -287,7 +402,9 @@ func (s *Service) Open(ctx context.Context, id string) (contracts.Workspace, err
 // root are not touched. Cleanup failures are logged (not returned): the
 // workspace is already gone by then, and failing the delete would misreport it.
 func (s *Service) Delete(ctx context.Context, id string) error {
-	if err := s.service.Delete(ctx, id); err != nil {
+	if err := s.mutate(func(service *rigworkspace.Service) error {
+		return service.Delete(ctx, id)
+	}); err != nil {
 		return err
 	}
 	if s.settings != nil {
@@ -305,7 +422,12 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 // are rejected with the exported contracts sentinels so a UI can localize them;
 // a rejected rename writes nothing.
 func (s *Service) RenameWorkspace(ctx context.Context, id, name string) (contracts.Workspace, error) {
-	renamed, err := s.service.Rename(ctx, id, name)
+	var renamed rigworkspace.Workspace
+	err := s.mutate(func(service *rigworkspace.Service) error {
+		updated, renameErr := service.Rename(ctx, id, name)
+		renamed = updated
+		return renameErr
+	})
 	switch {
 	case err == nil:
 		return contractWorkspace(renamed), nil
@@ -320,15 +442,19 @@ func (s *Service) RenameWorkspace(ctx context.Context, id, name string) (contrac
 // currentWorkspaceRoot returns the current workspace and its canonical root.
 // SetWorkspaceColor implements contracts.WorkspaceColorer.
 func (s *Service) SetWorkspaceColor(ctx context.Context, id, color string) (contracts.Workspace, error) {
-	updated, err := s.service.SetColor(ctx, id, color)
-	if err != nil {
+	var updated rigworkspace.Workspace
+	if err := s.mutate(func(service *rigworkspace.Service) error {
+		colored, err := service.SetColor(ctx, id, color)
+		updated = colored
+		return err
+	}); err != nil {
 		return contracts.Workspace{}, err
 	}
 	return contractWorkspace(updated), nil
 }
 
 func (s *Service) currentWorkspaceRoot() (contracts.Workspace, string, error) {
-	workspace, ok, err := s.service.Current(context.Background())
+	workspace, ok, err := s.active().Current(context.Background())
 	if err != nil {
 		return contracts.Workspace{}, "", err
 	}
@@ -353,7 +479,7 @@ func (s *Service) currentWorkspaceRoot() (contracts.Workspace, string, error) {
 
 // Files implements contracts.WorkspaceService.
 func (s *Service) Files(ctx context.Context, dir string) ([]contracts.FileEntry, error) {
-	entries, err := s.service.Files(ctx, dir)
+	entries, err := s.active().Files(ctx, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -362,13 +488,13 @@ func (s *Service) Files(ctx context.Context, dir string) ([]contracts.FileEntry,
 
 // ReadFile implements contracts.WorkspaceService.
 func (s *Service) ReadFile(ctx context.Context, path string, limit int) ([]byte, error) {
-	return s.service.ReadFile(ctx, path, limit)
+	return s.active().ReadFile(ctx, path, limit)
 }
 
 // Search implements contracts.WorkspaceService: a case-insensitive file-name
 // search below the current root, bounded by depth and result count.
 func (s *Service) Search(ctx context.Context, query string, limit int) ([]contracts.FileEntry, error) {
-	entries, err := s.service.Search(ctx, query, limit)
+	entries, err := s.active().Search(ctx, query, limit)
 	if err != nil {
 		return nil, err
 	}
