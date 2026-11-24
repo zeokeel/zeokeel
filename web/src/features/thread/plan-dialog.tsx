@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Input, Modal, Space, Typography } from 'antd';
 import { exitPlan, subscribePlan, type PlanState } from '@/api/gateway';
 import { useT } from '@/i18n';
@@ -22,12 +22,22 @@ export function PlanDialog({ onContinue }: { onContinue?: (feedback: string) => 
   const [feedback, setFeedback] = useState('');
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => subscribePlan((next) => setPlan(next)), []);
+  // Reset the feedback draft only when a *different* plan arrives; the domain also
+  // pushes on plain revisions, and those must not wipe what the user is typing.
+  const submitted = useRef('');
+  useEffect(
+    () =>
+      subscribePlan((next) => {
+        if (next.content !== submitted.current) {
+          submitted.current = next.content;
+          setFeedback('');
+        }
+        setPlan(next);
+      }),
+    [],
+  );
 
   const reviewing = plan?.state === 'reviewing' && Boolean(plan.content?.trim());
-  useEffect(() => {
-    if (reviewing) setFeedback('');
-  }, [reviewing]);
 
   if (!reviewing || !plan) return null;
 
