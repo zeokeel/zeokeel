@@ -124,7 +124,7 @@ export const en: Catalog = {
   'thread.queue.removeFailed': 'Could not cancel it',
 
   // ------------------------------------------------------------ composer --
-  'composer.placeholder': 'Message ZeoKeel…',
+  'composer.placeholder': 'Message ZeoKeel — / for commands, @ for files or conversations',
   'composer.placeholder.approval': 'Handle the approval above first…',
   'composer.hint.idle': 'Enter or Cmd/Ctrl+Enter to send · Shift+Enter for a new line · Esc clears the draft',
   'composer.hint.running': 'Enter queues it · Esc stops this turn · Shift+Enter for a new line',

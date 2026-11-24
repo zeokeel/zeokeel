@@ -20,10 +20,13 @@ export function ThoughtSteps({
   reasoning,
   steps,
   streaming,
+  durationMs,
 }: {
   reasoning: string;
   steps: ToolStep[];
   streaming: boolean;
+  /** The turn's measured wall time, when the backend reported one. */
+  durationMs?: number;
 }) {
   const t = useT();
   const [userExpanded, setUserExpanded] = useState<string[] | null>(null);
@@ -60,6 +63,8 @@ export function ThoughtSteps({
     items.push({
       key: 'reasoning',
       title: t('thread.reasoning'),
+      // The turn's measured wall time, the native 「用时 158ms」 line.
+      ...(durationMs ? { desc: formatDuration(durationMs) } : {}),
       icon: <ZkIcon name="sparkles" />,
       status: streaming ? 'loading' : 'success',
       collapsible: true,
@@ -172,4 +177,13 @@ function toolSummaryLine(step: ToolStep): string {
 function clip(value: string): string {
   const flat = value.replace(/\s+/g, ' ').trim();
   return flat.length > 96 ? `${flat.slice(0, 93)}…` : flat;
+}
+
+/** 158 → "158ms", 2300 → "2.3s", 95000 → "1m35s" — the native 「用时」 form. */
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return `${minutes}m${seconds}s`;
 }

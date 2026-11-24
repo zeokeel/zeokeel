@@ -74,6 +74,8 @@ export interface ToolResultData {
 export interface UsageData {
   inputTokens?: number;
   outputTokens?: number;
+  /** The backend's measured wall time for the turn (native 「用时」). */
+  durationMs?: number;
   [key: string]: unknown;
 }
 

@@ -27,7 +27,12 @@ export function AssistantBody({
 
   return (
     <>
-      <ThoughtSteps reasoning={message.reasoning} steps={message.steps} streaming={streaming} />
+      <ThoughtSteps
+        reasoning={message.reasoning}
+        steps={message.steps}
+        streaming={streaming}
+        durationMs={message.usage?.durationMs}
+      />
       {message.text ? <MarkdownBody text={message.text} streaming={streaming} /> : null}
       {message.error ? <ProviderErrorRow error={message.error} /> : null}
       {stopped ? <div className="zk-msg-stopped">{t('thread.stopped')}</div> : null}

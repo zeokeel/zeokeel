@@ -71,3 +71,12 @@ describe('valueText for tool payloads', () => {
     expect(valueText('echo zeokeel-tool-ok')).toBe('echo zeokeel-tool-ok');
   });
 });
+
+describe('formatDuration', () => {
+  it('reads like the native 用时 line', async () => {
+    const { formatDuration } = await import('./thought-steps');
+    expect(formatDuration(158)).toBe('158ms');
+    expect(formatDuration(2300)).toBe('2.3s');
+    expect(formatDuration(95_000)).toBe('1m35s');
+  });
+});

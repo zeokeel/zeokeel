@@ -14,7 +14,7 @@ import {
   type ToolStartData,
   type UsageData,
 } from '@/api/protocol';
-import { assistantMessage, type ToolStep, type ZeoMessage } from '@/chat/types';
+import { assistantMessage, type TokenUsage, type ToolStep, type ZeoMessage } from '@/chat/types';
 
 /**
  * The gateway's protocol projected onto `useXChat`.
@@ -210,7 +210,7 @@ function applyEvent(base: ZeoMessage, event: RunEvent): ZeoMessage {
     case 'usage': {
       const usage = event.data as UsageData | undefined;
       if (!usage) return withUnknown(base, event.rawName);
-      return { ...base, usage };
+      return { ...base, usage: usage as TokenUsage };
     }
     case 'done': {
       const done = event.data as DoneData | undefined;

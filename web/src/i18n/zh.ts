@@ -128,7 +128,7 @@ export const zh = {
   'thread.queue.removeFailed': '取消失败',
 
   // ------------------------------------------------------------ composer --
-  'composer.placeholder': '给 ZeoKeel 发消息…',
+  'composer.placeholder': '给 ZeoKeel 发消息，/ 调用指令，@ 文件或对话',
   'composer.placeholder.approval': '先处理上面的审批…',
   'composer.hint.idle': 'Enter 或 Cmd/Ctrl+Enter 发送 · Shift+Enter 换行 · Esc 清空草稿',
   'composer.hint.running': 'Enter 排队发送 · Esc 停止本轮 · Shift+Enter 换行',
