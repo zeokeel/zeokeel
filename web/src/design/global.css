@@ -1367,6 +1367,25 @@ body {
   min-width: 0;
 }
 
+/* antd paints a destructive dropdown item with its derived error hue, which is
+ * 3.9:1 in dark and 3.3:1 in light. The Menu token does not reach this rule —
+ * it is a Dropdown surface — so the fix lives here, against the AA token. */
+.ant-dropdown-menu-item-danger,
+.ant-dropdown-menu-item-danger:hover,
+.ant-dropdown-menu-item-danger:focus {
+  color: var(--zk-danger-text);
+}
+
+.ant-btn-dangerous:not(.ant-btn-primary) {
+  color: var(--zk-danger-text);
+}
+
+.zk-session-pin {
+  display: inline-flex;
+  align-items: center;
+  color: var(--zk-label-tertiary);
+}
+
 /* The conversation row menu trigger: visible without hover, focusable, 24px. */
 .zk-conv-menu-btn {
   display: inline-flex;

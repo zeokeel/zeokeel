@@ -48,10 +48,11 @@ export function Sidebar({
         content: (
           <Input
             defaultValue={current}
-            maxLength={200}
             autoFocus
+            // maxLength counts UTF-16 units, so 100 emoji looked like the limit;
+            // the gateway counts runes (round-3 session audit, note).
             onChange={(event) => {
-              draft = event.target.value;
+              draft = [...event.target.value].slice(0, 200).join('');
             }}
           />
         ),
@@ -89,9 +90,22 @@ export function Sidebar({
   const ordered = [...visible].sort((a, b) => Number(b.pinned === true) - Number(a.pinned === true));
   const items = ordered.map((session) => ({
     key: session.id,
-    label: session.pinned
-      ? `${session.title || t('shell.sessions.untitled')} · ${t('shell.sessions.pinnedMark')}`
-      : session.title || t('shell.sessions.untitled'),
+    // The label is the title and nothing else: the pin used to be spliced into
+    // it, so renaming pre-filled "标题 · 置顶" and the marker ended up inside the
+    // stored title (round-3 session audit F1b).
+    label: session.title || t('shell.sessions.untitled'),
+    ...(session.pinned
+      ? {
+          icon: (
+            <span className="zk-session-pin" title={t('shell.sessions.pinnedMark')} aria-label={t('shell.sessions.pinnedMark')}>
+              <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                <path d="M4 1.5h4l-.6 3 2 2v1H2.6v-1l2-2z" fill="currentColor" />
+                <path d="M6 7.5v3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+              </svg>
+            </span>
+          ),
+        }
+      : {}),
   }));
 
   const handleMenu = async (key: string, sessionId: string, title: string) => {
@@ -118,6 +132,11 @@ export function Sidebar({
         const confirmed = await confirmDelete(title || t('shell.sessions.untitled'));
         if (!confirmed) return;
         await deleteSession(sessionId);
+        try {
+          localStorage.removeItem(`zk.draft.${sessionId}`);
+        } catch {
+          // Storage may be unavailable; the conversation is gone either way.
+        }
         if (sessionId === activeSessionId) onCleared?.();
       }
     } catch (cause) {
@@ -199,6 +218,23 @@ export function Sidebar({
                     className="zk-conv-menu-btn"
                     aria-label={t('shell.sessions.menu')}
                     data-testid="session-menu"
+                    onKeyDown={(event) => {
+                      if (event.key !== 'ArrowDown' && event.key !== 'Enter' && event.key !== ' ') {
+                        return;
+                      }
+                      // Enter/Space already open it through the click handler;
+                      // ArrowDown needs the same treatment. Either way focus has
+                      // to land on the first item, or the keyboard user is stuck
+                      // on the trigger with a menu they cannot reach (F2′).
+                      window.setTimeout(() => {
+                        const first = document.activeElement?.closest('.ant-dropdown')
+                          ? null
+                          : document.querySelector<HTMLElement>(
+                              '.ant-dropdown:not(.ant-dropdown-hidden) .ant-dropdown-menu-item',
+                            );
+                        first?.focus();
+                      }, 80);
+                    }}
                   >
                     <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
                       <circle cx="8" cy="3.5" r="1.3" fill="currentColor" />
@@ -209,10 +245,11 @@ export function Sidebar({
                 ),
                 onClick: (info) => {
                   info.domEvent.stopPropagation();
+                  const target = sessions.find((item) => item.id === conversation.key);
                   void handleMenu(
                     String(info.key),
                     String(conversation.key),
-                    String(conversation.label ?? ''),
+                    target?.title ?? '',
                   );
                 },
               };
