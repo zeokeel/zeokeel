@@ -97,8 +97,24 @@ source .cache/env.sh && go build ./internal/... && go test ./internal/gateway ./
 
 `prompts.move` 无法在本仓库内诚实实现：队列的持久化在 `zeokeel-rig/session/inbox`，它只提供 `Enqueue/List/Remove/Take/Requeue/Drop`——**没有 Move**。用 `Drop` + 按新顺序 `Enqueue` 重建会**重新生成条目 id**（前端正握着这些 id），并且会与"运行结束时自动消费队首"的 drain 竞争。正确做法是在 rig 的 inbox 里加一个保留 id 的 Move（上游改动），再在 TRANSPORT §5.1 加 `prompts.move`。在那之前不提供客户端假排序。
 
+### 队列重排（`feat: reorder the prompt queue`，已完成）
+
+rig 的 inbox 没有 Move，但有 `Remove` + **保留 id 且前插**的 `Requeue`：重排 = 清空后倒序 Requeue，**id 全部保留**；会话空闲时拒绝（`queue_draining`，队列即将被消费）。协议 `prompts.move` + 面板上下移按钮。
+过程中发现客户端**完全忽略 `prompts.delta {reordered:true, order:[…]}`**——按钮在网关上生效、面板却不动；`applyPromptsDelta` 现在按 order 重排。
+
+### 文件检查器与自动化（`tails` 两轮，已 PASS）
+
+| 轮 | 抓到 | 修法 |
+|---|---|---|
+| 1 | 文件树仍不可达（guide 用空 splat 判断，`/files` 被判成指南页）；深路径 activeTab 错；390 两栏挤压；改动标记不渲染；**本地语法镜像与网关相反**；编辑网关存值被误拦；写入失败清空整表 | guide 判定改看路由；段匹配 tab；<900 单栏+返回；`showIcon`；**删掉客户端镜像**；错误进弹窗；错误不再是三元第一分支；`readJson` 保留网关 message |
+| 2 | 窄屏 inspector 是 `position:fixed` 浮层（盖顶栏、页签点不动、899 留 479px 空白、900 断点打架）；帮助示例 4/9 是 400；弹窗旧报错不清；页级错误无法关闭；深链不展开树 | 静态整宽列 + 断点统一 899；示例换成实测 200 的 `daily 09:00:00`/`weekly 09:00:00 1`/`every 86400s`/`after 120s`；open 清 `formError`；加「×」且开关成功清错；`defaultExpandAll` + 8px 标记 |
+| 3 | 900–1023 下 inspector 被旧规则钉成 320px（右留 60px 空白） | 删掉该规则，宽度交给 splitter panel |
+
 ## 6. 还没做完
 
-1. 队列**重排**：等上游 `zeokeel-rig` 的 inbox 提供保留 id 的 Move；然后 TRANSPORT §5.1 + dispatch + 一致性测试 + 面板按钮。
+1. 已知遗留（都不阻塞）：浏览器形态下"完成 toast 静默"契约（`run_notify.go` 依赖宿主前台）；`/api/models` 对**手改**坏行仍返回 500；真实 provider 连通性、多工作区隔离、OAuth/headers 连接器、真实 stdio MCP 成功路径、`timeoutMs` 卡死端点语义未覆盖。
 2. 已知遗留（都不阻塞）：浏览器形态下"完成 toast 静默"契约（`run_notify.go` 依赖宿主前台）；`/api/models` 对**手改**坏行仍返回 500；真实 provider 连通性、多工作区隔离、OAuth/headers 连接器、真实 stdio MCP 成功路径、`timeoutMs` 卡死端点语义未覆盖。
 3. 已知遗留：浏览器形态下"完成 toast 静默"契约（`run_notify.go` 依赖宿主前台）；`/api/models` 对**手改**坏行仍返回 500；真实 provider 连通性、多工作区隔离、OAuth/headers 连接器、真实 stdio MCP 成功路径、`timeoutMs` 卡死端点语义未覆盖。
+## 7. 审计原件
+
+六份独立验收报告在 `audits/`：`theme.md`、`mobile.md`、`model.md`、`conn.md`、`sessions.md`、`wire.md`、`composer2.md`、`tails.md`（每份含逐轮结论、失败项、截图索引；截图本体在 `.cache/ui-audit/findings3/`，未入库以免 181MB 进仓库）。
