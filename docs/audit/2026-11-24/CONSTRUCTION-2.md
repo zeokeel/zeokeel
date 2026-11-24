@@ -89,8 +89,16 @@ source .cache/env.sh && go build ./internal/... && go test ./internal/gateway ./
 表单原本文案写"五段 cron（如 `0 8 * * *`）"，而网关 `ParseAutomationSchedule` **不接受裸五段 cron**（需要 `cron` 前缀），且 `at`/`after`/`weekly`/`@hourly` 从未提到——照提示填会拿到网关报错。
 现在：帮助文案列出真实语法；字段用同一语法的镜像做校验，分三种提示（形状不对 / 时间不是 HH:MM / 五段 cron 缺前缀）；单测覆盖全部合法形式与六种错误写法。实测 `0 8 * * *` → 提示加前缀、`daily 9am` → 提示 HH:MM、`every 24h` → 通过。
 
+### 文件检查器入口（`feat(web): the file inspector gets a tab`）
+
+`/c/:id/files` 一直能渲染，但唯一入口是一个没人会发现的键盘命令。现在它与对话/轨迹/记忆/上下文并列成 tab：点「文件」→ 左对话 + 右检查器，URL 与 tab 状态一致。
+
+### 为什么队列重排不做（结论，不是遗留）
+
+`prompts.move` 无法在本仓库内诚实实现：队列的持久化在 `zeokeel-rig/session/inbox`，它只提供 `Enqueue/List/Remove/Take/Requeue/Drop`——**没有 Move**。用 `Drop` + 按新顺序 `Enqueue` 重建会**重新生成条目 id**（前端正握着这些 id），并且会与"运行结束时自动消费队首"的 drain 竞争。正确做法是在 rig 的 inbox 里加一个保留 id 的 Move（上游改动），再在 TRANSPORT §5.1 加 `prompts.move`。在那之前不提供客户端假排序。
+
 ## 6. 还没做完
 
-1. ⑥ 剩余：文件树入口（`/c/:id/files` 实测可渲染，但缺少从会话进入的显式入口）。
-2. 队列**重排**：需要 `prompts.move`（TRANSPORT §5.1 + 后端实现），客户端不做假排序。
+1. 队列**重排**：等上游 `zeokeel-rig` 的 inbox 提供保留 id 的 Move；然后 TRANSPORT §5.1 + dispatch + 一致性测试 + 面板按钮。
+2. 已知遗留（都不阻塞）：浏览器形态下"完成 toast 静默"契约（`run_notify.go` 依赖宿主前台）；`/api/models` 对**手改**坏行仍返回 500；真实 provider 连通性、多工作区隔离、OAuth/headers 连接器、真实 stdio MCP 成功路径、`timeoutMs` 卡死端点语义未覆盖。
 3. 已知遗留：浏览器形态下"完成 toast 静默"契约（`run_notify.go` 依赖宿主前台）；`/api/models` 对**手改**坏行仍返回 500；真实 provider 连通性、多工作区隔离、OAuth/headers 连接器、真实 stdio MCP 成功路径、`timeoutMs` 卡死端点语义未覆盖。
