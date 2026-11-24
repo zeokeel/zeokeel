@@ -38,6 +38,7 @@ export const en: Catalog = {
   'shell.sessions.delete': 'Delete',
   'shell.sessions.deleteTitle': 'Delete "{title}"?',
   'shell.sessions.deleteBody': 'The conversation and all its messages are removed. This cannot be undone.',
+  'shell.sessions.cancel': 'Cancel',
   'shell.sessions.save': 'Save',
   'shell.sessions.actionFailed': 'Could not complete the action',
   'shell.sessions.untitled': 'Untitled session',

@@ -42,6 +42,7 @@ export const zh = {
   'shell.sessions.delete': '删除',
   'shell.sessions.deleteTitle': '删除「{title}」？',
   'shell.sessions.deleteBody': '会话与全部消息会被删除，无法撤销。',
+  'shell.sessions.cancel': '取消',
   'shell.sessions.save': '保存',
   'shell.sessions.actionFailed': '操作失败',
   'shell.sessions.untitled': '未命名会话',

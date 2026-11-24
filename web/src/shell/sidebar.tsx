@@ -19,6 +19,11 @@ import { useT } from '@/i18n';
  * roles, the creation row); this component only supplies data and the
  * navigation side effect, so the client keeps no second list implementation.
  */
+/** Open a modal one frame later, after the key event that asked for it. */
+function openNextFrame(run: () => void): void {
+  window.requestAnimationFrame(run);
+}
+
 export function Sidebar({
   activeKey,
   activeSessionId,
@@ -65,27 +70,37 @@ export function Sidebar({
           />
         );
       };
+      openNextFrame(() =>
       modal.confirm({
         title: t('shell.sessions.renameTitle'),
         content: <RenameField onDraft={(value) => { draft = value; }} />,
         okText: t('shell.sessions.save'),
-        cancelText: t('settings.revert'),
+        cancelText: t('shell.sessions.cancel'),
         onOk: () => resolve(draft),
         onCancel: () => resolve(null),
-      });
+        afterClose: () => lastTrigger.current?.focus(),
+      }),
+      );
     });
 
   const confirmDelete = (title: string) =>
     new Promise<boolean>((resolve) => {
+      openNextFrame(() =>
       modal.confirm({
         title: t('shell.sessions.deleteTitle', { title }),
         content: t('shell.sessions.deleteBody'),
         okText: t('shell.sessions.delete'),
-        cancelText: t('settings.revert'),
+        cancelText: t('shell.sessions.cancel'),
         okButtonProps: { danger: true },
+        // 取消 is the focused button: the keystroke that chose 删除 in the menu
+        // used to land on the confirm's first button, so Enter "confirmed"
+        // itself (round-4 session audit F2d).
+        autoFocusButton: 'cancel',
         onOk: () => resolve(true),
         onCancel: () => resolve(false),
-      });
+        afterClose: () => lastTrigger.current?.focus(),
+      }),
+      );
     });
 
   // `ui.sessions.showArchived` is a real switch: the list only carried archived
@@ -242,14 +257,18 @@ export function Sidebar({
                     className="zk-conv-menu-btn"
                     aria-label={t('shell.sessions.menu')}
                     data-testid="session-menu"
-                    ref={(node) => {
-                      if (node) lastTrigger.current = node;
-                    }}
                     aria-haspopup="menu"
+                    onClick={(event) => {
+                      // Which row opened the menu: a ref callback would run for
+                      // every row and leave the last one, so focus came back to
+                      // the wrong conversation (round-4 session audit F2c).
+                      lastTrigger.current = event.currentTarget;
+                    }}
                     onKeyDown={(event) => {
                       if (event.key !== 'ArrowDown' && event.key !== 'Enter' && event.key !== ' ') {
                         return;
                       }
+                      lastTrigger.current = event.currentTarget;
                       if (event.key === 'ArrowDown') {
                         // The Dropdown opens on click only; ArrowDown has to be
                         // the same gesture or the key does nothing at all (F2a).
