@@ -56,9 +56,33 @@ export function approvalTarget(request: ApprovalRequest): ApprovalTarget | undef
 
 export type ApprovalRisk = 'exec' | 'write' | 'network' | 'read';
 
+/**
+ * The tools that only look. Everything else is classified conservatively: the
+ * card's sentence is a safety claim, and "this will read the workspace" for a
+ * subagent (which runs arbitrary tools) or an MCP server is the one wrong direction
+ * that matters. A live audit found exactly that — `subagent` produced the read
+ * sentence because anything unrecognised fell through to 'read'.
+ */
+const READ_TOOLS = new Set([
+  'read_file',
+  'list_dir',
+  'list_dir_inside',
+  'glob',
+  'grep',
+  'grep_inside',
+  'tool_search',
+  'skill',
+  'skills',
+  'exit_plan_mode',
+  'plan_review',
+]);
+
 export function approvalRisk(request: ApprovalRequest): ApprovalRisk {
   if (SHELL_TOOLS.has(request.tool)) return 'exec';
   if (FILE_TOOLS.has(request.tool)) return 'write';
+  if (READ_TOOLS.has(request.tool)) return 'read';
   if (request.tool.startsWith('web_')) return 'network';
-  return 'read';
+  // Shell, delegation (subagent/subagent_fork), MCP tools and anything the client
+  // has never heard of: all of them can act, so none of them is a read.
+  return 'exec';
 }
