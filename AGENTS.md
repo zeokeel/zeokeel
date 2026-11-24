@@ -17,9 +17,9 @@
 |---|---|---|
 | **Web 客户端**（默认改这里） | `web/`（React + TypeScript + Vite + antd 6 + antd X 2.0） | [WEB-CLIENT.md](docs/WEB-CLIENT.md) + [DESIGN.md](docs/DESIGN.md) |
 | **网关进程** | `internal/gateway`（WS 控制面、SSE 运行流、静态资源） | [TRANSPORT.md](docs/TRANSPORT.md) |
-| **托盘壳** | `internal/host/` 的托盘/热键/通知（约 1.5k 行 mygo） | mygo 规则仅此处适用（`.agents/skills/mygo-maintenance`） |
+| **托盘壳** | `internal/host/` 的托盘/热键/通知（约 0.8k 行 mygo：`tray.go`/`tray_shell.go`/`hotkey.go`/`notify.go`/`framework_locale.go`） | mygo 规则仅此处适用（原生 UI 已退役；托盘壳规则见 `internal/host` 注释） |
 
-- 决策记录：[docs/plans/web-ui-framework.md](docs/plans/web-ui-framework.md)、[docs/plans/web-runtime-adapter.md](docs/plans/web-runtime-adapter.md)；退役清单与执行记录：[docs/plans/s4-retirement-inventory.md](docs/plans/s4-retirement-inventory.md)、[docs/plans/s4-execution-checklist.md](docs/plans/s4-execution-checklist.md)
+- 决策记录：[docs/plans/web-ui-framework.md](docs/plans/web-ui-framework.md)、[docs/plans/web-runtime-adapter.md](docs/plans/web-runtime-adapter.md)；退役清单与执行记录（已归档）：[docs/archive/s4-retirement-inventory.md](docs/archive/s4-retirement-inventory.md)、[docs/archive/s4-execution-checklist.md](docs/archive/s4-execution-checklist.md)
 - **归档文档**（不是契约）：[docs/archive/README.md](docs/archive/README.md) 有索引。打开归档文件前先确认它是否描述现状。
 
 ---
@@ -30,12 +30,16 @@
 托盘壳只负责常驻图标 / 全局快捷键 / 系统通知。
 
 ```
-cmd/zeokeel             入口（serve 默认 / headless / acp）
+cmd/zeokeel             入口（默认 --product serve；--headless；--acp 是标志；
+                        --list-products 输出 headless 与 serve 两个产品）
 internal/gateway        serve 产品：WS 控制面（快照+差值）、SSE 运行流、静态资源、端口协商
 web/                    浏览器客户端：路由 / /inbox /c/:id /settings
-internal/host           进程宿主：托盘/热键/通知/单实例/设置存储/日志/退出
+internal/host           进程宿主 + 托盘壳：托盘/热键/通知/设置存储/日志/退出
 internal/contracts      服务契约（chat/approval/plan/team/task/...）——叶子层
-internal/modules/*      后端能力模块（18 个，全部保留）
+internal/modules/*      后端能力模块（17 个，全部保留）：acp agent appinfo approvals
+                        automation goal hosttools importer insights memorystore modelcatalog
+                        sandbox sessionstore skills toolkit update workspace
+internal/assembly       装配根：编译期 registry + assemblies/headless.json 预检（serve 复用其 entries）
 internal/design         设计 token（→ 生成 web/src/design/tokens.css）
 internal/brand          品牌层：唯一 hex 来源、主题、字体栈
 internal/icons          34 个 SVG 图标（→ 生成 web 图标组件）
@@ -45,15 +49,15 @@ docs/plans              迁移计划与执行清单（活）  docs/archive 已�
 
 ### 边界（机器断言，违反即 CI 红）
 
-- **原生引擎隔离**：`github.com/egoist/mygo` 只允许出现在 **5 个包**——
-  `internal/host`、`internal/lib/{openpath,openurl}`、`internal/brand`、`internal/design`。
+- **原生引擎隔离**：`github.com/egoist/mygo` 只允许出现在 **4 个包**——
+  `internal/host`、`internal/lib/openurl`、`internal/brand`、`internal/design`。
   其它任何包 import mygo 都会被 `TestEngineIsQuarantinedToTheShell` 拒绝。
 - **后端引擎无关**：`internal/gateway`、`internal/contracts`、`internal/modules/**`
   对 mygo 的**传递**依赖必须为 0（`TestBackendIsTransitivelyEngineFree`）。
 - **test 依赖单列**：`internal/gateway` 的 e2e 允许（且要求）拖进 `internal/modules/*`
   ——没有真模块就没有端到端价值；但**不得拖进 mygo**（`TestTestDependenciesStayEngineFree`）。
 - **模块边界**：后端模块只 import `contracts`/`design`/`lib/*` 与共享库
-  `internal/{hosttools,memorytools,websearch}`；`host` 不得直连 `internal/modules/*`
+  `internal/{hosttools,websearch}`；`host` 不得直连 `internal/modules/*`
   （[ARCHITECTURE.md](docs/ARCHITECTURE.md) §3；`TestImportBoundaries`）。
 - **Web 侧**：`web/src` 只能经 `web/src/api/` 访问网关，**禁止**手写 `fetch`/`WebSocket`；
   `web/src/design/tokens.css` 是唯一颜色/字号/间距来源（生成物，手改即违规）。
@@ -69,7 +73,9 @@ docs/plans              迁移计划与执行清单（活）  docs/archive 已�
 5. [docs/APPROVAL-SURFACES.md](docs/APPROVAL-SURFACES.md)：**哪些工具会停审批**（改审批行为前必读，含机器可读清单）。
 6. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：进程结构、传输层、边界表。
 
-改托盘壳时额外读 mygo 源码（`go list -m -f '{{.Dir}}' github.com/egoist/mygo`）与 `.agents/skills/mygo-maintenance`。
+改托盘壳时额外读 mygo 源码（`go list -m -f '{{.Dir}}' github.com/egoist/mygo`）。
+**原生 UI 已退役**，没有 `.agents/skills/` 之类的技能目录可读；托盘壳规则写在 `internal/host` 的
+注释里（`tray.go` / `tray_shell.go` / `hotkey.go` / `notify.go` / `framework_locale.go`）。
 
 ---
 
@@ -123,18 +129,24 @@ make acceptance-slow          # 断连 ≠ 停止
 ```bash
 cd web
 npm ci                 # 锁定依赖（package-lock.json 必须提交）
+
+# CI 也跑的项（.github/workflows/ci.yml 的 "Web client checks" + "Generated artefacts"）
 npm run typecheck      # tsc --noEmit
 npm run lint           # eslint
 npm run test           # vitest
-npm run e2e            # playwright（WEB-CLIENT.md 的验收清单）
+npm run gen:verify     # 复跑生成器并与基线比对（生成物被手改即红）
+
+npm run e2e            # 真浏览器（playwright chromium）冒烟：中英各一轮
+npm run e2e:cold       # 一条命令自包含：真网关 + fake model + 全新数据目录，跑完收尾
 npm run gen:tokens     # internal/design + internal/brand → tokens.css / antd-theme.ts（生成物）
 npm run gen:icons      # internal/icons/svg → 图标组件（生成物）
-npm run gen:baseline / gen:verify   # 生成链基线 / 校验（改了上游 Go 必跑）
+npm run gen:settings-keys  # 设置键清单 → src/design/settings-keys.ts（生成物）
+npm run gen:ws-contract    # internal/gateway/contract.json → src/design/ws-contract.ts（生成物）
+npm run gen:baseline   # 采生成链基线（改了上游 Go 先跑，再改生成物）
 npm run build          # 产物由 scripts/build-web-client.sh 复制进 go:embed 目录
 ```
 
-- **antd/X 知识必须查**：离线 CLI（`bash scripts/antd-cli.sh info Button --version 6 --format json`、`demo`、`token`、`semantic`、`lint ./web/src`）；X 的确切 props 读 `web/node_modules/@ant-design/x/es/**/*.d.ts`。包装脚本把 `HOME`/`XDG_*` 重定向到 `.cache/antd-cli/`。
-- 两个 skill：`antd`（v6）与 `antd-x`（2.10），见 [.agents/skills/README.txt](.agents/skills/README.txt)。
+- **antd/X 知识必须查**：离线 CLI（`bash scripts/antd-cli.sh info Button --version 6 --format json`、`demo`、`token`、`semantic`、`lint ./web/src`）；antd X 的确切 props 读 `web/node_modules/@ant-design/x/es/**/*.d.ts`。包装脚本把 `HOME`/`XDG_*` 重定向到 `.cache/antd-cli/`。仓库里**没有** `.agents/skills/` 目录——上面这两处是唯一的知识源。
 
 ---
 
@@ -166,7 +178,7 @@ npm run build          # 产物由 scripts/build-web-client.sh 复制进 go:embe
 
 ## 7. 硬边界（违反 = 拒绝合并）
 
-- **引擎隔离**：只有 §1 那 5 个包可以 import mygo；后端与网关必须引擎无关（含传递依赖）。
+- **引擎隔离**：只有 §1 那 4 个包可以 import mygo；后端与网关必须引擎无关（含传递依赖）。
 - **不自造协议**：客户端只能用 TRANSPORT 里声明的方法；要新方法就先进文档 + dispatch + 一致性测试。
 - **不绕过 api 层**：`web/src` 里手写 `fetch`/`WebSocket` 一律拒绝。
 - **不手改生成物**：`web/src/design/tokens.css`、`antd-theme.ts`、图标组件都是 `gen:*` 的产物。
@@ -198,5 +210,5 @@ npm run build          # 产物由 scripts/build-web-client.sh 复制进 go:embe
 | antd X 组件 props | `web/node_modules/@ant-design/x/es/**/*.d.ts` |
 | 协议级端到端 | `make acceptance-check / acceptance-approval / acceptance-slow` |
 | 现有测试保护网 | `internal/gateway/*_test.go`（含 15 条 `TestE2E*`）、`internal/assembly/boundary_test.go` |
-| 迁移决策与退役记录 | `docs/plans/web-runtime-adapter.md`、`s4-retirement-inventory.md`、`s4-execution-checklist.md` |
+| 迁移决策与退役记录 | `docs/plans/web-runtime-adapter.md`、`docs/archive/s4-retirement-inventory.md`、`docs/archive/s4-execution-checklist.md` |
 | 已退役的文档 | [docs/archive/README.md](docs/archive/README.md) |

@@ -1,6 +1,10 @@
 # S4 执行清单（原生 UI 退役 · 照单作业）
 
-> 由 `docs/plans/s4-retirement-inventory.md`（只读预研）拆解而来。**分析已做完，S4 只剩执行**：每条给出「改哪个文件 / 哪几行 / 改成什么 / 怎么验证」，按依赖顺序编号，逐步可提交、可回退。
+> **已归档（2026-11-24，文档核对轮）**：S4/S5 的退役工作已全部执行完毕，本清单是**执行记录与证据**，
+> 不再更新。现状请看 [../ARCHITECTURE.md](../ARCHITECTURE.md) §8 与根 [AGENTS.md](../../AGENTS.md)；
+> 活文档索引见 [README.md](README.md)。
+
+> 由 [s4-retirement-inventory.md](s4-retirement-inventory.md)（只读预研）拆解而来。**分析已做完，S4 只剩执行**：每条给出「改哪个文件 / 哪几行 / 改成什么 / 怎么验证」，按依赖顺序编号，逐步可提交、可回退。
 > 行号以 **2026-11-23 HEAD `59bd7f4`** 为准；动手前用每条的 `grep` 复核一次行号（本文件不含"大概位置"）。
 >
 > **勾选规则（2026-11-23 复盘后加）**：每条勾选**必须指向一个可验证的对象**——提交哈希、测试名、
@@ -133,7 +137,7 @@ S5 之后产品里已无 `ui.Element` 帧循环（托盘只有 App + Tray + 菜�
 ### S8 执行记录（2026-11-23）
 
 - `AGENTS.md` 整体重写：§0 改为"迁移已完成"（网关 + web + 托盘壳三块及各自规则），§1 目录与**两档引擎边界**（5 包允许清单 + 后端传递为 0 + test 档单列），§2 必读顺序换成 WEB-CLIENT/TRANSPORT/DESIGN/APPROVAL-SURFACES/ARCHITECTURE，§3 规则改为 web 客户端 + 托盘壳两套，§4 命令改为 `./internal/... ./cmd/...` 并补 `make acceptance-*` 与 web 生成器命令，§5 改为"Web 改动固定流程"，§6 同步义务表重写，§7 硬边界改为引擎隔离/不自造协议/不绕过 api 层，§9 速查表更新。
-- **审批面按裁决拆出**：新建 [docs/APPROVAL-SURFACES.md](../APPROVAL-SURFACES.md)（§S4.1 原文 + 机器可读 `approval-exemptions` 块）；`internal/modules/agent/approval_surface_test.go` 的解析路径同步改为该文件（`TestApprovalExemptionsMatchTheGate`、`TestDocumentedParksActuallyPark` 通过）；`docs/AGENT-SURFACES.md` 整体移入 `docs/archive/` 并在顶部指向新文档。
+- **审批面按裁决拆出**：新建 [docs/APPROVAL-SURFACES.md](../APPROVAL-SURFACES.md)（§S4.1 原文 + 机器可读 `approval-exemptions` 块）；`internal/modules/agent/approval_surface_test.go` 的解析路径同步改为该文件（`TestApprovalExemptionsMatchTheGate`、`TestDocumentedParksActuallyPark` 通过）；`AGENT-SURFACES.md` 整体移入本目录（现为 `docs/archive/AGENT-SURFACES.md`）并在顶部指向新文档。
 - 归档 16 份 + AGENT-SURFACES = **17 份历史文档**移入 `docs/archive/`，每份加归档头（"本文描述的是…，代码已被 S5 删除，现状请看 …"）；`docs/archive/README.md` 重写为**索引**（工具 2 项 + 文档 17 项 + 活文档清单）。
 - `docs/ARCHITECTURE.md`：§1 名词表（gateway/web/域/快照差值 替换 uiroot/槽位）、§2 目录、§3 三层边界（含两档引擎断言）、§5 加"本节属原生 UI，浏览器扩展点是路由+域订阅"、§6 服务键改为网关/host 提供、§7 装配换成 headless.json + serve 覆盖、§8 当前状态整体重写、§9 规则去掉 uiroot。
 - `docs/DESIGN.md`：加适用范围头——mygo/帧测试/designlint 部分只对托盘壳有意义，web 视觉事实来自 `gen:tokens`/`gen:icons`，冲突时以 web 现状为准。
@@ -271,7 +275,7 @@ S3 唯一能独立绿的部分（`usesUIServices`/`declareUIServices`）也无�
 - [x] **S5.3** 删 `internal/design/conform/**` + `internal/design/conformance_test.go`；`internal/design/registry.go:16` 的注释里删掉对 `internal/design/conform` 的提及。
   - **保留** `internal/design/{tokens.go,components.go,font.go,motion.go,style.go,registry.go,registry.json}`（web `gen:tokens` 按文本解析，`registry.json` 是前端组件规格源）。
   - 验证：`go build ./...`；`go test ./internal/design -count=1`；`cd web && node scripts/gen-tokens.mjs` 仍产出（这是跨轨验收，必须跑）。
-- [x] **S5.4** 删 `internal/regression/**`（71 文件 / 17,337 行）。后端覆盖已迁出：15 条 `TestE2E*` 在 `internal/gateway/`，对照表见 `docs/plans/regression-migration.md`。
+- [x] **S5.4** 删 `internal/regression/**`（71 文件 / 17,337 行）。后端覆盖已迁出：15 条 `TestE2E*` 在 `internal/gateway/`，对照表见 `docs/archive/regression-migration.md`。
   - 验证：`go build ./... && go test ./internal/gateway -run TestE2E -count=1` 全绿（这正是替代覆盖）。
 - [x] **S5.5** 删 `audit/demo/**`（非测试包，import uiroot）与 `audit/probes/{ui,ext}/**`（探针测试）；`audit/upstream/*` 各自有 go.mod，不在 `./...`，不动。
   - 验证：`go list ./... | grep audit` 为空。
@@ -324,13 +328,14 @@ S3 唯一能独立绿的部分（`usesUIServices`/`declareUIServices`）也无�
 - [x] **S8.3** `docs/DESIGN.md`：标注 mygo 相关条目仅托盘壳适用。
   - 验证：文档头部的适用范围声明已改。
 - [x] **S8.4** 归档（加"已归档 2026-11-23，随原生 UI 退役"头）：`INJECTION-POINTS.md`、`UI-CONFORMANCE.md`、`UI-COMPONENT-MIGRATION.md`、`DESIGN-LINT.md`、`UI-FIX-STATUS-v0.8.3.md`、`AGENT-SURFACES.md`（保留 S4.1 审批触发面章节——它对 web 仍有效，其余归档）、`COVERAGE.md`、`VERIFICATION.md`、`UI-AUDIT-2026-11-11.md`、`DESIGN-REVIEW.md`、`UI-STYLE-DIRECTION-2026-11-11.md`、`UI-UX-UPGRADE-2026-11-15.md`、`SETTINGS-IA-REVIEW-2026-11-16.md`、`USABILITY-REVIEW.md`、`INTERACTION-DEPTH-ROUND.md`、`PRODUCT-BUG-REVIEW-2026-11-11.md`、`ADVERSARIAL-AUDIT.md`。
-  - 验证：每个归档文件首行有归档注记；`grep -rn 'S4.1' docs/AGENT-SURFACES.md` 仍在（审批触发面保留）。
+  - 验证：每个归档文件首行有归档注记；`grep -rn 'S4.1' docs/archive/AGENT-SURFACES.md` 仍在（审批触发面保留）。
 - [x] **S8.5** `docs/plans/s4-retirement-inventory.md` 与本清单本身移到 `docs/archive/`（它们已完成使命）。
-  - **（更正 2026-11-23：决定不移）** 两者仍留在 `docs/plans/`。理由：本清单**仍在被追加**
-    （见文末「S9 之后新增的 T2 投影」），它是活的执行记录而不是退役证据；`archive/` 的语义是
-    "不再更新、仅供参考"。`s4-retirement-inventory.md` 同理（仍被 AGENTS.md §0/§9 引用）。
-    **退役完成后再归档。**
-  - 验证：`ls docs/plans/ | grep -c s4-` = 0，`ls docs/archive/ | grep s4-` = 2。
+  - **（2026-11-23 曾决定不移；2026-11-24 已真的移）** 当时留活是因为本清单还在被追加；
+    现在 S9 之后的 T2 投影与复盘都已收口，退役工作结束，两份文件按原条目执行归档：
+    `git mv docs/plans/s4-retirement-inventory.md docs/archive/s4-retirement-inventory.md`、
+    `git mv docs/plans/s4-execution-checklist.md docs/archive/s4-execution-checklist.md`。
+    引用同步到新路径：`AGENTS.md` §0/§9、`docs/ARCHITECTURE.md` §3/§8、`docs/archive/README.md` 索引。
+  - 验证：`ls docs/plans/ | grep -c s4-` = **0**，`ls docs/archive/ | grep -c s4-` = **2**。
 - [x] **S8.6** 提交 `S8: documentation for the browser-first product`。
 
 ## 9. 步骤 S9：收口验证（全绿才允许宣布完成）
@@ -486,7 +491,7 @@ P1/P2 的最终数字由 web 轨接完三笔后确定（web 轨排队：i18n、B
 | **S1.5 / S1.6** | 同一件事两处记账：line 31 已勾"S1.4–S1.6（改法调整）"，但 35/38 行仍留着未勾的同名条目。且 S1.5 的字面要求（`hotkey/notify/notification_click` 换成 `clientOpener`）**没有按字面发生**：仍是 `hotkeyWindow` 接口 + `BrowserWindow` 适配器（行为上等价：适配器的 Show/Restore/Focus 会打开客户端）。 | 行为覆盖成立，字面未执行；两处重复条目需要合并。 |
 | **S4.2** | 勾选行说把 `hosttools/{bridges_test.go,goal_dsh_test.go}` 的 uiroot import 改成假实现。 | `6544558` **只改了 contracts + approvals**；`bridges_test.go` 是 S5 **删除**的，`goal_dsh_test.go` 的自带 loader 也是 S5 补的。S4pre 当时没动这两个文件。 |
 | **S5.6** | 勾选行说"清扫残留（grep 为空）"。 | S5 当时 grep **不为零**：还剩 3 处代码注释（`toolkit/settings_tools.go`、`agent/child_notices.go`、`design/registry.go`），直到 `7932b1c`（S9 之后）才清零。当时的准确表述应是"只剩注释级的陈旧引用"。 |
-| **S8.5** | 勾选行说把 `s4-retirement-inventory.md` 与本清单移到 `docs/archive/`。 | **没有移**：两者仍在 `docs/plans/`。理由可以理解（它们仍在被引用），但记录与事实不符。 |
+| **S8.5** | 勾选行说把 `s4-retirement-inventory.md` 与本清单移到 `docs/archive/`。 | **已于 2026-11-24 补齐**：两者已 `git mv` 进 `docs/archive/`，引用同步；核对时它们还在 `docs/plans/` 是本条被记下的原因。 |
 | **S9.10** | 勾选行写"提交 `S9: post-retirement verification` + 打 tag `post-s4`"。 | 实际是 `38da7f2` + `9b28015`（没有单独的 S9 提交），tag 名由 Lead 定为 **`post-migration`**（打在 `9b28015`）。 |
 
 ### 复盘得到的判断（写给后来的人）

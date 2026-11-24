@@ -1,9 +1,11 @@
 # WEB-CLIENT
 
 > 浏览器客户端（`web/`）的设计契约：信息架构、屏面等价映射、键盘/焦点、拖放、流式、验收。
-> 状态：**草案**（2026-11-23）。栈已定 React + TypeScript + Vite；**组件库未定**，本文所有涉及组件库的段落只写行为要求，库名待 `docs/plans/web-ui-framework.md`。
+> **状态：现行契约**（2026-11-23 起；2026-11-24 按实现校正）。栈：React + TypeScript + Vite，
+> 组件库 **antd `6.7.1` + `@ant-design/x` `2.10.0`**（`web/package.json` 精确锁定），
+> 逐组件映射见 [plans/antd-x-component-map.md](plans/antd-x-component-map.md)。
 > 配套：[docs/TRANSPORT.md](TRANSPORT.md)（线协议）、[docs/ARCHITECTURE.md](ARCHITECTURE.md)（Go 侧边界）、[docs/APPROVAL-SURFACES.md](APPROVAL-SURFACES.md)（审批面行为）、[docs/DESIGN.md](DESIGN.md)。
-> 依据：`.cache/pivot/native-ui-inventory.md`（原生 UI 清点）、`.cache/pivot/contracts-projection.md`（契约投影）。
+> 依据：原生期清点笔记 `.cache/pivot/native-ui-inventory.md` 与 `.cache/pivot/contracts-projection.md`——**均未入库**（`.cache/` 是本机工作缓存），下面的引用只作溯源，不可当作可读文件。
 > 标注：**[新增]** = 原生无此行为；**[设计建议]** = 本文提出、尚未验证；**[占用]** = 语义已定、实现待逐页填充。
 
 ---
@@ -37,7 +39,7 @@
 | R4 | `/c/:sessionId/trajectory` | Thread · 轨迹 | 工具/推理时间线 | ✅ | Tab 在 URL，不靠内存 |
 | R5 | `/c/:sessionId/memory` | Thread · 记忆 | 会话记忆 | ✅ | 同上 |
 | R6 | `/c/:sessionId/context` | Thread · 上下文 | 上下文检查器；**后端无 `KeyContext` 时该 Tab 不出现**（同 `session/view.go:951` 的条件注册） | ✅（无后端时落到 R3，不 404） | 同上 |
-| R7 | `/c/:sessionId/child/:childId` | Thread · 子会话 | 子代理/队友子会话 + 面包屑返回 | ✅ | 子会话身份 = 稳定的 `child-<8hex>`（`AGENT-SURFACES.md` S9），刷新可直接恢复 |
+| R7 | `/c/:sessionId/child/:childId` | Thread · 子会话 | 子代理/队友子会话 + 面包屑返回 | ✅ | 子会话身份 = 稳定的 `child-<8hex>`（`docs/archive/AGENT-SURFACES.md` S9），刷新可直接恢复 |
 | R8 | `/c/:sessionId/files` | 右检查器 · 文件 | 工作区树 + 交付区历史 | ✅ | 树按目标 path 的祖先链自动展开 |
 | R9 | `/c/:sessionId/files/*path` | 右检查器 · 文件预览 | 只读预览（text/Markdown/图片 + 诚实回退） | ✅ | `path` 全在 URL |
 | R10 | `/c/:sessionId/files/*path?view=diff` | 逐文件 diff | unified diff（原生是"文件 Tab 内的折叠 diff"，`internal/ui/rightpanel/rightpanel.go:10-11`） | ✅ | `view=diff` 在 URL |
@@ -91,7 +93,7 @@
 | `ask_user` 提问 | `overlay.dialogs` 上的 FIFO 队列 | `internal/ui/interaction/interaction.go:1-15` |
 | 计划审阅 | 同上（队列内第三种） | 同上 |
 | 产物预览（present） | 同上 | 同上 |
-| 子代理/队友完成回执 | transcript 内 `ChatRoleNotice` 行 + 后台任务 chip | `AGENT-SURFACES.md` S9、`internal/ui/session/agentsurface.go:359` |
+| 子代理/队友完成回执 | transcript 内 `ChatRoleNotice` 行 + 后台任务 chip | `docs/archive/AGENT-SURFACES.md` S9、`internal/ui/session/agentsurface.go:359` |
 
 Inbox **不包含** toast：toast 是"我刚做的事的结果"（`toasts.go:44-50`，4s 自动消失，错误粘滞），不是"在等我做的事"。两者不可合并。
 
@@ -119,7 +121,7 @@ Inbox **不包含** toast：toast 是"我刚做的事的结果"（`toasts.go:44-
 | 页 | route | 版本 | 理由 |
 |---|---|---|---|
 | 模型 R13 / 行为与限额 R14 / 外观 R15 | — | **M1（前置）** | composer 的模型选择、权限模式、主题/语言不可缺；缺它们 Thread 无法日常用 |
-| 通知 R16 / 网络与搜索 R17 / LSP R18 / 归档 R19 / 数据与隐私 R20 / 关于 R21 | — | **M2** | 低频；M1 期间用原生桌面端兜底（原生产品保留为回退路径） |
+| 通知 R16 / 网络与搜索 R17 / LSP R18 / 归档 R19 / 数据与隐私 R20 / 关于 R21 | — | **M2** | 低频；已全部落地为真实路由（R12–R21）。原生桌面端**没有**兜底路径：`--product desktop` 已被删除并给出可读错误（`internal/host/host.go` 的 `retiredProductDesktop`），回退不适用 |
 
 ### 2.3 壳层 chrome（12 个面 → Web 组件）
 
@@ -216,13 +218,13 @@ Web ：模块 → 服务端 catalog（数据）  +  客户端 routes 表（静�
 | 槽位 | 原生贡献者 | Web 是否成立 | 说明 |
 |---|---|---|---|
 | `sidebar.primary` / `.nav` / `.footer` | 1 / 1 / 2 | ✅ 成立 | 三区数据化：`newSession` 动作、`nav[]` 数组、`footer[]` 数组 |
-| `sidebar.tree` | 0 | ❌ **消失** | 产品已改单工作区，树这一层 UI 被明确移除（`AGENT-SURFACES.md` S12「侧栏没有切换/管理/颜色 UI」） |
+| `sidebar.tree` | 0 | ❌ **消失** | 产品已改单工作区，树这一层 UI 被明确移除（`docs/archive/AGENT-SURFACES.md` S12「侧栏没有切换/管理/颜色 UI」） |
 | `screen.header` / `.actions` / `.tabs` | 4 / 3 / 1 | ✅ 成立 | 顶栏三区；`tabs` 只在 session 有贡献者 |
 | `screen.footer` | 0 | ⚠️ 保留位 | 无贡献者，M1 不实现，**但 catalog 里保留字段**以免将来加槽位要改协议 |
 | `home.hero` / `.composer` / `.recent` | 2 / 0 / 0 | ⚠️ 合并 | `hero` 成立（`welcome` 会覆盖它，`welcome.go:60`）；`composer` 与 Thread 的 composer 是**同一组件**（S7），不重复实现；`recent` 与侧栏会话列表重复 → **消失** |
 | `session.header.brand` / `.tabs` / `.actions` | 0 / 0 / 0 | ❌ **消失** | 与 `screen.header/tabs/actions` 语义重复（`ARCHITECTURE.md:118` 标 ⬜，从未有贡献者）→ 只保留一套 |
 | `session.banner` | 1（审批） | ✅ 成立 | 审批卡 / 目标条 / 子会话条共用此位 |
-| `session.transcript` | 0 | ✅ 成立 | S1（`AGENT-SURFACES.md:53`） |
+| `session.transcript` | 0 | ✅ 成立 | S1（`docs/archive/AGENT-SURFACES.md:53`） |
 | `session.trajectory` / `.trajectory.bar` | 0 / 0 | ✅ 成立 | R4 |
 | `session.panel.left` | 0 | ❌ **消失** | 从未有贡献者 |
 | `session.panel.right` / `.right.rail` | 1 / 0 | ✅ 合并 | 合并为右检查器路由组（R8–R11） |
@@ -403,38 +405,52 @@ Web 侧风险更高：每个组件自己 `addEventListener('keydown')` 时，**�
 
 ## 6. 文件拖入与附件
 
-### 6.1 现状（为什么不能直接搬）
+### 6.1 起点（原生期，已退役——解释为什么不能直接搬）
 
 原生拖入拿到的**就是绝对路径**（`internal/host/host.go:696` 的 `window.OnFileDrop` → `filedrop.go:22` → `session/view.go:3350-3360`），附件系统也以绝对路径为契约（`internal/ui/session/attachments.go:30-31`「It returns absolute paths.」）。浏览器拖入只给 `File` 对象，**没有路径**。
 
-### 6.2 宿主代理上传
+### 6.2 附件走 blob（已实现）
+
+契约见 [TRANSPORT.md](TRANSPORT.md) §3.0 / §6.4，实现在 `internal/gateway/blobs.go`。
+**没有** `POST /api/uploads`，也不往 `<dataDir>/uploads/` 写任何目录——附件是内存里的 blob：
 
 ```
-浏览器                    网关（gateway）                        工作区/附件系统
-  drop ──▶ POST /api/uploads (multipart, sessionId)
-                │ 校验 sessionId 属于本连接、大小/数量上限、扩展名白名单
-                │ 写入 <dataDir>/uploads/<sessionId>/<uuid>/<basename>
-                └─▶ 返回 { absolutePath, displayName, bytes, mime }
-  ◀── { absolutePath }
-  把 absolutePath 放进 composer 的待发附件列表（与原生附件同形状）
+浏览器                       网关（internal/gateway/blobs.go）           运行
+  drop ──▶ POST /api/blobs?name=<文件名>
+              body = 原始二进制（不是 multipart），≤ 10 MiB
+              ├─ 空体 → 400 invalid_params(body, is empty)
+              ├─ 超限 → 413 invalid_params(body, exceeds the 10 MiB attachment limit)
+              └─ {id, mime, bytes, name}
+  ◀── { id, mime, bytes, name }
+  把 id 放进 composer 的待发附件列表
+        ──▶ POST /api/chat/run { …, attachments: ["<blob id>", …] }
+              ├─ 未知/过期 id → invalid_params(attachments, unknown or expired blob <id>)
+              └─ 解析成 contracts.Attachment 交给 agent（run.go 的 resolveAttachments）
 ```
 
-**为什么落在 `dataDir` 而不是工作区**：原生已有先例——undo 快照刻意放数据目录，因为"工作区内的镜像会被文件工具读到隐藏路径、让 glob/grep/search 结果翻倍"（`docs/AGENT-SURFACES.md` S9 的 undo 段）。上传物同理：放进工作区会污染 agent 的文件面与 diff。
+- `id` 是网关生成的 128-bit 随机 hex（不可猜、不可枚举）；取回用 `GET /api/blobs/{id}`（要求 token，不支持 Range）。
+- `mime` 取请求头 `Content-Type`，缺失或 `application/octet-stream` 时用 `http.DetectContentType` 嗅探。
+- **blob 是短命的**：`blobTTL = 30 分钟`，写入与读取时都会清扫过期项（`blobStore.sweepExpiredLocked`）。
+  消息本身才是持久记录，网关重启即丢弃未消费的 blob——这是有意的：宁可让用户重发，也不留下指向空文件的附件。
+- 客户端只经 `web/src/api/blobs.ts` 调用（硬约束：`web/src` 不得手写 `fetch`）。
 
 **与右检查器的衔接（重要，且是"不自动"的）**：
-- 上传文件**不自动出现在文件树**（它不在工作区根下，`internal/ui/rightpanel/files.go:92-117` 的树只列工作区）；
-- 用户要看内容 → 附件行提供「预览」，走同一个只读预览器（原生 `FilePreviewer` 契约，`rightpanel.go:3`）读绝对路径；
-- 用户要 agent 处理它 → 附件机制本身已经把路径交给模型（原生同路径）。
+- 上传的附件**不会出现在工作区文件树**里（它根本不是文件，工作区树只列 `<workspace root>` 下的路径）；
+- 用户要看内容 → 消息里的附件 chip 用 blob id 走 `GET /api/blobs/{id}` 取字节做预览；
+- 用户要 agent 处理它 → `attachments` 已经把它交给模型（图片转 image content part，文本附件文本化）。
 
-### 6.3 生命周期与清理
+### 6.3 生命周期（无磁盘清扫）
 
-| 阶段 | 规则 |
-|---|---|
-| 上传即声明 | 目录名带 `sessionId`，会话删除时整目录删除 |
-| 会话未发送 | 页面关闭 / 会话切换时，尚未发送的暂存附件**保留 24h** 后由启动清扫删除 **[设计建议]** |
-| 启动清扫 | 网关启动时删除 `uploads/` 下 mtime > 7 天的孤儿目录 **[设计建议]**，且有日志 |
-| 幂等 | 同一 `File` 重复拖入按内容 hash 去重，避免 5 份同名副本 **[设计建议]** |
-| 上限 | 单文件与单会话总量需给硬上限并在 UI 报错（原生无此限制，因走本地文件系统；这是浏览器带来的**新**约束） |
+| 阶段 | 规则 | 依据 |
+|---|---|---|
+| 上传即入内存 | 键是随机 id，元数据只有 `mime`/`name`/`created` | `blobs.go` 的 `blobStore` |
+| 未发送 | 30 分钟后过期；下一次写入或读取时被清扫（不靠定时器） | `blobTTL`、`sweepExpiredLocked` |
+| 已发送 | blob 被消费进这一轮；消息 hold 元数据，重发/刷新不依赖 blob 存活 | `run.go` |
+| 重启 | 进程内存丢失 → 旧 id 全部失效；引用它们的 run 会**显式失败**而不是附空文件 | `resolveAttachments` 的 `unknown or expired blob` |
+| 上限 | 单 blob ≤ 10 MiB（对齐 ACP 的 `MaxPromptImageBytes`）；单轮附件条数由 composer 侧约束且在 UI 报错 | `blobMaxBytes` |
+
+> 曾经设想的"`<dataDir>/uploads/<sessionId>/…` + 启动清扫孤儿目录 + 内容 hash 去重"没有实现，
+> 也不需要：不落盘就没有孤儿目录。
 
 ### 6.4 交互契约
 
@@ -478,7 +494,7 @@ Web 侧风险更高：每个组件自己 `addEventListener('keydown')` 时，**�
 |---|---|---|
 | 默认态 | 运行中展开、完成后可折叠；本轮（最后一条 user 之后）默认展开，出现更新的 user 消息后折叠 | 原生 `workSteps` 策略 `collapse=next-input`（`view.go:1157-1172`） |
 | 用户手动切换 | 优先于默认策略（记在会话状态里） | 同上（"A reader's explicit toggle always wins"） |
-| 失败态 | 展开并露出 stderr 摘要，可看完整输出 | `AGENT-SURFACES.md` S3 |
+| 失败态 | 展开并露出 stderr 摘要，可看完整输出 | `docs/archive/AGENT-SURFACES.md` S3 |
 | 折叠时信息 | 仍显示 工具名 + 状态 + 一行摘要（不是空白） | `toolcards.go:8-12` |
 
 ### 7.4 性能预算
@@ -497,7 +513,7 @@ Web 侧风险更高：每个组件自己 `addEventListener('keydown')` 时，**�
 
 ## 8. 验收清单（引擎无关）
 
-来源：`internal/devtools/ui-drive` 的 **105 个 `d.step(...)`** 交互步骤（13 个 `steps_*.go`）+ `docs/AGENT-SURFACES.md` 的 **12 个 surface**（S1–S12）。这些是原生版唯一可继承的验收资产——旧测试体系（83,050 行）与 3 个 devtools 全部随退役作废（`.cache/pivot/native-ui-inventory.md` §3.1-3.2）。
+来源：`web/ACCEPTANCE-S3.md`（P0 24 条 + Esc 分层 E1–E9）、`web/ACCEPTANCE-P1P2.md`（P1 16 条 + P2 6 条）的行级对账，以及它们的证据列指向的 `web/src/**/*.test.tsx` / `*.test.ts`（核对时为 26 + 32 个文件，随开发增长）。原生期用的 `internal/devtools/ui-drive`（105 个 `d.step`）已随 S5 退役（现在 `internal/devtools` 只剩 `fakemodel` 与 `gwprobe`），其交互步骤已**翻译**成上面的对账表与 vitest 用例，不再有可运行的 drive 脚本。
 
 **优先级**：`P0` = 缺了就不能日常用；`P1` = 等价性缺口；`P2` = 打磨。同一行可同时来自 drive 步骤与 surface 规格。
 
@@ -560,13 +576,13 @@ Web 侧风险更高：每个组件自己 `addEventListener('keydown')` 时，**�
 | C3 | 命令面板按标题检索 | 每条命令都可被搜到 | `a4qa-palette-reaches-all-commands` |
 | C4 | 右栏文件树 ↑↓ | 改变当前项并显示预览 | `a4qa-files-tree-select` |
 | C5 | 面包屑「工作区根目录」 | 回树，**不关页签** | `a4qa-files-tree-return` |
-| C6 | 团队入口零值 | 团队/子代理入口**常显**（不显示 0 计数） | `team-turn-persist`、`AGENT-SURFACES.md` S9「零值常显」 |
+| C6 | 团队入口零值 | 团队/子代理入口**常显**（不显示 0 计数） | `team-turn-persist`、`docs/archive/AGENT-SURFACES.md` S9「零值常显」 |
 
 ### 8.4 M2 待补（来自 12 个 surface，本节只登记不展开）
 
 | surface | 关键验收点（原文出处） |
 |---|---|
-| S1 SessionThread（`AGENT-SURFACES.md:53`） | 虚拟化 / 跟随 / 空态 / 行 key 稳定 |
+| S1 SessionThread（`docs/archive/AGENT-SURFACES.md:53`） | 虚拟化 / 跟随 / 空态 / 行 key 稳定 |
 | S2 ReasoningTrace（`:130`） | 流式中展开、结束后收起 |
 | S3 ToolRow/ToolCallCard（`:176`） | 状态收敛、失败展开、无详情回退 |
 | S4 ApprovalDialog（`:226`） | 无 Default / Esc=拒绝 / 队列 |
@@ -585,7 +601,7 @@ Web 侧风险更高：每个组件自己 `addEventListener('keydown')` 时，**�
 
 ## 9. 视觉一致性规则（与组件库无关）
 
-> 【组件库待定：见 docs/plans/web-ui-framework.md】本节不写任何库名，只写**约束**。任何候选库都必须被本节约束"穿透"：若某库的默认主题与本节冲突，禁用该库主题是**接入前提**，不是可选项。
+> 本节只写**约束**。组件库已定：antd 6 + antd X 2.0（映射见 [plans/antd-x-component-map.md](plans/antd-x-component-map.md)）；任何后续候选替换都必须被本节约束"穿透"：若某库的默认主题与本节冲突，禁用该库主题是**接入前提**，不是可选项。
 
 ### 9.1 唯一来源
 
@@ -660,10 +676,10 @@ Web 侧风险更高：每个组件自己 `addEventListener('keydown')` 时，**�
 
 | 主题 | 归谁 |
 |---|---|
-| 换轨决策与阶段划分 | `docs/plans/web-client-pivot.md` |
+| 换轨决策与阶段划分 | `docs/plans/web-ui-framework.md`（选型/阶段）、`docs/archive/s4-execution-checklist.md`（退役执行记录） |
 | 线协议消息/字段/端口/token 校验、贡献模型 schema | `docs/TRANSPORT.md`（§8） |
 | 组件库选型与逐组件映射 | `docs/plans/web-ui-framework.md` |
 | 设计规则与组件契约（引擎无关部分） | `docs/DESIGN.md` |
-| surface 行为规格（12 个） | `docs/AGENT-SURFACES.md` |
+| surface 行为规格（12 个） | `docs/archive/AGENT-SURFACES.md` |
 | Go 侧分层/边界/import 断言 | `docs/ARCHITECTURE.md` |
 | 本文 | 路由、屏面等价、键盘/焦点、拖放、流式、验收 |

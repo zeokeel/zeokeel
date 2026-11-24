@@ -4,19 +4,88 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [0.3.2] - 2026-11-24
+## [Unreleased]
+
+### Added
+
+- **`prompts.unsubscribe` / `context.unsubscribe` / `tasks.unsubscribe`（协议方法，TRANSPORT §5.1）**：per-session 域此前只能订阅、无法退订，网关会为每个"曾经打开过"的会话每 2s 重建一次域（`context:` 的重建要重折叠 durable 事件日志），CPU/IO 随访问过的会话数线性增长。客户端在 effect cleanup 里调用它们。
+- **HTTP 端点表（TRANSPORT §2.6）**：`/api/capabilities`、`/api/insights`、`/api/models`、`/api/automation`、`/api/sessions/{id}/memory`、`/api/files/*`、`/api/blobs` 这些读模型/附件端点此前在任何文档里都查不到。
+- **CI 现在跑 web 的 typecheck / lint / test 与 `gen:verify`**（AGENTS.md §5 一直要求"三连"，CI 只构建产物）。
+- **`--help` 首行**不再自称 "desktop agent"。
 
 ### Fixed
 
-- **用户消息不再作为回答正文重复出现**：`/api/chat/run` 的流把「发送时追加的用户消息」当成正文增量（`message.delta`）推给客户端，于是助手气泡里出现了用户自己的话。现在只有 assistant 消息进入该流（含其后续 delta / 工具更新 / 补丁）。
-- **「正在连接模型…」现在真的会出现**：v0.3.1 引入的三态因上一条而永远停在运行态；接上第一帧的正确判据后，从发送到首个正文/推理/工具帧之间显示连接态。
+- **同一 `clientRunId` 的重试会启动两轮对话**：`beginRun` 的"查已在跑 → 占位"之间释放了锁并插入了一次 hub 往返，两次并发重试都通过检查，同一 prompt 追加两轮（`TestConcurrentClientRunIDClaimsOneTurn` 覆盖；修复前 8 个并发请求实测跑出 8 轮）。
+- **差值合并把不同会话/不同任务板的帧合成一帧**：合并键对 `prompts.*` / `context.*` 落到 `"?"`、对 `tasks.delta` 只按方法名，于是会话 b 的 delta 会被并进会话 a 的帧（或整帧被判"更旧"丢弃），客户端按 `sessionId` 路由后渲染进错误的会话。现在每个 delta 自己回答 `domainKey()`（`session:<id>` / `prompts:<id>` / `context:<id>` / `tasks:<id>` …）。
+- **工作区注册表被第二个进程整份覆盖**：注册表是"内存全量 + 整份重写"，headless / ACP 与 serve 共用数据目录且都不加锁，后写的进程用自己启动时的快照覆盖，另一进程期间新增/改名/删除的工作区静默丢失。现在每次写都持 `workspaces.json.lock`（flock）重新读盘再改，读路径按文件 mtime 感知他人写入。
+- **被 gitignore 的工作区里 `undo` 静默失效**：`git add -A -- <被忽略路径>` 退出码 1，每轮快照都失败且只写一行日志。现在构造期用 `git check-ignore` 判定，回落到文件后端。
+- **系统通知 / 开机自启 / 托盘实时状态三个"死开关"**：`mygoOSNotifier`、`syncAutostart`、托盘 refresh 闭包全都零调用。现在托盘壳通过 `contracts.ToastObserver` 消费 `System` 通知并按设置过滤；自启在启动时与设置变更时同步 XDG entry；托盘按 2s 刷新运行/待审批计数。
+- **自动化任务的 permission/workspace 覆盖失败只记日志、任务照跑**：全局权限为 `full` 时等于静默取消用户配置的授权边界。现在覆盖失败判本次运行失败（model 覆盖仍是尽力而为）。
+- **`Close()` 无界等待在飞运行**：慢盘上每个运行末尾的 `fsync` 会把关停拖长，且跨进程注册表锁要等 `Wait()` 之后才释放（`TestRunNowCloseRaceStress` 在 ext4 上 22/150 次超时）。现在等待有 3s 上限，超时也释放锁并记一条警告。
+- **settings.json 损坏即永久无法启动**：现在把坏文件改名为 `settings.json.bad-<ts>`、以默认值启动并记日志（证据保留，不再只能用"删文件"自救）。
+- **网关 flock 把所有 errno 都当成"已有实例在运行"**：在不支持 flock 的文件系统上永远起不来且报错误诊断。现在只有 `EWOULDBLOCK/EAGAIN` 判"已在运行"。
+- **`team.wait` / `team.send` / `run.interject` 冻结整条 WS 连接且 `$/cancel` 无效**：它们现在在各自 goroutine 上执行，`$/cancel` 通过 request id 真正取消并回 `1026 cancelled`；`run.interject` 只对"上一轮未结束/正在压缩"重试，不再对永久错误重试 3 秒。
+- **`prompts.snapshot` 在 `prompts.enqueue` 之后可能读到旧值**（`TestE2EQueueDrainsAfterTheRun` 间歇性红）：写路径立即刷新该域，快照前也先刷新。
+- **域构建失败被伪装成"类型不对"**：`hub.applyBuild` 把 build 错误丢掉后返回空 payload，各 handler 的类型断言统一报 `xxx snapshot has an unexpected type`。现在错误穿过 `domainSnapshot.err` 原样上抛（会话已消失仍是 `session_not_found`）。
+- **`promptsDelta.merge` 丢掉更早帧的 reorder**；**`itemSetDelta` 的 `rev` 字段恒为 0**；**`ask.snapshot` 在多会话并发提问时返回随机一个**（现在最早优先）；**`stream.stopObserving` 的无锁读写**。
+- **blob 只在读时过期**：粘贴图片后放弃发送的上传永久留在内存。现在写路径顺带清扫过期项。
+- **Web：REST 抢在 `POST /auth` 之前发出**：`authorizationReady()` 写了但零调用，带 token 冷启动直接落在功能页时 `/api/files/*`、`/api/models`、`/api/capabilities`、`/api/blobs` 全 401。现在统一走 `authedFetch`。
+- **Web：审批准入状态串台**：审批卡没有 `key`，第二张卡沿用上一张的"一次/本会话"选择，一次习惯性点击就把一次性授权升级成会话级。同时失败决策现在会回滚并把错误渲染出来（此前卡片消失、无提示、运行挂住）。
+- **Web：运行中带附件发送把附件丢给下一条消息**；**入队失败静默丢草稿**（现在拒绝带附件的排队并保留草稿、渲染队列错误）。
+- **Web：`ConfirmDanger` 的 Esc 完全失效**（会话页里还会连带停掉正在跑的轮次）；**`ask` 回答失败弹窗卡死**；**主题/深色/对话字号三个设置无消费者**（现在驱动 `ConfigProvider` 与 `--zk-chat-font-size`）；**`reload()` 每次泄漏一个订阅**；**`stop()` 不清重连定时器**；**diff 元信息行被剥首字符**；**检查器加载失败后永久转圈**；**`global.css` 引用了不存在的 `--zk-shadow-overlay` / `--zk-font-size-sm`**。
+- **`gofmt` 一个文件没格式化，`scripts/verify.sh --quick` 与 CI 第一步就红**；**`make acceptance-check` 依赖一个没人构建的 `.cache/bin/gwprobe`**；**`npm run gen:verify` 在有基线前永远报"没有基线"**（现在无基线时按"生成物 == 生成器输出"逐字节比对，任何克隆都能跑）。
+- **边界测试有两处可绕过**：`go list` 的 `.Imports` 不含 `_test.go` 导入（`_test.go` 里 import mygo 不会红），且 `-e` 会吞掉加载错误。现在扫描 test 侧导入（新增 `TestEngineIsQuarantinedToTheShellInTests`）并去掉 `-e`。
+- **调度表达式只校验上界**：`daily -1:00:00` 能通过校验再在 `Next()` 处报"没有即将到来的触发时间"。现在拒绝负分量。
+- **审批测试的断言时序**（`TestSubscriptions` 在全量跑时偶红）：改为等待日志行而不是假设它已写入。
 
-## [0.3.1] - 2026-11-24
+### Changed
+
+- **SDK 升级到 `github.com/zeokeel/zeokeel-rig v0.38.1`**（同日发布）：修掉 `gate.AskTimeout` 在超时/取消分支丢弃**已到达**答复的竞态（点"允许"落在截止时间上会被记成拒绝，且幂等缓存跟着变 deny），并给 `workspace` 注册表补上 `rename` 后的目录 `fsync`。产品的 A-1 修复因此不再需要自己的目录 fsync 兜底。
+- **`make acceptance-check` 依赖的探针现在由脚本自己构建**（此前 `.cache/bin/gwprobe` 无人生成，开箱即红）。
+- **vitest 用例上限从默认 5s 提到 20s，并把 worker 上限设为 2**：组件套件在 jsdom 里挂 antd/antd X，负载高时会以"超时"而不是断言失败的形式红 20 条（本机实测），滚动恢复与 app smoke 两个时序敏感文件在并行 worker 里单独跑绿、一起跑红。
+- **自动化任务的 permission/workspace 覆盖失败从"警告"变成"本次运行失败"**：这是授权边界，不是偏好。`model` 覆盖仍是尽力而为。
+- **`--version` 之外的 CLI 文案与文档**：README / AGENTS / WEB-CLIENT / ARCHITECTURE / DESIGN / RELEASE / 三份 web ACCEPTANCE 与 `docs/plans/*` 的过时表述批量校准（`/blob/{id}`→`/api/blobs`、`18 个模块`→17、`desktop.json`→`headless.json`、`uiroot.install-update`→`InstallPendingUpdateNow`、原生期已退役的命令块、失效链接等）。
+- **`CHANGELOG` 顺序**恢复为 Keep a Changelog 的逆序（`Unreleased` 在最前；0.3.1/0.3.2 曾被插到 0.3.3 之前）。
+
+## [0.3.7] - 2026-11-24
 
 ### Fixed
 
-- **模型失败不再原样贴报文**：v0.3.0 把模型客户端的英文 JSON 连内部错误码（`-32603`）直接放进对话流。现在首行是建议——「未配置模型或密钥无效」/「模型密钥无效或已过期」/「连接模型服务失败（网络不可达）」——前两种带「打开设置」按钮；原始报文收进可展开的「详情」，认不出类型的失败仍完整显示原文（不吞错误）。
-- **发送后不再 30 秒静默**：新增「正在连接模型…」态，从发出请求到收到第一帧（文本、推理或工具步骤任一）之间显示；第一帧到达即转为运行态。
+- **刚发出的消息里附件显示为 blob id**：乐观气泡只拿得到上传 id（名字要等持久化快照）。现在名字未知时显示「附件」，一轮结束后由快照换成真实文件名（实测 `zk-test.png`）。同时清理了 `run.interject` 测试替身的临时探针代码。
+
+## [0.3.6] - 2026-11-24
+
+### Fixed
+
+- **CI 的 race 检测失败**：0.3.5 新增的 `run.interject` 测试替身把 `busy` 状态跨 goroutine 读写（`Cancel` 里起协程结算），竞态在 CI 的 `-race` 上暴露。产品代码没有问题，替身补了锁；本地 `go test -race` 复验通过。
+
+## [0.3.5] - 2026-11-24
+
+### Added
+
+- **附件与图片输入**：输入框的「＋」可选中图片/文件，上传即出 chip（名称 + 大小），发送时随 run 以 blob id 携带；消息气泡按名字显示附件。网关新增 `POST /api/blobs`（≤10 MiB，随机 128-bit id）与 `GET /api/blobs/{id}`，未知 id 直接 400 而不是少发文件。实机：附图提问，模型收到图片并回答。
+- **实时输出速率**：会话页输入框下方显示 `~N tok/s`，由流式字符数与时间估算（中途没有 token 计数，故标 `~`），结束后的精确数字仍来自 usage。
+- **`run.interject`（插话）**：协议级"取消当前轮并立刻新开一轮"，网关内原子完成，客户端不会与 409 抢跑。**限制写得明白**：rig 的 agent 每轮只加载一次历史、`TurnHook` 没有逐轮注入的接缝，所以这是"重启式 steering"，不是轮内插入。
+- **MCP over HTTP 验证**：仓库内新增 `scripts/acceptance/mcp-http-fixture.py`（最小 MCP HTTP 服务器），实测连接器 `transport=http`、列出 1 个工具，真实模型经 `tool_search` 激活后调用返回标记。
+
+### Changed
+
+- 输入框占位提示改为「给 ZeoKeel 发消息，/ 调用指令，@ 文件或对话」，与 `@` 提及、`/` 命令的既有能力对齐。
+- 思考步骤显示本轮实测耗时（`usage.durationMs`，原生的「用时」）。
+- 一轮结束后转录切回持久化快照（附件名、结算工具态、服务端改写都以快照为准；快照更短时保持现状，绝不删消息）。
+
+## [0.3.4] - 2026-11-24
+
+### Added
+
+- **输入框小组件**（对齐 DeepSeek 客户端）：模式预设下拉（`agent.permission` 只读/工作区内修改/完全访问）、模型下拉、思考强度下拉（按会话存，模型有多个模式时出现）、会话用量行（轮/步/tok/缓存命中/上下文%）。三者在首页与会话页共用同一 hook，切换即写后端每轮读取的设置行。
+- **排队可见**：客户端早就有 prompts 域的完整 API 却没有界面。现在输入框显示排队条数，展开可看内容、移除，或「插话」。
+- **任务胶囊改为状态摘要**：「3 已完成 · 1 进行中 · 2 待处理」，不再只有一个未完成数。
+- `GET /api/models`：返回模型目录与每个模型的有效思考模式（双语标签）与当前默认模型——思考规则（家族表、用户自定义模式）只在 contracts 里，客户端不重新推导。
+
+### Known limitation
+
+- **插话不是真正的轮内插入**：后端队列只在轮次结束排空（rig 的 `TurnHook` 只有 BeforeRun/AfterRun/BeforeTool/AfterTool，没有逐迭代钩子），所以「插话」是"停止当前轮并立刻开始这一轮"。真正的轮内 steering 需要改 rig 钩子。
 
 ## [0.3.3] - 2026-11-24
 
@@ -37,47 +106,19 @@ All notable changes to ZeoKeel are documented here. The format follows
 - **运行中发起新运行会 409**：计划批准后的续跑、以及任何运行中的追加文本，现在统一走队列（先入队，本轮结束后执行）。
 - 团队能力在握手迟到时会永久停在「不支持」分支：改为订阅 `onGatewayReady` 后重算。
 
-## [0.3.4] - 2026-11-24
-
-### Added
-
-- **输入框小组件**（对齐 DeepSeek 客户端）：模式预设下拉（`agent.permission` 只读/工作区内修改/完全访问）、模型下拉、思考强度下拉（按会话存，模型有多个模式时出现）、会话用量行（轮/步/tok/缓存命中/上下文%）。三者在首页与会话页共用同一 hook，切换即写后端每轮读取的设置行。
-- **排队可见**：客户端早就有 prompts 域的完整 API 却没有界面。现在输入框显示排队条数，展开可看内容、移除，或「插话」。
-- **任务胶囊改为状态摘要**：「3 已完成 · 1 进行中 · 2 待处理」，不再只有一个未完成数。
-- `GET /api/models`：返回模型目录与每个模型的有效思考模式（双语标签）与当前默认模型——思考规则（家族表、用户自定义模式）只在 contracts 里，客户端不重新推导。
-
-### Known limitation
-
-- **插话不是真正的轮内插入**：后端队列只在轮次结束排空（rig 的 `TurnHook` 只有 BeforeRun/AfterRun/BeforeTool/AfterTool，没有逐迭代钩子），所以「插话」是"停止当前轮并立刻开始这一轮"。真正的轮内 steering 需要改 rig 钩子。
-
-## [0.3.5] - 2026-11-24
-
-### Added
-
-- **附件与图片输入**：输入框的「＋」可选中图片/文件，上传即出 chip（名称 + 大小），发送时随 run 以 blob id 携带；消息气泡按名字显示附件。网关新增 `POST /api/blobs`（≤10 MiB，随机 128-bit id）与 `GET /api/blobs/{id}`，未知 id 直接 400 而不是少发文件。实机：附图提问，模型收到图片并回答。
-- **实时输出速率**：会话页输入框下方显示 `~N tok/s`，由流式字符数与时间估算（中途没有 token 计数，故标 `~`），结束后的精确数字仍来自 usage。
-- **`run.interject`（插话）**：协议级"取消当前轮并立刻新开一轮"，网关内原子完成，客户端不会与 409 抢跑。**限制写得明白**：rig 的 agent 每轮只加载一次历史、`TurnHook` 没有逐轮注入的接缝，所以这是"重启式 steering"，不是轮内插入。
-- **MCP over HTTP 验证**：仓库内新增 `scripts/acceptance/mcp-http-fixture.py`（最小 MCP HTTP 服务器），实测连接器 `transport=http`、列出 1 个工具，真实模型经 `tool_search` 激活后调用返回标记。
-
-### Changed
-
-- 输入框占位提示改为「给 ZeoKeel 发消息，/ 调用指令，@ 文件或对话」，与 `@` 提及、`/` 命令的既有能力对齐。
-- 思考步骤显示本轮实测耗时（`usage.durationMs`，原生的「用时」）。
-- 一轮结束后转录切回持久化快照（附件名、结算工具态、服务端改写都以快照为准；快照更短时保持现状，绝不删消息）。
-
-## [0.3.6] - 2026-11-24
+## [0.3.2] - 2026-11-24
 
 ### Fixed
 
-- **CI 的 race 检测失败**：0.3.5 新增的 `run.interject` 测试替身把 `busy` 状态跨 goroutine 读写（`Cancel` 里起协程结算），竞态在 CI 的 `-race` 上暴露。产品代码没有问题，替身补了锁；本地 `go test -race` 复验通过。
+- **用户消息不再作为回答正文重复出现**：`/api/chat/run` 的流把「发送时追加的用户消息」当成正文增量（`message.delta`）推给客户端，于是助手气泡里出现了用户自己的话。现在只有 assistant 消息进入该流（含其后续 delta / 工具更新 / 补丁）。
+- **「正在连接模型…」现在真的会出现**：v0.3.1 引入的三态因上一条而永远停在运行态；接上第一帧的正确判据后，从发送到首个正文/推理/工具帧之间显示连接态。
 
-## [0.3.7] - 2026-11-24
+## [0.3.1] - 2026-11-24
 
 ### Fixed
 
-- **刚发出的消息里附件显示为 blob id**：乐观气泡只拿得到上传 id（名字要等持久化快照）。现在名字未知时显示「附件」，一轮结束后由快照换成真实文件名（实测 `zk-test.png`）。同时清理了 `run.interject` 测试替身的临时探针代码。
-
-## [Unreleased]
+- **模型失败不再原样贴报文**：v0.3.0 把模型客户端的英文 JSON 连内部错误码（`-32603`）直接放进对话流。现在首行是建议——「未配置模型或密钥无效」/「模型密钥无效或已过期」/「连接模型服务失败（网络不可达）」——前两种带「打开设置」按钮；原始报文收进可展开的「详情」，认不出类型的失败仍完整显示原文（不吞错误）。
+- **发送后不再 30 秒静默**：新增「正在连接模型…」态，从发出请求到收到第一帧（文本、推理或工具步骤任一）之间显示；第一帧到达即转为运行态。
 
 ## [0.3.0] - 2026-11-24
 
@@ -1184,6 +1225,7 @@ macOS 的 dmg + 签名/公证改为**全 Linux 工具链**，彻底移除 macOS 
 - **降级路径**：secrets 缺失或工具链失败时，`package-macos` 为 optional；Windows/Linux 与未签名
   `zeokeel-<version>-darwin-arm64.tar.gz` 仍会发布，应用内更新优先用 dmg，没有 dmg 时回退 tar.gz。
 - 首次使用时需要在一台 Mac 上人工验证 Linux 生成的 dmg：挂载、安装、签名/公证和 Gatekeeper。
+
 ## [0.2.11] - 2026-11-10
 
 macOS 改为在 Linux 上交叉编译，不再依赖 macOS 托管 runner。
@@ -1208,6 +1250,7 @@ macOS 改为在 Linux 上交叉编译，不再依赖 macOS 托管 runner。
 - **Linux AppImage 工具链安装加重试**：`go install appimagetool` 偶发代理查询失败，现在最多重试
   3 次并显式走 proxy.golang.org。
 - v0.2.9 的 Windows/Linux 资产已发布；本版补齐 macOS dmg。
+
 ## [0.2.9] - 2026-11-10
 
 继续修审计 P2，并修复 Windows 工具调用时弹出的 cmd 窗口。
@@ -1407,7 +1450,6 @@ macOS 改为在 Linux 上交叉编译，不再依赖 macOS 托管 runner。
   界面快照 **97 步 / 95 张**；设计检查 0 新增违规。
 - 覆盖：模型列表/连接/迁移/思考覆盖、审批内联卡与 Esc 语义、通知位置、顶栏与窄窗/深色主题、
   过程带折叠；六个安装包仍覆盖 Windows / macOS / Linux（x86-64 与 ARM64），每个包都有 SHA256 校验。
-
 
 ## [0.1.4] - 2026-11-10
 

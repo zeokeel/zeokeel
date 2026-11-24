@@ -6,8 +6,12 @@
 客户端契约见 [`docs/WEB-CLIENT.md`](../docs/WEB-CLIENT.md)，组件映射见
 [`docs/plans/antd-x-component-map.md`](../docs/plans/antd-x-component-map.md)。
 
-交付状态：**S2 骨架 + S3 功能对齐（mock 驱动）**。审批 / Inbox / 工具卡 / 设置 / 检查器 /
-分层 Esc 已落地；唯一未接线的是 WS 快照/差值（隔离在 `src/api/`，等 task-3）。
+交付状态：**已接真网关**（S2 骨架 → S3 功能对齐 → P1/P2 补齐 → WS 域 + SSE run 全接线）。
+审批 / Inbox / 工具卡 / 设置 / 检查器 / 分层 Esc 已落地；状态同步走**真 WS 域**
+（`src/api/ws/rpc.ts` 建 WebSocket，`src/api/gateway.ts` 逐域 `.snapshot` + `.delta` 订阅）+
+`src/api/run-stream.ts` 的 SSE run 流，**没有任何 mock 专属的桥接**。验收以
+[`ACCEPTANCE-S3.md`](ACCEPTANCE-S3.md)（P0 24/24）与 [`ACCEPTANCE-P1P2.md`](ACCEPTANCE-P1P2.md)
+（P1 16 + P2 6，全完成）为准。
 
 ## 启动（不需要 Go）
 
@@ -139,20 +143,23 @@ npm run gen:verify     # 复跑生成器并比对：输入*消失*才红，数�
 `antd 6.7.1` · `@ant-design/x` / `x-sdk` / `x-markdown` `2.10.0` · `@ant-design/icons 6.3.4` ·
 `react 19.3.1` · `react-router 8.5.2` · `@tanstack/react-virtual 3.14.28` · `vite 8.3.8`。
 
-## 本期有意延后（不是遗漏）
+## 已完成 / 范围外
 
-| 项 | 原因 / 归属 |
+**本轮之前列过的"未接线/未完成"项已全部收口**（逐条证据见
+[`ACCEPTANCE-S3.md`](ACCEPTANCE-S3.md) 与 [`ACCEPTANCE-P1P2.md`](ACCEPTANCE-P1P2.md)）：
+
+| 项 | 现状 |
 | --- | --- |
-| WS 快照/差值接线 | 权威状态在 WS `session:<id>` 域；当前由 `src/api/{gateway,approvals,inbox,settings,files}.ts` 的 HTTP 桥提供，task-3 落地后只改这些文件。审批队列用 1.5s 轮询桥接（`ApprovalsProvider`），同样只换实现。 |
-| ~~会话切换的滚动位置恢复（A3）~~ | 已完成（task-8）：消息 id + 行内偏移 + 贴底布尔。 |
-| ~~运行中排队（A5/B13）~~ | 已完成：队列是网关的 WS `prompts:<sessionID>` 域（快照 + 差值 + enqueue/remove 命令），客户端无本地副本、无 REST 路径。 |
-| 消息 `⋯` 菜单（B11）、后台任务 chip（B12） | 本轮范围外。 |
-| 计划/提问/产物三类浮层（S5/S6） | Inbox 能看见并跳回会话；浮层本身属下一轮。 |
-| 设置页的动态记录新增（LSP 服务器添加、归档恢复） | 目录驱动的删除已实现；新增表单未做。 |
-| Context Tab（R6） | 后端无 `KeyContext` 时该 Tab 不出现的规则已遵守；mock 不提供，故为占位路由。 |
-| 暗色/语言切换的真实生效（B5） | 当前跟随系统 `prefers-color-scheme`；设置值已能保存，尚未驱动外观。 |
-| 终端、图表、插件市场 | 任务书明确不做。 |
-| Playwright / 截图回归 | 环境无 headless 浏览器；以 vitest（E1–E9、真 SSE 集成、520 条虚拟化）替代，**不声称**已在真实浏览器验证滚动帧率。 |
+| WS 快照/差值接线 | **已接线**：`src/api/ws/rpc.ts`（WebSocket）+ `src/api/gateway.ts`（逐域 subscribe/snapshot/delta）；审批队列也走 `approvals` 域，不再轮询 |
+| 运行中排队（A5/B13） | 后端 `prompts:<sessionID>` 域（快照 + 差值 + enqueue/remove），客户端无本地副本、无 REST 路径 |
+| 会话切换滚动恢复（A3） | 消息 id + 行内偏移 + 贴底布尔，存 `sessionStorage` |
+| 消息 `⋯` 菜单（B11）、后台任务 chip（B12） | 已完成（`message-actions.test.tsx`、`task-chip.test.tsx`） |
+| Context Tab（R6） | 真屏 `features/thread/context-screen.tsx`，由 `initialize.capabilities` 门控 |
+| 暗色/语言切换（B5） | 设置值驱动外观与文案（`ui.language` → `src/i18n/`），delta 到达即换；残留见 P1P2 的「已知缺口」 |
+| 窄窗 1024/900/460（B7/B8） | 已完成（`global.css` 断点 + headless chromium 实测 `overflowX = 0`） |
+
+**明确的范围外**（不是遗漏）：终端、图表库、插件市场。真实浏览器帧率仍**未声称**已测——
+`npm run e2e` / `npm run e2e:cold` 只验交互与文本，不做帧率与截图像素回归。
 
 ### 夹具契约与已登记缺口（task-34）
 

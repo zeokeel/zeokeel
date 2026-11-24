@@ -1,6 +1,8 @@
 # Windows 沙盒并发写修复（rig v0.16.3）
 
-> 状态：2026-11-15。修复已随 rig **v0.17.1** 发布到 main；产品直接 `require github.com/zeokeel/zeokeel-rig v0.17.1`，无 fork/replace。
+> 状态：2026-11-15（2026-11-24 核对版本）。修复**自 rig v0.17.1 起就在主线**；产品现在直接
+> `require github.com/zeokeel/zeokeel-rig v0.38.1`（以 `go.mod` 为准），早已越过该版本，无 fork/replace，
+> 也不再有 `third_party/`。
 > Windows 实机运行时验证待做（Linux 只能交叉编译与纯状态机测试）。
 
 ## 1. 根因
@@ -37,8 +39,8 @@ Windows ACL runner 每个 sandbox helper 都：
 
 ## 3. 消费方式
 
-- rig **v0.17.1**（tag 在 main，release workflow 绿，goproxy.cn 已索引）：Windows ACL 修复 + 多会话 Goal Revision API。
-- 产品 v0.2.37：`go.mod` 直接 require `github.com/zeokeel/zeokeel-rig v0.17.1`；已删除 `third_party/zeokeel-rig` 与 `replace`。
+- rig **v0.17.1**（修复首次发布的版本；tag 在 main，release workflow 绿，goproxy.cn 已索引）：Windows ACL 修复 + 多会话 Goal Revision API。**当前 `go.mod` 是 v0.38.1（2026-11-24：`gate` 答复竞态 + 注册表目录 fsync）**。
+- 产品 v0.2.37 起：`go.mod` 直接 require `github.com/zeokeel/zeokeel-rig`（当时 v0.17.1）；已删除 `third_party/zeokeel-rig` 与 `replace`。当前版本见 `go.mod`（v0.38.1）。
 
 ## 4. 验证
 

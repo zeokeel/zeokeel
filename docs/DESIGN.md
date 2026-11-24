@@ -2,7 +2,7 @@
 
 > **适用范围（2026-11-23 起）**：本文描述的是**原生 mygo 期的设计契约**。原生桌面 UI 已随
 > `S5: retire the native UI` 删除，**其中与 `ui.*` / `internal/uikit` / 帧测试 / `designlint`
-> 相关的一切只对仍在的托盘壳（`internal/host` 约 1.5k 行）有意义**。
+> 相关的一切只对仍在的托盘壳（`internal/host` 里 import mygo 的 5 个文件，约 0.8k 行）有意义**。
 >
 > **浏览器客户端的视觉事实**来自别处：`internal/design` + `internal/brand` 经
 > `npm run gen:tokens` 生成 `web/src/design/tokens.css` 与 `antd-theme.ts`（antd 6 seed token），
@@ -59,7 +59,7 @@
 ### 0.4 版本锚定
 
 - 官方事实来源：`go list -m -f '{{.Dir}}' github.com/egoist/mygo` 指向的模块目录（当前 v0.9.2）里的 `docs/ui/*.md`（88 篇 = v0.8.3 的 87 篇 + 新增 `split-button.md`）与 `ui/` 源码。
-- 文档与源码冲突时**以 v0.9.2 源码为准**；`docs/ui` 中的能力缺口见 §7.4。
+- 文档与源码冲突时**以 v0.9.2 源码为准**；mygo 模块内 ui 文档里的能力缺口见 §7.4。
 - 本仓库当前依赖的是 mygo 的通用 `ui` 包。若未来依赖升级、引入更细的组件分类（例如 agent 客户端专用组件族），只需替换 §1.2、附录 A 的 `source` 与组件行，**三层约束结构不变**。
 
 ### 0.5 术语
@@ -78,7 +78,9 @@
 
 ## 1. 组件清单与选用规则
 
-### 1.1 资产分层（必须按层使用，不许跨层自造）
+### 1.1 资产分层（原生期，已退役）
+
+> 本节表格里的 `internal/uikit` / `ui.*` 路径随 `S5: retire the native UI` 删除，只剩证据价值；web 期的资产分层见 [WEB-CLIENT.md](WEB-CLIENT.md) §9.1。
 
 | 层 | 位置 | 内容 | 硬规则 |
 |---|---|---|---|
@@ -626,7 +628,9 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | composer 输入框的名字 | **会话 composer 用 placeholder**（`输入消息…`，也是 mygo 默认：未设 `Label` 时 placeholder 即名字）；**子会话 composer 用固定名**（`uikit.ComposerShellOptions.InputLabel = "发送给 <名>"`），placeholder 只做视觉提示 | 会话屏只有这一个 composer，名字唯一；子会话可能并存多个，placeholder 会重复且随状态变（`继续该队友…` / `继续该子代理…`） | 把会话 composer 也改成固定名：需迁移四个包共 84 处定位（`Find` 也失效——mygo 的 placeholder 不注册成可查 label），零视觉收益，**不做**；子会话若去掉 `InputLabel` 会重新引入定位歧义 |
 | `ShadowOverlay()` | 浮层阴影（深色 alpha 0.32） | 菜单/浮层/palette/toast/抽屉 | 卡片 |
 
-### 6.2 uikit 共享组合（`internal/uikit`）
+### 6.2 uikit 共享组合（原生期，已退役）
+
+> `internal/uikit` 已删除（代码在 `pre-s4` tag）；下表只说明原生期的共享组合层长什么样，**不要照它写 web 组件**——web 的组合件在 `web/src/ui/` 与 `web/src/chat/`。
 
 | 分类 | API | 用途 |
 |---|---|---|
@@ -772,30 +776,40 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 
 ### 8.1 命令（改 UI 后按顺序跑）
 
+**Web 客户端（现状；`web/`）**
+
+```bash
+cd web
+npm run typecheck && npm run lint && npm run test   # 三连；CI 的 "Web client checks" 也跑这三条
+npm run gen:verify                                  # 生成链校验：复跑生成器并与基线逐字节比对
+```
+
+**Go 侧（token / 品牌源头，改了 `internal/{design,brand}` 必跑）**
+
 ```bash
 export PATH=/usr/local/go/bin:$PATH
-# 本工作区沙箱:模块缓存可写在 .cache/gopath（普通环境可省略 GOPATH/GOCACHE 覆盖）
-export GOPATH=/data/mygo/.cache/gopath
-export GOCACHE=/data/mygo/.cache/go-build
-# 测试临时目录必须在仓库外（同 AGENTS.md）：/tmp/zeokeel-tmp
-export GOTMPDIR=/tmp/zeokeel-tmp TMPDIR=/tmp/zeokeel-tmp
+export GOTMPDIR=/tmp/zeokeel-tmp TMPDIR=/tmp/zeokeel-tmp   # 必须在仓库外（同 AGENTS.md §4）
 mkdir -p /tmp/zeokeel-tmp
 export GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off
 
 gofmt -l internal cmd                      # 应为空
-go build ./...
-go vet ./...
-go test ./... -count=1                     # 全量（慢）；内环可先跑受影响包
-go test ./internal/ui/... ./internal/uiroot ./internal/design ./internal/uikit -count=1
-go run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
-bash scripts/design-check.sh
-go tool mygo vet .
-go run ./internal/devtools/ui-snapshot .cache/ui-conformance   # 生成 PNG 并人工看
+go test ./internal/design ./internal/brand -count=1
+npm --prefix web run gen:tokens            # 生成物随之更新（禁止手改 tokens.css / antd-theme.ts）
 ```
 
-验证分层：静态规则（lint）→ 帧测试（`ui.NewTester`）→ 快照（ui-snapshot）→ 端到端（ui-drive）。
+验证分层（web 期）：生成链（`gen:verify`）→ 组件与协议适配（vitest）→ 类型/风格（tsc + eslint）
+→ 端到端（`web/ACCEPTANCE-S3.md` / `ACCEPTANCE-P1P2.md` 的对账，`npm run e2e` / `e2e:cold`）。
 
-### 8.2 规则 ID 索引
+> **原生命令已随 S5 退役**：本节的旧版是 `go test ./internal/ui/... ./internal/uiroot …
+> ./internal/uikit`、`go run ./internal/devtools/designlint --strict --baseline .design-baseline.json`、
+> `bash scripts/design-check.sh`、`go tool mygo vet .`、`go run ./internal/devtools/ui-snapshot
+> .cache/ui-conformance`（配 `ui.NewTester` 帧测试与 ui-drive 端到端）。这些工具与路径都已删除，
+> 脚本/基线归档在 [archive/](archive/)（`design-check.sh`、`design-baseline.json`），
+> 规则说明见 [archive/DESIGN-LINT.md](archive/DESIGN-LINT.md)。
+
+### 8.2 规则 ID 索引（原生期，已退役）
+
+> 这些 DS-* 规则由已删除的 `designlint` 执行；规则**意图**（颜色字面量禁止、状态语义、强调色预算、危险确认安全默认）在 web 期仍成立，但执行者换成 ESLint + `gen:verify` + vitest，见 [WEB-CLIENT.md](WEB-CLIENT.md) §9 与 [AGENTS.md](../AGENTS.md) §3。
 
 | 规则 | 名称 | 文档 |
 |---|---|---|
@@ -833,7 +847,7 @@ go run ./internal/devtools/ui-snapshot .cache/ui-conformance   # 生成 PNG 并�
 
 ### 8.4 mygo 升级流程（v0.9.x → 新版本）
 
-1. 读新版本 mygo 模块内的 `docs/ui/migration.md` 与 release notes；`go get github.com/egoist/mygo@<version>`。
+1. 读新版本 mygo 模块内的 `migration.md`（模块的 ui 文档目录下）与 release notes；`go get github.com/egoist/mygo@<version>`。
 2. `go tool mygo migrate-ui .` 预览 → `-write` 应用（Go 1.24+ tool 指令；go.mod 已声明 `tool github.com/egoist/mygo/cmd/mygo`，见 DESIGN-LINT §5.2）。
 3. 逐项复核迁移改动：stateful 泛型 parts、派生值回写（`Changed/Submitted`）、key 迁移到 `Context.Key`。
 4. 重跑 §8.1 全链；更新 [UI-CONFORMANCE.md](archive/UI-CONFORMANCE.md) 的版本号与 §1 表。
@@ -903,7 +917,9 @@ go run ./internal/devtools/ui-snapshot .cache/ui-conformance   # 生成 PNG 并�
 
 指南类：`README` `accessibility` `custom-widgets` `layout` `migration` `motion` `navigation` `overlays` `performance` `rendering` `styling` `testing` `transitions` `transforms` `windows`。
 
-## 附录 C：现状基线（2026-11 审计修复后，来自代码实测）
+## 附录 C：现状基线（原生期，已退役：2026-11 审计修复后，来自代码实测）
+
+> 下面是删除前 `internal/ui` 的实测基线，仅作历史对照；web 的现状基线以 `web/ACCEPTANCE-*.md` 的表格为准。
 
 | 指标 | 数值 |
 |---|---|

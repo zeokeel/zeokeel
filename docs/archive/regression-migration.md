@@ -1,5 +1,9 @@
 # internal/regression 迁出对照表（S4 前置，task-11）
 
+> **已完成：S4 已整包删除 `internal/regression`**（2026-11-24 核对：`ls internal/regression`
+> → 目录不存在）。下表记录的迁出去向仍然有效：保住的覆盖活在 `internal/gateway/e2e_*_test.go`
+> 的 15 条 `TestE2E*` 里，随 UI 一起失去的部分按本文「仍将失去的覆盖」执行。本文已归档，正文保留为证据。
+
 > S4 会整包删除 `internal/regression`（单个 Go 包：helper 里 import uiroot）。本文记录**哪些覆盖被保住、保住到哪、哪些随 UI 一起失去**。
 > 分类口径：`(a)` 只测后端服务/协议；`(c)` 含 UI 断言（帧/文本/测试器）；`(b)` 纯 UI 器材（无断言，供他人使用）。
 

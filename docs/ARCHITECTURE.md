@@ -27,7 +27,9 @@ internal/gateway/       serve 产品的传输层：WS 控制面、SSE 运行流�
 web/                    浏览器客户端（React + TS + antd 6 + antd X）
 internal/assembly/      装配根：编译期 registry、assembly.json、预检、按产品装配
 internal/contracts/     契约（本文件 §5/§6 的接口与枚举）
-internal/modules/*      后端模块（18 个：appinfo/store/session/tools/agent/acp/...）
+internal/modules/*      后端模块（17 个：acp agent appinfo approvals automation goal
+                        hosttools importer insights memorystore modelcatalog sandbox
+                        sessionstore skills toolkit update workspace）
 internal/design/        设计 tokens（→ web/src/design/tokens.css）
 internal/brand/         品牌层：唯一 hex 来源
 internal/icons/         34 个 SVG 图标（→ web 图标组件）
@@ -47,14 +49,14 @@ web (浏览器) ⇄ gateway (serve 产品) → 同一套 kernel root + 后端模
 
 **形态（2026-11-23 起）**：网关进程 + 浏览器客户端 + 极小托盘壳。原生 UI 宿主
 （`internal/uiroot`）与其模块已删除，代码在 `pre-s4` tag；退役记录见
-[plans/s4-execution-checklist.md](plans/s4-execution-checklist.md)。
+[archive/s4-execution-checklist.md](archive/s4-execution-checklist.md)。
 
 - **网关拥有传输**：WS 控制面（快照/差值/通知）、SSE 运行流、静态资源、token/Origin 校验、
   端口协商（`gateway.json`）。协议事实见 [TRANSPORT.md](TRANSPORT.md)。
 - **host 拥有进程**：单实例、数据目录、设置存储、日志、退出信号，以及**尽力而为**的
   托盘/热键/通知。「网关先起、托盘后起」：托盘失败只警告，绝不取消网关
   （`internal/host/serve.go`）。
-- **模块拥有能力**：18 个后端模块，全部与 UI 无关；它们只认 `contracts` 的服务键。
+- **模块拥有能力**：17 个后端模块，全部与 UI 无关；它们只认 `contracts` 的服务键。
 - **状态原则**：模块状态归模块实例，禁止包级可变状态；后台结果不得直接回调 UI。
 - **生命周期**：模块在装配期激活并把注销函数交给 `ctx.Effect`，kernel dispose 逆序撤销；
   配置变更 = 重启进程。
@@ -64,7 +66,7 @@ web (浏览器) ⇄ gateway (serve 产品) → 同一套 kernel root + 后端模
     禁止 import 其他模块实现、`host`、`assembly`。
   - `host` 不得直连 `internal/modules/*`（共享代码移 `internal/lib`，如 `lib/version`）。
   - **原生引擎隔离**：`github.com/egoist/mygo` 只允许出现在 `internal/host`、
-    `internal/lib/{openpath,openurl}`、`internal/brand`、`internal/design` 这 5 个包
+    `internal/lib/openurl`、`internal/brand`、`internal/design` 这 4 个包
     （`TestEngineIsQuarantinedToTheShell`）；`gateway`/`contracts`/`modules` 的**传递**依赖
     必须为 0（`TestBackendIsTransitivelyEngineFree`）。
   - **test 档单列**：`gateway` 的 e2e 允许并鼓励拖进 `internal/modules/*`（真模块才有价值），
@@ -207,14 +209,24 @@ if _, err := ctx.Effect(func() cordis.Effect {
 
 ## 8. 当前状态（2026-11-23：浏览器客户端 + 网关 + 托盘壳）
 
-- ✅ **网关**（`internal/gateway`，`--product serve`）：WS 控制面 8 个域
-  （sessions/messages/approvals/plans/tasks/team/settings/prompts），快照+差值+通知，
-  SSE 运行流 7 事件（`done|error` 必为最后一条、`tool.start` 先于 `tool.result`、
-  断连 ≠ 停止），`clientRunId` 幂等，token/Origin 校验，端口协商写 `gateway.json`，
+- ✅ **网关**（`internal/gateway`，`--product serve`）：WS 控制面按域组织，域键见
+  `internal/gateway/domains.go` 的常量与 `hub.go` 的 `domainState.global` 注释：
+  - **会话列表** `session.list`（全局，每个 ready 客户端都收）
+  - **对话** `session:<id>`（按会话、只发给订阅者；消息/推理/工具步骤都在它的 ops 里）
+  - **全局小域** `approvals`、`ask`、`plan`、`artifacts`、`settings`、`workspace.list`、`tasks`
+  - **按会话的域** `tasks:<id>`（该会话的任务板视图）、`context:<id>`（上下文时间线）、
+    `prompts:<id>`（该会话的排队提示词收件箱）
+
+  每个域都走同一套机制：epoch + 域内 rev + 快照缓存 + 回放环 + 慢客户端合并；域的第一帧不发差值，
+  客户端必须先 `.snapshot`。**没有 `messages` 域**（消息属于 `session:<id>`）、
+  **没有 `team` 域**（团队/子代理走 `session:<id>` + `tasks`）、plan 域名是单数 `plan`。
+  SSE 运行流 7 事件（`done|error` 必为最后一条、`tool.start` 先于 `tool.result`、断连 ≠ 停止），
+  `clientRunId` 幂等，token/Origin 校验，端口协商写 `gateway.json`，
   静态资源托管（`go:embed`，`scripts/build-web-client.sh` 从 `web/dist` 复制）。
 - ✅ **浏览器客户端**（`web/`）：路由 `/`、`/inbox`、`/c/:id`、`/settings`；antd 6 + antd X 2.0；
   token/图标由 Go 侧生成（`gen:tokens` / `gen:icons`），`gen:verify` 守住生成链。
-- ✅ **后端**：18 个模块（appinfo/store/session/tools/agent/acp/…）全部保留，行为未变；
+- ✅ **后端**：17 个模块（acp agent appinfo approvals automation goal hosttools importer insights
+  memorystore modelcatalog sandbox sessionstore skills toolkit update workspace）全部保留，行为未变；
   Rig toolkit + hosttools 的工具面完整（serve 交互档 8 个 host 工具，headless 5 个）。
 - ✅ **装配**：编译期 registry + 内嵌 assembly（`headless.json`；`serve` 复用其 entries 并加传输覆盖）；
   `Products()` = `[headless]`、`AllProducts()` = `[headless, serve]`；`--product` 默认 `serve`。
@@ -222,15 +234,32 @@ if _, err := ctx.Effect(func() cordis.Effect {
 - ✅ **验证**：`internal/gateway` 15 条 `TestE2E*` + 协议一致性；`make acceptance-{check,approval,slow}`
   三条协议级端到端；两档引擎边界断言；`scripts/verify.sh`。
 - ❌ **已退役**：`internal/{ui,uiroot,uikit,regression}`、原生 desktop 产品、designlint/design-check、
-  `go tool mygo vet`（空过）。历史见 [plans/s4-execution-checklist.md](plans/s4-execution-checklist.md)。
+  `go tool mygo vet`（空过）。历史见 [archive/s4-execution-checklist.md](archive/s4-execution-checklist.md)。
 
 ## 9. 硬规则（review checklist）
 
-1. **优先 mygo 原生控件**（`ui.Sidebar/List/Tabs/Modal/GridView/Button/...`；Markdown 在
-   `ui/markdown` 子包：`markdown.View/Stream`），不手搓控件或用 Row/Column 拼控件。
-2. UI 只在帧内构建；帧内无副作用；跨线程走 `UIRuntime.Post`。
-3. 状态归模块实例；禁止包级可变状态。
-4. 注册/注销必须走 `ctx.Effect`（裸注册无法回滚）。
-5. 模块不 import 其他模块实现 / host / assembly；跨模块行为依赖只走 contracts 服务（白名单见 §3，`boundary_test.go` 机器断言）。
-6. 配置变更 = 重启；无运行时模块安装/热更新。
-7. 每个 UI 模块带 headless 测试（`ui.NewTester` 或假 frame），覆盖「注册→渲染→卸载」。
+**Web 客户端**（细则见 [WEB-CLIENT.md](WEB-CLIENT.md) 与 [DESIGN.md](DESIGN.md)）：
+
+1. **只用官方件**：antd `6.7.1` 有组件就用（`Table`/`Modal`/`Form`/`Select`/`Tabs`/`Alert`…），
+   antd X `2.10.0` 覆盖会话面（Bubble/Sender/Conversations/ThoughtChain…）；自造前先查
+   [plans/antd-x-component-map.md](plans/antd-x-component-map.md)。**API 必须查、不许凭记忆写**：
+   `bash scripts/antd-cli.sh info <Component> --version 6 …` 与 `web/node_modules/@ant-design/x/es/**/*.d.ts`。
+2. **颜色/字号/间距只来自 `web/src/design/tokens.css`**：禁止 hex 字面量、禁止裸数值度量。
+   该文件是 `npm run gen:tokens`（消费 `internal/design` + `internal/brand`）的产物，手改即违规。
+3. **禁止手写 `fetch`/`WebSocket`**：`web/src` 只能经 `web/src/api/` 访问网关（HTTP 与 WS 客户端都在那里）。
+4. **审批动词不中性化**：允许/始终允许/拒绝三值；无默认动作、裸 Enter 不决定、**Esc = 拒绝**
+   （[APPROVAL-SURFACES.md](APPROVAL-SURFACES.md)）。
+5. **强调色预算**：一屏 ≤2 个主色填充块、≤1 个 primary 按钮、红色元素 ≤2；`running ≠ warning`。
+
+**后端 / 进程**（与 UI 形态无关，长期有效）：
+
+6. 状态归模块实例；禁止包级可变状态。
+7. 注册/注销必须走 `ctx.Effect`（裸注册无法回滚）。
+8. 模块不 import 其他模块实现 / host / assembly；跨模块行为依赖只走 contracts 服务（白名单见 §3，`boundary_test.go` 机器断言）。
+9. 配置变更 = 重启；无运行时模块安装/热更新。
+
+> **原生命令已退役（归档注记，别再照抄）**：曾经的第 1/2/7 条——「优先 mygo 原生控件
+> `ui.Sidebar/List/Tabs/Modal/GridView`」「UI 只在帧内构建、跨线程走 `UIRuntime.Post`」
+> 「每个 UI 模块带 headless 测试 `ui.NewTester`」——随 `internal/{ui,uiroot,uikit}` 在
+> `S5: retire the native UI` 删除（代码在 `pre-s4` tag）。证据文档：
+> [archive/AGENT-SURFACES.md](archive/AGENT-SURFACES.md)、[archive/DESIGN-LINT.md](archive/DESIGN-LINT.md)。

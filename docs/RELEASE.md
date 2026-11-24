@@ -2,9 +2,9 @@
 
 ZeoKeel 的安装包和更新链路全部由仓库自己的 Go 工具链完成：`mygo.json` +
 `go tool mygo build` 产出安装包，应用内更新直接读取本仓库的 GitHub Release。
-本文是维护者的操作说明；实现细节见
-[mygo distribution](https://github.com/egoist/mygo)（`docs/distribution.md`、
-`docs/updates.md`）。
+本文是维护者的操作说明；实现细节见 mygo 仓库自己的文档
+（[mygo distribution](https://github.com/egoist/mygo)，其 `distribution.md` / `updates.md`
+——**那两个文件在 mygo 仓库里，不在本仓库**）。
 
 ## 产物
 
@@ -132,7 +132,8 @@ Linux desktop/AppImage 图标全部由 `scripts/gen-icons.sh` 从这两个文件
 
 更新不依赖更新签名密钥，直接读取 GitHub Release：
 
-- 更新模块配置在 `internal/assembly/assemblies/desktop.json`：
+- 更新模块配置在 `internal/assembly/assemblies/headless.json`（只有这一个内嵌装配文件；
+  `serve` 复用它并叠加传输层覆盖，`--product desktop` 已删除）：
   `{"githubRepo": "zeokeel/zeokeel"}`。
 - 检查：`GET https://api.github.com/repos/zeokeel/zeokeel/releases/latest`，
   版本取 tag（去掉 `v`），release notes 取 release body，按平台选择**安装包**：
@@ -147,8 +148,8 @@ Linux desktop/AppImage 图标全部由 `scripts/gen-icons.sh` 从这两个文件
   `digest`）；`Download` 流式下载并校验大小/SHA-256 后暂存到
   `<dataDir>/updates/`。
 - 安装：设置页「更新」页下载后点「安装并重启」，把计划写入
-  `updates/pending.json`（带 `kind`），然后 host 的 `uiroot.install-update`
-  命令立即执行并退出应用：
+  `updates/pending.json`（带 `kind`），然后由 `internal/host/install_now.go` 的
+  `InstallPendingUpdateNow(dataDir, logger)`（`internal/host/install_now.go:53`）立即执行并退出应用：
   - `installer`（Windows）：启动下载好的 NSIS setup，由安装器完成升级（应用先退出，安装器可正常覆盖文件）；
   - `dmg`（macOS）：静默安装的最佳努力——`hdiutil attach` 挂载 → `ditto` 复制新 `.app` → 换掉当前 bundle → `open` 重启；安装目录不可写时回退为打开 dmg 让用户拖入；
   - `appimage`（Linux）：原子替换 `$APPIMAGE` 后重启；

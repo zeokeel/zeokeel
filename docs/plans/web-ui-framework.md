@@ -254,4 +254,4 @@ shadcn 已经把它们的组件源码备好了，裸用没有理由。
 - 本文档结论已定稿：**antd 6 + Ant Design X 2.0**。
 - `AGENTS.md` §0/§1 的"Radix 仅作无样式行为基元"表述需同步改为 antd（已改）。
 - `docs/WEB-CLIENT.md` 的组件库占位按 §5/§6/§7 填入，不再保留"待定"。
-- 下一步：Stage 0（契约解耦），见 [stage0-decouple-contracts.md](stage0-decouple-contracts.md)。
+- 下一步：Stage 0（契约解耦），见 [stage0-decouple-contracts.md](../archive/stage0-decouple-contracts.md)（已归档）。

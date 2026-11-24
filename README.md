@@ -4,14 +4,13 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.47 — MCP 稳定刷新、Headers 与技能管理** (2026-11-16). Native, compile-time modular
-> AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
-> webview. 本版让 MCP OAuth **后台自动刷新**（不再反复要求授权），连接器可配置
-> 自定义 **HTTP Headers**，详情内可逐个开关工具；技能支持**禁用/启用**、
-> **复制到我的技能**、外部修改自动刷新与 Markdown 预览。
-> See [CHANGELOG.md](CHANGELOG.md).
+> **当前版本 0.3.7**（以仓库根的 [`VERSION`](VERSION) 为准；逐版变更见 [CHANGELOG.md](CHANGELOG.md)）。
+> ZeoKeel 是常驻 AI agent，由三部分组成：**Go 网关进程**（`internal/gateway`，承载全部后端能力
+> 与 WS/SSE 传输）+ **浏览器 Web 客户端**（`web/`，React + TypeScript + antd 6 + antd X，主客户端）
+> + **极小原生托盘壳**（`internal/host`，只负责常驻图标 / 全局快捷键 / 系统通知）。
+> 原生桌面 UI 已于 `S5: retire the native UI` 退役（代码在 `pre-s4` tag）。
 
-> **v0.2.24 主要变化**：按 `docs/PRODUCT-BUG-REVIEW-2026-11-11.md` 做 TDD 修复——
+> **v0.2.24 主要变化**：按 `docs/archive/PRODUCT-BUG-REVIEW-2026-11-11.md` 做 TDD 修复——
 > ① 安全/权限：MCP 多 server 重名 panic、`settings_get` 明文凭据、自动化只读越权、只读预设 destructive memory、LSP 初始化与沙箱路径、损坏数据文件隔离、后端工具开关生效；
 > ② Loop/上下文：/compact 竞态与读模型不一致、删除运行中会话复活、停止误判失败、Regenerate 丢 @session、截断/迭代错误可识别、AGENTS.md 信任边界与 UTF-8 截断、模式/预设进入提示词与工具面、@session 引用转义、记忆/技能有界注入；
 > ③ MCP/记忆/技能：MCP 重连/启动超时/结果上限、记忆 scope 绑定工作区、提取校验、技能根优先级与 frontmatter 保真、工作区技能信任标记；
@@ -35,7 +34,7 @@ console window. In-app updates read this release directly (see
 [docs/RELEASE.md](docs/RELEASE.md)).
 
 ```sh
-# Desktop product (needs a desktop session; on Windows use zeokeel.exe)
+# 网关 + 浏览器客户端（默认产品 serve；启动行会打印带 token 的 URL）
 ./zeokeel
 
 # Headless product (no window; tools/memory/sessions/automation)
@@ -44,7 +43,8 @@ console window. In-app updates read this release directly (see
 # ACP stdio server for editor integration
 ./zeokeel --acp
 
-./zeokeel --version     # version, commit, build time
+./zeokeel --version         # version, commit, build time
+./zeokeel --list-products   # 内嵌装配产品：headless、serve
 ```
 
 Build from source: Go 1.27 and the pinned module set (`go.mod`/`go.sum`). The
@@ -53,7 +53,7 @@ repository defaults to the domestic Go mirror `https://goproxy.cn,direct`
 fully offline build:
 
 ```sh
-make build            # go build ./...
+make build            # go build ./internal/... ./cmd/...
 make ci               # build + vet + test
 ./scripts/verify.sh   # full local verification (Linux/Xvfb extras optional)
 ```
@@ -82,45 +82,58 @@ publishes the GitHub release with `SHA256SUMS.txt` and a download table.
 > （62 项：✅61 / 🟡0 / ❌1（winproc 平台非目标）——旧功能覆盖清单全部关闭）。
 > 验证证据：[docs/VERIFICATION.md](docs/archive/VERIFICATION.md)。
 
-编译期模块化的 Go 桌面 AI agent：**薄总入口 + 内核装配 + 模块贡献点**。
-UI 是 mygo 原生控件（无浏览器/webview）；所有模块一起编译进同一二进制，`assembly.json`
+编译期模块化的 Go 常驻 AI agent：**薄入口 + 网关 + 浏览器客户端**。
+主客户端是 `web/`（React + antd 6 + antd X），后端能力全部在网关进程里；
+原生托盘壳只做常驻图标/热键/通知。所有模块一起编译进同一二进制，`assembly.json`
 只决定启用/裁剪哪些模块。
 
 ```
-cmd/zeokeel           薄入口：解析参数 → host.Run
-internal/host         进程宿主：窗口/托盘/单实例/日志/退出
-internal/uiroot       UI 总入口（帧根）：布局、导航、overlay/toast、主题/语言、五张贡献点注册表
-internal/assembly     装配根：编译期 registry + assembly.json 预检 + 产品装配
+cmd/zeokeel           薄入口：解析参数 → host.Run（serve 默认 / headless / --acp）
+internal/gateway      serve 产品：WS 控制面（快照+差值）、SSE 运行流、静态资源、端口协商
+web/                  浏览器客户端：路由 / /inbox /c/:id /settings
+internal/assembly     装配根：编译期 registry + headless.json 预检 + serve 传输覆盖
 internal/contracts    契约：服务键 + 接口 + 贡献值类型（模块唯一共享面）
-internal/modules/*    后端模块（store/session/tools/...）
-internal/ui/*         UI 模块（home/session/settings/...）
-internal/uikit        共享 UI 库（优先 mygo 原生控件，不手搓）
-internal/design       设计 tokens
+internal/modules/*    后端能力模块（17 个，见下）
+internal/host         进程宿主 + 托盘壳：托盘/热键/通知/设置存储/日志/退出
+internal/design       设计 tokens（→ 生成 web/src/design/tokens.css）
+internal/brand        品牌层：唯一 hex 来源、主题、字体栈（→ 生成 antd-theme.ts）
+internal/icons        34 个 SVG 图标（→ 生成 web 图标组件）
+internal/lib/*        平台小工具（openurl 等）
+internal/hosttools    共享后端工具面（产品侧 host 工具）
+internal/websearch    搜索后端（web_search / web_fetch）
+internal/devtools     fakemodel / gwprobe 等开发夹具（不进产品二进制）
 ```
 
-规则（详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)）：
+`internal/modules/*` 的 17 个模块：`acp` `agent` `appinfo` `approvals` `automation` `goal`
+`hosttools` `importer` `insights` `memorystore` `modelcatalog` `sandbox` `sessionstore`
+`skills` `toolkit` `update` `workspace`。
 
-1. **mygo 有的控件优先用控件**，不手搓控件/布局图元树。
-2. 模块只依赖 `internal/contracts`、`internal/uikit`、`internal/design`、`internal/lib/*`；
-   禁止 import 其他模块实现、`internal/uiroot`、`internal/host`。
-3. UI 状态归模块实例；禁止包级可变状态；UI 渲染只在帧内，跨线程更新走 `UIRuntime.Post`。
-4. 注册/注销必须走 `ctx.Effect`（kernel 事务回滚依赖它）。
-5. 配置变更 = 重启进程（编译期注册表，无热更新/运行时插件安装）。
+规则（详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 与 [docs/WEB-CLIENT.md](docs/WEB-CLIENT.md)）：
+
+1. **颜色/字号/间距只来自 `web/src/design/tokens.css`**（生成物），禁止 hex 字面量与裸数值度量。
+2. 模块只依赖 `internal/contracts`、`internal/design`、`internal/lib/*` 与共享库
+   `internal/{hosttools,websearch}`；禁止 import 其他模块实现、`internal/gateway`、`internal/host`。
+3. Web 侧只经 `web/src/api/` 访问网关，禁止手写 `fetch`/`WebSocket`；审批动词不中性化（Esc=拒绝）。
+4. 状态归模块实例；禁止包级可变状态。
+5. 注册/注销必须走 `ctx.Effect`（kernel 事务回滚依赖它）。
+6. 配置变更 = 重启进程（编译期注册表，无热更新/运行时插件安装）。
 
 构建（离线可用）：
 
 ```sh
 export PATH=/usr/local/go/bin:$PATH GOPROXY=off GOSUMDB=off GOFLAGS=-mod=mod
-go build ./...
-go test ./...
+go build ./internal/... ./cmd/...
+go test ./internal/... ./cmd/... -count=1
 ```
 
-一键重复全部验证（gofmt、build、vet、test、`-race`、回归套件、UI 快照与三产品冒烟）：
+一键重复验证（gofmt、build、vet、test、`-race` 与 headless/ACP/serve 冒烟）：
 `./scripts/verify.sh`；快速循环 `./scripts/verify.sh --quick`，或 `make verify`（可 `ARGS=--quick`）。
 
-归档的旧工程：`cd old && go build ./...`（独立 module，仅参考）。
+## 状态（原生 UI 期里程碑记录，2026-11-07 起）
 
-## 状态（2026-11-07 · P1 持久化/审批/工具卡已可运行）
+> ⚠️ **本节是历史记录，不是现状**：以下条目描述原生 mygo UI 的实现进度，UI 代码已随
+> `S5: retire the native UI` 删除（见 `docs/archive/s4-execution-checklist.md`）。当前形态与验证方式看本文顶部、[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §8
+> 与 [CHANGELOG.md](CHANGELOG.md)。
 
 > **当前实现说明（v0.2.24，覆盖下方历史阶段描述）**
 > - **Home 屏不是导航目的地**（自 v0.2.6 起）：Home 模块保留用于兼容，但真实落地页是会话空态——空会话显示「开始前还需要：」检查清单（缺模型 / 缺 API Key / 未打开工作区）与修复深链。下文历史阶段里“首页导航/Home hero”的描述仅记录当时的迭代。
@@ -131,18 +144,18 @@ go test ./...
   （Design Tokens、字阶、间距、组件样式）、`internal/icons`（Lucide SVG 图标集）；宿主 chrome 使用 280px
   品牌侧栏 + 64px brand row（logo+wordmark）+ 52px 顶栏；全部 UI 模块（对话/Home/侧栏/设置/审批/工具卡）
   已按老 UI 设计重做（mygo 原生控件 + design 样式，无自绘）
-- ✅ 编译期装配：`internal/assembly`（显式 registry + 内嵌 `assemblies/desktop.json`、`headless.json`
+- ✅ 编译期装配：`internal/assembly`（显式 registry + 内嵌 `assemblies/headless.json`
   + kernel 预检 + required 失败整树回滚 + UI 子组级联卸载）
-- ✅ UI 总入口 `internal/uiroot`：帧根、布局区域、五张贡献点注册表、Post 队列、导航、设置面、
-  槽位渲染（`RenderSlot`）与工具卡注入（`RenderTool`）
-- ✅ 进程宿主 `internal/host` + 薄 `cmd/zeokeel`（17 行）+ `Makefile`
+- ~~✅ UI 总入口 `internal/uiroot`：帧根、布局区域、五张贡献点注册表、Post 队列、导航、设置面、
+  槽位渲染（`RenderSlot`）与工具卡注入（`RenderTool`）~~ **已随 `S5: retire the native UI` 删除**
+- ✅ 进程宿主 `internal/host` + 薄 `cmd/zeokeel` + `Makefile`
 - ✅ 示范模块：`appinfo`、`toolkit`（把 ZeoKeel Rig 工具集 + 沙盒策略组装成产品服务：
   fs/shell/pwsh、editor、image、PTY terminal、jobs、web、远程 MCP over HTTP、
   memory/schedule/worktree/skill/team_task/settings 等）、
   `hosttools`（产品侧 host 工具：ask_user/present/plan_review/exit_plan_mode + DSH goal 三件套
-  get_goal/create_goal/update_goal，注册进共享工具注册表）、
-  `ui/home`、`ui/welcome`、`ui/toolcards`、`uikit`
-- ✅ SDK 依赖：`github.com/zeokeel/zeokeel-rig v0.13.2`（纯工具集：agent loop / subagent / provider /
+  get_goal/create_goal/update_goal，注册进共享工具注册表）；
+  原生 UI 模块（`ui/home`、`ui/welcome`、`ui/toolcards`、`uikit`）已退役
+- ✅ SDK 依赖：`github.com/zeokeel/zeokeel-rig v0.38.1`（以 `go.mod` 为准；纯工具集：agent loop / subagent / provider /
   sandbox / 81 个静态工具 + MCP/LSP / gate / session+compact / checkpoint；零第三方依赖；
   旧 agent 61 个工具名 + 现代工具面 55 个名称 100% 覆盖，`TestToolCatalogCoverage` 与
   `TestModernToolSurface` 双重门禁）
@@ -316,28 +329,28 @@ go test ./...
   workflow/ralph 编排工具与统一委派预算；观测性数据基座（逐调用 model_call、context_snapshot、compact/spill
   事件、模型价格/成本）+ 会话 Context tab + 跨会话 Insights 洞察页；team/子会话 cold resume（历史
   Historical+Resumable 可继续）；上下文溢出自动压缩重试；通知点击直达会话；goal 三件套由产品
-  hosttools 自实现，rig 使用 v0.16.3 内树 fork（`third_party/zeokeel-rig`，Windows sandbox 并发修复；
-干净 checkout 可构建）；执行域 job/terminal
+  hosttools 自实现；rig 直接 `require github.com/zeokeel/zeokeel-rig v0.38.1`（`go.mod`，
+  无 fork/replace/`third_party/`）；执行域 job/terminal
   跨工作区/权限重建稳定存活（按 ID 路由 + durable 生命周期事件，跨应用重启不重连）。
 - 🔁 后续版本变更见 [CHANGELOG.md](CHANGELOG.md)；当前能力与验证方式见
   [docs/COVERAGE.md](docs/archive/COVERAGE.md) / [docs/VERIFICATION.md](docs/archive/VERIFICATION.md)
 - 📦 安装包（Windows 安装器 / Linux AppImage / macOS 签名公证 dmg）与无密钥
   自动更新流程见 [docs/RELEASE.md](docs/RELEASE.md)
-- ✅ `make ci` 全绿；uiroot 29 个 headless 测试（覆盖率 99.3%）；desktop/headless 装配集成测试；
-  Xvfb 真窗口冒烟通过
-- ⬜ 逐模块迁移（后端 20 + UI 16，见 `docs/research/kernel-split/05-ui-module-map.md`）：
-  `ui/session` 后续接管 `session.*` 注入点（轨迹、轨迹旁横条、页头横条、右栏、输入区）
+- ✅ `make ci` 全绿（含 web 三连与 `gen:verify`）；`internal/gateway` 15 条 `TestE2E*` 与两档引擎边界断言；
+  headless / serve / ACP 冒烟通过
+- ⬜ 后续能力扩展见 [CHANGELOG.md](CHANGELOG.md)；原生 UI 期的逐模块迁移计划已随 S5 作废
 
 ## 常用命令
 
 ```sh
 make ci            # build + vet + test
-make run           # 桌面产品（需要桌面会话）
+make run           # 默认产品 serve（网关 + 浏览器客户端；启动行打印带 token 的 URL）
 make run-headless  # headless 产品（无窗口，等 SIGINT/SIGTERM）
 make build ARGS=   # 仅构建
-make verify        # 全量验证（gofmt/build/vet/test/-race/regression/snapshot/smokes）
+make verify        # 全量验证（gofmt/build/vet/test/-race/两档边界/headless+ACP 冒烟）
 make release       # 本地按 VERSION 构建发布包（可选）
 ```
 
-注入点清单与灵活性规则：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §4/§5；
-已接线的模块清单：[docs/INJECTION-POINTS.md](docs/archive/INJECTION-POINTS.md)。
+进程结构与边界：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)；
+Web 客户端契约：[docs/WEB-CLIENT.md](docs/WEB-CLIENT.md)；
+原生期注入点清单（已退役，仅作证据）：[docs/archive/INJECTION-POINTS.md](docs/archive/INJECTION-POINTS.md)。

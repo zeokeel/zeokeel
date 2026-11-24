@@ -2,7 +2,12 @@
 
 > 目标：让 `internal/contracts` **不依赖 `github.com/egoist/mygo`**，成为可序列化、引擎无关的共享面。
 > 前置：本文档替代原先设想的"把 `BuildFunc` 抽象成引擎无关 builder"——实测那个方案更贵且没有必要。
-> 状态：待执行。基线 `master` 干净。
+> 状态：**已完成**（2026-11-24 核对）。`internal/contracts` 已无 `egoist/mygo` import
+> （`grep -rln "egoist/mygo" internal/contracts/*.go` 只剩注释里的说明文字）。
+> **实际收尾方式与本文的设想不同**：本文的路径是"把 mygo 贡献模型整体挪进
+> `internal/contracts/uinative/`，等 Stage 3 再删"；实际是原生 UI 随 `S5: retire the native UI`
+> 整体退役，`uinative` 子包与 `internal/{ui,uiroot,uikit}` 一起删除，因此"契约层变干净"这个目标
+> 达成得更彻底——没有子包要维护。本文已归档，正文保留为当时的分析与决策证据。
 
 ---
 

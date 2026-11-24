@@ -103,10 +103,15 @@ var KeyGoal = cordis.NewServiceKey[GoalService]("zeokeel/goal")
 2. 读 `GoalService.Goal(sessionID)`：`phase==active`、`activation==armed`、`rounds<max`。
 3. 防抢占：若 session 已在 running（UI 排队消息已抢先启动）或用户已 Stop，则跳过。
 4. `AdmitRound`（durable 自增）；`ErrGoalRoundLimit` → 已写 blocked(round-limit)，UI 提示。
-5. 以 origin=goal 启动新 run，prompt 带 goal 文本 + Round n/cap；用户输入优先（后续把排队迁移到后端）。
+5. 以 origin=goal 启动新 run，prompt 带 goal 文本 + Round n/cap；用户输入优先——排队已在后端（见 §4 末的完成注记）。
 6. 重启后 disarmed，不自动续跑；UI 提供「继续目标」。
 
-> 临时取舍：UI 的「排队发送」仍在 UI moduleState。驱动在 settle 后加短暂宽限并检查 running，尽量让用户排队消息先启动；把排队迁到后端作为紧随其后的 P1 任务（DSH inbox 语义）。
+> **已完成后端化（DSH inbox 语义）**：排队不再存在 UI 的 moduleState 里。契约是
+> `contracts/promptqueue.go`（`contracts.PromptQueue` / `contracts.QueuedPrompt`），实现是
+> `internal/modules/agent/promptqueue.go`：用户 prompt 进会话的 durable 收件箱，run settle 后先排空
+> 一条用户消息、再考虑 goal 自动续跑（人优先于 goal），重启后队列仍在。网关把它读成
+> `prompts:<sessionID>` 域（快照 + 差值 + `prompts.enqueue`/`prompts.remove`），客户端没有本地副本。
+> 因此原先"settle 后加短暂宽限并检查 running"的临时取舍已删除。
 
 ## 5. 上下文安全默认（agent 模块）
 

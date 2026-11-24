@@ -12,7 +12,7 @@
 | 项 | 值 |
 |---|---|
 | 传输 | **双传输**：状态面 WebSocket + JSON-RPC 2.0（换行分帧，与 ACP 同构）；单轮运行流 `POST /api/chat/run` → SSE（§4.6，2026-11-23 决策） |
-| 端点 | `ws://127.0.0.1:<port>/ws`，只读数据另走 `GET /blob/{id}` |
+| 端点 | `ws://127.0.0.1:<port>/ws`；其余 HTTP 端点见 §3.0，二进制附件走 `GET /api/blobs/{id}` |
 | 默认端口 | 9932，占用时顺延，实际端口写 `<data-dir>/gateway.json` |
 | 数据形状 | **快照（`<domain>.snapshot`）+ 差值（`<domain>.delta`）**；禁止每帧拉取 |
 | 版本 | `epoch`（网关实例随机 ID）+ 每域 `rev`（单调 uint64） |
@@ -38,7 +38,7 @@
 
 | # | 非目标 | 说明 |
 |---|---|---|
-| N1 | **不做公网暴露** | 第一版只 bind `127.0.0.1`。不监听 `0.0.0.0`、不做 TLS、不做反向代理场景（`docs/AGENTS.md` §0 的形态即此）。 |
+| N1 | **不做公网暴露** | 第一版只 bind `127.0.0.1`。不监听 `0.0.0.0`、不做 TLS、不做反向代理场景（`AGENTS.md` §0 的形态即此）。 |
 | N2 | **不做多用户** | 一个网关 = 一个 OS 用户 = 一份数据目录。没有用户表、没有 per-user 隔离；所有连接看到同一份状态。 |
 | N3 | **不做鉴权体系** | 没有账号/密码/角色/会话有效期管理。只有一枚**进程级随机 token**（§3），用于阻止"同机其它网页/进程顺手连上来"。 |
 | N4 | 不做插件市场/远程客户端/移动端 | 无 CORS 开放、无 `Access-Control-Allow-Origin: *`。 |
@@ -154,6 +154,30 @@ SIGINT/SIGTERM（signals_unix.go:11）
 
 ---
 
+## 2.6 HTTP 端点（状态面之外的全部入口）
+
+状态面是 WS；下面这些是**普通 HTTP**，全部要求 cookie 或 bearer（§3.2），并且都只 bind `127.0.0.1`。它们是 Web 客户端各屏的读模型与附件通道——此前文档只写了 WS 方法与一个不存在的 `/blob/{id}`，读模型端点完全没记（2026-11-24 补齐）。
+
+| 方法 | 路径 | 用途 | 实现 |
+|---|---|---|---|
+| POST | `/auth` | `#token=` fragment → HttpOnly cookie（§3.1） | `auth.go` |
+| GET | `/ws` | WebSocket 升级 = 状态面 | `server.go` |
+| POST | `/quit` | 托盘"退出" | `server.go` |
+| POST | `/api/chat/run` | 一轮对话的 SSE 流（§4.6），body 见 §5 的 `run` 条目 | `run.go` |
+| POST | `/api/blobs` | 上传附件（原始二进制体，`?name=`，≤10 MiB）→ `{id,mime,bytes,name}` | `blobs.go` |
+| GET | `/api/blobs/{id}` | 取回附件字节（**不支持 Range**） | `blobs.go` |
+| GET | `/api/capabilities` | 技能 + MCP 连接器（R23） | `read_models.go` |
+| GET | `/api/insights?range=7\|30` | 用量统计（R24） | `read_models.go` |
+| GET | `/api/models` | 模型目录（含每个模型的思考模式与可编辑字段） | `read_models.go` |
+| GET/POST/DELETE | `/api/automation`、`/api/automation/{id}`、`/api/automation/{id}/run` | 自动化任务 CRUD 与立即运行（R22） | `read_models.go` |
+| GET | `/api/sessions/{id}/memory` | 会话记忆（R5） | `read_models.go` |
+| GET | `/api/files/tree`、`/api/files/content`、`/api/files/diff` | 工作区文件/预览/差异（R8–R11） | `files.go` |
+| GET | `/` 及其余 GET | 内嵌客户端静态资源（未内嵌时 503） | `server.go` |
+
+**约定**：`/api/*` 未知路径先鉴权再 404（未鉴权的探测无法测绘端点面，`handleUnknownAPI`）。
+
+---
+
 ## 3. 安全模型
 
 四条约束，缺一不可。**防的是跨源网页与误连（N1/N3），不是同用户恶意进程。**
@@ -182,7 +206,7 @@ SIGINT/SIGTERM（signals_unix.go:11）
 
 补充：
 - `GET /`（静态资源）与 `GET /assets/*` **不要求** token（否则首屏无法加载 JS）；它们不含数据，且 C2 已经把 rebinding 挡住。
-- `GET /blob/{id}` **要求** token，且 `id` 是网关生成的随机 128-bit，不可猜、不可枚举目录。
+- `GET /api/blobs/{id}` **要求** token，且 `id` 是网关生成的随机 128-bit，不可猜、不可枚举目录。
 - 所有写方法都要求 cookie（`SameSite=Strict` 已阻断跨站表单/`fetch` 携带）。
 - 响应一律带 `X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、CSP `default-src 'self'`。
 
@@ -297,7 +321,7 @@ SIGINT/SIGTERM（signals_unix.go:11）
   "替身比生产宽松"：fake 手写了 `settings.set` 而真网关没有，171 条测试全绿、设置页永远只读。
 - **过期即红**：`TestContractIsUpToDate` 比对生成物与源码，不一致就指出具体方法/能力；
   生成是确定性的（键排序），**连跑两次 `git diff` 为空**。忘了重生成时的修法就是那一行命令。
-- `TestContractCoversEveryMethod` 断言 contract 的方法集合 == `SupportedMethods()`（37 个），
+- `TestContractCoversEveryMethod` 断言 contract 的方法集合 == `SupportedMethods()`（数量以测试为准，当前 48 个；这里刻意不写死数字），
   所以"新方法忘了进契约"也会红。
 - **`endpoints` 段**：非 JSON-RPC 的端点也在契约里。为什么单独一段而不是塞进 `params`：`params`
   以 JSON-RPC 方法名为键、且 `TestContractCoversEveryMethod` 把它的键集合钉死为
@@ -385,7 +409,7 @@ SIGINT/SIGTERM（signals_unix.go:11）
 |---|---|
 | 客户端消费慢（WS send buffer 满） | 丢弃该客户端的**中间** delta，只保留最后一帧（每个域合并成一个"这里已经到 rev N"的 delta），并补发一次全量快照；超阈值 → close(1013 try again later) |
 | 流式文本 | 服务端按 50–100ms 合并 `textAppend`（估算值，需实测调） |
-| 大 payload | 一律走 `/blob/{id}`，不走 WS（§6.4） |
+| 大 payload | 一律走 `/api/blobs/{id}`，不走 WS（§6.4） |
 
 ### 4.6 流式运行走 SSE（双传输）【决策 2026-11-23】
 
@@ -503,6 +527,12 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 
 #### 5.1.1 会话与消息（`chat`，`chat.go:554`）
 
+> **向前分页的终止语义**（2026-11-24 明确）：把上一页的 `oldestMessageId` 作为
+> `beforeMessageId` 再取一页，当游标正好是会话的第一条消息时，返回 **`messages: []` +
+> `truncated: false` + 无 `oldestMessageId`** —— 这就是"历史已到最前"。客户端以
+> **空 `messages` 停止翻页**，不要用 `truncated` 判断；非法/不属于该会话的游标是参数错误
+> （`invalid_params`），不是"从最新开始"。
+
 | 方法 | 参数 | 返回 | 幂等 | 契约 | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | `session.list.snapshot` | — | `{epoch,rev,sessions:[ChatSessionInfo]}` | Y | `ChatService.Sessions()` `chat.go:558` | ✅ 已实现 |
@@ -530,6 +560,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `prompts.enqueue` | `{sessionId,prompt}` | `{id}` | N | `promptqueue.go:36` | ✅ 已实现 |
 | `prompts.remove` | `{sessionId,id}` | `{}` | Y | `promptqueue.go:40` | ✅ 已实现 |
 | `prompts.subscribe` | `{sessionId, sinceRev}` | `{rev, resync:bool}` | Y | 域订阅（`prompts:<sessionId>`） | ✅ 已实现 |
+| `prompts.unsubscribe` | `{sessionId}` | `{}` | Y | 同上（取消；不调用则网关一直为该会话轮询重建域） | ✅ 已实现 |
 | `session.subscribe` | `{sessionId, sinceRev}` | `{rev, resync:bool}` | Y | `ChatService.Subscribe` `chat.go:577` | ✅ 已实现 |
 | `session.unsubscribe` | `{sessionId}` | `{}` | Y | 同上（取消） | ✅ 已实现 |
 | ↳ 通知 |  | `session.list.delta`、`session.delta` |  |  | — |
@@ -643,6 +674,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | --- | --- | --- | --- | --- | --- |
 | `context.snapshot` | `{sessionId}` | `{epoch,rev,sessionId,found,context?}` | Y | `ContextInspector.SessionContext` `contextinspect.go:256` | ✅ 已实现 |
 | `context.subscribe` | `{sessionId, sinceRev}` | `{epoch,rev,resync}` | Y | 同域机制（§6.5） | ✅ 已实现 |
+| `context.unsubscribe` | `{sessionId}` | `{}` | Y | 同上（取消） | ✅ 已实现 |
 | ↳ 通知 `context.delta` | `{sessionId, baseRev, rev, found, context?}` | — | — | **整段替换**（见下） | — |
 | `context.archive` | `{sessionId,seq}` | `{messages[],truncated}` | Y | `ContextArchiveService` `contextinspect.go:270+` | 延后 |
 
@@ -667,12 +699,13 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 > 会话轮询（`refreshWatchedPrefix("context:")`），无人看的会话零成本。客户端不能假设"运行中
 > 上下文读数实时刷新"——它在一次 run 期间会随 `model_call` 事件变化，但到达延迟上限是 2s。
 
-#### 5.1.8 任务板（taskboard，§6.3 降级）
+#### 5.1.9 任务板（taskboard，§6.3 降级）
 
 | 方法 / 通知 | 参数 | 返回 | 幂等 | 契约 | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | `tasks.snapshot` | `{sessionId?}` | `{epoch,rev,tasks:[Task]}` | Y | `TaskBoard.List` `tasks.go:43` / `SessionTaskBoard` `:69` | ✅ 已实现 |
 | `tasks.subscribe` | `{sessionId?, sinceRev}` | `{epoch,rev,resync}` | Y | 同域机制（§6.5） | ✅ 已实现 |
+| `tasks.unsubscribe` | `{sessionId?}` | `{}` | Y | 同上（取消；省略 `sessionId` = 进程级任务板） | ✅ 已实现 |
 | ↳ 通知 `tasks.delta` | `{baseRev, rev, added:[Task], removed:[id]}` | — | — | `diffTasks`（**按 id upsert**） | — |
 | `task.status` | `{id,status,sessionId?}` | `{epoch,rev,task}` | Y | `TaskBoard.SetStatus` `:45` | ✅ 已实现 |
 | `task.delete` | `{id,sessionId?}` | `{epoch,rev}` | Y | `TaskBoard.Delete` `:46` | ✅ 已实现 |
@@ -707,7 +740,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 > 无法把消息塞进正在跑的对话。这里的语义是**取消当前轮并立刻用新消息开一轮**——模型能看到
 > 已经产生的那半段回答和新的指令，且整个过程在网关内一次完成，客户端不会与 409 抢跑。
 
-#### 5.1.9 团队（`team`，`team.go:134`）
+#### 5.1.11 团队（`team`，`team.go:134`）
 
 浏览器客户端的团队屏。后端 `contracts.TeamService` 早已齐备，此前没有任何传输方法：
 成员列表、派发、发消息、等待、打断、关闭与活动流都取不到。快照由客户端在每次操作后刷新，
@@ -859,14 +892,17 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `session.list` | `[]ChatSessionInfo` | 任意会话变更（含标题/running/unread/pin/archive） | `chat.Subscribe` `session.go:612` |
 | `session:<id>` | 一个 `ChatSession`（含 messages） | 该会话任何变更 | 同上（过滤 sessionID） |
 | `approvals` | `{mode, pending[]}` | 待批集合变化 | `approvals.Subscribe` `approval.go:128` |
-| `automation` | `[]AutomationTask` | 任务集/运行完成 | `automation.Subscribe` `automation.go:163` |
-| `goal:<id>` | `Goal` 或 null | 目标变更 | `goal.Subscribe` `session.go:676` |
-| `toasts` | 无 rev（单向事件，不重放） | — | `notifier.SetHandler` `toasts.go:222` |
-| `settings` | `{rows}` | 任一行写入 | **无订阅**（§6.3 需新增） |
+| `ask` | 待回答的提问 | 提问/回答/取消 | `interaction`（真推送） |
+| `plan` | 计划审阅状态 | 进入/提交/退出计划 | `interaction`（真推送） |
+| `artifacts` | 产物列表（append-only） | 新产物 | `ArtifactPresenter`（真推送） |
+| `prompts:<id>` | `{prompts:[QueuedPrompt]}`（该会话的队列） | 入队/移除/队首派发 | **无订阅**（`PromptQueue` 无通知，轮询 + 写路径立即刷新） |
+| `settings` | `{rows}` | 任一行写入 | **无订阅**（§6.3：按 2s 轮询落地，延迟上限 2s） |
 | `tasks` / `tasks:<id>` | `{tasks:[Task]}`（进程级 / 按会话） | 看板内容真的变了（网关写路径立即、其余靠轮询） | **无订阅**（`tasks.go`，§6.3 降级，延迟上限 2s） |
 | `context:<id>` | `{found, context}`（折叠的上下文时间线） | 后端的 `Revision` 变了 | **无订阅**（`contextinspect.go`，只轮询已订阅会话，延迟上限 2s） |
 | `workspace.list` | `[]Workspace` + `currentId` | 增删改/切换 | **无订阅**（按需快照 + 客户端显式 invalidate） |
-| 其余（team/tasks/todo/jobs/plugins/insights/skills/memory） | 各自列表 | 网关在每次写方法成功后 +1；读模型本身无订阅 | 请求—响应 + 懒快照 |
+| 其余（team/jobs/plugins/insights/skills/memory/automation/goal） | 各自列表 | 网关在每次写方法成功后 +1；读模型本身无订阅 | 请求—响应 + 懒快照（automation 另有 `GET /api/automation` 读模型，见 §2.6） |
+
+> **没有** `messages`、`plans`（复数是笔误）与 `team` 域：消息走 `session:<id>` 的 ops，计划是单数 `plan`，团队走 `team.snapshot` 请求—响应 + 活动流。
 
 **维护规则（hub 单 goroutine 独占）**：
 
@@ -935,12 +971,12 @@ onServiceChange(domain):
 | **快照尾窗口** | `session.snapshot` 默认只回最近 **60 条消息** + `truncated:true` + `oldestMessageId` | 虚拟列表本来就只渲染视口；桌面 `ui.List` 也是虚拟化 |
 | **向前分页** | `session.messages.before {sessionId, beforeMessageId, limit≤100}` | 复用 `MessageOrdinalLocator`（`search.go:47-56`）作为稳定游标：`ordinal:N` 跨重启可用 |
 | **附件一律 blob 化** | 快照里 `Attachment` 只留 `{id,name,mime,bytes,blobId}`；`Data` 永不上快照 | `chat.go:414-422`：`Bytes` 字段本来就是为"未加载内容的恢复芯片"准备的，正好复用 |
-| **blob 端点** | `GET /blob/{id}`（Range 支持），`POST /blob` 上传（`message.send` 前） | `Attachment.DataURL()`（`chat.go:440-445`）已有 base64 先例，但 base64 膨胀 33%，二进制端点更省 |
+| **blob 端点** | `POST /api/blobs?name=<文件名>` 上传原始二进制体（≤10 MiB），`GET /api/blobs/{id}` 取回；实现不支持 Range（不要依赖分段读） | `Attachment.DataURL()`（`chat.go:440-445`）已有 base64 先例，但 base64 膨胀 33%，二进制端点更省 |
 | **blob 上限** | 单 blob ≤ 10 MiB（图片），与 ACP 的 `MaxPromptImageBytes` 对齐 | rig `acp/server/server.go:55`；`acp.go:43` 注释 |
 | **工具载荷裁剪** | `ToolCall.Arguments` 已"bounded in the transcript"（`contracts.go:116-118`）；`Summary` 保持后端边界 | 现成边界，不额外裁 |
 | **job 输出** | 64 KiB + 截断标记（`agentsurface.go:126-133`） | 现成 |
 | **归档** | 8 KiB/条、200 条、1 KiB/参数（`contextinspect.go:327-334`） | 现成 |
-| **压缩** | WS 开启 `permessage-deflate`；不得压缩 `/blob/*`（已压缩的图） | — |
+| **压缩** | WS 开启 `permessage-deflate`；不得压缩 `/api/blobs/*`（已压缩的图） | — |
 | **frame 上限** | 16 MiB 沿用（rig `acp/acp.go:26`）；超限 → `error 1025 backpressure` | — |
 
 **裁剪的铁律**：截断必须显式（`truncated:true` + 缺失量），不能静默。现有代码已经贯彻这条（`contextinspect.go:320-322` "never a silent loss"、`insights.go:214-219` "The UI must say so instead of presenting a complete total"），客户端照抄这个语义。
@@ -1199,17 +1235,12 @@ internal/gateway/
 | `Approvals.Request` 阻塞 | `internal/contracts/store.go:131-137` |
 | `PlanReview` 状态机 | `internal/contracts/interaction.go:65-81` |
 | `Notification.Action func()` | `internal/contracts/notify.go:35-41` |
-| 5 条订阅点（UI 侧） | `ui/session/session.go:612`、`ui/sidebar/sidebar.go:322`、`ui/approval/approval.go:128`、`ui/automation/automation.go:163`、`ui/toasts/toasts.go:222` |
-| `Post`/`Invalidate` 实现 | `internal/uiroot/runtime.go:51-61` |
-| `ui.Context` 闭包贡献模型 | `internal/contracts/contracts.go:11,17,25,34,44-57,77,156,165-166,311,314` |
-| 槽名常量表 | `internal/contracts/contracts.go:201-252` |
-| headless 只 provide 3 个宿主服务 | `internal/host/host.go:813-827` |
-| uiroot 提供另 12 个键 | `internal/host/host.go:828-865` |
-| 装配产品清单 / uiroot 服务按需声明 | `internal/assembly/assembly.go:31-38,133-141,163` |
-| headless 批准被钉 auto | `internal/assembly/assemblies/headless.json:22-27`（对照 `desktop.json:22-27`） |
-| 单实例策略固化为 true | `internal/host/singleinstance.go:9-22` |
-| 单实例锁依赖 GUI 事件循环 | `internal/host/host.go:411-420` |
-| 托盘实现（357 行，可整段复用） | `internal/host/tray.go:1-357` |
+| 订阅点（五个后端源） | `contracts.ChatService.Subscribe`、`Approvals.Subscribe`、`SettingsService`（轮询）、`WorkspaceService.List/Current`（轮询）、`ContextInspector.SessionContext`（轮询） |
+| 域快照/差值/合并 | `internal/gateway/domains.go`、`internal/gateway/delta.go`、`internal/gateway/hub.go` |
+| 装配产品清单 | `internal/assembly/assembly.go:48-70`（`Products()` / `AllProducts()`） |
+| headless 批准被钉 auto | `internal/assembly/assemblies/headless.json` |
+| 单实例（数据目录 flock） | `internal/gateway/lock_unix.go` / `lock_windows.go`（原生的 `singleinstance.go` 已随 S5 删除） |
+| 托盘实现（尽力而为） | `internal/host/tray.go`、`tray_shell.go` |
 | 数据目录解析 | `internal/host/host.go:145-153` |
 | 日志路径 | `internal/host/logger.go:45-56` |
 | 终止信号 | `internal/host/signals_unix.go:11` |
