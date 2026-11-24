@@ -63,6 +63,9 @@ func (g *Gateway) hasConditionalCapability(when string) bool {
 	case "KeyContext":
 		inspector, ok := g.root.Get(contracts.KeyContext)
 		return ok && inspector != nil
+	case "KeyTeam":
+		team, ok := g.root.Get(contracts.KeyTeam)
+		return ok && team != nil
 	case "KeyTaskBoard":
 		board, ok := g.root.Get(contracts.KeyTaskBoard)
 		return ok && board != nil
@@ -292,6 +295,27 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		},
 		"task.status": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.taskSetStatus(ctx, request.Params)
+		},
+		"team.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.teamSnapshot()
+		},
+		"team.spawn": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.teamSpawn(ctx, request.Params)
+		},
+		"team.send": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.teamSend(ctx, request.Params)
+		},
+		"team.wait": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.teamWait(ctx, request.Params)
+		},
+		"team.interrupt": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.teamInterrupt(request.Params)
+		},
+		"team.close": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.teamClose(request.Params)
+		},
+		"team.activity": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.teamActivity(request.Params)
 		},
 		"task.delete": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.taskDelete(ctx, request.Params)

@@ -695,6 +695,22 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 > **状态语汇**取契约常量（`pending` / `in_progress` / `completed`），未知值 → `invalid_params`
 > （不是静默 no-op）。`task.delete` 是"取消"，`task.status` 回 `pending` 是"停止"。
 
+#### 5.1.9 团队（`team`，`team.go:134`）
+
+浏览器客户端的团队屏。后端 `contracts.TeamService` 早已齐备，此前没有任何传输方法：
+成员列表、派发、发消息、等待、打断、关闭与活动流都取不到。快照由客户端在每次操作后刷新，
+并在团队屏打开期间轮询（服务没有变更订阅钩子）。
+
+| 方法 | 参数 | 返回 | 幂等 | 契约 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| `team.snapshot` | — | `{members:[TeamMember], activities:[TeamActivity]}` | Y | `TeamService.Members()` `team.go:138` | ✅ 已实现 |
+| `team.spawn` | `{name, prompt, model?}` | `{member}` | N | `:140` | ✅ 已实现 |
+| `team.send` | `{id, message, async?}` | `{answer}` / `{ok}` | N | `SendAsync` `:142` / `Send` `:144` | ✅ 已实现 |
+| `team.wait` | `{id}` | `{answer}` | Y | `:146` | ✅ 已实现 |
+| `team.interrupt` | `{id}` | `{ok}` | Y | `:148` | ✅ 已实现 |
+| `team.close` | `{id}` | `{ok}` | Y | `:150` | ✅ 已实现 |
+| `team.activity` | `{limit?}` | `{items:[TeamActivity]}` | Y | `TeamActivityLister` `team.go:127` | ✅ 已实现 |
+
 ### 5.2 T2：对齐桌面所需（22 键 / 约 48 方法）
 
 #### 5.2.1 编排（team / childagents / taskboard / todo）

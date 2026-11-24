@@ -74,6 +74,13 @@ var contractParams = map[string]any{
 	"tasks.subscribe":         tasksSubscribeParams{},
 	"task.status":             taskStatusParams{},
 	"task.delete":             taskDeleteParams{},
+	"team.snapshot":           struct{}{},
+	"team.spawn":              teamSpawnParams{},
+	"team.send":               teamSendParams{},
+	"team.wait":               teamIDParams{},
+	"team.interrupt":          teamIDParams{},
+	"team.close":              teamIDParams{},
+	"team.activity":           teamActivityParams{},
 }
 
 // conditionalCapability is one capability that exists only when the assembly
@@ -92,6 +99,7 @@ var conditionalCapabilities = []conditionalCapability{
 	{Name: "tasks", When: "KeyTaskBoard"},
 	{Name: "regenerate", When: "SessionRegenerator"},
 	{Name: "edit", When: "SessionEditor"},
+	{Name: "team", When: "KeyTeam"},
 }
 
 // contractParamSpec is one method's parameter contract.

@@ -477,3 +477,246 @@ func automationTaskDTOOf(task contracts.AutomationTask) automationTaskDTO {
 	}
 	return dto
 }
+
+// --- team (T2) ---------------------------------------------------------------
+//
+// The browser's team screen: spawn a teammate, send it work, interrupt or close it,
+// read the activity feed, and open one member's detail. The backend service existed
+// (contracts.KeyTeam) with no transport at all — the screen could only show its empty
+// state. These methods are the missing half; the client refreshes its snapshot after
+// every action and polls while the screen is open (there is no team change hook in
+// the service to subscribe to).
+
+// teamMemberDTO is one teammate row.
+type teamMemberDTO struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Status   string `json:"status"`
+	RunState string `json:"runState"`
+	Model    string `json:"model,omitempty"`
+	Created  string `json:"created,omitempty"`
+	Last     string `json:"last,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+// teamActivityDTO is one activity feed row.
+type teamActivityDTO struct {
+	ID       string `json:"id"`
+	MemberID string `json:"memberId,omitempty"`
+	Kind     string `json:"kind"`
+	Text     string `json:"text,omitempty"`
+	At       string `json:"at,omitempty"`
+}
+
+type teamSnapshotDTO struct {
+	Members    []teamMemberDTO   `json:"members"`
+	Activities []teamActivityDTO `json:"activities"`
+}
+
+// teamSpawnParams is team.spawn's parameter contract.
+type teamSpawnParams struct {
+	Name   string `json:"name"`
+	Prompt string `json:"prompt"`
+	Model  string `json:"model,omitempty"`
+}
+
+// teamSendParams is team.send's parameter contract.
+type teamSendParams struct {
+	ID      string `json:"id"`
+	Message string `json:"message"`
+	Async   bool   `json:"async,omitempty"`
+}
+
+// teamIDParams is the parameter contract of the methods that take only an id.
+type teamIDParams struct {
+	ID string `json:"id"`
+}
+
+// teamActivityParams is team.activity's parameter contract.
+type teamActivityParams struct {
+	Limit int `json:"limit,omitempty"`
+}
+
+// teamService returns the team backend or a capability error.
+func (g *Gateway) teamService() (contracts.TeamService, *protocolError) {
+	service, ok := g.root.Get(contracts.KeyTeam)
+	if !ok || service == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "team unavailable")
+	}
+	return service, nil
+}
+
+// teamSnapshot serves team.snapshot: members plus the activity feed.
+func (g *Gateway) teamSnapshot() (any, *protocolError) {
+	service, problem := g.teamService()
+	if problem != nil {
+		return nil, problem
+	}
+	payload := teamSnapshotDTO{Members: []teamMemberDTO{}, Activities: []teamActivityDTO{}}
+	for _, member := range service.Members() {
+		row := teamMemberDTO{
+			ID: member.ID, Name: member.Name, Status: member.Status,
+			RunState: member.RunState, Model: member.Model, Last: member.Last, Error: member.Error,
+		}
+		if !member.Created.IsZero() {
+			row.Created = member.Created.UTC().Format(time.RFC3339)
+		}
+		payload.Members = append(payload.Members, row)
+	}
+	if lister, ok := service.(contracts.TeamActivityLister); ok {
+		for _, activity := range lister.TeamActivities() {
+			row := teamActivityDTO{ID: activity.ID, MemberID: activity.MemberID, Kind: activity.Kind, Text: activity.Text}
+			if !activity.Time.IsZero() {
+				row.At = activity.Time.UTC().Format(time.RFC3339)
+			}
+			payload.Activities = append(payload.Activities, row)
+		}
+	}
+	return payload, nil
+}
+
+// teamSpawn serves team.spawn.
+func (g *Gateway) teamSpawn(ctx context.Context, params json.RawMessage) (any, *protocolError) {
+	service, problem := g.teamService()
+	if problem != nil {
+		return nil, problem
+	}
+	var body teamSpawnParams
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(body.Name) == "" || strings.TrimSpace(body.Prompt) == "" {
+		return nil, errInvalidParams("name", "name and prompt are required")
+	}
+	member, err := service.Spawn(ctx, body.Name, body.Prompt, body.Model)
+	if err != nil {
+		return nil, internalError(err)
+	}
+	return map[string]any{"member": teamMemberDTOOf(member)}, nil
+}
+
+// teamSend serves team.send (async queues the message, sync waits for the answer).
+func (g *Gateway) teamSend(ctx context.Context, params json.RawMessage) (any, *protocolError) {
+	service, problem := g.teamService()
+	if problem != nil {
+		return nil, problem
+	}
+	var body teamSendParams
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(body.ID) == "" || strings.TrimSpace(body.Message) == "" {
+		return nil, errInvalidParams("id", "id and message are required")
+	}
+	if body.Async {
+		if err := service.SendAsync(body.ID, body.Message); err != nil {
+			return nil, internalError(err)
+		}
+		return map[string]any{"ok": true}, nil
+	}
+	answer, err := service.Send(ctx, body.ID, body.Message)
+	if err != nil {
+		return nil, internalError(err)
+	}
+	return map[string]any{"answer": answer}, nil
+}
+
+// teamWait serves team.wait: block until the member's current run finishes.
+func (g *Gateway) teamWait(ctx context.Context, params json.RawMessage) (any, *protocolError) {
+	service, problem := g.teamService()
+	if problem != nil {
+		return nil, problem
+	}
+	var body teamIDParams
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(body.ID) == "" {
+		return nil, errInvalidParams("id", "is required")
+	}
+	answer, err := service.Wait(ctx, body.ID)
+	if err != nil {
+		return nil, internalError(err)
+	}
+	return map[string]any{"answer": answer}, nil
+}
+
+// teamInterrupt serves team.interrupt.
+func (g *Gateway) teamInterrupt(params json.RawMessage) (any, *protocolError) {
+	service, problem := g.teamService()
+	if problem != nil {
+		return nil, problem
+	}
+	var body teamIDParams
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(body.ID) == "" {
+		return nil, errInvalidParams("id", "is required")
+	}
+	if err := service.Interrupt(body.ID); err != nil {
+		return nil, internalError(err)
+	}
+	return map[string]any{"ok": true}, nil
+}
+
+// teamClose serves team.close.
+func (g *Gateway) teamClose(params json.RawMessage) (any, *protocolError) {
+	service, problem := g.teamService()
+	if problem != nil {
+		return nil, problem
+	}
+	var body teamIDParams
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(body.ID) == "" {
+		return nil, errInvalidParams("id", "is required")
+	}
+	if err := service.Close(body.ID); err != nil {
+		return nil, internalError(err)
+	}
+	return map[string]any{"ok": true}, nil
+}
+
+// teamActivity serves team.activity: the newest feed rows, oldest first.
+func (g *Gateway) teamActivity(params json.RawMessage) (any, *protocolError) {
+	service, problem := g.teamService()
+	if problem != nil {
+		return nil, problem
+	}
+	var body teamActivityParams
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	payload := map[string]any{"items": []teamActivityDTO{}}
+	lister, ok := service.(contracts.TeamActivityLister)
+	if !ok {
+		return payload, nil
+	}
+	rows := []teamActivityDTO{}
+	for _, activity := range lister.TeamActivities() {
+		row := teamActivityDTO{ID: activity.ID, MemberID: activity.MemberID, Kind: activity.Kind, Text: activity.Text}
+		if !activity.Time.IsZero() {
+			row.At = activity.Time.UTC().Format(time.RFC3339)
+		}
+		rows = append(rows, row)
+	}
+	if body.Limit > 0 && len(rows) > body.Limit {
+		rows = rows[len(rows)-body.Limit:]
+	}
+	payload["items"] = rows
+	return payload, nil
+}
+
+// teamMemberDTOOf maps one member.
+func teamMemberDTOOf(member contracts.TeamMember) teamMemberDTO {
+	row := teamMemberDTO{
+		ID: member.ID, Name: member.Name, Status: member.Status,
+		RunState: member.RunState, Model: member.Model, Last: member.Last, Error: member.Error,
+	}
+	if !member.Created.IsZero() {
+		row.Created = member.Created.UTC().Format(time.RFC3339)
+	}
+	return row
+}

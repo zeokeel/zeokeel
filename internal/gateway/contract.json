@@ -228,6 +228,52 @@
         "sinceRev"
       ]
     },
+    "team.activity": {
+      "required": [],
+      "optional": [
+        "limit"
+      ]
+    },
+    "team.close": {
+      "required": [
+        "id"
+      ],
+      "optional": []
+    },
+    "team.interrupt": {
+      "required": [
+        "id"
+      ],
+      "optional": []
+    },
+    "team.send": {
+      "required": [
+        "id",
+        "message"
+      ],
+      "optional": [
+        "async"
+      ]
+    },
+    "team.snapshot": {
+      "required": [],
+      "optional": []
+    },
+    "team.spawn": {
+      "required": [
+        "name",
+        "prompt"
+      ],
+      "optional": [
+        "model"
+      ]
+    },
+    "team.wait": {
+      "required": [
+        "id"
+      ],
+      "optional": []
+    },
     "workspace.list.snapshot": {
       "required": [],
       "optional": []
@@ -316,6 +362,10 @@
       {
         "name": "tasks",
         "when": "KeyTaskBoard"
+      },
+      {
+        "name": "team",
+        "when": "KeyTeam"
       }
     ]
   }
