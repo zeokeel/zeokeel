@@ -41,6 +41,12 @@ const (
 	// runCoalesceInterval is how long text/reasoning deltas are merged before a
 	// frame goes out (§4.6 backpressure: render-side throttling starts here).
 	runCoalesceInterval = 60 * time.Millisecond
+	// runHeartbeatInterval is how long a silent stream may stay silent before a
+	// comment frame keeps it alive. A subagent delegation or a slow tool can go
+	// minutes without an event, and the browser client treats a dead stream — not a
+	// slow one — as a failure; without this it aborted healthy runs at its 60s
+	// stream timeout and showed nothing but `StreamTimeoutError`.
+	runHeartbeatIntervalDefault = 15 * time.Second
 	// runLogEvents and runLogBytes bound one finished run's replay log.
 	runLogEvents = 4096
 	runLogBytes  = 4 << 20
@@ -49,6 +55,10 @@ const (
 	// maxRunRequestBytes bounds the POST body.
 	maxRunRequestBytes = 1 << 20
 )
+
+// runHeartbeatInterval is the live value; tests shrink it. It is a variable and
+// not a constant so a test can prove the heartbeat without waiting 15 seconds.
+var runHeartbeatInterval = runHeartbeatIntervalDefault
 
 // SSE event names.
 const (
@@ -419,6 +429,7 @@ func (g *Gateway) streamRun(w http.ResponseWriter, r *http.Request, stream *runS
 	_ = replay
 
 	cursor := 0
+	lastWrite := time.Now()
 	var pendingText, pendingReasoning strings.Builder
 	flushText := func() {
 		if pendingText.Len() > 0 {
@@ -434,10 +445,13 @@ func (g *Gateway) streamRun(w http.ResponseWriter, r *http.Request, stream *runS
 				"text":   pendingReasoning.String(),
 			}})
 			pendingReasoning.Reset()
+			lastWrite = time.Now()
 		}
 	}
 	ticker := time.NewTicker(runCoalesceInterval)
 	defer ticker.Stop()
+	heartbeat := time.NewTicker(runHeartbeatInterval)
+	defer heartbeat.Stop()
 	for {
 		events, next, dropped, finished := stream.eventsFrom(cursor)
 		if dropped {
@@ -464,6 +478,7 @@ func (g *Gateway) streamRun(w http.ResponseWriter, r *http.Request, stream *runS
 				// against the text they follow matters.
 				flushText()
 				writeSSE(w, flusher, event)
+				lastWrite = time.Now()
 				if event.terminal() {
 					return
 				}
@@ -477,6 +492,14 @@ func (g *Gateway) streamRun(w http.ResponseWriter, r *http.Request, stream *runS
 		case <-stream.wake:
 		case <-ticker.C:
 			flushText()
+		case <-heartbeat.C:
+			// SSE comment: the browser's stream timer resets on any byte, and a
+			// comment is not an event, so it cannot be mistaken for run output.
+			if time.Since(lastWrite) >= runHeartbeatInterval {
+				fmt.Fprint(w, ": ping\n\n")
+				flusher.Flush()
+				lastWrite = time.Now()
+			}
 		case <-r.Context().Done():
 			// The connection dropped. The run keeps going (this is not a stop
 			// request, §4.6); the client resyncs from the WS session domain.
