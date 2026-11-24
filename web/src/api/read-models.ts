@@ -20,12 +20,32 @@ export interface Capabilities {
   connectors: ConnectorSummary[];
 }
 
+export interface AutomationRun {
+  startedAt?: string;
+  completedAt?: string;
+  status: string;
+  error?: string;
+  summary?: string;
+  sessionId?: string;
+}
+
 export interface AutomationTask {
   id: string;
   title: string;
+  prompt: string;
   schedule: string;
   enabled: boolean;
   lastRun?: string;
+  nextRun?: string;
+  lastError?: string;
+  runHistory: AutomationRun[];
+}
+
+export interface AutomationInput {
+  title: string;
+  prompt: string;
+  schedule: string;
+  enabled?: boolean;
 }
 
 export interface InsightsTotals {
@@ -39,8 +59,9 @@ export interface InsightsTotals {
 export interface Insights {
   range: number;
   totals: InsightsTotals;
-  byDay: Array<{ day: string; turns: number }>;
-  byTool: Array<{ tool: string; calls: number }>;
+  byDay: Array<{ day: string; turns: number; toolCalls: number }>;
+  /** The backend aggregates by model; it tracks no per-tool split. */
+  byModel: Array<{ model: string; calls: number; totalTokens: number }>;
 }
 
 async function readJson<T>(res: Response, what: string): Promise<T> {
@@ -59,13 +80,42 @@ export async function loadAutomation(): Promise<AutomationTask[]> {
   return body.tasks;
 }
 
-export async function setAutomationEnabled(id: string, enabled: boolean): Promise<void> {
+export async function updateAutomation(
+  id: string,
+  patch: Partial<AutomationInput>,
+): Promise<AutomationTask> {
   const res = await fetch(`/api/automation/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ enabled }),
+    body: JSON.stringify(patch),
   });
-  await readJson<{ task: AutomationTask }>(res, 'automation update');
+  const body = await readJson<{ task: AutomationTask }>(res, 'automation update');
+  return body.task;
+}
+
+export async function createAutomation(input: AutomationInput): Promise<AutomationTask> {
+  const res = await fetch('/api/automation', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<{ task: AutomationTask }>(res, 'automation create');
+  return body.task;
+}
+
+export async function deleteAutomation(id: string): Promise<void> {
+  const res = await fetch(`/api/automation/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  await readJson<{ ok: boolean }>(res, 'automation delete');
+}
+
+export async function runAutomationNow(id: string): Promise<void> {
+  const res = await fetch(`/api/automation/${encodeURIComponent(id)}/run`, { method: 'POST' });
+  await readJson<{ ok: boolean }>(res, 'automation run');
+}
+
+/** Kept for the switch: it is an update of one field. */
+export async function setAutomationEnabled(id: string, enabled: boolean): Promise<void> {
+  await updateAutomation(id, { enabled });
 }
 
 export async function loadInsights(range: 7 | 30): Promise<Insights> {
@@ -73,4 +123,21 @@ export async function loadInsights(range: 7 | 30): Promise<Insights> {
     headers: { Accept: 'application/json' },
   });
   return readJson<Insights>(res, 'insights');
+}
+/** One row of the session Memory tab. The store is workspace-scoped and this build
+ * has one fixed workspace, so the tab shows that whole memory. */
+export interface MemoryEntry {
+  id: string;
+  title: string;
+  summary?: string;
+  type?: string;
+  updatedAt?: string;
+}
+
+export async function loadMemory(sessionId: string): Promise<MemoryEntry[]> {
+  const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/memory`, {
+    headers: { Accept: 'application/json' },
+  });
+  const body = await readJson<{ entries: MemoryEntry[] }>(res, 'session memory');
+  return body.entries;
 }

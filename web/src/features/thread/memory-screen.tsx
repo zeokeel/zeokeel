@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Empty, Spin, Typography } from 'antd';
 import { useParams } from 'react-router';
-import { loadMemory, type MemoryEntry } from '@/api/mock-surfaces';
+import { loadMemory, type MemoryEntry } from '@/api/read-models';
 import { useT } from '@/i18n';
 
 /** R5 · Memory — what this session remembered. Read-only in this milestone. */
@@ -47,10 +47,15 @@ export function MemoryScreen() {
         <ul className="zk-memory">
           {entries.map((entry) => (
             <li key={entry.id} className="zk-memory__row">
-              <Typography.Text>{entry.text}</Typography.Text>
-              {entry.createdAt ? (
-                <Typography.Text type="secondary">{entry.createdAt}</Typography.Text>
+              <Typography.Text strong>{entry.title}</Typography.Text>
+              {entry.summary ? (
+                <Typography.Text type="secondary">{entry.summary}</Typography.Text>
               ) : null}
+              <Typography.Text type="secondary" className="zk-memory__meta">
+                {[entry.type, entry.updatedAt ? new Date(entry.updatedAt).toLocaleString() : '']
+                  .filter(Boolean)
+                  .join(' · ')}
+              </Typography.Text>
             </li>
           ))}
         </ul>

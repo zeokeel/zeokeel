@@ -93,16 +93,17 @@ export function InsightsScreen() {
                 ]}
               />
             </section>
-            <section aria-label={t('screen.insights.byTool')}>
-              <Typography.Text strong>{t('screen.insights.byTool')}</Typography.Text>
+            <section aria-label={t('screen.insights.byModel')}>
+              <Typography.Text strong>{t('screen.insights.byModel')}</Typography.Text>
               <Table
                 size="small"
-                rowKey="tool"
+                rowKey="model"
                 pagination={false}
-                dataSource={data.byTool}
+                dataSource={data.byModel}
                 columns={[
-                  { title: t('screen.insights.col.tool'), dataIndex: 'tool' },
+                  { title: t('screen.insights.col.model'), dataIndex: 'model' },
                   { title: t('screen.insights.col.calls'), dataIndex: 'calls', width: 100 },
+                  { title: t('screen.insights.col.tokens'), dataIndex: 'totalTokens', width: 120 },
                 ]}
               />
             </section>

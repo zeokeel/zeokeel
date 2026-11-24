@@ -11,12 +11,6 @@
  * when the last surface here has a real method.
  */
 
-export interface MemoryEntry {
-  id: string;
-  text: string;
-  createdAt?: string;
-}
-
 export interface ChildSession {
   id: string;
   parentId: string;
@@ -27,14 +21,6 @@ export interface ChildSession {
 async function readJson<T>(res: Response, what: string): Promise<T> {
   if (!res.ok) throw new Error(`${what} failed: ${res.status} ${res.statusText}`);
   return (await res.json()) as T;
-}
-
-export async function loadMemory(sessionId: string): Promise<MemoryEntry[]> {
-  const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/memory`, {
-    headers: { Accept: 'application/json' },
-  });
-  const body = await readJson<{ entries: MemoryEntry[] }>(res, 'session memory');
-  return body.entries;
 }
 
 export async function loadChildSession(
