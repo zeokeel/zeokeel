@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
 // newSettingsDir returns a temporary data directory and the settings file path
@@ -121,13 +123,45 @@ func TestSettingsWriteIsAtomic(t *testing.T) {
 	}
 }
 
-func TestSettingsRejectsCorruptFile(t *testing.T) {
+// TestSettingsQuarantinesCorruptFile: a malformed settings file must not make
+// every product refuse to start (AUDIT-2026-11-24 B-4). The damaged copy is kept
+// as evidence under .bad-<timestamp>, the process starts on defaults, and the
+// next start reads the (absent) clean path normally.
+func TestSettingsQuarantinesCorruptFile(t *testing.T) {
 	dir, path := newSettingsDir(t)
 	if err := os.WriteFile(path, []byte("{ this is not json"), 0o600); err != nil {
 		t.Fatalf("write corrupt settings: %v", err)
 	}
-	if _, err := NewSettings(dir); err == nil {
-		t.Fatal("NewSettings accepted a corrupt settings file")
+	settings, err := NewSettings(dir)
+	if err != nil {
+		t.Fatalf("NewSettings on a corrupt file: %v", err)
+	}
+	if got := settings.Get(contracts.SettingAutostart, "default"); got != "default" {
+		t.Fatalf("recovered settings Get = %q, want the default", got)
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Fatalf("the corrupt file is still in place: %v", statErr)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	quarantined := 0
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), SettingsFileName+".bad-") {
+			quarantined++
+		}
+	}
+	if quarantined != 1 {
+		t.Fatalf("quarantined copies = %d, want 1 (entries %v)", quarantined, entries)
+	}
+	// The recovered settings are usable and durable.
+	if err := settings.Set("k", "v"); err != nil {
+		t.Fatalf("Set after recovery: %v", err)
+	}
+	reloaded, err := NewSettings(dir)
+	if err != nil || reloaded.Get("k", "") != "v" {
+		t.Fatalf("reload after recovery = %v/%q", err, reloaded.Get("k", ""))
 	}
 }
 

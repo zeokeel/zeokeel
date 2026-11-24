@@ -23,7 +23,7 @@ var proxyEnvironmentKeys = []string{
 }
 
 var (
-	// proxyApplied records the keys/valeurs this process set, so disabling the
+	// proxyApplied records the keys/values this process set, so disabling the
 	// setting can remove exactly them and nothing else.
 	proxyAppliedMu sync.Mutex
 	proxyApplied   = map[string]string{}

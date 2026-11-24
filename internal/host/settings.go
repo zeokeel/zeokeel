@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -29,6 +30,12 @@ type Settings struct {
 
 	mu     sync.Mutex
 	values map[string]string
+	// onAutostart applies contracts.SettingAutostart when it changes (the host
+	// installs it; see WatchAutostart).
+	onAutostart func()
+	// logf reports recovery actions (a quarantined settings file); the host
+	// logger is installed by SetLogger, a nil keeps it silent.
+	logf func(format string, args ...any)
 }
 
 // compile-time check: the process host provides this as contracts.KeySettings.
@@ -45,13 +52,23 @@ func NewSettings(dataDir string) (*Settings, error) {
 	settings := &Settings{
 		path:   filepath.Join(dataDir, SettingsFileName),
 		values: make(map[string]string),
+		logf:   func(string, ...any) {},
 	}
 	data, err := os.ReadFile(settings.path)
 	switch {
 	case err == nil:
 		var values map[string]string
 		if err := json.Unmarshal(data, &values); err != nil {
-			return nil, fmt.Errorf("host: parse settings %q: %w", settings.path, err)
+			// A malformed settings file used to make every product refuse to start
+			// with no way out but deleting the file by hand (AUDIT-2026-11-24 B-4).
+			// Keep the evidence, start on defaults, and say so: the user's rows are
+			// still on disk under the .bad name.
+			badPath, quarantineErr := quarantineSettings(settings.path)
+			if quarantineErr != nil {
+				return nil, fmt.Errorf("host: parse settings %q: %w (and it could not be set aside: %v)", settings.path, err, quarantineErr)
+			}
+			settings.logf("host: settings %q is malformed (%v); moved it to %q and started with defaults", settings.path, err, badPath)
+			return settings, nil
 		}
 		if values != nil {
 			settings.values = values
@@ -62,6 +79,38 @@ func NewSettings(dataDir string) (*Settings, error) {
 		return nil, fmt.Errorf("host: read settings %q: %w", settings.path, err)
 	}
 	return settings, nil
+}
+
+// quarantineSettings renames a settings file that cannot be parsed to
+// "<path>.bad-<unix time>", so the next start is clean and the damaged copy is
+// kept as evidence.
+func quarantineSettings(path string) (string, error) {
+	target := fmt.Sprintf("%s.bad-%d", path, time.Now().Unix())
+	if err := os.Rename(path, target); err != nil {
+		return "", err
+	}
+	return target, nil
+}
+
+// SetLogger installs the host logger used for recovery notices.
+func (s *Settings) SetLogger(logger *Logger) {
+	if s == nil || logger == nil {
+		return
+	}
+	s.mu.Lock()
+	s.logf = logger.Printf
+	s.mu.Unlock()
+}
+
+// WatchAutostart installs the callback that applies SettingAutostart when it
+// changes. The host sets it after loading; nil means "no side effect".
+func (s *Settings) WatchAutostart(hook func()) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.onAutostart = hook
+	s.mu.Unlock()
 }
 
 // Path returns the backing file path (diagnostics and tests).
@@ -94,8 +143,8 @@ func (s *Settings) Set(key, value string) error {
 		return errors.New("host: settings key is required")
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if current, ok := s.values[key]; ok && current == value {
+		s.mu.Unlock()
 		return nil
 	}
 	next := make(map[string]string, len(s.values)+1)
@@ -104,9 +153,18 @@ func (s *Settings) Set(key, value string) error {
 	}
 	next[key] = value
 	if err := writeJSONAtomic(s.path, next); err != nil {
+		s.mu.Unlock()
 		return err
 	}
 	s.values = next
+	hook := s.onAutostart
+	s.mu.Unlock()
+	// Toggling "launch at login" has to take effect now, not at the next start:
+	// the value was written and nothing applied it (AUDIT-2026-11-24 A-7).
+	// Outside the lock, best effort, and never failing a write that landed.
+	if key == contracts.SettingAutostart && hook != nil {
+		hook()
+	}
 	return nil
 }
 

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	goruntime "runtime"
+	"time"
 
 	"github.com/egoist/mygo"
 
@@ -92,6 +93,11 @@ func trayEnabled(noTray bool) bool {
 	return true
 }
 
+// trayRefreshInterval is how often the tray re-reads the run/approval counters.
+// A ticker beats "notify on every change": the counters live in the backend and
+// the tray is information, not an action.
+const trayRefreshInterval = 2 * time.Second
+
 // startTrayShell runs the tray on the CALLER's goroutine, which must be the
 // process main goroutine (mygo requires it). It blocks until the app quits or
 // the event loop fails to start.
@@ -100,13 +106,13 @@ func trayEnabled(noTray bool) bool {
 // language and close-to-tray rows (the latter now only affects the menu label
 // the desktop used to change).
 func startTrayShell(ctx context.Context, dataDir string, settings *Settings,
-	status func() (running, approvals int), english func() bool, quit func(), logger contracts.Logger) error {
+	status func() (running, approvals int), english func() bool, logger contracts.Logger) error {
 	if logger == nil {
 		logger = discardLogger{}
 	}
-	if quit == nil {
-		quit = func() { mygo.App.Quit() }
-	}
+	// There is no quit parameter any more: it was accepted, defaulted and never
+	// called (the tray's own quit item ends the mygo loop, and the caller stops
+	// the gateway when this function returns).
 	window := &BrowserWindow{Open: func() error { return openClientURL(dataDir) }}
 	actions := trayActions{
 		English: english,
@@ -114,10 +120,32 @@ func startTrayShell(ctx context.Context, dataDir string, settings *Settings,
 	}
 	// The tray needs a ready application, and only the main thread may create it.
 	mygo.App.WhenReady(func() {
-		if _, err := setupTrayWithActions(window, nil, func() bool {
+		tray, refresh, err := setupTrayWithActivity(window, settings, func() bool {
 			return ctx.Err() == nil
-		}, actions, logger); err != nil {
+		}, actions, newMygoTray, logger)
+		if err != nil {
 			logger.Printf("%s: tray unavailable: %v", appName, err)
+		} else {
+			// The tooltip and the "running / waiting for approval" menu line follow
+			// the live counters. The refresh closure used to be discarded, so the
+			// tray was frozen with the counts it had at creation — usually 0/0
+			// (AUDIT-2026-11-24 A-7).
+			refresh()
+			go func() {
+				ticker := time.NewTicker(trayRefreshInterval)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						// The tray must be updated from the event loop's thread; mygo's
+						// tray posts the change itself, and a fake handle is a no-op.
+						refresh()
+					}
+				}
+			}()
+			_ = tray
 		}
 		// The global hotkey is a tray feature: pressing it is "open the client".
 		// Best effort, exactly like the tray itself.

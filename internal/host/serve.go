@@ -50,6 +50,17 @@ func runServe(ctx context.Context, opts Options, out io.Writer) error {
 	if err := applyProxySettings(settings); err != nil {
 		logger.Printf("%s: proxy settings: %v", appName, err)
 	}
+	// The autostart entry follows the stored setting; without this call the
+	// settings switch wrote a value nothing ever read (AUDIT-2026-11-24 A-7).
+	if err := syncAutostart(settings, logger); err != nil {
+		logger.Printf("%s: autostart: %v", appName, err)
+	}
+	// Later toggles in the settings screen apply immediately.
+	settings.WatchAutostart(func() {
+		if err := syncAutostart(settings, logger); err != nil {
+			logger.Printf("%s: autostart: %v", appName, err)
+		}
+	})
 	// The gateway runs the same long-lived agent backend, so a scheduled update
 	// installs here too (failures are logged and keep the pending plan).
 	applyPendingUpdateOnStartup(opts.DataDir, opts.AppVersion, logger)
@@ -122,6 +133,10 @@ func runServe(ctx context.Context, opts Options, out io.Writer) error {
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- gw.Serve(serveCtx) }()
 
+	// The OS notification sink lives in this process (the tray shell), so the
+	// gateway's System notifications reach the notification center here.
+	installSystemNotifier(notifierFrom(root), settings, logger)
+
 	if !trayEnabled(opts.NoTray) {
 		// --no-tray, or a Linux session without a display: pure gateway. Wait for
 		// the service to end instead of starting the mygo event loop.
@@ -136,6 +151,15 @@ func runServe(ctx context.Context, opts Options, out io.Writer) error {
 		return nil
 	}
 	return err
+}
+
+// notifierFrom reads the gateway's notifier service off the kernel root.
+func notifierFrom(root cordis.Context) contracts.Notifier {
+	notifier, ok := root.Get(contracts.KeyNotifier)
+	if !ok {
+		return nil
+	}
+	return notifier
 }
 
 // runServeWithTray runs the gateway (already started in a goroutine) alongside
@@ -175,9 +199,7 @@ func runServeWithTray(ctx context.Context, opts Options, root cordis.Context, gw
 		stopTray()
 	}()
 
-	runErr := startTrayShell(trayCtx, opts.DataDir, settings, status, english, func() {
-		cancelServe()
-	}, logger)
+	runErr := startTrayShell(trayCtx, opts.DataDir, settings, status, english, logger)
 	if runErr != nil {
 		// The event loop itself failed to start (no display backend, no tray
 		// host): the gateway keeps serving. This is the documented degradation,

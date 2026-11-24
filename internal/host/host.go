@@ -268,7 +268,7 @@ func mainWithStreams(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-const usageText = `ZeoKeel - a compile-time modular desktop agent.
+const usageText = `ZeoKeel - a compile-time modular AI agent: gateway backend plus a browser client.
 
 Usage:
   zeokeel [flags]
@@ -333,6 +333,16 @@ func runHeadless(ctx context.Context, opts Options, out io.Writer) error {
 	if err := applyProxySettings(settings); err != nil {
 		logger.Printf("%s: proxy settings: %v", appName, err)
 	}
+	// Same as serve: the autostart entry follows the stored setting.
+	if err := syncAutostart(settings, logger); err != nil {
+		logger.Printf("%s: autostart: %v", appName, err)
+	}
+	// Later toggles in the settings screen apply immediately.
+	settings.WatchAutostart(func() {
+		if err := syncAutostart(settings, logger); err != nil {
+			logger.Printf("%s: autostart: %v", appName, err)
+		}
+	})
 	// Install a scheduled update at startup (the headless product serves the
 	// agent backend and should also apply updates); failures are logged, never
 	// fatal, and keep the pending plan.
