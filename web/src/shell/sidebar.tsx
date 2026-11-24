@@ -63,13 +63,17 @@ export function Sidebar({
       // Give up only if the user moved focus somewhere of their own accord: a
       // re-order lands as a later delta, so "focus once" always loses.
       const active = document.activeElement;
-      if (active instanceof HTMLElement && active !== document.body && active.isConnected) {
+      const inMenu = active instanceof HTMLElement && active.closest('.ant-dropdown') !== null;
+      if (!inMenu && active instanceof HTMLElement && active !== document.body && active.isConnected) {
         const isOurTrigger = active.getAttribute('data-testid') === 'session-menu';
         if (!isOurTrigger) return;
         if (sessionId && active.getAttribute('data-session-id') === sessionId) return;
       }
+      // Same-element selector: `data-session-id` is ON the button, so a
+      // descendant selector matched nothing and every restore fell through to
+      // "the first row" (round-6 session audit).
       const selector = sessionId
-        ? `[data-session-id="${CSS.escape(sessionId)}"] [data-testid="session-menu"]`
+        ? `[data-testid="session-menu"][data-session-id="${CSS.escape(sessionId)}"]`
         : null;
       const target =
         (selector ? document.querySelector<HTMLElement>(selector) : null) ??
