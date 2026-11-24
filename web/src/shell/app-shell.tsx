@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Drawer, Layout, Splitter } from 'antd';
 import { matchPath, useLocation, useNavigate } from 'react-router';
 import { useSessions } from '@/features/sessions/sessions-context';
@@ -86,6 +86,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   // The width the splitter had before folding, so expanding restores it instead
   // of jumping back to the default (B16: "展开后状态不丢").
   const [expandedWidth, setExpandedWidth] = useState(() => storedSidebarWidth());
+  // The width currently on screen; a resize that does not change it must not be
+  // persisted (the ref is seeded from the width the panel starts with).
+  const lastWidth = useRef<number | null>(expandedWidth);
   const activeSessionId = matchPath('/c/:sessionId/*', location.pathname)?.params.sessionId;
 
   const handleCreate = async () => {
@@ -161,11 +164,18 @@ export function AppShell({ children }: { children: ReactNode }) {
         <Splitter
           className="zk-split"
           onResizeEnd={(sizes) => {
-            const width = sizes[0];
-            if (width && typeof localStorage !== 'undefined') {
-              localStorage.setItem(SIDEBAR_WIDTH_KEY, String(Math.round(width)));
-              if (!collapsed) setExpandedWidth(Math.round(width));
+            const width = Math.round(sizes[0] ?? 0);
+            // Pressing and releasing a handle without moving reports the width
+            // it already had; persisting that is noise, and it made the stored
+            // value look like a user choice (round-3 mobile audit O2). The
+            // baseline starts at the width on screen, so a no-move press is a
+            // no-op even the first time.
+            if (!width || width === lastWidth.current) return;
+            lastWidth.current = width;
+            if (typeof localStorage !== 'undefined') {
+              localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width));
             }
+            if (!collapsed) setExpandedWidth(width);
           }}
         >
           <Splitter.Panel

@@ -51,7 +51,7 @@ const FAMILIES = ['', 'qwen', 'deepseek', 'other', 'custom'] as const;
 /** What the stored value actually is: absent, an array, or hand-broken JSON. */
 type Parsed = { rows: CatalogRow[]; broken: boolean };
 
-function parseRows(raw: string): Parsed {
+export function parseRows(raw: string): Parsed {
   if (!raw.trim()) return { rows: [], broken: false };
   try {
     const decoded = JSON.parse(raw);
@@ -84,6 +84,7 @@ export function ModelCatalogEditor() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<CatalogRow | null>(null);
   const [opening, setOpening] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [form] = Form.useForm<CatalogRow>();
 
   useEffect(() => subscribeSettings((value) => setRows(value)), []);
@@ -135,10 +136,25 @@ export function ModelCatalogEditor() {
   };
 
   const submit = async () => {
-    const values = await form.validateFields();
+    setFormError(null);
+    let values: CatalogRow;
+    try {
+      values = await form.validateFields();
+    } catch {
+      // A screen reader hears nothing when the only feedback is red text under
+      // a field it is not on. Announce a summary and move focus to the first
+      // offending field (round-3 model audit P2).
+      setFormError(t('settings.model.err.summary'));
+      const firstInvalid = form.getFieldsError().find((entry) => entry.errors.length > 0);
+      const name = firstInvalid?.name?.[0];
+      if (name) form.getFieldInstance(name)?.focus?.();
+      return;
+    }
     const row: CatalogRow = { ...((editing ?? { id: '', name: '' }) as CatalogRow) };
     for (const [key, value] of Object.entries(values)) {
-      if (value === undefined || value === '') {
+      // `null` is what antd's InputNumber reports when cleared; storing it made
+      // the row carry `"contextWindow": null` (round-3 model audit P2).
+      if (value === undefined || value === null || value === '') {
         if (key === 'apiKey') continue; // write-only: blank keeps the stored key
         delete row[key];
       } else {
@@ -168,7 +184,9 @@ export function ModelCatalogEditor() {
     // Whatever was default stops existing in two cases: the deleted row was the
     // default, or the default was already stale and this was the last row.
     const stillExists = next.some((item) => item.id === current);
-    if (!stillExists) await setDefault(next[0] ? String(next[0].id) : '');
+    // An unset default stays unset: deleting a row the user never chose must not
+    // silently pick one for them (round-3 model audit, behaviour note 1).
+    if (current !== '' && !stillExists) await setDefault(next[0] ? String(next[0].id) : '');
   };
 
   return (
@@ -204,7 +222,11 @@ export function ModelCatalogEditor() {
               className="zk-model-default__picker"
               data-testid="model-default-picker"
               value={currentExists ? current : undefined}
-              placeholder={t('settings.model.defaultUnset')}
+              placeholder={
+                catalog.length > 0
+                  ? t('settings.model.defaultPick')
+                  : t('settings.model.defaultUnset')
+              }
               disabled={catalog.length === 0}
               options={catalog.map((row) => ({
                 value: String(row.id),
@@ -223,7 +245,9 @@ export function ModelCatalogEditor() {
             <p className="zk-model-empty">
               {configured ? t('settings.model.cleared') : t('settings.model.empty')}
             </p>
-          ) : null}
+          ) : (
+            <p className="zk-model-note">{t('settings.model.note.instant')}</p>
+          )}
 
           <ul className="zk-model-list">
             {catalog.map((row) => (
@@ -303,11 +327,31 @@ export function ModelCatalogEditor() {
         // viewport keeps 保存 reachable without scrolling the modal body first.
         styles={{ body: { maxHeight: 'min(56vh, 520px)', overflowY: 'auto' } }}
       >
-        <Form form={form} layout="vertical" preserve={false} requiredMark>
+        {formError ? (
+          <p className="zk-form-error" role="alert">
+            {formError}
+          </p>
+        ) : null}
+        <Form
+          form={form}
+          layout="vertical"
+          preserve={false}
+          requiredMark
+          // Changing the window can invalidate maxTokens; without this the
+          // conflict only surfaced on save (round-3 model audit P2).
+          onValuesChange={(changed: Record<string, unknown>) => {
+            if ('contextWindow' in changed) {
+              void form.validateFields(['maxTokens']).catch(() => undefined);
+            }
+          }}
+        >
           <Form.Item
             name="name"
             label={t('settings.model.field.name')}
-            rules={[{ required: true, whitespace: true, message: t('settings.model.err.name') }]}
+            rules={[
+              { required: true, whitespace: true, message: t('settings.model.err.name') },
+              { max: 80, message: t('settings.model.err.nameLong') },
+            ]}
           >
             <Input data-testid="model-field-name" />
           </Form.Item>
@@ -364,6 +408,7 @@ export function ModelCatalogEditor() {
           <Form.Item
             name="contextWindow"
             label={t('settings.model.field.contextWindow')}
+
             rules={[
               {
                 validator: (_, value: number | undefined) => {
@@ -387,11 +432,15 @@ export function ModelCatalogEditor() {
             rules={[
               ({ getFieldValue }) => ({
                 validator: (_, value: number | undefined) => {
-                  const window = Number(getFieldValue('contextWindow') ?? 0);
-                  if (!value || !window) return Promise.resolve();
+                  if (value === undefined || value === null || value === 0) return Promise.resolve();
+                  // Whole numbers first, always: the gateway unmarshals an int,
+                  // so `12.5` with no window used to slip through the window
+                  // comparison and make /api/models answer 500 (audit P1-A).
                   if (!Number.isInteger(value)) {
                     return Promise.reject(new Error(t('settings.model.err.integer')));
                   }
+                  const window = Number(getFieldValue('contextWindow') ?? 0);
+                  if (!window) return Promise.resolve();
                   return value <= window
                     ? Promise.resolve()
                     : Promise.reject(new Error(t('settings.model.err.maxTokens')));

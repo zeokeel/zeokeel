@@ -1315,6 +1315,22 @@ body {
   font-size: var(--zk-type-xxs);
 }
 
+.zk-model-note {
+  margin: 0 0 var(--zk-space-2);
+  font-size: var(--zk-type-xxs);
+  line-height: var(--zk-type-xxs-line);
+  color: var(--zk-label-tertiary);
+}
+
+.zk-form-error {
+  margin: 0 0 var(--zk-space-2);
+  padding: var(--zk-space-2) var(--zk-space-3);
+  border-radius: var(--zk-radius-sm);
+  background: var(--zk-bg-strong);
+  color: var(--zk-danger-text);
+  font-size: var(--zk-type-xs);
+}
+
 .zk-model-empty {
   margin: 0 0 var(--zk-space-3);
   font-size: var(--zk-type-xxs);

@@ -493,7 +493,7 @@ function FieldRow({
           <Input.TextArea
             id={id}
             value={value}
-            disabled={disabled}
+            disabled={disabled || field.readOnly === true}
             autoSize={field.kind === 'json' ? { minRows: 3, maxRows: 12 } : { minRows: 2, maxRows: 8 }}
             spellCheck={field.kind === 'json' ? false : undefined}
             onChange={(event) => onChange(event.target.value)}
@@ -534,7 +534,12 @@ function FieldRow({
           tone below the label. Sharing the label's line made the two read as a
           single run-on sentence ("语言 语言 界面语言；缺失时跟随浏览器。") and left
           the input with no room to describe itself (round-2 S06/S07). */}
-      {field.helpKey ? <p className="zk-field__help">{t(field.helpKey)}</p> : null}
+      {field.helpKey ? (
+        <p className="zk-field__help">
+          {t(field.helpKey)}
+          {field.readOnly ? ` ${t('settings.ownedElsewhere')}` : ''}
+        </p>
+      ) : null}
     </div>
   );
 }

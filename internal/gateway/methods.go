@@ -238,7 +238,7 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 			return g.createSession(ctx, request.Params)
 		},
 		"mcp.reload": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
-			return g.reloadConnectors(ctx)
+			return g.reloadConnectors(ctx, request.Params)
 		},
 		"approvals.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.approvalsSnapshot(ctx)
@@ -512,10 +512,41 @@ func (g *Gateway) initialize(c *client, raw json.RawMessage) (any, *protocolErro
 // gateway restart to exist — while the page said 已保存 (round-2 C-03). The
 // reloader is optional: a composition without MCP answers a plain error instead
 // of pretending.
-func (g *Gateway) reloadConnectors(ctx context.Context) (any, *protocolError) {
+func (g *Gateway) reloadConnectors(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
 	reloader, ok := g.root.Get(contracts.KeyMCPReloader)
 	if !ok || reloader == nil {
 		return nil, appError(codeInternalError, "mcp_unavailable", false)
+	}
+	var params struct {
+		// The disabled list is written here rather than by the client: the key is
+		// workspace-scoped (`mcp.disabledServers.<wsId>`) and the browser does not
+		// know the workspace id, so a client-side write landed on a key the
+		// toolkit never reads and the switch did nothing (round-3 conn audit F1).
+		Disabled *[]string `json:"disabled,omitempty"`
+	}
+	if len(raw) > 0 {
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+	}
+	if params.Disabled != nil {
+		service, ok := g.root.Get(contracts.KeySettings)
+		if !ok || service == nil {
+			return nil, appError(codeNotReady, "settings_unavailable", false)
+		}
+		names := make([]string, 0, len(*params.Disabled))
+		for _, name := range *params.Disabled {
+			if trimmed := strings.TrimSpace(name); trimmed != "" {
+				names = append(names, trimmed)
+			}
+		}
+		encoded, err := json.Marshal(names)
+		if err != nil {
+			return nil, internalError(err)
+		}
+		if err := service.Set(contracts.MCPDisabledServersSettingKey(g.currentWorkspaceID()), string(encoded)); err != nil {
+			return nil, internalError(err)
+		}
 	}
 	plugins, err := reloader.Reload(ctx)
 	if err != nil {
@@ -523,7 +554,36 @@ func (g *Gateway) reloadConnectors(ctx context.Context) (any, *protocolError) {
 	}
 	return struct {
 		Connectors []capabilityConnectorDTO `json:"connectors"`
-	}{Connectors: connectorDTOs(plugins)}, nil
+		Disabled   []string                 `json:"disabled"`
+	}{Connectors: connectorDTOs(plugins), Disabled: g.disabledConnectorNames()}, nil
+}
+
+// currentWorkspaceID is the scope the toolkit reads its MCP rows under.
+func (g *Gateway) currentWorkspaceID() string {
+	service, ok := g.root.Get(contracts.KeyWorkspace)
+	if !ok || service == nil {
+		return ""
+	}
+	current, has, err := service.Current(context.Background())
+	if err != nil || !has {
+		return ""
+	}
+	return strings.TrimSpace(current.ID)
+}
+
+// disabledConnectorNames reads the disabled list the toolkit will honour.
+func (g *Gateway) disabledConnectorNames() []string {
+	service, ok := g.root.Get(contracts.KeySettings)
+	if !ok || service == nil {
+		return []string{}
+	}
+	raw := service.Get(contracts.MCPDisabledServersSettingKey(g.currentWorkspaceID()), "")
+	names := []string{}
+	if strings.TrimSpace(raw) == "" {
+		return names
+	}
+	_ = json.Unmarshal([]byte(raw), &names)
+	return names
 }
 
 // sessionListSnapshot returns the sidebar list.

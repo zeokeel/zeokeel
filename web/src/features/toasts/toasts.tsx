@@ -1,6 +1,13 @@
 import { App as AntApp, notification } from 'antd';
-import { useEffect, useRef } from 'react';
-import { notifyAction, subscribeToasts, type ToastEvent } from '@/api/gateway';
+import { useEffect, useRef, useState } from 'react';
+import {
+  notifyAction,
+  subscribeSettings,
+  subscribeToasts,
+  type SettingsRows,
+  type ToastEvent,
+} from '@/api/gateway';
+import { SETTING_KEYS } from '@/design/settings-keys';
 
 /**
  * Toasts (docs/TRANSPORT.md §6.3, acceptance B14).
@@ -31,12 +38,25 @@ export function Toasts({ children }: { children: React.ReactNode }) {
   const [api, contextHolder] = notification.useNotification();
   // Notifications are keyed by the gateway's id so a repeat cannot stack.
   const opened = useRef(new Set<string>());
+  // `ui.notifications` gates the in-app receipts. It was a switch that changed
+  // nothing (round-2 S13); the row is read here, live, so turning it off stops
+  // the next toast instead of the next reload.
+  const [rows, setRows] = useState<SettingsRows>({});
+  const enabled = String(rows[SETTING_KEYS.notifications] ?? 'true') !== 'false';
+  useEffect(() => subscribeSettings(setRows), []);
+  // The subscription below is created once; the live value rides a ref that the
+  // settings round trip updates (writing a ref during render is not allowed).
+  const enabledRef = useRef(enabled);
+  useEffect(() => {
+    enabledRef.current = enabled;
+  }, [enabled]);
 
   useEffect(
     () =>
       subscribeToasts((toast: ToastEvent) => {
         if (opened.current.has(toast.id)) return;
         opened.current.add(toast.id);
+        if (!enabledRef.current) return;
 
         const key = `toast-${toast.id}`;
         const type =

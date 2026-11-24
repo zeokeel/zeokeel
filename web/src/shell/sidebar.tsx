@@ -1,5 +1,8 @@
+import { useEffect, useState } from 'react';
 import { Button } from 'antd';
 import { Conversations } from '@ant-design/x';
+import { subscribeSettings, type SettingsRows } from '@/api/gateway';
+import { SETTING_KEYS } from '@/design/settings-keys';
 import { useSessions } from '@/features/sessions/sessions-context';
 import { SidebarNav } from './sidebar-nav';
 import { useT } from '@/i18n';
@@ -26,7 +29,15 @@ export function Sidebar({
   const { sessions, loading, error, reload } = useSessions();
   const t = useT();
 
-  const items = sessions.map((session) => ({
+  // `ui.sessions.showArchived` is a real switch: the list only carried archived
+  // conversations when the row said so, and the row said nothing at all before
+  // (round-2 S13 — a setting that changed no pixel).
+  const [rows, setRows] = useState<SettingsRows>({});
+  useEffect(() => subscribeSettings(setRows), []);
+  const showArchived = String(rows[SETTING_KEYS.sessionsShowArchived] ?? 'false') === 'true';
+  const visible = showArchived ? sessions : sessions.filter((session) => !session.archived);
+
+  const items = visible.map((session) => ({
     key: session.id,
     label: session.title || t('shell.sessions.untitled'),
   }));

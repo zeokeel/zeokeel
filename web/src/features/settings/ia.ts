@@ -42,6 +42,13 @@ export interface SettingsField {
    * the shape of (round-2 S09).
    */
   unit?: string;
+  /**
+   * The field is displayed but not editable, because another surface owns the
+   * row. Editing it here wrote a value the owner never re-read (round-3 conn
+   * audit F7: corrupt JSON looked "saved" and then silently cleared the
+   * connectors on the next refresh).
+   */
+  readOnly?: boolean;
 }
 
 export interface SettingsSection {
@@ -83,9 +90,15 @@ const text = (
   ...(example ? { example } : {}),
 });
 
-const json = (key: string, labelKey: MessageKey, helpKey?: MessageKey): SettingsField => ({
+const json = (
+  key: string,
+  labelKey: MessageKey,
+  helpKey?: MessageKey,
+  readOnly?: boolean,
+): SettingsField => ({
   key,
   labelKey,
+  ...(readOnly ? { readOnly } : {}),
   // Structured rows are edited as JSON today; the kind lets the field render in
   // the code face at full width, and names the surface a structured editor
   // (key/value rows) will replace (round-2 S07 / FIELD-DESIGN §3).
@@ -150,7 +163,20 @@ export const SETTINGS_PAGES: SettingsPage[] = [
           text(K.chatBaseURL, 'settings.ia.baseUrl', 'settings.ia.help.baseUrl'),
           secret(K.chatAPIKey, 'settings.ia.apiKey'),
           { key: K.chatContextBudget, labelKey: 'settings.ia.contextBudget', kind: 'number', unit: 'tokens' },
-          { key: K.chatMode, labelKey: 'settings.ia.chatMode', kind: 'text' },
+          // The gateway only accepts these three (`plan_mode.go`), and an
+          // unknown value used to be normalized silently — a free-text field
+          // therefore stored a value the UI then displayed as if it were real
+          // (round-3 model audit P2).
+          radio(
+            K.chatMode,
+            'settings.ia.chatMode',
+            [
+              { value: 'standard', labelKey: 'settings.ia.mode.standard' },
+              { value: 'minimal', labelKey: 'settings.ia.mode.minimal' },
+              { value: 'creator', labelKey: 'settings.ia.mode.creator' },
+            ],
+            'settings.ia.help.chatMode',
+          ),
           json(K.chatSystemPrompt, 'settings.ia.systemPrompt', 'settings.ia.help.systemPrompt'),
         ],
       },
@@ -332,8 +358,10 @@ export const SETTINGS_PAGES: SettingsPage[] = [
           json(K.toolsDisabled, 'settings.ia.disabledTools', 'settings.ia.help.jsonStringArray'),
           json(K.skillsDisabled, 'settings.ia.disabledSkills', 'settings.ia.help.jsonStringArray'),
           json(K.skillsDirs, 'settings.ia.skillCatalog', 'settings.ia.help.jsonStringArray'),
-          json(K.mcpServers, 'settings.ia.mcpServers', 'settings.ia.help.mcpJson'),
-          json(K.mcpDisabledServers, 'settings.ia.disabledMcp', 'settings.ia.help.jsonStringArray'),
+          // The connectors page owns both rows now; showing them read-only keeps
+          // the "where is it stored" answer without offering a second writer.
+          json(K.mcpServers, 'settings.ia.mcpServers', 'settings.ia.help.mcpJsonOwned', true),
+          json(K.mcpDisabledServers, 'settings.ia.disabledMcp', 'settings.ia.help.mcpDisabledOwned', true),
           json(K.mcpDisabledTools, 'settings.ia.disabledMcpTools', 'settings.ia.help.jsonStringArray'),
           text(K.mcpWorkspaceOptIn, 'settings.ia.mcpWorkspaceOptIn', 'settings.ia.help.mcpWorkspaceOptIn'),
         ],

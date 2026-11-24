@@ -47,12 +47,19 @@ type capabilityConnectorDTO struct {
 type capabilitiesDTO struct {
 	Skills     []capabilitySkillDTO     `json:"skills"`
 	Connectors []capabilityConnectorDTO `json:"connectors"`
+	// Disabled lists the connector names the toolkit is skipping, so the page
+	// can render a configured-but-off row instead of a missing one.
+	Disabled []string `json:"disabled"`
 }
 
 // handleCapabilities serves GET /api/capabilities: the skills this build can load
 // and the MCP connectors it knows about.
 func (g *Gateway) handleCapabilities(ctx context.Context) (any, *protocolError) {
-	payload := capabilitiesDTO{Skills: []capabilitySkillDTO{}, Connectors: []capabilityConnectorDTO{}}
+	payload := capabilitiesDTO{
+		Skills:     []capabilitySkillDTO{},
+		Connectors: []capabilityConnectorDTO{},
+		Disabled:   g.disabledConnectorNames(),
+	}
 
 	if skills, ok := g.root.Get(contracts.KeySkills); ok && skills != nil {
 		if list, err := skills.List(ctx); err == nil {

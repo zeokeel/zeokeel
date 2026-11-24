@@ -48,22 +48,12 @@ type ConnectorRow = Record<string, unknown> & {
   workspaceId?: string;
 };
 
-function parseConnectors(raw: string): ConnectorRow[] {
+export function parseConnectors(raw: string): ConnectorRow[] {
   if (!raw.trim()) return [];
   try {
     const decoded = JSON.parse(raw);
     if (!Array.isArray(decoded)) return [];
     return decoded.filter((row): row is ConnectorRow => Boolean(row) && typeof row === 'object');
-  } catch {
-    return [];
-  }
-}
-
-function parseNames(raw: string): string[] {
-  if (!raw.trim()) return [];
-  try {
-    const decoded = JSON.parse(raw);
-    return Array.isArray(decoded) ? decoded.map((value) => String(value)) : [];
   } catch {
     return [];
   }
@@ -121,10 +111,10 @@ export function CapabilitiesScreen() {
     () => parseConnectors(String(rows[SETTING_KEYS.mcpServers] ?? '')),
     [rows],
   );
-  const disabledNames = useMemo(
-    () => parseNames(String(rows[SETTING_KEYS.mcpDisabledServers] ?? '')),
-    [rows],
-  );
+  // The gateway owns the key (`mcp.disabledServers.<workspaceId>`) because the
+  // browser does not know the workspace id; writing the bare key from here made
+  // the switch a no-op (round-3 conn audit F1).
+  const disabledNames = useMemo(() => data?.disabled ?? [], [data]);
   const live = useMemo(() => {
     const map = new Map<string, ConnectorSummary>();
     for (const connector of data?.connectors ?? []) map.set(connector.name, connector);
@@ -136,12 +126,14 @@ export function CapabilitiesScreen() {
     setError(null);
     try {
       await setSetting(SETTING_KEYS.mcpServers, JSON.stringify(next));
-      if (disabled) await setSetting(SETTING_KEYS.mcpDisabledServers, JSON.stringify(disabled));
-      // The write is only half the change: the toolkit connects on reload.
-      const connectors = await reloadConnectors();
+      // The write is only half the change: the toolkit connects on reload, and
+      // the disabled list travels with the reload so the gateway writes it under
+      // the key it actually reads.
+      const result = await reloadConnectors(disabled);
       setData((current) => ({
         skills: current?.skills ?? data?.skills ?? [],
-        connectors,
+        connectors: result.connectors,
+        disabled: result.disabled,
       }));
       setNotice(t('screen.capabilities.saved'));
     } catch (cause) {
@@ -155,8 +147,12 @@ export function CapabilitiesScreen() {
     setBusy(true);
     setError(null);
     try {
-      const connectors = await reloadConnectors();
-      setData((current) => ({ skills: current?.skills ?? [], connectors }));
+      const result = await reloadConnectors();
+      setData((current) => ({
+        skills: current?.skills ?? [],
+        connectors: result.connectors,
+        disabled: result.disabled,
+      }));
     } catch (cause) {
       setError(describeError(cause, t, 'screen.capabilities.saveFailed'));
     } finally {
@@ -216,6 +212,14 @@ export function CapabilitiesScreen() {
       : [...configured, row];
     setFormOpen(false);
     await persist(next);
+    // The gateway dedupes servers by endpoint (`assembly wins`) and skips them
+    // silently; the row would sit at 空闲 forever with no explanation (F5).
+    if (!editing) {
+      const result = await reloadConnectors().catch(() => null);
+      if (result && !result.connectors.some((item) => item.name === row.name)) {
+        setError(t('screen.capabilities.err.notApplied', { name: row.name }));
+      }
+    }
   };
 
   const remove = async (row: ConnectorRow) => {
@@ -281,12 +285,21 @@ export function CapabilitiesScreen() {
               label: t('screen.capabilities.skills', { count: data.skills.length }),
               children:
                 data.skills.length === 0 ? (
-                  <Empty description={t('screen.capabilities.noSkills')} />
+                  <Empty description={t('screen.capabilities.noSkills')}>
+                    <Typography.Text type="secondary">
+                      {t('screen.capabilities.noSkills.hint')}
+                    </Typography.Text>
+                  </Empty>
                 ) : (
                   <Table
                     size="small"
                     rowKey="id"
                     pagination={false}
+                    // Without a fixed layout the source column takes its content
+                    // width and the name column is squeezed to one character per
+                    // line — the ellipsis never engages (round-3 conn audit F2).
+                    tableLayout="fixed"
+                    scroll={{ x: 'max-content' }}
                     dataSource={data.skills}
                     columns={[
                       { title: t('screen.capabilities.col.name'), dataIndex: 'name', width: 160 },
@@ -320,9 +333,9 @@ export function CapabilitiesScreen() {
                   </Empty>
                 ) : (
                   <ul className="zk-connector-list">
-                    {connectorRows.map(({ row, connector, disabled, state }) => (
+                    {connectorRows.map(({ row, connector, disabled, state }, index) => (
                       <li
-                        key={row.name}
+                        key={`${row.name}:${index}`}
                         className="zk-connector-row"
                         data-testid="connector-row"
                         data-state={state.tone}
@@ -387,7 +400,9 @@ export function CapabilitiesScreen() {
         open={formOpen}
         title={editing ? t('screen.capabilities.editConnector') : t('screen.capabilities.addConnector')}
         onCancel={() => setFormOpen(false)}
-        onOk={() => void submit()}
+        onOk={() => {
+          submit().catch(() => undefined);
+        }}
         okText={t('settings.save')}
         cancelText={t('settings.revert')}
         destroyOnHidden
@@ -398,7 +413,25 @@ export function CapabilitiesScreen() {
             name="name"
             label={t('screen.capabilities.field.name')}
             extra={t('screen.capabilities.help.name')}
-            rules={[{ required: true, whitespace: true, message: t('screen.capabilities.err.name') }]}
+            rules={[
+              { required: true, whitespace: true, message: t('screen.capabilities.err.name') },
+              { max: 80, message: t('screen.capabilities.err.nameLong') },
+              {
+                validator: (_, value: string) => {
+                  const name = String(value ?? '').trim();
+                  if (!name) return Promise.resolve();
+                  // Two rows sharing a name share a live entry: the second one
+                  // showed the first one's error and a delete removed both
+                  // (round-3 conn audit F4).
+                  const clash = configured.some(
+                    (row) => row.name === name && row.name !== editing?.name,
+                  );
+                  return clash
+                    ? Promise.reject(new Error(t('screen.capabilities.err.nameTaken')))
+                    : Promise.resolve();
+                },
+              },
+            ]}
           >
             <Input data-testid="connector-field-name" />
           </Form.Item>

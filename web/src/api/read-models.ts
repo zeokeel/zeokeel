@@ -28,6 +28,8 @@ export interface ConnectorSummary {
 export interface Capabilities {
   skills: SkillSummary[];
   connectors: ConnectorSummary[];
+  /** Connector names the toolkit is skipping (workspace-scoped on the gateway). */
+  disabled?: string[];
 }
 
 export interface AutomationRun {

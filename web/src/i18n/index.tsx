@@ -57,10 +57,26 @@ interface I18nApi {
 
 const I18nContext = createContext<I18nApi | null>(null);
 
+const LOCALE_CACHE_KEY = 'zk.locale';
+
+/** The language the last visit resolved to, if it was remembered. */
+function cachedLocale(): Locale | undefined {
+  try {
+    const value =
+      typeof localStorage === 'undefined' ? null : localStorage.getItem(LOCALE_CACHE_KEY);
+    return value === 'en' || value === 'zh' ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function I18nProvider({ children }: { children: ReactNode }) {
+  // The settings snapshot arrives one round trip after the first paint. Starting
+  // from the browser language made an English user see Chinese for ~1s on every
+  // load; the last resolved choice is the better guess (round-3 mobile audit N1).
   const [locale, setLocale] = useState<Locale>(() =>
     resolveLocale(
-      undefined,
+      cachedLocale(),
       typeof navigator === 'undefined' ? undefined : navigator.language,
     ),
   );
@@ -84,6 +100,11 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (typeof document !== 'undefined') {
       document.documentElement.lang = locale === 'en' ? 'en' : 'zh-CN';
+    }
+    try {
+      localStorage.setItem(LOCALE_CACHE_KEY, locale);
+    } catch {
+      // Private mode: the cache is an optimisation, not a requirement.
     }
   }, [locale]);
 

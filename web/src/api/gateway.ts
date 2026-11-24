@@ -675,9 +675,14 @@ export async function resolveApproval(
  * activation. Without this call the connectors page says 已保存 and the
  * connector never appears (round-2 C-03).
  */
-export async function reloadConnectors(): Promise<ConnectorSummary[]> {
-  const result = await client().request<{ connectors?: ConnectorSummary[] }>('mcp.reload', {});
-  return result.connectors ?? [];
+export async function reloadConnectors(
+  disabled?: string[],
+): Promise<{ connectors: ConnectorSummary[]; disabled: string[] }> {
+  const result = await client().request<{
+    connectors?: ConnectorSummary[];
+    disabled?: string[];
+  }>('mcp.reload', disabled ? { disabled } : {});
+  return { connectors: result.connectors ?? [], disabled: result.disabled ?? [] };
 }
 
 export async function cancelRun(sessionId: string): Promise<void> {
