@@ -79,7 +79,10 @@ export function NowScreen() {
                 const text = t(`now.suggest.${key}`);
                 // Never throw away what the user typed: append on a new line
                 // instead of replacing, then put the caret in the composer.
-                setDraft((current) => (current.trim() === '' ? text : `${current}\n${text}`));
+                setDraft((current) => {
+                  const trimmed = current.replace(/\s+$/, '');
+                  return trimmed === '' ? text : `${trimmed}\n${text}`;
+                });
                 setFocusRequest((current) => current + 1);
               }}
             >

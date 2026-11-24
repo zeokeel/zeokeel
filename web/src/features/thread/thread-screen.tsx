@@ -133,6 +133,9 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
     for (const file of files) {
       try {
         const staged = await uploadBlob(file);
+        // A successful attach means the earlier failure no longer describes the
+        // composer (the landing page already did this; the thread did not).
+        setAttachError(null);
         setAttachments((current) => [...current, staged]);
       } catch (cause) {
         const tooLarge = cause instanceof Error && cause.message === 'attachment_too_large';

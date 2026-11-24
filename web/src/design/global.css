@@ -741,6 +741,24 @@ body {
   outline-offset: 1px;
 }
 
+/* A 480px-tall window cannot hold a welcome block, an approval card and the
+ * composer. Rather than leave suggestions that are painted under the approval
+ * card and cannot be clicked, they step aside; the composer stays whole. */
+@media (max-height: 560px) {
+  .zk-now__suggestions {
+    display: none;
+  }
+
+  .zk-thread {
+    overflow-y: auto;
+  }
+
+  .zk-now__welcome {
+    height: auto;
+    padding-bottom: var(--zk-space-4);
+  }
+}
+
 /* Drop target: the whole card, because that is where the pointer is. */
 .zk-composer__drop {
   position: absolute;
@@ -2023,6 +2041,24 @@ body {
 .zk-now__suggestion:focus-visible {
   outline: 2px solid var(--zk-focus);
   outline-offset: 1px;
+}
+
+/* A 480px-tall window cannot hold a welcome block, an approval card and the
+ * composer. Rather than leave suggestions that are painted under the approval
+ * card and cannot be clicked, they step aside; the composer stays whole. */
+@media (max-height: 560px) {
+  .zk-now__suggestions {
+    display: none;
+  }
+
+  .zk-thread {
+    overflow-y: auto;
+  }
+
+  .zk-now__welcome {
+    height: auto;
+    padding-bottom: var(--zk-space-4);
+  }
 }
 
 /* Drop target: the whole card, because that is where the pointer is. */

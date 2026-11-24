@@ -369,11 +369,21 @@ export function Composer({
       event.preventDefault();
       if (event.type === 'drop') setDragging(false);
     };
+    // A cancelled drag (Esc) never sends `drop`; without these the overlay
+    // would stay on screen until the next pointer move (R2-3).
+    const clear = () => setDragging(false);
+    const onLeaveWindow = (event: DragEvent) => {
+      if (event.relatedTarget === null) clear();
+    };
     window.addEventListener('dragover', guard);
     window.addEventListener('drop', guard);
+    window.addEventListener('dragend', clear);
+    window.addEventListener('dragleave', onLeaveWindow);
     return () => {
       window.removeEventListener('dragover', guard);
       window.removeEventListener('drop', guard);
+      window.removeEventListener('dragend', clear);
+      window.removeEventListener('dragleave', onLeaveWindow);
     };
   }, []);
 
