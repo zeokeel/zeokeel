@@ -128,8 +128,12 @@ export const SETTINGS_PAGES: SettingsPage[] = [
       {
         titleKey: 'settings.ia.modelCatalog',
         component: 'modelCatalog',
-        // Declared for the IA honesty test and for search; the component renders it.
-        fields: [json(K.modelCatalogModels, 'settings.ia.modelCatalog', 'settings.ia.help.modelCatalog')],
+        // Declared for the IA honesty test and for search; the component renders
+        // them (the catalogue rows and the single default-model picker).
+        fields: [
+          json(K.modelCatalogModels, 'settings.ia.modelCatalog', 'settings.ia.help.modelCatalog'),
+          text(K.chatModel, 'settings.ia.model', 'settings.ia.help.defaultModel'),
+        ],
       },
       {
         titleKey: 'settings.ia.agentPresets',
@@ -140,7 +144,9 @@ export const SETTINGS_PAGES: SettingsPage[] = [
         // silently ignored the settings the agent actually reads.
         titleKey: 'settings.ia.modelProvider',
         fields: [
-          text(K.chatModel, 'settings.ia.model'),
+          // `chat.model` has exactly one control: the default picker at the top
+          // of the catalogue. A second free-text field for the same row made the
+          // outcome depend on which one the user touched last (round-2 S5).
           text(K.chatBaseURL, 'settings.ia.baseUrl', 'settings.ia.help.baseUrl'),
           secret(K.chatAPIKey, 'settings.ia.apiKey'),
           { key: K.chatContextBudget, labelKey: 'settings.ia.contextBudget', kind: 'number', unit: 'tokens' },
