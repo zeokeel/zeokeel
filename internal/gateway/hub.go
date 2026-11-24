@@ -110,6 +110,10 @@ type domainSnapshot struct {
 	payload any
 	// found is false for a conversation that does not exist.
 	found bool
+	// err carries the build failure, so a snapshot taken while the backend read
+	// is failing reports the real cause instead of an "unexpected type" from the
+	// handler's type assertion (AUDIT-2026-11-24 B-13).
+	err error
 }
 
 // newHub builds the hub for one epoch. chat may be nil until Serve resolves it.
@@ -411,9 +415,9 @@ func (h *hub) applyBuild(key string, payload any, buildErr error) {
 		if domain != nil {
 			domain.rev++
 			h.publish(domain, h.resyncDelta(domain, domain.rev-1, domain.rev))
-			h.answerWaiters(key, domainSnapshot{rev: domain.rev})
+			h.answerWaiters(key, domainSnapshot{rev: domain.rev, err: buildErr})
 		} else {
-			h.answerWaiters(key, domainSnapshot{})
+			h.answerWaiters(key, domainSnapshot{err: buildErr})
 		}
 		if again {
 			h.ensureBuild(key)

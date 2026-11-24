@@ -1042,3 +1042,54 @@ func TestChatRunEditModeRefusalNamesTheField(t *testing.T) {
 		t.Fatalf("error = %v, want name edit_target_compacted", body)
 	}
 }
+
+// TestConcurrentClientRunIDClaimsOneTurn is the regression form of
+// AUDIT-2026-11-24 A-3: the claim used to be check-then-act (lookup under the
+// lock, unlock, hub round-trip, insert under a second lock), so two retries of
+// the same clientRunId — exactly what §4.6 says the id exists for — both passed
+// the check and started two turns for one prompt.
+//
+// The fixture cannot make the window deterministic, so the test hammers it:
+// eight simultaneous requests for one id, repeated, and asserts the backend
+// received exactly one prompt in every round.
+func TestConcurrentClientRunIDClaimsOneTurn(t *testing.T) {
+	for round := 0; round < 12; round++ {
+		chat := newScriptedChat()
+		chat.addSession("s1", "First", "hello")
+		chat.script = func(f *fakeChat) {
+			f.setRunning("s1", true)
+			f.appendText("s1", "working")
+			f.setRunning("s1", false)
+		}
+		gw := startTestGateway(t, chat)
+
+		const attempts = 8
+		var wg sync.WaitGroup
+		statuses := make([]int, attempts)
+		bodies := make([]*http.Response, attempts)
+		wg.Add(attempts)
+		for i := 0; i < attempts; i++ {
+			go func(index int) {
+				defer wg.Done()
+				response := openRun(t, gw, runRequest{SessionID: "s1", Text: "do it", ClientRunID: "run-same"})
+				statuses[index] = response.StatusCode
+				bodies[index] = response
+			}(i)
+		}
+		wg.Wait()
+		for _, response := range bodies {
+			if response != nil {
+				_ = response.Body.Close()
+			}
+		}
+
+		chat.mu.Lock()
+		sent := len(chat.sent)
+		chat.mu.Unlock()
+		gw.stop(t)
+		if sent != 1 {
+			t.Fatalf("round %d: the chat backend received %d prompts for one clientRunId, want 1 (statuses %v)",
+				round, sent, statuses)
+		}
+	}
+}

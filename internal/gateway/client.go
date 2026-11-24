@@ -101,24 +101,14 @@ func (c *client) enqueueDelta(delta deltaPayload) {
 }
 
 // deltaDomainKey maps a delta to the coalescing slot it belongs to.
+//
+// The slot must be specific enough that two frames sharing it are truly about
+// the same thing: keying per-session domains by the notification name (or
+// falling back to "?") let a second session's delta be merged into — or
+// discarded behind — the first one's, which the client routes by sessionId
+// (AUDIT-2026-11-24 A-2). Every delta type therefore answers for itself.
 func deltaDomainKey(delta deltaPayload) string {
-	switch typed := delta.(type) {
-	case *sessionDelta:
-		return typed.SessionID
-	case *listDelta:
-		return listDomain
-	case *askDelta:
-		return domainAsk
-	case *planDelta:
-		return domainPlan
-	case *settingsDelta:
-		return domainSettings
-	case *workspaceDelta:
-		return domainWorkspace
-	case *itemSetDelta:
-		return typed.method
-	}
-	return "?"
+	return delta.domainKey()
 }
 
 // poke wakes the writer.
@@ -225,6 +215,13 @@ func (c *client) handleLine(ctx context.Context, line []byte) {
 		c.enqueueResponse(rpcResponse{JSONRPC: "2.0", ID: request.ID, Error: errInvalidRequest("frame has no method")})
 		return
 	}
+	if isBlocking(request.Method) && !request.isNotification() && !c.fatal {
+		// A method that can wait on the backend gets its own goroutine: on the
+		// reader goroutine it would freeze the whole connection (no ping, no
+		// run.cancel, no next request) and $/cancel could not reach it.
+		c.handleBlocking(ctx, request)
+		return
+	}
 	result, protocolErr := c.gw.dispatch(ctx, c, request)
 	if request.isNotification() {
 		// A notification has no response, by definition (JSON-RPC 2.0 §4.1).
@@ -247,6 +244,38 @@ func (c *client) handleLine(ctx context.Context, line []byte) {
 		response.Result = result
 	}
 	c.enqueueResponse(response)
+}
+
+// handleBlocking runs one potentially long request off the reader goroutine and
+// answers it when it returns. The response is written through the same outbox as
+// every other frame, so ordering per request id is preserved; $/cancel finds the
+// request in the gateway's in-flight table.
+func (c *client) handleBlocking(ctx context.Context, request rpcRequest) {
+	id := requestKey(request.ID)
+	requestCtx, cancel := context.WithCancel(ctx)
+	c.gw.registerInFlight(id, cancel)
+	go func() {
+		defer cancel()
+		defer c.gw.clearInFlight(id)
+		result, protocolErr := c.gw.dispatch(requestCtx, c, request)
+		response := rpcResponse{JSONRPC: "2.0", ID: request.ID}
+		switch {
+		case protocolErr != nil && requestCtx.Err() != nil:
+			// The request was cancelled mid-flight (§4.4): report the cancellation
+			// rather than whatever the backend said when it noticed.
+			response.Error = appError(codeCancelled, "cancelled", false)
+		case protocolErr != nil:
+			response.Error = protocolErr
+		default:
+			response.Result = result
+		}
+		select {
+		case <-c.closed:
+			// The connection went away while the request was running.
+		default:
+			c.enqueueResponse(response)
+		}
+	}()
 }
 
 // markReady flips the client into delta-streaming mode (§4.2).

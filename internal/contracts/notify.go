@@ -25,6 +25,13 @@ type Notification struct {
 	// the in-app toast then offers an "open conversation" action with the same
 	// behavior as the OS notification click.
 	SessionID string
+	// System marks a notification the caller asked to mirror to the operating
+	// system's notification center (contracts.SystemNotifier). The gateway itself
+	// owns no OS sink: the tray shell watches the toast stream and delivers these
+	// (respecting SettingSystemNotifications). Without the flag the host could not
+	// tell the two kinds apart, which is why OS notifications never fired
+	// (AUDIT-2026-11-24 A-7).
+	System bool
 	// Text is the toast copy, localized by its creator at generation time; the
 	// desktop toast overlay re-localizes the product's known copy at render
 	// time (and the OS mirror at delivery). Approval notices carry the stable

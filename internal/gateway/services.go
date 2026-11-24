@@ -367,6 +367,7 @@ func (s *notifyService) post(sessionID, level, text, actionLabel, actionID strin
 		ID:          g.newID("toast"),
 		Level:       level,
 		SessionID:   sessionID,
+		System:      wantSystem,
 		Text:        text,
 		ActionLabel: actionLabel,
 	}
@@ -400,18 +401,37 @@ func (s *notifyService) post(sessionID, level, text, actionLabel, actionID strin
 
 // pendingQuestionSnapshot returns the question a run is currently parked on, if
 // any (the ask domain's payload).
+// pendingQuestionSnapshot returns the oldest unanswered question.
+//
+// It used to return "whichever entry the map yielded first", so with two
+// conversations asking at once the same call answered differently every time —
+// and could show a question from a conversation the user is not looking at
+// (AUDIT-2026-11-24 C). Oldest-first is a rule, not an accident.
 func (g *Gateway) pendingQuestionSnapshot() *askDTO {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	var (
+		oldestID string
+		oldest   *pendingQuestion
+	)
 	for id, question := range g.questions {
-		return &askDTO{
-			ID:        id,
-			Text:      question.text,
-			Options:   append([]string(nil), question.options...),
-			CreatedAt: timePointer(question.createdAt),
+		if question == nil {
+			continue
+		}
+		if oldest == nil || question.createdAt.Before(oldest.createdAt) ||
+			(question.createdAt.Equal(oldest.createdAt) && id < oldestID) {
+			oldestID, oldest = id, question
 		}
 	}
-	return nil
+	if oldest == nil {
+		return nil
+	}
+	return &askDTO{
+		ID:        oldestID,
+		Text:      oldest.text,
+		Options:   append([]string(nil), oldest.options...),
+		CreatedAt: timePointer(oldest.createdAt),
+	}
 }
 
 // snapshot returns the plan review state and content.

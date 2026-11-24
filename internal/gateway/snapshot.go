@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 )
 
 // Snapshot and subscription plumbing shared by every domain (§6.5).
@@ -48,6 +49,16 @@ func (h *hub) snapshotDomain(ctx context.Context, key string) (domainSnapshot, e
 	}
 	select {
 	case snap := <-waited.ch:
+		if snap.err != nil {
+			if errors.Is(snap.err, errSessionGone) {
+				// A conversation that no longer exists is an answer ("not found"),
+				// not a fault: handlers turn found=false into session_not_found.
+				return domainSnapshot{}, nil
+			}
+			// Any other build failure is reported with its real cause, not as an
+			// empty payload every handler would misread as a type error.
+			return domainSnapshot{}, snap.err
+		}
 		return snap, nil
 	case <-ctx.Done():
 		return domainSnapshot{}, ctx.Err()

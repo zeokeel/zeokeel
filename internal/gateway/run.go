@@ -248,8 +248,24 @@ func (g *Gateway) handleChatRun(w http.ResponseWriter, r *http.Request) {
 }
 
 // beginRun starts a run or reports the existing one for the same clientRunId.
+//
+// The claim is one critical section: the lookup, the "is it finished" decision
+// and the registration of this attempt all happen under runMu. It used to
+// unlock between them and take a hub round-trip in the window, so two retries
+// of the same clientRunId (the exact case §4.6 says the id exists for) both
+// passed the check and started two turns for one prompt
+// (AUDIT-2026-11-24 A-3). Every failure after the claim drops it again.
 func (g *Gateway) beginRun(ctx context.Context, body runRequest) (stream *runStream, replay bool, protocolErr *protocolError) {
+	stream = &runStream{
+		clientRunID: body.ClientRunID,
+		sessionID:   body.SessionID,
+		turnID:      body.ClientRunID,
+		wake:        make(chan struct{}, 1),
+	}
 	g.runMu.Lock()
+	if g.runs == nil {
+		g.runs = make(map[string]*runStream)
+	}
 	if existing := g.runs[body.ClientRunID]; existing != nil {
 		existing.mu.Lock()
 		finished := existing.finished
@@ -262,55 +278,54 @@ func (g *Gateway) beginRun(ctx context.Context, body runRequest) (stream *runStr
 		}
 		return existing, true, nil
 	}
+	g.runs[body.ClientRunID] = stream
+	g.pruneRunsLocked()
 	g.runMu.Unlock()
 
 	chat, err := g.chatService()
 	if err != nil {
+		g.dropRun(stream)
 		return nil, false, internalError(err)
 	}
 	snapshot, err := g.hub.snapshotSession(ctx, body.SessionID)
 	if err != nil {
+		g.dropRun(stream)
 		return nil, false, internalError(err)
 	}
 	if !snapshot.found {
+		g.dropRun(stream)
 		return nil, false, appError(codeSessionNotFound, "session_not_found", false)
 	}
 	session, ok := snapshot.payload.(sessionDTO)
 	if !ok {
+		g.dropRun(stream)
 		return nil, false, internalError(errors.New("gateway: session snapshot has an unexpected type"))
 	}
+	// Safe to fill in after registration: only consume() reads the baseline, and
+	// the session observer that calls it is attached further down.
 	baseline := make(map[string]bool, len(session.Messages))
 	for _, message := range session.Messages {
 		baseline[message.ID] = true
 	}
-	stream = &runStream{
-		clientRunID: body.ClientRunID,
-		sessionID:   body.SessionID,
-		turnID:      body.ClientRunID,
-		baseline:    baseline,
-		wake:        make(chan struct{}, 1),
-	}
-	// Register before starting the run so no delta is missed.
-	g.runMu.Lock()
-	if g.runs == nil {
-		g.runs = make(map[string]*runStream)
-	}
-	g.runs[body.ClientRunID] = stream
-	g.pruneRunsLocked()
-	g.runMu.Unlock()
+	stream.baseline = baseline
 
 	stop, err := g.hub.observeSession(ctx, body.SessionID, stream.consume)
 	if err != nil {
 		g.dropRun(stream)
 		return nil, false, internalError(err)
 	}
+	// Guarded by stream.mu: emit() reads and clears it from the hub goroutine,
+	// and this assignment runs on the HTTP handler goroutine
+	// (AUDIT-2026-11-24 C: an unsynchronised read/write pair).
+	stream.mu.Lock()
 	stream.stopObserving = stop
+	stream.mu.Unlock()
 
 	// The observer is attached before the backend starts the turn: Regenerate
 	// rewinds and spawns the run goroutine itself, so attaching afterwards would
 	// drop the opening events (§4.6).
 	if err := g.startTurn(chat, body); err != nil {
-		stream.stopObserving()
+		stream.detach()
 		stream.emit(runEvent{name: sseError, data: map[string]any{
 			"code":    codeSessionRunning,
 			"message": err.Error(),
@@ -404,6 +419,18 @@ func editRefusal(editMessageID string, err error) *protocolError {
 		return protocolErr
 	}
 	return nil
+}
+
+// detach stops observing the session, if an observer is attached. It is the
+// safe form for callers outside the stream's lock.
+func (s *runStream) detach() {
+	s.mu.Lock()
+	stop := s.stopObserving
+	s.stopObserving = nil
+	s.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
 }
 
 // dropRun forgets one run that never lived.

@@ -55,9 +55,24 @@ func (s *blobStore) put(data []byte, mime, name string) (string, error) {
 		return "", err
 	}
 	s.mu.Lock()
+	// Sweep on write, not only on read: an upload whose blob is never read back
+	// (the user pasted an image and then did not send) used to stay in memory
+	// until the process restarted, because expiry was only checked by get
+	// (AUDIT-2026-11-24 B-11).
+	s.sweepExpiredLocked()
 	s.items[id] = blob{data: data, mime: mime, name: name, created: s.now()}
 	s.mu.Unlock()
 	return id, nil
+}
+
+// sweepExpiredLocked drops every blob past its TTL. Callers hold s.mu.
+func (s *blobStore) sweepExpiredLocked() {
+	now := s.now()
+	for id, item := range s.items {
+		if now.Sub(item.created) > blobTTL {
+			delete(s.items, id)
+		}
+	}
 }
 
 func (s *blobStore) get(id string) (blob, bool) {

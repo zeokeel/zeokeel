@@ -3,6 +3,8 @@
 package gateway
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"syscall"
 )
@@ -29,6 +31,14 @@ func acquireLock(dataDir string) (*fileLock, error) {
 	}
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		_ = file.Close()
+		// Only "held by someone else" means another instance. Any other errno
+		// (ENOLCK on a filesystem without lock support, EBADF, EIO on a network
+		// home) used to be reported as "another instance is already running",
+		// which sent users hunting for a process that does not exist while the
+		// gateway could never start (AUDIT-2026-11-24 A-6).
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+			return nil, fmt.Errorf("gateway: lock %q: %w", path, err)
+		}
 		if info, readErr := readInfo(dataDir); readErr == nil {
 			return nil, &alreadyRunningError{Info: info}
 		}

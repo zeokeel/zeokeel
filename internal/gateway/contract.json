@@ -62,6 +62,12 @@
         "sinceRev"
       ]
     },
+    "context.unsubscribe": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": []
+    },
     "foreground.set": {
       "required": [
         "sessionId"
@@ -132,6 +138,12 @@
       "optional": [
         "sinceRev"
       ]
+    },
+    "prompts.unsubscribe": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": []
     },
     "ready": {
       "required": [],
@@ -235,6 +247,12 @@
       "optional": [
         "sessionId",
         "sinceRev"
+      ]
+    },
+    "tasks.unsubscribe": {
+      "required": [],
+      "optional": [
+        "sessionId"
       ]
     },
     "team.activity": {

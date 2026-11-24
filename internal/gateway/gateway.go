@@ -131,6 +131,13 @@ type Gateway struct {
 	runMu sync.Mutex
 	runs  map[string]*runStream
 
+	// inFlight tracks the control-plane requests that run on their own goroutine
+	// because they may block (team.wait, team.send, run.interject), keyed by the
+	// JSON-RPC request id, so $/cancel can actually cancel them
+	// (AUDIT-2026-11-24 B-12).
+	inFlightMu sync.Mutex
+	inFlight   map[string]context.CancelFunc
+
 	shutdownOnce   sync.Once
 	shutdown       chan struct{}
 	shutdownReason atomic.Value

@@ -61,6 +61,9 @@ type listDelta struct {
 // notification implements deltaPayload.
 func (d *sessionDelta) notification() string { return "session.delta" }
 
+// domainKey implements deltaPayload: one slot per session.
+func (d *sessionDelta) domainKey() string { return "session:" + d.SessionID }
+
 // revs implements deltaPayload.
 func (d *sessionDelta) revs() (uint64, uint64) { return d.BaseRev, d.Rev }
 
@@ -91,6 +94,9 @@ func (d *sessionDelta) merge(next deltaPayload) deltaPayload {
 
 // notification implements deltaPayload.
 func (d *listDelta) notification() string { return "session.list.delta" }
+
+// domainKey implements deltaPayload.
+func (d *listDelta) domainKey() string { return listDomain }
 
 // revs implements deltaPayload.
 func (d *listDelta) revs() (uint64, uint64) { return d.BaseRev, d.Rev }

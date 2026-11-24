@@ -276,6 +276,9 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"prompts.subscribe": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.promptsSubscribe(ctx, c, request.Params)
 		},
+		"prompts.unsubscribe": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.promptsUnsubscribe(ctx, c, request.Params)
+		},
 		"prompts.enqueue": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.promptsEnqueue(request.Params)
 		},
@@ -288,11 +291,17 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"context.subscribe": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.contextSubscribe(ctx, c, request.Params)
 		},
+		"context.unsubscribe": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.contextUnsubscribe(ctx, c, request.Params)
+		},
 		"tasks.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.tasksSnapshot(ctx, request.Params)
 		},
 		"tasks.subscribe": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.tasksSubscribe(ctx, c, request.Params)
+		},
+		"tasks.unsubscribe": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.tasksUnsubscribe(ctx, c, request.Params)
 		},
 		"task.status": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.taskSetStatus(ctx, request.Params)
@@ -362,12 +371,74 @@ func SupportedMethods() []string {
 	return methods
 }
 
+// requestKey normalizes a JSON-RPC id to the string the in-flight table uses:
+// numbers and strings are distinct ids on the wire, so the raw bytes keep them
+// apart without guessing.
+func requestKey(id json.RawMessage) string {
+	trimmed := strings.TrimSpace(string(id))
+	if trimmed == "" || trimmed == "null" {
+		return ""
+	}
+	return trimmed
+}
+
+// blockingMethods are the control-plane methods that can wait on the backend.
+// They run on their own goroutine so a waiting call cannot freeze the rest of
+// the connection (ping, run.cancel, the next request); `$/cancel` cancels them
+// by request id (AUDIT-2026-11-24 B-12, TRANSPORT §4.4).
+var blockingMethods = map[string]bool{
+	"team.wait":     true,
+	"team.send":     true,
+	"run.interject": true,
+}
+
+// isBlocking reports whether a method must run on its own goroutine.
+func isBlocking(method string) bool { return blockingMethods[method] }
+
+// registerInFlight stores a cancel func for one request id.
+func (g *Gateway) registerInFlight(id string, cancel context.CancelFunc) {
+	g.inFlightMu.Lock()
+	if g.inFlight == nil {
+		g.inFlight = make(map[string]context.CancelFunc)
+	}
+	g.inFlight[id] = cancel
+	g.inFlightMu.Unlock()
+}
+
+// clearInFlight forgets one request id.
+func (g *Gateway) clearInFlight(id string) {
+	g.inFlightMu.Lock()
+	delete(g.inFlight, id)
+	g.inFlightMu.Unlock()
+}
+
+// cancelInFlight cancels one in-flight request and reports whether it existed.
+func (g *Gateway) cancelInFlight(id string) bool {
+	g.inFlightMu.Lock()
+	cancel := g.inFlight[id]
+	g.inFlightMu.Unlock()
+	if cancel == nil {
+		return false
+	}
+	cancel()
+	return true
+}
+
 func (g *Gateway) dispatch(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 	method := request.Method
 	if method == "$/cancel" {
-		// Request cancellation for the state plane is not needed: every method
-		// here returns immediately. The notification is accepted and ignored so
-		// an ACP-shaped client does not error.
+		// §4.4: a cancel notification names the request it aborts. Only the
+		// blocking methods above run on their own goroutine, so this is the set
+		// it can reach; everything else already answered.
+		var params struct {
+			ID json.RawMessage `json:"id"`
+		}
+		if len(request.Params) > 0 {
+			_ = json.Unmarshal(request.Params, &params)
+		}
+		if id := requestKey(params.ID); id != "" {
+			g.cancelInFlight(id)
+		}
 		return nil, nil
 	}
 	if method != "initialize" && method != "ready" && method != "ping" && !c.isReady() {
@@ -748,10 +819,12 @@ type promptsEnqueueParams struct {
 	Prompt    string `json:"prompt"`
 }
 
-// promptsEnqueueResult is the prompts.enqueue answer.
+// promptsEnqueueResult is the prompts.enqueue answer. There is no `rev` field:
+// it was declared but never assigned, so every answer carried rev:0 — a field
+// the contract (§5.1) does not promise and a client must not read
+// (AUDIT-2026-11-24 C).
 type promptsEnqueueResult struct {
 	Epoch  string `json:"epoch"`
-	Rev    uint64 `json:"rev"`
 	ID     string `json:"id"`
 	Queued int    `json:"queued"`
 }
@@ -762,10 +835,10 @@ type promptsRemoveParams struct {
 	ID        string `json:"id"`
 }
 
-// promptsRemoveResult is the prompts.remove answer.
+// promptsRemoveResult is the prompts.remove answer (no `rev`: see
+// promptsEnqueueResult).
 type promptsRemoveResult struct {
 	Epoch  string `json:"epoch"`
-	Rev    uint64 `json:"rev"`
 	Queued int    `json:"queued"`
 }
 
@@ -779,6 +852,12 @@ func (g *Gateway) promptsSnapshot(ctx context.Context, raw json.RawMessage) (any
 	if sessionID == "" {
 		return nil, errInvalidParams("sessionId", "is required")
 	}
+	// A protocol read has to be consistent with a protocol write on the same
+	// connection: the inbox has no backend change notification, so the cached
+	// domain can still be pre-enqueue. Refresh before answering (the poller would
+	// otherwise be the only path, and a snapshot right after prompts.enqueue read
+	// [] — the flake in TestE2EQueueDrainsAfterTheRun).
+	_ = g.hub.refreshNow(ctx, promptsKey(sessionID))
 	snapshot, err := g.hub.snapshotDomain(ctx, promptsKey(sessionID))
 	if err != nil {
 		return nil, internalError(err)
@@ -825,6 +904,36 @@ func (g *Gateway) promptsSubscribe(ctx context.Context, c *client, raw json.RawM
 	return domainSubscribeResult{Epoch: g.epoch, Rev: reply.rev, Resync: reply.resync}, nil
 }
 
+// promptsUnsubscribe drops one conversation's prompt-inbox subscription.
+//
+// Per-session domains had no unsubscribe at all, so every conversation a tab had
+// ever opened stayed subscribed for the life of the page: the gateway kept
+// rebuilding that domain on every poll tick (a context rebuild re-folds the
+// durable event log), and coalescing then had two live sessions to confuse
+// (AUDIT-2026-11-24 A-4).
+// promptsUnsubscribeParams is the prompts.unsubscribe body: the session only.
+// It is a separate type from the subscribe body on purpose — a subscription has
+// a resume point, an unsubscribe does not, and declaring `sinceRev` here would
+// tell clients and fixtures that it meant something.
+type promptsUnsubscribeParams struct {
+	SessionID string `json:"sessionId"`
+}
+
+func (g *Gateway) promptsUnsubscribe(ctx context.Context, c *client, raw json.RawMessage) (any, *protocolError) {
+	var params promptsUnsubscribeParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	sessionID := strings.TrimSpace(params.SessionID)
+	if sessionID == "" {
+		return nil, errInvalidParams("sessionId", "is required")
+	}
+	if err := g.hub.unsubscribeDomain(ctx, c.id, promptsKey(sessionID)); err != nil {
+		return nil, internalError(err)
+	}
+	return struct{}{}, nil
+}
+
 // promptsEnqueue appends one prompt to a conversation's inbox.
 //
 // The backend owns the queue: EnqueuePrompt may start the prompt immediately on
@@ -860,6 +969,10 @@ func (g *Gateway) promptsEnqueue(raw json.RawMessage) (any, *protocolError) {
 	if err != nil {
 		return nil, internalError(err)
 	}
+	// Publish the new inbox now, so a watching client sees the prompt as a delta
+	// instead of waiting for the next poll tick; markDomainDirty stays as the
+	// fallback for a hub that is not running yet.
+	_ = g.hub.refreshNow(context.Background(), promptsKey(sessionID))
 	g.hub.markDomainDirty(promptsKey(sessionID))
 	return promptsEnqueueResult{Epoch: g.epoch, ID: entry.ID, Queued: len(queue.QueuedPrompts(sessionID))}, nil
 }
@@ -893,6 +1006,7 @@ func (g *Gateway) promptsRemove(raw json.RawMessage) (any, *protocolError) {
 	if err := queue.RemoveQueuedPrompt(context.Background(), sessionID, params.ID); err != nil {
 		return nil, internalError(err)
 	}
+	_ = g.hub.refreshNow(context.Background(), promptsKey(sessionID))
 	g.hub.markDomainDirty(promptsKey(sessionID))
 	return promptsRemoveResult{Epoch: g.epoch, Queued: len(queue.QueuedPrompts(sessionID))}, nil
 }
@@ -1087,6 +1201,27 @@ func (g *Gateway) contextSubscribe(ctx context.Context, c *client, raw json.RawM
 	return g.domainSubscribe(ctx, c, contextKey(sessionID), raw)
 }
 
+// contextUnsubscribe drops one conversation's context-timeline subscription.
+// contextUnsubscribeParams is the context.unsubscribe body.
+type contextUnsubscribeParams struct {
+	SessionID string `json:"sessionId"`
+}
+
+func (g *Gateway) contextUnsubscribe(ctx context.Context, c *client, raw json.RawMessage) (any, *protocolError) {
+	var params contextUnsubscribeParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	sessionID := strings.TrimSpace(params.SessionID)
+	if sessionID == "" {
+		return nil, errInvalidParams("sessionId", "is required")
+	}
+	if err := g.hub.unsubscribeDomain(ctx, c.id, contextKey(sessionID)); err != nil {
+		return nil, internalError(err)
+	}
+	return struct{}{}, nil
+}
+
 // --- task board ------------------------------------------------------------
 
 // tasksSnapshotParams is the body of tasks.snapshot: a full snapshot of the task
@@ -1174,6 +1309,27 @@ func (g *Gateway) tasksSubscribe(ctx context.Context, c *client, raw json.RawMes
 		}
 	}
 	return g.domainSubscribe(ctx, c, tasksDomainKey(params.SessionID), raw)
+}
+
+// tasksUnsubscribe drops one task-board subscription (the process-wide board
+// when sessionId is empty, one conversation's board otherwise).
+// tasksUnsubscribeParams is the tasks.unsubscribe body; an omitted sessionId
+// means the process-wide board.
+type tasksUnsubscribeParams struct {
+	SessionID string `json:"sessionId,omitempty"`
+}
+
+func (g *Gateway) tasksUnsubscribe(ctx context.Context, c *client, raw json.RawMessage) (any, *protocolError) {
+	var params tasksUnsubscribeParams
+	if len(raw) > 0 {
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+	}
+	if err := g.hub.unsubscribeDomain(ctx, c.id, tasksDomainKey(params.SessionID)); err != nil {
+		return nil, internalError(err)
+	}
+	return struct{}{}, nil
 }
 
 // taskSetStatus moves one task to another board status (pending / in_progress /
@@ -1375,6 +1531,9 @@ func (g *Gateway) interjectRun(ctx context.Context, raw json.RawMessage) (any, *
 		}
 		attachments = resolved
 	}
+	if _, found := chat.Session(params.SessionID); !found {
+		return nil, appError(codeSessionNotFound, "session_not_found", false)
+	}
 	if err := chat.Cancel(params.SessionID); err != nil {
 		return nil, internalError(err)
 	}
@@ -1396,13 +1555,37 @@ func (g *Gateway) interjectRun(ctx context.Context, raw json.RawMessage) (any, *
 			return map[string]any{"ok": true}, nil
 		}
 		if time.Now().After(deadline) {
-			return nil, internalError(sendErr)
+			return nil, interjectSendError(sendErr)
+		}
+		// Retry only the two transient refusals (the previous turn has not
+		// settled yet / history is compacting). Anything else — an unknown
+		// session, a rejected prompt — is permanent, and retrying it for three
+		// seconds hid the real error and blocked the caller doing it
+		// (AUDIT-2026-11-24 C).
+		if !errors.Is(sendErr, contracts.ErrSessionRunning) && !errors.Is(sendErr, contracts.ErrChatCompacting) {
+			return nil, interjectSendError(sendErr)
 		}
 		select {
 		case <-ctx.Done():
-			return nil, internalError(ctx.Err())
+			return nil, appError(codeCancelled, "cancelled", false)
 		case <-time.After(80 * time.Millisecond):
 		}
+	}
+}
+
+// interjectSendError maps the backend's refusal to a protocol error.
+//
+// The message stays the stable contract name (§4.3): the English error text of
+// the agent backend is not a protocol message, and the code has to say what the
+// client can do about it.
+func interjectSendError(err error) *protocolError {
+	switch {
+	case errors.Is(err, contracts.ErrSessionRunning):
+		return appError(codeBackpressure, "run_already_active", true)
+	case errors.Is(err, contracts.ErrChatCompacting):
+		return appError(codeBackpressure, "session_compacting", true)
+	default:
+		return internalError(err)
 	}
 }
 
@@ -1413,14 +1596,21 @@ func (g *Gateway) cancelRun(raw json.RawMessage) (any, *protocolError) {
 	if err := decodeParams(raw, &params); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(params.SessionID) == "" {
+	sessionID := strings.TrimSpace(params.SessionID)
+	if sessionID == "" {
 		return nil, errInvalidParams("sessionId", "is required")
 	}
 	chat, err := g.chatService()
 	if err != nil {
 		return nil, internalError(err)
 	}
-	if err := chat.Cancel(params.SessionID); err != nil {
+	// An unknown session is the client's mistake and has its own code (§4.3);
+	// the backend's English "unknown chat session" text is not a protocol
+	// message and must not be pasted into one (AUDIT-2026-11-24 C).
+	if _, found := chat.Session(sessionID); !found {
+		return nil, appError(codeSessionNotFound, "session_not_found", false)
+	}
+	if err := chat.Cancel(sessionID); err != nil {
 		return nil, internalError(err)
 	}
 	return struct{}{}, nil

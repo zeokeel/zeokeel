@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -94,6 +95,13 @@ func promptsSessionID(key string) (string, bool) {
 type deltaPayload interface {
 	// notification is the wire method of the delta.
 	notification() string
+	// domainKey is the coalescing slot the delta belongs to. Two deltas may only
+	// be merged while one is still waiting to be written when their keys match;
+	// keying by notification name alone merged different sessions (and the two
+	// task boards) into one frame, so a field the client routes on could be
+	// replaced by another domain's value, or a whole delta could be dropped as
+	// "older" than an unrelated one (AUDIT-2026-11-24 A-2).
+	domainKey() string
 	// revs returns the delta's base and new revision.
 	revs() (base uint64, rev uint64)
 	// setRevs stamps both revisions.
@@ -384,6 +392,9 @@ type contextDelta struct {
 // notification implements deltaPayload.
 func (d *contextDelta) notification() string { return "context.delta" }
 
+// domainKey implements deltaPayload.
+func (d *contextDelta) domainKey() string { return "context:" + d.SessionID }
+
 // revs implements deltaPayload.
 func (d *contextDelta) revs() (uint64, uint64) { return d.BaseRev, d.Rev }
 
@@ -439,6 +450,9 @@ type promptsDelta struct {
 // notification implements deltaPayload.
 func (d *promptsDelta) notification() string { return "prompts.delta" }
 
+// domainKey implements deltaPayload.
+func (d *promptsDelta) domainKey() string { return "prompts:" + d.SessionID }
+
 // revs implements deltaPayload.
 func (d *promptsDelta) revs() (uint64, uint64) { return d.BaseRev, d.Rev }
 
@@ -486,13 +500,27 @@ func (d *promptsDelta) merge(next deltaPayload) deltaPayload {
 	for _, item := range other.Added {
 		delete(removed, item.ID)
 	}
+	// The newest frame wins on order, but only if it actually carries one: a
+	// later frame that merely appends a prompt must not erase the reorder the
+	// earlier (still undelivered) frame announced, or the client keeps the old
+	// order with no resync to fix it (AUDIT-2026-11-24 B-14).
+	reordered, order := other.Reordered, other.Order
+	if !reordered && d.Reordered {
+		reordered = true
+		order = append([]string(nil), d.Order...)
+		for _, item := range other.Added {
+			if !slices.Contains(order, item.ID) {
+				order = append(order, item.ID)
+			}
+		}
+	}
 	merged := &promptsDelta{
 		SessionID: d.SessionID,
 		BaseRev:   d.BaseRev,
 		Rev:       other.Rev,
 		Resync:    d.Resync || other.Resync,
-		Reordered: other.Reordered,
-		Order:     other.Order,
+		Reordered: reordered,
+		Order:     order,
 	}
 	for _, id := range order {
 		if !removed[id] {
@@ -521,7 +549,12 @@ type identified interface{ domainID() string }
 // append-only artifact list both speak it.
 type itemSetDelta struct {
 	// method is the wire notification name (not serialized).
-	method  string
+	method string
+	// domain is the coalescing domain key (not serialized). The same wire
+	// method serves several domains — `tasks.delta` is both the process-wide
+	// board and a conversation's board — and a frame merged across them would
+	// land items on the wrong board.
+	domain  string
 	BaseRev uint64   `json:"baseRev"`
 	Rev     uint64   `json:"rev"`
 	Added   []any    `json:"added,omitempty"`
@@ -531,6 +564,14 @@ type itemSetDelta struct {
 
 // notification implements deltaPayload.
 func (d *itemSetDelta) notification() string { return d.method }
+
+// domainKey implements deltaPayload.
+func (d *itemSetDelta) domainKey() string {
+	if d.domain != "" {
+		return d.domain
+	}
+	return d.method
+}
 
 // revs implements deltaPayload.
 func (d *itemSetDelta) revs() (uint64, uint64) { return d.BaseRev, d.Rev }
@@ -583,7 +624,7 @@ func (d *itemSetDelta) merge(next deltaPayload) deltaPayload {
 	for _, item := range other.Added {
 		delete(removed, itemID(item))
 	}
-	merged := &itemSetDelta{method: d.method, BaseRev: d.BaseRev, Rev: other.Rev,
+	merged := &itemSetDelta{method: d.method, domain: d.domain, BaseRev: d.BaseRev, Rev: other.Rev,
 		Resync: d.Resync || other.Resync}
 	for _, id := range order {
 		if removed[id] {
@@ -617,6 +658,9 @@ type askDelta struct {
 
 // notification implements deltaPayload.
 func (d *askDelta) notification() string { return "ask.delta" }
+
+// domainKey implements deltaPayload.
+func (d *askDelta) domainKey() string { return domainAsk }
 
 // revs implements deltaPayload.
 func (d *askDelta) revs() (uint64, uint64) { return d.BaseRev, d.Rev }
@@ -659,6 +703,9 @@ type planDelta struct {
 // notification implements deltaPayload.
 func (d *planDelta) notification() string { return "plan.delta" }
 
+// domainKey implements deltaPayload.
+func (d *planDelta) domainKey() string { return domainPlan }
+
 // revs implements deltaPayload.
 func (d *planDelta) revs() (uint64, uint64) { return d.BaseRev, d.Rev }
 
@@ -694,6 +741,9 @@ type settingsDelta struct {
 
 // notification implements deltaPayload.
 func (d *settingsDelta) notification() string { return "settings.delta" }
+
+// domainKey implements deltaPayload.
+func (d *settingsDelta) domainKey() string { return domainSettings }
 
 // revs implements deltaPayload.
 func (d *settingsDelta) revs() (uint64, uint64) { return d.BaseRev, d.Rev }
@@ -762,6 +812,9 @@ type workspaceDelta struct {
 
 // notification implements deltaPayload.
 func (d *workspaceDelta) notification() string { return "workspace.list.delta" }
+
+// domainKey implements deltaPayload.
+func (d *workspaceDelta) domainKey() string { return domainWorkspace }
 
 // revs implements deltaPayload.
 func (d *workspaceDelta) revs() (uint64, uint64) { return d.BaseRev, d.Rev }
@@ -955,6 +1008,7 @@ func (h *hub) diffDomain(key string, previous, next any) deltaPayload {
 			return nil
 		}
 		if delta := diffApprovals(old, fresh); delta != nil {
+			delta.domain = domainApprovals
 			return delta
 		}
 		return nil
@@ -985,6 +1039,7 @@ func (h *hub) diffDomain(key string, previous, next any) deltaPayload {
 			return nil
 		}
 		if delta := diffArtifacts(old, fresh); delta != nil {
+			delta.domain = domainArtifacts
 			return delta
 		}
 		return nil
@@ -995,6 +1050,7 @@ func (h *hub) diffDomain(key string, previous, next any) deltaPayload {
 			return nil
 		}
 		if delta := diffTasks(old, fresh); delta != nil {
+			delta.domain = domainTasks
 			return delta
 		}
 		return nil
@@ -1037,6 +1093,7 @@ func (h *hub) diffDomain(key string, previous, next any) deltaPayload {
 			return nil
 		}
 		if delta := diffTasks(old, fresh); delta != nil {
+			delta.domain = key
 			return delta
 		}
 		return nil
