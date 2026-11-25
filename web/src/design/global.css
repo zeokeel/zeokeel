@@ -308,6 +308,25 @@ body {
    * long one stretched to 1128px (~150 characters per line), and the column
    * jumped width between turns (round-4 reply audit). */
   max-width: 68ch;
+  width: 100%;
+}
+
+/* The renderer's own scale is em-based and lives on `.x-markdown` itself, so
+ * overriding it from an ancestor loses the cascade: the inline code kept the
+ * library's 0.85em (11.9px) instead of the 13px token (round-5 reply audit).
+ * One block, on the element the declarations are on. */
+.zk-markdown .x-markdown {
+  --code-inline-text: var(--zk-type-xs);
+  --padding-code-inline: 0 var(--zk-space-1);
+  --small-border-radius: var(--zk-radius-xs);
+  --td-th-padding: var(--zk-space-2) var(--zk-space-3);
+  --margin-block: 0 0 var(--zk-space-3) 0;
+  --margin-ul-ol: 0 0 var(--zk-space-3) var(--zk-space-5);
+  --padding-ul-ol: 0;
+  --margin-li: 0 0 var(--zk-space-1);
+  --margin-pre: 0 0 var(--zk-space-3);
+  --hr-margin: var(--zk-space-4) 0;
+  --table-margin: 0 0 var(--zk-space-3);
 }
 
 /* The renderer ships almost no tag styling (no table borders, no blockquote
@@ -374,6 +393,28 @@ body {
   border-collapse: collapse;
   font-size: var(--zk-type-xs);
   line-height: var(--zk-type-xs-line);
+  /* A wide table scrolls sideways instead of collapsing its columns into
+   * seven-line cells (round-5 reply audit: 14 columns → 2053px tall). */
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.zk-markdown th,
+.zk-markdown td {
+  white-space: nowrap;
+}
+
+/* Markdown's `align` attribute is how a column asks for right/left alignment;
+   the base rule forced `text-align: start` and lost it. */
+.zk-markdown th[align='right'],
+.zk-markdown td[align='right'] {
+  text-align: right;
+}
+
+.zk-markdown th[align='center'],
+.zk-markdown td[align='center'] {
+  text-align: center;
 }
 
 .zk-markdown th,
@@ -417,6 +458,16 @@ body {
   border: 1px solid var(--zk-border-subtle);
   border-radius: var(--zk-radius-sm);
   overflow: hidden;
+  background: var(--zk-bg-strong);
+}
+
+/* The transcript's own rows are full width: the bubble's shrink-to-fit made the
+ * reading column jump between 68ch and 529px per message (round-5 reply audit). */
+.zk-transcript__row .ant-bubble,
+.zk-transcript__row .ant-bubble-body,
+.zk-transcript__row .ant-bubble-content {
+  width: 100%;
+  max-width: 100%;
 }
 
 .zk-markdown > :first-child {
@@ -444,6 +495,12 @@ body {
  * jumped from 14/22 to 13/20 when the turn settled (round-4 think audit F-04).
  * Same metrics in both states, secondary colour at 8.0:1 (the inherited
  * rgba(0,0,0,.45) was 3.36:1, below AA — F-06). */
+/* Think's own collapse class ships with no rule: the arrow flipped state and the
+ * content stayed visible (round-5 think audit #5). */
+.ant-think-content-hidden {
+  display: none;
+}
+
 .zk-thought__title-button {
   display: inline-flex;
   align-items: center;

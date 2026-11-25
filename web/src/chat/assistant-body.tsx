@@ -45,7 +45,7 @@ export function AssistantBody({
       {/* A settled turn with no prose and no error used to leave a 0-height ghost
           row; the reader had no way to know whether the model had answered
           (round-4 reply audit). Say it, quietly. */}
-      {!streaming && !message.text && !message.error ? (
+      {!streaming && !message.text && !message.error && !stopped ? (
         <div className="zk-msg-empty">{t('thread.emptyAnswer')}</div>
       ) : null}
       {message.error ? <ProviderErrorRow error={message.error} /> : null}

@@ -31,8 +31,21 @@ function markdownComponents(dark: boolean) {
           lang={lang ?? 'text'}
           // The header is the language label plus the copy action; it used to be
           // suppressed (`header={false}`), which the round-4 reply audit read as a
-          // code block with no language and no way to copy it.
-          highlightProps={{ style: dark ? oneDark : oneLight }}
+          // code block with no language and no way to copy it. A fence with no
+          // language has nothing to label, so its header is hidden rather than
+          // showing a made-up "text".
+          header={lang ? undefined : false}
+          highlightProps={{
+            style: dark ? oneDark : oneLight,
+            // The library's own theme paints #fafafa and Fira Code; the block
+            // belongs to the page's surface and mono stack instead.
+            customStyle: {
+              background: 'var(--zk-bg-strong)',
+              fontFamily: 'var(--zk-font-mono)',
+              margin: 0,
+              borderRadius: 0,
+            },
+          }}
           className="zk-code-block"
         >
           {nodesToText(children)}

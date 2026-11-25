@@ -60,7 +60,21 @@ export function ThoughtSteps({
           expanded={liveOpen ?? true}
           onExpand={(next) => setLiveOpen(next)}
           loading
-          title={t('thread.reasoning')}
+          // Think renders its header as a plain div with an onClick; the title
+          // carries the keyboard affordance instead (round-5 think audit #4).
+          title={
+            <button
+              type="button"
+              className="zk-thought__title-button"
+              aria-expanded={liveOpen ?? true}
+              onClick={(event) => {
+                event.stopPropagation();
+                setLiveOpen(!(liveOpen ?? true));
+              }}
+            >
+              {t('thread.reasoning')}
+            </button>
+          }
           className="zk-think"
         >
           <div className="zk-thinking-text">{reasoning}</div>
