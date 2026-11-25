@@ -144,7 +144,7 @@ func TestProductsAndEntries(t *testing.T) {
 	wantHeadless := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/inbox", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/insights",
-		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/webhook", "zeokeel/hosttools", "zeokeel/memorystore",
+		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/webhook", "zeokeel/wechat", "zeokeel/hosttools", "zeokeel/memorystore",
 		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
 	}
 	loaded := make(map[string]bool, len(headless))
@@ -260,7 +260,7 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 
 	instances := loader.Instances()
 	wantIDs := []string{
-		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "notifyroute", "webhook", "hosttools", "memorystore",
+		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "notifyroute", "webhook", "wechat", "hosttools", "memorystore",
 		"agent", "automation", "update", "importer", "acp",
 	}
 	gotIDs := make([]string, 0, len(instances))
@@ -326,6 +326,20 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 	}
 	if updated, err := inboxService.Triage(context.Background(), []string{storedItem.ID}, contracts.InboxActionTask, []string{"task-1"}); err != nil || updated != 1 {
 		t.Fatalf("inbox Triage through the assembly = (%d, %v), want (1, nil)", updated, err)
+	}
+
+	// The WeChat adapter is wired but has no login token in a headless
+	// assembly, so the honest answer is "unauthorized" — not a fake success.
+	wechatService, ok := root.Get(contracts.KeyWeChat)
+	if !ok || wechatService == nil {
+		t.Fatal("KeyWeChat service is not available on the root")
+	}
+	if _, err := wechatService.PollOnce(context.Background()); !errors.Is(err, contracts.ErrWeChatUnauthorized) {
+		t.Fatalf("wechat PollOnce without a token = %v, want ErrWeChatUnauthorized", err)
+	}
+	wechatStatus, err := wechatService.Status(context.Background())
+	if err != nil || wechatStatus.Connected {
+		t.Fatalf("wechat status = (%+v, %v), want disconnected", wechatStatus, err)
 	}
 
 	// The triage pass is wired over the same inbox and triage services: with no

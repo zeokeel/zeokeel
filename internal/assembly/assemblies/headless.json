@@ -90,6 +90,11 @@
       }
     },
     {
+      "id": "wechat",
+      "module": "zeokeel/wechat",
+      "config": {}
+    },
+    {
       "id": "hosttools",
       "module": "zeokeel/hosttools",
       "config": {
