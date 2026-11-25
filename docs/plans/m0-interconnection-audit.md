@@ -129,6 +129,23 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 规则：**每个智能体只写自己的包**，装配/网关/文档由我串行集成——因为那三处正是之前踩过的"四处同步"热点。
 集成时我补了：registry + headless 条目 + 两个计数锁定清单 + dingtalk/feishu 的装配断言；随后 `verify.sh --quick` 全绿。
 
+## 4d. M5（MCP 连接器）的边界，写清楚
+
+规划里的 M5 在本仓库**大部分已经存在**，本轮的工作是把它接到产品面上，而不是另写一套：
+
+| 已有（产品既有） | 证据 |
+|---|---|
+| 连接器目录与状态 | `toolkit` 提供 `KeyPlugins`（`plugins.MCP()`）与 `KeyMCPToolCatalog`；`GET /api/capabilities` 就是它的投影 |
+| 工具命名与发现 | 工具名 `mcp__<server>__<tool>`；`internal/modules/agent/discovery.go` 的 `TailPrefixes` 含 `mcp__` |
+| 审批面 | `mcp__*` **不在** 自动放行清单（`approval_surface_test.go` 断言 `WorkspaceAutoAllowed("mcp__anything") == false`） |
+
+| 本轮新增 | 位置 |
+|---|---|
+| 任务页可见"能做什么"：技能 + MCP 连接器状态 + 不可用原因（网关原话） | `web/src/features/task/ExecutionMeans.tsx` |
+| 连接器失败不再静默：状态与错误文案一起展示 | 同上（`state=failed` 时显示 gateway error） |
+
+**仍缺**：把"某个连接器的某个工具"直接绑到某个任务上作为计划步骤（任务 → 工具的白名单）。这属于执行策略，不是连接器接入；在规划里属于 M3/M5 交界，留待后续。
+
 ## 5. 互联审计的固定动作（每加一个模块都做）
 
 1. `registry.go` 加一行 + `headless.json` 加一条（顺序写进 §2 表）。
