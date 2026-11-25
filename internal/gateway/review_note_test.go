@@ -82,6 +82,12 @@ func (f *fakeLease) Lease(context.Context, string) (contracts.TaskLease, bool, e
 	return contracts.TaskLease{}, false, nil
 }
 func (f *fakeLease) Expire(context.Context) ([]string, error) { return nil, nil }
+func (f *fakeLease) SetTools(_ context.Context, taskID string, tools []string) (contracts.TaskTools, error) {
+	return contracts.TaskTools{TaskID: taskID, Tools: tools}, nil
+}
+func (f *fakeLease) Tools(context.Context, string) (contracts.TaskTools, bool, error) {
+	return contracts.TaskTools{}, false, nil
+}
 
 func newReviewGateway(t *testing.T, lease contracts.TaskLeaseService, notes contracts.TeamNotesService) *Gateway {
 	t.Helper()

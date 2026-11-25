@@ -825,6 +825,8 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `tasks.heartbeat` | `{id,owner}` | `TaskLease` | Y | `TaskLeaseService.Heartbeat` | ✅ 已实现 |
 | `tasks.submit` | `{id,owner,evidence:[{kind,ref,note?}]}` | `TaskLease` | N | `TaskLeaseService.Submit`（无证据 → `1010 evidence_required`） | ✅ 已实现 |
 | `tasks.review` | `{id,decision:"accept"\|"reject",reviewer,note?}` | `TaskLease` | N | `TaskLeaseService.Accept` / `Reject` | ✅ 已实现 |
+| `tasks.tools.set` | `{id,tools:[string]}` | `TaskTools` | N | `TaskLeaseService.SetTools`（`tools:[]` 清除；名字 `[a-z0-9_.:-]{1,120}`、≤32、不重复；未知任务/非法列表 → `-32600`） | ✅ 已实现 |
+| `tasks.tools.get` | `{id}` | `TaskTools`（无绑定 `{tools:null}`） | Y | `TaskLeaseService.Tools` | ✅ 已实现 |
 | `approval.token` | `{approvalId}` | `{token,expiresAt}` | N | `ApprovalActionService.IssueToken` | ✅ 已实现 |
 | `approval.action` | `{approvalId,decision:"allow"\|"deny",token}` | `{ok:true}` | N | `ApprovalActionService.Apply` | ✅ 已实现 |
 | `notify.route.snapshot` | — | `{routes:[NotifyRoute]}` | Y | `NotifyRouterService.Routes` | ✅ 已实现 |

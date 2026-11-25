@@ -120,6 +120,11 @@
       "config": {}
     },
     {
+      "id": "channeldispatch",
+      "module": "zeokeel/channeldispatch",
+      "config": {}
+    },
+    {
       "id": "heartbeat",
       "module": "zeokeel/heartbeat",
       "config": {}

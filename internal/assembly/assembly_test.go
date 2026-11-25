@@ -148,7 +148,7 @@ func TestProductsAndEntries(t *testing.T) {
 	wantHeadless := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/inbox", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/insights",
-		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/credentials", "zeokeel/webhook", "zeokeel/wechat", "zeokeel/feishu", "zeokeel/dingtalk", "zeokeel/email", "zeokeel/replyrelay", "zeokeel/heartbeat", "zeokeel/browser", "zeokeel/hosttools", "zeokeel/memorystore", "zeokeel/teamnotes",
+		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/credentials", "zeokeel/webhook", "zeokeel/wechat", "zeokeel/feishu", "zeokeel/dingtalk", "zeokeel/email", "zeokeel/replyrelay", "zeokeel/channeldispatch", "zeokeel/heartbeat", "zeokeel/browser", "zeokeel/hosttools", "zeokeel/memorystore", "zeokeel/teamnotes",
 		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
 	}
 	loaded := make(map[string]bool, len(headless))
@@ -264,7 +264,7 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 
 	instances := loader.Instances()
 	wantIDs := []string{
-		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "notifyroute", "creds", "webhook", "wechat", "feishu", "dingtalk", "email", "replyrelay", "heartbeat", "browser", "hosttools", "memorystore", "teamnotes",
+		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "notifyroute", "creds", "webhook", "wechat", "feishu", "dingtalk", "email", "replyrelay", "channeldispatch", "heartbeat", "browser", "hosttools", "memorystore", "teamnotes",
 		"agent", "automation", "update", "importer", "acp",
 	}
 	gotIDs := make([]string, 0, len(instances))
@@ -403,6 +403,21 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 	}
 	if report, err := relayService.Relay(context.Background()); err != nil || report.Applied != 0 {
 		t.Fatalf("replyrelay Relay = (%+v, %v), want a quiet pass", report, err)
+	}
+
+	// The dispatcher is wired over the real router and adapters. With no target
+	// conversations configured it must still answer honestly: the message ends
+	// in-app rather than claiming a delivery that never happened.
+	dispatchService, ok := root.Get(contracts.KeyChannelDispatch)
+	if !ok || dispatchService == nil {
+		t.Fatal("KeyChannelDispatch service is not available on the root")
+	}
+	receipt, err := dispatchService.Deliver(context.Background(), contracts.NotifyCategoryApproval, "assembly delivery")
+	if err != nil {
+		t.Fatalf("channel dispatch Deliver: %v", err)
+	}
+	if receipt.Channel != contracts.NotifyChannelInApp {
+		t.Fatalf("receipt = %+v, want the in-app terminal channel", receipt)
 	}
 
 	// The autonomous loop is running: one pass through the assembled services

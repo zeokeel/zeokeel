@@ -31,6 +31,11 @@ import (
 var ErrLeaseStoreCorrupt = errors.New("tasklease: corrupt lease store")
 
 // leaseStoreVersion is bumped when the on-disk shape changes incompatibly.
+// Adding the tool bindings (M5) did NOT bump it: the `tools` key is additive and
+// optional, so a v1 file loads with no bindings and an older build reading a
+// file that carries bindings simply ignores the key — whereas a bump would make
+// that older build (module.go) quarantine the whole document, losing live
+// claims for data it never needed.
 const leaseStoreVersion = 1
 
 // leaseStoreName is the document's file name inside the module data directory.
@@ -40,6 +45,9 @@ const leaseStoreName = "leases.json"
 type leaseStoreDocument struct {
 	Version int                   `json:"version"`
 	Leases  []contracts.TaskLease `json:"leases"`
+	// Tools is the per-task tool binding (M5), same document so one atomic
+	// write covers both halves and there is only one file to quarantine.
+	Tools []contracts.TaskTools `json:"tools,omitempty"`
 }
 
 // Open builds a service whose live leases live in dir/leases.json. A missing
@@ -81,6 +89,28 @@ func Open(dir string, board contracts.TaskBoard, cfg Config) (*Service, error) {
 		}
 		stored := lease
 		service.leases[lease.TaskID] = &stored
+	}
+	// Tool bindings are restored as written. The loader is lenient on purpose:
+	// a hand-edited name that no longer matches the alphabet is still what the
+	// operator bound, and the binding is policy data, not an authorization
+	// decision made at load time. Rows with no task id or no names carry no
+	// policy at all and are dropped.
+	for _, binding := range document.Tools {
+		if binding.TaskID == "" || len(binding.Tools) == 0 {
+			continue
+		}
+		names := make([]string, 0, len(binding.Tools))
+		for _, name := range binding.Tools {
+			if name != "" {
+				names = append(names, name)
+			}
+		}
+		if len(names) == 0 {
+			continue
+		}
+		stored := binding
+		stored.Tools = names
+		service.tools[binding.TaskID] = &stored
 	}
 	service.mu.Unlock()
 
@@ -126,6 +156,15 @@ func (s *Service) persistLocked() error {
 	document := leaseStoreDocument{Version: leaseStoreVersion, Leases: make([]contracts.TaskLease, 0, len(ids))}
 	for _, id := range ids {
 		document.Leases = append(document.Leases, *s.leases[id])
+	}
+	toolIDs := make([]string, 0, len(s.tools))
+	for id := range s.tools {
+		toolIDs = append(toolIDs, id)
+	}
+	sort.Strings(toolIDs)
+	document.Tools = make([]contracts.TaskTools, 0, len(toolIDs))
+	for _, id := range toolIDs {
+		document.Tools = append(document.Tools, *s.tools[id])
 	}
 	encoded, err := json.Marshal(document)
 	if err != nil {

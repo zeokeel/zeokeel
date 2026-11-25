@@ -45,6 +45,32 @@ type TaskLease struct {
 	ReviewNote string
 }
 
+// TaskTools is the execution policy of one board task: the named tools its
+// owner may run while working on it (M5). Names are the ones the tool surface
+// already uses — `browser_open`, `mcp__server__tool` — so the binding is a
+// subset of the tool catalog, not a second vocabulary.
+//
+// The binding belongs to the task, not to a lease: it is set when the task is
+// dispatched, survives a release/re-claim (the policy of the work does not
+// change because the owner did), and is cleared explicitly. A name that no
+// longer exists in the catalog is still returned: the UI must be able to show
+// what was promised instead of silently narrowing it.
+type TaskTools struct {
+	TaskID string
+	// Tools is the allowed set, sorted by insertion order as the caller gave it;
+	// empty (and nil) means "no binding", which is not the same as "no tools".
+	Tools []string
+	// UpdatedAt is when the binding last changed.
+	UpdatedAt time.Time
+}
+
+// MaxTaskTools bounds one binding. An execution policy longer than this is a
+// caller bug (a copy of the whole catalog) rather than a policy.
+const MaxTaskTools = 32
+
+// TaskToolNameMaxLen is the longest accepted tool name.
+const TaskToolNameMaxLen = 120
+
 // TaskLeaseService is the time-bounded claim layer over the task board. It never
 // replaces the board: every transition here also moves the board status, so the
 // two views cannot disagree.
@@ -67,6 +93,13 @@ type TaskLeaseService interface {
 	Lease(ctx context.Context, taskID string) (TaskLease, bool, error)
 	// Expire releases every lease whose deadline passed and returns their ids.
 	Expire(ctx context.Context) ([]string, error)
+	// SetTools binds the tools the task's owner may run (rebinding replaces the
+	// previous set; an empty slice clears the binding). The task must exist on
+	// the board — ErrTaskToolsUnknownTask otherwise — and the names must be a
+	// valid tool list (ErrTaskToolsInvalid).
+	SetTools(ctx context.Context, taskID string, tools []string) (TaskTools, error)
+	// Tools reports a task's binding; false means the task has none.
+	Tools(ctx context.Context, taskID string) (TaskTools, bool, error)
 }
 
 // Lease errors are typed so the UI can say "someone else has it" instead of a
@@ -82,6 +115,13 @@ var (
 	ErrLeaseEvidenceRequired = errors.New("lease: evidence required")
 	// ErrLeaseInvalid means a required field was empty.
 	ErrLeaseInvalid = errors.New("lease: invalid")
+	// ErrTaskToolsInvalid means the requested tool binding is not a valid list:
+	// an empty name, a duplicate, a name outside [a-z0-9_.:-], or more than
+	// MaxTaskTools entries.
+	ErrTaskToolsInvalid = errors.New("lease: invalid tool binding")
+	// ErrTaskToolsUnknownTask means tools were bound to a task that is not on
+	// the board (a dispatch bug, never a future task).
+	ErrTaskToolsUnknownTask = errors.New("lease: unknown task for tool binding")
 )
 
 // DefaultLeaseTTL is the default claim lifetime; heartbeats extend it.

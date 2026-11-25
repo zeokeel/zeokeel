@@ -103,6 +103,8 @@ var contractParams = map[string]any{
 	"tasks.heartbeat":         leaseParams{},
 	"tasks.submit":            taskSubmitParams{},
 	"tasks.review":            taskReviewParams{},
+	"tasks.tools.set":         taskToolsSetParams{},
+	"tasks.tools.get":         leaseReadParams{},
 	"approval.token":          approvalTokenParams{},
 	"approval.action":         approvalActionParams{},
 	"notify.route.snapshot":   struct{}{},

@@ -10,6 +10,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/approvals"
 	"github.com/zeokeel/zeokeel/internal/modules/automation"
 	"github.com/zeokeel/zeokeel/internal/modules/browser"
+	"github.com/zeokeel/zeokeel/internal/modules/channeldispatch"
 	"github.com/zeokeel/zeokeel/internal/modules/creds"
 	"github.com/zeokeel/zeokeel/internal/modules/dingtalk"
 	"github.com/zeokeel/zeokeel/internal/modules/email"
@@ -81,6 +82,8 @@ func Registry() *module.Registry {
 	mustRegister(registry, heartbeat.Module())
 	// The reply relay joins the inbox and the approval action service.
 	mustRegister(registry, replyrelay.Module())
+	// The dispatcher executes the routing plan against the adapters.
+	mustRegister(registry, channeldispatch.Module())
 	// tasklease wraps the task board: it must come after toolkit.
 	mustRegister(registry, tasklease.Module())
 	mustRegister(registry, goal.Module())

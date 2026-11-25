@@ -397,6 +397,8 @@ const mockInbox = {
 const mockLeases = new Map();
 /** Channel credentials, kind/id -> {kind,id,fields}. Values are never echoed. */
 const mockCredentials = new Map();
+/** Task -> allowed tool names. */
+const mockTaskTools = new Map();
 /** Shared team notes, newest first. */
 const mockTeamNotes = [];
 /** QR logins started by the settings screen. */
@@ -1859,6 +1861,19 @@ const wsDispatch = (client, message) => {
       }
       item.status = action;
       return reply({ ...item });
+    }
+    case 'tasks.tools.set': {
+      const id = String(params.id ?? '');
+      const tools = Array.isArray(params.tools) ? params.tools.map(String) : null;
+      if (!id || tools === null) return fail(-32602, 'invalid_params');
+      if (tools.length > 32) return fail(-32600, 'lease: too many tools');
+      mockTaskTools.set(id, { taskId: id, tools, updatedAt: nowIso() });
+      return reply(mockTaskTools.get(id));
+    }
+    case 'tasks.tools.get': {
+      const id = String(params.id ?? '');
+      const bound = mockTaskTools.get(id);
+      return reply(bound ? bound : { tools: null });
     }
     case 'tasks.lease': {
       const held = mockLeases.get(String(params.id ?? ''));

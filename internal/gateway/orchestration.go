@@ -59,6 +59,16 @@ type taskLeaseDTO struct {
 	ReviewNote string        `json:"reviewNote,omitempty"`
 }
 
+// taskToolsDTO is the M5 tool binding of one task. `tools` is deliberately not
+// omitempty: null on the wire means "no binding" (the same shape tasks.tools.get
+// answers when there is none), while [] never comes back from a read — a clear
+// removes the binding instead of storing an empty one.
+type taskToolsDTO struct {
+	TaskID    string   `json:"taskId"`
+	Tools     []string `json:"tools"`
+	UpdatedAt string   `json:"updatedAt,omitempty"`
+}
+
 // --- mapping ---------------------------------------------------------------
 
 func rfc3339(value time.Time) string {
@@ -90,6 +100,14 @@ func taskLeaseFromContract(lease contracts.TaskLease) taskLeaseDTO {
 	}
 	for _, evidence := range lease.Evidence {
 		dto.Evidence = append(dto.Evidence, evidenceDTO{Kind: evidence.Kind, Ref: evidence.Ref, Note: evidence.Note})
+	}
+	return dto
+}
+
+func taskToolsFromContract(binding contracts.TaskTools) taskToolsDTO {
+	dto := taskToolsDTO{TaskID: binding.TaskID, UpdatedAt: rfc3339(binding.UpdatedAt)}
+	if len(binding.Tools) > 0 {
+		dto.Tools = append([]string(nil), binding.Tools...)
 	}
 	return dto
 }
@@ -148,6 +166,8 @@ func orchestrationError(err error) *protocolError {
 		errors.Is(err, contracts.ErrLeaseExpired),
 		errors.Is(err, contracts.ErrLeaseEvidenceRequired),
 		errors.Is(err, contracts.ErrLeaseInvalid),
+		errors.Is(err, contracts.ErrTaskToolsInvalid),
+		errors.Is(err, contracts.ErrTaskToolsUnknownTask),
 		errors.Is(err, contracts.ErrInboxUnknownItem),
 		errors.Is(err, contracts.ErrInboxUnknownAction),
 		errors.Is(err, contracts.ErrInboxInvalid),
@@ -687,6 +707,60 @@ func (g *Gateway) taskLease(ctx context.Context, raw json.RawMessage) (any, *pro
 		return map[string]any{"lease": nil}, nil
 	}
 	return taskLeaseFromContract(lease), nil
+}
+
+// --- task tools (M5 execution policy) --------------------------------------
+
+// taskToolsSetParams needs its own struct (not leaseParams + a slice): `tools`
+// is a required field, and the generator derives required from the missing
+// ",omitempty". The handler rejects a missing/null list rather than reading it
+// as "clear" — a policy must never be removed by a malformed request.
+type taskToolsSetParams struct {
+	ID    string   `json:"id"`
+	Tools []string `json:"tools"`
+}
+
+// tasks.tools.set binds the tools one task's owner may run. Rebinding replaces
+// the previous set; an empty list clears the binding.
+func (g *Gateway) taskToolsSet(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.leaseService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params taskToolsSetParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if params.Tools == nil {
+		return nil, errInvalidParams("tools", "required (send [] to clear the binding)")
+	}
+	binding, err := service.SetTools(ctx, params.ID, params.Tools)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return taskToolsFromContract(binding), nil
+}
+
+// tasks.tools.get is the read half: the task screen shows the policy a task was
+// dispatched with, and a task without one answers {"tools":null} — the same
+// shape as tasks.lease's {"lease":null}, so the client has one absent case.
+func (g *Gateway) taskToolsGet(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.leaseService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params leaseReadParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	binding, found, err := service.Tools(ctx, params.ID)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	if !found {
+		return map[string]any{"tools": nil}, nil
+	}
+	return taskToolsFromContract(binding), nil
 }
 
 // --- credentials -----------------------------------------------------------

@@ -437,6 +437,19 @@
         "sinceRev"
       ]
     },
+    "tasks.tools.get": {
+      "required": [
+        "id"
+      ],
+      "optional": []
+    },
+    "tasks.tools.set": {
+      "required": [
+        "id",
+        "tools"
+      ],
+      "optional": []
+    },
     "tasks.unsubscribe": {
       "required": [],
       "optional": [

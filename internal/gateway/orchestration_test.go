@@ -6,6 +6,8 @@ package gateway
 // are really dispatched, and the wire shape does not silently drop fields.
 
 import (
+	"context"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -18,6 +20,7 @@ func TestOrchestrationMethodsAreDispatched(t *testing.T) {
 	want := []string{
 		"inbox.snapshot", "inbox.dispatch", "inbox.triage",
 		"tasks.lease", "tasks.claim", "tasks.heartbeat", "tasks.submit", "tasks.review",
+		"tasks.tools.set", "tasks.tools.get",
 		"approval.token", "approval.action",
 		"notify.route.snapshot", "notify.route.upsert",
 		"webhook.sources", "webhook.source.set", "webhook.source.remove",
@@ -133,5 +136,154 @@ func TestNotifyRouteDTOMapping(t *testing.T) {
 	route.Fallback[0] = "mutated"
 	if dto.Fallback[0] != contracts.NotifyChannelDingTalk {
 		t.Fatal("dto shares the route's fallback slice")
+	}
+}
+
+func TestTaskToolsDTOMapping(t *testing.T) {
+	updated := time.Date(2026, 11, 25, 9, 0, 0, 0, time.UTC)
+	binding := contracts.TaskTools{
+		TaskID: "task-1", Tools: []string{"browser_open", "mcp__github__search"}, UpdatedAt: updated,
+	}
+	dto := taskToolsFromContract(binding)
+	if dto.TaskID != "task-1" || len(dto.Tools) != 2 || dto.Tools[1] != "mcp__github__search" {
+		t.Fatalf("dto = %+v", dto)
+	}
+	if dto.UpdatedAt != "2026-11-25T09:00:00Z" {
+		t.Fatalf("updatedAt = %q, want RFC3339 UTC", dto.UpdatedAt)
+	}
+	// Defensive copy: the policy on the wire must not be mutated by a caller.
+	binding.Tools[0] = "mutated"
+	if dto.Tools[0] != "browser_open" {
+		t.Fatal("dto shares the binding's Tools slice")
+	}
+	// No binding is null on the wire, never []: [] would say "may run nothing",
+	// which is a different policy from "no binding at all".
+	if empty := taskToolsFromContract(contracts.TaskTools{TaskID: "task-2"}); empty.Tools != nil {
+		t.Fatalf("empty binding tools = %v, want nil", empty.Tools)
+	}
+}
+
+// toolsFakeLease is the lease service seen by the two new handlers: a map of
+// bindings plus one injectable typed error.
+type toolsFakeLease struct {
+	fakeLease
+	bound map[string][]string
+	err   error
+}
+
+func (f *toolsFakeLease) SetTools(_ context.Context, taskID string, tools []string) (contracts.TaskTools, error) {
+	if f.err != nil {
+		return contracts.TaskTools{}, f.err
+	}
+	if len(tools) == 0 {
+		delete(f.bound, taskID)
+		return contracts.TaskTools{TaskID: taskID, UpdatedAt: time.Now()}, nil
+	}
+	f.bound[taskID] = append([]string(nil), tools...)
+	return contracts.TaskTools{TaskID: taskID, Tools: tools, UpdatedAt: time.Now()}, nil
+}
+
+func (f *toolsFakeLease) Tools(_ context.Context, taskID string) (contracts.TaskTools, bool, error) {
+	if f.err != nil {
+		return contracts.TaskTools{}, false, f.err
+	}
+	tools, ok := f.bound[taskID]
+	if !ok {
+		return contracts.TaskTools{}, false, nil
+	}
+	return contracts.TaskTools{TaskID: taskID, Tools: tools, UpdatedAt: time.Now()}, true, nil
+}
+
+func TestTaskToolsHandlersRoundTrip(t *testing.T) {
+	lease := &toolsFakeLease{bound: map[string][]string{}}
+	gw := newReviewGateway(t, lease, nil)
+	ctx := context.Background()
+	marshal := func(params map[string]any) json.RawMessage {
+		t.Helper()
+		raw, err := json.Marshal(params)
+		if err != nil {
+			t.Fatalf("marshal %v: %v", params, err)
+		}
+		return raw
+	}
+
+	// set → TaskTools
+	out, problem := gw.taskToolsSet(ctx, marshal(map[string]any{
+		"id": "task-1", "tools": []string{"browser_open", "mcp__github__search"},
+	}))
+	if problem != nil {
+		t.Fatalf("tasks.tools.set: %+v", problem)
+	}
+	set, ok := out.(taskToolsDTO)
+	if !ok {
+		t.Fatalf("tasks.tools.set result = %T, want taskToolsDTO", out)
+	}
+	if set.TaskID != "task-1" || len(set.Tools) != 2 || set.Tools[0] != "browser_open" {
+		t.Fatalf("set = %+v", set)
+	}
+
+	// get → the same binding
+	out, problem = gw.taskToolsGet(ctx, marshal(map[string]any{"id": "task-1"}))
+	if problem != nil {
+		t.Fatalf("tasks.tools.get: %+v", problem)
+	}
+	got, ok := out.(taskToolsDTO)
+	if !ok || got.TaskID != "task-1" || len(got.Tools) != 2 {
+		t.Fatalf("get = (%T) %+v", out, out)
+	}
+
+	// get on a task without a binding → {"tools":null}
+	out, problem = gw.taskToolsGet(ctx, marshal(map[string]any{"id": "task-2"}))
+	if problem != nil {
+		t.Fatalf("tasks.tools.get(no binding): %+v", problem)
+	}
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal absent result: %v", err)
+	}
+	if string(encoded) != `{"tools":null}` {
+		t.Fatalf("absent result = %s, want {\"tools\":null}", encoded)
+	}
+
+	// clear → the binding is gone (an empty list, not a missing one)
+	if _, problem := gw.taskToolsSet(ctx, marshal(map[string]any{"id": "task-1", "tools": []string{}})); problem != nil {
+		t.Fatalf("tasks.tools.set(clear): %+v", problem)
+	}
+	if len(lease.bound["task-1"]) != 0 {
+		t.Fatalf("binding after clear = %v, want none", lease.bound["task-1"])
+	}
+
+	// A missing tools field is a malformed request, never a silent clear: the
+	// binding set above must still be there for task-1... which it is not, so
+	// rebind first and then send the malformed request.
+	if _, problem := gw.taskToolsSet(ctx, marshal(map[string]any{"id": "task-1", "tools": []string{"fs.read"}})); problem != nil {
+		t.Fatalf("rebind: %+v", problem)
+	}
+	if _, problem := gw.taskToolsSet(ctx, marshal(map[string]any{"id": "task-1"})); problem == nil || problem.Code != codeInvalidParams {
+		t.Fatalf("missing tools problem = %+v, want codeInvalidParams", problem)
+	}
+	if len(lease.bound["task-1"]) != 1 {
+		t.Fatalf("a malformed request changed the binding: %v", lease.bound["task-1"])
+	}
+}
+
+func TestTaskToolsHandlersMapTypedErrors(t *testing.T) {
+	lease := &toolsFakeLease{bound: map[string][]string{}}
+	gw := newReviewGateway(t, lease, nil)
+	ctx := context.Background()
+	raw, err := json.Marshal(map[string]any{"id": "task-1", "tools": []string{"browser_open"}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	lease.err = contracts.ErrTaskToolsInvalid
+	if _, problem := gw.taskToolsSet(ctx, raw); problem == nil || problem.Code != codeInvalidRequest ||
+		!strings.Contains(problem.Message, "tool binding") {
+		t.Fatalf("invalid binding problem = %+v, want codeInvalidRequest with the typed text", problem)
+	}
+	lease.err = contracts.ErrTaskToolsUnknownTask
+	if _, problem := gw.taskToolsGet(ctx, raw); problem == nil || problem.Code != codeInvalidRequest ||
+		!strings.Contains(problem.Message, "unknown task") {
+		t.Fatalf("unknown task problem = %+v, want codeInvalidRequest with the typed text", problem)
 	}
 }

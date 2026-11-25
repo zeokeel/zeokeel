@@ -43,6 +43,10 @@ type Service struct {
 	// dropped from the map (the board keeps the outcome); evidence and notes are
 	// returned to the caller once.
 	leases map[string]*contracts.TaskLease
+	// tools keeps the per-task tool bindings (the M5 execution policy). They are
+	// independent of the leases map: releasing or accepting a lease does not
+	// drop the task's policy.
+	tools map[string]*contracts.TaskTools
 	// path is the durable document (dir/leases.json); empty means in-memory only
 	// (NewService, and unit tests that do not care about durability).
 	path string
@@ -50,7 +54,11 @@ type Service struct {
 
 // NewService wires the lease layer.
 func NewService(board contracts.TaskBoard, cfg Config) *Service {
-	return &Service{cfg: cfg.normalized(), board: board, leases: make(map[string]*contracts.TaskLease)}
+	return &Service{
+		cfg: cfg.normalized(), board: board,
+		leases: make(map[string]*contracts.TaskLease),
+		tools:  make(map[string]*contracts.TaskTools),
+	}
 }
 
 func cloneLease(lease *contracts.TaskLease) contracts.TaskLease {
