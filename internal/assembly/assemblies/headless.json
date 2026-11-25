@@ -73,6 +73,11 @@
       "config": {}
     },
     {
+      "id": "notifyroute",
+      "module": "zeokeel/notifyroute",
+      "config": {}
+    },
+    {
       "id": "hosttools",
       "module": "zeokeel/hosttools",
       "config": {

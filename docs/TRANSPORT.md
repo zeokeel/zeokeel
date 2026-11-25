@@ -818,6 +818,8 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `tasks.review` | `{id,decision:"accept"\|"reject",reviewer,note?}` | `TaskLease` | N | `TaskLeaseService.Accept` / `Reject` | ✅ 已实现 |
 | `approval.token` | `{approvalId}` | `{token,expiresAt}` | N | `ApprovalActionService.IssueToken` | ✅ 已实现 |
 | `approval.action` | `{approvalId,decision:"allow"\|"deny",token}` | `{ok:true}` | N | `ApprovalActionService.Apply` | ✅ 已实现 |
+| `notify.route.snapshot` | — | `{routes:[NotifyRoute]}` | Y | `NotifyRouterService.Routes` | ✅ 已实现 |
+| `notify.route.upsert` | `{category,primary,fallback?,quietHours?,escalationMs?,enabled?}` | `NotifyRoute` | N | `NotifyRouterService.Upsert` | ✅ 已实现 |
 
 `InboxItem`（摘要）：
 
@@ -848,8 +850,10 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
   「同意 / 不同意」走同一条 `Resolve`（网关不解析自然语言，解析在 approvals 模块内，`ParseReply`）。
 - 类型化错误映射成 `-32600`（invalid request）并保留原文：`lease: task already claimed`、
   `approval: token expired` 这类话可以直接显示给用户。
-- capability：`inbox`、`triage`、`tasklease`、`approvalaction`（四个服务键都随装配提供；缺任何一个，
-  对应方法返回 `-32004 capability_unsupported`）。
+- capability：`inbox`、`triage`、`tasklease`、`approvalaction`、`notifyroute`（五个服务键都随装配提供；
+  缺任何一个，对应方法返回 `-32004 capability_unsupported`）。
+- `NotifyRoute` 的兜底顺序：`primary` → `fallback[]` → **`inapp` 永远作为最后一档**（交付循环可以在这里停住）；
+  静音时段只压非审批类；审批类永不静音（`deferred` 只在非审批消息上出现）。
 
 #### 5.1.9 连接器（`mcp`，能力页）
 

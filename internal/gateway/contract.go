@@ -104,6 +104,8 @@ var contractParams = map[string]any{
 	"tasks.review":            taskReviewParams{},
 	"approval.token":          approvalTokenParams{},
 	"approval.action":         approvalActionParams{},
+	"notify.route.snapshot":   struct{}{},
+	"notify.route.upsert":     notifyRouteUpsertParams{},
 }
 
 // conditionalCapability is one capability that exists only when the assembly

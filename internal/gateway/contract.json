@@ -142,6 +142,22 @@
         "actionId"
       ]
     },
+    "notify.route.snapshot": {
+      "required": [],
+      "optional": []
+    },
+    "notify.route.upsert": {
+      "required": [
+        "category",
+        "primary"
+      ],
+      "optional": [
+        "enabled",
+        "escalationMs",
+        "fallback",
+        "quietHours"
+      ]
+    },
     "ping": {
       "required": [],
       "optional": []
@@ -502,6 +518,7 @@
       "foreground",
       "inbox",
       "notify",
+      "notifyroute",
       "plan",
       "prompts",
       "run.cancel",

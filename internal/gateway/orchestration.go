@@ -418,3 +418,86 @@ func (g *Gateway) approvalAction(ctx context.Context, raw json.RawMessage) (any,
 	}
 	return map[string]any{"ok": true}, nil
 }
+
+// --- notification routes ---------------------------------------------------
+
+type notifyRouteDTO struct {
+	Category     string   `json:"category"`
+	Primary      string   `json:"primary"`
+	Fallback     []string `json:"fallback,omitempty"`
+	QuietHours   string   `json:"quietHours,omitempty"`
+	EscalationMS int64    `json:"escalationMs,omitempty"`
+	Enabled      bool     `json:"enabled"`
+}
+
+type notifyRoutesResult struct {
+	Routes []notifyRouteDTO `json:"routes"`
+}
+
+type notifyRouteUpsertParams struct {
+	Category     string   `json:"category"`
+	Primary      string   `json:"primary"`
+	Fallback     []string `json:"fallback,omitempty"`
+	QuietHours   string   `json:"quietHours,omitempty"`
+	EscalationMS int64    `json:"escalationMs,omitempty"`
+	Enabled      *bool    `json:"enabled,omitempty"`
+}
+
+func notifyRouteFromContract(route contracts.NotifyRoute) notifyRouteDTO {
+	dto := notifyRouteDTO{
+		Category: route.Category, Primary: route.Primary, QuietHours: route.QuietHours,
+		EscalationMS: route.Escalation.Milliseconds(), Enabled: route.Enabled,
+	}
+	if len(route.Fallback) > 0 {
+		dto.Fallback = append([]string(nil), route.Fallback...)
+	}
+	return dto
+}
+
+func (g *Gateway) notifyRouteService() (contracts.NotifyRouterService, *protocolError) {
+	service, ok := g.root.Get(contracts.KeyNotifyRoute)
+	if !ok || service == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "notification routing unavailable")
+	}
+	return service, nil
+}
+
+func (g *Gateway) notifyRoutesSnapshot(ctx context.Context, _ json.RawMessage) (any, *protocolError) {
+	service, problem := g.notifyRouteService()
+	if problem != nil {
+		return nil, problem
+	}
+	routes, err := service.Routes(ctx)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	result := notifyRoutesResult{Routes: make([]notifyRouteDTO, 0, len(routes))}
+	for _, route := range routes {
+		result.Routes = append(result.Routes, notifyRouteFromContract(route))
+	}
+	return result, nil
+}
+
+func (g *Gateway) notifyRouteUpsert(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.notifyRouteService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params notifyRouteUpsertParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	enabled := true
+	if params.Enabled != nil {
+		enabled = *params.Enabled
+	}
+	route := contracts.NotifyRoute{
+		Category: params.Category, Primary: params.Primary, Fallback: params.Fallback,
+		QuietHours: params.QuietHours, Escalation: time.Duration(params.EscalationMS) * time.Millisecond,
+		Enabled: enabled,
+	}
+	if err := service.Upsert(ctx, route); err != nil {
+		return nil, orchestrationError(err)
+	}
+	return notifyRouteFromContract(route), nil
+}

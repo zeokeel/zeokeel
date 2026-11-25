@@ -16,6 +16,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/insights"
 	"github.com/zeokeel/zeokeel/internal/modules/memorystore"
 	"github.com/zeokeel/zeokeel/internal/modules/modelcatalog"
+	"github.com/zeokeel/zeokeel/internal/modules/notifyroute"
 	"github.com/zeokeel/zeokeel/internal/modules/sandbox"
 	"github.com/zeokeel/zeokeel/internal/modules/sessionstore"
 	"github.com/zeokeel/zeokeel/internal/modules/skills"
@@ -69,6 +70,8 @@ func Registry() *module.Registry {
 	mustRegister(registry, importer.Module())
 	mustRegister(registry, acp.Module())
 	mustRegister(registry, modelcatalog.Module())
+	// Notification routing: pure policy, no channel dependency.
+	mustRegister(registry, notifyroute.Module())
 	mustRegister(registry, insights.Module())
 	mustRegister(registry, hosttools.Module())
 	mustRegister(registry, GroupModule())

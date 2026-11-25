@@ -9,6 +9,7 @@ package assembly_test
 import (
 	"context"
 	"os"
+	"time"
 
 	"errors"
 	"github.com/zeokeel/zeokeel-rig/sandbox/osrunner"
@@ -143,7 +144,7 @@ func TestProductsAndEntries(t *testing.T) {
 	wantHeadless := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/inbox", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/insights",
-		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/tasklease", "zeokeel/hosttools", "zeokeel/memorystore",
+		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/hosttools", "zeokeel/memorystore",
 		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
 	}
 	loaded := make(map[string]bool, len(headless))
@@ -259,7 +260,7 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 
 	instances := loader.Instances()
 	wantIDs := []string{
-		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "tasklease", "hosttools", "memorystore",
+		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "tasklease", "notifyroute", "hosttools", "memorystore",
 		"agent", "automation", "update", "importer", "acp",
 	}
 	gotIDs := make([]string, 0, len(instances))
@@ -325,6 +326,17 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 	}
 	if updated, err := inboxService.Triage(context.Background(), []string{storedItem.ID}, contracts.InboxActionTask, []string{"task-1"}); err != nil || updated != 1 {
 		t.Fatalf("inbox Triage through the assembly = (%d, %v), want (1, nil)", updated, err)
+	}
+
+	// Notification routing is pure policy: a bare gateway must still be able to
+	// ask "where does an approval go?" and get the in-app terminal channel.
+	router, ok := root.Get(contracts.KeyNotifyRoute)
+	if !ok || router == nil {
+		t.Fatal("KeyNotifyRoute service is not available on the root")
+	}
+	plan, err := router.Plan(context.Background(), contracts.NotifyCategoryApproval, time.Now(), nil)
+	if err != nil || len(plan.Channels) == 0 || plan.Channels[len(plan.Channels)-1] != contracts.NotifyChannelInApp {
+		t.Fatalf("notify plan through the assembly = (%+v, %v), want in-app", plan, err)
 	}
 
 	// The approval action layer shares the approvals queue. Headless runs in

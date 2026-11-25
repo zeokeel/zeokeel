@@ -40,6 +40,7 @@ var serverCapabilities = []string{
 	"triage",
 	"tasklease",
 	"approvalaction",
+	"notifyroute",
 }
 
 // gatewayCapabilities is the handshake's capability list for this gateway
@@ -360,6 +361,12 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		},
 		"approval.action": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.approvalAction(ctx, request.Params)
+		},
+		"notify.route.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.notifyRoutesSnapshot(ctx, request.Params)
+		},
+		"notify.route.upsert": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.notifyRouteUpsert(ctx, request.Params)
 		},
 		"team.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.teamSnapshot()

@@ -19,6 +19,7 @@ func TestOrchestrationMethodsAreDispatched(t *testing.T) {
 		"inbox.snapshot", "inbox.dispatch", "inbox.triage",
 		"tasks.claim", "tasks.heartbeat", "tasks.submit", "tasks.review",
 		"approval.token", "approval.action",
+		"notify.route.snapshot", "notify.route.upsert",
 	}
 	methods := SupportedMethods()
 	for _, name := range want {
@@ -104,5 +105,27 @@ func TestOrchestrationErrorMapsTypedErrorsToClientErrors(t *testing.T) {
 			!strings.Contains(mapped.Message, "approval") {
 			t.Errorf("mapped message = %q, want the original typed text", mapped.Message)
 		}
+	}
+}
+
+func TestNotifyRouteDTOMapping(t *testing.T) {
+	route := contracts.NotifyRoute{
+		Category: contracts.NotifyCategoryApproval, Primary: contracts.NotifyChannelWeChat,
+		Fallback: []string{contracts.NotifyChannelDingTalk}, QuietHours: "22:30-08:00",
+		Escalation: 15 * time.Minute, Enabled: true,
+	}
+	dto := notifyRouteFromContract(route)
+	if dto.Category != route.Category || dto.Primary != route.Primary || !dto.Enabled {
+		t.Fatalf("dto = %+v", dto)
+	}
+	if dto.EscalationMS != (15 * time.Minute).Milliseconds() {
+		t.Fatalf("escalationMs = %d, want %d", dto.EscalationMS, (15 * time.Minute).Milliseconds())
+	}
+	if len(dto.Fallback) != 1 || dto.Fallback[0] != contracts.NotifyChannelDingTalk {
+		t.Fatalf("fallback = %v", dto.Fallback)
+	}
+	route.Fallback[0] = "mutated"
+	if dto.Fallback[0] != contracts.NotifyChannelDingTalk {
+		t.Fatal("dto shares the route's fallback slice")
 	}
 }
