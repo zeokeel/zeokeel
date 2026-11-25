@@ -659,6 +659,12 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--zk-space-1);
+  /* A `dl` carries default margins of its own. */
+  margin: 0;
+}
+
+.zk-tool-section__body {
+  margin: 0;
 }
 
 .zk-tool-section__label {

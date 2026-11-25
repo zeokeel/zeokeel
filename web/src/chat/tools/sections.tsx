@@ -11,13 +11,20 @@ import type { MessageKey } from '@/i18n';
  * A renderer only chooses which sections apply; it never invents a new look.
  */
 
+/**
+ * One label/value pair of a tool card.
+ *
+ * A `dl` rather than two divs: a screen reader reads "地址, http://…" instead of
+ * two unrelated strings, and the 13 section rows get the same pairing the 2
+ * `Descriptions` uses had (round-4 component audit #4).
+ */
 export function SectionRow({ labelKey, children }: { labelKey: MessageKey; children: ReactNode }) {
   const t = useT();
   return (
-    <div className="zk-tool-section">
-      <span className="zk-tool-section__label">{t(labelKey)}</span>
-      <div className="zk-tool-section__body">{children}</div>
-    </div>
+    <dl className="zk-tool-section">
+      <dt className="zk-tool-section__label">{t(labelKey)}</dt>
+      <dd className="zk-tool-section__body">{children}</dd>
+    </dl>
   );
 }
 
@@ -163,19 +170,6 @@ export function DiffBlock({ unified }: { unified: string }) {
         </div>
       ))}
     </div>
-  );
-}
-
-export function KeyValueList({ entries }: { entries: Array<[string, string]> }) {
-  return (
-    <dl className="zk-kv">
-      {entries.map(([key, value]) => (
-        <div key={key} className="zk-kv__row">
-          <dt className="zk-kv__key">{key}</dt>
-          <dd className="zk-kv__value">{value}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }
 
