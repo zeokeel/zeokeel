@@ -41,7 +41,10 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | `contracts.KeyDingTalk` | dingtalk（依赖 inbox） | 入站路由（待挂） | 17 条（验签/过期/非文本/合并/发送/限速型错误） |
 | `contracts.KeyFeishu` | feishu（依赖 inbox） | 入站路由（待挂） | 24 条（challenge/验签/旧签名/v1 回调/合并/卡片动作/发送/token 铸造） |
 | 租约持久化 | tasklease（+dataDir） | 重启恢复 | 7 条（存活/过期回收/损坏/0600/评审状态） |
-| `contracts.KeyCredentials` | creds（依赖 dataDir） | 渠道适配器、设置页 | 17 条 + 19 校验子测试（往返/覆盖/深拷贝/List 无字段/损坏/0600/并发） |
+| `contracts.KeyCredentials` | creds（依赖 dataDir） | `credentials.list/set/delete`、渠道适配器 | 17 条 + 19 校验子测试；网关 3 方法 + mock 覆盖 |
+| `contracts.KeyEmail` | email（依赖 inbox） | 邮件渠道 | 30 条（SMTP 报文/535/IMAP 归一/Message-ID 去重/QP+base64/循环取消） |
+| `planner`（library） | planner（仅依赖 contracts） | 模型计划器 | 14 测试 / 21 断言（线格式/错误分层/预算先于网络/密钥永不入错误） |
+| 模型计划器接入 | `lead.ModelPlanner` + `lib/leadplan` | `lead.RunOnce` | 4 条（映射 task/skip/无模型/驱动整轮） |
 | 入站路由（钉钉/飞书） | gateway `inbound.go` | 平台回调 | 6 条（202/签名 401/challenge 200/204/404） |
 | Web「待办收件箱」 | `web/src/features/inbox/**`、`web/src/api/inbox.ts` | `/inbox/incoming` | web 全量 477 tests 绿；旧 `/inbox` 有回归测试 |
 | Web「任务详情」 | `web/src/features/task/**`、`web/src/api/task.ts` | `/t/:taskId`（R3b，无导航） | 22 测试（五段顺序/认领/证据门槛/通过打回/重试） |
@@ -64,6 +67,7 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 | F5 | ~~inbox 是内存实现，重启丢~~ | ✅ 已修：`Open(dir)` 载入 `<data>/inbox/inbox.json`，每次变更原子写（tmp+rename），失败回滚内存；损坏文件**移到一边**并告警，不静默清空 | 持久化测试 6 条（重启恢复/重启后仍去重/状态恢复/损坏报错/无残留 tmp） |
 | F6 | 第二次加模块又触发同一批断言（顺序列表、实例数、`instances[10]`） | 证明 F1/F2 不是偶发 | **已修根因**：改为「存在性」断言 + 按 id 查实例；计数断言删除，换成"必须包含这些模块" |
 | F8 | `TestApprovalsSnapshotDeltaReplay` 在全套并发下偶发 `i/o timeout` | 测试脚手架的首帧读超时只有 5s，整包并发时不够 | ✅ 已修：`wstest` 读超时 5s → 15s（测试夹具，不是产品超时），`-count=3` 连过、全量重跑绿 |
+| F9 | 全量测试时 `internal/modules/planner` 卡满 600s 超时 | 取消测试的假处理器只等测试放行、不等请求断开，`httptest.Server.Close` 被永久阻塞 | ✅ 已修：处理器 `select` 加上 `r.Context().Done()`，`-count=3` 通过 |
 | F7 | **装配链路测出一个真 bug**：`Claim` 对已经指派/进行中的任务再次写 board，被 rig 拒绝 `team task update has no changes`，整次认领失败 | 单模块测试用的是 fake board，永远发现不了；只有真实装配链路能测出来 | 已修：先读当前任务，只写变化过的字段（状态不同才 SetStatus，owner 不同才 Assign） |
 
 ## 4. 尚未接的线（明确空白，不许假装完成）
@@ -79,7 +83,7 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 | ~~钉钉/飞书 HTTP 路由~~ | ✅ 已交付：`/api/inbound/dingtalk`、`/api/inbound/feishu`（challenge 200、无关事件 204、错误 401/400/503） | 已交付 |
 | 凭据仍未接到适配器 | creds 库有了，但三个适配器仍从 Config 读 `json:"-"` 字段；没人调用 `KeyCredentials` | 缺口 | 适配器启动时 `Get(kind,id)` + 热更新；UI 表单 |
 | 卡片动作未接审批 | 飞书 `CardAction` 提取了 approvalId/decision，但审批 action 需要一次性 token；卡片 value 里还没带 token | 缺口 | 发卡时把 token 放进 `action.value`，回调走 `approval.action` |
-| 模型计划器未接入 | leadplan 库已就绪，lead 已修成"用注入的 planner"；但还没有 provider 适配器与装配注入 | 缺口 | 在装配层构造 `contracts.PlannerModel`（模型目录 + agent 客户端），注入 `lead.NewService` |
+| 模型计划器装配注入 | 零件齐：`planner.New(...)` + `lead.ModelPlanner`；装配层还没读 `chat.baseURL/apiKey/model` 设置去构造 | 小缺口 | 装配/自动化里按设置构造；无配置则保持规则计划器 |
 | 钉钉/飞书未读凭据库 | 只有 wechat 接了 `KeyCredentials`；钉钉/飞书仍从 Config 读 `json:"-"` | 缺口 | 同 wechat 模式复制（kind=dingtalk/feishu） |
 | ~~网关协议 `inbox.*` / 租约 / 审批动作~~ | ✅ 9 个方法已实现并同步 TRANSPORT §5.1.13、contract.json、ws-contract.ts | 已交付 |
 | ~~`notify.route.*`（主/备渠道）~~ | ✅ 已交付：router 服务 + `notify.route.snapshot/upsert` + capability `notifyroute` | 已交付 |
@@ -145,6 +149,8 @@ scripts/verify.sh --quick（creds 集成后）PASS 5/5，68s
 web: typecheck / lint(25 既有 warning) / test 453 / gen:verify 全绿
 web（任务详情后）: typecheck / lint(25) / test 477 全绿
 web（lease 首屏后）: typecheck / lint(25) / test 484 / gen:verify 全绿
+web（团队板后）: typecheck / lint(25) / test 501 全绿
+scripts/verify.sh --quick（邮件/计划器/凭据/卡片后）PASS 5/5，64s
 scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过
 scripts/verify.sh --quick（approval 后）    PASS 5/5（一次 flaky 后重跑绿）
                                             （首次跑时 gateway 的
