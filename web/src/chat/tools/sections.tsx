@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Descriptions } from 'antd';
 import { CodeHighlighter } from '@ant-design/x';
-import { ghcolors, oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { darkCodeTheme, lightCodeTheme } from '@/chat/syntax-theme';
 import { parseUnifiedDiff, type DiffLine } from '@/api/files';
 import { useDarkMode } from '@/chat/markdown';
 import { useT } from '@/i18n';
@@ -110,12 +110,18 @@ export function CodeBlock({
           // and the theme's inline style beat the token in dark mode
           // (round-5 tools audit, dark 390: a white block on a black card).
           highlightProps={{
-            style: dark ? oneDark : ghcolors,
+            style: dark ? darkCodeTheme() : lightCodeTheme(),
             customStyle: {
               background: 'var(--zk-bg-strong)',
               fontFamily: 'var(--zk-font-mono)',
               margin: 0,
+              padding: 0,
+              border: 'none',
               borderRadius: 0,
+              // The stock light palette also shrank the text to 12.6px/15.1;
+              // the block uses the page's own type scale.
+              fontSize: 'var(--zk-type-xxs)',
+              lineHeight: 'var(--zk-type-xxs-line)',
             },
           }}
         >

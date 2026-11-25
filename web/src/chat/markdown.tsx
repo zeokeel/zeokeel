@@ -1,10 +1,7 @@
 import { useSyncExternalStore, type ReactNode } from 'react';
 import { XMarkdown } from '@ant-design/x-markdown';
 import { CodeHighlighter } from '@ant-design/x';
-import {
-  oneDark,
-  ghcolors,
-} from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { darkCodeTheme, lightCodeTheme } from './syntax-theme';
 import { nodesToText } from './nodes-to-text';
 
 /** The live appearance, read from the one place the app publishes it. */
@@ -38,17 +35,21 @@ function markdownComponents(dark: boolean) {
           // showing a made-up "text".
           header={lang ? undefined : false}
           highlightProps={{
-            // The default light theme's number orange is 3.72:1 on the surface,
-            // and its colours are inline styles no CSS rule can correct; the
-            // ghcolors variant is the same palette with readable contrast.
-            style: dark ? oneDark : ghcolors,
+            // The stock palettes' tokens are inline styles that measured 2.5–3.7:1
+            // on this product's surfaces; `syntax-theme` corrects every colour
+            // against the surface it is drawn on, and a unit test measures them.
+            style: dark ? darkCodeTheme() : lightCodeTheme(),
             // The library's own theme paints #fafafa and Fira Code; the block
             // belongs to the page's surface and mono stack instead.
             customStyle: {
               background: 'var(--zk-bg-strong)',
               fontFamily: 'var(--zk-font-mono)',
               margin: 0,
+              padding: 0,
+              border: 'none',
               borderRadius: 0,
+              fontSize: 'var(--zk-type-xxs)',
+              lineHeight: 'var(--zk-type-xxs-line)',
             },
           }}
           className="zk-code-block"
