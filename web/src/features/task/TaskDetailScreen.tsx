@@ -61,6 +61,7 @@ import {
 import { useMediaQuery } from '@/design/use-system-appearance';
 import { useT } from '@/i18n';
 import { ExecutionMeans } from './ExecutionMeans';
+import { PendingSend } from './PendingSend';
 import { TaskBudget } from './TaskBudget';
 
 /**
@@ -314,11 +315,22 @@ export function TaskDetailScreen() {
   const [ref, setRef] = useState('');
   const [reason, setReason] = useState('');
   const [expanded, setExpanded] = useState(false);
+  /**
+   * Whether a `before_send` task is holding a message: `null` until the
+   * 待发送消息 block has read that (it owns the read, its failure and its write).
+   * The mirror exists for one line of copy — §5 must not say 不需要你做什么 while
+   * the answer is unknown, because a waiting message is exactly what that line
+   * would contradict. A failed hold read therefore keeps the line away too.
+   */
+  const [sendHeld, setSendHeld] = useState<boolean | null>(null);
 
   useEffect(() => {
     // No id means the route was reached without a parameter; the render below
     // answers that with the same honest empty state, without a fetch.
     if (!id) return;
+    // Another task (or a 重试 of this one) is another hold: what the last read
+    // proved about it no longer answers for this one.
+    setSendHeld(null);
     let cancelled = false;
     void readTask(id).then((next) => {
       if (!cancelled) setState(next);
@@ -630,139 +642,152 @@ export function TaskDetailScreen() {
         {/* 5 要不要你 */}
         <section aria-label={t('task.detail.section.needYou')}>
           <Typography.Title level={2}>{t('task.detail.section.needYou')}</Typography.Title>
-          {settled ? (
-            <Typography.Text type="secondary">{t('task.detail.needYou.none')}</Typography.Text>
-          ) : (
-            <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-              {actionError ? (
-                <Alert
-                  type="error"
-                  showIcon
-                  role="alert"
-                  closable
-                  title={actionError}
-                  onClose={() => setActionError(null)}
-                />
-              ) : null}
+          <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+            {/* 待发送消息: with approval=before_send the message this task wants to
+                send is parked instead of sent, and this is the only place the
+                person can learn that — so it sits in §5, the section about what
+                they have to do. The block owns its read and its write; it reports
+                whether something is waiting so the settled line below never
+                contradicts it. */}
+            <PendingSend taskId={id} onHeld={setSendHeld} />
+            {settled ? (
+              // Only a *read* answer may produce this line: while the hold is
+              // unknown there is nothing honest to say about it.
+              sendHeld === false ? (
+                <Typography.Text type="secondary">{t('task.detail.needYou.none')}</Typography.Text>
+              ) : null
+            ) : (
+              <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+                {actionError ? (
+                  <Alert
+                    type="error"
+                    showIcon
+                    role="alert"
+                    closable
+                    title={actionError}
+                    onClose={() => setActionError(null)}
+                  />
+                ) : null}
 
-              <Space wrap>
-                {/* The screen's one primary: taking the task is the move that
-                    makes the rest of this section possible. */}
-                <Button
-                  type="primary"
-                  size={narrow ? 'large' : undefined}
-                  onClick={() => void claim()}
-                  loading={busy === 'claim'}
-                  disabled={busy !== null && busy !== 'claim'}
-                >
-                  {t('task.detail.claim')}
-                </Button>
-                <Button
-                  size={narrow ? 'large' : undefined}
-                  onClick={() => {
-                    setActionError(null);
-                    setForm((value) => (value === 'evidence' ? 'none' : 'evidence'));
-                  }}
-                  disabled={busy !== null}
-                >
-                  {t('task.detail.submitEvidence')}
-                </Button>
-                <Button
-                  size={narrow ? 'large' : undefined}
-                  onClick={() => void accept()}
-                  loading={busy === 'accept'}
-                  disabled={busy !== null && busy !== 'accept'}
-                >
-                  {t('task.detail.accept')}
-                </Button>
-                <Button
-                  danger
-                  size={narrow ? 'large' : undefined}
-                  onClick={() => {
-                    setActionError(null);
-                    setForm((value) => (value === 'reject' ? 'none' : 'reject'));
-                  }}
-                  disabled={busy !== null}
-                >
-                  {t('task.detail.reject')}
-                </Button>
-              </Space>
+                <Space wrap>
+                  {/* The screen's one primary: taking the task is the move that
+                      makes the rest of this section possible. */}
+                  <Button
+                    type="primary"
+                    size={narrow ? 'large' : undefined}
+                    onClick={() => void claim()}
+                    loading={busy === 'claim'}
+                    disabled={busy !== null && busy !== 'claim'}
+                  >
+                    {t('task.detail.claim')}
+                  </Button>
+                  <Button
+                    size={narrow ? 'large' : undefined}
+                    onClick={() => {
+                      setActionError(null);
+                      setForm((value) => (value === 'evidence' ? 'none' : 'evidence'));
+                    }}
+                    disabled={busy !== null}
+                  >
+                    {t('task.detail.submitEvidence')}
+                  </Button>
+                  <Button
+                    size={narrow ? 'large' : undefined}
+                    onClick={() => void accept()}
+                    loading={busy === 'accept'}
+                    disabled={busy !== null && busy !== 'accept'}
+                  >
+                    {t('task.detail.accept')}
+                  </Button>
+                  <Button
+                    danger
+                    size={narrow ? 'large' : undefined}
+                    onClick={() => {
+                      setActionError(null);
+                      setForm((value) => (value === 'reject' ? 'none' : 'reject'));
+                    }}
+                    disabled={busy !== null}
+                  >
+                    {t('task.detail.reject')}
+                  </Button>
+                </Space>
 
-              {form === 'evidence' ? (
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void submit();
-                  }}
-                >
-                  <Space.Compact style={{ width: '100%' }}>
-                    <Input
-                      value={ref}
-                      autoFocus
-                      aria-label={t('task.detail.evidenceRef')}
-                      placeholder={t('task.detail.evidenceRefPlaceholder')}
-                      onChange={(event) => setRef(event.target.value)}
-                    />
-                    <Button
-                      htmlType="submit"
-                      disabled={ref.trim() === '' || busy !== null}
-                      loading={busy === 'submit'}
-                    >
-                      {t('task.detail.submit')}
-                    </Button>
-                    <Button
-                      onClick={() => {
-                        setForm('none');
-                        setRef('');
-                      }}
-                    >
-                      {t('task.detail.cancel')}
-                    </Button>
-                  </Space.Compact>
-                </form>
-              ) : null}
-
-              {form === 'reject' ? (
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void reject();
-                  }}
-                >
-                  <Space orientation="vertical" size="small" style={{ width: '100%' }}>
-                    <Input.TextArea
-                      value={reason}
-                      autoFocus
-                      rows={2}
-                      aria-label={t('task.detail.rejectReason')}
-                      placeholder={t('task.detail.rejectReasonPlaceholder')}
-                      onChange={(event) => setReason(event.target.value)}
-                    />
-                    <Space>
-                      {/* A reject without a reason tells the teammate nothing,
-                          so the button stays off until there is one. */}
+                {form === 'evidence' ? (
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void submit();
+                    }}
+                  >
+                    <Space.Compact style={{ width: '100%' }}>
+                      <Input
+                        value={ref}
+                        autoFocus
+                        aria-label={t('task.detail.evidenceRef')}
+                        placeholder={t('task.detail.evidenceRefPlaceholder')}
+                        onChange={(event) => setRef(event.target.value)}
+                      />
                       <Button
-                        danger
                         htmlType="submit"
-                        disabled={reason.trim() === '' || busy !== null}
-                        loading={busy === 'reject'}
+                        disabled={ref.trim() === '' || busy !== null}
+                        loading={busy === 'submit'}
                       >
-                        {t('task.detail.rejectSubmit')}
+                        {t('task.detail.submit')}
                       </Button>
                       <Button
                         onClick={() => {
                           setForm('none');
-                          setReason('');
+                          setRef('');
                         }}
                       >
                         {t('task.detail.cancel')}
                       </Button>
+                    </Space.Compact>
+                  </form>
+                ) : null}
+
+                {form === 'reject' ? (
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void reject();
+                    }}
+                  >
+                    <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+                      <Input.TextArea
+                        value={reason}
+                        autoFocus
+                        rows={2}
+                        aria-label={t('task.detail.rejectReason')}
+                        placeholder={t('task.detail.rejectReasonPlaceholder')}
+                        onChange={(event) => setReason(event.target.value)}
+                      />
+                      <Space>
+                        {/* A reject without a reason tells the teammate nothing,
+                            so the button stays off until there is one. */}
+                        <Button
+                          danger
+                          htmlType="submit"
+                          disabled={reason.trim() === '' || busy !== null}
+                          loading={busy === 'reject'}
+                        >
+                          {t('task.detail.rejectSubmit')}
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            setForm('none');
+                            setReason('');
+                          }}
+                        >
+                          {t('task.detail.cancel')}
+                        </Button>
+                      </Space>
                     </Space>
-                  </Space>
-                </form>
-              ) : null}
-            </Space>
-          )}
+                  </form>
+                ) : null}
+              </Space>
+            )}
+          </Space>
         </section>
       </Space>
     </div>

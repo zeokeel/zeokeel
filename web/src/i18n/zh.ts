@@ -380,6 +380,18 @@ export const zh = {
   'task.detail.budget.none': '这个任务没有预算上限。',
   'task.detail.budget.exhausted': '任务已停止，需要追加预算才能继续',
   'task.detail.budget.loadFailed': '预算没读出来',
+  // 待发送消息 (approval=before_send). The block shows the exact words that would
+  // go out, so the copy never summarises them; the confirm states plainly that
+  // approving sends them, because there is no undo.
+  'task.detail.send.title': '待发送消息',
+  'task.detail.send.hint': '这条消息还没送出去，等你批准后才会发出。',
+  'task.detail.send.approve': '批准发送',
+  'task.detail.send.confirm': '批准后这条消息会立刻发出去，发出后不能撤回。',
+  'task.detail.send.confirmOk': '确认发送',
+  'task.detail.send.sent': '已通过 {channel} 发出',
+  'task.detail.send.sentUnknown': '已发出',
+  'task.detail.send.failed': '没发出去',
+  'task.detail.send.loadFailed': '待发送消息没读出来',
   'task.detail.progress.more': '展开全部',
   'task.detail.progress.less': '收起',
   'task.detail.progress.now': '现在',

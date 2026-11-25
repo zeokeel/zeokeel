@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -41,6 +41,10 @@ const api = vi.hoisted(() => ({
   // 预算 reads its own row on the task (`tasks.budget.get`): its failure is
   // never the task's failure, so it gets a mock of its own.
   loadTaskBudget: vi.fn(),
+  // 待发送消息 reads (`tasks.send.pending`) and releases (`tasks.send.approve`)
+  // a parked outbound message; both are its own, like the budget's read.
+  loadPendingSend: vi.fn(),
+  approveSend: vi.fn(),
   // The 执行手段 block reads this on its own; a failure here is not a failure
   // of the task, so it is a mock of its own.
   loadCapabilities: vi.fn(),
@@ -58,6 +62,8 @@ vi.mock('@/api/task', () => ({
   loadTaskTools: api.loadTaskTools,
   setTaskTools: api.setTaskTools,
   loadTaskBudget: api.loadTaskBudget,
+  loadPendingSend: api.loadPendingSend,
+  approveSend: api.approveSend,
 }));
 
 vi.mock('@/api/read-models', () => ({
@@ -145,6 +151,13 @@ beforeEach(() => {
   // task with no ceiling is the honest default (`{budget:null}`).
   api.loadTaskBudget.mockReset();
   api.loadTaskBudget.mockResolvedValue(null);
+  // Nothing is parked unless a test says so: a task with no held message is the
+  // honest default (`{held:false}`), and it is what the block must stay silent on.
+  api.loadPendingSend.mockReset();
+  api.loadPendingSend.mockResolvedValue(null);
+  api.approveSend.mockReset();
+  // The gateway's answer to a release: the channel that took the message.
+  api.approveSend.mockResolvedValue({ channel: 'feishu' });
   api.claimTask.mockResolvedValue(lease());
   api.submitTask.mockResolvedValue(lease({ state: 'review' }));
   api.reviewTask.mockResolvedValue(lease({ state: 'done' }));
@@ -200,7 +213,9 @@ describe('TaskDetailScreen', () => {
     renderScreen();
 
     const needYou = await screen.findByRole('region', { name: T('task.detail.section.needYou') });
-    expect(within(needYou).getByText(T('task.detail.needYou.none'))).toBeInTheDocument();
+    // The line waits for the 待发送消息 read: while that answer is unknown the
+    // screen must not claim there is nothing for this person to do.
+    expect(await within(needYou).findByText(T('task.detail.needYou.none'))).toBeInTheDocument();
     expect(within(needYou).queryByRole('button', { name: label(T('task.detail.claim')) })).toBeNull();
   });
 
@@ -957,6 +972,193 @@ describe('TaskDetailScreen', () => {
       // Not the whole-screen failure, and no false "no ceiling".
       expect(screen.queryByText(T('task.detail.loadFailed'))).toBeNull();
       expect(within(element).queryByText('这个任务没有预算上限。')).toBeNull();
+    });
+  });
+
+  /**
+   * 待发送消息 (the outbound half of `approval=before_send`).
+   *
+   * A settled task parks the message it wants to send instead of sending it, so
+   * the screen owes the person two things: the **exact words** that would go out
+   * (it is what would be said in public — never paraphrased, never truncated) and
+   * one verb that lets them leave. The approval is one write of exactly
+   * `{id,approver}` followed by a re-read, because the hold is what the read
+   * answers and the write is what empties it.
+   *
+   * It is a read of its own (`tasks.send.pending`), with its own failure: a read
+   * that failed must not take the task down, and it must not be confused with
+   * "nothing is waiting". Nothing held is the **absence** of the block — no empty
+   * scaffolding, because a box that says "no message waiting" on every task is
+   * noise on every task.
+   */
+  describe('待发送消息', () => {
+    /** The words the gateway parked — with a newline, so verbatim means something. */
+    const HELD = '退款率 3.1%，比上季度低 0.4 个点。\n报告：https://example.test/r/1';
+
+    /** The block's own testid: every assertion below is scoped to it. */
+    async function block(): Promise<HTMLElement> {
+      return screen.findByTestId('task-pending-send');
+    }
+
+    /** A write that has not answered yet, so "in flight" can be observed. */
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((done) => {
+        resolve = done;
+      });
+      return { promise, resolve };
+    }
+
+    it('is not on screen at all when nothing is held', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadPendingSend.mockResolvedValue(null);
+
+      renderScreen();
+
+      // The task rendered, and the block's own read answered "nothing" …
+      expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('查退款率');
+      await waitFor(() => expect(api.loadPendingSend).toHaveBeenCalledWith('task-1'));
+      // … so there is no title, no box and no verb: no empty scaffolding.
+      expect(screen.queryByTestId('task-pending-send')).toBeNull();
+      expect(screen.queryByText(T('task.detail.send.title'))).toBeNull();
+      expect(
+        screen.queryByRole('button', { name: label(T('task.detail.send.approve')) }),
+      ).toBeNull();
+    });
+
+    it('shows the held words verbatim, newlines included', async () => {
+      api.loadTaskBoard.mockResolvedValue([task({ status: 'completed' })]);
+      api.loadPendingSend.mockResolvedValue({ text: HELD });
+
+      renderScreen();
+
+      const element = await block();
+      expect(within(element).getByText(T('task.detail.send.title'))).toBeInTheDocument();
+      // The words themselves, exactly — not a summary, not a trimmed version.
+      expect(within(element).getByTestId('task-send-text').textContent).toBe(HELD);
+      // The newline is preserved by the style the block sets, so the words read
+      // as the gateway wrote them.
+      const body = within(element).getByTestId('task-send-text');
+      expect(body.style.whiteSpace).toBe('pre-wrap');
+    });
+
+    it('says nothing of 不需要你做什么 while a message is waiting', async () => {
+      api.loadTaskBoard.mockResolvedValue([task({ status: 'completed' })]);
+      api.loadPendingSend.mockResolvedValue({ text: HELD });
+
+      renderScreen();
+
+      await block();
+      expect(screen.queryByText(T('task.detail.needYou.none'))).toBeNull();
+    });
+
+    it('sends exactly {id, approver:"lead"} after the confirm, then re-reads and drops the text', async () => {
+      const user = userEvent.setup();
+      api.loadTaskBoard.mockResolvedValue([task({ status: 'completed' })]);
+      api.loadPendingSend.mockResolvedValueOnce({ text: HELD }).mockResolvedValueOnce(null);
+      api.approveSend.mockResolvedValue({ channel: 'feishu' });
+
+      renderScreen();
+
+      const element = await block();
+      await user.click(within(element).getByTestId('task-send-approve'));
+      // Opening the question is not an answer.
+      expect(api.approveSend).not.toHaveBeenCalled();
+      // The question states that the message will be sent.
+      expect(await screen.findByText(T('task.detail.send.confirm'))).toBeInTheDocument();
+
+      await user.click(
+        await screen.findByRole('button', { name: label(T('task.detail.send.confirmOk')) }),
+      );
+
+      await waitFor(() => expect(api.approveSend).toHaveBeenCalledTimes(1));
+      expect(api.approveSend.mock.calls[0][0]).toEqual({ id: 'task-1', approver: 'lead' });
+
+      // The write is followed by a read of the hold it emptied.
+      await waitFor(() => expect(api.loadPendingSend).toHaveBeenCalledTimes(2));
+      // The held text is gone …
+      await waitFor(() => expect(screen.queryByTestId('task-pending-send')).toBeNull());
+      // … and the receipt says which channel took it.
+      expect(screen.getByTestId('task-send-receipt')).toHaveTextContent(
+        T('task.detail.send.sent', { channel: 'feishu' }),
+      );
+      // The task is settled and nothing waits, so §5 may now say so.
+      expect(screen.getByText(T('task.detail.needYou.none'))).toBeInTheDocument();
+    });
+
+    it('keeps the text and prints the gateway own words when the send fails', async () => {
+      const user = userEvent.setup();
+      api.loadTaskBoard.mockResolvedValue([task({ status: 'completed' })]);
+      api.loadPendingSend.mockResolvedValue({ text: HELD });
+      api.approveSend.mockRejectedValue(new Error('channel dispatch: no channel configured'));
+
+      renderScreen();
+
+      const element = await block();
+      await user.click(within(element).getByTestId('task-send-approve'));
+      await user.click(
+        await screen.findByRole('button', { name: label(T('task.detail.send.confirmOk')) }),
+      );
+
+      const alert = await within(element).findByRole('alert');
+      // The gateway's own words, not a guess of ours.
+      expect(within(alert).getByText('channel dispatch: no channel configured')).toBeInTheDocument();
+      // The words are still on screen, unchanged: the message did not leave.
+      expect(within(element).getByTestId('task-send-text').textContent).toBe(HELD);
+      // A failed write changed nothing, so nothing is read again …
+      expect(api.loadPendingSend).toHaveBeenCalledTimes(1);
+      // … there is no receipt to show …
+      expect(screen.queryByTestId('task-send-receipt')).toBeNull();
+      // … and the verb is offered again.
+      expect(within(element).getByTestId('task-send-approve')).toBeEnabled();
+    });
+
+    it('allows one send in flight: the verb is disabled and a second click sends nothing', async () => {
+      const user = userEvent.setup();
+      const inFlight = deferred<{ channel: string }>();
+      api.loadTaskBoard.mockResolvedValue([task({ status: 'completed' })]);
+      api.loadPendingSend.mockResolvedValueOnce({ text: HELD }).mockResolvedValueOnce(null);
+      api.approveSend.mockReturnValue(inFlight.promise);
+
+      renderScreen();
+
+      const element = await block();
+      await user.click(within(element).getByTestId('task-send-approve'));
+      await user.click(
+        await screen.findByRole('button', { name: label(T('task.detail.send.confirmOk')) }),
+      );
+
+      await waitFor(() => expect(api.approveSend).toHaveBeenCalledTimes(1));
+      const approve = within(element).getByTestId('task-send-approve');
+      expect(approve).toBeDisabled();
+      await user.click(approve);
+      expect(api.approveSend).toHaveBeenCalledTimes(1);
+
+      inFlight.resolve({ channel: 'feishu' });
+      await waitFor(() => expect(api.loadPendingSend).toHaveBeenCalledTimes(2));
+    });
+
+    it('keeps a failed read inside the block and re-reads only the held message on 重试', async () => {
+      const user = userEvent.setup();
+      api.loadTaskBoard.mockResolvedValue([task({ status: 'completed' })]);
+      api.loadPendingSend
+        .mockRejectedValueOnce(new Error('held sends unavailable'))
+        .mockResolvedValue({ text: HELD });
+
+      renderScreen();
+
+      const element = await block();
+      const alert = await within(element).findByRole('alert');
+      expect(within(alert).getByText(T('task.detail.send.loadFailed'))).toBeInTheDocument();
+      // "It did not load" is not "nothing is waiting": no false silence.
+      expect(within(alert).getByText('held sends unavailable')).toBeInTheDocument();
+
+      await user.click(within(alert).getByRole('button', { name: label(T('task.detail.retry')) }));
+
+      expect(within(await block()).getByTestId('task-send-text').textContent).toBe(HELD);
+      // The retry promises one thing: exactly one more read of the hold.
+      expect(api.loadPendingSend).toHaveBeenCalledTimes(2);
+      expect(api.loadTaskBoard).toHaveBeenCalledTimes(1);
     });
   });
 });

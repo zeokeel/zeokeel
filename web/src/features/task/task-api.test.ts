@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  approveSend,
   claimTask,
   heartbeatTask,
+  loadPendingSend,
   loadTaskBoard,
   loadTaskBudget,
   loadTaskLease,
@@ -337,5 +339,70 @@ describe('task budget api', () => {
     const budget = await loadTaskBudget('task-1');
 
     expect(budget).toEqual({ taskId: 'task-1', maxTokens: 0, maxMinutes: 0, usedTokens: 5, exhausted: false });
+  });
+});
+
+/**
+ * 待发送消息 (`tasks.send.pending` / `tasks.send.approve`): the outbound half of
+ * the `before_send` gate.
+ *
+ * The read has exactly two meanings and this layer keeps them apart: `{held:false}`
+ * (and an answer that never says `held` at all) is **nothing held** → `null`, while
+ * `{held:true,text}` is a parked message whose words are kept **verbatim** — they
+ * are what would be said in public, so this layer neither trims nor rewrites them.
+ * The write is exactly `{id,approver}`; `approver` is required by the gateway.
+ */
+describe('held send api', () => {
+  it('reads the parked message with {id} and nothing else', async () => {
+    wire.request.mockResolvedValue({ held: true, text: '退款率是 3.1%，报告见附件。' });
+
+    const pending = await loadPendingSend('task-1');
+
+    expect(wire.request).toHaveBeenCalledWith('tasks.send.pending', { id: 'task-1' });
+    expect(pending).toEqual({ text: '退款率是 3.1%，报告见附件。' });
+  });
+
+  it('answers null for {held:false}: nothing parked is an answer, not a failure', async () => {
+    wire.request.mockResolvedValue({ held: false });
+
+    await expect(loadPendingSend('task-1')).resolves.toBeNull();
+  });
+
+  it('answers null when the answer never says held at all', async () => {
+    // An older gateway, or a hold released between the read and its answer.
+    wire.request.mockResolvedValue({});
+
+    await expect(loadPendingSend('task-1')).resolves.toBeNull();
+  });
+
+  it('keeps the held words verbatim — whitespace and newlines included', async () => {
+    // The text is shown to a human and then said out loud in a channel: a trim
+    // here would be a different message on the wire.
+    const text = '  第一行\n\n  第二行，缩进两个空格  ';
+    wire.request.mockResolvedValue({ held: true, text });
+
+    const pending = await loadPendingSend('task-1');
+
+    expect(pending?.text).toBe(text);
+  });
+
+  it('approves with exactly {id, approver} and returns the channel that took it', async () => {
+    wire.request.mockResolvedValue({ sent: true, channel: 'feishu', attempts: 2 });
+
+    const receipt = await approveSend({ id: 'task-1', approver: 'lead' });
+
+    expect(wire.request).toHaveBeenCalledWith('tasks.send.approve', {
+      id: 'task-1',
+      approver: 'lead',
+    });
+    expect(receipt).toEqual({ channel: 'feishu', attempts: 2 });
+  });
+
+  it('answers a receipt with no attempts when the gateway does not report one', async () => {
+    wire.request.mockResolvedValue({ sent: true, channel: 'qq' });
+
+    await expect(approveSend({ id: 'task-1', approver: 'lead' })).resolves.toEqual({
+      channel: 'qq',
+    });
   });
 });

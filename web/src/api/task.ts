@@ -457,3 +457,94 @@ export async function loadTaskBudget(id: string): Promise<TaskBudget | null> {
   if (!row) return null;
   return taskBudgetFromWire(row, id);
 }
+
+/**
+ * 待发送消息 — the message a `before_send` task is holding
+ * (`tasks.send.pending`, docs/TRANSPORT.md §5.1).
+ *
+ * A task with `approval=before_send` may start, but the message it wants to send
+ * when it settles does not leave the product: it is parked with the task until a
+ * human approves it (`tasks.send.approve`). Until this read existed nobody could
+ * find that out — the task simply looked finished and the words never arrived.
+ *
+ * The answer is `{held:true,text}` while a message waits and `{held:false}`
+ * otherwise. Only the first shape is a hold; `held` that is `false`, missing, or
+ * wrapped in anything else normalizes to `null` here, because "nothing is
+ * waiting" is a real answer and not a failure. A thrown error is the read itself
+ * having failed, and the block that calls this reports it as such.
+ *
+ * `text` is kept **verbatim** — no trim, no re-wrap, no truncation: it is the
+ * words that would be said in public, and any edit here would be a different
+ * message on the wire.
+ */
+export interface HeldSend {
+  /** The exact words that would go out. */
+  text: string;
+}
+
+/** Rows as they arrive on the wire: `held:false` carries no text at all. */
+interface HeldSendWire {
+  held?: boolean;
+  text?: string;
+}
+
+/**
+ * Read the parked message for one task (`tasks.send.pending`).
+ *
+ * `null` is an answer — nothing is held — and must not be turned into an error.
+ * `{held:true}` without text is still a hold (a message with nothing in it), so
+ * it is reported rather than swallowed: hiding it would hide something waiting
+ * to go out.
+ */
+export async function loadPendingSend(id: string): Promise<HeldSend | null> {
+  const result = await request<HeldSendWire>('tasks.send.pending', { id });
+  if (result.held !== true) return null;
+  return { text: result.text ?? '' };
+}
+
+/**
+ * What the channel dispatcher reported back about an approved send
+ * (`contracts.ChannelReceipt`).
+ */
+export interface SendReceipt {
+  /** The channel that took the message (`feishu`, `qq`, …); the gateway's own word. */
+  channel: string;
+  /**
+   * How many delivery attempts it took, when the gateway reports it. Kept out of
+   * the type when absent, so "one attempt" (the usual case) is not invented.
+   */
+  attempts?: number;
+}
+
+/** Exactly what the gateway accepts for a release: who, and on which task. */
+export interface ApproveSendInput {
+  id: string;
+  /**
+   * Who approves it. Required by the gateway — a blank approver is refused
+   * (`1010 approver is required`) rather than read as consent.
+   */
+  approver: string;
+}
+
+interface SendReceiptWire {
+  sent?: boolean;
+  channel?: string;
+  attempts?: number;
+}
+
+/**
+ * Let a held message leave (`tasks.send.approve`, not idempotent: an approved
+ * message leaves exactly once, and a second approval is an error).
+ *
+ * A failed call is a message that did **not** go out; the gateway reports it as a
+ * protocol error carrying its own words, which reach the screen unchanged.
+ */
+export async function approveSend(input: ApproveSendInput): Promise<SendReceipt> {
+  const result = await request<SendReceiptWire>('tasks.send.approve', {
+    id: input.id,
+    approver: input.approver,
+  });
+  const receipt: SendReceipt = { channel: result.channel ?? '' };
+  if (typeof result.attempts === 'number') receipt.attempts = result.attempts;
+  return receipt;
+}

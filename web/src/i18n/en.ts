@@ -377,6 +377,18 @@ export const en: Catalog = {
   'task.detail.budget.none': 'This task has no budget limit.',
   'task.detail.budget.exhausted': 'The task has stopped; more budget is needed before it can continue',
   'task.detail.budget.loadFailed': 'Could not load the budget',
+  // Message waiting to be sent (approval=before_send). The block shows the exact
+  // words that would go out, so this copy never summarises them; the confirm says
+  // plainly that approving sends them, because there is no undo.
+  'task.detail.send.title': 'Message waiting to be sent',
+  'task.detail.send.hint': 'This message has not gone out yet; it leaves once you approve it.',
+  'task.detail.send.approve': 'Approve and send',
+  'task.detail.send.confirm': 'Approving sends this message right away, and it cannot be recalled.',
+  'task.detail.send.confirmOk': 'Send it',
+  'task.detail.send.sent': 'Sent via {channel}',
+  'task.detail.send.sentUnknown': 'Sent',
+  'task.detail.send.failed': 'It did not go out',
+  'task.detail.send.loadFailed': 'Could not load the held message',
   'task.detail.progress.more': 'Show all',
   'task.detail.progress.less': 'Show less',
   'task.detail.progress.now': 'Now',
