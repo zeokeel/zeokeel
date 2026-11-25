@@ -20,6 +20,8 @@ export interface ToolStep {
 export interface TokenUsage {
   inputTokens?: number;
   outputTokens?: number;
+  /** Model iterations in the turn (one thinking/tool round each). */
+  iterations?: number;
   /** Wall time of the turn as the backend measured it (the native 「用时」 line). */
   durationMs?: number;
   [key: string]: unknown;

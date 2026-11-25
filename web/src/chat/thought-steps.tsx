@@ -22,6 +22,7 @@ export function ThoughtSteps({
   steps,
   streaming,
   durationMs,
+  iterations,
   mode = 'standard',
   collapse = 'completion',
   isLatest = true,
@@ -32,6 +33,8 @@ export function ThoughtSteps({
   streaming: boolean;
   /** The turn's measured wall time, when the backend reported one. */
   durationMs?: number;
+  /** Model iterations in the turn (one thinking/tool round each). */
+  iterations?: number;
   /** 设置 → 外观 → 工作步骤展示 (concise / standard / detailed / expanded). */
   mode?: WorkStepsMode;
   /** 设置 → 外观 → 收起时机: fold on settle, or only when the next turn starts. */
@@ -124,8 +127,15 @@ export function ThoughtSteps({
     items.push({
       key: 'reasoning',
       title: t('thread.reasoning'),
-      // The turn's measured wall time, the native 「用时 158ms」 line.
-      ...(durationMs ? { description: formatDuration(durationMs) } : {}),
+      // The turn's measured wall time and its round count, the native 「用时」
+      // line plus how many model rounds it took.
+      ...(durationMs || iterations
+        ? {
+            description: [durationMs ? formatDuration(durationMs) : null, iterations && iterations > 1 ? t('thread.reasoning.rounds', { count: iterations }) : null]
+              .filter(Boolean)
+              .join(' · '),
+          }
+        : {}),
       icon: <ZkIcon name="sparkles" />,
       status: streaming ? 'loading' : 'success',
       collapsible: true,
@@ -320,6 +330,13 @@ function toolSummaryLine(step: ToolStep): string {
       const value = input[key];
       if (typeof value === 'string' && value.trim() !== '') return clip(value);
     }
+  }
+  // A todo list has no single substring: say how many items and how many are
+  // done instead of dumping the JSON array into the row (round-5 tools audit D11).
+  if (parsed !== null && typeof parsed === 'object' && Array.isArray((parsed as { todos?: unknown }).todos)) {
+    const todos = (parsed as { todos: Array<Record<string, unknown>> }).todos;
+    const done = todos.filter((item) => item?.status === 'completed' || item?.status === 'done').length;
+    return `${done}/${todos.length}`;
   }
   // Not an object we know how to read: show the arguments as they are. A string
   // is already text (never stringify it again); anything else is JSON.

@@ -120,6 +120,7 @@ export const zh = {
   'thread.emptyAnswer': '模型没有返回内容',
   'thread.stopped': '已停止',
   'thread.steps.summary': '已完成 {count} 个步骤',
+  'thread.reasoning.rounds': '{count} 轮',
   'thread.reasoning': '推理',
   'thread.tool.denied': '已拒绝调用',
   'thread.tool.failedBy': '调用失败（{kind}）',

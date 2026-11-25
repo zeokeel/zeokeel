@@ -116,6 +116,7 @@ export const en: Catalog = {
   'thread.emptyAnswer': 'The model returned no content',
   'thread.stopped': 'Stopped',
   'thread.steps.summary': 'Completed {count} steps',
+  'thread.reasoning.rounds': '{count} rounds',
   'thread.reasoning': 'Reasoning',
   'thread.tool.denied': 'Call denied',
   'thread.tool.failedBy': 'The call failed ({kind})',

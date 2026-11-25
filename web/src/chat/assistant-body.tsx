@@ -40,6 +40,7 @@ export function AssistantBody({
         steps={message.steps}
         streaming={streaming}
         durationMs={message.usage?.durationMs}
+        iterations={message.usage?.iterations}
         mode={workSteps.mode}
         collapse={workSteps.collapse}
         isLatest={isLatest}
