@@ -725,9 +725,12 @@ describe('TaskDetailScreen', () => {
         renderScreen();
 
         const means = within(await progress());
-        expect(await means.findByText(BINDING_COPY.unbound)).toBeInTheDocument();
+        // Scoped to the binding block: 还没绑定工具 is about this task's policy,
+        // not about the product having nothing installed.
+        const binding = within(means.getByTestId('tools-binding'));
+        expect(await binding.findByText(BINDING_COPY.unbound)).toBeInTheDocument();
         // Unbound is not "nothing to offer": the boxes are there to bind with.
-        expect(means.getByRole('checkbox', { name: 'github' })).not.toBeChecked();
+        expect(binding.getByRole('checkbox', { name: 'github' })).not.toBeChecked();
       });
 
       it('allows one write in flight at a time', async () => {
