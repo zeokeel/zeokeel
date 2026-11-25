@@ -223,3 +223,51 @@ scripts/verify.sh --quick（approval 后）    PASS 5/5（一次 flaky 后重跑
 ```
 
 提交：`ed3d628`（设计文档）→ `b9f2aff`（inbox + 审批解析 + 装配守卫，1205 行新增）。
+
+## 6. 第 39 轮：全链路复审（2026-11-26 00:10 北京时间）
+
+这一轮不做新功能，只把"模块之间怎么连"再查一遍，留证据。
+
+### 6.1 协议四处一致性
+
+| 位置 | 计数 | 状态 |
+|---|---|---|
+| `internal/gateway/methods.go` dispatch | 116 | ✅ |
+| `internal/gateway/contract.go` `contractParams` | 116 | ✅ |
+| `internal/gateway/contract.json` `params` | 116 | ✅ |
+| `web/src/design/ws-contract.ts`（生成物） | 116 | ✅ |
+| `docs/TRANSPORT.md` §5.1 行 | 由 `TestTransportMethodsMatchDispatch` 守卫 | ✅ |
+
+五个守卫测试全绿：
+`TestContractIsUpToDate` / `TestContractCoversEveryMethod` / `TestTransportMethodsMatchDispatch` /
+`TestTransportDeferredRowsStayHonest` / `TestOrchestrationMethodsAreDispatched`。
+
+能力（capabilities）：静态 32 个；`domains_test.go` 的 `wantStatic` 与 `serverCapabilities` 一致。
+
+### 6.2 装配
+
+| 断言 | 结果 |
+|---|---|
+| `TestProductsAndEntries`（headless 条目数 == 期望列表） | PASS |
+| `TestEveryRegisteredModuleIsComposedIntoAProduct` | PASS |
+| `TestHeadlessAssemblyLoadsAndUnwinds`（实例 id 列表精确相等） | PASS |
+| `TestHeadlessPinsPermissionSensitiveModules` | PASS |
+| `TestImportBoundaries`（模块只 import contracts/design/lib） | PASS |
+
+36 个模块，服务键 73 个（`contracts` 里的 `Key*`）。
+
+### 6.3 真进程
+
+```
+bash scripts/verify-live/run.sh      → SUMMARY 14/14 passed
+bash scripts/verify.sh               → 9 passed, 0 failed, 189s
+   （含 gofmt / build / vet / 协议一致性 / 全量 test / -race /
+     headless smoke / ACP smoke / serve smoke）
+cd web && npm run test -- --run      → 81 文件 / 721 测试全绿
+```
+
+### 6.4 冒烟里的一个诚实记录
+
+`headless smoke` 报告 `(headless exit 124) PASS`：124 是超时退出码，冒烟脚本把它当"起了但没崩"
+接受。这不是缺陷，但值得写清楚：**headless 冒烟证明的是"能启动并保持运行"，不是"功能正确"**；
+功能正确由 `TestM0ChainEndToEnd` 与 verify-live 负责。
