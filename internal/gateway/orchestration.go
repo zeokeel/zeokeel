@@ -290,6 +290,9 @@ func (g *Gateway) inboxDispatch(ctx context.Context, raw json.RawMessage) (any, 
 	if err := decodeParams(raw, &params); err != nil {
 		return nil, err
 	}
+	if problem := g.requireAction(ctx, contracts.ActionDispatch); problem != nil {
+		return nil, problem
+	}
 	assignee := params.Assignee
 	var boundTools []string
 	if params.BotID != "" {
@@ -440,6 +443,9 @@ type taskReviewParams struct {
 }
 
 func (g *Gateway) taskReview(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	if problem := g.requireAction(ctx, contracts.ActionApprove); problem != nil {
+		return nil, problem
+	}
 	service, problem := g.leaseService()
 	if problem != nil {
 		return nil, problem
@@ -1034,6 +1040,9 @@ type taskBudgetConsumeParams struct {
 // tasks.budget.set declares a task's ceiling and is also how the Lead resumes a
 // stopped task (the claim goes back to claimed when there is headroom).
 func (g *Gateway) taskBudgetSet(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	if problem := g.requireAction(ctx, contracts.ActionDecideBudget); problem != nil {
+		return nil, problem
+	}
 	service, problem := g.leaseService()
 	if problem != nil {
 		return nil, problem
@@ -1445,6 +1454,9 @@ func (g *Gateway) wechatStatusOrZero(ctx context.Context) (bool, error) {
 // teamNoteReview marks one shared note as reviewed (or rejected). accept is a
 // pointer on purpose: an omitted field must be refused, not read as "rejected".
 func (g *Gateway) teamNoteReview(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	if problem := g.requireAction(ctx, contracts.ActionReviewMemory); problem != nil {
+		return nil, problem
+	}
 	service, problem := g.teamNotesService()
 	if problem != nil {
 		return nil, problem
@@ -1982,6 +1994,9 @@ func (g *Gateway) botsSnapshot(ctx context.Context, _ json.RawMessage) (any, *pr
 // botsUpsert creates or updates one instance (the natural flow is snapshot →
 // modify → upsert).
 func (g *Gateway) botsUpsert(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	if problem := g.requireAction(ctx, contracts.ActionManageBots); problem != nil {
+		return nil, problem
+	}
 	service, problem := g.botService()
 	if problem != nil {
 		return nil, problem
@@ -2254,4 +2269,142 @@ func (g *Gateway) noteSuggestionDismiss(ctx context.Context, raw json.RawMessage
 		return nil, orchestrationError(err)
 	}
 	return map[string]any{"ok": true}, nil
+}
+
+// --- users (M6) ------------------------------------------------------------
+
+type userDTO struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Role      string `json:"role"`
+	CreatedAt string `json:"createdAt,omitempty"`
+}
+
+type usersSnapshotResult struct {
+	Users        []userDTO `json:"users"`
+	ActingUserID string    `json:"actingUserId,omitempty"`
+	ActingRole   string    `json:"actingRole,omitempty"`
+}
+
+type usersUpsertParams struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Role string `json:"role"`
+}
+
+type usersActParams struct {
+	ID string `json:"id"`
+}
+
+// actingUserSettingKey stores which roster member this browser session acts as.
+// The product has one human today, so it defaults to the seeded owner; it is a
+// settings row rather than a login session because M6 roles are a policy table,
+// not an authentication system — the gateway trusts the local client.
+func actingUserSettingKey() string { return "gateway.actingUser" }
+
+func (g *Gateway) actingUser(ctx context.Context) (contracts.User, bool) {
+	users, ok := g.root.Get(contracts.KeyUsers)
+	if !ok || users == nil {
+		return contracts.User{}, false
+	}
+	roster, err := users.Users(ctx)
+	if err != nil || len(roster) == 0 {
+		return contracts.User{}, false
+	}
+	acting := ""
+	if settings, ok := g.root.Get(contracts.KeySettings); ok && settings != nil {
+		acting = strings.TrimSpace(settings.Get(actingUserSettingKey(), ""))
+	}
+	if acting != "" {
+		for _, user := range roster {
+			if user.ID == acting {
+				return user, true
+			}
+		}
+	}
+	// Fall back to the first owner: a roster always has one (the store refuses to
+	// lose the last), so the product never becomes unusable after a bad setting.
+	for _, user := range roster {
+		if user.Role == contracts.UserRoleOwner {
+			return user, true
+		}
+	}
+	return roster[0], true
+}
+
+// requireAction refuses a privileged call the acting user may not make. When no
+// roster exists at all (a product built without the users module) the check is
+// inert, exactly like every other optional dependency here.
+func (g *Gateway) requireAction(ctx context.Context, action contracts.UserAction) *protocolError {
+	user, ok := g.actingUser(ctx)
+	if !ok {
+		return nil
+	}
+	if contracts.Allowed(user.Role, action) {
+		return nil
+	}
+	return protocolErrorWithMessage(codeInvalidRequest,
+		"user "+user.ID+" ("+user.Role+") may not "+string(action))
+}
+
+func (g *Gateway) usersSnapshot(ctx context.Context, _ json.RawMessage) (any, *protocolError) {
+	users, ok := g.root.Get(contracts.KeyUsers)
+	if !ok || users == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "users unavailable")
+	}
+	roster, err := users.Users(ctx)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	result := usersSnapshotResult{Users: make([]userDTO, 0, len(roster))}
+	for _, user := range roster {
+		result.Users = append(result.Users, userDTO{
+			ID: user.ID, Name: user.Name, Role: user.Role, CreatedAt: rfc3339(user.CreatedAt),
+		})
+	}
+	if acting, ok := g.actingUser(ctx); ok {
+		result.ActingUserID = acting.ID
+		result.ActingRole = acting.Role
+	}
+	return result, nil
+}
+
+func (g *Gateway) usersUpsert(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	if problem := g.requireAction(ctx, contracts.ActionManageBots); problem != nil {
+		return nil, problem
+	}
+	users, ok := g.root.Get(contracts.KeyUsers)
+	if !ok || users == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "users unavailable")
+	}
+	var params usersUpsertParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	user, err := users.Put(ctx, contracts.User{ID: params.ID, Name: params.Name, Role: params.Role})
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return userDTO{ID: user.ID, Name: user.Name, Role: user.Role, CreatedAt: rfc3339(user.CreatedAt)}, nil
+}
+
+// usersAct records which roster member this browser acts as.
+func (g *Gateway) usersAct(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	users, ok := g.root.Get(contracts.KeyUsers)
+	if !ok || users == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "users unavailable")
+	}
+	var params usersActParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if _, err := users.Get(ctx, params.ID); err != nil {
+		return nil, orchestrationError(err)
+	}
+	if settings, ok := g.root.Get(contracts.KeySettings); ok && settings != nil {
+		if err := settings.Set(actingUserSettingKey(), params.ID); err != nil {
+			return nil, orchestrationError(err)
+		}
+	}
+	return map[string]any{"actingUserId": params.ID}, nil
 }

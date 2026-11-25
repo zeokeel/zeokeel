@@ -839,6 +839,9 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `tasks.budget.consume` | `{id,tokens}` | 累加后的 `TaskBudget` | N | `TaskLeaseService.Consume`（用量由测量方上报；`used > max` 越限时租约转 `blocked` 并返回 `-32600`（`lease: task budget exhausted`，报文含 used/max），此后 `tasks.submit` 同样被拒，只有 Lead 调 `tasks.budget.set` 追加预算才继续。显式 `tokens:0` = 只重算时长轴） | ✅ 已实现 |
 | `approval.token` | `{approvalId}` | `{token,expiresAt}` | N | `ApprovalActionService.IssueToken` | ✅ 已实现 |
 | `approval.action` | `{approvalId,decision:"allow"\|"deny",token}` | `{ok:true}` | N | `ApprovalActionService.Apply` | ✅ 已实现 |
+| `users.snapshot` | — | `{users:[{id,name,role,createdAt?}],actingUserId?,actingRole?}` | Y | `UserService.Users` + acting user（settings `gateway.actingUser`，缺省取 owner） | ✅ 已实现 |
+| `users.upsert` | `{id,name,role}` | `User` | N | `UserService.Put`（需 `manage-bots`；最后一个 owner 不可降级） | ✅ 已实现 |
+| `users.act` | `{id}` | `{actingUserId}` | N | 记录本浏览器以谁的身份行动（M6 角色是策略表，不是登录） | ✅ 已实现 |
 | `bots.snapshot` | — | `{templates:[BotTemplate],instances:[BotInstance]}` | Y | `BotService.Templates/Instances` | ✅ 已实现 |
 | `bots.upsert` | `{id,templateId,name?,owner?,defaultModel?,allowedTools?,memoryScope?,status?}` | `BotInstance` | N | `BotService.Create/Update`（更新不可改身份；退休终态） | ✅ 已实现 |
 | `bots.template.get` | `{id}` | `{template: BotTemplate}`；不存在时 **`{template:null}`**（不是错误，前端渲染空表单） | Y | `BotService.Template`（id 做 TrimSpace；返回副本） | ✅ 已实现 |
@@ -911,7 +914,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
   OS 沙箱豁免、交互工具、记住的「始终允许」和审批对话框**之前**（那些分支只能放宽，排在它们之后就会被绕过）。
   任务不存在 / 任务没有绑定 / 装配没有租约模块时绑定不生效（最多记一行日志，绝不中断 run）；
   空 `taskId` 解绑后立即恢复原来的审批流程。
-- capability：`inbox`、`triage`、`tasklease`、`approvalaction`、`notifyroute`、`webhook`、`lead`、`credentials`、`heartbeat`、`browser`、`teamnotes`、`wechatlogin`、`channeldispatch`、`skilldrafts`、`bots`（十五个服务键都随装配提供；
+- capability：`inbox`、`triage`、`tasklease`、`approvalaction`、`notifyroute`、`webhook`、`lead`、`credentials`、`heartbeat`、`browser`、`teamnotes`、`wechatlogin`、`channeldispatch`、`skilldrafts`、`bots`、`users`（十六个服务键都随装配提供；
   缺任何一个，对应方法返回 `-32004 capability_unsupported`）。
 - `webhook.source.set` 的 `secret` 只在请求体里出现：响应、`webhook.sources` 和日志都不回显它。
 - `NotifyRoute` 的兜底顺序：`primary` → `fallback[]` → **`inapp` 永远作为最后一档**（交付循环可以在这里停住）；

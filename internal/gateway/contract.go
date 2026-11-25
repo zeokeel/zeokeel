@@ -136,6 +136,9 @@ var contractParams = map[string]any{
 	"bots.upsert":       botsUpsertParams{},
 	"bots.template.get": botTemplateGetParams{},
 	"bots.template.put": botTemplatePutParams{},
+	"users.snapshot":    struct{}{},
+	"users.upsert":      usersUpsertParams{},
+	"users.act":         usersActParams{},
 	"skilldrafts.snapshot": struct {
 		Limit int `json:"limit,omitempty"`
 	}{},

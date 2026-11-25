@@ -729,6 +729,24 @@
       "required": [],
       "optional": []
     },
+    "users.act": {
+      "required": [
+        "id"
+      ],
+      "optional": []
+    },
+    "users.snapshot": {
+      "required": [],
+      "optional": []
+    },
+    "users.upsert": {
+      "required": [
+        "id",
+        "name",
+        "role"
+      ],
+      "optional": []
+    },
     "webhook.source.remove": {
       "required": [
         "id"
@@ -841,6 +859,7 @@
       "tasklease",
       "teamnotes",
       "triage",
+      "users",
       "webhook",
       "wechatlogin",
       "workspace"

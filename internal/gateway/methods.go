@@ -51,6 +51,7 @@ var serverCapabilities = []string{
 	"channeldispatch",
 	"skilldrafts",
 	"bots",
+	"users",
 }
 
 // gatewayCapabilities is the handshake's capability list for this gateway
@@ -449,6 +450,15 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		},
 		"notify.deliver": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.notifyDeliver(ctx, request.Params)
+		},
+		"users.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.usersSnapshot(ctx, request.Params)
+		},
+		"users.upsert": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.usersUpsert(ctx, request.Params)
+		},
+		"users.act": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.usersAct(ctx, request.Params)
 		},
 		"bots.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.botsSnapshot(ctx, request.Params)

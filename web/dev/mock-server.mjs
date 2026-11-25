@@ -412,6 +412,9 @@ const mockSkillDrafts = [];
 /** Bot templates + instances. */
 const mockBotTemplates = [{ id: 'lead', name: 'Lead', role: 'Lead', memoryScope: 'team' }];
 const mockBots = [];
+/** The M6 roster; one owner exists from the start. */
+const mockUsers = [{ id: 'owner', name: 'Owner', role: 'owner', createdAt: nowIso() }];
+let mockActingUser = 'owner';
 /** Session -> bound task id ("" clears). */
 const mockSessionBindings = new Map();
 /** Shared team notes, newest first. */
@@ -2116,6 +2119,28 @@ const wsDispatch = (client, message) => {
       const taskId = String(params.taskId ?? '');
       mockSessionBindings.set(sessionId, taskId);
       return reply({ taskId });
+    }
+    case 'users.snapshot': {
+      return reply({ users: mockUsers, actingUserId: mockActingUser });
+    }
+    case 'users.upsert': {
+      const id = String(params.id ?? '');
+      const name = String(params.name ?? '');
+      const role = String(params.role ?? '');
+      if (!id || !name || !['owner', 'manager', 'collaborator'].includes(role)) {
+        return fail(-32602, 'invalid_params');
+      }
+      const index = mockUsers.findIndex((row) => row.id === id);
+      const user = { id, name, role, createdAt: index >= 0 ? mockUsers[index].createdAt : nowIso() };
+      if (index >= 0) mockUsers[index] = user;
+      else mockUsers.push(user);
+      return reply(user);
+    }
+    case 'users.act': {
+      const id = String(params.id ?? '');
+      if (!mockUsers.some((row) => row.id === id)) return fail(-32600, 'users: unknown user');
+      mockActingUser = id;
+      return reply({ actingUserId: id });
     }
     case 'bots.snapshot': {
       return reply({ templates: mockBotTemplates, instances: mockBots });
