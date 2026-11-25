@@ -9,7 +9,7 @@
 
 | ID | 差距 | 状态 | 证据 / 位置 | 还差什么 |
 |---|---|---|---|---|
-| G1 | Bot 实体（模板+实例） | 🟡 | `bot` 模块 + `bots.snapshot/upsert` + **`inbox.dispatch {botId}` 派单**（任务归 Bot，Bot 的工具授予写进任务白名单） | 未绑定活会话（LastSeenAt 无生产者）；memory scope 未被执行；无设置页 UI；AllowedTools 已能落到任务，但执行侧仍未拦截 |
+| G1 | Bot 实体（模板+实例） | 🟡 | `bot` 模块 + `bots.*` + **派单到 Bot**（任务归 Bot、工具授予成约束、派单即唤醒 LastSeenAt）+ `/settings/bots` | memory scope 未被执行；AllowedTools 已落到任务但执行侧仍未拦截；模板暂不可编辑 |
 | G2 | 队友开工前确认 | 🟡 | `tasklease`：`tasks.approval.set/get` + `awaiting_approval` 状态 + `tasks.approve` / `tasks.reject-start`（策略随任务持久化，未知值 fail-closed） | `before_send` 未做；无推送域（UI 需轮询）；审批通过/拒绝尚未发通知 |
 | G3 | 任务板租约 | ✅ | `internal/modules/tasklease`（claim/heartbeat/expire，过期回收） | — |
 | G4 | 证据与验收 | ✅ | `tasklease`（无证据拒收）+ `tasks.review` + 验收写团队笔记 | — |
@@ -48,6 +48,7 @@
 | `/settings/health` 自转/浏览器/投递测试 | ✅ |
 | `/settings/memory` 共享记忆 + 复核 | ✅ |
 | `/skills/drafts` 技能草稿 | ✅ |
+| `/settings/bots` 机器人 | ✅ |
 | 390px 窄屏 | ✅（四屏实测无横向滚动） |
 
 ## 四、验证手段

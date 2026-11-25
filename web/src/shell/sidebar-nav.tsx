@@ -39,6 +39,8 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
       // R27c: the shared note board. Its own entry for the same reason: it must
       // not leave the generic settings item selected.
       '/settings/memory',
+      // R27d: the bot roster. Its own entry too — a bot is not a setting.
+      '/settings/bots',
       // R28: the skill-drafts queue, also its own entry.
       '/skills/drafts',
     ].find((path) => location.pathname.startsWith(path)) ??
@@ -112,6 +114,12 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
         // `data` is the inbound work queue and `pencil` would promise editing
         // the list, which this surface does not offer.
         { key: '/settings/memory', icon: <ZkIcon name="file" />, label: t('memory.title') },
+        // R27d: the bot roster. There is no robot glyph in internal/icons/svg
+        // yet, so the neutral unit box (`square`) stands in until one is
+        // generated — the same precedent as the inbound work queue's `data`.
+        // `users` is the roster of people, `sparkles` the proposals queue, and
+        // `sliders` the settings entry: none of them means "a persistent岗位".
+        { key: '/settings/bots', icon: <ZkIcon name="square" />, label: t('bots.title') },
       ]}
     />
   );

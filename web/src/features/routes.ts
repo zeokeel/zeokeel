@@ -54,6 +54,11 @@ export const ROUTES: RouteMeta[] = [
   // Same shape as R27a/R27b — a static path that outranks `/settings/:page` by
   // length — because a note board is not a `settings` domain row.
   { path: '/settings/memory', ref: 'R27c', titleKey: 'memory.title' },
+  // R27d: the bot roster — 岗位 templates and the instances created from them
+  // (`bots.snapshot`/`bots.upsert`, plan G1). Same shape as R27a–R27c: a static
+  // path that outranks `/settings/:page` by length, because a roster of bots is
+  // not a `settings` domain row.
+  { path: '/settings/bots', ref: 'R27d', titleKey: 'bots.title' },
   { path: '/automation', ref: 'R22', titleKey: 'shell.automation' },
   { path: '/capabilities', ref: 'R23', titleKey: 'shell.capabilities' },
   { path: '/insights', ref: 'R24', titleKey: 'shell.insights' },
@@ -76,13 +81,25 @@ export const ROUTES: RouteMeta[] = [
 /**
  * The nearest matching entry for a pathname.
  *
- * An exact route always beats a splat, and only then does the longer path win.
- * Both rules are load-bearing: react-router lets a splat match the empty rest,
- * so `/c/:id/files/*` also matches `/c/:id/files` — sorting on length alone
- * handed the file-tree URL to the preview entry (found by `routes.test.ts`).
+ * Three rules, in order:
+ *  1. an exact route beats a splat — react-router lets a splat match the empty
+ *     rest, so `/c/:id/files/*` also matches `/c/:id/files`, and sorting on
+ *     length alone handed the file-tree URL to the preview entry (found by
+ *     `routes.test.ts`);
+ *  2. a literal path beats a pattern with a `:param`, whatever their lengths —
+ *     `/settings/bots` is one character shorter than `/settings/:page`, so a
+ *     length-only rule resolved the bot roster (R27d) to the generic settings
+ *     page (found when R27d landed);
+ *  3. among routes of the same kind, the longer path wins (`/settings/channels`
+ *     over `/settings`).
  */
 export function routeForPath(pathname: string): RouteMeta | undefined {
-  const rank = (route: RouteMeta) => (route.path.includes('*') ? 0 : 1_000) + route.path.length;
+  const rank = (route: RouteMeta): number => {
+    // A splat is the weakest shape: it matches anything, including nothing.
+    if (route.path.includes('*')) return 0;
+    const dynamic = route.path.split('/').some((segment) => segment.startsWith(':'));
+    return (dynamic ? 1_000 : 2_000) + route.path.length;
+  };
   return ROUTES.filter((route) => matchPath({ path: route.path, end: true }, pathname)).sort(
     (a, b) => rank(b) - rank(a),
   )[0];

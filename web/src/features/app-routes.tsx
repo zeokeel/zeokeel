@@ -19,6 +19,7 @@ import { TeamScreen as TeammatesScreen } from '@/features/team/team-screen';
 import { ContextScreen } from '@/features/thread/context-screen';
 import { NowScreen } from '@/features/now/now-screen';
 import { ChannelsScreen } from '@/features/settings/channels/ChannelsScreen';
+import { BotsScreen } from '@/features/settings/bots/BotsScreen';
 import { HealthScreen } from '@/features/settings/health/HealthScreen';
 import { TeamMemoryScreen } from '@/features/settings/memory/TeamMemoryScreen';
 import { SettingsScreen } from '@/features/settings/settings-screen';
@@ -108,6 +109,11 @@ export function AppRoutes() {
           A static path for the same reason R27a/R27b have one: a note board is
           not a `settings` domain row, so `/settings/:page` must not own it. */}
       <Route path="/settings/memory" element={<TeamMemoryScreen />} />
+      {/* R27d: 岗位 templates and the bots created from them (`bots.snapshot`,
+          `bots.upsert`, plan G1). A static path for the same reason R27a–R27c
+          have one: a bot roster is not a `settings` domain row, so
+          `/settings/:page` must not own it. */}
+      <Route path="/settings/bots" element={<BotsScreen />} />
       <Route path="/settings/:page" element={<SettingsScreen />} />
       <Route path="/automation" element={<AutomationScreen />} />
       <Route path="/capabilities" element={<CapabilitiesScreen />} />
