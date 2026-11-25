@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"golang.org/x/text/encoding/simplifiedchinese"
 	"mime/quotedprintable"
 	"net"
 	"strings"
@@ -355,5 +356,63 @@ func TestPollOnceHonorsACanceledContext(t *testing.T) {
 	}
 	if calls := client.callCount(); calls != 0 {
 		t.Fatalf("IMAP client called %d times after cancellation, want 0", calls)
+	}
+}
+
+// Mail from Chinese mail clients is routinely GBK and declares it. Without the
+// charset step the inbox shows mojibake and triage receives it.
+func TestPollOnceDecodesDeclaredCharsets(t *testing.T) {
+	gbk := func(text string) []byte {
+		encoded, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(text))
+		if err != nil {
+			t.Fatalf("encode gbk: %v", err)
+		}
+		return encoded
+	}
+	client := &fakeIMAPClient{}
+	client.setMessages(
+		email.RawMessage{
+			Header: map[string][]string{
+				"Message-ID":   {"<gbk@example.com>"},
+				"From":         {"owner@example.com"},
+				"Subject":      {"gbk"},
+				"Content-Type": {"text/plain; charset=GBK"},
+			},
+			Body:     gbk("请确认本期退款名单"),
+			Encoding: "8bit",
+		},
+	)
+	adapter, inbox := pollFixture(t, client)
+
+	if _, err := adapter.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	items := inbox.snapshot()
+	if items[0].Body != "请确认本期退款名单" {
+		t.Fatalf("gbk body = %q, want the decoded Chinese text", items[0].Body)
+	}
+}
+
+// A wrong or unknown label must never corrupt text that is already valid UTF-8.
+func TestPollOnceKeepsValidUTF8WithAnUnknownCharset(t *testing.T) {
+	client := &fakeIMAPClient{}
+	client.setMessages(email.RawMessage{
+		Header: map[string][]string{
+			"Message-ID":   {"<unknown@example.com>"},
+			"From":         {"owner@example.com"},
+			"Subject":      {"unknown"},
+			"Content-Type": {"text/plain; charset=x-user-defined"},
+		},
+		Body:     []byte("退款 3.1%"),
+		Encoding: "8bit",
+	})
+	adapter, inbox := pollFixture(t, client)
+
+	if _, err := adapter.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	items := inbox.snapshot()
+	if items[0].Body != "退款 3.1%" {
+		t.Fatalf("body = %q, want the original text", items[0].Body)
 	}
 }

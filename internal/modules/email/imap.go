@@ -10,6 +10,15 @@ import (
 	"mime"
 	"mime/multipart"
 	"mime/quotedprintable"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/charmap"
+	"golang.org/x/text/encoding/japanese"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/encoding/traditionalchinese"
+
+	"github.com/zeokeel/zeokeel/internal/lib/textenc"
 	"strings"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -126,7 +135,7 @@ func (a *Adapter) markInbound() {
 func messageText(message RawMessage) (string, error) {
 	mediaType, params := parseContentType(headerValue(message.Header, "Content-Type"))
 	if !strings.HasPrefix(mediaType, "multipart/") {
-		return decodeRawBody(message.Body, message.Encoding)
+		return decodeRawBody(message.Body, message.Encoding, params["charset"])
 	}
 	envelope, err := decodeTransferEncoding(message.Body, message.Encoding)
 	if err != nil {
@@ -180,8 +189,24 @@ func textPlainPart(body []byte, mediaType, boundary string, depth int) (string, 
 			continue
 		}
 		// RFC 2046 §5.1.1: a part with no Content-Type defaults to text/plain.
-		return decodeRawBody(raw, part.Header.Get("Content-Transfer-Encoding"))
+		return decodeRawBody(raw, part.Header.Get("Content-Transfer-Encoding"), partParams["charset"])
 	}
+}
+
+// mailCharsets are the declared charsets we can decode honestly. A label that is
+// not here is not guessed at: textenc's repair handles the common GBK/UTF-16
+// cases, and anything else stays as-is rather than being decoded into garbage.
+var mailCharsets = map[string]encoding.Encoding{
+	"gbk":          simplifiedchinese.GBK,
+	"gb2312":       simplifiedchinese.GBK,
+	"gb18030":      simplifiedchinese.GB18030,
+	"big5":         traditionalchinese.Big5,
+	"shift_jis":    japanese.ShiftJIS,
+	"sjis":         japanese.ShiftJIS,
+	"euc-jp":       japanese.EUCJP,
+	"iso-8859-1":   charmap.ISO8859_1,
+	"latin1":       charmap.ISO8859_1,
+	"windows-1252": charmap.Windows1252,
 }
 
 // parseContentType splits a Content-Type value; a missing or broken one is "".
@@ -193,13 +218,38 @@ func parseContentType(value string) (string, map[string]string) {
 	return mediaType, params
 }
 
-// decodeRawBody returns the message text according to its transfer encoding.
-func decodeRawBody(body []byte, encoding string) (string, error) {
+// decodeRawBody returns the message text according to its transfer encoding and
+// then its declared character set.
+func decodeRawBody(body []byte, encoding, charset string) (string, error) {
 	decoded, err := decodeTransferEncoding(body, encoding)
 	if err != nil {
 		return "", err
 	}
-	return string(decoded), nil
+	return decodeCharset(decoded, charset), nil
+}
+
+// decodeCharset turns the bytes into UTF-8 text.
+//
+// Mail from Chinese and Japanese mail clients is routinely GBK or Shift_JIS, and
+// the bytes are not UTF-8: without this step the inbox shows mojibake and the
+// triage prompt receives it. The declared charset is honoured when it is one we
+// can decode; UTF-8 (or no declaration) means the bytes are taken as they are;
+// an unknown label falls back to textenc's repair, which only rewrites bytes that
+// are not valid UTF-8 — so a wrong label can never corrupt already-good text.
+func decodeCharset(body []byte, charset string) string {
+	trimmed := strings.ToLower(strings.Trim(strings.TrimSpace(charset), "\""))
+	if trimmed == "" || trimmed == "utf-8" || trimmed == "utf8" || trimmed == "us-ascii" || trimmed == "ascii" {
+		if utf8.Valid(body) {
+			return string(body)
+		}
+		return textenc.RepairBytes(body)
+	}
+	if encoding, ok := mailCharsets[trimmed]; ok {
+		if decoded, err := encoding.NewDecoder().Bytes(body); err == nil {
+			return string(decoded)
+		}
+	}
+	return textenc.RepairBytes(body)
 }
 
 // decodeTransferEncoding undoes the transfer encoding and returns the bytes.
