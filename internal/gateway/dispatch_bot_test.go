@@ -25,6 +25,12 @@ func (f *fakeBots) Templates(context.Context) ([]contracts.BotTemplate, error) {
 func (f *fakeBots) PutTemplate(_ context.Context, template contracts.BotTemplate) (contracts.BotTemplate, error) {
 	return template, nil
 }
+func (f *fakeBots) Template(_ context.Context, id string) (contracts.BotTemplate, bool, error) {
+	if id == "lead" {
+		return contracts.BotTemplate{ID: "lead", Name: "Lead"}, true, nil
+	}
+	return contracts.BotTemplate{}, false, nil
+}
 func (f *fakeBots) Instances(context.Context) ([]contracts.BotInstance, error) { return nil, nil }
 func (f *fakeBots) Create(_ context.Context, instance contracts.BotInstance) (contracts.BotInstance, error) {
 	return instance, nil

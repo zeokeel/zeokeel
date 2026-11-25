@@ -30,7 +30,7 @@ func TestOrchestrationMethodsAreDispatched(t *testing.T) {
 		"credentials.list", "credentials.set", "credentials.delete",
 		"heartbeat.status", "heartbeat.tick", "heartbeat.configure", "browser.status",
 		"team.notes", "team.note.record",
-		"bots.snapshot", "bots.upsert",
+		"bots.snapshot", "bots.upsert", "bots.template.get", "bots.template.put",
 		"skilldrafts.snapshot", "skilldrafts.propose", "skilldrafts.decide", "skilldrafts.install",
 		"notify.plan", "notify.deliver", "team.note.review",
 		"wechat.login.start", "wechat.login.state",

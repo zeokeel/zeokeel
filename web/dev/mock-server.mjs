@@ -2065,6 +2065,29 @@ const wsDispatch = (client, message) => {
       note.reviewedAt = params.at ? String(params.at) : nowIso();
       return reply(note);
     }
+    case 'bots.template.get': {
+      const template = mockBotTemplates.find((row) => row.id === String(params.id ?? ''));
+      return reply({ template: template ?? null });
+    }
+    case 'bots.template.put': {
+      const id = String(params.id ?? '');
+      const name = String(params.name ?? '');
+      if (!id || !name) return fail(-32602, 'invalid_params');
+      const template = {
+        id,
+        name,
+        ...(params.role ? { role: String(params.role) } : {}),
+        ...(params.description ? { description: String(params.description) } : {}),
+        ...(params.defaultModel ? { defaultModel: String(params.defaultModel) } : {}),
+        ...(params.systemPrompt ? { systemPrompt: String(params.systemPrompt) } : {}),
+        ...(Array.isArray(params.allowedTools) ? { allowedTools: params.allowedTools.map(String) } : {}),
+        memoryScope: String(params.memoryScope ?? 'agent'),
+      };
+      const index = mockBotTemplates.findIndex((row) => row.id === id);
+      if (index >= 0) mockBotTemplates[index] = template;
+      else mockBotTemplates.push(template);
+      return reply(template);
+    }
     case 'bots.snapshot': {
       return reply({ templates: mockBotTemplates, instances: mockBots });
     }

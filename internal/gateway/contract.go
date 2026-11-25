@@ -128,9 +128,11 @@ var contractParams = map[string]any{
 	"notify.plan": struct {
 		Category string `json:"category"`
 	}{},
-	"notify.deliver": notifyDeliverParams{},
-	"bots.snapshot":  struct{}{},
-	"bots.upsert":    botsUpsertParams{},
+	"notify.deliver":    notifyDeliverParams{},
+	"bots.snapshot":     struct{}{},
+	"bots.upsert":       botsUpsertParams{},
+	"bots.template.get": botTemplateGetParams{},
+	"bots.template.put": botTemplatePutParams{},
 	"skilldrafts.snapshot": struct {
 		Limit int `json:"limit,omitempty"`
 	}{},

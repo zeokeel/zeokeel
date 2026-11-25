@@ -9,7 +9,7 @@
 
 | ID | 差距 | 状态 | 证据 / 位置 | 还差什么 |
 |---|---|---|---|---|
-| G1 | Bot 实体（模板+实例） | 🟡 | `bot` 模块 + `bots.*` + **派单到 Bot**（任务归 Bot、工具授予成约束、派单即唤醒 LastSeenAt）+ `/settings/bots` | memory scope 未被执行；AllowedTools 已落到任务但执行侧仍未拦截；模板暂不可编辑 |
+| G1 | Bot 实体（模板+实例） | 🟡 | `bot` 模块 + `bots.*`（含模板编辑）+ 派单到 Bot（任务归 Bot、工具授予成约束、派单即唤醒）+ `/settings/bots` + 团队笔记支持 `agent` 私有作用域 | **AllowedTools 执行侧仍未拦截**（约束只落在任务上）；模板编辑不回溯已建实例（刻意）；多用户角色未做 |
 | G2 | 队友开工前确认 | 🟡 | `tasklease`：`tasks.approval.set/get` + `awaiting_approval` 状态 + `tasks.approve` / `tasks.reject-start`（策略随任务持久化，未知值 fail-closed） | `before_send` 未做；无推送域（UI 需轮询）；审批通过/拒绝尚未发通知 |
 | G3 | 任务板租约 | ✅ | `internal/modules/tasklease`（claim/heartbeat/expire，过期回收） | — |
 | G4 | 证据与验收 | ✅ | `tasklease`（无证据拒收）+ `tasks.review` + 验收写团队笔记 | — |
@@ -29,7 +29,7 @@
 | 里程碑 | 状态 | 说明 |
 |---|---|---|
 | M0 地基 | ✅ | 收件箱→分诊→租约/证据→审批→路由，三层证据：单元/装配/实机（`scripts/verify-live` 12/12） |
-| M1 记忆 | 🟡 | 团队笔记 + 复核 + 验收自动沉淀；缺 agent 私有作用域与建议队列 |
+| M1 记忆 | 🟡 | 团队笔记 + 复核 + 验收自动沉淀 + **agent 私有作用域（独立 memory 类型，团队板天然看不到）**；缺建议队列 |
 | M2 触发 | 🟡 | webhook 入站 + heartbeat 自转 + automation 定时；缺"事件→收件箱"通用通道 |
 | M2.5 MCP 补全 | ⬜ | 未开工（基建在，补全未做） |
 | M3 浏览器 | 🟡 | CDP 真连接 + 三个工具；缺每 Bot 独立 context、下载拦截 |

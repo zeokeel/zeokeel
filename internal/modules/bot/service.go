@@ -141,6 +141,23 @@ func (s *Service) Templates(ctx context.Context) ([]contracts.BotTemplate, error
 }
 
 // PutTemplate implements contracts.BotService: it upserts one template.
+//
+// Two properties the settings screen depends on, stated here because they are
+// not visible in the signature:
+//
+//   - The write replaces the whole record. A field the caller omits is cleared
+//     (an empty MemoryScope becomes the agent default), never inherited from the
+//     previous version: a "patch" that kept an old tool list would make the
+//     grant depend on what the caller happened not to send.
+//   - The id is the identity. There is no rename, so editing a template cannot
+//     leave its instances pointing at a name that no longer exists.
+//
+// What an edit does NOT do is equally deliberate: it does not touch instances.
+// Each instance stored the model, tool whitelist and memory scope resolved from
+// the template at creation time (see resolve), so a retuned template applies to
+// bots created afterwards only. A tool grant is a permission surface, and
+// permissions must not grow behind the user's back just because a template was
+// edited.
 func (s *Service) PutTemplate(ctx context.Context, template contracts.BotTemplate) (contracts.BotTemplate, error) {
 	if err := ctx.Err(); err != nil {
 		return contracts.BotTemplate{}, err
@@ -153,6 +170,8 @@ func (s *Service) PutTemplate(ctx context.Context, template contracts.BotTemplat
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	previous, hadPrevious := s.templates[normalized.ID]
+	// Only the template map is written. Instances keep the policy they resolved
+	// at creation, which is what makes a template edit non-retroactive.
 	s.templates[normalized.ID] = normalized
 	if err := s.saveLocked(); err != nil {
 		if hadPrevious {
@@ -163,6 +182,25 @@ func (s *Service) PutTemplate(ctx context.Context, template contracts.BotTemplat
 		return contracts.BotTemplate{}, err
 	}
 	return cloneTemplate(normalized), nil
+}
+
+// Template implements contracts.BotService: one template by id.
+//
+// The boolean is "found", not an error. A get backs a form that may still be
+// empty, so "no such template" is an answer the caller renders rather than a
+// fault it reports; ErrBotTemplateUnknown stays reserved for the write path,
+// where naming a missing template is a real mistake (Create).
+func (s *Service) Template(ctx context.Context, id string) (contracts.BotTemplate, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return contracts.BotTemplate{}, false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	template, ok := s.templates[strings.TrimSpace(id)]
+	if !ok {
+		return contracts.BotTemplate{}, false, nil
+	}
+	return cloneTemplate(template), true, nil
 }
 
 // Instances implements contracts.BotService.

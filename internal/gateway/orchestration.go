@@ -199,7 +199,14 @@ func orchestrationError(err error) *protocolError {
 		errors.Is(err, contracts.ErrApprovalTokenExpired),
 		errors.Is(err, contracts.ErrApprovalTokenUsed),
 		errors.Is(err, contracts.ErrApprovalNotPending),
-		errors.Is(err, contracts.ErrApprovalNoPending):
+		errors.Is(err, contracts.ErrApprovalNoPending),
+		// Bot template validation is the form's problem, not a gateway fault:
+		// a bad template slug, an over-budget name, a tool outside the alphabet,
+		// an unknown memory scope, or a template id that does not exist.
+		// Reporting those as internal errors made the settings screen say
+		// "something broke" for a typo.
+		errors.Is(err, contracts.ErrBotInvalid),
+		errors.Is(err, contracts.ErrBotTemplateUnknown):
 		return protocolErrorWithMessage(codeInvalidRequest, err.Error())
 	}
 	return internalError(err)
@@ -1805,6 +1812,35 @@ type botsUpsertParams struct {
 	Status      string   `json:"status,omitempty"`
 }
 
+// botTemplatePutParams is the editable form of a岗位 template. Only id and name
+// are required; the rest has a meaningful empty value (an empty DefaultModel is
+// "follow the session", an empty AllowedTools is the read-only default set, an
+// empty MemoryScope is agent). The write is a replace, so an omitted optional
+// field is cleared — the screen edits a full form it read from
+// bots.template.get / bots.snapshot.
+type botTemplatePutParams struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Role         string   `json:"role,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	DefaultModel string   `json:"defaultModel,omitempty"`
+	SystemPrompt string   `json:"systemPrompt,omitempty"`
+	AllowedTools []string `json:"allowedTools,omitempty"`
+	MemoryScope  string   `json:"memoryScope,omitempty"`
+}
+
+type botTemplateGetParams struct {
+	ID string `json:"id"`
+}
+
+// botTemplateGetResult is `{template:...}` with an explicit null. An unknown id
+// is an ordinary answer here (the form is empty, not broken), and keeping the
+// key present means the client never has to distinguish "no template" from
+// "field dropped by the encoder".
+type botTemplateGetResult struct {
+	Template *botTemplateDTO `json:"template"`
+}
+
 func botTemplateFromContract(template contracts.BotTemplate) botTemplateDTO {
 	return botTemplateDTO{
 		ID: template.ID, Name: template.Name, Role: template.Role, Description: template.Description,
@@ -1888,4 +1924,66 @@ func (g *Gateway) botsUpsert(ctx context.Context, raw json.RawMessage) (any, *pr
 		return nil, orchestrationError(err)
 	}
 	return botInstanceFromContract(saved), nil
+}
+
+// botsTemplatePut creates or replaces one reusable岗位 template (plan G1: the
+// template is the reusable half of "Bot = 模板 + 记忆作用域 + 工具授予 + 默认模型").
+//
+// Two properties the caller may rely on, both pinned by tests:
+//
+//   - It is create-or-replace, not a patch. The stored template is exactly what
+//     this request described; a field left out is cleared. Callers that mean
+//     "change one field" must send the record back (get → modify → put).
+//   - It never reshapes a bot that already exists. Instances store the model,
+//     tool whitelist and memory scope they resolved at creation, so a template
+//     edit applies to bots created afterwards only. A tool grant is a permission
+//     surface: editing a template must not widen it behind the user's back.
+func (g *Gateway) botsTemplatePut(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.botService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params botTemplatePutParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	saved, err := service.PutTemplate(ctx, contracts.BotTemplate{
+		ID:           params.ID,
+		Name:         params.Name,
+		Role:         params.Role,
+		Description:  params.Description,
+		DefaultModel: params.DefaultModel,
+		SystemPrompt: params.SystemPrompt,
+		AllowedTools: params.AllowedTools,
+		MemoryScope:  params.MemoryScope,
+	})
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return botTemplateFromContract(saved), nil
+}
+
+// botsTemplateGet reads one template for the edit form. An unknown id answers
+// `{template:null}` rather than an error: the form is still open and empty, and
+// "that template is gone" is a normal thing to discover after a delete or a
+// restart with another store. The read is a snapshot of one template, while
+// bots.snapshot remains the door for everything at once (templates + instances).
+func (g *Gateway) botsTemplateGet(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.botService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params botTemplateGetParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	template, found, err := service.Template(ctx, params.ID)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	if !found {
+		return botTemplateGetResult{}, nil
+	}
+	dto := botTemplateFromContract(template)
+	return botTemplateGetResult{Template: &dto}, nil
 }

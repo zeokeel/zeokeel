@@ -838,6 +838,8 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `approval.action` | `{approvalId,decision:"allow"\|"deny",token}` | `{ok:true}` | N | `ApprovalActionService.Apply` | ✅ 已实现 |
 | `bots.snapshot` | — | `{templates:[BotTemplate],instances:[BotInstance]}` | Y | `BotService.Templates/Instances` | ✅ 已实现 |
 | `bots.upsert` | `{id,templateId,name?,owner?,defaultModel?,allowedTools?,memoryScope?,status?}` | `BotInstance` | N | `BotService.Create/Update`（更新不可改身份；退休终态） | ✅ 已实现 |
+| `bots.template.get` | `{id}` | `{template: BotTemplate}`；不存在时 **`{template:null}`**（不是错误，前端渲染空表单） | Y | `BotService.Template`（id 做 TrimSpace；返回副本） | ✅ 已实现 |
+| `bots.template.put` | `{id,name,role?,description?,defaultModel?,systemPrompt?,allowedTools?,memoryScope?}` | `BotTemplate` | N | `BotService.PutTemplate`：**整流替换（省略字段即清空）**，非补丁；id 是身份——"改名"= 新建一条模板，老 id 与其实例不动；校验失败 → `-32600`（`ErrBotInvalid`）。**模板编辑只对之后新建的实例生效**：实例在创建时快照模板的 defaultModel/allowedTools/memoryScope，改模板不会回溯改已有 Bot 的授权 | ✅ 已实现 |
 | `skilldrafts.snapshot` | `{limit?}` | `{drafts:[SkillDraft]}` | Y | `SkillDraftsService.List`（最新在前） | ✅ 已实现 |
 | `skilldrafts.propose` | `{taskId?,name,summary?,body?}` | `SkillDraft`（status=pending） | N | `SkillDraftsService.Draft`（六段式模板；草稿永不自动安装） | ✅ 已实现 |
 | `skilldrafts.install` | `{id}` | `{installed:true,name}` | N | 采纳后的草稿写入真实 SKILL.md（重名 → `-32600`；未采纳 → `-32602`） | ✅ 已实现 |

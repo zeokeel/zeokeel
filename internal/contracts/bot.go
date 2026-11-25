@@ -138,7 +138,21 @@ type BotService interface {
 	// PutTemplate creates or replaces one template. A built-in template may be
 	// overridden (a user may want to retune "lead"), but its id stays taken.
 	// Invalid templates are ErrBotInvalid.
+	//
+	// The write is a replace, not a patch: every field is taken from the
+	// argument, so a field the caller omits is cleared rather than kept. The id
+	// is the record's identity — a "rename" is therefore a second template, and
+	// the old id keeps its record because instances name it.
+	//
+	// A template edit only applies forward. Instances snapshot the template's
+	// default model, tool whitelist and memory scope at creation and are never
+	// re-resolved against a later template, so retuning a template cannot widen
+	// the grant of a bot that already exists.
 	PutTemplate(ctx context.Context, template BotTemplate) (BotTemplate, error)
+	// Template returns one template by id. The boolean reports whether it
+	// exists: an unknown id is an ordinary answer for a read (the UI renders an
+	// empty form), not an error. The returned value is a copy.
+	Template(ctx context.Context, id string) (BotTemplate, bool, error)
 	// Instances lists every bot, sorted by id, including paused and retired
 	// ones: the history needs them even when dispatch ignores them.
 	Instances(ctx context.Context) ([]BotInstance, error)
@@ -179,6 +193,13 @@ var (
 	ErrBotUnknown = errors.New("bot: unknown bot")
 	// ErrBotTemplateUnknown means the instance names no stored template.
 	ErrBotTemplateUnknown = errors.New("bot: unknown bot template")
+	// ErrBotTemplateInUse means a template still has instances created from it,
+	// so removing it would leave bots whose "what this bot is for" no longer
+	// resolves. It is reserved for a template delete: this build has no delete
+	// (an instance names its template, and the loader refuses a document whose
+	// instance points at a missing template), and the error is declared here so
+	// the rule is stated once instead of being reinvented by the delete.
+	ErrBotTemplateInUse = errors.New("bot: bot template in use")
 	// ErrBotDuplicate means a bot with that id already exists. Creation never
 	// overwrites: silently replacing a bot would replace its grants too.
 	ErrBotDuplicate = errors.New("bot: duplicate bot id")

@@ -447,6 +447,12 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"bots.upsert": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.botsUpsert(ctx, request.Params)
 		},
+		"bots.template.get": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.botsTemplateGet(ctx, request.Params)
+		},
+		"bots.template.put": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.botsTemplatePut(ctx, request.Params)
+		},
 		"skilldrafts.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.skillDraftsList(ctx, request.Params)
 		},

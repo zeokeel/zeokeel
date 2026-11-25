@@ -66,6 +66,26 @@
       "required": [],
       "optional": []
     },
+    "bots.template.get": {
+      "required": [
+        "id"
+      ],
+      "optional": []
+    },
+    "bots.template.put": {
+      "required": [
+        "id",
+        "name"
+      ],
+      "optional": [
+        "allowedTools",
+        "defaultModel",
+        "description",
+        "memoryScope",
+        "role",
+        "systemPrompt"
+      ]
+    },
     "bots.upsert": {
       "required": [
         "id",
