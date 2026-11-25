@@ -1,7 +1,11 @@
 package webhook
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
@@ -20,13 +24,29 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return fmt.Errorf("%s: require inbox: %w", ModuleID, err)
 		}
-		service := NewService(inboxService, cfg)
+		dataDir, err := ctx.Require(contracts.KeyDataDir)
+		if err != nil {
+			return fmt.Errorf("%s: require data dir: %w", ModuleID, err)
+		}
+		sourceDir := filepath.Join(dataDir, "webhook")
+		service, err := Open(sourceDir, inboxService, cfg)
+		if err != nil {
+			// A corrupt source file must not brick the product and must not be
+			// overwritten: move it aside, say so, keep the endpoint table empty.
+			quarantined := fmt.Sprintf("sources.json.corrupt-%d", time.Now().Unix())
+			_ = os.Rename(filepath.Join(sourceDir, "sources.json"), filepath.Join(sourceDir, quarantined))
+			if logger, ok := ctx.Get(contracts.KeyLogger); ok && logger != nil {
+				logger.Printf("webhook: corrupt source list moved to %s; no endpoints are configured", quarantined)
+			}
+			service = NewService(inboxService, cfg)
+		}
+		_ = errors.Is // keep the import for the wrapped errors above
 		if _, err := ctx.Provide(contracts.KeyWebhook, contracts.WebhookService(service)); err != nil {
 			return fmt.Errorf("%s: provide webhook: %w", ModuleID, err)
 		}
 		return nil
 	}).
 		AddProvides(module.Provides(contracts.KeyWebhook)).
-		AddRequires(module.Requires(contracts.KeyInbox)).
+		AddRequires(module.Requires(contracts.KeyInbox), module.Requires(contracts.KeyDataDir)).
 		WithName("ZeoKeel webhook ingress")
 }

@@ -36,7 +36,7 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | **四模块链路** inbox → triage → board → lease | 上述四个模块 | — | 装配测试里：Apply 建任务 → Claim → Submit → Accept，board 最终 completed |
 | `contracts.KeyApprovalAction` | approvals 模块（与 KeyApprovals 同源） | 桌面按钮 / 卡片回调 / 聊天回复 | 13 条（token 校验/过期/单次使用/绑单/索引回复/空队列） |
 | `contracts.KeyNotifyRoute` | notifyroute（新，无依赖） | 渠道适配器、gateway | 8 条（默认覆盖/校验/顺序/不健康跳过/inapp 兜底/静音只压非审批/跨午夜/停用） |
-| `contracts.KeyWebhook` | webhook（新，只依赖 inbox） | `POST /api/inbound/{source}` | 10 条模块测试 + 7 条 HTTP 测试（202/401/404/400/429/405/413/Origin 拒绝/无服务 404） |
+| `contracts.KeyWebhook` | webhook（依赖 inbox + dataDir） | `POST /api/inbound/{source}`、`webhook.sources/source.set/remove` | 10 条收件测试 + 7 条 HTTP 测试 + 6 条 source 管理测试（排序/校验/删除/重启恢复/轮换失效/0600） |
 | **网关 → 服务键**（11 个方法） | inbox / triage / tasklease / approvalaction | web 客户端、Lead 分诊回合 | 一致性测试（TRANSPORT §5.1 ↔ dispatch ↔ contract.json ↔ ws-contract.ts）+ 载荷映射测试 7 条 |
 | 注册 ↔ 装配一致 | registry | headless.json | `TestEveryRegisteredModuleIsLoaded`（新） |
 
@@ -52,7 +52,7 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 | F4 | `zeokeel/host/group`（容器模块）也不在 headless entries | 合法：它只在嵌套 group 时被引用，headless 没有 group | 带原因列入例外，不失败 |
 | F5 | ~~inbox 是内存实现，重启丢~~ | ✅ 已修：`Open(dir)` 载入 `<data>/inbox/inbox.json`，每次变更原子写（tmp+rename），失败回滚内存；损坏文件**移到一边**并告警，不静默清空 | 持久化测试 6 条（重启恢复/重启后仍去重/状态恢复/损坏报错/无残留 tmp） |
 | F6 | 第二次加模块又触发同一批断言（顺序列表、实例数、`instances[10]`） | 证明 F1/F2 不是偶发 | **已修根因**：改为「存在性」断言 + 按 id 查实例；计数断言删除，换成"必须包含这些模块" |
-| F8 | `internal/gateway` 的 `TestApprovalsSnapshotDeltaReplay` 在整套测试并发时偶发 `i/o timeout`（7s） | 高负载下的时序 flaky，与本次改动无关（单独 `-count=3` 连续通过，全量重跑通过） | 记录在案；后续给该测试加宽松超时或改成事件驱动等待，不掩盖 |
+| F8 | `TestApprovalsSnapshotDeltaReplay` 在全套并发下偶发 `i/o timeout` | 测试脚手架的首帧读超时只有 5s，整包并发时不够 | ✅ 已修：`wstest` 读超时 5s → 15s（测试夹具，不是产品超时），`-count=3` 连过、全量重跑绿 |
 | F7 | **装配链路测出一个真 bug**：`Claim` 对已经指派/进行中的任务再次写 board，被 rig 拒绝 `team task update has no changes`，整次认领失败 | 单模块测试用的是 fake board，永远发现不了；只有真实装配链路能测出来 | 已修：先读当前任务，只写变化过的字段（状态不同才 SetStatus，owner 不同才 Assign） |
 
 ## 4. 尚未接的线（明确空白，不许假装完成）
@@ -63,7 +63,7 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 | Lead 的"思考"层（谁来决定 Action/Task） | triage 只执行决定，不做判断；决定来自 Lead 模型 | M0-2b：Lead 分诊回合（agent 侧） |
 | ~~任务板租约/心跳/证据/验收~~ | ✅ 已交付：`tasklease`（TTL/心跳/证据必填/review/accept/reject/expire） | 已交付 |
 | ~~审批 action + 文字回复~~ | ✅ 已交付：`IssueToken` / `Apply` / `ApplyReply`，三条入口最终都落到 `Resolve` | 已交付 |
-| 渠道适配器 | 🟡 webhook **内核 + HTTP 入口**已交付（`POST /api/inbound/{source}`，签名即认证）；**source 的密钥来源还没接设置**（装配文档不放密钥，headless 是空源表）；微信/钉钉/飞书/邮件未开始 | 下一步：webhook source 的设置页/表单 + 微信 iLink |
+| 渠道适配器 | 🟡 webhook **内核 + HTTP 入口 + source 管理**已交付（`webhook.sources/source.set/source.remove`，密钥 0600 持久化、读路径不回显）；微信/钉钉/飞书/邮件未开始 | 下一步：微信 iLink；设置页表单 |
 | ~~网关协议 `inbox.*` / 租约 / 审批动作~~ | ✅ 9 个方法已实现并同步 TRANSPORT §5.1.13、contract.json、ws-contract.ts | 已交付 |
 | ~~`notify.route.*`（主/备渠道）~~ | ✅ 已交付：router 服务 + `notify.route.snapshot/upsert` + capability `notifyroute` | 已交付 |
 | UI | 未接；效果图只是原型 | 协议稳定后一轮做 |
@@ -106,6 +106,7 @@ scripts/verify.sh --quick（持久化后）    PASS 5/5，63s
 scripts/verify.sh --quick（notifyroute 后）PASS 5/5，63s；web gen:verify / tsc 通过
 scripts/verify.sh --quick（webhook 后）  PASS 5/5，66s
 scripts/verify.sh --quick（inbound 后）  PASS 5/5，64s
+scripts/verify.sh --quick（source 管理后）PASS 5/5，63s
 scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过
 scripts/verify.sh --quick（approval 后）    PASS 5/5（一次 flaky 后重跑绿）
                                             （首次跑时 gateway 的

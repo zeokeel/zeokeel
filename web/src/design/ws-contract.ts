@@ -78,6 +78,9 @@ export const WS_METHODS = [
   'update.download',
   'update.install',
   'update.status',
+  'webhook.source.remove',
+  'webhook.source.set',
+  'webhook.sources',
   'workspace.list.snapshot',
 ] as const;
 
@@ -152,6 +155,9 @@ export const WS_PARAMS: Record<WsMethod, MethodParams> = {
   'update.download': { required: [], optional: [] },
   'update.install': { required: [], optional: ['restart'] },
   'update.status': { required: [], optional: [] },
+  'webhook.source.remove': { required: ['id'], optional: [] },
+  'webhook.source.set': { required: ['id', 'secret'], optional: ['channel'] },
+  'webhook.sources': { required: [], optional: [] },
   'workspace.list.snapshot': { required: [], optional: [] },
 };
 
@@ -177,6 +183,7 @@ export const STATIC_CAPABILITIES = [
   'settings.set',
   'tasklease',
   'triage',
+  'webhook',
   'workspace',
 ] as const;
 

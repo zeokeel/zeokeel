@@ -89,7 +89,10 @@ func (c *testWSConn) writeText(payload []byte) {
 // readMessage reads one server frame (the gateway never masks).
 func (c *testWSConn) readMessage() (byte, []byte) {
 	c.t.Helper()
-	_ = c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	// 15s, not 5s: under `go test ./internal/...` the process competes with the
+	// rest of the suite, and a 5s first-frame deadline produced rare i/o timeouts
+	// (audit F8). This is a test harness deadline, not a product timeout.
+	_ = c.conn.SetReadDeadline(time.Now().Add(15 * time.Second))
 	var head [2]byte
 	if _, err := io.ReadFull(c.reader, head[:]); err != nil {
 		c.t.Fatalf("read frame head: %v", err)

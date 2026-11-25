@@ -55,5 +55,26 @@ var (
 	ErrWebhookBadPayload = errors.New("webhook: bad payload")
 )
 
+// WebhookSourceInfo is the safe view of a configured source: it deliberately has
+// no secret field, so no UI or log path can leak one.
+type WebhookSourceInfo struct {
+	ID      string
+	Channel string
+}
+
+// WebhookSourceAdmin is the configuration half of the adapter: the settings UI
+// adds, rotates and removes endpoints, and the adapter persists them.
+type WebhookSourceAdmin interface {
+	// Sources lists the configured sources, sorted by id.
+	Sources(ctx context.Context) ([]WebhookSourceInfo, error)
+	// UpsertSource adds or replaces one source (id + secret + default channel).
+	UpsertSource(ctx context.Context, source WebhookSource) error
+	// RemoveSource deletes one source by id.
+	RemoveSource(ctx context.Context, id string) error
+}
+
+// ErrWebhookInvalidSource is returned for a malformed id or a short secret.
+var ErrWebhookInvalidSource = errors.New("webhook: invalid source")
+
 // KeyWebhook is provided by the webhook module.
 var KeyWebhook = cordis.NewServiceKey[WebhookService]("zeokeel/webhook")

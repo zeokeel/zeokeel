@@ -41,6 +41,7 @@ var serverCapabilities = []string{
 	"tasklease",
 	"approvalaction",
 	"notifyroute",
+	"webhook",
 }
 
 // gatewayCapabilities is the handshake's capability list for this gateway
@@ -367,6 +368,15 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		},
 		"notify.route.upsert": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.notifyRouteUpsert(ctx, request.Params)
+		},
+		"webhook.sources": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.webhookSources(ctx, request.Params)
+		},
+		"webhook.source.set": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.webhookSourceSet(ctx, request.Params)
+		},
+		"webhook.source.remove": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.webhookSourceRemove(ctx, request.Params)
 		},
 		"team.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.teamSnapshot()

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -39,11 +40,18 @@ func (c Config) normalized() Config {
 	return c
 }
 
-// Service implements contracts.WebhookService.
+// Service implements contracts.WebhookService and
+// contracts.WebhookSourceAdmin.
 type Service struct {
-	inbox   contracts.InboxService
-	cfg     Config
+	inbox contracts.InboxService
+	cfg   Config
+
+	// mu guards sources: the settings UI mutates them while deliveries read
+	// them. A delivery only needs the map, so a short lock is enough.
+	mu      sync.RWMutex
 	sources map[string]contracts.WebhookSource
+	// persistPath is the durable source list ("" = memory only).
+	persistPath string
 }
 
 // NewService wires the adapter.
@@ -74,7 +82,9 @@ func (s *Service) Receive(ctx context.Context, sourceID, header string, body []b
 	if err := ctx.Err(); err != nil {
 		return contracts.WebhookResult{}, err
 	}
+	s.mu.RLock()
 	source, ok := s.sources[sourceID]
+	s.mu.RUnlock()
 	if !ok {
 		return contracts.WebhookResult{}, contracts.ErrWebhookUnknownSource
 	}

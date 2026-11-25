@@ -501,3 +501,87 @@ func (g *Gateway) notifyRouteUpsert(ctx context.Context, raw json.RawMessage) (a
 	}
 	return notifyRouteFromContract(route), nil
 }
+
+// --- webhook sources -------------------------------------------------------
+
+type webhookSourcesResult struct {
+	Sources []webhookSourceDTO `json:"sources"`
+}
+
+type webhookSourceDTO struct {
+	ID      string `json:"id"`
+	Channel string `json:"channel,omitempty"`
+}
+
+type webhookSourceSetParams struct {
+	ID      string `json:"id"`
+	Secret  string `json:"secret"`
+	Channel string `json:"channel,omitempty"`
+}
+
+type webhookSourceRemoveParams struct {
+	ID string `json:"id"`
+}
+
+func (g *Gateway) webhookAdmin() (contracts.WebhookSourceAdmin, *protocolError) {
+	service, ok := g.root.Get(contracts.KeyWebhook)
+	if !ok || service == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "webhook unavailable")
+	}
+	admin, ok := service.(contracts.WebhookSourceAdmin)
+	if !ok {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "webhook source admin unavailable")
+	}
+	return admin, nil
+}
+
+func (g *Gateway) webhookSources(ctx context.Context, _ json.RawMessage) (any, *protocolError) {
+	admin, problem := g.webhookAdmin()
+	if problem != nil {
+		return nil, problem
+	}
+	sources, err := admin.Sources(ctx)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	result := webhookSourcesResult{Sources: make([]webhookSourceDTO, 0, len(sources))}
+	for _, source := range sources {
+		result.Sources = append(result.Sources, webhookSourceDTO{ID: source.ID, Channel: source.Channel})
+	}
+	return result, nil
+}
+
+func (g *Gateway) webhookSourceSet(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	admin, problem := g.webhookAdmin()
+	if problem != nil {
+		return nil, problem
+	}
+	var params webhookSourceSetParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if params.Secret == "" {
+		return nil, errInvalidParams("secret", "a source secret is required")
+	}
+	if err := admin.UpsertSource(ctx, contracts.WebhookSource{
+		ID: params.ID, Secret: []byte(params.Secret), DefaultChannel: params.Channel,
+	}); err != nil {
+		return nil, orchestrationError(err)
+	}
+	return webhookSourceDTO{ID: params.ID, Channel: params.Channel}, nil
+}
+
+func (g *Gateway) webhookSourceRemove(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	admin, problem := g.webhookAdmin()
+	if problem != nil {
+		return nil, problem
+	}
+	var params webhookSourceRemoveParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if err := admin.RemoveSource(ctx, params.ID); err != nil {
+		return nil, orchestrationError(err)
+	}
+	return map[string]any{"ok": true}, nil
+}

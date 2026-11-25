@@ -16,7 +16,11 @@ func TestDescriptorMetadata(t *testing.T) {
 	if len(descriptor.Provides) != 1 || descriptor.Provides[0].Name != contracts.KeyWebhook.Name() {
 		t.Fatalf("provides = %+v, want the webhook key", descriptor.Provides)
 	}
-	if len(descriptor.Requires) != 1 || descriptor.Requires[0].Name != contracts.KeyInbox.Name() {
-		t.Fatalf("requires = %+v, want only the inbox", descriptor.Requires)
+	required := map[string]bool{}
+	for _, requirement := range descriptor.Requires {
+		required[requirement.Name] = true
+	}
+	if !required[contracts.KeyInbox.Name()] || !required[contracts.KeyDataDir.Name()] {
+		t.Fatalf("requires = %v, want inbox + data dir", required)
 	}
 }

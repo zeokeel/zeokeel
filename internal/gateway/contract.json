@@ -456,6 +456,25 @@
       "required": [],
       "optional": []
     },
+    "webhook.source.remove": {
+      "required": [
+        "id"
+      ],
+      "optional": []
+    },
+    "webhook.source.set": {
+      "required": [
+        "id",
+        "secret"
+      ],
+      "optional": [
+        "channel"
+      ]
+    },
+    "webhook.sources": {
+      "required": [],
+      "optional": []
+    },
     "workspace.list.snapshot": {
       "required": [],
       "optional": []
@@ -531,6 +550,7 @@
       "settings.set",
       "tasklease",
       "triage",
+      "webhook",
       "workspace"
     ],
     "conditional": [

@@ -825,6 +825,9 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `approval.action` | `{approvalId,decision:"allow"\|"deny",token}` | `{ok:true}` | N | `ApprovalActionService.Apply` | ✅ 已实现 |
 | `notify.route.snapshot` | — | `{routes:[NotifyRoute]}` | Y | `NotifyRouterService.Routes` | ✅ 已实现 |
 | `notify.route.upsert` | `{category,primary,fallback?,quietHours?,escalationMs?,enabled?}` | `NotifyRoute` | N | `NotifyRouterService.Upsert` | ✅ 已实现 |
+| `webhook.sources` | — | `{sources:[{id,channel?}]}` | Y | `WebhookSourceAdmin.Sources`（**不含 secret**） | ✅ 已实现 |
+| `webhook.source.set` | `{id,secret,channel?}` | `{id,channel?}` | N | `WebhookSourceAdmin.UpsertSource`（id `[a-z0-9-]`、secret ≥16 字节） | ✅ 已实现 |
+| `webhook.source.remove` | `{id}` | `{ok:true}` | N | `WebhookSourceAdmin.RemoveSource` | ✅ 已实现 |
 
 `InboxItem`（摘要）：
 
@@ -855,8 +858,9 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
   「同意 / 不同意」走同一条 `Resolve`（网关不解析自然语言，解析在 approvals 模块内，`ParseReply`）。
 - 类型化错误映射成 `-32600`（invalid request）并保留原文：`lease: task already claimed`、
   `approval: token expired` 这类话可以直接显示给用户。
-- capability：`inbox`、`triage`、`tasklease`、`approvalaction`、`notifyroute`（五个服务键都随装配提供；
+- capability：`inbox`、`triage`、`tasklease`、`approvalaction`、`notifyroute`、`webhook`（六个服务键都随装配提供；
   缺任何一个，对应方法返回 `-32004 capability_unsupported`）。
+- `webhook.source.set` 的 `secret` 只在请求体里出现：响应、`webhook.sources` 和日志都不回显它。
 - `NotifyRoute` 的兜底顺序：`primary` → `fallback[]` → **`inapp` 永远作为最后一档**（交付循环可以在这里停住）；
   静音时段只压非审批类；审批类永不静音（`deferred` 只在非审批消息上出现）。
 

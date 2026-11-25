@@ -20,6 +20,7 @@ func TestOrchestrationMethodsAreDispatched(t *testing.T) {
 		"tasks.claim", "tasks.heartbeat", "tasks.submit", "tasks.review",
 		"approval.token", "approval.action",
 		"notify.route.snapshot", "notify.route.upsert",
+		"webhook.sources", "webhook.source.set", "webhook.source.remove",
 	}
 	methods := SupportedMethods()
 	for _, name := range want {

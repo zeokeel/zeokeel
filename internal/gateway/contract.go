@@ -106,6 +106,9 @@ var contractParams = map[string]any{
 	"approval.action":         approvalActionParams{},
 	"notify.route.snapshot":   struct{}{},
 	"notify.route.upsert":     notifyRouteUpsertParams{},
+	"webhook.sources":         struct{}{},
+	"webhook.source.set":      webhookSourceSetParams{},
+	"webhook.source.remove":   webhookSourceRemoveParams{},
 }
 
 // conditionalCapability is one capability that exists only when the assembly
