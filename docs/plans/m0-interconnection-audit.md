@@ -100,9 +100,9 @@ scripts/verify.sh --quick                   PASS（gofmt / build / vet /
 scripts/verify.sh --quick（triage 后）       PASS 5/5，63s
                                             （中间有一次重跑才绿，记在案）
 scripts/verify.sh --quick（tasklease 后）   PASS 5/5，67s
-scripts/verify.sh --quick（持久化后）    见提交记录
+scripts/verify.sh --quick（持久化后）    PASS 5/5，63s
 scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过
-scripts/verify.sh --quick（approval 后）    PASS 5/5，63s
+scripts/verify.sh --quick（approval 后）    PASS 5/5（一次 flaky 后重跑绿）
                                             （首次跑时 gateway 的
                                             TestApprovalsSnapshotDeltaReplay 以
                                             i/o timeout 失败；单独 -count=3 连过、
