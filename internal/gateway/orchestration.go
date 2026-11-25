@@ -303,6 +303,13 @@ func (g *Gateway) inboxDispatch(ctx context.Context, raw json.RawMessage) (any, 
 		}
 		assignee = bot.ID
 		boundTools = bot.AllowedTools
+		// One bot, one live task: a bot that is still working cannot be handed a
+		// second job, or its context becomes two conversations fighting over one
+		// memory. The refusal names the task that is already in flight.
+		if busy, busyTask := g.botIsBusy(ctx, bot.ID); busy {
+			return nil, protocolErrorWithMessage(codeInvalidRequest,
+				"bot "+bot.ID+" is already working on "+busyTask+"; wait for it or dispatch to another bot")
+		}
 		// Dispatching to a bot is the only thing that currently "wakes" it: the
 		// LastSeenAt column had no producer, so the settings screen could never
 		// tell a working bot from one that never ran.
@@ -1759,6 +1766,39 @@ func (g *Gateway) skillDraftInstall(ctx context.Context, raw json.RawMessage) (a
 		return nil, orchestrationError(err)
 	}
 	return map[string]any{"installed": true, "name": skill.Name}, nil
+}
+
+// botIsBusy reports the task a bot is currently holding, if any. A lease in
+// claimed/awaiting_approval/blocked counts as busy: the task is its owner's until
+// it settles or expires, and handing the bot a second job would split its
+// attention.
+func (g *Gateway) botIsBusy(ctx context.Context, botID string) (bool, string) {
+	leases, ok := g.root.Get(contracts.KeyTaskLease)
+	if !ok || leases == nil || botID == "" {
+		return false, ""
+	}
+	board, ok := g.root.Get(contracts.KeyTaskBoard)
+	if !ok || board == nil {
+		return false, ""
+	}
+	tasks, err := board.List(ctx)
+	if err != nil {
+		return false, ""
+	}
+	for _, task := range tasks {
+		if task.Owner != botID {
+			continue
+		}
+		lease, held, err := leases.Lease(ctx, task.ID)
+		if err != nil || !held {
+			continue
+		}
+		switch lease.State {
+		case contracts.LeaseStateClaimed, contracts.LeaseStateAwaitingApproval, contracts.LeaseStateBlocked:
+			return true, task.ID
+		}
+	}
+	return false, ""
 }
 
 // touchBot records that a bot was just handed work. Best-effort: a failed write

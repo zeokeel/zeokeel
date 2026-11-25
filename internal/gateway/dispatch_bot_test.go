@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -216,4 +217,97 @@ func TestDispatchTouchesTheBot(t *testing.T) {
 	if bots.instances["research"].LastSeenAt.IsZero() {
 		t.Fatal("the dispatched bot was not marked as seen")
 	}
+}
+
+func TestABotTakesOneJobAtATime(t *testing.T) {
+	bots := &fakeBots{instances: map[string]contracts.BotInstance{
+		"research": {ID: "research", TemplateID: "lead", Name: "Research"},
+	}}
+	triage := &fakeTriageRecorder{}
+	leases := &busyAwareLease{held: map[string]contracts.TaskLease{
+		"task-live": {TaskID: "task-live", Owner: "research", State: contracts.LeaseStateClaimed},
+	}}
+	gateway := newDispatchGatewayWithBoard(t, bots, triage, leases,
+		[]contracts.BoardTask{{ID: "task-live", Owner: "research"}})
+
+	raw, _ := json.Marshal(map[string]any{"id": "i1", "subject": "再来一个", "botId": "research"})
+	_, problem := gateway.inboxDispatch(context.Background(), raw)
+	if problem == nil {
+		t.Fatal("a busy bot was handed a second job")
+	}
+	if problem.Code != codeInvalidRequest {
+		t.Fatalf("code = %d, want %d", problem.Code, codeInvalidRequest)
+	}
+	if !strings.Contains(problem.Message, "task-live") {
+		t.Fatalf("message = %q, want the task in flight named", problem.Message)
+	}
+	if len(triage.seen) != 0 {
+		t.Fatalf("a task was created anyway: %+v", triage.seen)
+	}
+}
+
+func TestAnIdleBotTakesTheJob(t *testing.T) {
+	bots := &fakeBots{instances: map[string]contracts.BotInstance{
+		"research": {ID: "research", TemplateID: "lead", Name: "Research"},
+	}}
+	triage := &fakeTriageRecorder{}
+	leases := &busyAwareLease{held: map[string]contracts.TaskLease{
+		"task-done": {TaskID: "task-done", Owner: "research", State: contracts.LeaseStateReview},
+	}}
+	gateway := newDispatchGatewayWithBoard(t, bots, triage, leases,
+		[]contracts.BoardTask{{ID: "task-done", Owner: "research"}})
+
+	raw, _ := json.Marshal(map[string]any{"id": "i1", "subject": "新的", "botId": "research"})
+	if _, problem := gateway.inboxDispatch(context.Background(), raw); problem != nil {
+		t.Fatalf("dispatch: %+v", problem)
+	}
+	if len(triage.seen) != 1 {
+		t.Fatalf("tasks created = %d, want one", len(triage.seen))
+	}
+}
+
+// busyAwareLease is the fake lease set that can report a live lease per task.
+type busyAwareLease struct {
+	fakeLeaseTools
+	held map[string]contracts.TaskLease
+}
+
+func (f *busyAwareLease) Lease(_ context.Context, taskID string) (contracts.TaskLease, bool, error) {
+	lease, ok := f.held[taskID]
+	return lease, ok, nil
+}
+
+type staticBoard struct {
+	tasks []contracts.BoardTask
+}
+
+func (b *staticBoard) List(context.Context) ([]contracts.BoardTask, error) { return b.tasks, nil }
+func (b *staticBoard) Create(context.Context, string, string) (contracts.BoardTask, error) {
+	return contracts.BoardTask{}, nil
+}
+func (b *staticBoard) SetStatus(context.Context, string, string) (contracts.BoardTask, error) {
+	return contracts.BoardTask{}, nil
+}
+func (b *staticBoard) Delete(context.Context, string) error { return nil }
+
+func newDispatchGatewayWithBoard(t *testing.T, bots *fakeBots, triage *fakeTriageRecorder, leases contracts.TaskLeaseService, tasks []contracts.BoardTask) *Gateway {
+	t.Helper()
+	root := testRoot(t, newFakeChat())
+	if _, err := root.Provide(contracts.KeyBots, contracts.BotService(bots)); err != nil {
+		t.Fatalf("provide bots: %v", err)
+	}
+	if _, err := root.Provide(contracts.KeyTriage, contracts.TriageService(triage)); err != nil {
+		t.Fatalf("provide triage: %v", err)
+	}
+	if _, err := root.Provide(contracts.KeyTaskLease, leases); err != nil {
+		t.Fatalf("provide lease: %v", err)
+	}
+	if _, err := root.Provide(contracts.KeyTaskBoard, contracts.TaskBoard(&staticBoard{tasks: tasks})); err != nil {
+		t.Fatalf("provide board: %v", err)
+	}
+	gateway, err := New(root, Options{DataDir: t.TempDir(), Port: -1, Logger: testLogger{t: t}, Out: discardWriter{}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return gateway
 }
