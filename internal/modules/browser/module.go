@@ -6,7 +6,9 @@
 package browser
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
@@ -23,6 +25,28 @@ const ModuleID = "zeokeel/browser"
 // not installed or not started yet.
 func Module() *module.Descriptor[Config] {
 	return module.Define(ModuleID, func(ctx cordis.Context, cfg Config) error {
+		// With an endpoint configured and no transport injected, dial the real
+		// CDP socket here. A browser that is not running must not block boot: the
+		// failure is logged and the adapter serves a disconnected status.
+		if cfg.Endpoint != "" && cfg.Transport == nil {
+			dialCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			socket, dialErr := DialTransport(dialCtx, cfg.Endpoint, DialOptions{})
+			cancel()
+			if dialErr != nil {
+				if logger, ok := ctx.Get(contracts.KeyLogger); ok && logger != nil {
+					logger.Printf("browser: %v; starting without a browser connection", dialErr)
+				}
+				cfg.Endpoint = ""
+			} else {
+				cfg.Transport = socket
+				if _, effectErr := ctx.Effect(func() cordis.Effect {
+					return cordis.Effect{cordis.CleanupOf(func() { _ = socket.Close() })}
+				}); effectErr != nil {
+					_ = socket.Close()
+					return fmt.Errorf("%s: own socket shutdown: %w", ModuleID, effectErr)
+				}
+			}
+		}
 		adapter, err := New(cfg)
 		if err != nil {
 			return fmt.Errorf("%s: open adapter: %w", ModuleID, err)

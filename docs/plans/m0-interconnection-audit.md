@@ -43,7 +43,8 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | 租约持久化 | tasklease（+dataDir） | 重启恢复 | 7 条（存活/过期回收/损坏/0600/评审状态） |
 | `contracts.KeyCredentials` | creds（依赖 dataDir） | `credentials.list/set/delete`、渠道适配器 | 17 条 + 19 校验子测试；网关 3 方法 + mock 覆盖 |
 | `contracts.KeyEmail` | email（依赖 inbox） | 邮件渠道 | 30 条（SMTP 报文/535/IMAP 归一/Message-ID 去重/QP+base64/循环取消） |
-| `contracts.KeyBrowser` | browser（新，无 requires） | 未来工具面 / 任务证据 | 26 测试（URL 校验先于发送/截图解码/超时/未配置即断开） |
+| `contracts.KeyBrowser` | browser（新，无 requires） | 未来工具面 / 任务证据 | 46 测试（含真 ws:// 传输：握手/分片/乱序回复/事件丢弃计数/Close 幂等） |
+| `contracts.KeyHeartbeat` | heartbeat（新，可选 lead/wechat/email） | 自治循环 | 7 测试（tick/单渠道失败不中断/lead 失败记录/定时停止/禁用不动/状态） |
 | 模型计划器装配 | `lead.PlannerFromSettings`（读 `chat.baseURL/apiKey/model`） | `lead.RunOnce` | 4 条（完整→模型/缺项→规则） |
 | Web 渠道设置 | `web/src/features/settings/channels/**`、`web/src/api/channels.ts` | `/settings/channels`（R27a） | 12 测试；密钥不回显有断言 |
 | `planner`（library） | planner（仅依赖 contracts） | 模型计划器 | 14 测试 / 21 断言（线格式/错误分层/预算先于网络/密钥永不入错误） |
@@ -155,6 +156,7 @@ web（lease 首屏后）: typecheck / lint(25) / test 484 / gen:verify 全绿
 web（团队板后）: typecheck / lint(25) / test 501 全绿
 web（渠道设置后）: typecheck / lint(25) / test 514 全绿
 scripts/verify.sh --quick（浏览器/计划器/渠道设置后）PASS 5/5，67s
+scripts/verify.sh --quick（heartbeat/CDP ws 后）PASS 5/5，69s
 scripts/verify.sh --quick（邮件/计划器/凭据/卡片后）PASS 5/5，64s
 scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过
 scripts/verify.sh --quick（approval 后）    PASS 5/5（一次 flaky 后重跑绿）
