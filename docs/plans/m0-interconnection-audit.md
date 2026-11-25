@@ -73,4 +73,10 @@ go test ./internal/contracts/               ok
 go test -race ./internal/modules/inbox/ ./internal/modules/approvals/   ok
 go vet ./internal/modules/inbox/ ./internal/modules/approvals/ ./internal/assembly/ ./internal/contracts/   ok
 gofmt -l 改动文件                            空
+
+scripts/verify.sh --quick                   PASS（gofmt / build / vet /
+                                            协议一致性 / 全量 go test 59s，
+                                            5 passed 0 failed）
 ```
+
+提交：`ed3d628`（设计文档）→ `b9f2aff`（inbox + 审批解析 + 装配守卫，1205 行新增）。
