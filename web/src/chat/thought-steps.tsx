@@ -19,6 +19,7 @@ import type { ToolStep } from './types';
  */
 export function ThoughtSteps({
   reasoning,
+  reasoningSegments,
   steps,
   streaming,
   durationMs,
@@ -29,6 +30,8 @@ export function ThoughtSteps({
   parkedTool,
 }: {
   reasoning: string;
+  /** Per-iteration thinking, when the turn had more than one model round. */
+  reasoningSegments?: Array<{ iteration: number; text: string; offset?: number }>;
   steps: ToolStep[];
   streaming: boolean;
   /** The turn's measured wall time, when the backend reported one. */
@@ -123,7 +126,43 @@ export function ThoughtSteps({
     );
   }
 
-  if (reasoning) {
+  // 简洁 shows what the user has to act on (a running or failed step) and hides
+  // the successes behind one line; the other modes keep every step.
+  const compactMode = mode === 'compact';
+  const actionable = steps.filter((step) => step.status !== 'ok');
+  const visibleSteps = compactMode && !streaming ? actionable : steps;
+  const describedSteps = visibleSteps.map((step) =>
+    toolItem(step, t, parkedTool?.name === step.name && step.status === 'running'),
+  );
+
+  // A multi-round turn keeps one node per round, interleaved with its tool cards
+  // by position in the answer (round-5 tools audit D6). One segment is the
+  // ordinary case and keeps the plain 思考 node.
+  const segments = reasoningSegments?.filter((segment) => segment.text.trim() !== '') ?? [];
+  if (segments.length > 1) {
+    const merged: Array<{ offset: number; item: ThoughtChainItemType }> = [];
+    segments.forEach((segment, index) => {
+      merged.push({
+        offset: segment.offset ?? Number.MAX_SAFE_INTEGER - segments.length + index,
+        item: {
+          key: `thinking-${segment.iteration}`,
+          title: t('thread.reasoning.round', { count: index + 1 }),
+          icon: <ZkIcon name="sparkles" />,
+          status: streaming ? 'loading' : 'success',
+          collapsible: true,
+          content: <div className="zk-reasoning-text">{segment.text}</div>,
+        },
+      });
+    });
+    visibleSteps.forEach((step, index) => {
+      merged.push({
+        offset: step.offset ?? Number.MAX_SAFE_INTEGER + index,
+        item: describedSteps[index],
+      });
+    });
+    merged.sort((left, right) => (left.offset === right.offset ? 0 : left.offset - right.offset));
+    merged.forEach((entry) => items.push(entry.item));
+  } else if (reasoning) {
     items.push({
       key: 'reasoning',
       title: t('thread.reasoning'),
@@ -142,14 +181,7 @@ export function ThoughtSteps({
       content: <div className="zk-reasoning-text">{reasoning}</div>,
     });
   }
-  // 简洁 shows what the user has to act on (a running or failed step) and hides
-  // the successes behind one line; the other modes keep every step.
-  const compactMode = mode === 'compact';
-  const actionable = steps.filter((step) => step.status !== 'ok');
-  const visibleSteps = compactMode && !streaming ? actionable : steps;
-  visibleSteps.forEach((step) =>
-    items.push(toolItem(step, t, parkedTool?.name === step.name && step.status === 'running')),
-  );
+  if (segments.length <= 1) describedSteps.forEach((item) => items.push(item));
 
   const hiddenSuccesses = compactMode ? steps.length - visibleSteps.length : 0;
   if (compactMode && !streaming && hiddenSuccesses > 0) {

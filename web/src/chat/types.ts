@@ -5,9 +5,19 @@ export type MessageStatus = 'local' | 'loading' | 'updating' | 'success' | 'erro
 
 export type ToolStepStatus = 'running' | 'ok' | 'error';
 
+/** One model iteration's thinking (the wire's `reasoningSegments` entry). */
+export interface ReasoningSegment {
+  iteration: number;
+  text: string;
+  /** Position in the turn's cumulative text, so thinking and tools interleave. */
+  offset?: number;
+}
+
 export interface ToolStep {
   callId: string;
   name: string;
+  /** Position in the turn's cumulative text (the wire's `textOffset`). */
+  offset?: number;
   input?: unknown;
   output?: unknown;
   /** The failure text the tool actually reported (never the category). */
@@ -36,6 +46,8 @@ export interface ZeoMessage {
   role: 'user' | 'assistant';
   text: string;
   reasoning: string;
+  /** Per-iteration thinking, when the turn had more than one round. */
+  reasoningSegments?: ReasoningSegment[];
   steps: ToolStep[];
   usage?: TokenUsage;
   /** `done` event's stopReason (e.g. `end_turn`, `aborted`). */

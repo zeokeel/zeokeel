@@ -37,6 +37,7 @@ export function AssistantBody({
     <>
       <ThoughtSteps
         reasoning={message.reasoning}
+        reasoningSegments={message.reasoningSegments}
         steps={message.steps}
         streaming={streaming}
         durationMs={message.usage?.durationMs}

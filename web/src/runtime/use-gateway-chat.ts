@@ -49,6 +49,9 @@ export function useGatewayChat(
         role: message.role === 'user' ? 'user' : 'assistant',
         text: message.text,
         reasoning: message.reasoning ?? '',
+        ...(message.reasoningSegments && message.reasoningSegments.length > 0
+          ? { reasoningSegments: message.reasoningSegments }
+          : {}),
         steps: (message.steps ?? []).map((step) => ({
           callId: step.callId,
           name: step.name,

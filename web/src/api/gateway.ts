@@ -73,6 +73,8 @@ export interface SnapshotMessage {
   role: string;
   text: string;
   reasoning?: string;
+  /** Per-iteration thinking, position-tagged for interleaving. */
+  reasoningSegments?: Array<{ iteration: number; text: string; offset?: number }>;
   attachments?: Array<{ id: string; name: string; mime: string; bytes: number }>;
   steps?: SnapshotStep[];
   usage?: { inputTokens?: number; outputTokens?: number };
@@ -1000,6 +1002,8 @@ export async function loadSnapshot(sessionId: string): Promise<SessionSnapshot> 
         error?: string;
         /** `cancelled` (a user stop) must not paint as a failure. */
         errorKind?: string;
+        /** Per-iteration thinking, position-tagged for interleaving. */
+        reasoningSegments?: Array<{ text: string; iteration: number; textOffset?: number }>;
         usage?: {
           promptTokens?: number;
           completionTokens?: number;
@@ -1017,6 +1021,7 @@ export async function loadSnapshot(sessionId: string): Promise<SessionSnapshot> 
           path?: string;
           errorKind?: string;
           error?: string;
+          textOffset?: number;
         }>;
       }>;
       running: boolean;
@@ -1037,9 +1042,19 @@ export async function loadSnapshot(sessionId: string): Promise<SessionSnapshot> 
       ...(message.attachments && message.attachments.length > 0
         ? { attachments: message.attachments }
         : {}),
+      ...(message.reasoningSegments && message.reasoningSegments.length > 0
+        ? {
+            reasoningSegments: message.reasoningSegments.map((segment) => ({
+              iteration: segment.iteration,
+              text: segment.text,
+              offset: segment.textOffset,
+            })),
+          }
+        : {}),
       steps: (message.tools ?? []).map((tool) => ({
         callId: tool.id,
         name: tool.name,
+        ...(typeof tool.textOffset === 'number' ? { offset: tool.textOffset } : {}),
         status: mapToolStatus(tool.status),
         input: parseArguments(tool.arguments) ?? (tool.path ? { path: tool.path } : undefined),
         output: tool.summary || undefined,
@@ -1091,6 +1106,22 @@ export async function loadSnapshot(sessionId: string): Promise<SessionSnapshot> 
   };
 }
 
+/** Fold one iteration's reasoning delta into the segment list. */
+function appendReasoningSegment(
+  segments: Array<{ iteration: number; text: string; offset?: number }> | undefined,
+  iteration: number,
+  text: string,
+): Array<{ iteration: number; text: string; offset?: number }> {
+  const list = segments ?? [];
+  const index = list.findIndex((segment) => segment.iteration === iteration);
+  if (index >= 0) {
+    const next = [...list];
+    next[index] = { ...next[index], text: next[index].text + text };
+    return next;
+  }
+  return [...list, { iteration, text }];
+}
+
 function mapToolStatus(status: string | undefined): string {
   switch (status) {
     case 'running':
@@ -1138,16 +1169,24 @@ export function applySessionDelta(
       case 'msg.delta': {
         const messageId = String(op.messageId ?? '');
         const textAppend = typeof op.textAppend === 'string' ? op.textAppend : '';
-        const reasoningAppend = op.reasoningAppend as { textAppend?: string } | undefined;
-        messages = messages.map((message) =>
-          message.id === messageId
-            ? {
-                ...message,
-                text: message.text + textAppend,
-                reasoning: (message.reasoning ?? '') + (reasoningAppend?.textAppend ?? ''),
-              }
-            : message,
-        );
+        const reasoningAppend = op.reasoningAppend as
+          | { textAppend?: string; iteration?: number }
+          | undefined;
+        messages = messages.map((message) => {
+          if (message.id !== messageId) return message;
+          const appended = reasoningAppend?.textAppend ?? '';
+          const iteration = reasoningAppend?.iteration;
+          const segments =
+            appended && typeof iteration === 'number'
+              ? appendReasoningSegment(message.reasoningSegments, iteration, appended)
+              : message.reasoningSegments;
+          return {
+            ...message,
+            text: message.text + textAppend,
+            reasoning: (message.reasoning ?? '') + appended,
+            ...(segments ? { reasoningSegments: segments } : {}),
+          };
+        });
         break;
       }
       case 'msg.tool.upsert': {
@@ -1187,6 +1226,21 @@ export function applySessionDelta(
                 text: typeof fields.text === 'string' ? fields.text : message.text,
                 reasoning:
                   typeof fields.reasoning === 'string' ? fields.reasoning : message.reasoning,
+                ...(Array.isArray(fields.reasoningSegments)
+                  ? {
+                      reasoningSegments: (
+                        fields.reasoningSegments as Array<{
+                          text?: string;
+                          iteration?: number;
+                          textOffset?: number;
+                        }>
+                      ).map((segment) => ({
+                        iteration: segment.iteration ?? 0,
+                        text: segment.text ?? '',
+                        offset: segment.textOffset,
+                      })),
+                    }
+                  : {}),
                 streaming:
                   typeof fields.streaming === 'boolean' ? fields.streaming : message.streaming,
                 remoteError:
