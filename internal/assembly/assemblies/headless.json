@@ -164,6 +164,11 @@
       "config": {}
     },
     {
+      "id": "users",
+      "module": "zeokeel/users",
+      "config": {}
+    },
+    {
       "id": "agent",
       "module": "zeokeel/agent",
       "config": {

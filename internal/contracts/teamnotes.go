@@ -71,6 +71,9 @@ const (
 	NoteScopeTeam = "team"
 	// NoteScopeAgent is private to one bot.
 	NoteScopeAgent = "agent"
+	// NoteScopeUser is private to one human (M6): the same bot can serve two
+	// people, and what one taught it must not be visible to the other.
+	NoteScopeUser = "user"
 )
 
 // TeamNotesService is the team's shared note board over the memory store. It is

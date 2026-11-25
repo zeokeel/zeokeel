@@ -36,6 +36,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/toolkit"
 	"github.com/zeokeel/zeokeel/internal/modules/triage"
 	"github.com/zeokeel/zeokeel/internal/modules/update"
+	"github.com/zeokeel/zeokeel/internal/modules/users"
 	"github.com/zeokeel/zeokeel/internal/modules/webhook"
 	"github.com/zeokeel/zeokeel/internal/modules/wechat"
 	"github.com/zeokeel/zeokeel/internal/modules/workspace"
@@ -77,6 +78,8 @@ func Registry() *module.Registry {
 	mustRegister(registry, skilldraft.Module())
 	// Bots: templates and instances a task can be dispatched to.
 	mustRegister(registry, bot.Module())
+	// Users: the role roster the permission table (contracts.Allowed) reads.
+	mustRegister(registry, users.Module())
 	mustRegister(registry, sandbox.Module())
 	mustRegister(registry, toolkit.Module())
 	// triage joins the inbox to the task board: it must come after both.

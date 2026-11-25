@@ -38,6 +38,11 @@ const URIPrefix = "mem://user/self/memories/team-note/"
 const (
 	AgentNoteType  = "agent-note"
 	AgentURIPrefix = "mem://user/self/memories/agent-note/"
+	// User-scoped notes (M6) get their own type and subtree for the same reason:
+	// a board listing filters on the team type, so one person's private note
+	// cannot appear to another person by accident.
+	UserNoteType  = "user-note"
+	UserURIPrefix = "mem://user/self/memories/user-note/"
 )
 
 // Validation limits. The notes' own budgets are rune counts (a CJK title and a
@@ -328,6 +333,10 @@ func validate(note contracts.TeamNote) error {
 		if strings.TrimSpace(note.Owner) == "" {
 			return invalid("agent-scoped note needs an owner")
 		}
+	case contracts.NoteScopeUser:
+		if strings.TrimSpace(note.Owner) == "" {
+			return invalid("user-scoped note needs an owner")
+		}
 	default:
 		return invalid("unknown scope %q", note.Scope)
 	}
@@ -360,8 +369,11 @@ func unknown(id, format string, args ...any) error {
 // noteURI is the deterministic memory URI of one note.
 func noteURI(note contracts.TeamNote) string {
 	prefix := URIPrefix
-	if note.Scope == contracts.NoteScopeAgent {
+	switch note.Scope {
+	case contracts.NoteScopeAgent:
 		prefix = AgentURIPrefix + agentSlug(note.Owner) + "/"
+	case contracts.NoteScopeUser:
+		prefix = UserURIPrefix + agentSlug(note.Owner) + "/"
 	}
 	if slug, ok := taskSlug(note.TaskID); ok {
 		return prefix + slug
@@ -457,8 +469,11 @@ func taskIDFromURI(uri string) string {
 // through it so the stored shape can never drift between them.
 func draftOf(note contracts.TeamNote, state reviewState) contracts.MemoryDraft {
 	memoryType := NoteType
-	if note.Scope == contracts.NoteScopeAgent {
+	switch note.Scope {
+	case contracts.NoteScopeAgent:
 		memoryType = AgentNoteType
+	case contracts.NoteScopeUser:
+		memoryType = UserNoteType
 	}
 	return contracts.MemoryDraft{
 		URI:      note.ID,

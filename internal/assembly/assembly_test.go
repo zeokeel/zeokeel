@@ -148,7 +148,7 @@ func TestProductsAndEntries(t *testing.T) {
 	wantHeadless := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/inbox", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/insights",
-		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/credentials", "zeokeel/webhook", "zeokeel/wechat", "zeokeel/feishu", "zeokeel/dingtalk", "zeokeel/email", "zeokeel/replyrelay", "zeokeel/channeldispatch", "zeokeel/heartbeat", "zeokeel/browser", "zeokeel/hosttools", "zeokeel/memorystore", "zeokeel/teamnotes", "zeokeel/skilldraft", "zeokeel/bots",
+		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/credentials", "zeokeel/webhook", "zeokeel/wechat", "zeokeel/feishu", "zeokeel/dingtalk", "zeokeel/email", "zeokeel/replyrelay", "zeokeel/channeldispatch", "zeokeel/heartbeat", "zeokeel/browser", "zeokeel/hosttools", "zeokeel/memorystore", "zeokeel/teamnotes", "zeokeel/skilldraft", "zeokeel/bots", "zeokeel/users",
 		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
 	}
 	loaded := make(map[string]bool, len(headless))
@@ -264,7 +264,7 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 
 	instances := loader.Instances()
 	wantIDs := []string{
-		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "notifyroute", "creds", "webhook", "wechat", "feishu", "dingtalk", "email", "replyrelay", "channeldispatch", "heartbeat", "browser", "hosttools", "memorystore", "teamnotes", "skilldraft", "bots",
+		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "notifyroute", "creds", "webhook", "wechat", "feishu", "dingtalk", "email", "replyrelay", "channeldispatch", "heartbeat", "browser", "hosttools", "memorystore", "teamnotes", "skilldraft", "bots", "users",
 		"agent", "automation", "update", "importer", "acp",
 	}
 	gotIDs := make([]string, 0, len(instances))
@@ -381,6 +381,17 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 	}
 	if challenge, ok := feishuService.VerifyURL([]byte(`{"type":"url_verification","challenge":"abc"}`)); !ok || challenge != "abc" {
 		t.Fatalf("feishu VerifyURL = (%q, %v), want the challenge echoed", challenge, ok)
+	}
+
+	// The roster exists and has an owner: the permission table (contracts.Allowed)
+	// has something to read once enforcement lands.
+	userService, ok := root.Get(contracts.KeyUsers)
+	if !ok || userService == nil {
+		t.Fatal("KeyUsers service is not available on the root")
+	}
+	roster, err := userService.Users(context.Background())
+	if err != nil || len(roster) == 0 || roster[0].Role != contracts.UserRoleOwner {
+		t.Fatalf("users = (%+v, %v), want a seeded owner", roster, err)
 	}
 
 	// Bots are wired and the built-in template exists, so a task has something

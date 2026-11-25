@@ -19,7 +19,7 @@
 | G8 | 产物库（Artifact） | 🟡 | 证据 `kind=file/screenshot` + blobs 存储 | 没有独立产物实体（hash/过期/可见性/任务反向引用） |
 | G9 | 凭据库 | ✅ | `internal/modules/creds`（0600、读路径无字段）+ 适配器读取 | — |
 | G10 | 浏览器（CDP，每 Bot 独立 context） | 🟡 | `internal/modules/browser`（真 ws 传输 + 工具） | 没做每 Bot 独立 browser context / profile 隔离 |
-| G11 | 预算与配额（token/时长/并发） | 🟡 | `tasks.budget.*` + 真实计量 + 停摆通知 + 任务页预算块 + **每 Bot 并发 1**（派单时检查在飞租约并拒绝，理由点名占用任务） | 配额（跨任务合计）未做 |
+| G11 | 预算与配额（token/时长/并发） | 🟡 | `tasks.budget.*` + 真实计量 + 停摆通知 + 任务页预算块 + 每 Bot 并发 1 | 跨任务/按人配额未做（M6 归属） |
 | G12 | 从任务沉淀技能 | ✅ | `skilldraft` + 验收自动提议 + `skilldrafts.*`（含 `install` 写入真实 SKILL.md）+ `/skills/drafts` 采纳页 | 重名明确失败（不覆盖），由人改名后重试 |
 | G13 | 工作入口连接器 | ✅ | `webhook`/`wechat`/`dingtalk`/`feishu`/`email` + `channeldispatch` 出站 + 飞书卡片审批 | 真平台凭据下的端到端仍待验证 |
 | G14 | MCP 全量（注解→审批、两级白名单…） | 🟡 | 产品既有 toolkit/MCP 基建；`mcp__*` 走审批门；`tasks.tools` 任务级白名单**且已执行** | 注解→审批映射、prompts/resources、分页、结构化输出、进度取消未做 |
@@ -35,7 +35,7 @@
 | M3 浏览器 | 🟡 | CDP 真连接 + 三个工具 + **每 Bot 独立 browser context**（独立 cookie jar；空 profile 拒绝；并发首开只建一个；关闭释放） | 真浏览器需验证上下文命令经 WS 传输可用与大窗口行为；CDP 上下文不跨浏览器重启（需独立 user-data-dir，属 M5 收尾） |
 | M4 连接器 | 🟡 | 四类渠道 + 出站 + 凭据 + 扫码登录协议 + **邮件按声明的字符集解码**（GBK/Big5/Shift_JIS 等）；**真机验证只做了本地能做的部分** |
 | M5 浏览器收尾 | ⬜ | 未开工（依赖 M3 的隔离） |
-| M6 共享（多用户） | ⬜ | 未开工 |
+| M6 共享（多用户） | 🟡 | 用户与角色模型：`users` 模块（0600 持久化、种子 owner、最后 owner 不可降级）+ **权限表 `Allowed`**（owner/manager/collaborator × 派单/审批/管 Bot/复核记忆/定预算，默认拒绝）+ 笔记支持 `user` 私有作用域 | 无协议与界面；`Allowed` 尚未在任何入口执行；任务没有 `requested_by`；预算未按人归属；渠道身份未绑定；无登录（角色是策略不是认证） |
 
 ## 三、交互面（docs/design/grokbot-interaction-design.md）
 

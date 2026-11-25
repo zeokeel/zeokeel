@@ -83,3 +83,35 @@ func contains(values []string, want string) bool {
 	}
 	return false
 }
+
+// M6: the same bot serves two people, and what one taught it stays theirs.
+func TestUserScopedNotesAreInvisibleToOthers(t *testing.T) {
+	service, memory := newService(t)
+	ctx := context.Background()
+
+	if _, err := service.Record(ctx, contracts.TeamNote{
+		Title: "alice 的偏好", Body: "她喜欢先看结论", Author: "bot-1",
+		Scope: contracts.NoteScopeUser, Owner: "alice",
+	}); err != nil {
+		t.Fatalf("record user note: %v", err)
+	}
+	board, err := service.List(ctx, 50)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(board) != 0 {
+		t.Fatalf("a user-scoped note reached the shared board: %+v", board)
+	}
+	if !contains(memory.typesSeen(), teamnotes.UserNoteType) {
+		t.Fatalf("stored types = %v, want the user type", memory.typesSeen())
+	}
+}
+
+func TestUserScopeNeedsAnOwner(t *testing.T) {
+	service, _ := newService(t)
+	if _, err := service.Record(context.Background(), contracts.TeamNote{
+		Title: "私事", Scope: contracts.NoteScopeUser,
+	}); !errors.Is(err, contracts.ErrTeamNoteInvalid) {
+		t.Fatalf("err = %v, want ErrTeamNoteInvalid", err)
+	}
+}
