@@ -56,7 +56,8 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | `heartbeat.configure` | gateway + 运行状态页控件 | 运行中改节奏/开关 | 3 条模块测试 + 5 条 UI 测试（开关/节奏/失败不翻转/在飞禁用） |
 | `contracts.KeyReplyRelay` | replyrelay（inbox + approval action） | 聊天里回「同意」 | 5 条（归档/非回复不动/非渠道不解析/无待办不报错/同一到达只解析一次） |
 | `contracts.KeyChannelDispatch` | channeldispatch（router + 各渠道适配器） | 主→备真实投递 | 6 条（主渠道成功/失败改道/全失败落站内/未配置跳过/静音延迟/一次重试） |
-| `tasks.tools.set/get` | tasklease + gateway | 任务 → 允许工具（M5 执行策略） | 8 条模块测试（含校验表/持久化/绑定随任务不随租约） |
+| `tasks.tools.set/get` | tasklease + gateway + 任务页选择器 | 任务 → 允许工具（M5 执行策略） | 8 条模块测试 + 12 条 UI/api 测试（只能按连接器绑定，已如实标注） |
+| `notify.plan` / `notify.deliver` | gateway + channeldispatch | 投递可观测/可触发 | 6 条 dispatch 测试；回执含 attempts/deferred/reason/errors |
 | 渠道报文夹具（微信） | wechat testdata + fixtures | 真机前最后一道闸 | 发现 200+ret_code 当成功、data 信封静默丢弃，均已修 |
 | 渠道报文夹具（邮件） | email testdata + fixtures | 真机前最后一道闸 | 发现 multipart 当原文入库、HTML-only 静默、折叠主题留 CRLF；单封坏信曾阻塞整个邮箱，已改为跳过+上报 |
 | Web 渠道设置 | `web/src/features/settings/channels/**`、`web/src/api/channels.ts` | `/settings/channels`（R27a） | 12 测试；密钥不回显有断言 |
@@ -205,6 +206,7 @@ scripts/verify.sh --quick（凭据/浏览器工具后）PASS 5/5，70s
 scripts/verify.sh --quick（复核/配置/夹具后）PASS 5/5，69s
 web（复核 UI 后）: typecheck / lint(25) / test 575 全绿
 web（循环控件后）: typecheck / lint(25) / test 580 全绿
+web（工具绑定后）: typecheck / lint(25) / test 596 全绿
 web（扫码 UI 后）: typecheck / lint(25) / test 560 全绿
 scripts/verify.sh --quick（邮件/计划器/凭据/卡片后）PASS 5/5，64s
 scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过
