@@ -327,6 +327,16 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 		t.Fatalf("inbox Triage through the assembly = (%d, %v), want (1, nil)", updated, err)
 	}
 
+	// The approval action layer shares the approvals queue. Headless runs in
+	// "auto" mode, so nothing is pending: the wiring proof is the typed error.
+	approvalAction, ok := root.Get(contracts.KeyApprovalAction)
+	if !ok || approvalAction == nil {
+		t.Fatal("KeyApprovalAction service is not available on the root")
+	}
+	if _, err := approvalAction.ApplyReply(context.Background(), "同意"); !errors.Is(err, contracts.ErrApprovalNoPending) {
+		t.Fatalf("ApplyReply without a pending approval = %v, want ErrApprovalNoPending", err)
+	}
+
 	// The three-module chain: an inbound item becomes a real board task through
 	// triage, and the inbox row points at the same id. This is the seam the
 	// product depends on — if any of the three is wired to a different key, this

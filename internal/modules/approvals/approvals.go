@@ -36,6 +36,7 @@ package approvals
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"strings"
@@ -120,10 +121,20 @@ func Module() *module.Descriptor[Config] {
 		if notifier, ok := ctx.Get(contracts.KeyNotifier); ok && notifier != nil {
 			service.notifier = notifier
 		}
-		_, err = ctx.Provide(contracts.KeyApprovals, contracts.Approvals(service))
+		if _, err = ctx.Provide(contracts.KeyApprovals, contracts.Approvals(service)); err != nil {
+			return err
+		}
+		// The action layer shares the same queue: desktop buttons, the mobile
+		// approval page and chat replies all end up in Resolve.
+		secret := make([]byte, 32)
+		if _, err := rand.Read(secret); err != nil {
+			return fmt.Errorf("%s: token secret: %w", ModuleID, err)
+		}
+		_, err = ctx.Provide(contracts.KeyApprovalAction, contracts.ApprovalActionService(
+			newActionService(service, actionConfig{Secret: secret})))
 		return err
 	}).
-		AddProvides(module.Provides(contracts.KeyApprovals)).
+		AddProvides(module.Provides(contracts.KeyApprovals), module.Provides(contracts.KeyApprovalAction)).
 		AddRequires(module.Requires(contracts.KeyLogger)).
 		WithName("ZeoKeel approvals backend")
 }

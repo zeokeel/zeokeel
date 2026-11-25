@@ -455,8 +455,19 @@ func TestActivation(t *testing.T) {
 	if descriptor.Factory == nil {
 		t.Fatal("module has a nil factory")
 	}
-	if len(descriptor.Provides) != 1 || descriptor.Provides[0].Name != contracts.KeyApprovals.Name() {
-		t.Fatalf("provides = %+v, want KeyApprovals", descriptor.Provides)
+	wantProvides := map[string]bool{
+		contracts.KeyApprovals.Name():      false,
+		contracts.KeyApprovalAction.Name(): false,
+	}
+	for _, provided := range descriptor.Provides {
+		if _, ok := wantProvides[provided.Name]; ok {
+			wantProvides[provided.Name] = true
+		}
+	}
+	for name, found := range wantProvides {
+		if !found {
+			t.Fatalf("provides = %+v, missing %s", descriptor.Provides, name)
+		}
 	}
 	required := make(map[string]bool, len(descriptor.Requires))
 	for _, requirement := range descriptor.Requires {
