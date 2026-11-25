@@ -259,15 +259,39 @@ func (a *Adapter) PollOnce(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("%w: status %d", contracts.ErrWeChatUnavailable, response.StatusCode)
 	}
 
+	// Some iLink builds wrap the payload ({"data":{"msgs":[...]}}) and some report
+	// a refusal as 200 with ret_code != 0 (channel-capabilities §1). Both used to
+	// be a silent "no messages", which is the worst possible answer: the loop
+	// resets its backoff and the queue quietly stops draining.
 	var envelope struct {
-		Msgs []inboundMessage `json:"msgs"`
+		Msgs    []inboundMessage `json:"msgs"`
+		RetCode int              `json:"ret_code"`
+		ErrMsg  string           `json:"errmsg"`
+		Data    *struct {
+			Msgs    []inboundMessage `json:"msgs"`
+			RetCode int              `json:"ret_code"`
+			ErrMsg  string           `json:"errmsg"`
+		} `json:"data"`
 	}
 	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&envelope); err != nil {
 		return 0, fmt.Errorf("%w: decode: %v", contracts.ErrWeChatUnavailable, err)
 	}
+	messages := envelope.Msgs
+	retCode, errMsg := envelope.RetCode, envelope.ErrMsg
+	if envelope.Data != nil {
+		if len(messages) == 0 {
+			messages = envelope.Data.Msgs
+		}
+		if retCode == 0 {
+			retCode, errMsg = envelope.Data.RetCode, envelope.Data.ErrMsg
+		}
+	}
+	if retCode != 0 {
+		return 0, fmt.Errorf("%w: getupdates refused (ret_code %d: %s)", contracts.ErrWeChatUnavailable, retCode, errMsg)
+	}
 
 	ingested := 0
-	for _, message := range envelope.Msgs {
+	for _, message := range messages {
 		text := message.text()
 		if message.FromUserID == "" || text == "" {
 			continue // media-only or malformed: the channel is text-only for now
@@ -300,6 +324,11 @@ func (a *Adapter) PollOnce(ctx context.Context) (int, error) {
 }
 
 // Send implements contracts.WeChatService.
+//
+// A 200 alone is not a delivery: the platform answers 200 for a message it
+// refused (see docs/research/channel-capabilities.md §1 and
+// testdata/sendmessage_error_retcode.json), so the body's verdict is checked
+// before success is reported.
 func (a *Adapter) Send(ctx context.Context, toUserID, text string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -353,12 +382,64 @@ func (a *Adapter) Send(ctx context.Context, toUserID, text string) error {
 	defer response.Body.Close()
 	switch response.StatusCode {
 	case http.StatusOK:
-		return nil
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return contracts.ErrWeChatUnauthorized
 	default:
 		return fmt.Errorf("%w: status %d", contracts.ErrWeChatUnavailable, response.StatusCode)
 	}
+	// The status said 200; the body still has to say "did the platform take it".
+	// Without this check a refused message was reported as delivered, and a
+	// swallowed notification is the one failure nothing downstream can notice:
+	// no retry, no fallback, and a success the caller trusts.
+	if err := checkSendVerdict(response.Body); err != nil {
+		return err
+	}
+	return nil
+}
+
+// sendVerdict is the body-level verdict of one sendmessage call. The fields are
+// pointers so "the platform did not say" stays distinguishable from an explicit
+// zero: {"ok": true} and {"ret_code": 0} are both acceptance, an absent field is
+// silence (accepted, since the request already got a 200), while an explicit
+// false / non-zero code is a refusal.
+type sendVerdict struct {
+	OK      *bool  `json:"ok"`
+	RetCode *int   `json:"ret_code"`
+	ErrMsg  string `json:"errmsg"`
+}
+
+// checkSendVerdict maps a sendmessage body onto an error. A body that cannot be
+// read is a refusal too: something between us and iLink answered, and nothing in
+// it claims the message was taken.
+func checkSendVerdict(body io.Reader) error {
+	raw, err := io.ReadAll(io.LimitReader(body, 1<<20))
+	if err != nil {
+		return fmt.Errorf("%w: read sendmessage body: %v", contracts.ErrWeChatUnavailable, err)
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil // no body: nothing contradicts the 200
+	}
+	var verdict sendVerdict
+	if err := json.Unmarshal(trimmed, &verdict); err != nil {
+		return fmt.Errorf("%w: sendmessage answered 200 with an unreadable body: %v", contracts.ErrWeChatUnavailable, err)
+	}
+	reason := strings.TrimSpace(verdict.ErrMsg)
+	retCode := 0
+	if verdict.RetCode != nil {
+		retCode = *verdict.RetCode
+	}
+	refused := retCode != 0 || (verdict.OK != nil && !*verdict.OK)
+	if !refused {
+		return nil
+	}
+	if reason == "" {
+		reason = "the platform gave no reason"
+	}
+	if retCode != 0 {
+		return fmt.Errorf("%w: ret_code %d: %s", contracts.ErrWeChatUnavailable, retCode, reason)
+	}
+	return fmt.Errorf("%w: ok false: %s", contracts.ErrWeChatUnavailable, reason)
 }
 
 // Status implements contracts.WeChatService.

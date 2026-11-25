@@ -1,0 +1,21 @@
+{
+  "data": {
+    "msgs": [
+      {
+        "msg_id": "7502345678901234777",
+        "from_user_id": "wxid_alice01",
+        "to_user_id": "wxid_zeokeel_bot",
+        "context_token": "ctx-envelope-4c2e",
+        "create_time": 1764051840,
+        "item_list": [
+          {
+            "type": 1,
+            "text_item": {
+              "text": "这条消息被 data 信封包着"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

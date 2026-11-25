@@ -1,0 +1,21 @@
+{
+  "msgs": [
+    {
+      "msg_id": "7502345678901234999",
+      "from_user_id": "wxid_alice01",
+      "to_user_id": "wxid_zeokeel_bot",
+      "context_token": "ctx-media-88aa",
+      "create_time": 1764051720,
+      "message_type": 2,
+      "item_list": [
+        {
+          "type": 3,
+          "image_item": {
+            "file_id": "file_7c1f0e2d",
+            "file_size": 20480
+          }
+        }
+      ]
+    }
+  ]
+}
