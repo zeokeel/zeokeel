@@ -49,6 +49,10 @@ export const ROUTES: RouteMeta[] = [
   // Same shape as R27a — a static path that outranks `/settings/:page` by
   // length — because neither surface is a `settings` domain row.
   { path: '/settings/health', ref: 'R27b', titleKey: 'health.title' },
+  // R27c: the team's shared note board (`team.notes`/`team.note.record`).
+  // Same shape as R27a/R27b — a static path that outranks `/settings/:page` by
+  // length — because a note board is not a `settings` domain row.
+  { path: '/settings/memory', ref: 'R27c', titleKey: 'memory.title' },
   { path: '/automation', ref: 'R22', titleKey: 'shell.automation' },
   { path: '/capabilities', ref: 'R23', titleKey: 'shell.capabilities' },
   { path: '/insights', ref: 'R24', titleKey: 'shell.insights' },

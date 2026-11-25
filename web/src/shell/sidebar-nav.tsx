@@ -36,6 +36,9 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
       // R27b: the run-status surface has its own entry too, so it cannot
       // inherit the settings item's selection either.
       '/settings/health',
+      // R27c: the shared note board. Its own entry for the same reason: it must
+      // not leave the generic settings item selected.
+      '/settings/memory',
     ].find((path) => location.pathname.startsWith(path)) ??
     (location.pathname.startsWith('/settings') ? '/settings/model' : '');
 
@@ -94,6 +97,10 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
         // "is it connected and alive" glyph; `activity` is already the insights
         // entry and `clock` the automation one.
         { key: '/settings/health', icon: <ZkIcon name="plug" />, label: t('health.title') },
+        // R27c: the shared note board. `file` is the "written note" glyph;
+        // `data` is the inbound work queue and `pencil` would promise editing
+        // the list, which this surface does not offer.
+        { key: '/settings/memory', icon: <ZkIcon name="file" />, label: t('memory.title') },
       ]}
     />
   );

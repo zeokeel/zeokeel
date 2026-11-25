@@ -20,6 +20,7 @@ import { ContextScreen } from '@/features/thread/context-screen';
 import { NowScreen } from '@/features/now/now-screen';
 import { ChannelsScreen } from '@/features/settings/channels/ChannelsScreen';
 import { HealthScreen } from '@/features/settings/health/HealthScreen';
+import { TeamMemoryScreen } from '@/features/settings/memory/TeamMemoryScreen';
 import { SettingsScreen } from '@/features/settings/settings-screen';
 import { NotFoundScreen } from '@/features/not-found-screen';
 import { ChildSessionScreen } from '@/features/thread/child-session-screen';
@@ -102,6 +103,10 @@ export function AppRoutes() {
           `browser.status` reads, not `settings` domain rows. The static path
           outranks `:page` in `routeForPath`, so this resolves first. */}
       <Route path="/settings/health" element={<HealthScreen />} />
+      {/* R27c: the team's shared note board (`team.notes`, `team.note.record`).
+          A static path for the same reason R27a/R27b have one: a note board is
+          not a `settings` domain row, so `/settings/:page` must not own it. */}
+      <Route path="/settings/memory" element={<TeamMemoryScreen />} />
       <Route path="/settings/:page" element={<SettingsScreen />} />
       <Route path="/automation" element={<AutomationScreen />} />
       <Route path="/capabilities" element={<CapabilitiesScreen />} />

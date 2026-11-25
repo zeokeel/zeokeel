@@ -47,6 +47,9 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | `contracts.KeyHeartbeat` | heartbeat（新，可选 lead/wechat/email） | `heartbeat.status/tick`、运行状态页 | 7 测试（tick/单渠道失败不中断/lead 失败记录/定时停止/禁用不动/状态） |
 | `contracts.KeyTeamNotes` | teamnotes（依赖 memorystore 之后） | 团队共享记忆 | 16 测试（真 provider 的 URI/type/字节上限约束全钉住） |
 | Web 运行状态页 | `web/src/features/settings/health/**` | `/settings/health`（R27b） | 9 测试（调用顺序 read<tick<read、失败不回读、断开空态） |
+| 验收即记忆 | gateway `taskReview` → teamnotes | 任务通过时写共享笔记 | 3 测试（通过写/打回不写/记忆失败不影响验收） |
+| 微信扫码登录 | `wechat` + `wechat.login.start/state` | 设置页扫码接入 | 12 模块测试 + 网关 2 方法（expired 是答案不是错误） |
+| Web 共享记忆页 | `web/src/features/settings/memory/**` | `/settings/memory`（R27c） | 12 测试（顺序/深链/正文折叠/390px 换行） |
 | 模型计划器装配 | `lead.PlannerFromSettings`（读 `chat.baseURL/apiKey/model`） | `lead.RunOnce` | 4 条（完整→模型/缺项→规则） |
 | Web 渠道设置 | `web/src/features/settings/channels/**`、`web/src/api/channels.ts` | `/settings/channels`（R27a） | 12 测试；密钥不回显有断言 |
 | `planner`（library） | planner（仅依赖 contracts） | 模型计划器 | 14 测试 / 21 断言（线格式/错误分层/预算先于网络/密钥永不入错误） |
@@ -91,6 +94,7 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 | 卡片动作未接审批 | 飞书 `CardAction` 提取了 approvalId/decision，但审批 action 需要一次性 token；卡片 value 里还没带 token | 缺口 | 发卡时把 token 放进 `action.value`，回调走 `approval.action` |
 | 模型计划器装配注入 | 零件齐：`planner.New(...)` + `lead.ModelPlanner`；装配层还没读 `chat.baseURL/apiKey/model` 设置去构造 | 小缺口 | 装配/自动化里按设置构造；无配置则保持规则计划器 |
 | 钉钉/飞书未读凭据库 | 只有 wechat 接了 `KeyCredentials`；钉钉/飞书仍从 Config 读 `json:"-"` | 缺口 | 同 wechat 模式复制（kind=dingtalk/feishu） |
+| 扫码登录 UI | 协议与模块已就绪（wechat.login.start/state），设置页还没渲染二维码 | 缺口 | 渠道设置页加"扫码接入"，轮询 2s，expired 自动重启 |
 | ~~网关协议 `inbox.*` / 租约 / 审批动作~~ | ✅ 9 个方法已实现并同步 TRANSPORT §5.1.13、contract.json、ws-contract.ts | 已交付 |
 | ~~`notify.route.*`（主/备渠道）~~ | ✅ 已交付：router 服务 + `notify.route.snapshot/upsert` + capability `notifyroute` | 已交付 |
 | UI | 未接；效果图只是原型 | 协议稳定后一轮做 |
@@ -161,6 +165,8 @@ scripts/verify.sh --quick（浏览器/计划器/渠道设置后）PASS 5/5，67s
 scripts/verify.sh --quick（heartbeat/CDP ws 后）PASS 5/5，69s
 scripts/verify.sh --quick（teamnotes 后）PASS 5/5，75s
 web（运行状态页后）: typecheck / lint(25) / test 534 全绿
+web（共享记忆页后）: typecheck / lint(25) / test 551 全绿
+scripts/verify.sh --quick（验收即记忆/扫码登录后）PASS 5/5，67s
 scripts/verify.sh --quick（邮件/计划器/凭据/卡片后）PASS 5/5，64s
 scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过
 scripts/verify.sh --quick（approval 后）    PASS 5/5（一次 flaky 后重跑绿）
