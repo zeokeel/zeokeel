@@ -88,9 +88,13 @@ export function CodeBlock({
   const shown = clipped ? lines.slice(0, maxLines).join('\n') : text;
   return (
     <div className="zk-code">
-      <CodeHighlighter lang={lang} header={false}>
-        {shown}
-      </CodeHighlighter>
+      {/* A long output scrolls inside its card: slicing it left the rest of a
+          200-line log unreachable (round-4 tools audit D9). */}
+      <div className="zk-code__scroll">
+        <CodeHighlighter lang={lang} header={false}>
+          {shown}
+        </CodeHighlighter>
+      </div>
       {clipped ? (
         <div className="zk-tool-truncated">
           {t('thread.truncated', { max: maxLines, total: lines.length })}
@@ -200,7 +204,27 @@ export function valueText(value: unknown): string {
   }
 }
 
+/**
+ * Arguments as a record.
+ *
+ * The live wire carries them as the JSON *string* the model produced (a settled
+ * snapshot carries the parsed object), so a card that only accepted objects drew
+ * no target section at all while the call was running — exactly when the user
+ * needs to know what it is about to touch (round-4 tools audit D1).
+ */
 export function asRecord(value: unknown): Record<string, unknown> {
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return {};
+    try {
+      const parsed: unknown = JSON.parse(text);
+      return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};

@@ -34,8 +34,8 @@ export const TOOL_META: Record<string, ToolMeta> = {
   grep: { labelKey: 'tool.grep', icon: 'search', category: 'file' },
   read_image: { labelKey: 'tool.other', icon: 'image', category: 'file' },
   // web
-  web_fetch: { labelKey: 'tool.other', icon: 'globe', category: 'web' },
-  web_search: { labelKey: 'tool.other', icon: 'search', category: 'web' },
+  web_fetch: { labelKey: 'tool.webFetch', icon: 'globe', category: 'web' },
+  web_search: { labelKey: 'tool.webSearch', icon: 'search', category: 'web' },
   // jobs / terminals
   job_start: { labelKey: 'tool.other', icon: 'activity', category: 'job' },
   job_output: { labelKey: 'tool.other', icon: 'activity', category: 'job' },
@@ -52,7 +52,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
   team_task_create: { labelKey: 'tool.other', icon: 'plus', category: 'team' },
   team_task_update: { labelKey: 'tool.other', icon: 'pencil', category: 'team' },
   todo: { labelKey: 'tool.other', icon: 'check', category: 'plan' },
-  todo_write: { labelKey: 'tool.other', icon: 'check', category: 'plan' },
+  todo_write: { labelKey: 'tool.todoWrite', icon: 'check', category: 'plan' },
   plan_review: { labelKey: 'tool.other', icon: 'sparkles', category: 'plan' },
   // skills
   skill: { labelKey: 'tool.other', icon: 'plugin', category: 'skill' },

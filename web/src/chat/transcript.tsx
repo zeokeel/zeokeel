@@ -217,7 +217,19 @@ export function Transcript({
 
   return (
     <div className="zk-transcript">
-      <div className="zk-transcript__scroll" ref={scrollRef} role="log" aria-live="polite">
+      {/* A virtual list is the wrong live region: every streamed token mutated the
+          region (137 mutations for 72 characters in the component audit) and rows
+          outside the window left the accessibility tree. The scroll container is a
+          focusable log with announcements off; the coarse state is announced once
+          by the thread's own status element. */}
+      <div
+        className="zk-transcript__scroll"
+        ref={scrollRef}
+        role="log"
+        aria-live="off"
+        tabIndex={0}
+        aria-label={t('thread.transcript')}
+      >
         <div className="zk-transcript__inner" style={{ height: virtualizer.getTotalSize() }}>
           {rows.map((row) => {
             const info = messages[row.index];

@@ -297,6 +297,119 @@ body {
 .zk-markdown {
   font-size: var(--zk-type-body);
   line-height: var(--zk-type-body-line);
+  /* A measure, not a page: without it a short answer collapsed to 433px and a
+   * long one stretched to 1128px (~150 characters per line), and the column
+   * jumped width between turns (round-4 reply audit). */
+  max-width: 68ch;
+}
+
+/* The renderer ships almost no tag styling (no table borders, no blockquote
+ * rule, no heading scale), so the whole vocabulary is ours. Values are tokens:
+ * the audit measured a 21px UA h2 — larger than the page title — and a code
+ * block stuck at #fafafa in dark mode. */
+.zk-markdown h1,
+.zk-markdown h2,
+.zk-markdown h3,
+.zk-markdown h4,
+.zk-markdown h5,
+.zk-markdown h6 {
+  margin: var(--zk-space-4) 0 var(--zk-space-2);
+  font-size: var(--zk-type-body);
+  line-height: var(--zk-type-body-line);
+  font-weight: 600;
+  color: var(--zk-label-primary);
+}
+
+.zk-markdown h1 {
+  font-size: var(--zk-type-m);
+  line-height: var(--zk-type-m-line);
+}
+
+.zk-markdown h2 {
+  font-size: var(--zk-type-body);
+  line-height: var(--zk-type-body-line);
+}
+
+.zk-markdown p {
+  margin: 0 0 var(--zk-space-3);
+}
+
+.zk-markdown ul,
+.zk-markdown ol {
+  margin: 0 0 var(--zk-space-3);
+  padding-inline-start: var(--zk-space-5);
+}
+
+.zk-markdown li {
+  margin: 0 0 var(--zk-space-1);
+}
+
+.zk-markdown li > ul,
+.zk-markdown li > ol {
+  margin: var(--zk-space-1) 0 0;
+}
+
+.zk-markdown blockquote {
+  margin: 0 0 var(--zk-space-3);
+  padding: var(--zk-space-1) var(--zk-space-3);
+  border-inline-start: 3px solid var(--zk-border-l3);
+  border-radius: var(--zk-radius-xs);
+  background: var(--zk-bg-strong);
+  color: var(--zk-label-secondary);
+}
+
+.zk-markdown blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.zk-markdown table {
+  margin: 0 0 var(--zk-space-3);
+  border-collapse: collapse;
+  font-size: var(--zk-type-xs);
+  line-height: var(--zk-type-xs-line);
+}
+
+.zk-markdown th,
+.zk-markdown td {
+  padding: var(--zk-space-2) var(--zk-space-3);
+  border: 1px solid var(--zk-border-subtle);
+  text-align: start;
+  vertical-align: top;
+}
+
+.zk-markdown th {
+  background: var(--zk-bg-strong);
+  font-weight: 600;
+  color: var(--zk-label-primary);
+}
+
+.zk-markdown a {
+  color: var(--zk-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.zk-markdown a:hover {
+  color: var(--zk-accent-hover);
+}
+
+.zk-markdown hr {
+  margin: var(--zk-space-4) 0;
+  border: 0;
+  border-top: 1px solid var(--zk-border-subtle);
+}
+
+.zk-markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--zk-radius-sm);
+}
+
+.zk-code-block {
+  margin: 0 0 var(--zk-space-3);
+  border: 1px solid var(--zk-border-subtle);
+  border-radius: var(--zk-radius-sm);
+  overflow: hidden;
 }
 
 .zk-markdown > :first-child {
@@ -319,8 +432,40 @@ body {
   margin-bottom: var(--zk-space-2);
 }
 
-.zk-tool-text,
+/* The streaming reasoning block: it had no rule at all, so `white-space: normal`
+ * collapsed every newline into one paragraph while it streamed and the text
+ * jumped from 14/22 to 13/20 when the turn settled (round-4 think audit F-04).
+ * Same metrics in both states, secondary colour at 8.0:1 (the inherited
+ * rgba(0,0,0,.45) was 3.36:1, below AA — F-06). */
+.zk-thought__title-button {
+  display: inline-flex;
+  align-items: center;
+  gap: inherit;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.zk-thought__title-button:focus-visible {
+  outline: 2px solid var(--zk-focus);
+  outline-offset: 2px;
+  border-radius: var(--zk-radius-xs);
+}
+
+.zk-thinking-text,
 .zk-reasoning-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--zk-type-xs);
+  line-height: var(--zk-type-xs-line);
+  color: var(--zk-label-secondary);
+}
+
+.zk-tool-text {
   white-space: pre-wrap;
   word-break: break-word;
   font-size: var(--zk-type-xs);
@@ -563,6 +708,20 @@ body {
   padding-top: var(--zk-space-1);
 }
 
+.zk-code__scroll {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.zk-tool-notice {
+  margin-bottom: var(--zk-space-2);
+  padding: var(--zk-space-1) var(--zk-space-2);
+  border-radius: var(--zk-radius-xs);
+  background: var(--zk-bg-strong);
+  color: var(--zk-label-secondary);
+  font-size: var(--zk-type-xs);
+}
+
 .zk-code {
   border: 1px solid var(--zk-border-l1);
   border-radius: var(--zk-radius-sm);
@@ -644,6 +803,18 @@ body {
 }
 
 /* =============================== transcript ============================= */
+
+.zk-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 
 .zk-transcript {
   position: relative;
@@ -833,10 +1004,6 @@ body {
 /* Placeholder: one line, the caption colour, starting where the text starts. */
 .zk-composer .ant-sender textarea::placeholder {
   color: var(--zk-label-tertiary);
-}
-
-.zk-composer .ant-sender-actions-list {
-  display: none;
 }
 
 .zk-composer__toolbar {
@@ -2354,6 +2521,14 @@ body {
 .zk-transcript__row:hover .zk-msg-actions,
 .zk-msg-actions:focus-within {
   opacity: 1;
+}
+
+/* A touch screen has no hover: the actions were permanently invisible at
+ * opacity 0 on every phone (round-4 component audit, touch 390×844). */
+@media (hover: none) {
+  .zk-msg-actions {
+    opacity: 1;
+  }
 }
 
 /* Background-task chip (B12): collapsed like the queue chip. */

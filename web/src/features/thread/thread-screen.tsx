@@ -108,6 +108,14 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
     const last = chat.parsedMessages[chat.parsedMessages.length - 1];
     latestText.current = last?.message.text?.length ?? 0;
   }, [chat.parsedMessages]);
+  // Coarse turn state for the screen reader, derived from the last row: a
+  // per-token live region would re-announce the whole answer on every delta.
+  const lastRow = chat.parsedMessages[chat.parsedMessages.length - 1];
+  const lastTurnFailed = Boolean(lastRow?.message.error);
+  const lastTurnStopped = lastRow?.message.stopReason === 'aborted';
+  const lastTurnSettled =
+    !chat.isRequesting && lastRow?.message.role === 'assistant' && lastRow?.status === 'success';
+
   const [rateText, setRateText] = useState('');
   useEffect(() => {
     if (!chat.isRequesting) {
@@ -384,6 +392,20 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
           }}
         />
       ) : null}
+
+      {/* One coarse announcement per turn instead of a live region on the virtual
+          list (which re-announced every token). */}
+      <span className="zk-visually-hidden" role="status" aria-live="polite">
+        {chat.isRequesting
+          ? t('thread.announce.running')
+          : lastTurnFailed
+            ? t('thread.announce.failed')
+            : lastTurnStopped
+              ? t('thread.announce.stopped')
+              : lastTurnSettled
+                ? t('thread.announce.done')
+                : ''}
+      </span>
 
       <div className="zk-thread__body">
         {snapshotError ? (

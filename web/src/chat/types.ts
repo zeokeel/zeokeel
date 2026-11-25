@@ -10,7 +10,10 @@ export interface ToolStep {
   name: string;
   input?: unknown;
   output?: unknown;
+  /** The failure text the tool actually reported (never the category). */
   error?: string;
+  /** A coarse category (`network`, `cancelled`, …) for copy and colour. */
+  errorKind?: string;
   status: ToolStepStatus;
 }
 

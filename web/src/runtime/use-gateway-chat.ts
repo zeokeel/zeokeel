@@ -68,9 +68,14 @@ export function useGatewayChat(
         ...(message.stopReason ? { stopReason: message.stopReason } : {}),
         // A turn that failed is stored with its error text; a reload must
         // show that red line, not an empty assistant bubble.
-        ...(message.remoteError
-          ? { error: { code: 'run_failed', message: message.remoteError } }
-          : {}),
+        // A stop is not a failure: the gateway records `error=cancelled`
+        // (kind `cancelled`), and painting that red told the user their run had
+        // failed when they had simply stopped it (round-4 loop audit F2).
+        ...(message.remoteErrorKind === 'cancelled' || message.remoteError === 'cancelled'
+          ? { stopReason: 'aborted' }
+          : message.remoteError
+            ? { error: { code: 'run_failed', message: message.remoteError } }
+            : {}),
     } satisfies ZeoMessage,
     status: 'success',
     }));
@@ -117,14 +122,40 @@ export function useGatewayChat(
     ...chat,
     refresh: async () => {
       const durable = await loadMessages();
+      const current = chat.messages ?? [];
+      // A durable row says "success"; a row that is still streaming must stay
+      // loading. Without this merge, any domain change during a run (the approval
+      // that pauses the turn, a tool upsert, a settings echo) replaced the live row
+      // with a settled one: the live thinking collapsed and the whole turn looked
+      // finished while the composer still said 运行中 (round-3 loop audit).
+      const live = new Map<string, (typeof current)[number]>(
+        current
+          .filter((info) => info.status === 'loading' && info.id !== undefined)
+          .map((info) => [String(info.id), info]),
+      );
+      const merged = durable.map((row) => {
+        const streaming = row.id === undefined ? undefined : live.get(String(row.id));
+        if (!streaming) return row;
+        // The live row is ahead of the snapshot for what it already streamed.
+        const longer = (a: string, b: string) => (a.length >= b.length ? a : b);
+        return {
+          ...row,
+          status: 'loading',
+          message: {
+            ...row.message,
+            text: longer(streaming.message.text, row.message.text),
+            reasoning: longer(streaming.message.reasoning, row.message.reasoning),
+          },
+        };
+      });
       // Never replace a longer transcript with a shorter one: the snapshot can lag
       // a just-sent turn, and deleting the user's own message is worse than showing
       // the optimistic row a moment longer.
-      if (durable.length >= (chat.messages?.length ?? 0)) {
+      if (merged.length >= current.length) {
         // `DefaultMessageInfo` carries the same fields the store holds; the cast is
         // the SDK's own conversion (MessageInfo is the same shape minus the
         // loader-only fields).
-        chat.setMessages(durable as never);
+        chat.setMessages(merged as never);
       }
     },
   };

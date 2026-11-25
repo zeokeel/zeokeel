@@ -84,7 +84,11 @@ export function ApprovalCard({
       {target ? (
         <div className="zk-approval__target">
           <span className="zk-approval__target-label">
-            {target.kind === 'command' ? t('approval.target.command') : t('approval.target.path')}
+            {target.kind === 'command'
+              ? t('approval.target.command')
+              : target.kind === 'url'
+                ? t('approval.target.url')
+                : t('approval.target.path')}
           </span>
           <MonoLine text={target.text} />
         </div>

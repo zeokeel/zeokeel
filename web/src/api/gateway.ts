@@ -64,6 +64,8 @@ export interface SnapshotStep {
   input?: unknown;
   output?: unknown;
   error?: string;
+  /** A coarse category (`network`, `cancelled`), used for copy and colour. */
+  errorKind?: string;
 }
 
 export interface SnapshotMessage {
@@ -76,6 +78,8 @@ export interface SnapshotMessage {
   usage?: { inputTokens?: number; outputTokens?: number };
   stopReason?: string;
   remoteError?: string;
+  /** `cancelled` means the user stopped the turn: neutral, never an error row. */
+  remoteErrorKind?: string;
   streaming?: boolean;
 }
 
@@ -994,7 +998,16 @@ export async function loadSnapshot(sessionId: string): Promise<SessionSnapshot> 
         streaming?: boolean;
         attachments?: Array<{ id: string; name: string; mime: string; bytes: number }>;
         error?: string;
-        usage?: { promptTokens?: number; completionTokens?: number };
+        /** `cancelled` (a user stop) must not paint as a failure. */
+        errorKind?: string;
+        usage?: {
+          promptTokens?: number;
+          completionTokens?: number;
+          /** Wall time of the turn, the 「用时」 line next to the reasoning. */
+          durationMs?: number;
+          /** Model iterations in the turn (one per thinking/tool round). */
+          iterations?: number;
+        };
         tools?: Array<{
           id: string;
           name: string;
@@ -1003,6 +1016,7 @@ export async function loadSnapshot(sessionId: string): Promise<SessionSnapshot> 
           arguments?: string;
           path?: string;
           errorKind?: string;
+          error?: string;
         }>;
       }>;
       running: boolean;
@@ -1029,10 +1043,22 @@ export async function loadSnapshot(sessionId: string): Promise<SessionSnapshot> 
         status: mapToolStatus(tool.status),
         input: parseArguments(tool.arguments) ?? (tool.path ? { path: tool.path } : undefined),
         output: tool.summary || undefined,
-        error: tool.errorKind || undefined,
+        // `errorKind` is a category (`network`, `cancelled`), not a sentence:
+        // showing it as the failure text put the word "network" in the red box
+        // (round-4 tools audit D3).
+        errorKind: tool.errorKind || undefined,
+        ...(tool.error ? { error: tool.error } : {}),
       })),
+      // The reasoning node's 「用时」 and the step count come from here; dropping
+      // durationMs/iterations left the node with a title and nothing else
+      // (round-4 think audit, item 4).
       usage: message.usage
-        ? { inputTokens: message.usage.promptTokens, outputTokens: message.usage.completionTokens }
+        ? {
+            inputTokens: message.usage.promptTokens,
+            outputTokens: message.usage.completionTokens,
+            durationMs: message.usage.durationMs,
+            iterations: message.usage.iterations,
+          }
         : undefined,
       stopReason:
         last && session.interrupted
@@ -1041,6 +1067,7 @@ export async function loadSnapshot(sessionId: string): Promise<SessionSnapshot> 
             ? 'end_turn'
             : undefined,
       remoteError: message.error,
+      remoteErrorKind: message.errorKind,
       streaming: message.streaming,
     };
   });
@@ -1129,7 +1156,10 @@ export function applySessionDelta(
             status: mapToolStatus(tool.status as string | undefined),
             input: parseArguments(tool.arguments as string | undefined),
             output: typeof tool.summary === 'string' ? tool.summary : undefined,
-            error: typeof tool.errorKind === 'string' ? tool.errorKind : undefined,
+            errorKind: typeof tool.errorKind === 'string' ? tool.errorKind : undefined,
+            ...(typeof tool.error === 'string' && tool.error.trim() !== ''
+              ? { error: tool.error }
+              : {}),
           };
           const existing = message.steps ?? [];
           const index = existing.findIndex((item) => item.callId === step.callId);
@@ -1155,6 +1185,8 @@ export function applySessionDelta(
                   typeof fields.streaming === 'boolean' ? fields.streaming : message.streaming,
                 remoteError:
                   typeof fields.error === 'string' ? fields.error : message.remoteError,
+                remoteErrorKind:
+                  typeof fields.errorKind === 'string' ? fields.errorKind : message.remoteErrorKind,
               }
             : message,
         );
@@ -1197,7 +1229,10 @@ function mapDeltaMessage(raw: unknown): SnapshotMessage | null {
           status: mapToolStatus(tool.status as string | undefined),
           input: parseArguments(tool.arguments as string | undefined),
           output: typeof tool.summary === 'string' ? tool.summary : undefined,
-          error: typeof tool.errorKind === 'string' ? tool.errorKind : undefined,
+          errorKind: typeof tool.errorKind === 'string' ? tool.errorKind : undefined,
+          ...(typeof tool.error === 'string' && tool.error.trim() !== ''
+            ? { error: tool.error }
+            : {}),
         }))
       : [],
     usage: message.usage
@@ -1208,6 +1243,7 @@ function mapDeltaMessage(raw: unknown): SnapshotMessage | null {
       : undefined,
     streaming: Boolean(message.streaming),
     remoteError: typeof message.error === 'string' ? message.error : undefined,
+    remoteErrorKind: typeof message.errorKind === 'string' ? message.errorKind : undefined,
   };
 }
 

@@ -22,7 +22,7 @@ const FILE_TOOLS = new Set(['write_file', 'edit_file', 'str_replace_editor']);
 const SHELL_TOOLS = new Set(['bash', 'terminal_send', 'job_start', 'terminal_read']);
 
 export interface ApprovalTarget {
-  kind: 'command' | 'path';
+  kind: 'command' | 'path' | 'url';
   text: string;
 }
 
@@ -49,6 +49,14 @@ export function approvalTarget(request: ApprovalRequest): ApprovalTarget | undef
   if (typeof command === 'string' && command.trim() !== '') {
     return { kind: 'command', text: command };
   }
+  // A network call's target is the URL and a search's is the query: without
+  // them the approval card only said "会向外发出网络请求" and left the user to
+  // approve a request whose destination was nowhere on screen (round-4 tools
+  // audit D2).
+  const url = args.url ?? args.href;
+  if (typeof url === 'string' && url.trim() !== '') return { kind: 'url', text: url };
+  const query = args.query ?? args.q ?? args.search;
+  if (typeof query === 'string' && query.trim() !== '') return { kind: 'url', text: query };
   const path = args.path;
   if (typeof path === 'string') return { kind: 'path', text: path };
   return undefined;

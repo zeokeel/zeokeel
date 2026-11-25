@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Think, ThoughtChain } from '@ant-design/x';
 import type { ThoughtChainItemType } from '@ant-design/x';
 import { ZkIcon } from '@/design/icons';
@@ -40,6 +40,8 @@ export function ThoughtSteps({
 }) {
   const t = useT();
   const [userExpanded, setUserExpanded] = useState<string[] | null>(null);
+  // The live Think's own expansion: open while streaming unless the reader folds it.
+  const [liveOpen, setLiveOpen] = useState<boolean | undefined>(undefined);
 
   const items: ThoughtChainItemType[] = [];
   // While the model is thinking, the live reasoning is X's `Think` (task-37 #5):
@@ -50,10 +52,13 @@ export function ThoughtSteps({
     streaming && reasoning ? (
       <div className="zk-thought">
         <Think
-          // Streaming must be **visible**: a collapsed Think would hide exactly
-          // what the user is waiting on, so expansion is pinned both ways.
-          expanded
-          onExpand={() => undefined}
+          destroyOnHidden={false}
+          // Streaming is **visible** by default — a collapsed Think would hide
+          // exactly what the user is waiting on — but the arrow is a real
+          // control, not decoration: the reader may fold it while reading the
+          // answer (round-4 think audit F-08).
+          expanded={liveOpen ?? true}
+          onExpand={(next) => setLiveOpen(next)}
           loading
           title={t('thread.reasoning')}
           className="zk-think"
@@ -63,10 +68,34 @@ export function ThoughtSteps({
       </div>
     ) : null;
 
-  if (streaming && reasoning) {
-    // No `destroyOnHidden`: the content must survive being collapsed and the
-    // hand-over to the chain below.
-    return liveThink;
+  // While the model is thinking the live text stays above, but the steps must
+  // stay visible too: the old early return hid a running tool (and the approval
+  // that pauses the turn) behind the reasoning for the whole iteration, which
+  // read as "nothing is happening" (round-4 loop audit).
+  const stepsOnly = streaming && reasoning;
+  if (stepsOnly) {
+    const running = steps.map((step) => toolItem(step, t));
+    if (running.length === 0) return liveThink;
+    const defaultOpen = running
+      .filter((item) => item.status === 'loading' || item.status === 'error')
+      .map((item) => String(item.key));
+    const openKeys = userExpanded ?? defaultOpen;
+    const toggle = (key: string) =>
+      setUserExpanded(
+        openKeys.includes(key) ? openKeys.filter((item) => item !== key) : [...openKeys, key],
+      );
+    return (
+      <div className="zk-thought">
+        {liveThink}
+        <ThoughtChain
+          items={withTitleButtons(running, (key) => openKeys.includes(key), toggle)}
+          line="solid"
+          expandedKeys={openKeys}
+          onExpand={(keys) => setUserExpanded(keys.map(String))}
+          classNames={{ itemHeader: 'zk-thought__header', itemContent: 'zk-thought__content' }}
+        />
+      </div>
+    );
   }
 
   if (reasoning) {
@@ -74,7 +103,7 @@ export function ThoughtSteps({
       key: 'reasoning',
       title: t('thread.reasoning'),
       // The turn's measured wall time, the native 「用时 158ms」 line.
-      ...(durationMs ? { desc: formatDuration(durationMs) } : {}),
+      ...(durationMs ? { description: formatDuration(durationMs) } : {}),
       icon: <ZkIcon name="sparkles" />,
       status: streaming ? 'loading' : 'success',
       collapsible: true,
@@ -94,7 +123,7 @@ export function ThoughtSteps({
     items.push({
       key: 'concise-summary',
       title: t('thread.steps.summary', { count: hiddenSuccesses }),
-      ...(durationMs ? { desc: formatDuration(durationMs) } : {}),
+      ...(durationMs ? { description: formatDuration(durationMs) } : {}),
       icon: <ZkIcon name="check" />,
       status: 'success',
       collapsible: false,
@@ -123,17 +152,61 @@ export function ThoughtSteps({
           .map((item) => item.key)
           .filter((key): key is string => typeof key === 'string');
 
+  const openKeys = userExpanded ?? autoExpanded;
+  // antd X's chain header is a plain `div` with an onClick: no role, no
+  // tabindex, no aria-expanded, so the whole step list was mouse-only
+  // (round-4 think/tools audits). The title becomes a real button; it stops the
+  // click from bubbling to the header so one press toggles once.
+  const toggle = (key: string) => {
+    setUserExpanded(
+      openKeys.includes(key) ? openKeys.filter((item) => item !== key) : [...openKeys, key],
+    );
+  };
+  const accessible = withTitleButtons(items, (key) => openKeys.includes(key), toggle);
+
   return (
     <div className="zk-thought">
       <ThoughtChain
-        items={items}
+        items={accessible}
         line="solid"
-        expandedKeys={userExpanded ?? autoExpanded}
+        expandedKeys={openKeys}
         onExpand={(keys) => setUserExpanded(keys.map(String))}
         classNames={{ itemHeader: 'zk-thought__header', itemContent: 'zk-thought__content' }}
       />
     </div>
   );
+}
+
+/**
+ * antd X's chain header is a plain `div` with an onClick: no role, no tabindex,
+ * no aria-expanded, so the step list was mouse-only (round-4 think/tools
+ * audits). The title becomes a real button that stops the click from bubbling
+ * to the header, so one press toggles once.
+ */
+function withTitleButtons(
+  items: ThoughtChainItemType[],
+  isOpen: (key: string) => boolean,
+  toggle: (key: string) => void,
+): ThoughtChainItemType[] {
+  return items.map((item) => {
+    const key = String(item.key);
+    return {
+      ...item,
+      title: (
+        <button
+          type="button"
+          className="zk-thought__title-button"
+          aria-expanded={isOpen(key)}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggle(key);
+          }}
+        >
+          {item.title as ReactNode}
+        </button>
+      ),
+    };
+  });
 }
 
 function toolItem(step: ToolStep, t: ReturnType<typeof useT>): ThoughtChainItemType {

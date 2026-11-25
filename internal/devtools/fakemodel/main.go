@@ -17,6 +17,13 @@
 //	        tool the workspace policy parks on the approval card), then — once the
 //	        tool result comes back — a streamed summary
 //	slow*   one token every 200ms for ~30s, for stop / disconnect testing
+//	think*  reasoning_content deltas, then the answer (the Think surface)
+//	rich*   markdown-rich answer: headings, lists, table, inline code, fences,
+//	        a link, a blockquote — the renderer's whole vocabulary in one turn
+//	long*   ~120 lines of prose, for scrolling and windowed rendering
+//	multi*  two sequential tool calls in one turn, then a summary
+//	fail*   a tool call that fails (a closed port), then a summary about it
+//	fence*  an unclosed fence mid-stream that closes at the end
 //
 // Paths: POST /v1/chat/completions (and /chat/completions, so a base URL with or
 // without the /v1 suffix works). GET /health answers "ok" for the launcher.
@@ -133,6 +140,74 @@ func (h *handler) complete(w http.ResponseWriter, r *http.Request) {
 		streamer.text(answer, 25*time.Millisecond)
 		streamer.finish("stop", answer)
 		streamer.done()
+	case "think":
+		if !hasToolResult(request) {
+			streamer.reasoning("The user asked a question. I should look at the workspace first, then answer with a short list. Checking the two files that matter. ", 20*time.Millisecond)
+			answer := "Here is the short answer after thinking."
+			streamer.text(answer, 25*time.Millisecond)
+			streamer.finish("stop", answer)
+			streamer.done()
+			return
+		}
+		answer := "Done."
+		streamer.text(answer, 25*time.Millisecond)
+		streamer.finish("stop", answer)
+		streamer.done()
+	case "rich":
+		answer := richAnswer
+		streamer.text(answer, 8*time.Millisecond)
+		streamer.finish("stop", answer)
+		streamer.done()
+	case "long":
+		answer := longAnswer()
+		streamer.text(answer, 2*time.Millisecond)
+		streamer.finish("stop", answer)
+		streamer.done()
+	case "fence":
+		answer := "Here is a snippet:\n\n```go\nfunc main() {\n\tprintln(\"hi\")\n}\n```\n\nThat is all."
+		streamer.text(answer, 30*time.Millisecond)
+		streamer.finish("stop", answer)
+		streamer.done()
+	case "thinktool":
+		// Reasoning, then a tool, then the answer: the whole loop in one turn.
+		if !hasToolResult(request) {
+			streamer.reasoning("I need the health endpoint before I answer. Fetching it now. ", 20*time.Millisecond)
+			arguments, _ := json.Marshal(map[string]string{"url": "http://" + h.addr + "/health"})
+			streamer.toolCall("web_fetch", string(arguments))
+			streamer.finish("tool_calls", "")
+			streamer.done()
+			return
+		}
+		answer := "The endpoint answered, so here is the summary."
+		streamer.text(answer, 25*time.Millisecond)
+		streamer.finish("stop", answer)
+		streamer.done()
+	case "multi":
+		results := toolResultCount(request)
+		if results < 2 {
+			arguments, _ := json.Marshal(map[string]string{"url": "http://" + h.addr + "/health"})
+			streamer.toolCallAt("web_fetch", string(arguments), results)
+			streamer.finish("tool_calls", "")
+			streamer.done()
+			return
+		}
+		answer := "Both fetches finished."
+		streamer.text(answer, 25*time.Millisecond)
+		streamer.finish("stop", answer)
+		streamer.done()
+	case "fail":
+		if !hasToolResult(request) {
+			// A closed port: the approval is allowed, the tool itself fails.
+			arguments, _ := json.Marshal(map[string]string{"url": "http://127.0.0.1:9/health"})
+			streamer.toolCall("web_fetch", string(arguments))
+			streamer.finish("tool_calls", "")
+			streamer.done()
+			return
+		}
+		answer := "The fetch failed, so I am reporting that instead."
+		streamer.text(answer, 25*time.Millisecond)
+		streamer.finish("stop", answer)
+		streamer.done()
 	case "slow":
 		streamer.text(strings.Repeat("slow stream ", 30), 200*time.Millisecond)
 		streamer.finish("stop", "")
@@ -149,8 +224,23 @@ func (h *handler) complete(w http.ResponseWriter, r *http.Request) {
 func scenarioOf(model string) string {
 	name := strings.ToLower(model)
 	switch {
+	case strings.Contains(name, "thinktool"):
+		return "thinktool"
+	case strings.Contains(name, "multi"):
+		return "multi"
+	case strings.Contains(name, "fail"):
+		return "fail"
+	case strings.Contains(name, "think"):
+		return "think"
+	// `tool` last among the tool-ish names: "thinktool" contains "tool" too.
 	case strings.Contains(name, "tool"):
 		return "tool"
+	case strings.Contains(name, "rich"):
+		return "rich"
+	case strings.Contains(name, "long"):
+		return "long"
+	case strings.Contains(name, "fence"):
+		return "fence"
 	case strings.Contains(name, "slow"):
 		return "slow"
 	default:
@@ -176,13 +266,13 @@ type sseWriter struct {
 }
 
 // text streams one answer in word-sized chunks.
+//
+// Newlines are part of the payload: `strings.Fields` would collapse the whole
+// answer onto one line, which silently turned every markdown fixture into a
+// single heading (the round-4 component audit caught it). Words stay word-sized
+// so the stream still arrives incrementally.
 func (s *sseWriter) text(answer string, delay time.Duration) {
-	words := strings.Fields(answer)
-	for index, word := range words {
-		piece := word
-		if index > 0 {
-			piece = " " + word
-		}
+	for _, piece := range splitKeepingLines(answer) {
 		payload, _ := json.Marshal(map[string]any{
 			"choices": []any{map[string]any{
 				"index": 0,
@@ -195,7 +285,58 @@ func (s *sseWriter) text(answer string, delay time.Duration) {
 	}
 }
 
-// toolCall streams one tool call.
+// splitKeepingLines splits into streamable chunks without losing whitespace:
+// each chunk is a word plus the whitespace that follows it (newlines included).
+func splitKeepingLines(text string) []string {
+	var chunks []string
+	start := 0
+	inSpace := false
+	for index, r := range text {
+		space := r == ' ' || r == '\n' || r == '\t' || r == '\r'
+		if !space && inSpace && index > start {
+			chunks = append(chunks, text[start:index])
+			start = index
+		}
+		inSpace = space
+	}
+	if start < len(text) {
+		chunks = append(chunks, text[start:])
+	}
+	return chunks
+}
+
+// reasoning streams reasoning_content deltas (the Think surface's input).
+func (s *sseWriter) reasoning(text string, delay time.Duration) {
+	words := strings.Fields(text)
+	for index, word := range words {
+		piece := word
+		if index > 0 {
+			piece = " " + word
+		}
+		payload, _ := json.Marshal(map[string]any{
+			"choices": []any{map[string]any{
+				"index": 0,
+				"delta": map[string]any{"reasoning_content": piece},
+			}},
+		})
+		fmt.Fprintf(s.w, "data: %s\n\n", payload)
+		s.flush()
+		time.Sleep(delay)
+	}
+}
+
+// toolResultCount is how many tool results the conversation already carries.
+func toolResultCount(request completionRequest) int {
+	count := 0
+	for _, message := range request.Messages {
+		if message.Role == "tool" || message.Role == "function" {
+			count++
+		}
+	}
+	return count
+}
+
+// toolCall streams one tool call with a unique id per round.
 func (s *sseWriter) toolCall(name, arguments string) {
 	payload, _ := json.Marshal(map[string]any{
 		"choices": []any{map[string]any{
@@ -204,6 +345,26 @@ func (s *sseWriter) toolCall(name, arguments string) {
 				"tool_calls": []any{map[string]any{
 					"index":    0,
 					"id":       "call-acceptance",
+					"type":     "function",
+					"function": map[string]any{"name": name, "arguments": arguments},
+				}},
+			},
+		}},
+	})
+	fmt.Fprintf(s.w, "data: %s\n\n", payload)
+	s.flush()
+}
+
+// toolCallAt is toolCall with an explicit round, so sequential calls in one turn
+// do not share an id.
+func (s *sseWriter) toolCallAt(name, arguments string, round int) {
+	payload, _ := json.Marshal(map[string]any{
+		"choices": []any{map[string]any{
+			"index": 0,
+			"delta": map[string]any{
+				"tool_calls": []any{map[string]any{
+					"index":    0,
+					"id":       fmt.Sprintf("call-acceptance-%d", round),
 					"type":     "function",
 					"function": map[string]any{"name": name, "arguments": arguments},
 				}},
