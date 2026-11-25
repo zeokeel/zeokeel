@@ -43,6 +43,9 @@ type Service struct {
 	// dropped from the map (the board keeps the outcome); evidence and notes are
 	// returned to the caller once.
 	leases map[string]*contracts.TaskLease
+	// path is the durable document (dir/leases.json); empty means in-memory only
+	// (NewService, and unit tests that do not care about durability).
+	path string
 }
 
 // NewService wires the lease layer.
@@ -75,8 +78,12 @@ func (s *Service) Claim(ctx context.Context, taskID, owner string) (contracts.Ta
 		// The previous owner is gone: drop the stale claim and report it so the
 		// caller can decide to retry (never silently steal).
 		delete(s.leases, taskID)
+		persistErr := s.persistLocked()
 		s.mu.Unlock()
 		s.releaseBoard(ctx, taskID)
+		if persistErr != nil {
+			return contracts.TaskLease{}, persistErr
+		}
 		return contracts.TaskLease{}, contracts.ErrLeaseExpired
 	}
 	s.mu.Unlock()
@@ -105,6 +112,9 @@ func (s *Service) Claim(ctx context.Context, taskID, owner string) (contracts.Ta
 		Heartbeat: now, State: contracts.LeaseStateClaimed,
 	}
 	s.leases[taskID] = lease
+	if err := s.persistLocked(); err != nil {
+		return contracts.TaskLease{}, err
+	}
 	return cloneLease(lease), nil
 }
 
@@ -114,14 +124,19 @@ func (s *Service) Heartbeat(ctx context.Context, taskID, owner string) (contract
 		return contracts.TaskLease{}, err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	lease, err := s.liveLeaseLocked(taskID, owner)
 	if err != nil {
+		s.mu.Unlock()
 		return contracts.TaskLease{}, err
 	}
 	now := s.cfg.Now()
 	lease.Heartbeat = now
 	lease.Until = now.Add(s.cfg.TTL)
+	if err := s.persistLocked(); err != nil {
+		s.mu.Unlock()
+		return contracts.TaskLease{}, err
+	}
+	s.mu.Unlock()
 	return cloneLease(lease), nil
 }
 
@@ -138,9 +153,12 @@ func (s *Service) Release(ctx context.Context, taskID, owner string) error {
 	}
 	lease.State = contracts.LeaseStateRejected
 	delete(s.leases, taskID)
+	persistErr := s.persistLocked()
 	s.mu.Unlock()
+	// The board goes back to pending even when the document could not be
+	// rewritten: a stale file row is pruned on the next load, hidden work is not.
 	s.releaseBoard(ctx, taskID)
-	return nil
+	return persistErr
 }
 
 // Submit implements contracts.TaskLeaseService.
@@ -160,6 +178,9 @@ func (s *Service) Submit(ctx context.Context, taskID, owner string, evidence []c
 	lease.Evidence = append([]contracts.Evidence(nil), evidence...)
 	lease.State = contracts.LeaseStateReview
 	lease.Heartbeat = s.cfg.Now()
+	if err := s.persistLocked(); err != nil {
+		return contracts.TaskLease{}, err
+	}
 	return cloneLease(lease), nil
 }
 
@@ -181,6 +202,10 @@ func (s *Service) Accept(ctx context.Context, taskID, reviewer, note string) (co
 	lease.ReviewNote = note
 	done := cloneLease(lease)
 	delete(s.leases, taskID)
+	if err := s.persistLocked(); err != nil {
+		s.mu.Unlock()
+		return contracts.TaskLease{}, err
+	}
 	s.mu.Unlock()
 
 	if _, err := s.board.SetStatus(ctx, taskID, contracts.TaskStatusCompleted); err != nil {
@@ -207,9 +232,13 @@ func (s *Service) Reject(ctx context.Context, taskID, reviewer, reason string) (
 	lease.ReviewNote = reason
 	rejected := cloneLease(lease)
 	delete(s.leases, taskID)
+	persistErr := s.persistLocked()
 	s.mu.Unlock()
 
 	s.releaseBoard(ctx, taskID)
+	if persistErr != nil {
+		return contracts.TaskLease{}, persistErr
+	}
 	return rejected, nil
 }
 
@@ -248,6 +277,17 @@ func (s *Service) Expire(ctx context.Context) ([]string, error) {
 	for _, id := range expired {
 		s.releaseBoard(ctx, id)
 	}
+	if len(expired) == 0 {
+		return expired, nil
+	}
+	// The board is already released; now drop the rows from the document. A
+	// failed write leaves stale rows that the next load prunes — never hidden
+	// work.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.persistLocked(); err != nil {
+		return expired, err
+	}
 	return expired, nil
 }
 
@@ -273,6 +313,8 @@ func (s *Service) liveLeaseLocked(taskID, owner string) (*contracts.TaskLease, e
 	}
 	if !s.cfg.Now().Before(lease.Until) {
 		delete(s.leases, taskID)
+		// Best effort: the row is stale either way, and a load prunes it.
+		_ = s.persistLocked()
 		return nil, contracts.ErrLeaseNotHeld
 	}
 	return lease, nil
@@ -281,6 +323,9 @@ func (s *Service) liveLeaseLocked(taskID, owner string) (*contracts.TaskLease, e
 // releaseBoard puts the task back to pending and unassigns it, ignoring the
 // board's absence of an owner API.
 func (s *Service) releaseBoard(ctx context.Context, taskID string) {
+	if s.board == nil {
+		return // a service opened only for its persisted table (no board wired)
+	}
 	current, err := s.findTask(ctx, taskID)
 	if err != nil {
 		return

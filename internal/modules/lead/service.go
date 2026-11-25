@@ -82,6 +82,9 @@ type Service struct {
 	// mu guards rules: the settings UI may replace them while a pass runs.
 	mu    sync.Mutex
 	rules []Rule
+	// path is the durable rule document (dir/rules.json); empty means in-memory
+	// only (NewService, and unit tests that do not care about durability).
+	path string
 }
 
 // NewService wires the pass.
@@ -111,7 +114,9 @@ func (s *Service) SetRules(ctx context.Context, rules []Rule) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.rules = append([]Rule(nil), rules...)
-	return nil
+	// The caller's rule set is now the live one; failing to make it durable must
+	// not silently look like success.
+	return s.persistLocked()
 }
 
 // RunOnce implements contracts.LeadService.
