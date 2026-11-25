@@ -310,7 +310,10 @@ const (
 	// point at the permission mode / OS wall instead of a generic tool failure.
 	MessageErrorKindSandboxDenied = "sandbox_denied"
 	MessageErrorKindCancelled     = "cancelled"
-	MessageErrorKindOther         = "other"
+	// MessageErrorKindDenied marks a call the human refused at the approval
+	// gate: a decision, never a failure (round-5 tools audit D4).
+	MessageErrorKindDenied = "denied"
+	MessageErrorKindOther  = "other"
 )
 
 // ClassifyError maps one backend error (or its message) to a MessageErrorKind
@@ -334,6 +337,11 @@ func ClassifyError(err error, msg string) string {
 		return false
 	}
 	switch {
+	// A refusal is a decision by the user, not a malfunction: the card says
+	// 已拒绝 instead of painting rig's English sentence red (round-5 tools audit
+	// D4). The phrase is rig's approval-gate wording.
+	case has("denied by approval"):
+		return MessageErrorKindDenied
 	case has("context canceled", "context cancelled", "operation was canceled", "operation was cancelled"):
 		return MessageErrorKindCancelled
 	case has("[sandbox:"):

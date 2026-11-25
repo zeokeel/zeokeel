@@ -54,7 +54,11 @@ export function useGatewayChat(
           name: step.name,
           input: step.input,
           output: step.output,
-          error: step.error,
+          // The category travels with the step: without it a settled or reloaded
+          // card could not tell a denial from a network failure (round-5 tools
+          // audit D3/D4 — this whitelist silently dropped the field).
+          ...(step.error ? { error: step.error } : {}),
+          ...(step.errorKind ? { errorKind: step.errorKind } : {}),
           status: (step.status === 'error'
             ? 'error'
             : step.status === 'running'

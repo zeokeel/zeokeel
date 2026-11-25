@@ -98,7 +98,21 @@ export function CodeBlock({
       {/* A long output scrolls inside its card: slicing it left the rest of a
           200-line log unreachable (round-4 tools audit D9). */}
       <div className="zk-code__scroll">
-        <CodeHighlighter lang={lang} header={false}>
+        <CodeHighlighter
+          lang={lang}
+          header={false}
+          // The syntax theme paints its own surface; the card belongs to the page,
+          // and the theme's inline style beat the token in dark mode
+          // (round-5 tools audit, dark 390: a white block on a black card).
+          highlightProps={{
+            customStyle: {
+              background: 'var(--zk-bg-strong)',
+              fontFamily: 'var(--zk-font-mono)',
+              margin: 0,
+              borderRadius: 0,
+            },
+          }}
+        >
           {shown}
         </CodeHighlighter>
       </div>

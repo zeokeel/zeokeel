@@ -147,7 +147,9 @@ export const TOOL_RENDERERS: Record<string, CardRenderer> = {
   // ---------------------------------------------------------------- shell --
   bash: defineCard({
     target: commandTarget(),
-    body: (_args, step) => <OutputCode step={step} lang="bash" maxLines={24} />,
+    // No line cap: the block scrolls inside the card, and a cap made the rest of
+    // a 200-line output unreachable (round-5 tools audit D9).
+    body: (_args, step) => <OutputCode step={step} lang="bash" />,
   }),
 
   // ----------------------------------------------------------------- file --
@@ -249,7 +251,9 @@ export const TOOL_RENDERERS: Record<string, CardRenderer> = {
   // ------------------------------------------------------------ jobs/term --
   job_start: defineCard({
     target: commandTarget(),
-    body: (_args, step) => <OutputCode step={step} lang="bash" maxLines={24} />,
+    // No line cap: the block scrolls inside the card, and a cap made the rest of
+    // a 200-line output unreachable (round-5 tools audit D9).
+    body: (_args, step) => <OutputCode step={step} lang="bash" />,
   }),
   job_output: defineCard({
     target: idTarget('tool.target.task', 'jobId', 'job_id', 'id'),

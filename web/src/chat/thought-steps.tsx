@@ -225,9 +225,12 @@ function withTitleButtons(
 
 function toolItem(step: ToolStep, t: ReturnType<typeof useT>): ThoughtChainItemType {
   const meta = toolMeta(step.name);
-  // Protocol status → the user's own words; never the raw enum.
-  const state =
-    step.status === 'running'
+  // Protocol status → the user's own words; never the raw enum. A refused call
+  // is a decision, not a failure (round-5 tools audit D4/D12).
+  const denied = step.errorKind === 'denied';
+  const state = denied
+    ? t('thread.status.denied')
+    : step.status === 'running'
       ? t('thread.status.running')
       : step.status === 'ok'
         ? t('thread.status.done')
@@ -251,7 +254,7 @@ function toolItem(step: ToolStep, t: ReturnType<typeof useT>): ThoughtChainItemT
         {state}
       </span>
     ),
-    status: step.status === 'running' ? 'loading' : step.status === 'ok' ? 'success' : 'error',
+    status: step.status === 'running' ? 'loading' : step.status === 'ok' || denied ? 'success' : 'error',
     collapsible: true,
     content: <ToolCardBody step={step} />,
   };

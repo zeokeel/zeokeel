@@ -128,6 +128,7 @@ export const zh = {
   'thread.usage': '{in} 入 · {out} 出',
   'thread.status.running': '运行中',
   'thread.status.done': '完成',
+  'thread.status.denied': '已拒绝',
   'thread.status.failed': '失败',
   'thread.truncated': '已截断，仅显示前 {max} 行（共 {total} 行）',
   'thread.contextUnavailable': '网关尚未提供上下文检查器（KeyContext），该标签页暂不出现',

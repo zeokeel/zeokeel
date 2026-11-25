@@ -124,6 +124,7 @@ export const en: Catalog = {
   'thread.usage': '{in} in · {out} out',
   'thread.status.running': 'Running',
   'thread.status.done': 'Done',
+  'thread.status.denied': 'Denied',
   'thread.status.failed': 'Failed',
   'thread.truncated': 'Truncated: showing the first {max} of {total} lines',
   'thread.contextUnavailable': 'The gateway does not expose the context inspector (KeyContext) yet, so this tab stays hidden',
