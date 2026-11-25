@@ -10,6 +10,7 @@ import { InboxScreen as WorkInboxScreen } from '@/features/inbox/InboxScreen';
 import { InspectorPanel } from '@/features/inspector/inspector-panel';
 import { useMediaQuery } from '@/design/use-system-appearance';
 import { InsightsScreen } from '@/features/insights/insights-screen';
+import { TaskDetailScreen } from '@/features/task/TaskDetailScreen';
 import { TeamScreen } from '@/features/team/team-screen';
 import { ContextScreen } from '@/features/thread/context-screen';
 import { NowScreen } from '@/features/now/now-screen';
@@ -90,6 +91,7 @@ export function AppRoutes() {
       <Route path="/capabilities" element={<CapabilitiesScreen />} />
       <Route path="/insights" element={<InsightsScreen />} />
       <Route path="/team" element={<TeamScreen />} />
+      <Route path="/t/:taskId" element={<TaskDetailScreen />} />
       <Route path="*" element={<NotFoundScreen />} />
     </Routes>
   );

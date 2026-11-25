@@ -43,6 +43,10 @@ export const ROUTES: RouteMeta[] = [
   { path: '/capabilities', ref: 'R23', titleKey: 'shell.capabilities' },
   { path: '/insights', ref: 'R24', titleKey: 'shell.insights' },
   { path: '/team', ref: 'R26', titleKey: 'shell.team' },
+  // R3b: one task on the work board (`tasks.*`, TRANSPORT §5.1.8/§5.1.13).
+  // The band shows the section's own name; the task's subject is the screen's
+  // `<h1>` (a row title in the band would be stale the moment it is renamed).
+  { path: '/t/:taskId', ref: 'R3b', titleKey: 'task.detail.title' },
 ];
 
 /**
