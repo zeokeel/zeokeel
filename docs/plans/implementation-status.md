@@ -35,7 +35,7 @@
 | M3 浏览器 | 🟡 | CDP 真连接 + 三个工具 + **每 Bot 独立 browser context**（独立 cookie jar；空 profile 拒绝；并发首开只建一个；关闭释放） | 真浏览器需验证上下文命令经 WS 传输可用与大窗口行为；CDP 上下文不跨浏览器重启（需独立 user-data-dir，属 M5 收尾） |
 | M4 连接器 | 🟡 | 四类渠道 + 出站 + 凭据 + 扫码登录协议 + **邮件按声明的字符集解码**（GBK/Big5/Shift_JIS 等）；**真机验证只做了本地能做的部分** |
 | M5 浏览器收尾 | ⬜ | 未开工（依赖 M3 的隔离） |
-| M6 共享（多用户） | 🟡 | `users` 模块 + `Allowed` 权限表 + **在入口执行**（派单/验收/复核/预算/名册）+ `users.*` 协议 + `user` 私有记忆作用域 | 无设置页 UI；任务无 `requested_by`；预算未按人归属；渠道身份未绑定；**无登录**（角色是策略不是认证） |
+| M6 共享（多用户） | 🟡 | `users` 模块 + `Allowed` 在入口执行 + `users.*` 协议 + `/settings/users`（名册/当前身份/角色图例）+ `user` 私有记忆作用域 | 任务无 `requested_by`；预算未按人归属；渠道身份未绑定；**无登录**（角色是策略不是认证） |
 
 ## 三、交互面（docs/design/grokbot-interaction-design.md）
 
@@ -49,6 +49,7 @@
 | `/settings/memory` 共享记忆 + 复核 | ✅ |
 | `/skills/drafts` 技能草稿 | ✅ |
 | `/settings/bots` 机器人 | ✅ |
+| `/settings/users` 成员与角色 | ✅ |
 | 390px 窄屏 | ✅（四屏实测无横向滚动） |
 
 ## 四、验证手段

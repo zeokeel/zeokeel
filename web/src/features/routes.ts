@@ -59,6 +59,11 @@ export const ROUTES: RouteMeta[] = [
   // path that outranks `/settings/:page` by length, because a roster of bots is
   // not a `settings` domain row.
   { path: '/settings/bots', ref: 'R27d', titleKey: 'bots.title' },
+  // R27e: the roster and the role policy (`users.snapshot`/`users.upsert`/
+  // `users.act`, M6). Same shape as R27a–R27d — a static path that outranks
+  // `/settings/:page` by length, because a roster of people is not a `settings`
+  // domain row. Roles are a permission policy, not sign-in: there is no login.
+  { path: '/settings/users', ref: 'R27e', titleKey: 'users.title' },
   { path: '/automation', ref: 'R22', titleKey: 'shell.automation' },
   { path: '/capabilities', ref: 'R23', titleKey: 'shell.capabilities' },
   { path: '/insights', ref: 'R24', titleKey: 'shell.insights' },

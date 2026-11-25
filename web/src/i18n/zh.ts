@@ -1052,6 +1052,44 @@ export const zh = {
   'bots.writeFailed': '这处改动没有被接受',
   'bots.loadFailed': '机器人加载失败',
   'bots.retry': '重试',
+
+  // ---------------------------------------------------------------- users --
+  // R27e · 成员与角色 (M6). The first two lines are the point of the screen: a
+  // roster with roles looks like sign-in, and it is not one.
+  'users.title': '成员',
+  'users.note':
+    '角色是权限策略，不是登录：这个产品没有身份验证，网关信任本机上打开的这个浏览器。切换身份只改变「谁在行动」，不证明你是那个人。',
+  'users.actingAs': '当前身份：{name}（{role}）',
+  'users.acting.mark': '当前身份',
+  'users.actAs': '以他/她身份行动',
+  'users.legend.title': '角色能做什么',
+  'users.legend.note':
+    '五行就是权限表的全部：角色只决定这五件事，更细的（哪个工具、哪个文件）仍由审批与沙箱决定。',
+  'users.legend.allRoles': '全部角色',
+  'users.action.dispatch': '派活给 Bot（建任务、给它发消息）',
+  'users.action.approve': '审批（放行一次写、发、删或花钱）',
+  'users.action.manageBots': '管理 Bot（新建、退休、改工具 / 记忆 / 模型）',
+  'users.action.reviewMemory': '复核团队记忆（把一条共享记忆发布给所有人）',
+  'users.action.decideBudget': '决定预算（提高上限、接受超额）',
+  'users.roles.owner': '所有者',
+  'users.roles.manager': '管理者',
+  'users.roles.collaborator': '协作成员',
+  'users.roles.separator': '、',
+  'users.roster.title': '名单',
+  'users.roster.note':
+    '角色改动下一次判断就生效。至少保留一个所有者：把最后一个所有者降级会被网关拒绝。',
+  'users.empty': '还没有成员。',
+  'users.field.id': 'id',
+  'users.field.name': '名字',
+  'users.field.role': '角色',
+  'users.field.created': '创建',
+  'users.timeUnknown': '时间未知',
+  'users.create': '新增成员',
+  'users.createFailed': '新增失败',
+  'users.writeFailed': '这处改动没有被接受',
+  'users.actFailed': '身份切换没有被接受',
+  'users.loadFailed': '成员加载失败',
+  'users.retry': '重试',
 } as const;
 
 export type MessageKey = keyof typeof zh;

@@ -41,6 +41,9 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
       '/settings/memory',
       // R27d: the bot roster. Its own entry too — a bot is not a setting.
       '/settings/bots',
+      // R27e: the roster of people. Its own entry for the same reason: a policy
+      // table about who may act is not a client preference.
+      '/settings/users',
       // R28: the skill-drafts queue, also its own entry.
       '/skills/drafts',
     ].find((path) => location.pathname.startsWith(path)) ??
@@ -120,6 +123,11 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
         // `users` is the roster of people, `sparkles` the proposals queue, and
         // `sliders` the settings entry: none of them means "a persistent岗位".
         { key: '/settings/bots', icon: <ZkIcon name="square" />, label: t('bots.title') },
+        // R27e: the roster of people and the role policy. `shield` is the
+        // "who may do what" glyph, which is what this screen is about: `users`
+        // already means the team roster above, and `sliders` is the settings
+        // entry — neither says "permission".
+        { key: '/settings/users', icon: <ZkIcon name="shield" />, label: t('users.title') },
       ]}
     />
   );

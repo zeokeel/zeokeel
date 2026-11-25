@@ -1058,4 +1058,41 @@ export const en: Catalog = {
   'bots.writeFailed': 'The change was not accepted',
   'bots.loadFailed': 'Could not load the bots',
   'bots.retry': 'Retry',
+
+  // ---------------------------------------------------------------- users --
+  // R27e · people and roles (M6).
+  'users.title': 'People',
+  'users.note':
+    'Roles are a permission policy, not sign-in: this product has no authentication — the gateway trusts the browser open on this machine. Switching identity only changes who acts; it does not prove you are that person.',
+  'users.actingAs': 'Acting as {name} ({role})',
+  'users.acting.mark': 'current identity',
+  'users.actAs': 'Act as them',
+  'users.legend.title': 'What each role may do',
+  'users.legend.note':
+    'These five rows are the whole table: a role decides only these five things. Anything finer — which tool, which file — is still the approval gate and the sandbox.',
+  'users.legend.allRoles': 'every role',
+  'users.action.dispatch': 'Dispatch (create a task, message a bot)',
+  'users.action.approve': 'Approve (release a write, a send, a delete or a spend)',
+  'users.action.manageBots': 'Manage bots (create, retire, retune tools / memory / model)',
+  'users.action.reviewMemory': 'Review memory (publish a shared note to everyone)',
+  'users.action.decideBudget': 'Decide the budget (raise a limit, accept an overrun)',
+  'users.roles.owner': 'owner',
+  'users.roles.manager': 'manager',
+  'users.roles.collaborator': 'collaborator',
+  'users.roles.separator': ', ',
+  'users.roster.title': 'Roster',
+  'users.roster.note':
+    'A role change takes effect on the gateway’s next check. At least one owner must remain: demoting the last one is refused by the gateway.',
+  'users.empty': 'Nobody on the roster yet.',
+  'users.field.id': 'id',
+  'users.field.name': 'name',
+  'users.field.role': 'role',
+  'users.field.created': 'created',
+  'users.timeUnknown': 'time unknown',
+  'users.create': 'Add member',
+  'users.createFailed': 'Could not add the member',
+  'users.writeFailed': 'The change was not accepted',
+  'users.actFailed': 'The identity switch was not accepted',
+  'users.loadFailed': 'Could not load the roster',
+  'users.retry': 'Retry',
 };

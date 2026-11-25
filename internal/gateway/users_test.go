@@ -174,3 +174,14 @@ func TestActingUserSnapshotNamesTheActor(t *testing.T) {
 		t.Fatalf("snapshot = %+v, want the acting manager named", payload)
 	}
 }
+
+func TestDemotingTheLastOwnerReadsAsARequestProblem(t *testing.T) {
+	// A refusal the person caused (and can fix in the form) must not surface as
+	// an internal error: the screen shows the message either way, but the code
+	// tells every other client which of the two it is.
+	err := contracts.ErrUserLastOwner
+	problem := orchestrationError(err)
+	if problem == nil || problem.Code != codeInvalidRequest {
+		t.Fatalf("problem = %+v, want codeInvalidRequest", problem)
+	}
+}

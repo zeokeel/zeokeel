@@ -210,7 +210,13 @@ func orchestrationError(err error) *protocolError {
 		// Reporting those as internal errors made the settings screen say
 		// "something broke" for a typo.
 		errors.Is(err, contracts.ErrBotInvalid),
-		errors.Is(err, contracts.ErrBotTemplateUnknown):
+		errors.Is(err, contracts.ErrBotTemplateUnknown),
+		// The roster's own refusals are the form's problem too: a bad role, an
+		// unknown member, or demoting the only owner all have a fix the person
+		// can apply, so they must not read as "something broke".
+		errors.Is(err, contracts.ErrUserInvalid),
+		errors.Is(err, contracts.ErrUserUnknown),
+		errors.Is(err, contracts.ErrUserLastOwner):
 		return protocolErrorWithMessage(codeInvalidRequest, err.Error())
 	}
 	return internalError(err)

@@ -22,6 +22,7 @@ import { ChannelsScreen } from '@/features/settings/channels/ChannelsScreen';
 import { BotsScreen } from '@/features/settings/bots/BotsScreen';
 import { HealthScreen } from '@/features/settings/health/HealthScreen';
 import { TeamMemoryScreen } from '@/features/settings/memory/TeamMemoryScreen';
+import { UsersScreen } from '@/features/settings/users/UsersScreen';
 import { SettingsScreen } from '@/features/settings/settings-screen';
 import { SkillDraftsScreen } from '@/features/skills/SkillDraftsScreen';
 import { NotFoundScreen } from '@/features/not-found-screen';
@@ -114,6 +115,11 @@ export function AppRoutes() {
           have one: a bot roster is not a `settings` domain row, so
           `/settings/:page` must not own it. */}
       <Route path="/settings/bots" element={<BotsScreen />} />
+      {/* R27e: the roster and the role policy (`users.snapshot`, `users.upsert`,
+          `users.act`, M6). A static path for the same reason R27a–R27d have one:
+          a roster of people is not a `settings` domain row, so `/settings/:page`
+          must not own it. */}
+      <Route path="/settings/users" element={<UsersScreen />} />
       <Route path="/settings/:page" element={<SettingsScreen />} />
       <Route path="/automation" element={<AutomationScreen />} />
       <Route path="/capabilities" element={<CapabilitiesScreen />} />
