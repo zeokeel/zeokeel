@@ -27,15 +27,21 @@ export function ToolCardBody({ step }: { step: ToolStep }) {
   // tools audit D3/N1).
   const outputText =
     typeof step.output === 'string' && step.output.trim() !== '' ? step.output : null;
-  const failureText = denied || step.status === 'denied'
-    ? t('thread.tool.denied')
-    : step.error
-      ? step.error
-      : outputText
-        ? outputText
+  // Only a failed call gets the alert: without this guard the *success* output
+  // became the red box (round-6 final audit R1 — every successful card announced
+  // its own output as an error).
+  const failed = step.status === 'error' || step.status === 'denied';
+  const failureText = !failed
+    ? null
+    : denied || step.status === 'denied'
+      ? t('thread.tool.denied')
+      : step.error
+        ? step.error
         : step.errorKind
-          ? t('thread.tool.failedBy', { kind: step.errorKind })
-          : null;
+          ? // The wire has no separate error field: a failed call's summary *is*
+            // the failure text, and the category is only the fallback.
+            outputText ?? t('thread.tool.failedBy', { kind: step.errorKind })
+          : outputText;
 
   return (
     <div className="zk-tool-card">

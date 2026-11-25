@@ -465,6 +465,13 @@ body {
   border-radius: var(--zk-radius-sm);
 }
 
+.zk-code-block .token.number,
+.zk-code-block .token.boolean,
+.zk-code-block .token.constant {
+  /* The syntax theme's orange was 3.72:1 on the light surface. */
+  color: var(--zk-label-primary);
+}
+
 .zk-code-block {
   margin: 0 0 var(--zk-space-3);
   border: 1px solid var(--zk-border-subtle);

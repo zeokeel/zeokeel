@@ -187,7 +187,7 @@ function applyEvent(base: ZeoMessage, event: RunEvent): ZeoMessage {
         input: undefined,
         output: result.output,
         error: result.error,
-        status: result.ok ? 'ok' : 'error',
+        status: result.cancelled ? 'cancelled' : result.ok ? 'ok' : 'error',
       };
       return {
         ...base,
@@ -198,7 +198,7 @@ function applyEvent(base: ZeoMessage, event: RunEvent): ZeoMessage {
                     ...step,
                     output: result.output,
                     error: result.error,
-                    status: result.ok ? 'ok' : 'error',
+                    status: result.cancelled ? 'cancelled' : result.ok ? 'ok' : 'error',
                   }
                 : step,
             )

@@ -738,7 +738,13 @@ func (s *runStream) emitTool(tool toolCallDTO) {
 	data := map[string]any{
 		"callId": tool.ID,
 		"name":   tool.Name,
-		"ok":     tool.Status != "error",
+		// A cancelled call did not succeed: `ok` drives the client's status, and
+		// "not error" made a stopped call render as a green 完成 (round-6 final
+		// audit N3).
+		"ok": tool.Status != "error" && tool.Status != "cancelled",
+	}
+	if tool.Status == "cancelled" {
+		data["cancelled"] = true
 	}
 	if tool.Summary != "" {
 		if tool.Status == "error" {

@@ -330,7 +330,12 @@ function toolItem(
           : 'loading'
         : step.status === 'ok' || denied || cancelled
           ? 'success'
-          : 'error',
+          : // An unclassified error is not yet known to be a failure: the
+            // denial kind arrives a frame or two after the status, and the node
+            // flashed red before turning 已拒绝 (round-6 final audit R2).
+            step.errorKind
+            ? 'error'
+            : 'abort',
     collapsible: true,
     content: <ToolCardBody step={step} />,
   };

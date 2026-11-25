@@ -62,11 +62,17 @@ export function useGatewayChat(
           // audit D3/D4 — this whitelist silently dropped the field).
           ...(step.error ? { error: step.error } : {}),
           ...(step.errorKind ? { errorKind: step.errorKind } : {}),
+          // The wire's four states survive the mapping: a stopped or refused
+          // call must not arrive as a green 完成 (round-6 final audit N3).
           status: (step.status === 'error'
             ? 'error'
             : step.status === 'running'
               ? 'running'
-              : 'ok') satisfies ToolStepStatus,
+              : step.status === 'cancelled'
+                ? 'cancelled'
+                : step.status === 'denied'
+                  ? 'denied'
+                  : 'ok') satisfies ToolStepStatus,
         })),
         ...(message.attachments && message.attachments.length > 0
           ? { attachments: message.attachments }

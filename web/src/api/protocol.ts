@@ -67,6 +67,8 @@ export interface ToolResultData {
    * still be labelled with the tool instead of the raw call id. */
   name?: string;
   ok: boolean;
+  /** The run was stopped before the call finished: neutral, never 完成. */
+  cancelled?: boolean;
   output?: unknown;
   error?: string;
 }
