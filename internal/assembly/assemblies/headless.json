@@ -68,6 +68,11 @@
       "config": {}
     },
     {
+      "id": "tasklease",
+      "module": "zeokeel/tasklease",
+      "config": {}
+    },
+    {
       "id": "hosttools",
       "module": "zeokeel/hosttools",
       "config": {

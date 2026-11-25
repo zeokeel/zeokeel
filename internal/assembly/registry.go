@@ -19,6 +19,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/sandbox"
 	"github.com/zeokeel/zeokeel/internal/modules/sessionstore"
 	"github.com/zeokeel/zeokeel/internal/modules/skills"
+	"github.com/zeokeel/zeokeel/internal/modules/tasklease"
 	"github.com/zeokeel/zeokeel/internal/modules/toolkit"
 	"github.com/zeokeel/zeokeel/internal/modules/triage"
 	"github.com/zeokeel/zeokeel/internal/modules/update"
@@ -59,6 +60,8 @@ func Registry() *module.Registry {
 	mustRegister(registry, toolkit.Module())
 	// triage joins the inbox to the task board: it must come after both.
 	mustRegister(registry, triage.Module())
+	// tasklease wraps the task board: it must come after toolkit.
+	mustRegister(registry, tasklease.Module())
 	mustRegister(registry, goal.Module())
 	mustRegister(registry, agent.Module())
 	mustRegister(registry, automation.Module())

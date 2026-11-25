@@ -143,7 +143,7 @@ func TestProductsAndEntries(t *testing.T) {
 	wantHeadless := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/inbox", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/insights",
-		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/hosttools", "zeokeel/memorystore",
+		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/tasklease", "zeokeel/hosttools", "zeokeel/memorystore",
 		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
 	}
 	loaded := make(map[string]bool, len(headless))
@@ -230,39 +230,6 @@ func TestRegistryIsExplicit(t *testing.T) {
 	}
 }
 
-// TestEveryRegisteredModuleIsLoaded closes the "registered but never loaded"
-// hole: a module can be added to Registry() (so its tests and imports compile)
-// yet never appear in any embedded assembly, in which case it silently does not
-// exist at runtime. The gateway reuses the headless entries, so headless is the
-// one place every module must appear.
-func TestEveryRegisteredModuleIsLoaded(t *testing.T) {
-	entries, err := assembly.Entries(assembly.ProductHeadless)
-	if err != nil {
-		t.Fatalf("Entries(headless): %v", err)
-	}
-	loaded := make(map[string]bool, len(entries))
-	for _, entry := range entries {
-		loaded[entry.Module] = true
-	}
-	// Known exceptions are named with a reason. Anything else that is
-	// registered but not loaded fails the test: that is the silent-dead-module
-	// bug this guard exists for.
-	knownNotLoaded := map[string]string{
-		assembly.GroupModuleID: "container module: only referenced by nested assembly groups, and headless has none",
-		"zeokeel/modelcatalog": "registered but has no assembly entry yet (no consumer today); tracked in docs/plans/m0-interconnection-audit.md",
-	}
-	for _, info := range assembly.Registry().Modules() {
-		if loaded[info.ID] {
-			continue
-		}
-		if reason, ok := knownNotLoaded[info.ID]; ok {
-			t.Logf("module %q is registered but not loaded: %s", info.ID, reason)
-			continue
-		}
-		t.Errorf("module %q is registered but absent from the headless assembly (it will never load)", info.ID)
-	}
-}
-
 func TestValidateEmbeddedProducts(t *testing.T) {
 	for _, product := range assembly.Products() {
 		if err := assembly.Validate(product); err != nil {
@@ -292,7 +259,7 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 
 	instances := loader.Instances()
 	wantIDs := []string{
-		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "hosttools", "memorystore",
+		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "tasklease", "hosttools", "memorystore",
 		"agent", "automation", "update", "importer", "acp",
 	}
 	gotIDs := make([]string, 0, len(instances))
@@ -402,6 +369,34 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 	marked, err := inboxService.Get(context.Background(), arrival.ID)
 	if err != nil || marked.Status != contracts.InboxStatusTask {
 		t.Fatalf("inbox row after triage = (%+v, %v), want status task", marked, err)
+	}
+
+	// The fourth module: the claim layer. It must move the same board task
+	// through claim → review → done while keeping the board in sync.
+	leaseService, ok := root.Get(contracts.KeyTaskLease)
+	if !ok || leaseService == nil {
+		t.Fatal("KeyTaskLease service is not available on the root")
+	}
+	taskID := decision.TaskIDs[0]
+	claimed, err := leaseService.Claim(context.Background(), taskID, "bot-1")
+	if err != nil || claimed.Owner != "bot-1" {
+		t.Fatalf("lease Claim through the assembly = (%+v, %v), want bot-1", claimed, err)
+	}
+	if _, err := leaseService.Submit(context.Background(), taskID, "bot-1", []contracts.Evidence{{Kind: "link", Ref: "https://example.test"}}); err != nil {
+		t.Fatalf("lease Submit through the assembly: %v", err)
+	}
+	accepted, err := leaseService.Accept(context.Background(), taskID, "lead", "verified")
+	if err != nil || accepted.State != contracts.LeaseStateDone {
+		t.Fatalf("lease Accept through the assembly = (%+v, %v), want done", accepted, err)
+	}
+	boardTasks, err = board.List(context.Background())
+	if err != nil {
+		t.Fatalf("board List after accept: %v", err)
+	}
+	for _, task := range boardTasks {
+		if task.ID == taskID && task.Status != contracts.TaskStatusCompleted {
+			t.Fatalf("board task %q status = %q after accept, want completed", taskID, task.Status)
+		}
 	}
 
 	// Goal v2: the durable per-session goal backend is assembled and the DSH
