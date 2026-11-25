@@ -194,19 +194,25 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
     setStopping(true);
     if (stoppingTimer.current !== null) window.clearTimeout(stoppingTimer.current);
     stoppingTimer.current = window.setTimeout(() => setStopping(false), 2500);
-    // `chat.abort()` only closes the client's stream: the gateway keeps running
-    // and the next send is a 409 ("a run is active"). Cancel server-side first,
-    // then drop the local stream so the UI reacts without waiting for the ack.
-    void cancelRun(sessionId).catch(() => undefined);
-    // A turn started before this page loaded has no local stream to abort, and
-    // calling abort() on one threw `reading 'abort'` (round-6 loop audit F7).
-    if (chat.isRequesting) {
-      chat.abort();
-    } else {
-      // No stream: reflect the stop locally so the row stops looking live; the
-      // next snapshot settles it.
-      void chat.refresh?.(true);
-    }
+    // Everything below is deferred to the next frame: the click handler itself
+    // took 39–68ms (cancel + abort + their renders), and a browser cannot paint
+    // in the middle of a task — so the optimistic 已停止 could not reach the
+    // screen any sooner no matter how early it was committed (round-6 final
+    // audit R4-1, measured with Tracing).
+    requestAnimationFrame(() => {
+      // `chat.abort()` only closes the client's stream: the gateway keeps
+      // running and the next send is a 409 ("a run is active"). Cancel
+      // server-side as well.
+      void cancelRun(sessionId).catch(() => undefined);
+      // A turn started before this page loaded has no local stream to abort, and
+      // calling abort() on one threw `reading 'abort'` (round-6 loop audit F7).
+      if (chat.isRequesting) {
+        chat.abort();
+      } else {
+        // No stream: the next snapshot settles the row.
+        void chat.refresh?.(true);
+      }
+    });
   };
 
   // L5: a running turn is stopped by Esc from anywhere on the screen.

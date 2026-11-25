@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Descriptions } from 'antd';
 import { CodeHighlighter } from '@ant-design/x';
-import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { ghcolors, oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { parseUnifiedDiff, type DiffLine } from '@/api/files';
 import { useDarkMode } from '@/chat/markdown';
 import { useT } from '@/i18n';
@@ -37,7 +37,7 @@ export function KeyValueRows({
   rows: Array<{ labelKey: MessageKey; text: string }>;
 }) {
   const t = useT();
-  // antd owns the label/value pairing, the column layout and the a11y of the
+  // antd owns the label/value pairing, the column layout and the ghcolors of the
   // pairing; the card around it stays ours (it is one of the six surfaces antd X
   // does not provide — docs/plans/antd-x-component-map.md §4).
   return (
@@ -110,7 +110,7 @@ export function CodeBlock({
           // and the theme's inline style beat the token in dark mode
           // (round-5 tools audit, dark 390: a white block on a black card).
           highlightProps={{
-            style: dark ? oneDark : oneLight,
+            style: dark ? oneDark : ghcolors,
             customStyle: {
               background: 'var(--zk-bg-strong)',
               fontFamily: 'var(--zk-font-mono)',

@@ -328,14 +328,21 @@ function toolItem(
           ? // Parked on the approval card: neither spinning nor finished.
             'abort'
           : 'loading'
-        : step.status === 'ok' || denied || cancelled
+        : step.status === 'ok'
           ? 'success'
-          : // An unclassified error is not yet known to be a failure: the
-            // denial kind arrives a frame or two after the status, and the node
-            // flashed red before turning 已拒绝 (round-6 final audit R2).
-            step.errorKind
-            ? 'error'
-            : 'abort',
+          : // A stop is neutral (a minus in the muted colour), never the green
+            // tick of a finished call (round-6 final audit N3); a refusal keeps
+            // the danger mark, which is DESIGN 5.2's rule for approval denials.
+            cancelled
+            ? 'abort'
+            : denied
+              ? 'error'
+              : // An unclassified error is not yet known to be a failure: the
+                // denial kind arrives a frame or two after the status, and the
+                // node flashed red before turning 已拒绝 (round-6 audit R2).
+                step.errorKind
+                ? 'error'
+                : 'abort',
     collapsible: true,
     content: <ToolCardBody step={step} />,
   };

@@ -1,8 +1,10 @@
 import { useSyncExternalStore, type ReactNode } from 'react';
 import { XMarkdown } from '@ant-design/x-markdown';
 import { CodeHighlighter } from '@ant-design/x';
-import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import {
+  oneDark,
+  ghcolors,
+} from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { nodesToText } from './nodes-to-text';
 
 /** The live appearance, read from the one place the app publishes it. */
@@ -36,7 +38,10 @@ function markdownComponents(dark: boolean) {
           // showing a made-up "text".
           header={lang ? undefined : false}
           highlightProps={{
-            style: dark ? oneDark : oneLight,
+            // The default light theme's number orange is 3.72:1 on the surface,
+            // and its colours are inline styles no CSS rule can correct; the
+            // ghcolors variant is the same palette with readable contrast.
+            style: dark ? oneDark : ghcolors,
             // The library's own theme paints #fafafa and Fira Code; the block
             // belongs to the page's surface and mono stack instead.
             customStyle: {
