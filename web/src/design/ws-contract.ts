@@ -10,7 +10,9 @@ export interface MethodParams {
 }
 
 export const WS_METHODS = [
+  'approval.action',
   'approval.resolve',
+  'approval.token',
   'approvals.snapshot',
   'approvals.subscribe',
   'artifacts.snapshot',
@@ -22,6 +24,9 @@ export const WS_METHODS = [
   'context.subscribe',
   'context.unsubscribe',
   'foreground.set',
+  'inbox.dispatch',
+  'inbox.snapshot',
+  'inbox.triage',
   'initialize',
   'mcp.reload',
   'notify.action',
@@ -53,7 +58,11 @@ export const WS_METHODS = [
   'settings.subscribe',
   'task.delete',
   'task.status',
+  'tasks.claim',
+  'tasks.heartbeat',
+  'tasks.review',
   'tasks.snapshot',
+  'tasks.submit',
   'tasks.subscribe',
   'tasks.unsubscribe',
   'team.activity',
@@ -73,7 +82,9 @@ export const WS_METHODS = [
 export type WsMethod = (typeof WS_METHODS)[number];
 
 export const WS_PARAMS: Record<WsMethod, MethodParams> = {
+  'approval.action': { required: ['approvalId', 'decision', 'token'], optional: [] },
   'approval.resolve': { required: ['decision', 'id'], optional: [] },
+  'approval.token': { required: ['approvalId'], optional: [] },
   'approvals.snapshot': { required: [], optional: [] },
   'approvals.subscribe': { required: [], optional: ['sinceRev'] },
   'artifacts.snapshot': { required: [], optional: [] },
@@ -85,6 +96,9 @@ export const WS_PARAMS: Record<WsMethod, MethodParams> = {
   'context.subscribe': { required: ['sessionId'], optional: ['sinceRev'] },
   'context.unsubscribe': { required: ['sessionId'], optional: [] },
   'foreground.set': { required: ['sessionId'], optional: [] },
+  'inbox.dispatch': { required: ['id', 'subject'], optional: ['assignee', 'blockedBy', 'detail', 'note', 'writeScopes'] },
+  'inbox.snapshot': { required: [], optional: ['includeExpired', 'limit', 'source', 'statuses'] },
+  'inbox.triage': { required: ['action', 'id'], optional: ['note'] },
   'initialize': { required: [], optional: ['capabilities', 'clientName', 'clientVersion', 'protocolVersion'] },
   'mcp.reload': { required: [], optional: ['disabled'] },
   'notify.action': { required: ['id'], optional: ['actionId'] },
@@ -116,7 +130,11 @@ export const WS_PARAMS: Record<WsMethod, MethodParams> = {
   'settings.subscribe': { required: [], optional: ['sinceRev'] },
   'task.delete': { required: ['id'], optional: ['sessionId'] },
   'task.status': { required: ['id', 'status'], optional: ['sessionId'] },
+  'tasks.claim': { required: ['id', 'owner'], optional: [] },
+  'tasks.heartbeat': { required: ['id', 'owner'], optional: [] },
+  'tasks.review': { required: ['decision', 'id', 'reviewer'], optional: ['note'] },
   'tasks.snapshot': { required: [], optional: ['sessionId'] },
+  'tasks.submit': { required: ['evidence', 'id', 'owner'], optional: [] },
   'tasks.subscribe': { required: [], optional: ['sessionId', 'sinceRev'] },
   'tasks.unsubscribe': { required: [], optional: ['sessionId'] },
   'team.activity': { required: [], optional: ['limit'] },

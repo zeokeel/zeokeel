@@ -1,10 +1,24 @@
 {
   "protocolVersion": 1,
   "params": {
+    "approval.action": {
+      "required": [
+        "approvalId",
+        "decision",
+        "token"
+      ],
+      "optional": []
+    },
     "approval.resolve": {
       "required": [
         "decision",
         "id"
+      ],
+      "optional": []
+    },
+    "approval.token": {
+      "required": [
+        "approvalId"
       ],
       "optional": []
     },
@@ -73,6 +87,37 @@
         "sessionId"
       ],
       "optional": []
+    },
+    "inbox.dispatch": {
+      "required": [
+        "id",
+        "subject"
+      ],
+      "optional": [
+        "assignee",
+        "blockedBy",
+        "detail",
+        "note",
+        "writeScopes"
+      ]
+    },
+    "inbox.snapshot": {
+      "required": [],
+      "optional": [
+        "includeExpired",
+        "limit",
+        "source",
+        "statuses"
+      ]
+    },
+    "inbox.triage": {
+      "required": [
+        "action",
+        "id"
+      ],
+      "optional": [
+        "note"
+      ]
     },
     "initialize": {
       "required": [],
@@ -280,11 +325,43 @@
         "sessionId"
       ]
     },
+    "tasks.claim": {
+      "required": [
+        "id",
+        "owner"
+      ],
+      "optional": []
+    },
+    "tasks.heartbeat": {
+      "required": [
+        "id",
+        "owner"
+      ],
+      "optional": []
+    },
+    "tasks.review": {
+      "required": [
+        "decision",
+        "id",
+        "reviewer"
+      ],
+      "optional": [
+        "note"
+      ]
+    },
     "tasks.snapshot": {
       "required": [],
       "optional": [
         "sessionId"
       ]
+    },
+    "tasks.submit": {
+      "required": [
+        "evidence",
+        "id",
+        "owner"
+      ],
+      "optional": []
     },
     "tasks.subscribe": {
       "required": [],

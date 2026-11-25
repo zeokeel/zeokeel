@@ -327,6 +327,33 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"task.status": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.taskSetStatus(ctx, request.Params)
 		},
+		"inbox.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.inboxSnapshot(ctx, request.Params)
+		},
+		"inbox.dispatch": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.inboxDispatch(ctx, request.Params)
+		},
+		"inbox.triage": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.inboxTriage(ctx, request.Params)
+		},
+		"tasks.claim": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.taskClaim(ctx, request.Params)
+		},
+		"tasks.heartbeat": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.taskHeartbeat(ctx, request.Params)
+		},
+		"tasks.submit": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.taskSubmit(ctx, request.Params)
+		},
+		"tasks.review": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.taskReview(ctx, request.Params)
+		},
+		"approval.token": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.approvalToken(ctx, request.Params)
+		},
+		"approval.action": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.approvalAction(ctx, request.Params)
+		},
 		"team.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.teamSnapshot()
 		},

@@ -802,6 +802,55 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
   以免每个测试网关都去访问 GitHub。
 - capability：`update`（来自 `KeyUpdate`，headless 与 serve 都装配了 update 模块）。
 
+#### 5.1.13 编排扩展：收件箱 / 租约 / 审批动作
+
+这一组方法把"外面有人递活"接到 Lead 的分诊和任务板上。它们是**请求—响应**（不是推送域）：
+界面打开「等我」时读一次、Lead 的分诊回合读一次；推送域以后再加，不改这些载荷。
+
+| 方法 | 参数 | 返回 | 幂等 | 契约 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| `inbox.snapshot` | `{statuses?,source?,limit?,includeExpired?}` | `{items:[InboxItem],stats:{total,new,triaged}}` | Y | `InboxService.List` + `Stats` | ✅ 已实现 |
+| `inbox.dispatch` | `{id,subject,detail?,assignee?,blockedBy?,writeScopes?,note?}` | `{taskIds,created,item}` | N | `TriageService.Apply`（action=task） | ✅ 已实现 |
+| `inbox.triage` | `{id,action,note?}` | `InboxItem` | N | `TriageService.Apply`（ignored/archived/triaged） | ✅ 已实现 |
+| `tasks.claim` | `{id,owner}` | `TaskLease` | N | `TaskLeaseService.Claim` | ✅ 已实现 |
+| `tasks.heartbeat` | `{id,owner}` | `TaskLease` | Y | `TaskLeaseService.Heartbeat` | ✅ 已实现 |
+| `tasks.submit` | `{id,owner,evidence:[{kind,ref,note?}]}` | `TaskLease` | N | `TaskLeaseService.Submit`（无证据 → `1010 evidence_required`） | ✅ 已实现 |
+| `tasks.review` | `{id,decision:"accept"\|"reject",reviewer,note?}` | `TaskLease` | N | `TaskLeaseService.Accept` / `Reject` | ✅ 已实现 |
+| `approval.token` | `{approvalId}` | `{token,expiresAt}` | N | `ApprovalActionService.IssueToken` | ✅ 已实现 |
+| `approval.action` | `{approvalId,decision:"allow"\|"deny",token}` | `{ok:true}` | N | `ApprovalActionService.Apply` | ✅ 已实现 |
+
+`InboxItem`（摘要）：
+
+```jsonc
+{
+  "id": "inbox-000001", "source": "wechat", "channel": "dm-1", "sender": "owner",
+  "priority": 0, "title": "查退款率", "body": "…", "ref": "…",
+  "receivedAt": "2026-11-25T09:00:00Z", "lastSeenAt": "…", "expiresAt": "…",
+  "status": "new", "count": 1, "taskIds": ["task-1"]
+}
+```
+
+`TaskLease`（摘要）：
+
+```jsonc
+{
+  "taskId": "task-1", "owner": "bot-1", "until": "2026-11-25T09:10:00Z",
+  "heartbeat": "2026-11-25T09:00:00Z", "state": "claimed",
+  "evidence": [{"kind": "link", "ref": "https://…"}], "reviewNote": ""
+}
+```
+
+规则：
+
+- **所有入站都先进 `inbox`**：渠道适配器只调用 `inbox` 的写入侧（模块内 `Add`），再由 Lead 用
+  `inbox.dispatch` / `inbox.triage` 分诊；队友永远不直接写任务板。
+- **审批只有一种语义**：`approval.token` 签发一次性 token，`approval.action` 用它回答；聊天里的
+  「同意 / 不同意」走同一条 `Resolve`（网关不解析自然语言，解析在 approvals 模块内，`ParseReply`）。
+- 类型化错误映射成 `-32600`（invalid request）并保留原文：`lease: task already claimed`、
+  `approval: token expired` 这类话可以直接显示给用户。
+- capability：`inbox`、`triage`、`tasklease`、`approvalaction`（四个服务键都随装配提供；缺任何一个，
+  对应方法返回 `-32004 capability_unsupported`）。
+
 #### 5.1.9 连接器（`mcp`，能力页）
 
 | 方法 | 参数 | 返回 | 幂等 | 契约 | 状态 |

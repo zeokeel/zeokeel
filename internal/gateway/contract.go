@@ -95,6 +95,15 @@ var contractParams = map[string]any{
 	"team.interrupt":          teamIDParams{},
 	"team.close":              teamIDParams{},
 	"team.activity":           teamActivityParams{},
+	"inbox.snapshot":          inboxSnapshotParams{},
+	"inbox.dispatch":          inboxDispatchParams{},
+	"inbox.triage":            inboxTriageParams{},
+	"tasks.claim":             leaseParams{},
+	"tasks.heartbeat":         leaseParams{},
+	"tasks.submit":            taskSubmitParams{},
+	"tasks.review":            taskReviewParams{},
+	"approval.token":          approvalTokenParams{},
+	"approval.action":         approvalActionParams{},
 }
 
 // conditionalCapability is one capability that exists only when the assembly

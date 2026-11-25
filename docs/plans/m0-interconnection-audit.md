@@ -35,6 +35,7 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | `contracts.KeyTaskLease` | `internal/modules/tasklease`（新） | 未来的派遣器、gateway | 10 条（抢占/心跳/证据必填/验收/打回/过期/释放/防双开） |
 | **四模块链路** inbox → triage → board → lease | 上述四个模块 | — | 装配测试里：Apply 建任务 → Claim → Submit → Accept，board 最终 completed |
 | `contracts.KeyApprovalAction` | approvals 模块（与 KeyApprovals 同源） | 桌面按钮 / 卡片回调 / 聊天回复 | 13 条（token 校验/过期/单次使用/绑单/索引回复/空队列） |
+| **网关 → 服务键**（9 个方法） | inbox / triage / tasklease / approvalaction | web 客户端、Lead 分诊回合 | 一致性测试（TRANSPORT §5.1 ↔ dispatch ↔ contract.json ↔ ws-contract.ts）+ 载荷映射测试 7 条 |
 | 注册 ↔ 装配一致 | registry | headless.json | `TestEveryRegisteredModuleIsLoaded`（新） |
 
 inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为空），所以它必须能先于 Lead/任务板启动。这条由 `TestDescriptorMetadata` 钉住——如果将来有人给它加 `Require(KeyTeam)`，测试会红。
@@ -61,7 +62,8 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 | ~~任务板租约/心跳/证据/验收~~ | ✅ 已交付：`tasklease`（TTL/心跳/证据必填/review/accept/reject/expire） | 已交付 |
 | ~~审批 action + 文字回复~~ | ✅ 已交付：`IssueToken` / `Apply` / `ApplyReply`，三条入口最终都落到 `Resolve` | 已交付 |
 | 渠道适配器 | 无（微信/钉钉/飞书/邮件都还没代码） | M0-5，先 webhook，再微信 iLink |
-| 网关协议 `inbox.*` / `notify.route.*` | 未加，TRANSPORT 未改 | 与 M0-2 同批（协议先行） |
+| ~~网关协议 `inbox.*` / 租约 / 审批动作~~ | ✅ 9 个方法已实现并同步 TRANSPORT §5.1.13、contract.json、ws-contract.ts | 已交付 |
+| `notify.route.*`（主/备渠道） | 未加 | 下一批 |
 | UI | 未接；效果图只是原型 | 协议稳定后一轮做 |
 
 ## 4b. 本轮互联判断（审批层）
@@ -70,6 +72,8 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 - **复用而非重写**：`ApplyReply` 调 `ParseReply`，测试 `TestApplyReplyRoundTripsThroughTheParser` 盯着，防止词表被复制成两份。
 - **token 绑定审批单**：签名覆盖 `payload|approvalID`，把 A 单的 token 用到 B 单会被判无效（有测试）。
 - **重启失效**：secret 每次启动随机生成，重启后旧 token 全失效——这是**有意的**（宁可让用户重发一次，也不让旧链接长期有效）；代价写进 §4 已知限制。
+- **能力门控暂缺**：新方法可用，但 `serverCapabilities` 还没加 `inbox/triage/tasklease/approvalaction`（要连带改 contract.json 的 static 列表和 web 生成物）。目前客户端只能"调用后看 `-32004`"，不优雅；列为下一步。
+- **生成链是互联的一部分**：改 dispatch 必须同步 4 处——TRANSPORT §5.1、`contractParams`、`contract.json`（`go run ./gencontract`，**要在包目录里跑**，否则会写到仓库根）、`web/src/design/ws-contract.ts`（`npm run gen:ws-contract`）。漏一处，一致性测试或 `gen:verify` 会红。
 
 ## 5. 互联审计的固定动作（每加一个模块都做）
 
@@ -96,6 +100,7 @@ scripts/verify.sh --quick                   PASS（gofmt / build / vet /
 scripts/verify.sh --quick（triage 后）       PASS 5/5，63s
                                             （中间有一次重跑才绿，记在案）
 scripts/verify.sh --quick（tasklease 后）   PASS 5/5，67s
+scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过
 scripts/verify.sh --quick（approval 后）    PASS 5/5，63s
                                             （首次跑时 gateway 的
                                             TestApprovalsSnapshotDeltaReplay 以
