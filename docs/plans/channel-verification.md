@@ -55,7 +55,7 @@ scripts/channel-verify.sh dingtalk    http://127.0.0.1:<port> <secret>
 
 1. 应用控制台把机器人回调地址设为 `https://<host>/api/inbound/dingtalk`（需公网或内网穿透）。
 2. 用 `scripts/channel-verify.sh dingtalk` 先验签名，再在群里 @机器人 发一条。
-3. 确认回调 header 名与你实现的一致（`X-DingTalk-Signature` / `X-DingTalk-Timestamp`）。
+3. 钉钉官方回调头是 `timestamp` + `sign`（时间戳**毫秒**），适配器两种拼写都接受；签名覆盖的是 `timestamp+"\n"+secret`，时间戳按原样参与计算。
 
 ## 3. 飞书
 

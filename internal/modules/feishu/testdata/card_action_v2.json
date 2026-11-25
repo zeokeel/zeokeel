@@ -1,0 +1,35 @@
+{
+  "schema": "2.0",
+  "header": {
+    "event_id": "f7984f25108f8137722bb63cee927e66",
+    "token": "066zT6pS4QCbgj5Do145GfDbbagCHGgF",
+    "create_time": "1603977298000000",
+    "event_type": "card.action.trigger",
+    "tenant_key": "2df73991750a1b2c",
+    "app_id": "cli_a5fb0ae6a4e0e5f1"
+  },
+  "event": {
+    "operator": {
+      "tenant_key": "2df73991750a1b2c",
+      "user_id": "8675309",
+      "open_id": "ou_3c14f3a59eaf2825dbe25359f15a1b2c",
+      "union_id": "on_cad4860e7af114fb4ff6c5d496da1b2c"
+    },
+    "token": "c-295ee57216a5dc9de90fefd0aadb4b1d7d0d1b2c",
+    "action": {
+      "value": {
+        "approvalId": "ap_100",
+        "decision": "allow",
+        "token": "tok_100"
+      },
+      "tag": "button",
+      "timezone": "Asia/Shanghai",
+      "name": "Button_approve"
+    },
+    "host": "im_message",
+    "context": {
+      "open_message_id": "om_574d639e4a44e4dd646eaf628e24d4f8",
+      "open_chat_id": "oc_e4d2605ca917e695f54f11aaf56a1b2c"
+    }
+  }
+}

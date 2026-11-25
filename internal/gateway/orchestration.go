@@ -868,12 +868,22 @@ func (g *Gateway) browserStatus(ctx context.Context, _ json.RawMessage) (any, *p
 // --- shared team notes -----------------------------------------------------
 
 type teamNoteDTO struct {
-	ID     string `json:"id"`
-	TaskID string `json:"taskId,omitempty"`
-	Title  string `json:"title"`
-	Body   string `json:"body,omitempty"`
-	Author string `json:"author,omitempty"`
-	At     string `json:"at,omitempty"`
+	ID         string `json:"id"`
+	TaskID     string `json:"taskId,omitempty"`
+	Title      string `json:"title"`
+	Body       string `json:"body,omitempty"`
+	Author     string `json:"author,omitempty"`
+	At         string `json:"at,omitempty"`
+	Reviewed   bool   `json:"reviewed"`
+	ReviewedBy string `json:"reviewedBy,omitempty"`
+	ReviewedAt string `json:"reviewedAt,omitempty"`
+}
+
+type teamNoteReviewParams struct {
+	ID       string `json:"id"`
+	Reviewer string `json:"reviewer"`
+	Accept   *bool  `json:"accept"`
+	At       string `json:"at,omitempty"`
 }
 
 type teamNotesListResult struct {
@@ -900,6 +910,7 @@ func teamNoteFromContract(note contracts.TeamNote) teamNoteDTO {
 	return teamNoteDTO{
 		ID: note.ID, TaskID: note.TaskID, Title: note.Title, Body: note.Body,
 		Author: note.Author, At: rfc3339(note.At),
+		Reviewed: note.Reviewed, ReviewedBy: note.ReviewedBy, ReviewedAt: rfc3339(note.ReviewedAt),
 	}
 }
 
@@ -1024,4 +1035,35 @@ func (g *Gateway) wechatStatusOrZero(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return status.Connected, nil
+}
+
+// teamNoteReview marks one shared note as reviewed (or rejected). accept is a
+// pointer on purpose: an omitted field must be refused, not read as "rejected".
+func (g *Gateway) teamNoteReview(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.teamNotesService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params teamNoteReviewParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if params.Accept == nil {
+		return nil, errInvalidParams("accept", "accept is required (true or false)")
+	}
+	at := time.Time{}
+	if params.At != "" {
+		parsed, err := time.Parse(time.RFC3339, params.At)
+		if err != nil {
+			return nil, errInvalidParams("at", "want RFC3339")
+		}
+		at = parsed
+	}
+	note, err := service.Review(ctx, contracts.TeamNoteReview{
+		NoteID: params.ID, Reviewer: params.Reviewer, Accept: *params.Accept, At: at,
+	})
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return teamNoteFromContract(note), nil
 }

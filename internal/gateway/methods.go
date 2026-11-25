@@ -411,6 +411,9 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"team.note.record": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.teamNoteRecord(ctx, request.Params)
 		},
+		"team.note.review": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.teamNoteReview(ctx, request.Params)
+		},
 		"heartbeat.status": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.heartbeatStatus(ctx, request.Params)
 		},

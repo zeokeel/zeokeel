@@ -9,10 +9,16 @@
 //	stringToSign = timestamp + "\n" + secret
 //	sign        = base64(HMAC-SHA256(key = secret, message = stringToSign))
 //
-// and quotes the timestamp in *seconds* (X-DingTalk-Timestamp). We accept the
-// base64 form only — that is what DingTalk's callback delivers; a hex signature
-// is refused rather than silently reinterpreted (a signature we cannot decode is
-// just a signature we cannot verify).
+// and delivers it in the documented HTTP-mode callback headers `timestamp` (unix
+// *milliseconds*) and `sign`. The X-DingTalk-Signature / X-DingTalk-Timestamp
+// spelling (unix seconds) is accepted as well because scripts/channel-verify.sh
+// and the gateway passthrough test send it. The HMAC is computed over whichever
+// timestamp string arrived, so the unit is never attacker-chosen — it only
+// decides how the value is read as a clock reading (see callbackTime).
+//
+// We accept the base64 form only — that is what DingTalk's callback delivers; a
+// hex signature is refused rather than silently reinterpreted (a signature we
+// cannot decode is just a signature we cannot verify).
 package dingtalk
 
 import (
@@ -39,10 +45,18 @@ const DefaultBaseURL = "https://api.dingtalk.com"
 // sendPath is the robot group-message endpoint (msgKey "sampleText").
 const sendPath = "/v1.0/robot/groupMessages/send"
 
-// Callback header names (upper-case; lookups are case-insensitive).
+// Callback header names. Lookups are case-insensitive; a request may use either
+// spelling (see the package comment for why both exist).
 const (
+	// HeaderSignature / HeaderTimestamp are the spelling our own verify script
+	// and gateway tests send; the timestamp there is in unix seconds.
 	HeaderSignature = "X-DingTalk-Signature"
 	HeaderTimestamp = "X-DingTalk-Timestamp"
+	// HeaderSignDocumented / HeaderTimestampDocumented are the platform's
+	// documented HTTP-mode callback headers; the timestamp is in milliseconds.
+	// https://open.dingtalk.com/document/robots/receive-message
+	HeaderSignDocumented      = "sign"
+	HeaderTimestampDocumented = "timestamp"
 )
 
 // msgKeyText is the robot message template for a plain-text reply.
@@ -162,35 +176,54 @@ func (a *Adapter) Receive(ctx context.Context, headers map[string]string, body [
 // trusted once the request is proven authentic, and a replay of an old (but
 // genuine) callback is refused with ErrDingTalkStaleTimestamp.
 func (a *Adapter) verifySignature(headers map[string]string, now time.Time) error {
-	signatureValue := lookupHeader(headers, HeaderSignature)
-	timestampValue := lookupHeader(headers, HeaderTimestamp)
+	signatureValue := lookupHeaderAny(headers, HeaderSignDocumented, HeaderSignature)
+	timestampValue := lookupHeaderAny(headers, HeaderTimestampDocumented, HeaderTimestamp)
 	if signatureValue == "" || timestampValue == "" {
-		return fmt.Errorf("%w: missing %s/%s", contracts.ErrDingTalkBadSignature, HeaderSignature, HeaderTimestamp)
+		return fmt.Errorf("%w: missing %s/%s (or %s/%s)",
+			contracts.ErrDingTalkBadSignature,
+			HeaderSignDocumented, HeaderTimestampDocumented, HeaderSignature, HeaderTimestamp)
 	}
 	signature, err := base64.StdEncoding.DecodeString(signatureValue)
 	if err != nil || len(signature) == 0 {
 		return fmt.Errorf("%w: signature is not base64", contracts.ErrDingTalkBadSignature)
 	}
-	seconds, err := strconv.ParseInt(timestampValue, 10, 64)
-	if err != nil {
-		return fmt.Errorf("%w: timestamp %q is not seconds", contracts.ErrDingTalkBadSignature, timestampValue)
+	at, ok := callbackTime(timestampValue)
+	if !ok {
+		return fmt.Errorf("%w: timestamp %q is not unix seconds or milliseconds", contracts.ErrDingTalkBadSignature, timestampValue)
 	}
 
 	secret := []byte(a.cfg.SignSecret)
 	if len(secret) == 0 {
 		return fmt.Errorf("%w: no sign secret configured", contracts.ErrDingTalkBadSignature)
 	}
+	// The platform signs the header string it sent, so the unit cannot be
+	// swapped without the secret.
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(timestampValue + "\n" + a.cfg.SignSecret))
 	if !hmac.Equal(mac.Sum(nil), signature) {
 		return contracts.ErrDingTalkBadSignature
 	}
 
-	at := time.Unix(seconds, 0)
 	if skew := now.Sub(at); skew > contracts.DingTalkMaxSkew || skew < -contracts.DingTalkMaxSkew {
 		return fmt.Errorf("%w: %s off by %s", contracts.ErrDingTalkStaleTimestamp, timestampValue, skew.Round(time.Second))
 	}
 	return nil
+}
+
+// callbackTime reads the callback timestamp header as a clock reading. DingTalk's
+// documented header quotes unix *milliseconds* (e.g. 1708327204136) while the
+// X-DingTalk-Timestamp spelling quotes seconds; the magnitude decides, because a
+// seconds value can never reach 1e12 before the year 33658.
+func callbackTime(value string) (time.Time, bool) {
+	number, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || number <= 0 {
+		return time.Time{}, false
+	}
+	const millisecondThreshold = 1_000_000_000_000
+	if number >= millisecondThreshold {
+		return time.UnixMilli(number), true
+	}
+	return time.Unix(number, 0), true
 }
 
 // lookupHeader finds a header case-insensitively (net/http canonicalizes on the
@@ -202,6 +235,17 @@ func lookupHeader(headers map[string]string, name string) string {
 	for key, value := range headers {
 		if strings.EqualFold(key, name) {
 			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+// lookupHeaderAny returns the first non-empty value among the accepted spellings
+// of one header, in priority order.
+func lookupHeaderAny(headers map[string]string, names ...string) string {
+	for _, name := range names {
+		if value := lookupHeader(headers, name); value != "" {
+			return value
 		}
 	}
 	return ""

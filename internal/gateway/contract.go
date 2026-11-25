@@ -120,6 +120,7 @@ var contractParams = map[string]any{
 		Limit int `json:"limit,omitempty"`
 	}{},
 	"team.note.record": teamNotesRecordParams{},
+	"team.note.review": teamNoteReviewParams{},
 	"heartbeat.status": struct{}{},
 	"heartbeat.tick":   struct{}{},
 	"browser.status":   struct{}{},

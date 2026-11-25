@@ -1,0 +1,24 @@
+{
+  "senderPlatform": "iOS",
+  "conversationId": "cid7a6b5c4d3e2f1a==",
+  "chatbotCorpId": "ding9733d095*******6cb783455b",
+  "chatbotUserId": "$:LWCP_v1:$PcdFk0c1XakTWLPSQCaVcRzxeEVV3pr5",
+  "msgId": "msgSessionFields0001==",
+  "senderNick": "王五",
+  "isAdmin": false,
+  "senderStaffId": "staff0001",
+  "sessionWebhookExpiredTime": 1708331000000,
+  "createAt": 1708327400000,
+  "senderCorpId": "ding9733d095*******6cb783455b",
+  "conversationType": "2",
+  "senderId": "$:LWCP_v1:$Zq9wE7r6T5y4U3i2O1p0",
+  "conversationTitle": "值班群",
+  "isInAtList": true,
+  "sessionWebhook": "https://oapi.dingtalk.com/robot/sendBySession?session=d41d8cd98f00b204e9800998ecf8427e",
+  "text": {
+    "content": "好的，谢谢"
+  },
+  "robotCode": "dingohropvkloy0xdm3k",
+  "timeout": 3000,
+  "msgtype": "text"
+}

@@ -25,6 +25,35 @@ type TeamNote struct {
 	Author string
 	// At is when the note was recorded (zero means "now" on Record).
 	At time.Time
+
+	// Reviewed reports whether a human has reviewed the note. Notes are always
+	// recorded unreviewed: a fact may be written down as-is, and only a review
+	// turns it into something the team treats as agreed. Record clears these
+	// three fields, so re-recording a note sends it back to unreviewed.
+	Reviewed bool
+	// ReviewedBy names the human who reviewed it (empty when Reviewed is
+	// false).
+	ReviewedBy string
+	// ReviewedAt is when the review happened (zero when Reviewed is false). It
+	// is not At: a note keeps the time it was recorded.
+	ReviewedAt time.Time
+}
+
+// TeamNoteReview is one human review of a stored note. Accepting a note is the
+// only way a note becomes "agreed"; rejecting it keeps the note (and its
+// content) but records who rejected it and when.
+type TeamNoteReview struct {
+	// NoteID is the URI of the note being reviewed (TeamNote.ID).
+	NoteID string
+	// Reviewer names the human who reviewed it (required).
+	Reviewer string
+	// Accept records agreement. False records a rejection, which is written
+	// into the note itself — the stored metadata block says
+	// "- Reviewed: rejected" and the note's summary is prefixed with
+	// "[rejected]", so the rejection is visible wherever the note is shown.
+	Accept bool
+	// At is when the review happened (zero means "now").
+	At time.Time
 }
 
 // TeamNotesService is the team's shared note board over the memory store. It is
@@ -38,16 +67,30 @@ type TeamNotesService interface {
 	// List returns the newest notes first, at most limit of them (limit <= 0
 	// means "the store's own default").
 	List(ctx context.Context, limit int) ([]TeamNote, error)
+	// Review marks one stored note as reviewed by a human and returns it.
+	//
+	// It rewrites the note in place (same URI), so reviewing twice updates the
+	// reviewer and the time instead of piling up rows. A note keeps its title
+	// and body; Review only adds the review fields. An id that is not a stored
+	// note reports ErrTeamNoteUnknown.
+	Review(ctx context.Context, review TeamNoteReview) (TeamNote, error)
 }
 
 // Team note errors are typed so callers can distinguish "you wrote a bad note"
 // (fix the input) from "this product has no memory store" (nothing to fix).
 var (
-	// ErrTeamNoteInvalid means the note failed validation (title/body/author).
+	// ErrTeamNoteInvalid means the note or review failed validation
+	// (title/body/author, or the reviewer on a review).
 	ErrTeamNoteInvalid = errors.New("teamnotes: invalid note")
 	// ErrTeamNotesUnavailable means the product has no memory service, so added
 	// notes could not be stored.
 	ErrTeamNotesUnavailable = errors.New("teamnotes: memory service unavailable")
+	// ErrTeamNoteUnknown means the id passed to Review names no reviewable note:
+	// it is outside the notes namespace, it holds another kind of memory, or it
+	// can no longer be read (so its body could not be preserved). It is separate
+	// from ErrTeamNoteInvalid so a caller can tell "check your input" from
+	// "that note does not exist".
+	ErrTeamNoteUnknown = errors.New("teamnotes: note not found")
 )
 
 // KeyTeamNotes is provided by the teamnotes module.

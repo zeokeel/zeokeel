@@ -30,6 +30,22 @@ func (f *fakeTeamNotes) Record(_ context.Context, note contracts.TeamNote) (cont
 	return note, nil
 }
 
+func (f *fakeTeamNotes) Review(_ context.Context, review contracts.TeamNoteReview) (contracts.TeamNote, error) {
+	if f.err != nil {
+		return contracts.TeamNote{}, f.err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, note := range f.notes {
+		if note.ID != "" && note.ID == review.NoteID {
+			note.Reviewed, note.ReviewedBy, note.ReviewedAt = true, review.Reviewer, review.At
+			f.notes[i] = note
+			return note, nil
+		}
+	}
+	return contracts.TeamNote{}, contracts.ErrTeamNoteUnknown
+}
+
 func (f *fakeTeamNotes) List(context.Context, int) ([]contracts.TeamNote, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

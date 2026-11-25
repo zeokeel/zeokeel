@@ -837,6 +837,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `wechat.login.state` | `{qrId}` | `{state,connected}`，`state` ∈ pending/waiting/confirmed/expired | Y | `WeChatLoginService.LoginState`（**expired 是正常答案，不是错误**） | ✅ 已实现 |
 | `team.notes` | `{limit?}` | `{notes:[TeamNote]}` | Y | `TeamNotesService.List`（最多 200） | ✅ 已实现 |
 | `team.note.record` | `{id?,taskId?,title,body?,author?}` | `TeamNote` | N | `TeamNotesService.Record` | ✅ 已实现 |
+| `team.note.review` | `{id,reviewer,accept,at?}` | `TeamNote`（含 reviewed/reviewedBy/reviewedAt） | N | `TeamNotesService.Review`（`accept` 必须显式传，缺省拒绝） | ✅ 已实现 |
 | `heartbeat.status` | — | `{running,leadIntervalMs,channelIntervalMs,lastTick?,leadRuns,dispatched,polls,newMessages,errors?}` | Y | `HeartbeatService.Status` | ✅ 已实现 |
 | `heartbeat.tick` | — | `{leadRuns,dispatched,polls,newMessages,errors?}` | N | `HeartbeatService.Tick`（手动跑一次） | ✅ 已实现 |
 | `browser.status` | — | `{connected,endpoint?,pages}` | Y | `BrowserService.Status` | ✅ 已实现 |

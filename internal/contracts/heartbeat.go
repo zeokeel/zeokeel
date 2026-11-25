@@ -39,13 +39,28 @@ type HeartbeatReport struct {
 	Errors []string
 }
 
+// HeartbeatConfig is the runtime control surface: the settings screen can turn
+// the loop off or change its cadence without restarting the product.
+type HeartbeatConfig struct {
+	Enabled         *bool
+	LeadInterval    time.Duration
+	ChannelInterval time.Duration
+}
+
 // HeartbeatService is the product's autonomous loop.
 type HeartbeatService interface {
 	// Tick performs one pass immediately (the loop calls this on its timer).
 	Tick(ctx context.Context) (HeartbeatReport, error)
 	// Status reports the loop state.
 	Status(ctx context.Context) (HeartbeatStatus, error)
+	// Configure changes the loop while it runs. A zero field keeps the current
+	// value; intervals below HeartbeatMinInterval are refused.
+	Configure(ctx context.Context, cfg HeartbeatConfig) error
 }
+
+// HeartbeatMinInterval is the shortest cadence the loop accepts: anything faster
+// hammers every channel and every triage pass for no new information.
+const HeartbeatMinInterval = 5 * time.Second
 
 // KeyHeartbeat is provided by the heartbeat module.
 var KeyHeartbeat = cordis.NewServiceKey[HeartbeatService]("zeokeel/heartbeat")

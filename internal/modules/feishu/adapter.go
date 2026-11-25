@@ -18,6 +18,12 @@
 //     still present. It keeps the skew check; it is narrower (same secret, one
 //     fewer input) but not weaker against forgery. A request without a
 //     timestamp header is always rejected, so no scheme is replayable forever.
+//
+// Encrypted pushes ({"encrypt": "<base64>"}, what the platform sends once an
+// Encrypt Key is configured — for events and for the handshake alike) are refused
+// with contracts.ErrFeishuBadPayload: the signature over the wrapper verifies, so
+// acknowledging the body would look like a successful ingest while the event was
+// never read. We do not implement the decrypt path.
 package feishu
 
 import (
@@ -142,6 +148,12 @@ func (a *Adapter) Receive(ctx context.Context, headers map[string]string, body [
 	}
 	if err := a.verifyRequest(headers, body); err != nil {
 		return contracts.InboxItem{}, false, err
+	}
+	// An encrypted push verifies like any other request (the signature covers the
+	// raw wrapper), so it has to be recognised explicitly: dropping it with a nil
+	// error would answer the platform with 200 and lose the event.
+	if isEncryptedPush(body) {
+		return contracts.InboxItem{}, false, fmt.Errorf("%w: encrypted event body (no decrypt path)", contracts.ErrFeishuBadPayload)
 	}
 	// A handshake is answered by the HTTP layer through VerifyURL; it must not
 	// become an inbox row.
@@ -545,6 +557,24 @@ func parseEvent(body []byte) (eventEnvelope, error) {
 		envelope.Header.EventType = contracts.FeishuEventMessageReceive
 	}
 	return envelope, nil
+}
+
+// isEncryptedPush reports whether body is the platform's encrypted wrapper
+// ({"encrypt": "<base64 ciphertext>"}) rather than a plaintext callback payload.
+// It is the only shape we cannot read, and it also carries the handshake when an
+// Encrypt Key is configured, so it is checked before anything is echoed or filed.
+func isEncryptedPush(body []byte) bool {
+	var probe struct {
+		Encrypt json.RawMessage `json:"encrypt"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return false
+	}
+	if len(probe.Encrypt) == 0 || string(probe.Encrypt) == "null" {
+		return false
+	}
+	var ciphertext string
+	return json.Unmarshal(probe.Encrypt, &ciphertext) == nil && strings.TrimSpace(ciphertext) != ""
 }
 
 // textContent pulls the plain text out of message.content, which the platform

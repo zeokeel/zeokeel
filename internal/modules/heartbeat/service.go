@@ -30,6 +30,9 @@ type Config struct {
 	LeadInterval time.Duration `json:"leadInterval,omitempty"`
 	// ChannelInterval is how often channels are polled (default 60s).
 	ChannelInterval time.Duration `json:"channelInterval,omitempty"`
+	// MinInterval overrides the cadence floor (tests use it; 0 = the product
+	// default of 5s). It exists so the floor can be tested without sleeping 5s.
+	MinInterval time.Duration `json:"-"`
 }
 
 func (c Config) enabled() bool { return c.Enabled == nil || *c.Enabled }
@@ -55,6 +58,8 @@ type Service struct {
 	lastTick time.Time
 	last     contracts.HeartbeatReport
 	running  bool
+	// wake asks the running loop to re-read its configuration.
+	wake chan struct{}
 }
 
 // New wires the loop (now defaults to time.Now; nil lead is allowed for tests
@@ -63,7 +68,7 @@ func New(cfg Config, lead contracts.LeadService, channels []Channel, now func() 
 	if now == nil {
 		now = time.Now
 	}
-	return &Service{cfg: cfg.normalized(), lead: lead, channels: channels, now: now}
+	return &Service{cfg: cfg.normalized(), lead: lead, channels: channels, now: now, wake: make(chan struct{}, 1)}
 }
 
 // Tick implements contracts.HeartbeatService.
@@ -118,34 +123,134 @@ func (s *Service) Status(ctx context.Context) (contracts.HeartbeatStatus, error)
 	}, nil
 }
 
-// Run ticks until the context ends: triage on LeadInterval, channels on
-// ChannelInterval. It returns nil on cancellation (a stop is not a failure).
+// Run ticks until the context ends, re-reading its configuration whenever
+// Configure asks it to. Two independent schedules (lead, channels) share one
+// wait: the loop sleeps until whichever fires first, and a Configure shortens or
+// lengthens that wait immediately. It returns nil on cancellation (a stop is not
+// a failure).
 func (s *Service) Run(ctx context.Context) error {
-	if !s.cfg.enabled() {
-		return nil
-	}
-	s.mu.Lock()
-	s.running = true
-	s.mu.Unlock()
-	defer func() {
-		s.mu.Lock()
-		s.running = false
-		s.mu.Unlock()
-	}()
-
-	leadTick := time.NewTicker(s.cfg.LeadInterval)
-	defer leadTick.Stop()
-	channelTick := time.NewTicker(s.cfg.ChannelInterval)
-	defer channelTick.Stop()
+	nextLead := s.now().Add(s.configSnapshot().LeadInterval)
+	nextChannel := s.now().Add(s.configSnapshot().ChannelInterval)
 
 	for {
+		cfg := s.configSnapshot()
+		s.setRunning(cfg.enabled())
+		if !cfg.enabled() {
+			// Disabled: wait for a Configure or the context. Returning here would
+			// make enable-at-runtime impossible.
+			select {
+			case <-ctx.Done():
+				s.setRunning(false)
+				return nil
+			case <-s.wake:
+			}
+			nextLead = s.now().Add(s.configSnapshot().LeadInterval)
+			nextChannel = s.now().Add(s.configSnapshot().ChannelInterval)
+			continue
+		}
+
+		wait := nextLead.Sub(s.now())
+		if channelWait := nextChannel.Sub(s.now()); channelWait < wait {
+			wait = channelWait
+		}
+		if wait < 0 {
+			wait = 0
+		}
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
+			s.setRunning(false)
 			return nil
-		case <-leadTick.C:
-			s.runLeadOnly(ctx)
-		case <-channelTick.C:
-			s.runChannelsOnly(ctx)
+		case <-s.wake:
+			timer.Stop()
+			cfg = s.configSnapshot()
+			nextLead = s.now().Add(cfg.LeadInterval)
+			nextChannel = s.now().Add(cfg.ChannelInterval)
+		case <-timer.C:
+			now := s.now()
+			if !now.Before(nextLead) {
+				s.runLeadOnly(ctx)
+				nextLead = s.now().Add(s.configSnapshot().LeadInterval)
+			}
+			if !now.Before(nextChannel) {
+				s.runChannelsOnly(ctx)
+				nextChannel = s.now().Add(s.configSnapshot().ChannelInterval)
+			}
+		}
+	}
+}
+
+// Configure implements contracts.HeartbeatService.
+func (s *Service) Configure(ctx context.Context, update contracts.HeartbeatConfig) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// The floor read takes the same mutex, so read it before locking.
+	floor := s.minInterval()
+	s.mu.Lock()
+	next := s.cfg
+	if update.Enabled != nil {
+		next.Enabled = update.Enabled
+	}
+	if update.LeadInterval != 0 {
+		if update.LeadInterval < floor {
+			s.mu.Unlock()
+			return fmt.Errorf("heartbeat: lead interval %s is below the %s minimum", update.LeadInterval, floor)
+		}
+		if update.LeadInterval > 24*time.Hour {
+			s.mu.Unlock()
+			return fmt.Errorf("heartbeat: lead interval %s is above 24h", update.LeadInterval)
+		}
+		next.LeadInterval = update.LeadInterval
+	}
+	if update.ChannelInterval != 0 {
+		if update.ChannelInterval < floor {
+			s.mu.Unlock()
+			return fmt.Errorf("heartbeat: channel interval %s is below the %s minimum", update.ChannelInterval, floor)
+		}
+		if update.ChannelInterval > 24*time.Hour {
+			s.mu.Unlock()
+			return fmt.Errorf("heartbeat: channel interval %s is above 24h", update.ChannelInterval)
+		}
+		next.ChannelInterval = update.ChannelInterval
+	}
+	s.cfg = next
+	s.mu.Unlock()
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+// minInterval is the cadence floor (product default, or the test override).
+func (s *Service) minInterval() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cfg.MinInterval > 0 {
+		return s.cfg.MinInterval
+	}
+	return contracts.HeartbeatMinInterval
+}
+
+func (s *Service) configSnapshot() Config {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg
+}
+
+func (s *Service) setRunning(running bool) {
+	s.mu.Lock()
+	s.running = running
+	s.mu.Unlock()
+}
+
+func stopTimer(timer *time.Timer) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
 		}
 	}
 }

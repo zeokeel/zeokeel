@@ -34,8 +34,10 @@ case "$mode" in
     string_to_sign=$(printf '%s\n%s' "$ts" "$secret")
     sig=$(printf '%s' "$string_to_sign" | openssl dgst -sha256 -hmac "$secret" -binary | openssl base64 -A)
     body='{"msgtype":"text","msgId":"verify-1","conversationId":"c1","senderStaffId":"u1","text":{"content":"channel-verify"}}'
+    # The platform sends `timestamp` + `sign`; the X-DingTalk-* spelling is an alias
+    # the adapter also accepts. Send the documented pair, keep the alias visible.
     code=$(curl -s -o /tmp/channel-verify.out -w '%{http_code}' -X POST \
-      -H "Content-Type: application/json" -H "X-DingTalk-Timestamp: $ts" -H "X-DingTalk-Signature: $sig" \
+      -H "Content-Type: application/json" -H "timestamp: $ts" -H "sign: $sig" \
       --data-binary "$body" "$base/api/inbound/dingtalk")
     ;;
   feishu-challenge)

@@ -1958,6 +1958,17 @@ const wsDispatch = (client, message) => {
       const state = entry.polls === 1 ? 'pending' : entry.polls === 2 ? 'waiting' : 'confirmed';
       return reply({ state, connected: state === 'confirmed' });
     }
+    case 'team.note.review': {
+      const id = String(params.id ?? '');
+      if (!id) return fail(-32602, 'invalid_params');
+      if (params.accept === undefined) return fail(-32602, 'invalid_params');
+      const note = mockTeamNotes.find((row) => row.id === id);
+      if (!note) return fail(-32600, 'team notes: unknown note');
+      note.reviewed = true;
+      note.reviewedBy = String(params.reviewer ?? '');
+      note.reviewedAt = params.at ? String(params.at) : nowIso();
+      return reply(note);
+    }
     case 'team.notes': {
       return reply({ notes: mockTeamNotes.slice(0, Number(params.limit ?? 50)) });
     }

@@ -464,6 +464,16 @@
         "taskId"
       ]
     },
+    "team.note.review": {
+      "required": [
+        "accept",
+        "id",
+        "reviewer"
+      ],
+      "optional": [
+        "at"
+      ]
+    },
     "team.notes": {
       "required": [],
       "optional": [

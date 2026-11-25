@@ -188,3 +188,78 @@ func TestStatusReportsTheLastPass(t *testing.T) {
 }
 
 func boolPtr(value bool) *bool { return &value }
+
+func TestConfigureChangesTheCadenceAtRuntime(t *testing.T) {
+	leadService := &fakeLead{}
+	service := heartbeat.New(heartbeat.Config{LeadInterval: time.Hour, ChannelInterval: time.Hour, Enabled: boolPtr(true), MinInterval: time.Millisecond},
+		leadService, nil, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = service.Run(ctx) }()
+
+	// Turn the cadence down: the running loop must pick it up without a restart.
+	if err := service.Configure(ctx, contracts.HeartbeatConfig{LeadInterval: 10 * time.Millisecond}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && leadService.count() < 2 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if leadService.count() < 2 {
+		t.Fatalf("lead calls = %d after configuring a faster cadence, want at least 2", leadService.count())
+	}
+	status, _ := service.Status(context.Background())
+	if status.LeadInterval != 10*time.Millisecond {
+		t.Fatalf("status interval = %s, want the configured one", status.LeadInterval)
+	}
+}
+
+func TestConfigureRefusesAnUnsafeCadence(t *testing.T) {
+	service := heartbeat.New(heartbeat.Config{}, &fakeLead{}, nil, nil)
+	if err := service.Configure(context.Background(), contracts.HeartbeatConfig{LeadInterval: time.Millisecond}); err == nil {
+		t.Fatal("a 1ms cadence was accepted")
+	}
+	if err := service.Configure(context.Background(), contracts.HeartbeatConfig{ChannelInterval: 48 * time.Hour}); err == nil {
+		t.Fatal("a 48h cadence was accepted")
+	}
+}
+
+func TestConfigureCanDisableARunningLoop(t *testing.T) {
+	leadService := &fakeLead{}
+	service := heartbeat.New(heartbeat.Config{LeadInterval: 10 * time.Millisecond, Enabled: boolPtr(true), MinInterval: time.Millisecond}, leadService, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = service.Run(ctx) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && leadService.count() < 1 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if leadService.count() < 1 {
+		t.Fatal("the loop never ticked")
+	}
+
+	disabled := false
+	if err := service.Configure(ctx, contracts.HeartbeatConfig{Enabled: &disabled}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	time.Sleep(80 * time.Millisecond)
+	frozen := leadService.count()
+	time.Sleep(80 * time.Millisecond)
+	if leadService.count() != frozen {
+		t.Fatalf("the disabled loop kept ticking: %d -> %d", frozen, leadService.count())
+	}
+
+	enabled := true
+	if err := service.Configure(ctx, contracts.HeartbeatConfig{Enabled: &enabled}); err != nil {
+		t.Fatalf("re-enable: %v", err)
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && leadService.count() <= frozen {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if leadService.count() <= frozen {
+		t.Fatal("the loop did not resume after being re-enabled")
+	}
+}
