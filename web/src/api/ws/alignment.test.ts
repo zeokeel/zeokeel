@@ -91,6 +91,13 @@ const CLIENT_METHODS = [
   'tasks.subscribe',
   'task.status',
   'task.delete',
+  // §5.1.13: the inbound work inbox is the one orchestration half the web
+  // client sends today (`api/inbox.ts`). Leases, approval tokens, notify routes,
+  // webhook sources and `lead.run` are served by the mock already but no screen
+  // sends them yet — they join this list with the screen that calls them.
+  'inbox.snapshot',
+  'inbox.dispatch',
+  'inbox.triage',
 ];
 
 describe('mock ↔ gateway', () => {

@@ -360,6 +360,62 @@ taskBoard('').tasks.push(
   },
 );
 
+// ------------------------------------------------ orchestration fixtures --
+// §5.1.13. The inbound work queue is request/response (no delta follows a
+// triage), so the screen reads again after each write; the fixture keeps a
+// small queue so `npm run mock` can drive the screen by hand.
+const mockInbox = {
+  items: [
+    {
+      id: 'inbox-000001',
+      source: 'wechat',
+      channel: 'dm-1',
+      sender: 'owner',
+      title: '查退款率',
+      body: '帮我看一下上周的退款率',
+      ref: 'wechat://dm-1/7788',
+      receivedAt: nowIso(),
+      lastSeenAt: nowIso(),
+      status: 'new',
+      count: 3,
+    },
+    {
+      id: 'inbox-000002',
+      source: 'dingtalk',
+      channel: 'group-42',
+      sender: 'lead',
+      title: '整理周报',
+      receivedAt: nowIso(),
+      status: 'task',
+      count: 1,
+      taskIds: ['task-2'],
+    },
+  ],
+};
+
+/** Leases handed out by `tasks.claim`, keyed by task id. */
+const mockLeases = new Map();
+const leaseFor = (taskId, owner, state) => {
+  const lease = {
+    taskId,
+    owner,
+    until: new Date(Date.now() + 10 * 60_000).toISOString(),
+    heartbeat: nowIso(),
+    state,
+    evidence: [],
+    reviewNote: '',
+  };
+  mockLeases.set(taskId, lease);
+  return { ...lease };
+};
+
+/** One-shot `approval.token` values; `approval.action` consumes them. */
+const mockApprovalTokens = new Set();
+
+/** Notify routes and webhook sources (both default to empty). */
+const mockNotifyRoutes = [];
+const mockWebhookSources = [];
+
 // ---------------------------------------------------------------- settings --
 const settingsCatalog = {
   groups: [
@@ -1737,6 +1793,171 @@ const wsDispatch = (client, message) => {
       publishTasks(sessionId);
       return reply({});
     }
+    // ------------------------------------------- inbound work inbox (§5.1.13) --
+    case 'inbox.snapshot': {
+      const statuses = Array.isArray(params.statuses) ? params.statuses.map(String) : null;
+      const source = params.source === undefined ? '' : String(params.source);
+      const includeExpired = params.includeExpired === true;
+      const limit = params.limit === undefined ? 0 : Math.max(0, Number(params.limit) || 0);
+      const nowMs = Date.now();
+      // The zero filter means "still actionable" (new + triaged); a caller that
+      // also wants decided rows names the statuses, exactly like the gateway.
+      const items = mockInbox.items.filter((item) => {
+        if (statuses && !statuses.includes(item.status)) return false;
+        if (source !== '' && item.source !== source) return false;
+        if (!includeExpired && item.expiresAt && Date.parse(item.expiresAt) <= nowMs) return false;
+        return true;
+      });
+      return reply({
+        items: limit > 0 ? items.slice(0, limit) : items.map((item) => ({ ...item })),
+        stats: {
+          total: mockInbox.items.length,
+          new: mockInbox.items.filter((item) => item.status === 'new').length,
+          triaged: mockInbox.items.filter((item) => item.status !== 'new').length,
+        },
+      });
+    }
+    case 'inbox.dispatch': {
+      const item = mockInbox.items.find((row) => row.id === params.id);
+      if (!item) return fail(-32600, 'inbox: unknown item');
+      const subject = String(params.subject ?? '').trim();
+      if (subject === '') return fail(-32602, 'invalid_params');
+      const blockedBy = Array.isArray(params.blockedBy) ? params.blockedBy.map(String) : [];
+      const writeScopes = Array.isArray(params.writeScopes) ? params.writeScopes.map(String) : [];
+      const board = taskBoard('');
+      const taskId = shortId('task');
+      board.tasks.push({
+        id: taskId,
+        subject,
+        status: 'pending',
+        ...(params.detail ? { description: String(params.detail) } : {}),
+        ...(params.assignee ? { owner: String(params.assignee) } : {}),
+        ...(blockedBy.length > 0 ? { blockedBy } : {}),
+        ...(writeScopes.length > 0 ? { writeScopes } : {}),
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      });
+      item.status = 'task';
+      item.taskIds = [...(item.taskIds ?? []), taskId];
+      publishTasks('');
+      return reply({ taskIds: [taskId], created: true, item: { ...item } });
+    }
+    case 'inbox.triage': {
+      const item = mockInbox.items.find((row) => row.id === params.id);
+      if (!item) return fail(-32600, 'inbox: unknown item');
+      const action = String(params.action ?? '');
+      if (!['triaged', 'task', 'ignored', 'archived'].includes(action)) {
+        return fail(-32602, 'invalid_params');
+      }
+      item.status = action;
+      return reply({ ...item });
+    }
+    case 'tasks.claim': {
+      const taskId = String(params.id ?? '');
+      const owner = String(params.owner ?? '');
+      const held = mockLeases.get(taskId);
+      if (held && held.owner !== owner) return fail(-32600, 'lease: task already claimed');
+      return reply(leaseFor(taskId, owner, 'claimed'));
+    }
+    case 'tasks.heartbeat': {
+      const held = mockLeases.get(String(params.id ?? ''));
+      if (!held || held.owner !== String(params.owner ?? '')) {
+        return fail(-32600, 'lease: task not held');
+      }
+      held.heartbeat = nowIso();
+      return reply({ ...held, evidence: held.evidence.slice() });
+    }
+    case 'tasks.submit': {
+      const held = mockLeases.get(String(params.id ?? ''));
+      if (!held || held.owner !== String(params.owner ?? '')) {
+        return fail(-32600, 'lease: task not held');
+      }
+      const evidence = Array.isArray(params.evidence) ? params.evidence : [];
+      if (evidence.length === 0) return fail(1010, 'evidence_required');
+      held.evidence = evidence.map((row) => ({
+        kind: String(row.kind ?? ''),
+        ref: String(row.ref ?? ''),
+        ...(row.note ? { note: String(row.note) } : {}),
+      }));
+      held.state = 'submitted';
+      return reply({ ...held, evidence: held.evidence.slice() });
+    }
+    case 'tasks.review': {
+      const held = mockLeases.get(String(params.id ?? ''));
+      if (!held) return fail(-32600, 'lease: task not held');
+      const decision = String(params.decision ?? '');
+      if (decision !== 'accept' && decision !== 'reject') return fail(-32602, 'invalid_params');
+      held.state = decision === 'accept' ? 'accepted' : 'rejected';
+      held.reviewNote = String(params.note ?? '');
+      held.reviewer = String(params.reviewer ?? '');
+      return reply({ ...held, evidence: held.evidence.slice() });
+    }
+    case 'approval.token': {
+      const approvalId = String(params.approvalId ?? '');
+      if (!approvals.has(approvalId)) return fail(1019, 'approval_not_pending');
+      const token = `mock-token-${approvalId}`;
+      mockApprovalTokens.add(token);
+      return reply({ token, expiresAt: new Date(Date.now() + 60_000).toISOString() });
+    }
+    case 'approval.action': {
+      const token = String(params.token ?? '');
+      if (!mockApprovalTokens.has(token)) return fail(-32600, 'approval: token expired');
+      const decision = String(params.decision ?? '');
+      if (decision !== 'allow' && decision !== 'deny') return fail(-32602, 'invalid_params');
+      mockApprovalTokens.delete(token);
+      if (!resolveApproval(String(params.approvalId ?? ''), decision)) {
+        return fail(1019, 'approval_not_pending');
+      }
+      publishApprovals();
+      return reply({ ok: true });
+    }
+    case 'notify.route.snapshot':
+      return reply({ routes: mockNotifyRoutes.map((route) => ({ ...route })) });
+    case 'notify.route.upsert': {
+      const category = String(params.category ?? '');
+      const primary = String(params.primary ?? '');
+      if (category === '' || primary === '') return fail(-32602, 'invalid_params');
+      const route = {
+        category,
+        primary,
+        fallback: Array.isArray(params.fallback) ? params.fallback.map(String) : [],
+        ...(params.quietHours ? { quietHours: params.quietHours } : {}),
+        ...(params.escalationMs === undefined ? {} : { escalationMs: Number(params.escalationMs) }),
+        enabled: params.enabled !== false,
+      };
+      const at = mockNotifyRoutes.findIndex((row) => row.category === category);
+      if (at >= 0) mockNotifyRoutes[at] = route;
+      else mockNotifyRoutes.push(route);
+      return reply({ ...route });
+    }
+    case 'webhook.sources':
+      // The secret never leaves the gateway: no echo here either.
+      return reply({
+        sources: mockWebhookSources.map((row) => ({
+          id: row.id,
+          ...(row.channel ? { channel: row.channel } : {}),
+        })),
+      });
+    case 'webhook.source.set': {
+      const id = String(params.id ?? '');
+      const secret = String(params.secret ?? '');
+      if (!/^[a-z0-9-]+$/.test(id)) return fail(-32602, 'invalid_params');
+      if (secret.length < 16) return fail(-32602, 'invalid_params');
+      const row = { id, ...(params.channel ? { channel: String(params.channel) } : {}), secret };
+      const at = mockWebhookSources.findIndex((item) => item.id === id);
+      if (at >= 0) mockWebhookSources[at] = row;
+      else mockWebhookSources.push(row);
+      return reply({ id: row.id, ...(row.channel ? { channel: row.channel } : {}) });
+    }
+    case 'webhook.source.remove': {
+      const at = mockWebhookSources.findIndex((item) => item.id === String(params.id ?? ''));
+      if (at >= 0) mockWebhookSources.splice(at, 1);
+      return reply({ ok: true });
+    }
+    case 'lead.run':
+      // One bounded pass. The fixture has nothing to scan on its own, so the
+      // honest answer is a run that touched nothing rather than invented counts.
+      return reply({ scanned: 0, dispatched: 0, ignored: 0, skipped: 0, failed: 0 });
     case 'prompts.enqueue': {
       const sessionId = String(params.sessionId ?? '');
       const text = String(params.prompt ?? params.text ?? '').trim();

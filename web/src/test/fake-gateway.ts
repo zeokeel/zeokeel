@@ -61,6 +61,23 @@ export const FAKED_CONDITIONAL: string[] = ['context', 'tasks', 'regenerate', 't
   CONDITIONAL_CAPABILITIES.some((item) => item.name === name),
 );
 
+/** One inbound work item (`inbox.*`, docs/TRANSPORT.md §5.1.13). */
+export interface FakeInboxItem {
+  id: string;
+  source: string;
+  channel?: string;
+  sender?: string;
+  title: string;
+  body?: string;
+  ref?: string;
+  receivedAt?: string;
+  lastSeenAt?: string;
+  expiresAt?: string;
+  status: string;
+  count: number;
+  taskIds?: string[];
+}
+
 export interface FakeState {
   sessions: FakeSessionInfo[];
   messages: Record<string, FakeMessage[]>;
@@ -88,6 +105,8 @@ export interface FakeState {
   /** sessionId → folded context view, or `null` for `found:false`. */
   contexts: Record<string, unknown | null>;
   currentWorkspaceId?: string;
+  /** The inbound work queue, newest-first like the gateway's `List`. */
+  inbox: FakeInboxItem[];
   capabilities: string[];
 }
 
@@ -116,6 +135,7 @@ export function defaultState(): FakeState {
     taskRevs: { '': 1 },
     contexts: {},
     currentWorkspaceId: 'ws-1',
+    inbox: [],
     // Every static capability the contract declares, plus the conditional ones
     // this fixture actually fakes. Hand-writing this list is how `approvals`
     // was once served without being declared.
@@ -187,6 +207,8 @@ export class FakeGateway {
 
   /** Every decision the client sent, in order — `{id, tool, decision}`. */
   readonly decisions: Array<{ id: string; tool: string; decision: string }> = [];
+  /** Every `inbox.dispatch` the client sent — `{id, subject}` — for assertions. */
+  readonly dispatches: Array<{ id: string; subject: string; taskIds: string[] }> = [];
   /** Tools whose approval was denied: they must never execute. */
   readonly deniedTools: string[] = [];
   /** Tools whose approval was granted. */
@@ -442,6 +464,73 @@ export class FakeGateway {
         workspaces: this.state.workspaces,
         currentId: this.state.currentWorkspaceId,
       });
+      return;
+    }
+    if (method === 'inbox.snapshot') {
+      // The zero filter means "still actionable" on the gateway; the fixture
+      // honours an explicit status list and otherwise returns everything it has,
+      // so a test that sets no statuses still sees its own rows.
+      const statuses = Array.isArray(params.statuses) ? params.statuses.map(String) : null;
+      const items = this.state.inbox.filter(
+        (item) => statuses === null || statuses.includes(item.status),
+      );
+      reply({
+        items: items.map((item) => ({ ...item })),
+        stats: {
+          total: this.state.inbox.length,
+          new: this.state.inbox.filter((item) => item.status === 'new').length,
+          triaged: this.state.inbox.filter((item) => item.status !== 'new').length,
+        },
+      });
+      return;
+    }
+    if (method === 'inbox.dispatch') {
+      const item = this.state.inbox.find((row) => row.id === params.id);
+      if (!item) {
+        fail(-32600, 'inbox: unknown item');
+        return;
+      }
+      const subject = String(params.subject ?? '').trim();
+      if (subject === '') {
+        fail(-32602, 'invalid_params');
+        return;
+      }
+      const taskId = `task-inbox-${this.dispatches.length + 1}`;
+      this.state.inbox = this.state.inbox.map((row) =>
+        row.id === item.id
+          ? { ...row, status: 'task', taskIds: [...(row.taskIds ?? []), taskId] }
+          : row,
+      );
+      this.dispatches.push({ id: item.id, subject, taskIds: [taskId] });
+      // The gateway appends the task to the process-wide board: do the same, so
+      // a test that dispatches can see the chip and the board agree.
+      const board = this.state.tasks[''] ?? (this.state.tasks[''] = []);
+      board.push({
+        id: taskId,
+        subject,
+        status: 'pending',
+        ...(params.assignee ? { owner: String(params.assignee) } : {}),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      this.broadcastTasks('', [board[board.length - 1] as Record<string, unknown>], []);
+      const updated = this.state.inbox.find((row) => row.id === item.id)!;
+      reply({ taskIds: [taskId], created: true, item: { ...updated } });
+      return;
+    }
+    if (method === 'inbox.triage') {
+      const item = this.state.inbox.find((row) => row.id === params.id);
+      if (!item) {
+        fail(-32600, 'inbox: unknown item');
+        return;
+      }
+      const action = String(params.action ?? '');
+      if (!['triaged', 'task', 'ignored', 'archived'].includes(action)) {
+        fail(-32602, 'invalid_params');
+        return;
+      }
+      item.status = action;
+      reply({ ...item });
       return;
     }
     if (method === 'prompts.snapshot') {

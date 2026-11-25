@@ -18,9 +18,11 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
   const { approvals } = useApprovals();
   const t = useT();
 
+  // Longest first: `/inbox/incoming` also starts with `/inbox`, and the nested
+  // route must keep its own entry selected.
   const selected =
-    ['/inbox', '/capabilities', '/automation', '/insights', '/team'].find((path) =>
-      location.pathname.startsWith(path),
+    ['/inbox/incoming', '/inbox', '/capabilities', '/automation', '/insights', '/team'].find(
+      (path) => location.pathname.startsWith(path),
     ) ?? (location.pathname.startsWith('/settings') ? '/settings/model' : '');
 
   return (
@@ -48,6 +50,16 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
               ) : null}
             </span>
           ),
+        },
+        {
+          // R2b: the inbound work queue. No count badge — it is a request/
+          // response surface, so the entry cannot promise a number it has not
+          // read, and a zero badge would be a number worth nothing (C6).
+          // There is no `inbox` icon in internal/icons/svg yet, so the neutral
+          // box (`data`) stands in until one is generated.
+          key: '/inbox/incoming',
+          icon: <ZkIcon name="data" />,
+          label: t('inbox.work.title'),
         },
         { key: '/capabilities', icon: <ZkIcon name="plugin" />, label: t('shell.capabilities') },
         { key: '/automation', icon: <ZkIcon name="clock" />, label: t('shell.automation') },

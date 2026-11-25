@@ -75,6 +75,23 @@ export const en: Catalog = {
   'inbox.allowOnce': 'Allow once',
   'inbox.deny': 'Deny',
 
+  // The inbound work inbox (the gateway's `inbox.*` domain, TRANSPORT §5.1.13).
+  // Not the same surface as the "waiting for you" aggregation above: each row
+  // here is work a channel handed in.
+  'inbox.work.title': 'Work inbox',
+  'inbox.work.now': 'Do now',
+  'inbox.work.triaged': 'Triaged',
+  'inbox.work.empty': 'Nothing is waiting for you.',
+  'inbox.work.dispatch': 'Make task',
+  'inbox.work.ignore': 'Ignore',
+  'inbox.work.retry': 'Retry',
+  'inbox.work.loadFailed': 'Could not read the inbox',
+  'inbox.work.mergedCount': '{count} merged',
+  'inbox.time.justNow': 'just now',
+  'inbox.time.minutesAgo': '{count} min ago',
+  'inbox.time.hoursAgo': '{count} h ago',
+  'inbox.time.daysAgo': '{count} d ago',
+
   // -------------------------------------------------------------- thread --
   'thread.transcript': 'Conversation log',
   'thread.announce.running': 'Answering',

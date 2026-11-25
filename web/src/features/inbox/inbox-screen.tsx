@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button, Empty, Tag } from 'antd';
 import { useNavigate } from 'react-router';
-import {
-  buildInboxItems,
-  inboxActionKind,
-  type InboxKind,
-} from '@/api/inbox';
+import { buildInboxItems, inboxActionKind, type InboxKind } from './pending-inbox';
 import { subscribeArtifacts, subscribeAsk, subscribePlan } from '@/api/gateway';
 import { useApprovals } from '@/features/approvals/approvals-context';
 import { ZkIcon } from '@/design/icons';

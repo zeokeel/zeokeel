@@ -3,6 +3,10 @@ import { Splitter } from 'antd';
 import { AutomationScreen } from '@/features/automation/automation-screen';
 import { CapabilitiesScreen } from '@/features/capabilities/capabilities-screen';
 import { InboxScreen } from '@/features/inbox/inbox-screen';
+// Two inboxes, two routes: `/inbox` is the approvals aggregation (R2), while
+// `/inbox/incoming` is the gateway's inbound work queue (R2b,
+// docs/TRANSPORT.md §5.1.13). Aliased so the two never get confused here.
+import { InboxScreen as WorkInboxScreen } from '@/features/inbox/InboxScreen';
 import { InspectorPanel } from '@/features/inspector/inspector-panel';
 import { useMediaQuery } from '@/design/use-system-appearance';
 import { InsightsScreen } from '@/features/insights/insights-screen';
@@ -66,6 +70,7 @@ export function AppRoutes() {
     <Routes>
       <Route path="/" element={<NowScreen />} />
       <Route path="/inbox" element={<InboxScreen />} />
+      <Route path="/inbox/incoming" element={<WorkInboxScreen />} />
       <Route path="/c/:sessionId" element={<ThreadRoute />} />
       <Route path="/c/:sessionId/trajectory" element={<TrajectoryScreen />} />
       <Route path="/c/:sessionId/memory" element={<MemoryScreen />} />

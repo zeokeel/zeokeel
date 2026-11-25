@@ -60,6 +60,12 @@ export const MOCK_IGNORED_PARAMS: Record<string, Record<string, string>> = {
   'ask.cancel': {
     answer: '契约里 cancel 也带 answer，但取消没有答案可写；网关同样忽略它',
   },
+  'inbox.dispatch': {
+    note: '任务板没有分诊备注字段；真网关把 note 存进分诊记录，模板只建任务',
+  },
+  'inbox.triage': {
+    note: '同上：mock 只改状态，不保存分诊备注',
+  },
   initialize: {
     clientName: 'mock 不校验握手字段（真网关会按契约校验并拒绝非法值）',
     clientVersion: '同上：握手字段只做形状占位',

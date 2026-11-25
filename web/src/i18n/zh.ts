@@ -79,6 +79,22 @@ export const zh = {
   'inbox.allowOnce': '允许一次',
   'inbox.deny': '拒绝',
 
+  // 入站工作收件箱（网关 `inbox.*` 域，docs/TRANSPORT.md §5.1.13）。和上面那组
+  // 「等我处理」的汇聚不是同一块面：这里的每一条都是渠道递进来的活。
+  'inbox.work.title': '待办收件箱',
+  'inbox.work.now': '现在必须做',
+  'inbox.work.triaged': '已分诊',
+  'inbox.work.empty': '没有等你的。',
+  'inbox.work.dispatch': '派成任务',
+  'inbox.work.ignore': '忽略',
+  'inbox.work.retry': '重试',
+  'inbox.work.loadFailed': '收件箱没读出来',
+  'inbox.work.mergedCount': '{count} 条',
+  'inbox.time.justNow': '刚刚',
+  'inbox.time.minutesAgo': '{count} 分钟前',
+  'inbox.time.hoursAgo': '{count} 小时前',
+  'inbox.time.daysAgo': '{count} 天前',
+
   // -------------------------------------------------------------- thread --
   'thread.transcript': '对话记录',
   'thread.announce.running': '正在回答',

@@ -26,6 +26,10 @@ export interface RouteMeta {
 export const ROUTES: RouteMeta[] = [
   { path: '/', ref: 'R1', titleKey: 'now.title' },
   { path: '/inbox', ref: 'R2', titleKey: 'inbox.title' },
+  // R2b: the gateway's inbound work queue (`inbox.*`, TRANSPORT §5.1.13). A
+  // separate route from R2 because they answer different questions and their
+  // rows are different entities.
+  { path: '/inbox/incoming', ref: 'R2b', titleKey: 'inbox.work.title' },
   { path: '/c/:sessionId', ref: 'R3', titleKey: 'thread.untitled' },
   { path: '/c/:sessionId/trajectory', ref: 'R4', titleKey: 'thread.tabs.trajectory' },
   { path: '/c/:sessionId/memory', ref: 'R5', titleKey: 'thread.tabs.memory' },
