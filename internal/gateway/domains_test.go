@@ -1222,7 +1222,7 @@ func TestInitializeAdvertisesCapabilities(t *testing.T) {
 		"session.list", "session.snapshot", "session.delta", "session.subscribe",
 		"session.create", "run.cancel", "approvals", "ask", "plan", "artifacts",
 		"settings", "settings.set", "workspace", "prompts", "notify", "foreground",
-		"inbox", "triage", "tasklease", "approvalaction", "notifyroute", "webhook", "lead",
+		"inbox", "triage", "tasklease", "approvalaction", "notifyroute", "webhook", "lead", "credentials",
 	}
 	sortedStatic := append([]string(nil), serverCapabilities...)
 	sort.Strings(sortedStatic)

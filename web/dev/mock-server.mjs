@@ -395,6 +395,8 @@ const mockInbox = {
 
 /** Leases handed out by `tasks.claim`, keyed by task id. */
 const mockLeases = new Map();
+/** Channel credentials, kind/id -> {kind,id,fields}. Values are never echoed. */
+const mockCredentials = new Map();
 const leaseFor = (taskId, owner, state) => {
   const lease = {
     taskId,
@@ -1937,6 +1939,26 @@ const wsDispatch = (client, message) => {
       if (at >= 0) mockNotifyRoutes[at] = route;
       else mockNotifyRoutes.push(route);
       return reply({ ...route });
+    }
+    case 'credentials.list': {
+      const kind = String(params.kind ?? '');
+      const rows = [...mockCredentials.entries()]
+        .filter(([, row]) => !kind || row.kind === kind)
+        .map(([, row]) => ({ kind: row.kind, id: row.id }));
+      return reply({ credentials: rows });
+    }
+    case 'credentials.set': {
+      const kind = String(params.kind ?? '');
+      const id = String(params.id ?? '');
+      if (!kind || !id) return fail(-32602, 'invalid_params');
+      mockCredentials.set(`${kind}/${id}`, { kind, id, fields: { ...(params.fields ?? {}) } });
+      return reply({ ok: true });
+    }
+    case 'credentials.delete': {
+      const kind = String(params.kind ?? '');
+      const id = String(params.id ?? '');
+      if (!mockCredentials.delete(`${kind}/${id}`)) return fail(-32600, 'credentials: not found');
+      return reply({ ok: true });
     }
     case 'webhook.sources':
       // The secret never leaves the gateway: no echo here either.

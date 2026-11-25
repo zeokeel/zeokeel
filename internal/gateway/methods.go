@@ -43,6 +43,7 @@ var serverCapabilities = []string{
 	"notifyroute",
 	"webhook",
 	"lead",
+	"credentials",
 }
 
 // gatewayCapabilities is the handshake's capability list for this gateway
@@ -372,6 +373,15 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		},
 		"notify.route.upsert": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.notifyRouteUpsert(ctx, request.Params)
+		},
+		"credentials.list": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.credentialsList(ctx, request.Params)
+		},
+		"credentials.set": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.credentialsSet(ctx, request.Params)
+		},
+		"credentials.delete": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.credentialsDelete(ctx, request.Params)
 		},
 		"webhook.sources": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.webhookSources(ctx, request.Params)

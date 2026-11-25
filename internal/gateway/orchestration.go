@@ -650,3 +650,94 @@ func (g *Gateway) taskLease(ctx context.Context, raw json.RawMessage) (any, *pro
 	}
 	return taskLeaseFromContract(lease), nil
 }
+
+// --- credentials -----------------------------------------------------------
+
+type credentialInfoDTO struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+}
+
+type credentialsListResult struct {
+	Credentials []credentialInfoDTO `json:"credentials"`
+}
+
+type credentialsListParams struct {
+	Kind string `json:"kind,omitempty"`
+}
+
+type credentialsSetParams struct {
+	Kind   string            `json:"kind"`
+	ID     string            `json:"id"`
+	Fields map[string]string `json:"fields"`
+}
+
+type credentialsDeleteParams struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+}
+
+func (g *Gateway) credentialsService() (contracts.CredentialStore, *protocolError) {
+	service, ok := g.root.Get(contracts.KeyCredentials)
+	if !ok || service == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "credentials unavailable")
+	}
+	return service, nil
+}
+
+// credentialsList returns identities only: the store's info type has no field
+// map, so a secret cannot leak through this method even by accident.
+func (g *Gateway) credentialsList(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.credentialsService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params credentialsListParams
+	if len(raw) > 0 {
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+	}
+	infos, err := service.List(ctx, params.Kind)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	result := credentialsListResult{Credentials: make([]credentialInfoDTO, 0, len(infos))}
+	for _, info := range infos {
+		result.Credentials = append(result.Credentials, credentialInfoDTO{Kind: info.Kind, ID: info.ID})
+	}
+	return result, nil
+}
+
+func (g *Gateway) credentialsSet(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.credentialsService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params credentialsSetParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if len(params.Fields) == 0 {
+		return nil, errInvalidParams("fields", "at least one field is required")
+	}
+	if err := service.Set(ctx, contracts.Credential{Kind: params.Kind, ID: params.ID, Fields: params.Fields}); err != nil {
+		return nil, orchestrationError(err)
+	}
+	return map[string]any{"ok": true}, nil
+}
+
+func (g *Gateway) credentialsDelete(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.credentialsService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params credentialsDeleteParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if err := service.Delete(ctx, params.Kind, params.ID); err != nil {
+		return nil, orchestrationError(err)
+	}
+	return map[string]any{"ok": true}, nil
+}

@@ -190,3 +190,72 @@ func inboundStatus(err error) int {
 		return http.StatusInternalServerError
 	}
 }
+
+// handleFeishuCard serves a card-button callback. The card carries the approval
+// id, the decision and the one-time token; the adapter verifies the signature and
+// extracts all three, and this handler applies them through the approval action
+// service — the card never bypasses the token check.
+func (g *Gateway) handleFeishuCard(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := g.auth.checkHost(r); err != nil {
+		writeProtocolError(w, http.StatusForbidden, err)
+		return
+	}
+	if strings.TrimSpace(r.Header.Get("Origin")) != "" {
+		writeProtocolError(w, http.StatusForbidden, appError(codeBadOrigin, "bad_origin", false))
+		return
+	}
+	feishuService, ok := g.root.Get(contracts.KeyFeishu)
+	if !ok || feishuService == nil {
+		http.NotFound(w, r)
+		return
+	}
+	verifier, ok := feishuService.(contracts.FeishuRequestVerifier)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	extractor, ok := feishuService.(contracts.FeishuCardActionReader)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, inboundMaxBody))
+	if err != nil {
+		http.Error(w, "read body", http.StatusBadRequest)
+		return
+	}
+	if err := verifier.VerifyRequest(headerMap(r), body); err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	approvalID, decision, token, ok := extractor.CardActionWithToken(body)
+	if !ok {
+		http.Error(w, "card callback carries no approval decision", http.StatusBadRequest)
+		return
+	}
+	actionService, ok := g.root.Get(contracts.KeyApprovalAction)
+	if !ok || actionService == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if err := actionService.Apply(r.Context(), approvalID, contracts.ApprovalDecision(decision), token); err != nil {
+		status := http.StatusBadRequest
+		switch {
+		case errors.Is(err, contracts.ErrApprovalTokenInvalid), errors.Is(err, contracts.ErrApprovalTokenExpired),
+			errors.Is(err, contracts.ErrApprovalTokenUsed):
+			status = http.StatusForbidden
+		case errors.Is(err, contracts.ErrApprovalNotPending):
+			status = http.StatusConflict
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}

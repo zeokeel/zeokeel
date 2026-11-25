@@ -11,6 +11,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/automation"
 	"github.com/zeokeel/zeokeel/internal/modules/creds"
 	"github.com/zeokeel/zeokeel/internal/modules/dingtalk"
+	"github.com/zeokeel/zeokeel/internal/modules/email"
 	"github.com/zeokeel/zeokeel/internal/modules/feishu"
 	"github.com/zeokeel/zeokeel/internal/modules/goal"
 	"github.com/zeokeel/zeokeel/internal/modules/hosttools"
@@ -89,6 +90,7 @@ func Registry() *module.Registry {
 	mustRegister(registry, wechat.Module())
 	mustRegister(registry, dingtalk.Module())
 	mustRegister(registry, feishu.Module())
+	mustRegister(registry, email.Module())
 	mustRegister(registry, GroupModule())
 	return registry
 }

@@ -64,6 +64,10 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request) {
 		// menu. Authenticated like every other API path: a read of the user's
 		// workspace is not public.
 		g.handleFiles(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/inbound/feishu/card"):
+		// Card button callback: same signature rules, applied through the
+		// approval action service.
+		g.handleFeishuCard(w, r)
 	case strings.HasPrefix(r.URL.Path, "/api/inbound/"):
 		// Channel ingress: authenticated by the sender's signature, not by the
 		// browser token (the signature is checked by the webhook adapter).

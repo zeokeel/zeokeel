@@ -218,6 +218,58 @@ func (a *Adapter) CardAction(body []byte) (string, string, bool) {
 	return parseCardValue(action.Value)
 }
 
+// CardActionWithToken is CardAction plus the one-time approval token that our
+// cards embed in action.value. The approval action layer needs all three to
+// apply a decision without trusting the request body's identity.
+func (a *Adapter) CardActionWithToken(body []byte) (approvalID, decision, token string, ok bool) {
+	var payload struct {
+		Action *cardAction `json:"action"`
+		Event  struct {
+			Action *cardAction `json:"action"`
+		} `json:"event"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", "", "", false
+	}
+	action := payload.Event.Action
+	if action == nil {
+		action = payload.Action
+	}
+	if action == nil || len(action.Value) == 0 {
+		return "", "", "", false
+	}
+	return parseCardValueWithToken(action.Value)
+}
+
+// parseCardValueWithToken reads approvalId/decision/token from an action.value
+// that may be a nested object or a JSON string holding one.
+func parseCardValueWithToken(raw json.RawMessage) (string, string, string, bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", "", "", false
+	}
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err == nil {
+		raw = json.RawMessage(asString)
+	}
+	var value struct {
+		ApprovalID      string `json:"approvalId"`
+		ApprovalIDSnake string `json:"approval_id"`
+		Decision        string `json:"decision"`
+		Token           string `json:"token"`
+	}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", "", "", false
+	}
+	approvalID := value.ApprovalID
+	if approvalID == "" {
+		approvalID = value.ApprovalIDSnake
+	}
+	if approvalID == "" || (value.Decision != contracts.FeishuDecisionAllow && value.Decision != contracts.FeishuDecisionDeny) || value.Token == "" {
+		return "", "", "", false
+	}
+	return approvalID, value.Decision, value.Token, true
+}
+
 // cardAction is the button callback inside a card payload.
 type cardAction struct {
 	Tag   string          `json:"tag"`
@@ -385,6 +437,13 @@ func (a *Adapter) ensureToken(ctx context.Context) (string, error) {
 	a.tokenExpiry = expiry
 	a.mu.Unlock()
 	return result.Token, nil
+}
+
+// VerifyRequest lets the HTTP layer authenticate a non-message callback (a card
+// button, for instance) with the same signature and replay rules as events.
+// It never touches the inbox and never compares decisions.
+func (a *Adapter) VerifyRequest(headers map[string]string, body []byte) error {
+	return a.verifyRequest(headers, body)
 }
 
 // verifyRequest checks the signature headers and the replay window.

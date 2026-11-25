@@ -82,6 +82,27 @@
       ],
       "optional": []
     },
+    "credentials.delete": {
+      "required": [
+        "id",
+        "kind"
+      ],
+      "optional": []
+    },
+    "credentials.list": {
+      "required": [],
+      "optional": [
+        "kind"
+      ]
+    },
+    "credentials.set": {
+      "required": [
+        "fields",
+        "id",
+        "kind"
+      ],
+      "optional": []
+    },
     "foreground.set": {
       "required": [
         "sessionId"
@@ -544,6 +565,7 @@
       "approvals",
       "artifacts",
       "ask",
+      "credentials",
       "foreground",
       "inbox",
       "lead",

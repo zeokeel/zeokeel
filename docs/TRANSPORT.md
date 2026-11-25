@@ -173,6 +173,7 @@ SIGINT/SIGTERM（signals_unix.go:11）
 | GET | `/api/sessions/{id}/memory` | 会话记忆（R5） | `read_models.go` |
 | GET | `/api/files/tree`、`/api/files/content`、`/api/files/diff` | 工作区文件/预览/差异（R8–R11） | `files.go` |
 | GET | `/` 及其余 GET | 内嵌客户端静态资源（未内嵌时 503） | `server.go` |
+| POST | `/api/inbound/feishu/card` | 飞书卡片按钮回调：验签后用卡片携带的一次性 token 走 `ApprovalActionService.Apply`（无 token 拒绝） | `inbound.go` |
 | POST | `/api/inbound/{source}` | 渠道入站：**签名即认证**（`webhook` / `dingtalk` / `feishu`），不要求浏览器 token；Host 必须属于本机，带 `Origin` 一律 403，body ≤ 1 MiB | `inbound.go` |
 
 **约定**：`/api/*` 未知路径先鉴权再 404（未鉴权的探测无法测绘端点面，`handleUnknownAPI`）。
@@ -832,6 +833,9 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `webhook.source.set` | `{id,secret,channel?}` | `{id,channel?}` | N | `WebhookSourceAdmin.UpsertSource`（id `[a-z0-9-]`、secret ≥16 字节） | ✅ 已实现 |
 | `webhook.source.remove` | `{id}` | `{ok:true}` | N | `WebhookSourceAdmin.RemoveSource` | ✅ 已实现 |
 | `lead.run` | — | `{scanned,dispatched,ignored,skipped,failed,errors?}` | Y | `LeadService.RunOnce`（有界一轮；已处理的条目不再是 new） | ✅ 已实现 |
+| `credentials.list` | `{kind?}` | `{credentials:[{kind,id}]}` | Y | `CredentialStore.List`（**只回身份，不含任何密钥字段**） | ✅ 已实现 |
+| `credentials.set` | `{kind,id,fields}` | `{ok:true}` | N | `CredentialStore.Set` | ✅ 已实现 |
+| `credentials.delete` | `{kind,id}` | `{ok:true}` | N | `CredentialStore.Delete` | ✅ 已实现 |
 
 `InboxItem`（摘要）：
 
@@ -862,7 +866,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
   「同意 / 不同意」走同一条 `Resolve`（网关不解析自然语言，解析在 approvals 模块内，`ParseReply`）。
 - 类型化错误映射成 `-32600`（invalid request）并保留原文：`lease: task already claimed`、
   `approval: token expired` 这类话可以直接显示给用户。
-- capability：`inbox`、`triage`、`tasklease`、`approvalaction`、`notifyroute`、`webhook`、`lead`（七个服务键都随装配提供；
+- capability：`inbox`、`triage`、`tasklease`、`approvalaction`、`notifyroute`、`webhook`、`lead`、`credentials`（八个服务键都随装配提供；
   缺任何一个，对应方法返回 `-32004 capability_unsupported`）。
 - `webhook.source.set` 的 `secret` 只在请求体里出现：响应、`webhook.sources` 和日志都不回显它。
 - `NotifyRoute` 的兜底顺序：`primary` → `fallback[]` → **`inapp` 永远作为最后一档**（交付循环可以在这里停住）；

@@ -87,3 +87,16 @@ var (
 
 // KeyFeishu is provided by the feishu module.
 var KeyFeishu = cordis.NewServiceKey[FeishuService]("zeokeel/feishu")
+
+// FeishuRequestVerifier is implemented by the adapter so the HTTP layer can
+// authenticate callbacks that are not messages (card buttons) without reaching
+// into the adapter's internals.
+type FeishuRequestVerifier interface {
+	VerifyRequest(headers map[string]string, body []byte) error
+}
+
+// FeishuCardActionReader extracts the approval id, decision and one-time token a
+// card button carries.
+type FeishuCardActionReader interface {
+	CardActionWithToken(body []byte) (approvalID, decision, token string, ok bool)
+}

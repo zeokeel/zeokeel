@@ -110,6 +110,11 @@
       "config": {}
     },
     {
+      "id": "email",
+      "module": "zeokeel/email",
+      "config": {}
+    },
+    {
       "id": "hosttools",
       "module": "zeokeel/hosttools",
       "config": {
