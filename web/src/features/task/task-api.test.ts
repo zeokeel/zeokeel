@@ -3,6 +3,7 @@ import {
   claimTask,
   heartbeatTask,
   loadTaskBoard,
+  loadTaskBudget,
   loadTaskLease,
   loadTaskTools,
   reviewTask,
@@ -272,5 +273,69 @@ describe('task tools api', () => {
     // removed by a malformed request, so a clear is an empty list.
     expect(wire.request).toHaveBeenCalledWith('tasks.tools.set', { id: 'task-1', tools: [] });
     expect(binding).toEqual({ taskId: 'task-1', updatedAt: '2026-11-25T09:00:00Z' });
+  });
+});
+
+/**
+ * 预算 (`tasks.budget.get`, G11): the per-task cost ceiling.
+ *
+ * The read has three legal answers and this layer must not blur them: a row (a
+ * ceiling exists, possibly already spent), `{budget:null}` (no ceiling — an
+ * answer, not a failure), and a thrown error (the read itself failed). `0` on
+ * either limit means "unlimited", so the numbers are kept verbatim rather than
+ * normalized away.
+ */
+describe('task budget api', () => {
+  it('reads the budget with {id} and nothing else', async () => {
+    wire.request.mockResolvedValue({
+      taskId: 'task-1',
+      maxTokens: 1000,
+      maxMinutes: 30,
+      usedTokens: 120,
+      startedAt: '2026-11-25T09:00:00Z',
+      exhausted: false,
+    });
+
+    const budget = await loadTaskBudget('task-1');
+
+    expect(wire.request).toHaveBeenCalledWith('tasks.budget.get', { id: 'task-1' });
+    expect(budget).toEqual({
+      taskId: 'task-1',
+      maxTokens: 1000,
+      maxMinutes: 30,
+      usedTokens: 120,
+      startedAt: '2026-11-25T09:00:00Z',
+      exhausted: false,
+    });
+  });
+
+  it('answers null for {budget:null}: no ceiling, not a failure', async () => {
+    wire.request.mockResolvedValue({ budget: null });
+
+    await expect(loadTaskBudget('task-1')).resolves.toBeNull();
+  });
+
+  it('unwraps a {budget:{...}} envelope and falls back to the requested id', async () => {
+    wire.request.mockResolvedValue({ budget: { maxTokens: 10, usedTokens: 10, exhausted: true } });
+
+    const budget = await loadTaskBudget('task-7');
+
+    expect(budget).toEqual({
+      taskId: 'task-7',
+      maxTokens: 10,
+      maxMinutes: 0,
+      usedTokens: 10,
+      exhausted: true,
+    });
+  });
+
+  it('keeps a missing limit as 0 (unlimited) and only reports a real stop', async () => {
+    // A gateway that omits the limits must not make the screen show `NaN` or
+    // treat "no ceiling" as "exhausted".
+    wire.request.mockResolvedValue({ taskId: 'task-1', usedTokens: 5 });
+
+    const budget = await loadTaskBudget('task-1');
+
+    expect(budget).toEqual({ taskId: 'task-1', maxTokens: 0, maxMinutes: 0, usedTokens: 5, exhausted: false });
   });
 });

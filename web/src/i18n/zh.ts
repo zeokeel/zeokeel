@@ -370,6 +370,16 @@ export const zh = {
   'task.detail.means.title': '执行手段',
   'task.detail.means.empty': '这个产品还没装任何执行手段',
   'task.detail.means.unavailable': '不可用',
+  // 预算 (G11). The exhausted line says what happened and what unblocks it; the
+  // topping up itself is a Lead action on another surface, so no verb here.
+  'task.detail.budget.title': '预算',
+  'task.detail.budget.used': '已用 {used} / 上限 {limit} tokens',
+  'task.detail.budget.usedUnlimited': '已用 {used} tokens（没设上限）',
+  'task.detail.budget.minutes': '已用 {used} 分钟 / 上限 {limit} 分钟',
+  'task.detail.budget.minutesLimitOnly': '时间上限 {limit} 分钟',
+  'task.detail.budget.none': '这个任务没有预算上限。',
+  'task.detail.budget.exhausted': '任务已停止，需要追加预算才能继续',
+  'task.detail.budget.loadFailed': '预算没读出来',
   'task.detail.progress.more': '展开全部',
   'task.detail.progress.less': '收起',
   'task.detail.progress.now': '现在',

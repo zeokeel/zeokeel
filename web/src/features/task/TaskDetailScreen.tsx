@@ -27,7 +27,10 @@
  *
  * §2 also carries the 执行手段 block (`ExecutionMeans`): what the product can
  * actually reach (skills, MCP connectors) is the other half of "how is this
- * getting done", so it is read — and allowed to fail — on its own.
+ * getting done", so it is read — and allowed to fail — on its own. Next to it
+ * sits 预算 (`TaskBudget`): what the work cost against its ceiling, and whether
+ * that ceiling stopped it. Three separate reads, three separate failures — none
+ * of them can take the task down.
  */
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { useParams } from 'react-router';
@@ -58,6 +61,7 @@ import {
 import { useMediaQuery } from '@/design/use-system-appearance';
 import { useT } from '@/i18n';
 import { ExecutionMeans } from './ExecutionMeans';
+import { TaskBudget } from './TaskBudget';
 
 /**
  * The acting identity.
@@ -551,6 +555,13 @@ export function TaskDetailScreen() {
                 "不需要你做什么", which is exactly when a finished task still owes
                 an answer about what did the work. */}
             <ExecutionMeans taskId={id} />
+
+            {/* 预算: the cost side of the same question. A task stops when a bound
+                session spends past its ceiling, so the reader learns it here,
+                next to what did the work — as a read of its own, which is why a
+                failed budget read leaves everything above untouched. Topping up
+                is a Lead action on another surface; this block only reports. */}
+            <TaskBudget taskId={id} />
           </Space>
         </section>
 

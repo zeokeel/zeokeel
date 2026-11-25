@@ -377,3 +377,83 @@ export async function setTaskTools(input: TaskToolsSetInput): Promise<TaskTools>
   });
   return taskToolsFromWire(result, input.id);
 }
+
+/**
+ * The per-task cost ceiling (`contracts.TaskBudget`, G11).
+ *
+ * A bound session reports real token usage and the task stops when it crosses
+ * this ceiling, so the three numbers here are the whole story a person needs:
+ * how much was spent, what the limit was, and whether the stop has happened.
+ *
+ * `maxTokens` / `maxMinutes` are `0` for "unlimited" — the gateway does not use
+ * `omitempty` on them precisely so this layer can tell that from a missing
+ * field, and this layer keeps that meaning verbatim instead of guessing a
+ * ceiling the gateway never set.
+ */
+export interface TaskBudget {
+  taskId: string;
+  /** Token ceiling. `0` means unlimited. */
+  maxTokens: number;
+  /** Wall-clock ceiling in minutes, measured from {@link startedAt}. `0` means unlimited. */
+  maxMinutes: number;
+  /** What the accounting source has reported so far. Never derived here. */
+  usedTokens: number;
+  /** When the first usage was reported — the clock `maxMinutes` runs on. */
+  startedAt?: string;
+  /** The stop itself. Sticky until somebody re-budgets the task. */
+  exhausted: boolean;
+}
+
+/** Rows as they arrive on the wire: `exhausted` is always present, the limits are 0 when unset. */
+interface TaskBudgetWire {
+  taskId?: string;
+  maxTokens?: number;
+  maxMinutes?: number;
+  usedTokens?: number;
+  startedAt?: string;
+  exhausted?: boolean;
+}
+
+/** A count the wire claims to carry; anything else is 0 rather than `NaN` on screen. */
+function count(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+/**
+ * A budget row, with the requested id as the fallback: a gateway that omits
+ * `taskId` still answered about *this* task, and the screen keys its render on it.
+ *
+ * `exhausted` is `true` only when the gateway says so: a missing field is "no
+ * stop", never an inferred one — a task that was stopped and an older gateway
+ * that never reported stops must not look the same.
+ */
+function taskBudgetFromWire(row: TaskBudgetWire, fallbackId: string): TaskBudget {
+  const budget: TaskBudget = {
+    taskId: row.taskId || fallbackId,
+    maxTokens: count(row.maxTokens),
+    maxMinutes: count(row.maxMinutes),
+    usedTokens: count(row.usedTokens),
+    exhausted: row.exhausted === true,
+  };
+  if (row.startedAt) budget.startedAt = row.startedAt;
+  return budget;
+}
+
+/**
+ * Read the ceiling a task was dispatched with (`tasks.budget.get`).
+ *
+ * Two wire shapes are legal and both mean the same thing here: a bare
+ * `TaskBudget`, or `{budget:null}` when the task has none. `null` is an answer —
+ * "no ceiling" — and must not be turned into an error; a thrown error means the
+ * read itself failed. That distinction is the whole reason this is a separate
+ * call: a task you can see but whose budget did not load is still a task.
+ */
+export async function loadTaskBudget(id: string): Promise<TaskBudget | null> {
+  const result = await request<TaskBudgetWire & { budget?: TaskBudgetWire | null }>(
+    'tasks.budget.get',
+    { id },
+  );
+  const row = Object.prototype.hasOwnProperty.call(result, 'budget') ? result.budget : result;
+  if (!row) return null;
+  return taskBudgetFromWire(row, id);
+}

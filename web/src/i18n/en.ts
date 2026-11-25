@@ -367,6 +367,16 @@ export const en: Catalog = {
   'task.detail.means.title': 'Execution means',
   'task.detail.means.empty': 'This product has no execution means installed',
   'task.detail.means.unavailable': 'Unavailable',
+  // Budget (G11). The exhausted line says what happened and what unblocks it;
+  // topping up is a Lead action on another surface, so there is no verb here.
+  'task.detail.budget.title': 'Budget',
+  'task.detail.budget.used': 'Used {used} / limit {limit} tokens',
+  'task.detail.budget.usedUnlimited': 'Used {used} tokens (no limit set)',
+  'task.detail.budget.minutes': 'Used {used} min / limit {limit} min',
+  'task.detail.budget.minutesLimitOnly': 'Time limit {limit} min',
+  'task.detail.budget.none': 'This task has no budget limit.',
+  'task.detail.budget.exhausted': 'The task has stopped; more budget is needed before it can continue',
+  'task.detail.budget.loadFailed': 'Could not load the budget',
   'task.detail.progress.more': 'Show all',
   'task.detail.progress.less': 'Show less',
   'task.detail.progress.now': 'Now',

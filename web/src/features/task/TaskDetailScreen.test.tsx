@@ -38,6 +38,9 @@ const api = vi.hoisted(() => ({
   // 工具绑定 reads and writes its own row on the task (`tasks.tools.get/set`).
   loadTaskTools: vi.fn(),
   setTaskTools: vi.fn(),
+  // 预算 reads its own row on the task (`tasks.budget.get`): its failure is
+  // never the task's failure, so it gets a mock of its own.
+  loadTaskBudget: vi.fn(),
   // The 执行手段 block reads this on its own; a failure here is not a failure
   // of the task, so it is a mock of its own.
   loadCapabilities: vi.fn(),
@@ -54,6 +57,7 @@ vi.mock('@/api/task', () => ({
   reviewTask: api.reviewTask,
   loadTaskTools: api.loadTaskTools,
   setTaskTools: api.setTaskTools,
+  loadTaskBudget: api.loadTaskBudget,
 }));
 
 vi.mock('@/api/read-models', () => ({
@@ -137,6 +141,10 @@ beforeEach(() => {
   // No claim unless a test says so: "no lease" is the honest default for a task
   // nobody has opened.
   api.loadTaskLease.mockResolvedValue(null);
+  // Same reason again: a queued budget answer must not steer the next test. A
+  // task with no ceiling is the honest default (`{budget:null}`).
+  api.loadTaskBudget.mockReset();
+  api.loadTaskBudget.mockResolvedValue(null);
   api.claimTask.mockResolvedValue(lease());
   api.submitTask.mockResolvedValue(lease({ state: 'review' }));
   api.reviewTask.mockResolvedValue(lease({ state: 'done' }));
@@ -760,14 +768,23 @@ describe('TaskDetailScreen', () => {
 
     it('re-reads the capabilities on 重试 without re-reading the board', async () => {
       api.loadTaskBoard.mockResolvedValue([task()]);
-      api.loadCapabilities
-        .mockRejectedValueOnce(new Error('能力服务连不上'))
-        .mockResolvedValue({ skills: [skill('pdf')], connectors: [], disabled: [] });
+      // A flag rather than a single-shot rejection: under load the component may
+      // read twice before the click, and a queue-based mock then hands the second
+      // read a success — leaving no alert to click. The flag makes the failure
+      // last exactly as long as the test says it does.
+      let failing = true;
+      api.loadCapabilities.mockImplementation(() =>
+        failing
+          ? Promise.reject(new Error('能力服务连不上'))
+          : Promise.resolve({ skills: [skill('pdf')], connectors: [], disabled: [] }),
+      );
       const user = userEvent.setup();
 
       renderScreen();
 
       const region = within(await progress()).getByTestId('means-capabilities');
+      await within(region).findByText('能力服务连不上');
+      failing = false;
       // Count before the click: under load React may mount twice, and asserting an
       // absolute number made this test depend on how many mounts happened.
       const readsBeforeRetry = api.loadCapabilities.mock.calls.length;
@@ -779,6 +796,167 @@ describe('TaskDetailScreen', () => {
       expect(api.loadTaskBoard).toHaveBeenCalledTimes(1);
       // The failure is no longer on screen.
       expect(within(region).queryByText('能力服务连不上')).toBeNull();
+    });
+  });
+
+  /**
+   * 预算 (G11 cost ceiling).
+   *
+   * A bound session reports real token usage and the task stops when it crosses
+   * its ceiling, so the screen owes the reader two facts: how much of the
+   * ceiling is spent, and — when it is spent — that the task has stopped and
+   * what unblocks it. The top-up itself is a Lead action on another surface
+   * (`tasks.budget.set`), so this block deliberately offers no 继续 button.
+   *
+   * It is a read of its own (`tasks.budget.get`), with its own failure: a budget
+   * that did not load must not take the task around it down, and "no ceiling"
+   * (`{budget:null}`) is an answer, not a failure.
+   */
+  describe('预算', () => {
+    /** The block's own testid, so every assertion is scoped to it. */
+    async function budget(): Promise<HTMLElement> {
+      return screen.findByTestId('task-budget');
+    }
+
+    /** The catalogue's own number formatting, so the assertion is locale-free. */
+    const n = (value: number) => value.toLocaleString();
+
+    it('says 这个任务没有预算上限 when the task has no budget row', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadTaskBudget.mockResolvedValue(null);
+
+      renderScreen();
+
+      const block = within(await budget());
+      expect(await block.findByText('这个任务没有预算上限。')).toBeInTheDocument();
+      // Nothing was measured, so nothing is drawn: no bar, no alert, no retry.
+      expect(block.queryByRole('progressbar')).toBeNull();
+      expect(block.queryByRole('alert')).toBeNull();
+      expect(block.queryByRole('button')).toBeNull();
+      expect(api.loadTaskBudget).toHaveBeenCalledWith('task-1');
+      // The budget is its own read; the board is not read again for it.
+      expect(api.loadTaskBoard).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows used over limit and a bar whose aria-valuenow is the used percentage', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadTaskBudget.mockResolvedValue({
+        taskId: 'task-1',
+        maxTokens: 1000,
+        maxMinutes: 0,
+        usedTokens: 440,
+        exhausted: false,
+      });
+
+      renderScreen();
+
+      const block = within(await budget());
+      expect(
+        await block.findByText(`已用 ${n(440)} / 上限 ${n(1000)} tokens`),
+      ).toBeInTheDocument();
+      const bar = block.getByRole('progressbar');
+      expect(bar).toHaveAttribute('aria-valuenow', '44');
+      // Still going: the bar keeps the in-progress semantic, not the error one.
+      expect(bar.className).toContain('ant-progress-status-normal');
+      expect(bar.className).not.toContain('ant-progress-status-exception');
+      // The stop line belongs to an exhausted budget only.
+      expect(block.queryByText('任务已停止，需要追加预算才能继续')).toBeNull();
+    });
+
+    it('also shows the minutes when the budget has a time ceiling', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadTaskBudget.mockResolvedValue({
+        taskId: 'task-1',
+        maxTokens: 1000,
+        maxMinutes: 60,
+        usedTokens: 10,
+        // The clock a minute ceiling runs on: 25 minutes spent so far.
+        startedAt: new Date(Date.now() - 25 * 60_000).toISOString(),
+        exhausted: false,
+      });
+
+      renderScreen();
+
+      const block = within(await budget());
+      expect(await block.findByText(`已用 25 分钟 / 上限 60 分钟`)).toBeInTheDocument();
+    });
+
+    it('says the stop in one line and turns the bar to the error semantic once exhausted', async () => {
+      api.loadTaskBoard.mockResolvedValue([task({ status: 'in_progress' })]);
+      api.loadTaskBudget.mockResolvedValue({
+        taskId: 'task-1',
+        maxTokens: 1000,
+        maxMinutes: 0,
+        usedTokens: 1000,
+        exhausted: true,
+      });
+
+      renderScreen();
+
+      const block = within(await budget());
+      expect(await block.findByText('任务已停止，需要追加预算才能继续')).toBeInTheDocument();
+      const bar = block.getByRole('progressbar');
+      expect(bar).toHaveAttribute('aria-valuenow', '100');
+      // The stop is the error semantic (the same colour an error uses
+      // everywhere else) — not a decorative red.
+      expect(bar.className).toContain('ant-progress-status-exception');
+      // Topping up is a Lead action on another surface: no 继续 button here.
+      expect(block.queryByRole('button')).toBeNull();
+    });
+
+    it('keeps the failure inside the block and re-reads only the budget on 重试', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadTaskBudget
+        .mockRejectedValueOnce(new Error('预算服务连不上'))
+        .mockResolvedValue(null);
+      const user = userEvent.setup();
+
+      renderScreen();
+
+      const block = within(await budget());
+      const alert = await block.findByRole('alert');
+      expect(within(alert).getByText(T('task.detail.budget.loadFailed'))).toBeInTheDocument();
+      // The gateway's own words, not a guess of ours.
+      expect(within(alert).getByText('预算服务连不上')).toBeInTheDocument();
+
+      const readsBeforeRetry = api.loadTaskBudget.mock.calls.length;
+      await user.click(within(alert).getByRole('button', { name: label(T('task.detail.retry')) }));
+
+      expect(await block.findByText('这个任务没有预算上限。')).toBeInTheDocument();
+      // The retry promises one thing: exactly one more budget read.
+      expect(api.loadTaskBudget.mock.calls.length).toBe(readsBeforeRetry + 1);
+      expect(api.loadTaskBoard).toHaveBeenCalledTimes(1);
+      expect(block.queryByRole('alert')).toBeNull();
+    });
+
+    it('keeps the whole task on screen when only the budget read fails', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadTaskBudget.mockRejectedValue(new Error('预算服务连不上'));
+
+      renderScreen();
+
+      // The task itself rendered: its title, its goal and its five sections …
+      expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('查退款率');
+      expect(screen.getByText('对比三家竞品的退款政策')).toBeInTheDocument();
+      expect(sectionHeadings()).toEqual([
+        T('task.detail.section.doing'),
+        T('task.detail.section.progress'),
+        T('task.detail.section.evidence'),
+        T('task.detail.section.artifacts'),
+        T('task.detail.section.needYou'),
+      ]);
+      // … the four verbs still work …
+      expect(screen.getByRole('button', { name: label(T('task.detail.claim')) })).toBeEnabled();
+      // … the failure is the budget's own, inside the block …
+      const element = await budget();
+      const block = within(element);
+      expect(within(block.getByRole('alert')).getByText('预算服务连不上')).toBeInTheDocument();
+      // … and the evidence half is untouched: not loaded ≠ failed.
+      const evidence = screen.getByRole('region', { name: T('task.detail.section.evidence') });
+      expect(within(evidence).queryByRole('alert')).toBeNull();
+      // Not the whole-screen failure, and no false "no ceiling".
+      expect(screen.queryByText(T('task.detail.loadFailed'))).toBeNull();
+      expect(within(element).queryByText('这个任务没有预算上限。')).toBeNull();
     });
   });
 });
