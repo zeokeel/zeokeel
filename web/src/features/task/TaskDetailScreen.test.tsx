@@ -767,7 +767,7 @@ describe('TaskDetailScreen', () => {
 
       renderScreen();
 
-      const region = await progress();
+      const region = within(await progress()).getByTestId('means-capabilities');
       await user.click(within(region).getByRole('button', { name: label(T('task.detail.retry')) }));
 
       expect(await within(region).findByText('pdf')).toBeInTheDocument();

@@ -502,7 +502,9 @@ export function ExecutionMeans({ taskId }: { taskId: string }) {
             ),
           children: (
             <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-              {body}
+              {/* Its own testid so a test can say "the capabilities part" without
+                  accidentally matching the tool binding's controls. */}
+              <div data-testid="means-capabilities">{body}</div>
               {/* Its own read and its own write: a capabilities failure above
                   does not take the binding down, and vice versa. */}
               <ToolsBinding taskId={taskId} connectors={connectors} />
