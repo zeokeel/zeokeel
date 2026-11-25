@@ -168,6 +168,21 @@ func (h *handler) complete(w http.ResponseWriter, r *http.Request) {
 		streamer.text(answer, 30*time.Millisecond)
 		streamer.finish("stop", answer)
 		streamer.done()
+	case "longcmd":
+		// A tool call whose argument and output are both one long unbreakable
+		// token: the card must scroll inside itself, not widen the transcript.
+		if !hasToolResult(request) {
+			long := strings.Repeat("A", 300)
+			arguments, _ := json.Marshal(map[string]string{"command": "echo " + long})
+			streamer.toolCall("bash", string(arguments))
+			streamer.finish("tool_calls", "")
+			streamer.done()
+			return
+		}
+		answer := "Done."
+		streamer.text(answer, 25*time.Millisecond)
+		streamer.finish("stop", answer)
+		streamer.done()
 	case "thinktool":
 		// Reasoning, then a tool, then the answer: the whole loop in one turn.
 		if !hasToolResult(request) {
@@ -224,6 +239,8 @@ func (h *handler) complete(w http.ResponseWriter, r *http.Request) {
 func scenarioOf(model string) string {
 	name := strings.ToLower(model)
 	switch {
+	case strings.Contains(name, "longcmd"):
+		return "longcmd"
 	case strings.Contains(name, "thinktool"):
 		return "thinktool"
 	case strings.Contains(name, "multi"):

@@ -781,6 +781,21 @@ body {
 .zk-code__scroll {
   max-height: 320px;
   overflow: auto;
+  /* Flex/grid ancestors default to `min-width: auto`, so one long unbreakable
+   * line widened the whole card to 2552px and the inner scroller never scrolled
+   * (round-5 md audit #5). */
+  min-width: 0;
+}
+
+.zk-tool-card,
+.zk-tool-section,
+.zk-tool-section__body,
+.zk-code,
+.zk-thought .ant-thought-chain-node-box,
+.zk-thought .ant-thought-chain-node,
+.zk-thought .ant-thought-chain {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .zk-tool-notice {
