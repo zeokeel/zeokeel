@@ -4,7 +4,9 @@ import {
   heartbeatTask,
   loadTaskBoard,
   loadTaskLease,
+  loadTaskTools,
   reviewTask,
+  setTaskTools,
   submitTask,
 } from '@/api/task';
 
@@ -200,5 +202,75 @@ describe('task api', () => {
     const lease = await claimTask({ id: 'task-9', owner: 'lead' });
 
     expect(lease).toEqual({ taskId: 'task-9', owner: 'lead', state: 'claimed' });
+  });
+});
+
+/**
+ * 工具绑定 (M5 execution policy): `tasks.tools.get` / `tasks.tools.set`.
+ *
+ * The read's "no binding" answer is `{tools:null}` — the same absent shape as
+ * `tasks.lease`'s `{lease:null}` — and it is an answer, not a failure. A clear
+ * is `set` with `[]`, which the gateway stores as "no binding", so a read that
+ * follows a clear answers `{tools:null}` again.
+ */
+describe('task tools api', () => {
+  it('reads the binding with {id} and nothing else', async () => {
+    wire.request.mockResolvedValue({
+      taskId: 'task-1',
+      tools: ['browser_open', 'mcp__github__search'],
+      updatedAt: '2026-11-25T09:00:00Z',
+    });
+
+    const binding = await loadTaskTools('task-1');
+
+    expect(wire.request).toHaveBeenCalledWith('tasks.tools.get', { id: 'task-1' });
+    expect(binding).toEqual({
+      taskId: 'task-1',
+      tools: ['browser_open', 'mcp__github__search'],
+      updatedAt: '2026-11-25T09:00:00Z',
+    });
+  });
+
+  it('answers null for {tools:null}: unbound, not a failure', async () => {
+    wire.request.mockResolvedValue({ tools: null });
+
+    await expect(loadTaskTools('task-1')).resolves.toBeNull();
+  });
+
+  it('answers null when the answer carries no list at all', async () => {
+    wire.request.mockResolvedValue({});
+
+    await expect(loadTaskTools('task-1')).resolves.toBeNull();
+  });
+
+  it('falls back to the requested id and keeps blank names out of the binding', async () => {
+    wire.request.mockResolvedValue({ tools: ['browser_open', '  ', ''] });
+
+    const binding = await loadTaskTools('task-1');
+
+    expect(binding).toEqual({ taskId: 'task-1', tools: ['browser_open'] });
+  });
+
+  it('writes the full list as {id, tools} and returns the binding', async () => {
+    wire.request.mockResolvedValue({ taskId: 'task-1', tools: ['a', 'b'] });
+
+    const binding = await setTaskTools({ id: 'task-1', tools: ['a', 'b'] });
+
+    expect(wire.request).toHaveBeenCalledWith('tasks.tools.set', {
+      id: 'task-1',
+      tools: ['a', 'b'],
+    });
+    expect(binding).toEqual({ taskId: 'task-1', tools: ['a', 'b'] });
+  });
+
+  it('clears with an explicit empty list, never with null', async () => {
+    wire.request.mockResolvedValue({ taskId: 'task-1', updatedAt: '2026-11-25T09:00:00Z' });
+
+    const binding = await setTaskTools({ id: 'task-1', tools: [] });
+
+    // `tools:null` would be rejected by the gateway (1010): a policy is never
+    // removed by a malformed request, so a clear is an empty list.
+    expect(wire.request).toHaveBeenCalledWith('tasks.tools.set', { id: 'task-1', tools: [] });
+    expect(binding).toEqual({ taskId: 'task-1', updatedAt: '2026-11-25T09:00:00Z' });
   });
 });

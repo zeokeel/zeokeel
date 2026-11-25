@@ -35,6 +35,9 @@ const api = vi.hoisted(() => ({
   heartbeatTask: vi.fn(),
   submitTask: vi.fn(),
   reviewTask: vi.fn(),
+  // 工具绑定 reads and writes its own row on the task (`tasks.tools.get/set`).
+  loadTaskTools: vi.fn(),
+  setTaskTools: vi.fn(),
   // The 执行手段 block reads this on its own; a failure here is not a failure
   // of the task, so it is a mock of its own.
   loadCapabilities: vi.fn(),
@@ -49,6 +52,8 @@ vi.mock('@/api/task', () => ({
   heartbeatTask: api.heartbeatTask,
   submitTask: api.submitTask,
   reviewTask: api.reviewTask,
+  loadTaskTools: api.loadTaskTools,
+  setTaskTools: api.setTaskTools,
 }));
 
 vi.mock('@/api/read-models', () => ({
@@ -118,6 +123,17 @@ beforeEach(() => {
   // `mockResolvedValueOnce` queues survive `clearAllMocks`, so the lease read is
   // reset outright: a leftover answer from one test must not steer the next.
   api.loadTaskLease.mockReset();
+  // Same reason as the lease: a queued answer must not steer the next test.
+  api.loadTaskTools.mockReset();
+  // No binding unless a test says so: a task nobody bound tools to is the
+  // honest default, and it is what the gateway answers with `{tools:null}`.
+  api.loadTaskTools.mockResolvedValue(null);
+  api.setTaskTools.mockReset();
+  // The gateway echoes what it stored; a clear answers without a list.
+  api.setTaskTools.mockImplementation(async (input: { id: string; tools: string[] }) => ({
+    taskId: input.id,
+    ...(input.tools.length > 0 ? { tools: [...input.tools] } : {}),
+  }));
   // No claim unless a test says so: "no lease" is the honest default for a task
   // nobody has opened.
   api.loadTaskLease.mockResolvedValue(null);
@@ -476,7 +492,9 @@ describe('TaskDetailScreen', () => {
       expect(means.getByText('读 PDF 里的表格')).toBeInTheDocument();
       expect(means.getByText('git')).toBeInTheDocument();
       // The connector and its state, which the gateway derived (round-2 C-04).
-      expect(means.getByText('local-mcp')).toBeInTheDocument();
+      // Scoped to the connector rows: the name is also a box in the binding
+      // picker below (a connector row is "connected?", the box is "allowed here?").
+      expect(within(means.getByTestId('means-connectors')).getByText('local-mcp')).toBeInTheDocument();
       expect(means.getByText(T('screen.capabilities.state.connected'))).toBeInTheDocument();
       // One read, and it is the capabilities read — not the board again.
       expect(api.loadCapabilities).toHaveBeenCalledTimes(1);
@@ -543,7 +561,8 @@ describe('TaskDetailScreen', () => {
       expect(within(disabledRow).getByText('old-mcp')).toBeInTheDocument();
       // Two different statements: what is connected, and what is switched off.
       expect(within(disabledRow).queryByText('live')).toBeNull();
-      expect(means.getByText('live')).toBeInTheDocument();
+      // Connected, on the connector list (and, separately, offered for binding).
+      expect(within(means.getByTestId('means-connectors')).getByText('live')).toBeInTheDocument();
     });
 
     it('says the product has no execution means at all when the API answers empty', async () => {
@@ -576,6 +595,164 @@ describe('TaskDetailScreen', () => {
       expect(within(alert).getByRole('button', { name: label(T('task.detail.retry')) })).toBeInTheDocument();
       // Not the whole-screen failure.
       expect(screen.queryByText(T('task.detail.loadFailed'))).toBeNull();
+    });
+
+    /**
+     * 工具绑定 — the execution policy of *this* task (`tasks.tools.get/set`, M5).
+     *
+     * What is offered: connector names only. `GET /api/capabilities` answers the
+     * MCP servers it knows and a *count* of their tools, never the individual
+     * tool names, so a picker that showed `mcp__<connector>__*` would be
+     * inventing names the gateway never printed. The block says so in one line
+     * instead. A name the task is already bound to is always offered, even when
+     * capabilities does not list it, so 保存 can never silently drop it.
+     */
+    describe('工具绑定', () => {
+      const BINDING_COPY = {
+        unbound: '还没绑定工具',
+      };
+      const SAVE = T('settings.save');
+      const TOOLS = 'browser_open';
+
+      /** A product whose capabilities name two connectors and their counts. */
+      function twoConnectors() {
+        api.loadCapabilities.mockResolvedValue({
+          skills: [],
+          connectors: [connector('local-mcp', { tools: 2 }), connector('github', { tools: 7 })],
+          disabled: [],
+        });
+      }
+
+      it('renders the current binding as checked boxes', async () => {
+        api.loadTaskBoard.mockResolvedValue([task()]);
+        twoConnectors();
+        api.loadTaskTools.mockResolvedValue({ taskId: 'task-1', tools: ['github'] });
+
+        renderScreen();
+
+        const means = within(await progress());
+        expect(await means.findByRole('checkbox', { name: 'github' })).toBeChecked();
+        expect(means.getByRole('checkbox', { name: 'local-mcp' })).not.toBeChecked();
+        // The binding is this task's policy, read by id — not guessed from
+        // capabilities, and not the whole board read again.
+        expect(api.loadTaskTools).toHaveBeenCalledWith('task-1');
+        expect(api.loadTaskBoard).toHaveBeenCalledTimes(1);
+        // The connector-name note is there because names are all we have.
+        expect(
+          means.getByText('只能按连接器绑定：网关还没在 capabilities 里给出单个工具名'),
+        ).toBeInTheDocument();
+      });
+
+      it('sends the exact full list on 保存, then re-reads the binding', async () => {
+        api.loadTaskBoard.mockResolvedValue([task()]);
+        twoConnectors();
+        api.loadTaskTools
+          .mockResolvedValueOnce({ taskId: 'task-1', tools: ['local-mcp'] })
+          .mockResolvedValue({ taskId: 'task-1', tools: ['local-mcp', 'github'] });
+        const user = userEvent.setup();
+
+        renderScreen();
+
+        const means = within(await progress());
+        await user.click(await means.findByRole('checkbox', { name: 'github' }));
+        await user.click(means.getByRole('button', { name: label(SAVE) }));
+
+        // The whole list, in the order the boxes are shown — a rebind replaces,
+        // it does not merge, so a partial list would drop what is not in it.
+        expect(api.setTaskTools).toHaveBeenCalledWith({
+          id: 'task-1',
+          tools: ['local-mcp', 'github'],
+        });
+        expect(api.setTaskTools).toHaveBeenCalledTimes(1);
+        // One re-read of the binding after the write: the boxes show what the
+        // gateway stored, not what this component hoped it stored.
+        await vi.waitFor(() => expect(api.loadTaskTools).toHaveBeenCalledTimes(2));
+        expect(means.getByRole('checkbox', { name: 'github' })).toBeChecked();
+      });
+
+      it('sends [] on 清除 and reports the task as unbound again', async () => {
+        api.loadTaskBoard.mockResolvedValue([task()]);
+        twoConnectors();
+        api.loadTaskTools
+          .mockResolvedValueOnce({ taskId: 'task-1', tools: [TOOLS] })
+          .mockResolvedValue(null);
+        const user = userEvent.setup();
+
+        renderScreen();
+
+        const means = within(await progress());
+        // A bound name capabilities never listed (individual tool names are not
+        // in that payload) is still on the box list while it is bound.
+        expect(await means.findByRole('checkbox', { name: TOOLS })).toBeChecked();
+
+        await user.click(means.getByRole('button', { name: label('清除') }));
+
+        expect(api.setTaskTools).toHaveBeenCalledWith({ id: 'task-1', tools: [] });
+        await vi.waitFor(() => expect(api.loadTaskTools).toHaveBeenCalledTimes(2));
+        expect(await means.findByText(BINDING_COPY.unbound)).toBeInTheDocument();
+      });
+
+      it('keeps the previous binding when the write fails', async () => {
+        api.loadTaskBoard.mockResolvedValue([task()]);
+        twoConnectors();
+        api.loadTaskTools.mockResolvedValue({ taskId: 'task-1', tools: ['local-mcp'] });
+        api.setTaskTools.mockRejectedValue(new Error('tasklease: task tools invalid'));
+        const user = userEvent.setup();
+
+        renderScreen();
+
+        const means = within(await progress());
+        const box = await means.findByRole('checkbox', { name: 'local-mcp' });
+        await user.click(box);
+        // The edit is in the boxes …
+        expect(box).not.toBeChecked();
+
+        await user.click(means.getByRole('button', { name: label(SAVE) }));
+
+        // … the failure is reported in the gateway's own words …
+        expect(await means.findByText('tasklease: task tools invalid')).toBeInTheDocument();
+        // … and the boxes go back to the binding the gateway still holds: a
+        // policy the gateway rejected must not look applied.
+        await vi.waitFor(() => expect(box).toBeChecked());
+        // No re-read: a failed write changed nothing.
+        expect(api.loadTaskTools).toHaveBeenCalledTimes(1);
+      });
+
+      it('says 还没绑定工具 for a task with no policy', async () => {
+        api.loadTaskBoard.mockResolvedValue([task()]);
+        twoConnectors();
+
+        renderScreen();
+
+        const means = within(await progress());
+        expect(await means.findByText(BINDING_COPY.unbound)).toBeInTheDocument();
+        // Unbound is not "nothing to offer": the boxes are there to bind with.
+        expect(means.getByRole('checkbox', { name: 'github' })).not.toBeChecked();
+      });
+
+      it('allows one write in flight at a time', async () => {
+        api.loadTaskBoard.mockResolvedValue([task()]);
+        twoConnectors();
+        api.loadTaskTools.mockResolvedValue({ taskId: 'task-1', tools: ['local-mcp'] });
+        // Never settles: the point is what the buttons do *while* it is in the air.
+        api.setTaskTools.mockReturnValue(new Promise(() => {}));
+        const user = userEvent.setup();
+
+        renderScreen();
+
+        const means = within(await progress());
+        await user.click(await means.findByRole('checkbox', { name: 'github' }));
+        await user.click(means.getByRole('button', { name: label(SAVE) }));
+
+        // antd renders a loading icon with `aria-label="loading"`, which joins the
+        // button's accessible name — so the button is matched without anchors.
+        expect(
+          means.getByRole('button', { name: new RegExp([...SAVE].join('\\s*')) }),
+        ).toBeDisabled();
+        expect(means.getByRole('button', { name: label('清除') })).toBeDisabled();
+        expect(means.getByRole('checkbox', { name: 'github' })).toBeDisabled();
+        expect(api.setTaskTools).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('re-reads the capabilities on 重试 without re-reading the board', async () => {

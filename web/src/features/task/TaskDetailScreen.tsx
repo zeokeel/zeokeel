@@ -550,7 +550,7 @@ export function TaskDetailScreen() {
                 make; §5 is the four verbs, and a settled task shows §5 as
                 "不需要你做什么", which is exactly when a finished task still owes
                 an answer about what did the work. */}
-            <ExecutionMeans />
+            <ExecutionMeans taskId={id} />
           </Space>
         </section>
 

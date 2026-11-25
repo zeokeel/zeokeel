@@ -297,3 +297,83 @@ export async function reviewTask(input: ReviewTaskInput): Promise<TaskLease> {
   const result = await request<LeaseWire>('tasks.review', params);
   return leaseFromWire(result, { id: input.id, owner: input.reviewer });
 }
+
+/**
+ * The tool binding of one task (`contracts.TaskTools`, M5 execution policy).
+ *
+ * A lease says *who* is working on a task; this says *what that work may touch*.
+ * They are separate records on purpose (a task can be released and re-claimed
+ * without losing its policy), which is why the screen reads both.
+ *
+ * `tools` is absent, never `[]`, in a real answer: the gateway deletes a binding
+ * rather than storing an empty one, and a read of a task with no binding answers
+ * `{tools:null}` — the same absent shape as `tasks.lease`'s `{lease:null}`, so
+ * this layer has one "nothing there" case.
+ */
+export interface TaskTools {
+  taskId: string;
+  /** Model-visible tool names the owner may run. Absent means "no binding". */
+  tools?: string[];
+  /** When the policy was last written, RFC 3339. */
+  updatedAt?: string;
+}
+
+/** Rows as they arrive on the wire: `tools` is null when nothing is bound. */
+interface TaskToolsWire {
+  taskId?: string;
+  tools?: string[] | null;
+  updatedAt?: string;
+}
+
+export interface TaskToolsSetInput {
+  id: string;
+  /** The full policy. `[]` clears it — the gateway never merges two writes. */
+  tools: readonly string[];
+}
+
+/**
+ * A binding, with the requested id as the fallback: a gateway that omits
+ * `taskId` still answered about *this* task, and the screen keys its state on it.
+ *
+ * Blank names are dropped: they are not tool names, they cannot be run, and a
+ * checkbox for "" would be a checkbox nobody can act on. Everything else is kept
+ * verbatim and in the order the gateway stored it, so a rebind that changes
+ * nothing writes back exactly what was read.
+ */
+function taskToolsFromWire(row: TaskToolsWire, fallbackId: string): TaskTools {
+  const tools = (row.tools ?? []).filter((name) => typeof name === 'string' && name.trim() !== '');
+  const binding: TaskTools = { taskId: row.taskId || fallbackId };
+  if (tools.length > 0) binding.tools = tools;
+  if (row.updatedAt) binding.updatedAt = row.updatedAt;
+  return binding;
+}
+
+/**
+ * Read the policy a task was dispatched with (`tasks.tools.get`).
+ *
+ * `null` is an answer — "no binding" — and must not be turned into an error;
+ * a thrown error means the read itself failed. Both the absent shape the gateway
+ * documents (`{tools:null}`) and an empty list normalize to `null`, because a
+ * zero-item policy means exactly what no policy means: nothing is restricted.
+ */
+export async function loadTaskTools(id: string): Promise<TaskTools | null> {
+  const result = await request<TaskToolsWire>('tasks.tools.get', { id });
+  const binding = taskToolsFromWire(result, id);
+  return binding.tools && binding.tools.length > 0 ? binding : null;
+}
+
+/**
+ * Replace the task's policy (`tasks.tools.set`, not idempotent in intent: the
+ * previous set is replaced, never merged).
+ *
+ * `tools` is always sent, and a clear is an explicit `[]` rather than a missing
+ * field: the gateway rejects a missing/null list with `1010` so that a policy can
+ * never be removed by a malformed request.
+ */
+export async function setTaskTools(input: TaskToolsSetInput): Promise<TaskTools> {
+  const result = await request<TaskToolsWire>('tasks.tools.set', {
+    id: input.id,
+    tools: [...input.tools],
+  });
+  return taskToolsFromWire(result, input.id);
+}

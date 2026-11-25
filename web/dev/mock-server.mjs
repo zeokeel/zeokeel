@@ -1991,8 +1991,9 @@ const wsDispatch = (client, message) => {
       return reply({ channels: ['inapp'], deferred: false, ...(category ? {} : {}) });
     }
     case 'notify.deliver': {
+      const category = String(params.category ?? '');
       const text = String(params.text ?? '');
-      if (!text) return fail(-32602, 'invalid_params');
+      if (!category || !text) return fail(-32602, 'invalid_params');
       return reply({ channel: 'inapp', attempts: ['inapp'], deferred: false });
     }
     case 'team.notes': {
