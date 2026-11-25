@@ -185,3 +185,29 @@ func TestDemotingTheLastOwnerReadsAsARequestProblem(t *testing.T) {
 		t.Fatalf("problem = %+v, want codeInvalidRequest", problem)
 	}
 }
+
+func TestRequestedByIsWireVisible(t *testing.T) {
+	root := testRoot(t, newFakeChat())
+	recorder := &fakeRequester{task: "task-3", user: "alice"}
+	if _, err := root.Provide(contracts.KeyTaskRequester, contracts.TaskRequester(recorder)); err != nil {
+		t.Fatalf("provide requester: %v", err)
+	}
+	gateway, err := New(root, Options{DataDir: t.TempDir(), Port: -1, Logger: testLogger{t: t}, Out: discardWriter{}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	result, problem := gateway.taskRequestedBy(context.Background(), json.RawMessage(`{"id":"task-3"}`))
+	if problem != nil {
+		t.Fatalf("requestedby: %+v", problem)
+	}
+	if payload, _ := result.(map[string]any); payload["requestedBy"] != "alice" {
+		t.Fatalf("result = %+v", result)
+	}
+	missing, problem := gateway.taskRequestedBy(context.Background(), json.RawMessage(`{"id":"task-9"}`))
+	if problem != nil {
+		t.Fatalf("requestedby(unknown): %+v", problem)
+	}
+	if payload, _ := missing.(map[string]any); payload["requestedBy"] != nil {
+		t.Fatalf("unknown task = %+v, want null", missing)
+	}
+}

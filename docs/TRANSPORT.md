@@ -832,6 +832,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `tasks.approval.get` | `{id}` | `{policy,set}` | Y | `TaskLeaseService.Approval`（没有策略时答 `{policy:"none",set:false}`） | ✅ 已实现 |
 | `tasks.approve` | `{id,approver}` | `TaskLease`（`awaiting_approval` → `claimed`，保留 owner 并重算租期） | N | `TaskLeaseService.Approve`（没有待批准的租约 → `-32600`） | ✅ 已实现 |
 | `tasks.reject-start` | `{id,approver,note}` | `{ok:true}` | N | `TaskLeaseService.RejectStart`（任务回 pending、清 owner；note 记进 `startRejections`） | ✅ 已实现 |
+| `tasks.requestedby.get` | `{id}` | `{requestedBy:string\|null}` | Y | `TaskRequester.RequestedBy`（派单时按 acting user 记录；无名册的产品返回 null） | ✅ 已实现 |
 | `tasks.send.pending` | `{id}` | `{held:true,text}` 或 `{held:false}` | Y | `TaskSendHolder.Held`（给任务页显示“有消息待批准”） | ✅ 已实现 |
 | `tasks.send.approve` | `{id,approver}` | `{sent:true,channel,attempts?}` | N | `TaskSendHolder.ApproveSend` + `ChannelDispatchService.Deliver`（仅 `approval=before_send` 的任务会挂起消息；approver 必填；同一条只发一次） | ✅ 已实现 |
 | `tasks.budget.set` | `{id,maxTokens?,maxMinutes?}` | `{taskId,maxTokens,maxMinutes,usedTokens,startedAt?,exhausted}` | N | `TaskLeaseService.SetBudget`（上限属于任务，写进 `leases.json` 的 `budgets` 键；两轴 0=不限、负数 → `-32600`；替换上限不动用量；兼作"Lead 追加预算"：有余量时被 stop 的租约回到 `claimed`） | ✅ 已实现 |

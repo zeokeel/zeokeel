@@ -391,6 +391,9 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"tasks.reject-start": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.taskRejectStart(ctx, request.Params)
 		},
+		"tasks.requestedby.get": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.taskRequestedBy(ctx, request.Params)
+		},
 		"tasks.send.pending": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.taskSendPending(ctx, request.Params)
 		},

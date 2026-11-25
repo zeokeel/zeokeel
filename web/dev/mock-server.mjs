@@ -405,6 +405,8 @@ const mockTaskApproval = new Map();
 const mockTaskBudgets = new Map();
 /** Task -> message held for approval (approval=before_send). */
 const mockHeldSends = new Map();
+/** Task -> requesting user (M6 attribution). */
+const mockRequestedBy = new Map();
 /** Team rules proposed by bots, waiting for a human. */
 const mockNoteSuggestions = [];
 /** Skill drafts proposed by finished tasks. */
@@ -1883,6 +1885,11 @@ const wsDispatch = (client, message) => {
       }
       item.status = action;
       return reply({ ...item });
+    }
+    case 'tasks.requestedby.get': {
+      const id = String(params.id ?? '');
+      const user = mockRequestedBy.get(id);
+      return reply({ requestedBy: user ?? null });
     }
     case 'tasks.send.pending': {
       const id = String(params.id ?? '');

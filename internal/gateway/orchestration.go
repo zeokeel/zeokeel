@@ -2423,3 +2423,28 @@ func (g *Gateway) usersAct(ctx context.Context, raw json.RawMessage) (any, *prot
 	}
 	return map[string]any{"actingUserId": params.ID}, nil
 }
+
+type taskRequestedByParams struct {
+	ID string `json:"id"`
+}
+
+// taskRequestedBy answers which human asked for a task. The board knows the work
+// and the lease the executor; this is the third leg of attribution.
+func (g *Gateway) taskRequestedBy(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	requester, ok := g.root.Get(contracts.KeyTaskRequester)
+	if !ok || requester == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "task attribution unavailable")
+	}
+	var params taskRequestedByParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	userID, found, err := requester.RequestedBy(ctx, params.ID)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	if !found {
+		return map[string]any{"requestedBy": nil}, nil
+	}
+	return map[string]any{"requestedBy": userID}, nil
+}
