@@ -19,11 +19,29 @@
  * A failed *read* replaces the list with an error that names the cause and
  * offers 重试. A failed *write* is reported above the form it came from, because
  * nothing was recorded and the list on screen is still the last true answer.
+ *
+ * Each row also states its **review** (`team.note.review`): 未复核 until someone
+ * looks, then 已复核 (with the reviewer's name when the gateway names one) or
+ * 已驳回. Only an unreviewed note carries 确认 / 驳回 — a review is final, so a
+ * reviewed row offers neither verb again. 驳回 asks first (a Popconfirm: the
+ * verdict cannot be taken back), and both verbs are one write followed by the
+ * same re-read 记录 does, disabled while that write is in flight. A failed
+ * review keeps the row and the board exactly as they were, and prints the
+ * gateway's own words above the list.
+ *
+ * Copy comes from the catalogue (`memory.*` for the write and the read,
+ * `memory.review.*` for the verdict) — this file carries no user-visible string
+ * of its own.
  */
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
-import { Alert, Button, Empty, Flex, Input, Listy, Skeleton, Typography } from 'antd';
+import { Alert, Button, Empty, Flex, Input, Listy, Popconfirm, Skeleton, Typography } from 'antd';
 import { Link } from 'react-router';
-import { loadTeamNotes, recordTeamNote, type TeamNote } from '@/api/teamnotes';
+import {
+  loadTeamNotes,
+  recordTeamNote,
+  reviewTeamNote,
+  type TeamNote,
+} from '@/api/teamnotes';
 import { useMediaQuery } from '@/design/use-system-appearance';
 import { describeError } from '@/features/describe-error';
 import { formatRelativeTime } from '@/features/inbox/state';
@@ -42,6 +60,14 @@ const NARROW_QUERY = '(max-width: 768px)';
  * an author the gateway can render differently from a blank name.
  */
 const DEFAULT_AUTHOR = 'lead';
+
+/**
+ * The reviewer a review is filed under. Same person, same reason: the Lead is
+ * the one who reads this board and the one whose notes it holds. The gateway
+ * takes the reviewer as data (there is no ambient identity on this surface), so
+ * the client states the name it is filing under rather than leaving it blank.
+ */
+const REVIEWER = 'lead';
 
 /** Lines the body is clamped to before offering 展开. */
 const CLAMP_ROWS = 3;
@@ -101,6 +127,32 @@ function bodyOverflows(body: string): boolean {
   );
 }
 
+/**
+ * The row's review state in words: 未复核, 已复核 (· who), or 已驳回.
+ *
+ * `reviewed` is a tri-state — absent means "nobody has looked", which is not
+ * the same statement as a rejection — and an accepted note whose reviewer the
+ * gateway did not name says 已复核 alone rather than inventing 未知 for a
+ * reviewer (the author's 未知 would read as a name that failed to load).
+ */
+function reviewStateLabel(note: TeamNote, t: ReturnType<typeof useT>): string {
+  if (note.reviewed === undefined) return t('memory.review.pending');
+  if (!note.reviewed) return t('memory.review.rejected');
+  // The catalogue interpolates `{by}`; the screen does not re-format a
+  // translated sentence it did not build.
+  if (!note.reviewedBy) return t('memory.review.accepted');
+  return t('memory.review.acceptedBy', { by: note.reviewedBy });
+}
+
+/**
+ * What to print when a review fails: the gateway's own words, which are not
+ * ours to translate (`src/features/describe-error.ts`), and only when it threw
+ * something with no text at all the screen's own sentence.
+ */
+function reviewFailureText(cause: unknown, t: ReturnType<typeof useT>): string {
+  return cause instanceof Error && cause.message ? cause.message : t('memory.review.failed');
+}
+
 export function TeamMemoryScreen() {
   const t = useT();
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
@@ -111,6 +163,10 @@ export function TeamMemoryScreen() {
   const [author, setAuthor] = useState(DEFAULT_AUTHOR);
   const [saving, setSaving] = useState(false);
   const [writeError, setWriteError] = useState<string | null>(null);
+  // Which note's verdict is on the wire, and which way it went: both verbs are
+  // disabled meanwhile so a second review cannot race the first.
+  const [reviewing, setReviewing] = useState<{ id: string; accept: boolean } | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
   const narrow = useMediaQuery(NARROW_QUERY);
 
   const readNotes = useCallback(async (): Promise<LoadState> => {
@@ -163,6 +219,27 @@ export function TeamMemoryScreen() {
       setWriteError(describeError(cause, t, 'memory.saveFailed'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  /**
+   * One verdict on one note: the write, then the same re-read 记录 does — the
+   * reviewed row the gateway answers with is not the board, and the board is
+   * what this screen renders.
+   */
+  const decide = async (note: TeamNote, accept: boolean) => {
+    if (reviewing) return;
+    setReviewing({ id: note.id, accept });
+    setReviewError(null);
+    try {
+      await reviewTeamNote({ id: note.id, reviewer: REVIEWER, accept });
+      setState(await readNotes());
+    } catch (cause) {
+      // Nothing was recorded, so there is nothing to re-read: the list on
+      // screen is still the last true answer, and the row keeps its verbs.
+      setReviewError(reviewFailureText(cause, t));
+    } finally {
+      setReviewing(null);
     }
   };
 
@@ -234,6 +311,17 @@ export function TeamMemoryScreen() {
             </div>
           </div>
 
+          {reviewError ? (
+            <Alert
+              type="error"
+              showIcon
+              role="alert"
+              closable
+              title={reviewError}
+              data-testid="memory-review-error"
+            />
+          ) : null}
+
           {state.kind === 'loading' ? (
             <Skeleton active title={false} paragraph={{ rows: 3 }} />
           ) : null}
@@ -270,7 +358,23 @@ export function TeamMemoryScreen() {
                 virtual={false}
                 items={state.notes}
                 rowKey="id"
-                itemRender={(note) => <NoteRow note={note} now={state.at} />}
+                itemRender={(note) => (
+                  <NoteRow
+                    note={note}
+                    now={state.at}
+                    // Both verbs of every row are off while one review is on the
+                    // wire; the row that sent it also shows what it is doing.
+                    reviewPending={
+                      reviewing?.id === note.id
+                        ? reviewing.accept
+                          ? 'accept'
+                          : 'reject'
+                        : null
+                    }
+                    reviewsBlocked={reviewing !== null}
+                    onReview={(accept) => void decide(note, accept)}
+                  />
+                )}
               />
             </div>
           ) : null}
@@ -280,12 +384,33 @@ export function TeamMemoryScreen() {
   );
 }
 
-/** One note: title, who wrote it, when, the task it belongs to, and its body. */
-function NoteRow({ note, now }: { note: TeamNote; now: number }) {
+/**
+ * One note: title, who wrote it, when, the task it belongs to, its body, and
+ * the review state that decides whether anyone has answered for it yet.
+ */
+function NoteRow({
+  note,
+  now,
+  reviewPending,
+  reviewsBlocked,
+  onReview,
+}: {
+  note: TeamNote;
+  now: number;
+  /** Which verdict this row is currently recording, if any. */
+  reviewPending: 'accept' | 'reject' | null;
+  /** True while any row's review is on the wire (both verbs wait their turn). */
+  reviewsBlocked: boolean;
+  onReview: (accept: boolean) => void;
+}) {
   const t = useT();
   // A note the gateway did not stamp has no relative age; printing "" is
   // better than inventing "just now" for a record that carries no time.
   const stamp = formatRelativeTime(note.at, now, t);
+  // Absent is "nobody has looked", not `false`: only an answered verdict is
+  // final, and only an unanswered note can be moved on.
+  const answered = note.reviewed !== undefined;
+  const disabled = reviewsBlocked || answered;
 
   return (
     <article data-testid={`memory-note-${note.id}`}>
@@ -309,6 +434,59 @@ function NoteRow({ note, now }: { note: TeamNote; now: number }) {
             {t('memory.taskLink', { id: note.taskId })}
           </Link>
         ) : null}
+      </Flex>
+
+      {/* The verdict, then (only while there is none) the two verbs that give
+          one.
+
+          Two levels and no colour: an unanswered note says 未复核 in secondary
+          because nothing has happened to it yet, while a settled verdict —
+          accepted or rejected — is a fact about the note and reads at normal
+          weight. A rejection is deliberately not red: it is a decision, not a
+          failure (DESIGN §5 draws the same line for `cancelled`), and one red
+          mark per rejected row would also spend the screen's ≤2-red budget
+          (§3.7 / DS-13). The two verbs exist only on an unanswered note, so
+          "has buttons" already means "waiting for a reviewer". */}
+      <Flex wrap gap="small" align="center">
+        <Typography.Text
+          type={answered ? undefined : 'secondary'}
+          data-testid={`memory-note-review-${note.id}`}
+        >
+          {reviewStateLabel(note, t)}
+        </Typography.Text>
+        {answered ? null : (
+          <>
+            <Button
+              size="small"
+              loading={reviewPending === 'accept'}
+              disabled={disabled}
+              onClick={() => onReview(true)}
+              data-testid={`memory-review-accept-${note.id}`}
+            >
+              {t('memory.review.accept')}
+            </Button>
+            {/* Opening the verdict is not the dangerous step; recording a
+                rejection is, so the danger colour lives on the confirm button
+                alone — the same split the settings screens use for deletes. */}
+            <Popconfirm
+              title={t('memory.review.rejectConfirm')}
+              okText={t('memory.review.rejectOk')}
+              cancelText={t('ui.cancel')}
+              okButtonProps={{ danger: true }}
+              disabled={disabled}
+              onConfirm={() => onReview(false)}
+            >
+              <Button
+                size="small"
+                loading={reviewPending === 'reject'}
+                disabled={disabled}
+                data-testid={`memory-review-reject-${note.id}`}
+              >
+                {t('memory.review.reject')}
+              </Button>
+            </Popconfirm>
+          </>
+        )}
       </Flex>
 
       {note.body ? <NoteBody noteId={note.id} body={note.body} /> : null}

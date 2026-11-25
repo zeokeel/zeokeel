@@ -23,7 +23,12 @@ import {
  *     write keeps the typed text and re-reads nothing;
  *  4. an unattributed note says 未知 and a note tied to a task links to
  *     `/t/:taskId`;
- *  5. a body cut to three lines can be expanded, and long tokens wrap.
+ *  5. a body cut to three lines can be expanded, and long tokens wrap;
+ *  6. every row states its review (未复核 / 已复核 · who / 已驳回) as the list
+ *     reports it, and only an unreviewed note offers 确认 / 驳回;
+ *  7. a review is one write of exactly `{id, reviewer, accept}` followed by a
+ *     read of the board it produced — disabled while in flight, and a failed
+ *     review keeps the row and prints the gateway's own words.
  *
  * No timers are faked: the screen has no polling, so every assertion is about
  * one explicit read or one explicit write.
@@ -32,6 +37,7 @@ import {
 const api = vi.hoisted(() => ({
   loadTeamNotes: vi.fn(),
   recordTeamNote: vi.fn(),
+  reviewTeamNote: vi.fn(),
 }));
 
 vi.mock('@/api/teamnotes', async (importOriginal) => {
@@ -302,5 +308,186 @@ describe('TeamMemoryScreen — a phone screen', () => {
 
     // 记录 is the screen's only filled primary; at 390 it is antd `large` (40px).
     expectTapTarget(screen.getByTestId('memory-write-submit'));
+  });
+});
+/* ------------------------------------------------------------------ review -- */
+
+/** A review that stays in flight until the test resolves it. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+/** A note nobody has reviewed yet. */
+function pendingNote(id = 'note-p') {
+  return { id, title: '待复核的笔记', body: '需要别人看一眼' };
+}
+
+describe('TeamMemoryScreen — every row states its review', () => {
+  it('says 未复核 for an unreviewed note and 已复核 · who for an accepted one', async () => {
+    api.loadTeamNotes.mockResolvedValue([
+      pendingNote('note-new'),
+      {
+        id: 'note-ok',
+        title: '已通过的笔记',
+        reviewed: true,
+        reviewedBy: 'lead',
+        reviewedAt: twoMinutesAgo(),
+      },
+      { id: 'note-no', title: '被驳回的笔记', reviewed: false, reviewedBy: 'lead' },
+    ]);
+    renderScreen();
+
+    const unreviewed = await screen.findByTestId('memory-note-review-note-new');
+    expect(unreviewed).toHaveTextContent(/^未复核$/);
+    // Only an unreviewed note can be moved on.
+    // antd inserts a space between two CJK glyphs in a button.
+    expect(screen.getByTestId('memory-review-accept-note-new')).toHaveTextContent(/^确\s*认$/);
+    expect(screen.getByTestId('memory-review-reject-note-new')).toHaveTextContent(/^驳\s*回$/);
+
+    const accepted = screen.getByTestId('memory-note-review-note-ok');
+    expect(accepted).toHaveTextContent('已复核');
+    expect(accepted).toHaveTextContent('lead');
+    // A review is final: a reviewed note offers neither verb again.
+    expect(screen.queryByTestId('memory-review-accept-note-ok')).toBeNull();
+    expect(screen.queryByTestId('memory-review-reject-note-ok')).toBeNull();
+
+    const rejected = screen.getByTestId('memory-note-review-note-no');
+    expect(rejected).toHaveTextContent(/^已驳回$/);
+    expect(screen.queryByTestId('memory-review-accept-note-no')).toBeNull();
+    expect(screen.queryByTestId('memory-review-reject-note-no')).toBeNull();
+  });
+
+  it('states 已复核 without inventing a reviewer the gateway did not name', async () => {
+    api.loadTeamNotes.mockResolvedValue([{ id: 'note-anon', title: '匿名复核', reviewed: true }]);
+    renderScreen();
+
+    const state = await screen.findByTestId('memory-note-review-note-anon');
+    expect(state).toHaveTextContent(/^已复核$/);
+    expect(state).not.toHaveTextContent('未知');
+  });
+});
+
+describe('TeamMemoryScreen — 确认 records one review, then re-reads', () => {
+  it('sends exactly {id, reviewer, accept} and shows the board the re-read returned', async () => {
+    const user = userEvent.setup();
+    api.loadTeamNotes
+      .mockResolvedValueOnce([pendingNote('note-p')])
+      .mockResolvedValueOnce([
+        { id: 'note-p', title: '待复核的笔记', reviewed: true, reviewedBy: 'lead' },
+      ]);
+    api.reviewTeamNote.mockResolvedValue({
+      id: 'note-p',
+      title: '待复核的笔记',
+      reviewed: true,
+      reviewedBy: 'lead',
+    });
+    renderScreen();
+
+    const accept = await screen.findByTestId('memory-review-accept-note-p');
+    await user.click(accept);
+
+    await waitFor(() => expect(api.reviewTeamNote).toHaveBeenCalledTimes(1));
+    // The exact wire payload: the contract's three required fields and nothing
+    // the caller did not ask for (`at` stays the gateway's to stamp).
+    expect(api.reviewTeamNote.mock.calls[0][0]).toEqual({
+      id: 'note-p',
+      reviewer: 'lead',
+      accept: true,
+    });
+
+    // The write, then a read of the state it produced — in that order.
+    await waitFor(() => expect(api.loadTeamNotes).toHaveBeenCalledTimes(2));
+    const write = api.reviewTeamNote.mock.invocationCallOrder[0];
+    const secondRead = api.loadTeamNotes.mock.invocationCallOrder[1];
+    expect(write).toBeLessThan(secondRead);
+
+    // The re-read is what renders, not the write's answer.
+    expect(await screen.findByTestId('memory-note-review-note-p')).toHaveTextContent('已复核');
+    expect(screen.queryByTestId('memory-review-accept-note-p')).toBeNull();
+  });
+});
+
+describe('TeamMemoryScreen — 驳回 asks first, then records accept:false', () => {
+  it('sends nothing until the confirm, then re-reads the board', async () => {
+    const user = userEvent.setup();
+    api.loadTeamNotes
+      .mockResolvedValueOnce([pendingNote('note-p')])
+      .mockResolvedValueOnce([
+        { id: 'note-p', title: '待复核的笔记', reviewed: false, reviewedBy: 'lead' },
+      ]);
+    api.reviewTeamNote.mockResolvedValue({
+      id: 'note-p',
+      title: '待复核的笔记',
+      reviewed: false,
+      reviewedBy: 'lead',
+    });
+    renderScreen();
+
+    await user.click(await screen.findByTestId('memory-review-reject-note-p'));
+    // Opening the question is not an answer: no write yet.
+    expect(api.reviewTeamNote).not.toHaveBeenCalled();
+
+    await user.click(await screen.findByRole('button', { name: /确认驳回/ }));
+
+    await waitFor(() => expect(api.reviewTeamNote).toHaveBeenCalledTimes(1));
+    expect(api.reviewTeamNote.mock.calls[0][0]).toEqual({
+      id: 'note-p',
+      reviewer: 'lead',
+      accept: false,
+    });
+    await waitFor(() => expect(api.loadTeamNotes).toHaveBeenCalledTimes(2));
+    expect(await screen.findByTestId('memory-note-review-note-p')).toHaveTextContent(/^已驳回$/);
+  });
+});
+
+describe('TeamMemoryScreen — one review at a time', () => {
+  it('disables both verbs while the review is in flight and sends it once', async () => {
+    const user = userEvent.setup();
+    const inFlight = deferred<unknown>();
+    api.loadTeamNotes
+      .mockResolvedValueOnce([pendingNote('note-p'), pendingNote('note-q')])
+      .mockResolvedValueOnce([
+        { id: 'note-p', title: '待复核的笔记', reviewed: true, reviewedBy: 'lead' },
+        pendingNote('note-q'),
+      ]);
+    api.reviewTeamNote.mockReturnValue(inFlight.promise);
+    renderScreen();
+
+    const accept = await screen.findByTestId('memory-review-accept-note-p');
+    await user.click(accept);
+
+    expect(accept).toBeDisabled();
+    expect(screen.getByTestId('memory-review-reject-note-p')).toBeDisabled();
+    // Another row cannot start a second review over the first one.
+    expect(screen.getByTestId('memory-review-accept-note-q')).toBeDisabled();
+    await user.click(accept);
+    expect(api.reviewTeamNote).toHaveBeenCalledTimes(1);
+
+    inFlight.resolve(undefined);
+    await waitFor(() => expect(api.loadTeamNotes).toHaveBeenCalledTimes(2));
+    expect(await screen.findByTestId('memory-note-review-note-p')).toHaveTextContent('已复核');
+  });
+});
+
+describe('TeamMemoryScreen — a failed review changes nothing on screen', () => {
+  it('keeps the row and prints the gateway text', async () => {
+    const user = userEvent.setup();
+    api.loadTeamNotes.mockResolvedValue([pendingNote('note-p')]);
+    api.reviewTeamNote.mockRejectedValueOnce(new Error('note is already reviewed'));
+    renderScreen();
+
+    await user.click(await screen.findByTestId('memory-review-accept-note-p'));
+
+    const alert = await screen.findByTestId('memory-review-error');
+    expect(alert).toHaveTextContent('note is already reviewed');
+    // Nothing changed, so nothing was read again: the row is still the last
+    // true answer and its verbs still work.
+    expect(api.loadTeamNotes).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('memory-note-review-note-p')).toHaveTextContent(/^未复核$/);
+    expect(screen.getByTestId('memory-review-accept-note-p')).toBeEnabled();
   });
 });

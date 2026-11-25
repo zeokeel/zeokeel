@@ -9,8 +9,9 @@
  * forbids.
  *
  * Parameters are exactly the ones the generated contract allows
- * (`src/design/ws-contract.ts` — `team.notes` takes `{limit?}`, and
+ * (`src/design/ws-contract.ts` — `team.notes` takes `{limit?}`,
  * `team.note.record` requires `title` with `id`/`taskId`/`body`/`author`
+ * optional, and `team.note.review` requires `id`/`reviewer`/`accept` with `at`
  * optional), so a stray field fails here instead of on the wire.
  */
 import { authorizationReady } from './gateway';
@@ -32,6 +33,16 @@ export interface TeamNote {
   body?: string;
   author?: string;
   at?: string;
+  /**
+   * The reviewer's verdict: `true` accepted, `false` rejected, **absent** until
+   * someone reviewed it. Absent is not `false` here — "nobody has looked" and
+   * "somebody said no" are different states and must read differently.
+   */
+  reviewed?: boolean;
+  /** Who recorded the review, when the gateway names them. */
+  reviewedBy?: string;
+  /** When the review was recorded (RFC 3339), when the gateway stamped one. */
+  reviewedAt?: string;
 }
 
 /** The write payload: `title` is the only required field (contract table). */
@@ -51,6 +62,9 @@ interface TeamNoteWire {
   body?: unknown;
   author?: unknown;
   at?: unknown;
+  reviewed?: unknown;
+  reviewedBy?: unknown;
+  reviewedAt?: unknown;
 }
 
 function text(value: unknown): string | undefined {
@@ -70,6 +84,11 @@ function fromWire(raw: TeamNoteWire): TeamNote {
     ...(text(raw.body) ? { body: text(raw.body) } : {}),
     ...(text(raw.author) ? { author: text(raw.author) } : {}),
     ...(text(raw.at) ? { at: text(raw.at) } : {}),
+    // `reviewed` is a tri-state, so only a real boolean is carried across: a
+    // missing field must stay missing instead of reading as "rejected".
+    ...(typeof raw.reviewed === 'boolean' ? { reviewed: raw.reviewed } : {}),
+    ...(text(raw.reviewedBy) ? { reviewedBy: text(raw.reviewedBy) } : {}),
+    ...(text(raw.reviewedAt) ? { reviewedAt: text(raw.reviewedAt) } : {}),
   };
 }
 
@@ -110,4 +129,34 @@ export async function recordTeamNote(input: RecordTeamNoteInput): Promise<TeamNo
   if (input.author) params.author = input.author;
   if (input.taskId) params.taskId = input.taskId;
   return fromWire(await request<TeamNoteWire>('team.note.record', params));
+}
+
+/**
+ * The review payload: the contract's three required fields, and `at` only when
+ * the caller has a stamp of its own (normally the gateway stamps the review).
+ */
+export interface ReviewTeamNoteInput {
+  /** The note's memory URI, exactly as the list reported it. */
+  id: string;
+  /** Who is recording the review (`lead` for this client's only board). */
+  reviewer: string;
+  /** `true` accepts the note, `false` rejects it — the verdict is not a string. */
+  accept: boolean;
+  at?: string;
+}
+
+/**
+ * Record one review of a note (`team.note.review`). The gateway answers with
+ * the reviewed note; callers that want the board still re-read it, because the
+ * single row answered for is not the board (a review may also have been
+ * recorded elsewhere between the two calls).
+ */
+export async function reviewTeamNote(input: ReviewTeamNoteInput): Promise<TeamNote> {
+  const params: Record<string, unknown> = {
+    id: input.id,
+    reviewer: input.reviewer,
+    accept: input.accept,
+  };
+  if (input.at) params.at = input.at;
+  return fromWire(await request<TeamNoteWire>('team.note.review', params));
 }

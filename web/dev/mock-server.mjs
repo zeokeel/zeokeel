@@ -1989,6 +1989,10 @@ const wsDispatch = (client, message) => {
       return reply(note);
     }
     case 'heartbeat.configure': {
+      // The contract declares enabled; the mock must read it, not just intervals.
+      if (params.enabled !== undefined) mockHeartbeat.enabled = Boolean(params.enabled);
+      if (params.leadIntervalMs !== undefined) mockHeartbeat.leadIntervalMs = Number(params.leadIntervalMs);
+      if (params.channelIntervalMs !== undefined) mockHeartbeat.channelIntervalMs = Number(params.channelIntervalMs);
       if (params.leadIntervalMs !== undefined && params.leadIntervalMs < 5000) {
         return fail(-32602, 'invalid_params');
       }
