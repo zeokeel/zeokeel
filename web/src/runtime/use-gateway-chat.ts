@@ -140,13 +140,18 @@ export function useGatewayChat(
           .filter((info) => info.status === 'loading' && info.id !== undefined)
           .map((info) => [String(info.id), info]),
       );
-      const abortedIds = preserveStop
-        ? new Set(
-            current
-              .filter((info) => info.message.stopReason === 'aborted' && info.id !== undefined)
-              .map((info) => String(info.id)),
-          )
-        : new Set<string>();
+      // The row the stop applies to is the last assistant row: a snapshot read
+      // before the cancel committed still says end_turn there, and matching by id
+      // alone missed it because the streaming row's id can differ from the
+      // durable one.
+      let lastAssistantId: string | undefined;
+      for (let index = durable.length - 1; index >= 0; index -= 1) {
+        if (durable[index]?.message.role === 'assistant') {
+          lastAssistantId = durable[index].id === undefined ? undefined : String(durable[index].id);
+          break;
+        }
+      }
+      const abortedIds = preserveStop && lastAssistantId ? new Set([lastAssistantId]) : new Set<string>();
       const merged = durable.map((row) => {
         // A stop the user just performed must survive a snapshot that was read
         // before the cancel committed: the row stays aborted, never end_turn.
