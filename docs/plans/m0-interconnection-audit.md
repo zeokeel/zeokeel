@@ -59,7 +59,7 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | `tasks.tools.set/get` | tasklease + gateway + 任务页选择器 | 任务 → 允许工具（M5 执行策略） | 8 条模块测试 + 12 条 UI/api 测试（只能按连接器绑定，已如实标注） |
 | `notify.plan` / `notify.deliver` | gateway + channeldispatch + 运行状态页 | 投递可观测/可触发 | 6 条 dispatch + 4 条网关 + 7 条 UI；回执含 attempts/deferred/reason/errors |
 | 任务结算通知 | gateway `taskReview` → dispatcher | `task_done`/`task_failed` 真实生产者 | 3 条（通过通知/打回通知/通知失败不影响验收） |
-| 本地自证 harness | `scripts/verify-live/` | 真进程 8 项检查 | 连跑两次 8/8 PASS（含坏签名 401、凭据不泄密） |
+| 本地自证 harness | `scripts/verify-live/` | 真进程 12 项检查 | 12/12 PASS：签名投递→派单→认领→交证据→验收→团队笔记→工具白名单往返 |
 | 渠道报文夹具（微信） | wechat testdata + fixtures | 真机前最后一道闸 | 发现 200+ret_code 当成功、data 信封静默丢弃，均已修 |
 | 渠道报文夹具（邮件） | email testdata + fixtures | 真机前最后一道闸 | 发现 multipart 当原文入库、HTML-only 静默、折叠主题留 CRLF；单封坏信曾阻塞整个邮箱，已改为跳过+上报 |
 | Web 渠道设置 | `web/src/features/settings/channels/**`、`web/src/api/channels.ts` | `/settings/channels`（R27a） | 12 测试；密钥不回显有断言 |
