@@ -15,7 +15,7 @@
  *     passed through as reported and never accumulated on this side.
  *
  * Parameters are exactly what the generated contract allows
- * (`src/design/ws-contract.ts`): all three methods take `{}`, which is why no
+ * (`src/design/ws-contract.ts`): the heartbeat methods take `{}`; the delivery methods carry params (see the block at the tail), which is why no
  * helper here accepts arguments.
  */
 import { authorizationReady } from './gateway';
@@ -174,6 +174,128 @@ export async function configureHeartbeat(config: HeartbeatConfig): Promise<Heart
     dispatched: count(result.dispatched),
     polls: count(result.polls),
     newMessages: count(result.newMessages),
+    ...(reported ? { errors: reported } : {}),
+  };
+}
+
+/* ------------------------------------------------------------ delivery test -- */
+
+/**
+ * `notify.plan` / `notify.deliver` — the two methods that ask the router where a
+ * message goes and then actually try it.
+ *
+ * Unlike the three status methods above, these two **take parameters**
+ * (`WS_PARAMS` in `src/design/ws-contract.ts`: `notify.plan {category}`,
+ * `notify.deliver {category, text}`), so they go through `requestWith` rather
+ * than the parameterless helper. The header of this file predates this block.
+ *
+ * Nothing here normalises the gateway's vocabulary: a channel name and an error
+ * string are protocol values, and the screen above prints them as given.
+ */
+
+/**
+ * The six categories the router knows (`contracts.NotifyCategory*`). They are
+ * protocol values, not copy: they travel to the gateway as-is and are shown
+ * as-is.
+ */
+export type NotifyCategory =
+  | 'approval'
+  | 'needs_decision'
+  | 'task_done'
+  | 'task_failed'
+  | 'inbox_digest'
+  | 'daily_summary';
+
+/** The same six, in the gateway's own order (contract `notifyroute.go`). */
+export const NOTIFY_CATEGORIES: readonly NotifyCategory[] = [
+  'approval',
+  'needs_decision',
+  'task_done',
+  'task_failed',
+  'inbox_digest',
+  'daily_summary',
+];
+
+/** `notify.plan` — where one category would go right now. Nothing was sent. */
+export interface DeliveryPlan {
+  /** The channels to try, in the order the router chose. */
+  channels: string[];
+  /** True when quiet hours held the message back. */
+  deferred: boolean;
+  /** The router's one-line reason, when it shortened the plan. */
+  reason?: string;
+}
+
+/** `notify.deliver` — what the dispatcher actually did with the message. */
+export interface DeliveryReceipt {
+  /** The channel that accepted it (`inapp` when the plan ended in-app). */
+  channel: string;
+  /** The channels tried, in order, up to and including `channel`. */
+  attempts?: string[];
+  /** True when quiet hours deferred it. */
+  deferred: boolean;
+  /** The router's reason, when the plan was shortened. */
+  reason?: string;
+  /** Per-channel failures it fell back from, in the gateway's own words. */
+  errors?: string[];
+}
+
+/** A string list from the wire; an absent or empty list is `undefined`. */
+function stringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const rows = value.filter((row): row is string => typeof row === 'string' && row !== '');
+  return rows.length > 0 ? rows : undefined;
+}
+
+/** A non-empty string from the wire, or `undefined`. */
+function text(value: unknown): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
+/** One parameterised request, gated like every other bridge in this layer. */
+async function requestWith<T>(method: string, params: Record<string, unknown>): Promise<T> {
+  await authorizationReady();
+  return gatewayRpc().request<T>(method, params);
+}
+
+/**
+ * Where one category would go right now. The answer is a plan, not a promise:
+ * the dispatcher may still fall back, and what it did is `deliverNotification`.
+ */
+export async function planNotification(category: NotifyCategory): Promise<DeliveryPlan> {
+  const result = await requestWith<Partial<DeliveryPlan>>('notify.plan', { category });
+  const reason = text(result.reason);
+  return {
+    channels: stringList(result.channels) ?? [],
+    deferred: result.deferred === true,
+    ...(reason ? { reason } : {}),
+  };
+}
+
+/**
+ * Send one message through the plan and return the receipt.
+ *
+ * The caller must pass the text it wants sent: an empty one is refused by the
+ * gateway (`text is required`) and refused here by the screen, which is why this
+ * function never trims or substitutes it — the receipt then describes the bytes
+ * the user actually saw.
+ */
+export async function deliverNotification(input: {
+  category: NotifyCategory;
+  text: string;
+}): Promise<DeliveryReceipt> {
+  const result = await requestWith<Partial<DeliveryReceipt>>('notify.deliver', {
+    category: input.category,
+    text: input.text,
+  });
+  const attempts = stringList(result.attempts);
+  const reason = text(result.reason);
+  const reported = stringList(result.errors);
+  return {
+    channel: text(result.channel) ?? '',
+    deferred: result.deferred === true,
+    ...(attempts ? { attempts } : {}),
+    ...(reason ? { reason } : {}),
     ...(reported ? { errors: reported } : {}),
   };
 }

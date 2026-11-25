@@ -3,11 +3,19 @@
  * heartbeat (`heartbeat.status` / `heartbeat.tick`) and the automation browser
  * (`browser.status`). See docs/TRANSPORT.md §5.1.
  *
- * Two honest sections, each with its own read:
+ * Three honest sections:
  *
  *   自转      running state, on/off + cadence controls, the two cadences, the
  *             last pass and its counts
+ *   投递      one category's delivery plan, and a test send with its receipt
  *   浏览器     connected state, endpoint and page count — or an empty state
+ *
+ * 投递 is the only section that sends something outside the product, so it is
+ * built to show the gateway's answer and nothing else: the plan is the router's
+ * channel order (with its deferred flag and reason), the receipt is the
+ * dispatcher's report (which channel took it, what was tried, every error in its
+ * own words). Planning sends nothing; sending replaces the plan with the receipt,
+ * because one answer at a time is the only unambiguous reading.
  *
  * **There is no timer on purpose.** Neither method has a delta stream, so the
  * only way to notice a change made elsewhere would be a poll, and a status page
@@ -27,15 +35,21 @@
  * write leaves the switch where the last real answer put it.
  */
 import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
-import { Alert, Button, Descriptions, Empty, Flex, Select, Skeleton, Switch, Tag, Typography } from 'antd';
+import { Alert, Button, Descriptions, Empty, Flex, Input, Select, Skeleton, Switch, Tag, Typography } from 'antd';
 import {
+  NOTIFY_CATEGORIES,
   configureHeartbeat,
+  deliverNotification,
   loadBrowserStatus,
   loadHeartbeatStatus,
+  planNotification,
   tickHeartbeat,
   type BrowserStatus,
+  type DeliveryPlan,
+  type DeliveryReceipt,
   type HeartbeatConfig,
   type HeartbeatStatus,
+  type NotifyCategory,
 } from '@/api/health';
 import { describeError } from '@/features/describe-error';
 import { useT } from '@/i18n';
@@ -48,6 +62,9 @@ type Translate = (key: MessageKey, params?: Record<string, string | number>) => 
  * keeps it inside the row at 390px instead of widening the page.
  */
 const WRAP_LONG: CSSProperties = { overflowWrap: 'anywhere' };
+
+/** A field that may grow: `minWidth: 0` lets it shrink instead of the page. */
+const SHRINKABLE: CSSProperties = { flex: 1, minWidth: 0 };
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -188,25 +205,25 @@ function SectionState({ state, onRetry }: { state: Loaded<unknown>; onRetry: () 
 }
 
 function Section({
-  titleKey,
-  noteKey,
+  title,
+  note,
   action,
   testId,
   children,
 }: {
-  titleKey: MessageKey;
-  noteKey: MessageKey;
+  /** Already-translated copy: the catalogue owns the strings, this owns the box. */
+  title: string;
+  note: string;
   action?: ReactNode;
   testId: string;
   children: ReactNode;
 }) {
-  const t = useT();
   return (
     <section className="zk-settings__section" data-testid={testId}>
       <div className="zk-screen__header--row">
         <div>
-          <h2 className="zk-settings__section-title">{t(titleKey)}</h2>
-          <p className="zk-screen__note">{t(noteKey)}</p>
+          <h2 className="zk-settings__section-title">{title}</h2>
+          <p className="zk-screen__note">{note}</p>
         </div>
         {action}
       </div>
@@ -225,6 +242,7 @@ export function HealthScreen() {
       </header>
       <Flex vertical gap="large">
         <HeartbeatSection />
+        <DeliverySection />
         <BrowserSection />
       </Flex>
     </div>
@@ -285,8 +303,8 @@ function HeartbeatSection() {
 
   return (
     <Section
-      titleKey="health.heartbeat.title"
-      noteKey="health.heartbeat.note"
+      title={t('health.heartbeat.title')}
+      note={t('health.heartbeat.note')}
       testId="health-heartbeat"
       action={
         <Button
@@ -457,6 +475,239 @@ function HeartbeatFacts({ reading }: { reading: HeartbeatReading }) {
   );
 }
 
+/* --------------------------------------------------------------- delivery -- */
+
+/** Label → control, the same anatomy the settings pages use. */
+function Field({ id, label, children }: { id: string; label: string; children: ReactNode }) {
+  return (
+    <div className="zk-field">
+      <div className="zk-field__label-row">
+        <label className="zk-field__label" htmlFor={id}>
+          {label}
+        </label>
+      </div>
+      <div className="zk-field__control">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * 投递 — one category's plan, and a test send with its receipt.
+ *
+ * The two actions are alternatives and both talk to the gateway for real:
+ * 看计划 calls `notify.plan` (router only, nothing leaves the product) and
+ * 发送测试 calls `notify.deliver` (the dispatcher tries the plan in order). Each
+ * answer replaces the other, because "where it would go" and "where it went" are
+ * different claims and showing them together is how a status page lies.
+ *
+ * One action is in flight at a time: the buttons disable for the duration, and a
+ * second click is not a second send. A failure is the gateway's text in an
+ * Alert — never a paraphrase, because a delivery error names the thing that
+ * refused.
+ *
+ * The category and the channel names are protocol values (`notifyroute.go`),
+ * so they are printed verbatim; the copy around them is in the catalogue.
+ */
+function DeliverySection() {
+  const t = useT();
+
+  // `null` = "still the default sentence"; once the user types, the text is
+  // theirs and the default (which follows the language) no longer applies.
+  const [draft, setDraft] = useState<string | null>(null);
+  const [category, setCategory] = useState<NotifyCategory>('approval');
+  const [busy, setBusy] = useState<'plan' | 'send' | null>(null);
+  const [plan, setPlan] = useState<DeliveryPlan | null>(null);
+  const [receipt, setReceipt] = useState<DeliveryReceipt | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const text = draft ?? t('health.delivery.textDefault');
+  // A blank text is not a message: the gateway refuses it, so the button does too.
+  const canSend = busy === null && text.trim() !== '';
+
+  const runPlan = async () => {
+    if (busy !== null) return;
+    setBusy('plan');
+    setError(null);
+    try {
+      const answer = await planNotification(category);
+      // The newest answer wins.
+      setReceipt(null);
+      setPlan(answer);
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const send = async () => {
+    if (!canSend) return;
+    setBusy('send');
+    setError(null);
+    try {
+      const answer = await deliverNotification({ category, text });
+      setPlan(null);
+      setReceipt(answer);
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Section
+      title={t('health.delivery.title')}
+      note={t('health.delivery.note')}
+      testId="health-delivery"
+      action={
+        <Flex gap="small">
+          <Button
+            onClick={() => void runPlan()}
+            loading={busy === 'plan'}
+            disabled={busy !== null}
+            data-testid="health-delivery-plan"
+          >
+            {t('health.delivery.plan')}
+          </Button>
+          <Button
+            onClick={() => void send()}
+            loading={busy === 'send'}
+            disabled={!canSend}
+            data-testid="health-delivery-send"
+          >
+            {t('health.delivery.send')}
+          </Button>
+        </Flex>
+      }
+    >
+      {error ? <Alert type="error" showIcon role="alert" closable title={error} /> : null}
+
+      <Flex gap="middle" wrap align="flex-start">
+        <Field id="health-delivery-category-field" label={t('health.delivery.category')}>
+          {/* The category is a protocol value: the option label is the value. */}
+          <Select<NotifyCategory>
+            id="health-delivery-category-field"
+            value={category}
+            options={NOTIFY_CATEGORIES.map((value) => ({ value, label: value }))}
+            onChange={(next) => {
+              setCategory(next);
+              // A plan/receipt belongs to the category it was answered for.
+              setPlan(null);
+              setReceipt(null);
+            }}
+            disabled={busy !== null}
+            data-testid="health-delivery-category"
+          />
+        </Field>
+        <div style={SHRINKABLE}>
+          <Field id="health-delivery-text-field" label={t('health.delivery.text')}>
+            <Input
+              id="health-delivery-text-field"
+              value={text}
+              onChange={(event) => setDraft(event.target.value)}
+              disabled={busy !== null}
+              data-testid="health-delivery-text"
+            />
+          </Field>
+        </div>
+      </Flex>
+
+      {plan ? <DeliveryPlanView plan={plan} /> : null}
+      {receipt ? <DeliveryReceiptView receipt={receipt} /> : null}
+    </Section>
+  );
+}
+
+/** The router's answer: the channels in its order, plus deferred and why. */
+function DeliveryPlanView({ plan }: { plan: DeliveryPlan }) {
+  const t = useT();
+  return (
+    <div data-testid="health-delivery-plan-result">
+      <Typography.Text strong>{t('health.delivery.planTitle')}</Typography.Text>
+      {plan.channels.length > 0 ? (
+        <ol className="zk-inbox__list">
+          {plan.channels.map((channel, index) => (
+            <li key={`${index}:${channel}`}>
+              <Tag data-testid="health-delivery-plan-channel">{channel}</Tag>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="zk-screen__note">{t('health.delivery.noChannels')}</p>
+      )}
+      {plan.deferred ? (
+        <Flex gap="small" align="center" wrap data-testid="health-delivery-deferred">
+          {/* Deferred is a fact about the plan, not a warning: quiet hours held
+              the message back on purpose, so the tag stays neutral. */}
+          <Tag>{t('health.delivery.deferred')}</Tag>
+          {/* The router's sentence, not ours to rewrite. */}
+          {plan.reason ? (
+            <Typography.Text type="secondary" style={WRAP_LONG}>
+              {plan.reason}
+            </Typography.Text>
+          ) : null}
+        </Flex>
+      ) : plan.reason ? (
+        <Typography.Text type="secondary" style={WRAP_LONG}>
+          {plan.reason}
+        </Typography.Text>
+      ) : null}
+    </div>
+  );
+}
+
+/** The dispatcher's answer: who took it, what was tried, what failed. */
+function DeliveryReceiptView({ receipt }: { receipt: DeliveryReceipt }) {
+  const t = useT();
+  return (
+    <div data-testid="health-delivery-receipt">
+      <Typography.Text strong>{t('health.delivery.receiptTitle')}</Typography.Text>
+      <Descriptions size="small" column={1}>
+        <Descriptions.Item label={t('health.delivery.channel')}>
+          <Tag color="success" data-testid="health-delivery-receipt-channel">
+            {receipt.channel || '—'}
+          </Tag>
+        </Descriptions.Item>
+        {receipt.attempts ? (
+          <Descriptions.Item label={t('health.delivery.attempts')}>
+            <Flex gap="small" wrap>
+              {receipt.attempts.map((channel, index) => (
+                <Tag key={`${index}:${channel}`} data-testid="health-delivery-attempt">
+                  {channel}
+                </Tag>
+              ))}
+            </Flex>
+          </Descriptions.Item>
+        ) : null}
+        {receipt.deferred ? (
+          <Descriptions.Item label={t('health.delivery.deferred')}>
+            <span data-testid="health-delivery-receipt-deferred">{receipt.reason ?? '—'}</span>
+          </Descriptions.Item>
+        ) : null}
+      </Descriptions>
+
+      {receipt.errors ? (
+        <div data-testid="health-delivery-receipt-errors">
+          <Typography.Text type="danger" strong>
+            {t('health.delivery.errors')}
+          </Typography.Text>
+          <ul className="zk-inbox__list">
+            {receipt.errors.map((message, index) => (
+              <li key={`${index}:${message}`} data-testid="health-delivery-receipt-error">
+                {/* The gateway's own words: not translated, but selectable. */}
+                <Typography.Text type="danger" style={WRAP_LONG}>
+                  {message}
+                </Typography.Text>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------------- browser -- */
 
 function BrowserSection() {
@@ -478,8 +729,8 @@ function BrowserSection() {
 
   return (
     <Section
-      titleKey="health.browser.title"
-      noteKey="health.browser.note"
+      title={t('health.browser.title')}
+      note={t('health.browser.note')}
       testId="health-browser"
       action={
         <Button

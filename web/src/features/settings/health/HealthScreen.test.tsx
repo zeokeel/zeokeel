@@ -26,6 +26,8 @@ const api = vi.hoisted(() => ({
   tickHeartbeat: vi.fn(),
   configureHeartbeat: vi.fn(),
   loadBrowserStatus: vi.fn(),
+  planNotification: vi.fn(),
+  deliverNotification: vi.fn(),
 }));
 
 vi.mock('@/api/health', async (importOriginal) => {
@@ -104,6 +106,10 @@ beforeEach(() => {
     endpoint: 'http://127.0.0.1:9222',
     pages: 3,
   });
+  // The delivery section starts from a clean plan/receipt: each test that cares
+  // gives the answer it wants to pin.
+  api.planNotification.mockResolvedValue({ channels: ['inapp'], deferred: false });
+  api.deliverNotification.mockResolvedValue({ channel: 'inapp', deferred: false });
 });
 
 describe('HealthScreen — both sections render what their API returned', () => {
@@ -382,5 +388,180 @@ describe('HealthScreen — a disconnected browser is an empty state, not an erro
     await waitFor(() => expect(api.loadBrowserStatus).toHaveBeenCalledTimes(2));
     expect(api.loadHeartbeatStatus).toHaveBeenCalledTimes(1);
     expect(api.tickHeartbeat).not.toHaveBeenCalled();
+  });
+});
+/* --------------------------------------------------------------- delivery -- */
+
+/**
+ * 投递 — the one section that asks the gateway to *send* something.
+ *
+ * Two properties are the whole point, and both are about not inventing anything:
+ *  1. the plan is shown as the channel order the gateway answered with, plus its
+ *     deferred flag and reason — no local "will probably go to…" guess;
+ *  2. the receipt is shown verbatim (channel, attempts in order, every error in
+ *     the gateway's own words) because a delivery failure is the one place where
+ *     its text is the only true description of what happened.
+ *
+ * Plan and receipt are alternatives, not a log: the newest answer wins, so the
+ * section never mixes "where it would go" with "where it went".
+ */
+
+const PLAN = { channels: ['feishu', 'wechat', 'inapp'], deferred: false };
+
+const RECEIPT = {
+  channel: 'wechat',
+  attempts: ['feishu', 'wechat'],
+  deferred: false,
+  errors: ['feishu: 401 token expired'],
+};
+
+describe('HealthScreen — 投递 shows the plan and the receipt the gateway returned', () => {
+  it('shows the plan as the ordered channels, with deferred and its reason', async () => {
+    const user = userEvent.setup();
+    api.planNotification.mockResolvedValue({
+      channels: ['feishu', 'wechat', 'inapp'],
+      deferred: true,
+      reason: 'quiet hours 22:00-08:00',
+    });
+    renderScreen();
+
+    await user.click(await screen.findByTestId('health-delivery-plan'));
+
+    await waitFor(() => expect(api.planNotification).toHaveBeenCalledWith('approval'));
+    const plan = await screen.findByTestId('health-delivery-plan-result');
+    expect(
+      within(plan)
+        .getAllByTestId('health-delivery-plan-channel')
+        .map((node) => node.textContent),
+    ).toEqual(['feishu', 'wechat', 'inapp']);
+    // Deferred is a fact about the plan, and its reason is the router's sentence
+    // — printed as given.
+    expect(within(plan).getByTestId('health-delivery-deferred')).toBeInTheDocument();
+    expect(plan).toHaveTextContent('quiet hours 22:00-08:00');
+    // Planning sends nothing, so there is no receipt.
+    expect(screen.queryByTestId('health-delivery-receipt')).toBeNull();
+    expect(api.deliverNotification).not.toHaveBeenCalled();
+  });
+
+  it('shows the receipt: which channel took it, the attempts in order, every error verbatim', async () => {
+    const user = userEvent.setup();
+    api.deliverNotification.mockResolvedValue(RECEIPT);
+    renderScreen();
+
+    const text = await screen.findByTestId('health-delivery-text');
+    await user.click(screen.getByTestId('health-delivery-send'));
+
+    await waitFor(() => expect(api.deliverNotification).toHaveBeenCalledTimes(1));
+    // The selected category and the text the user sees are what is sent.
+    expect(api.deliverNotification).toHaveBeenCalledWith({
+      category: 'approval',
+      text: (text as HTMLInputElement).value,
+    });
+
+    const receipt = await screen.findByTestId('health-delivery-receipt');
+    expect(within(receipt).getByTestId('health-delivery-receipt-channel')).toHaveTextContent(
+      'wechat',
+    );
+    expect(
+      within(receipt)
+        .getAllByTestId('health-delivery-attempt')
+        .map((node) => node.textContent),
+    ).toEqual(['feishu', 'wechat']);
+    const errors = within(receipt).getAllByTestId('health-delivery-receipt-error');
+    expect(errors).toHaveLength(1);
+    // Verbatim: the gateway's words, not a translation of them.
+    expect(errors[0].textContent).toBe('feishu: 401 token expired');
+    // The newest answer replaces the older one.
+    expect(screen.queryByTestId('health-delivery-plan-result')).toBeNull();
+  });
+
+  it('replaces a receipt with a newer plan (the newest action wins)', async () => {
+    const user = userEvent.setup();
+    api.deliverNotification.mockResolvedValue(RECEIPT);
+    api.planNotification.mockResolvedValue(PLAN);
+    renderScreen();
+
+    await user.click(await screen.findByTestId('health-delivery-send'));
+    await screen.findByTestId('health-delivery-receipt');
+
+    await user.click(screen.getByTestId('health-delivery-plan'));
+
+    await screen.findByTestId('health-delivery-plan-result');
+    expect(screen.queryByTestId('health-delivery-receipt')).toBeNull();
+  });
+
+  it('disables 发送测试 while the text is blank and never calls the gateway', async () => {
+    const user = userEvent.setup();
+    renderScreen();
+
+    const text = await screen.findByTestId('health-delivery-text');
+    const send = screen.getByTestId('health-delivery-send');
+    expect(send).not.toBeDisabled();
+
+    await user.clear(text);
+    expect(send).toBeDisabled();
+    await user.click(send);
+    expect(api.deliverNotification).not.toHaveBeenCalled();
+  });
+
+  it('keeps one action in flight at a time: both buttons are disabled until it lands', async () => {
+    const user = userEvent.setup();
+    const pending = deferred<typeof PLAN>();
+    api.planNotification.mockReturnValue(pending.promise);
+    renderScreen();
+
+    const plan = await screen.findByTestId('health-delivery-plan');
+    const send = screen.getByTestId('health-delivery-send');
+    await user.click(plan);
+
+    expect(plan).toBeDisabled();
+    expect(send).toBeDisabled();
+    // A second action while the first is unanswered is not a second action.
+    await user.click(send);
+    expect(api.deliverNotification).not.toHaveBeenCalled();
+
+    pending.resolve(PLAN);
+    await waitFor(() => expect(plan).not.toBeDisabled());
+    expect(send).not.toBeDisabled();
+  });
+
+  it('offers the six categories and plans the one that is selected', async () => {
+    const user = userEvent.setup();
+    renderScreen();
+
+    const select = await screen.findByTestId('health-delivery-category');
+    // Categories are protocol values: shown verbatim, in the gateway's order.
+    expect(optionsOf(select).map((option) => option.getAttribute('title') ?? option.textContent)).toEqual([
+      'approval',
+      'needs_decision',
+      'task_done',
+      'task_failed',
+      'inbox_digest',
+      'daily_summary',
+    ]);
+
+    const taskFailed = optionsOf(select).find(
+      (option) => (option.getAttribute('title') ?? '') === 'task_failed',
+    );
+    fireEvent.click(taskFailed as HTMLElement);
+    await waitFor(() => expect(select).toHaveTextContent('task_failed'));
+
+    await user.click(screen.getByTestId('health-delivery-plan'));
+    await waitFor(() => expect(api.planNotification).toHaveBeenCalledWith('task_failed'));
+  });
+
+  it('shows the gateway text in an Alert when the action fails', async () => {
+    const user = userEvent.setup();
+    api.deliverNotification.mockRejectedValueOnce(
+      new Error('channeldispatch: every channel failed: feishu 500'),
+    );
+    renderScreen();
+
+    await user.click(await screen.findByTestId('health-delivery-send'));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('channeldispatch: every channel failed: feishu 500');
+    // Nothing was delivered, so no receipt is invented.
+    expect(screen.queryByTestId('health-delivery-receipt')).toBeNull();
   });
 });

@@ -898,6 +898,23 @@ export const en: Catalog = {
   'health.heartbeat.polls': 'Channel polls',
   'health.heartbeat.newMessages': 'New messages',
   'health.heartbeat.errorCount': 'Errors in the last pass ({count})',
+  // Delivery: one category's plan, and the receipt of one test message. Category
+  // and channel names are protocol values, shown verbatim, so they have no keys.
+  'health.delivery.title': 'Delivery',
+  'health.delivery.note':
+    'Look at one category\'s plan, then send a test message; the receipt carries the gateway\'s own words.',
+  'health.delivery.category': 'Category',
+  'health.delivery.text': 'Test text',
+  'health.delivery.textDefault': 'This is a test message.',
+  'health.delivery.plan': 'Show the plan',
+  'health.delivery.send': 'Send a test',
+  'health.delivery.planTitle': 'Plan: tried in order',
+  'health.delivery.receiptTitle': 'Receipt',
+  'health.delivery.deferred': 'Deferred',
+  'health.delivery.channel': 'Delivered by',
+  'health.delivery.attempts': 'Attempts',
+  'health.delivery.errors': 'Errors',
+  'health.delivery.noChannels': 'No channel is available for this category.',
   'health.browser.title': 'Browser',
   'health.browser.note': 'The automation browser; the connection itself is made in settings.',
   'health.browser.connected': 'Connected',
