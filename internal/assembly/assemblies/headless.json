@@ -63,6 +63,11 @@
       }
     },
     {
+      "id": "triage",
+      "module": "zeokeel/triage",
+      "config": {}
+    },
+    {
       "id": "hosttools",
       "module": "zeokeel/hosttools",
       "config": {

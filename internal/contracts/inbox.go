@@ -96,6 +96,8 @@ type InboxService interface {
 	Add(ctx context.Context, item InboxItem) (stored InboxItem, merged bool, err error)
 	// List returns items newest-first under the filter.
 	List(ctx context.Context, filter InboxFilter) ([]InboxItem, error)
+	// Get returns one item by id (ErrInboxUnknownItem when it is gone).
+	Get(ctx context.Context, id string) (InboxItem, error)
 	// Triage records the Lead's decision for the given items and returns how
 	// many were updated.
 	Triage(ctx context.Context, ids []string, action string, taskIDs []string) (int, error)

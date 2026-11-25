@@ -138,19 +138,25 @@ func TestProductsAndEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Entries(headless): %v", err)
 	}
+	// Presence, not order: inserting a module must not fail an unrelated test
+	// (2026-11-25 audit finding F1). Order is the assembly document's business.
 	wantHeadless := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/inbox", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/insights",
-		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/hosttools", "zeokeel/memorystore",
+		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/hosttools", "zeokeel/memorystore",
 		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
 	}
-	if len(headless) != len(wantHeadless) {
-		t.Fatalf("headless entries = %d, want %d", len(headless), len(wantHeadless))
+	loaded := make(map[string]bool, len(headless))
+	for _, entry := range headless {
+		loaded[entry.Module] = true
 	}
-	for index, root := range headless {
-		if root.Module != wantHeadless[index] {
-			t.Fatalf("headless entry %d = %q, want %q", index, root.Module, wantHeadless[index])
+	for _, want := range wantHeadless {
+		if !loaded[want] {
+			t.Errorf("headless assembly is missing %q", want)
 		}
+	}
+	if len(headless) != len(wantHeadless) {
+		t.Errorf("headless entries = %d, want %d (update wantHeadless when adding a module)", len(headless), len(wantHeadless))
 	}
 }
 
@@ -214,8 +220,13 @@ func TestRegistryIsExplicit(t *testing.T) {
 			t.Fatalf("Registry() still registers the retired UI module %q", id)
 		}
 	}
-	if got := len(registry.Modules()); got != 19 {
-		t.Fatalf("Registry() modules = %d, want 19", got)
+	// No exact count: a count assertion is a change-detector (audit finding F2).
+	// What matters is that the core modules are present and the retired UI ones
+	// are not, both checked above / below.
+	for _, id := range []string{"zeokeel/sessionstore", "zeokeel/inbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/agent"} {
+		if !registry.Has(id) {
+			t.Errorf("Registry() is missing the required module %q", id)
+		}
 	}
 }
 
@@ -281,18 +292,23 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 
 	instances := loader.Instances()
 	wantIDs := []string{
-		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "hosttools", "memorystore",
+		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "hosttools", "memorystore",
 		"agent", "automation", "update", "importer", "acp",
 	}
-	gotIDs := make([]string, len(instances))
-	for index, instance := range instances {
-		gotIDs[index] = instance.ID()
+	gotIDs := make([]string, 0, len(instances))
+	for _, instance := range instances {
+		gotIDs = append(gotIDs, instance.ID())
 		if state := instance.State(); state != cordis.Active {
 			t.Fatalf("instance %q state = %s, want Active", instance.ID(), state)
 		}
 	}
-	if !slices.Equal(gotIDs, wantIDs) {
-		t.Fatalf("headless instance IDs = %v, want %v", gotIDs, wantIDs)
+	for _, want := range wantIDs {
+		if !slices.Contains(gotIDs, want) {
+			t.Errorf("headless instance %q is not loaded", want)
+		}
+	}
+	if len(gotIDs) != len(wantIDs) {
+		t.Errorf("headless instances = %v, want %v", gotIDs, wantIDs)
 	}
 	if warnings := loader.Warnings(); len(warnings) != 0 {
 		t.Fatalf("headless warnings = %v, want none", warnings)
@@ -342,6 +358,50 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 	}
 	if updated, err := inboxService.Triage(context.Background(), []string{storedItem.ID}, contracts.InboxActionTask, []string{"task-1"}); err != nil || updated != 1 {
 		t.Fatalf("inbox Triage through the assembly = (%d, %v), want (1, nil)", updated, err)
+	}
+
+	// The three-module chain: an inbound item becomes a real board task through
+	// triage, and the inbox row points at the same id. This is the seam the
+	// product depends on — if any of the three is wired to a different key, this
+	// fails instead of silently creating orphan work.
+	triageService, ok := root.Get(contracts.KeyTriage)
+	if !ok || triageService == nil {
+		t.Fatal("KeyTriage service is not available on the root")
+	}
+	board, ok := root.Get(contracts.KeyTaskBoard)
+	if !ok || board == nil {
+		t.Fatal("KeyTaskBoard service is not available on the root")
+	}
+	arrival, _, err := inboxService.Add(context.Background(), contracts.InboxItem{
+		Source: "wechat", Channel: "dm-2", Sender: "owner", DedupKey: "assembly-chain", Title: "chain",
+	})
+	if err != nil {
+		t.Fatalf("inbox Add for the chain: %v", err)
+	}
+	decision, err := triageService.Apply(context.Background(), arrival.ID, contracts.TriageDecision{
+		Action: contracts.InboxActionTask,
+		Task:   &contracts.NewTask{Subject: "assembly chain task", Assignee: "bot-1"},
+	})
+	if err != nil || !decision.Created || len(decision.TaskIDs) != 1 {
+		t.Fatalf("triage Apply through the assembly = (%+v, %v), want one created task", decision, err)
+	}
+	boardTasks, err := board.List(context.Background())
+	if err != nil {
+		t.Fatalf("board List: %v", err)
+	}
+	found := false
+	for _, task := range boardTasks {
+		if task.ID == decision.TaskIDs[0] {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("the task %q created by triage is not on the board", decision.TaskIDs[0])
+	}
+	marked, err := inboxService.Get(context.Background(), arrival.ID)
+	if err != nil || marked.Status != contracts.InboxStatusTask {
+		t.Fatalf("inbox row after triage = (%+v, %v), want status task", marked, err)
 	}
 
 	// Goal v2: the durable per-session goal backend is assembled and the DSH
@@ -478,8 +538,8 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	}()
 
 	instances := loader.Instances()
-	if len(instances) != 17 {
-		t.Fatalf("headless instances = %d, want 17", len(instances))
+	if len(instances) == 0 {
+		t.Fatal("headless loaded no instances")
 	}
 	instance := instances[0]
 	if instance.ID() != "appinfo" || instance.ModuleID() != "zeokeel/appinfo" {
@@ -488,11 +548,20 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	if state := instance.State(); state != cordis.Active {
 		t.Fatalf("appinfo state = %s, want Active", state)
 	}
-	// The inbox follows store, so hosttools shifts to index 10.
-	hostInstance := instances[10]
-	if hostInstance.ID() != "hosttools" || hostInstance.ModuleID() != "zeokeel/hosttools" {
-		t.Fatalf("headless instance[10] = %s/%s, want hosttools/zeokeel/hosttools",
-			hostInstance.ID(), hostInstance.ModuleID())
+	// Look up by id: an index would break the moment a module is inserted
+	// before it (audit finding F1).
+	var hostInstance *module.Instance
+	for _, instance := range instances {
+		if instance.ID() == "hosttools" {
+			hostInstance = instance
+			break
+		}
+	}
+	if hostInstance == nil {
+		t.Fatal("headless did not load hosttools")
+	}
+	if hostInstance.ModuleID() != "zeokeel/hosttools" {
+		t.Fatalf("hosttools module = %s, want zeokeel/hosttools", hostInstance.ModuleID())
 	}
 	if state := hostInstance.State(); state != cordis.Active {
 		t.Fatalf("hosttools state = %s, want Active", state)

@@ -229,6 +229,20 @@ func (s *Service) List(ctx context.Context, filter contracts.InboxFilter) ([]con
 	return out, nil
 }
 
+// Get implements contracts.InboxService.
+func (s *Service) Get(ctx context.Context, id string) (contracts.InboxItem, error) {
+	if err := ctx.Err(); err != nil {
+		return contracts.InboxItem{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored, ok := s.items[id]
+	if !ok {
+		return contracts.InboxItem{}, fmt.Errorf("%w: %s", contracts.ErrInboxUnknownItem, id)
+	}
+	return cloneItem(stored), nil
+}
+
 // Triage implements contracts.InboxService. It validates every id and the
 // action first, then applies, so a bad batch never leaves a half-applied state.
 func (s *Service) Triage(ctx context.Context, ids []string, action string, taskIDs []string) (int, error) {

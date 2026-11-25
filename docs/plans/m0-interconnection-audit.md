@@ -29,7 +29,9 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 
 | 连线 | 提供方 | 消费方 | 断言（测试） |
 |---|---|---|---|
-| `contracts.KeyInbox` | `internal/modules/inbox`（新） | 未来的 Lead 分诊器、gateway `inbox.*` | `internal/modules/inbox` 行为测试 15 条；`internal/assembly` 里通过 `root.Get(KeyInbox)` 真实调用 Add/去重/Triage |
+| `contracts.KeyInbox` | `internal/modules/inbox`（新） | triage、未来的 gateway `inbox.*` | `internal/modules/inbox` 行为测试 16 条；`internal/assembly` 里通过 `root.Get(KeyInbox)` 真实调用 Add/去重/Triage/Get |
+| `contracts.KeyTriage` | `internal/modules/triage`（新） | 未来的 Lead 派遣、gateway | `internal/modules/triage` 7 条（幂等、看板失败不脏写、无 assignee 跳过 Assign） |
+| **三模块链路** inbox → triage → task board | inbox + triage + toolkit | — | 装配测试里：Add → Apply(task) → board.List 里能找到同一 id，且 inbox 行变 task |
 | 注册 ↔ 装配一致 | registry | headless.json | `TestEveryRegisteredModuleIsLoaded`（新） |
 
 inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为空），所以它必须能先于 Lead/任务板启动。这条由 `TestDescriptorMetadata` 钉住——如果将来有人给它加 `Require(KeyTeam)`，测试会红。
@@ -43,12 +45,14 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 | F3 | `zeokeel/modelcatalog` **注册了但不在任何装配文档里**，且当前无消费者 → 运行时永不加载 | 真·死模块：注册 ≠ 加载 | 在守卫测试里列为**带原因的已知缺口**，写入本文件；要么补进装配，要么删注册 |
 | F4 | `zeokeel/host/group`（容器模块）也不在 headless entries | 合法：它只在嵌套 group 时被引用，headless 没有 group | 带原因列入例外，不失败 |
 | F5 | inbox 是内存实现（slice 1），重启丢 ⚠️ | 已知限制 | 下一片：接 `KeyDataDir` 做 JSONL/SQLite 持久化，契约不变 |
+| F6 | 第二次加模块又触发同一批断言（顺序列表、实例数、`instances[10]`） | 证明 F1/F2 不是偶发 | **已修根因**：改为「存在性」断言 + 按 id 查实例；计数断言删除，换成"必须包含这些模块" |
 
 ## 4. 尚未接的线（明确空白，不许假装完成）
 
 | 缺口 | 说明 | 下一步 |
 |---|---|---|
-| inbox → Lead 分诊器 | 现在只有存与改状态，没有"Lead 读收件箱 → 拆任务 → 派活" | M0-2：triage loop + 任务板写入 |
+| ~~inbox → Lead 分诊器~~ | ✅ 已接：`triage.Apply` 把收件箱项变成任务板任务（先建任务再标记，失败不脏写；重复分诊不重复建） | 已交付 |
+| Lead 的"思考"层（谁来决定 Action/Task） | triage 只执行决定，不做判断；决定来自 Lead 模型 | M0-2b：Lead 分诊回合（agent 侧） |
 | 任务板租约/心跳/证据/验收 | 现状只有 CAS/依赖/认领，没有 lease、没有 evidence、没有 review | M0-3 |
 | 审批 `approval.action` + 文字回复接线 | 解析器（`approvals/reply.go`）已绿，但还没接到审批单上 | M0-4：审批单 token + action + 回复路由 |
 | 渠道适配器 | 无（微信/钉钉/飞书/邮件都还没代码） | M0-5，先 webhook，再微信 iLink |
@@ -77,6 +81,8 @@ gofmt -l 改动文件                            空
 scripts/verify.sh --quick                   PASS（gofmt / build / vet /
                                             协议一致性 / 全量 go test 59s，
                                             5 passed 0 failed）
+scripts/verify.sh --quick（triage 后）       PASS 5/5，63s
+                                            （中间有一次重跑才绿，记在案）
 ```
 
 提交：`ed3d628`（设计文档）→ `b9f2aff`（inbox + 审批解析 + 装配守卫，1205 行新增）。

@@ -233,6 +233,26 @@ func TestTriageTaskRecordsTaskIDs(t *testing.T) {
 	}
 }
 
+func TestGetReturnsStoredAndRejectsMissing(t *testing.T) {
+	svc, _ := newService(t, nil)
+	ctx := context.Background()
+
+	stored, _, err := svc.Add(ctx, item("wechat", "k", "标题"))
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	got, err := svc.Get(ctx, stored.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.ID != stored.ID || got.Title != "标题" {
+		t.Fatalf("Get = %+v, want the stored item", got)
+	}
+	if _, err := svc.Get(ctx, "missing"); !errors.Is(err, contracts.ErrInboxUnknownItem) {
+		t.Fatalf("missing err = %v, want ErrInboxUnknownItem", err)
+	}
+}
+
 func TestTriageRejectsUnknownAction(t *testing.T) {
 	svc, _ := newService(t, nil)
 	ctx := context.Background()
