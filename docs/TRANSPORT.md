@@ -819,6 +819,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `inbox.snapshot` | `{statuses?,source?,limit?,includeExpired?}` | `{items:[InboxItem],stats:{total,new,triaged}}` | Y | `InboxService.List` + `Stats` | ✅ 已实现 |
 | `inbox.dispatch` | `{id,subject,detail?,assignee?,blockedBy?,writeScopes?,note?}` | `{taskIds,created,item}` | N | `TriageService.Apply`（action=task） | ✅ 已实现 |
 | `inbox.triage` | `{id,action,note?}` | `InboxItem` | N | `TriageService.Apply`（ignored/archived/triaged） | ✅ 已实现 |
+| `tasks.lease` | `{id}` | `TaskLease`（没有租约时 `{lease:null}`） | Y | `TaskLeaseService.Lease` | ✅ 已实现 |
 | `tasks.claim` | `{id,owner}` | `TaskLease` | N | `TaskLeaseService.Claim` | ✅ 已实现 |
 | `tasks.heartbeat` | `{id,owner}` | `TaskLease` | Y | `TaskLeaseService.Heartbeat` | ✅ 已实现 |
 | `tasks.submit` | `{id,owner,evidence:[{kind,ref,note?}]}` | `TaskLease` | N | `TaskLeaseService.Submit`（无证据 → `1010 evidence_required`） | ✅ 已实现 |

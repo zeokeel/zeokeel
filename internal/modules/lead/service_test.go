@@ -158,3 +158,37 @@ func TestSecondPassDoesNotReprocessHandledItems(t *testing.T) {
 		t.Fatalf("second pass scanned %d items, want 0 (only new items are triaged)", report.Scanned)
 	}
 }
+
+// customPlanner proves the seam that a model-backed planner plugs into: the
+// service must use the planner it was constructed with, not rebuild rules.
+type customPlanner struct {
+	calls int
+	give  contracts.TriageDecision
+}
+
+func (p *customPlanner) Plan(_ context.Context, _ contracts.InboxItem) (contracts.TriageDecision, bool, error) {
+	p.calls++
+	return p.give, true, nil
+}
+
+func TestRunOnceUsesTheInjectedPlanner(t *testing.T) {
+	inboxSvc := inbox.NewService(inbox.Config{Now: time.Now, MaxPerMinute: 1000})
+	triage := newFakeTriage()
+	planner := &customPlanner{give: contracts.TriageDecision{
+		Action: contracts.InboxActionTask,
+		Task:   &contracts.NewTask{Subject: "from the model", Assignee: "bot-9"},
+	}}
+	svc := lead.NewService(inboxSvc, triage, planner, lead.Config{MaxPerRun: 5, Now: time.Now})
+	arrive(t, inboxSvc, "webhook", "anything at all")
+
+	report, err := svc.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if planner.calls != 1 {
+		t.Fatalf("planner calls = %d, want 1 (a custom planner must not be replaced by the rule planner)", planner.calls)
+	}
+	if report.Dispatched != 1 || len(triage.applied) != 1 || triage.applied[0].Task.Subject != "from the model" {
+		t.Fatalf("report = %+v applied = %+v", report, triage.applied)
+	}
+}

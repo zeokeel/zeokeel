@@ -349,6 +349,9 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"tasks.claim": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.taskClaim(ctx, request.Params)
 		},
+		"tasks.lease": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.taskLease(ctx, request.Params)
+		},
 		"tasks.heartbeat": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.taskHeartbeat(ctx, request.Params)
 		},

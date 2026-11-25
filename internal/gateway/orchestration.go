@@ -621,3 +621,25 @@ func (g *Gateway) leadRun(ctx context.Context, _ json.RawMessage) (any, *protoco
 		Skipped: report.Skipped, Failed: report.Failed, Errors: report.Errors,
 	}, nil
 }
+
+// tasks.lease is the read half of the lease surface. Without it the task screen
+// can only see evidence right after a write in the same session; with it, opening
+// a task shows what a teammate already submitted.
+func (g *Gateway) taskLease(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.leaseService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params leaseParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	lease, found, err := service.Lease(ctx, params.ID)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	if !found {
+		return map[string]any{"lease": nil}, nil
+	}
+	return taskLeaseFromContract(lease), nil
+}

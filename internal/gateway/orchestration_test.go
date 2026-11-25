@@ -17,7 +17,7 @@ import (
 func TestOrchestrationMethodsAreDispatched(t *testing.T) {
 	want := []string{
 		"inbox.snapshot", "inbox.dispatch", "inbox.triage",
-		"tasks.claim", "tasks.heartbeat", "tasks.submit", "tasks.review",
+		"tasks.lease", "tasks.claim", "tasks.heartbeat", "tasks.submit", "tasks.review",
 		"approval.token", "approval.action",
 		"notify.route.snapshot", "notify.route.upsert",
 		"webhook.sources", "webhook.source.set", "webhook.source.remove",

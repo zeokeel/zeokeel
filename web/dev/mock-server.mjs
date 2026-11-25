@@ -1852,6 +1852,11 @@ const wsDispatch = (client, message) => {
       item.status = action;
       return reply({ ...item });
     }
+    case 'tasks.lease': {
+      const held = mockLeases.get(String(params.id ?? ''));
+      if (!held) return reply({ lease: null });
+      return reply({ ...held, evidence: held.evidence.slice() });
+    }
     case 'tasks.claim': {
       const taskId = String(params.id ?? '');
       const owner = String(params.owner ?? '');

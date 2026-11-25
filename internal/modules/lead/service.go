@@ -79,6 +79,10 @@ type Service struct {
 	triage contracts.TriageService
 	cfg    Config
 
+	// planner is the injected decision maker (nil = the rule planner built from
+	// rules). A model-backed planner must be used as given, not rebuilt.
+	planner Planner
+
 	// mu guards rules: the settings UI may replace them while a pass runs.
 	mu    sync.Mutex
 	rules []Rule
@@ -91,7 +95,11 @@ type Service struct {
 func NewService(inboxService contracts.InboxService, triage contracts.TriageService, planner Planner, cfg Config) *Service {
 	service := &Service{inbox: inboxService, triage: triage, cfg: cfg.normalized()}
 	if rulePlanner, ok := planner.(RulePlanner); ok {
+		// The rule planner's rules are editable through LeadRuleAdmin, so keep
+		// them in one place; other planners are used exactly as injected.
 		service.rules = append([]Rule(nil), rulePlanner.Rules...)
+	} else {
+		service.planner = planner
 	}
 	return service
 }
@@ -133,7 +141,10 @@ func (s *Service) RunOnce(ctx context.Context) (contracts.LeadReport, error) {
 
 	report := contracts.LeadReport{Scanned: len(items)}
 	s.mu.Lock()
-	planner := RulePlanner{Rules: append([]Rule(nil), s.rules...)}
+	planner := s.planner
+	if planner == nil {
+		planner = RulePlanner{Rules: append([]Rule(nil), s.rules...)}
+	}
 	s.mu.Unlock()
 
 	for _, item := range items {

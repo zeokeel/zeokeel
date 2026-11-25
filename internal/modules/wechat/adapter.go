@@ -103,6 +103,12 @@ type Adapter struct {
 	// store is the optional login-token store. nil means the token lives only in
 	// memory for this process (tests, or a host without a data directory).
 	store *TokenStore
+	// credentials is the optional shared credential store; when set, the login
+	// token may come from it (one place owns every channel secret).
+	credentials contracts.CredentialStore
+	// credentialID selects the row inside the store ("default" for the single
+	// personal account).
+	credentialID string
 
 	mu sync.Mutex
 	// tokens is the latest context token per user: a reply must ride the token
@@ -117,6 +123,15 @@ type Adapter struct {
 // NewAdapter wires the adapter without token persistence.
 func NewAdapter(inboxService contracts.InboxService, cfg Config) *Adapter {
 	return &Adapter{inbox: inboxService, cfg: cfg.normalized(), tokens: make(map[string]string)}
+}
+
+// NewAdapterWithCredentials wires the adapter to the shared credential store.
+// The token then resolves as: explicit cfg.Token, else the stored credential.
+func NewAdapterWithCredentials(inboxService contracts.InboxService, cfg Config, credentials contracts.CredentialStore) *Adapter {
+	adapter := NewAdapter(inboxService, cfg)
+	adapter.credentials = credentials
+	adapter.credentialID = "default"
+	return adapter
 }
 
 // OpenAdapter wires the adapter with a token store and restores the persisted
@@ -162,9 +177,23 @@ func (a *Adapter) SetToken(token string) error {
 	}
 
 	a.mu.Lock()
+	credentials := a.credentials
+	id := a.credentialID
 	a.cfg.Token = token
 	a.tokens = make(map[string]string)
 	a.mu.Unlock()
+
+	if credentials != nil {
+		if token == "" {
+			if err := credentials.Delete(context.Background(), "wechat", id); err != nil && !errors.Is(err, contracts.ErrCredentialNotFound) {
+				return fmt.Errorf("wechat: clear credential: %w", err)
+			}
+		} else if err := credentials.Set(context.Background(), contracts.Credential{
+			Kind: "wechat", ID: id, Fields: map[string]string{"token": token},
+		}); err != nil {
+			return fmt.Errorf("wechat: persist credential: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -173,11 +202,23 @@ func (a *Adapter) ClearToken() error {
 	return a.SetToken("")
 }
 
-// token returns the current login token ("" = not connected).
-func (a *Adapter) token() string {
+// token returns the current login token ("" = not connected). An explicit
+// configuration token wins; otherwise the shared credential store is consulted,
+// so the settings UI can install a login without restarting the process.
+func (a *Adapter) token(ctx context.Context) string {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.cfg.Token
+	token := strings.TrimSpace(a.cfg.Token)
+	credentials := a.credentials
+	id := a.credentialID
+	a.mu.Unlock()
+	if token != "" || credentials == nil {
+		return token
+	}
+	credential, ok, err := credentials.Get(ctx, "wechat", id)
+	if err != nil || !ok {
+		return ""
+	}
+	return strings.TrimSpace(credential.Fields["token"])
 }
 
 // PollOnce implements contracts.WeChatService.
@@ -185,7 +226,8 @@ func (a *Adapter) PollOnce(ctx context.Context) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	if a.token() == "" {
+	token := a.token(ctx)
+	if token == "" {
 		return 0, contracts.ErrWeChatUnauthorized
 	}
 	body, _ := json.Marshal(map[string]any{})
@@ -193,7 +235,7 @@ func (a *Adapter) PollOnce(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("%w: %v", contracts.ErrWeChatUnavailable, err)
 	}
-	a.setHeaders(request)
+	a.setHeaders(request, token)
 
 	response, err := a.cfg.Client.Do(request)
 	if err != nil {
@@ -256,7 +298,7 @@ func (a *Adapter) Send(ctx context.Context, toUserID, text string) error {
 	if strings.TrimSpace(text) == "" {
 		return contracts.ErrWeChatEmptyMessage
 	}
-	if a.token() == "" {
+	if a.token(ctx) == "" {
 		return contracts.ErrWeChatUnauthorized
 	}
 
@@ -294,7 +336,7 @@ func (a *Adapter) Send(ctx context.Context, toUserID, text string) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", contracts.ErrWeChatUnavailable, err)
 	}
-	a.setHeaders(request)
+	a.setHeaders(request, a.token(ctx))
 	response, err := a.cfg.Client.Do(request)
 	if err != nil {
 		return fmt.Errorf("%w: %v", contracts.ErrWeChatUnavailable, err)
@@ -315,13 +357,18 @@ func (a *Adapter) Status(ctx context.Context) (contracts.WeChatStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return contracts.WeChatStatus{}, err
 	}
+	// Read the fields under the lock, then ask for the token outside it:
+	// token() takes the same mutex, so holding it here would self-deadlock.
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	lastInbound := a.lastInbound
+	botID := a.botID
+	a.mu.Unlock()
+
 	status := contracts.WeChatStatus{
-		Connected: a.cfg.Token != "", LastInbound: a.lastInbound, BotID: a.botID,
+		Connected: a.token(ctx) != "", LastInbound: lastInbound, BotID: botID,
 	}
-	if !a.lastInbound.IsZero() {
-		status.WindowClosesAt = a.lastInbound.Add(contracts.WeChatWindow)
+	if !lastInbound.IsZero() {
+		status.WindowClosesAt = lastInbound.Add(contracts.WeChatWindow)
 	}
 	return status, nil
 }
@@ -412,10 +459,10 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 
 // setHeaders copies the iLink header contract (bearer token + a per-request
 // random uint32 so the platform cannot correlate requests by a fixed id).
-func (a *Adapter) setHeaders(request *http.Request) {
+func (a *Adapter) setHeaders(request *http.Request, token string) {
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("AuthorizationType", "ilink_bot_token")
-	request.Header.Set("Authorization", "Bearer "+a.token())
+	request.Header.Set("Authorization", "Bearer "+token)
 	var seed [4]byte
 	_, _ = rand.Read(seed[:])
 	request.Header.Set("X-WECHAT-UIN", base64.StdEncoding.EncodeToString(seed[:]))

@@ -359,6 +359,13 @@
       ],
       "optional": []
     },
+    "tasks.lease": {
+      "required": [
+        "id",
+        "owner"
+      ],
+      "optional": []
+    },
     "tasks.review": {
       "required": [
         "decision",
