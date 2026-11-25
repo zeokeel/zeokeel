@@ -52,6 +52,22 @@ func (f *fakeTeamNotes) List(context.Context, int) ([]contracts.TeamNote, error)
 	return append([]contracts.TeamNote(nil), f.notes...), nil
 }
 
+type fakeDispatchRecorder struct {
+	mu       sync.Mutex
+	requests []string
+	err      error
+}
+
+func (f *fakeDispatchRecorder) Deliver(_ context.Context, category, text string) (contracts.DispatchReceipt, error) {
+	if f.err != nil {
+		return contracts.DispatchReceipt{}, f.err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.requests = append(f.requests, category+"|"+text)
+	return contracts.DispatchReceipt{Channel: contracts.NotifyChannelInApp}, nil
+}
+
 type fakeLease struct {
 	state   string
 	applied []string
@@ -186,3 +202,68 @@ func stringsContains(haystack, needle string) bool {
 }
 
 var _ = time.Now
+
+func TestAcceptNotifiesTheHuman(t *testing.T) {
+	dispatcher := &fakeDispatchRecorder{}
+	gw := newReviewGateway(t, &fakeLease{}, nil)
+	if _, err := gw.root.Provide(contracts.KeyChannelDispatch, contracts.ChannelDispatchService(dispatcher)); err != nil {
+		t.Fatalf("provide dispatch: %v", err)
+	}
+
+	if problem := review(t, gw, map[string]any{
+		"id": "t1", "decision": "accept", "reviewer": "lead", "note": "verified",
+	}); problem != nil {
+		t.Fatalf("review failed: %+v", problem)
+	}
+	dispatcher.mu.Lock()
+	defer dispatcher.mu.Unlock()
+	if len(dispatcher.requests) != 1 {
+		t.Fatalf("dispatches = %v, want one", dispatcher.requests)
+	}
+	if !stringsHas(dispatcher.requests[0], contracts.NotifyCategoryTaskDone) {
+		t.Fatalf("category = %q, want the task_done route", dispatcher.requests[0])
+	}
+}
+
+func TestRejectNotifiesWithTheFailureCategory(t *testing.T) {
+	dispatcher := &fakeDispatchRecorder{}
+	gw := newReviewGateway(t, &fakeLease{}, nil)
+	if _, err := gw.root.Provide(contracts.KeyChannelDispatch, contracts.ChannelDispatchService(dispatcher)); err != nil {
+		t.Fatalf("provide dispatch: %v", err)
+	}
+
+	if problem := review(t, gw, map[string]any{
+		"id": "t1", "decision": "reject", "reviewer": "lead", "note": "证据不够",
+	}); problem != nil {
+		t.Fatalf("review failed: %+v", problem)
+	}
+	dispatcher.mu.Lock()
+	defer dispatcher.mu.Unlock()
+	if len(dispatcher.requests) != 1 || !stringsHas(dispatcher.requests[0], contracts.NotifyCategoryTaskFailed) {
+		t.Fatalf("dispatches = %v, want one task_failed route", dispatcher.requests)
+	}
+}
+
+func TestNotificationFailureDoesNotUndoTheReview(t *testing.T) {
+	dispatcher := &fakeDispatchRecorder{err: contracts.ErrNotifyRouteInvalid}
+	gw := newReviewGateway(t, &fakeLease{}, nil)
+	if _, err := gw.root.Provide(contracts.KeyChannelDispatch, contracts.ChannelDispatchService(dispatcher)); err != nil {
+		t.Fatalf("provide dispatch: %v", err)
+	}
+	if problem := review(t, gw, map[string]any{
+		"id": "t1", "decision": "accept", "reviewer": "lead", "note": "ok",
+	}); problem != nil {
+		t.Fatalf("a notification failure failed the review: %+v", problem)
+	}
+}
+
+func stringsHas(haystack, needle string) bool {
+	return len(haystack) >= len(needle) && (func() bool {
+		for i := 0; i+len(needle) <= len(haystack); i++ {
+			if haystack[i:i+len(needle)] == needle {
+				return true
+			}
+		}
+		return false
+	})()
+}

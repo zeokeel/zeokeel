@@ -398,6 +398,7 @@ func (g *Gateway) taskReview(ctx context.Context, raw json.RawMessage) (any, *pr
 	if params.Decision == "accept" {
 		g.recordReviewNote(ctx, params.ID, params.Reviewer, params.Note, lease)
 	}
+	g.notifyReview(ctx, params.Decision, params.ID, params.Note)
 	return taskLeaseFromContract(lease), nil
 }
 
@@ -429,6 +430,28 @@ func (g *Gateway) recordReviewNote(ctx context.Context, taskID, reviewer, note s
 		TaskID: taskID, Title: title, Body: body, Author: reviewer,
 	}); err != nil {
 		g.logger.Printf("gateway: record review note for %s: %v", taskID, err)
+	}
+}
+
+// notifyReview tells the human that a task settled. It is the first real
+// producer for the notification router: until now the route could be planned and
+// tested but nothing in the product ever asked it to send anything.
+func (g *Gateway) notifyReview(ctx context.Context, decision, taskID, note string) {
+	dispatcher, ok := g.root.Get(contracts.KeyChannelDispatch)
+	if !ok || dispatcher == nil {
+		return
+	}
+	category := contracts.NotifyCategoryTaskDone
+	text := "任务 " + taskID + " 已通过验收。"
+	if decision != "accept" {
+		category = contracts.NotifyCategoryTaskFailed
+		text = "任务 " + taskID + " 被打回，需要返工。"
+	}
+	if strings.TrimSpace(note) != "" {
+		text += "\n" + note
+	}
+	if _, err := dispatcher.Deliver(ctx, category, text); err != nil {
+		g.logger.Printf("gateway: notify review for %s: %v", taskID, err)
 	}
 }
 
