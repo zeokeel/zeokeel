@@ -190,7 +190,15 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
     // and the next send is a 409 ("a run is active"). Cancel server-side first,
     // then drop the local stream so the UI reacts without waiting for the ack.
     void cancelRun(sessionId).catch(() => undefined);
-    chat.abort();
+    // A turn started before this page loaded has no local stream to abort, and
+    // calling abort() on one threw `reading 'abort'` (round-6 loop audit F7).
+    if (chat.isRequesting) {
+      chat.abort();
+    } else {
+      // No stream: reflect the stop locally so the row stops looking live; the
+      // next snapshot settles it.
+      void chat.refresh?.(true);
+    }
   };
 
   // L5: a running turn is stopped by Esc from anywhere on the screen.
@@ -268,8 +276,11 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     if (wasRequesting.current && !chat.isRequesting) {
       // The optimistic rows were placeholders: the durable snapshot is the truth
-      // (attachment names, settled tool states, any server-side rewrite).
-      void chat.refresh?.();
+      // (attachment names, settled tool states, any server-side rewrite). After a
+      // stop the snapshot can still be the *pre-cancel* one (the read lands
+      // before the cancel commits), which turned 已停止 into 回答完成 23ms later;
+      // `chat.refresh` therefore refuses to downgrade an aborted row.
+      void chat.refresh?.(stoppedByUser.current);
       void reload();
       const aborted = stoppedByUser.current;
       stoppedByUser.current = false;

@@ -127,7 +127,7 @@ export function useGatewayChat(
   // states and server-side edits are the truth, the optimistic row is not.
   return {
     ...chat,
-    refresh: async () => {
+    refresh: async (preserveStop = false) => {
       const durable = await loadMessages();
       const current = chat.messages ?? [];
       // A durable row says "success"; a row that is still streaming must stay
@@ -140,7 +140,19 @@ export function useGatewayChat(
           .filter((info) => info.status === 'loading' && info.id !== undefined)
           .map((info) => [String(info.id), info]),
       );
+      const abortedIds = preserveStop
+        ? new Set(
+            current
+              .filter((info) => info.message.stopReason === 'aborted' && info.id !== undefined)
+              .map((info) => String(info.id)),
+          )
+        : new Set<string>();
       const merged = durable.map((row) => {
+        // A stop the user just performed must survive a snapshot that was read
+        // before the cancel committed: the row stays aborted, never end_turn.
+        if (row.id !== undefined && abortedIds.has(String(row.id))) {
+          return { ...row, message: { ...row.message, stopReason: 'aborted' } };
+        }
         const streaming = row.id === undefined ? undefined : live.get(String(row.id));
         if (!streaming) return row;
         // The live row is ahead of the snapshot for what it already streamed.

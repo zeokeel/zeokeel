@@ -140,10 +140,15 @@ export function ThoughtSteps({
   // ordinary case and keeps the plain 思考 node.
   const segments = reasoningSegments?.filter((segment) => segment.text.trim() !== '') ?? [];
   if (segments.length > 1) {
-    const merged: Array<{ offset: number; item: ThoughtChainItemType }> = [];
+    // Offsets alone do not order a turn that never wrote prose: every round
+    // starts at text 0, so all offsets tie. Ties break by round — segment i, then
+    // the i-th tool call (a tool call is what ends a round), then segment i+1 —
+    // which is the true order in exactly that case.
+    const merged: Array<{ offset: number; phase: number; item: ThoughtChainItemType }> = [];
     segments.forEach((segment, index) => {
       merged.push({
-        offset: segment.offset ?? Number.MAX_SAFE_INTEGER - segments.length + index,
+        offset: segment.offset ?? 0,
+        phase: index * 2,
         item: {
           key: `thinking-${segment.iteration}`,
           title: t('thread.reasoning.round', { count: index + 1 }),
@@ -155,12 +160,11 @@ export function ThoughtSteps({
       });
     });
     visibleSteps.forEach((step, index) => {
-      merged.push({
-        offset: step.offset ?? Number.MAX_SAFE_INTEGER + index,
-        item: describedSteps[index],
-      });
+      merged.push({ offset: step.offset ?? 0, phase: index * 2 + 1, item: describedSteps[index] });
     });
-    merged.sort((left, right) => (left.offset === right.offset ? 0 : left.offset - right.offset));
+    merged.sort((left, right) =>
+      left.offset === right.offset ? left.phase - right.phase : left.offset - right.offset,
+    );
     merged.forEach((entry) => items.push(entry.item));
   } else if (reasoning) {
     items.push({
