@@ -25,7 +25,7 @@
  * `inbox.time.*` for relative stamps) — this file carries no user-visible
  * string of its own.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { useParams } from 'react-router';
 import {
   Alert,
@@ -51,6 +51,7 @@ import {
   type TaskEvidence,
   type TaskLease,
 } from '@/api/task';
+import { useMediaQuery } from '@/design/use-system-appearance';
 import { useT } from '@/i18n';
 
 /**
@@ -61,6 +62,21 @@ import { useT } from '@/i18n';
  * anybody else would need an identity the gateway does not hand out yet.
  */
 const OWNER = 'lead';
+
+/**
+ * A subject, a goal or an evidence ref is often one unbroken token (a URL, a
+ * commit id). `overflowWrap: anywhere` keeps it inside the column at 390px —
+ * `break-word` would not, because it leaves the intrinsic min-content width at
+ * the whole token, which is what widened the screen to 2255px before this.
+ */
+const WRAP_LONG: CSSProperties = { overflowWrap: 'anywhere' };
+
+/**
+ * Below this width the four verbs get antd's `large` (40px): `middle` is 32px,
+ * which a thumb misses on a phone — the same full web on a LAN (prototype
+ * screen 05), not a cut-down app. Matches the CSS breakpoints global.css uses.
+ */
+const NARROW_QUERY = '(max-width: 768px)';
 
 /** `useT()`'s translator, threaded into the pure helpers below. */
 type Translate = ReturnType<typeof useT>;
@@ -250,17 +266,23 @@ function timelineSteps(lease: TaskLease | null, t: Translate): Step[] {
  */
 function EvidenceRow({ row, t }: { row: TaskEvidence; t: Translate }) {
   return (
-    <Space size={4} wrap>
+    <Space size={4} wrap style={WRAP_LONG}>
       <Tag>{evidenceKindLabel(row.kind, t)}</Tag>
       {isLink(row.ref) ? (
         // External proof opens in a new tab with no opener.
-        <a href={row.ref} target="_blank" rel="noreferrer">
+        <a href={row.ref} target="_blank" rel="noreferrer" style={WRAP_LONG}>
           {row.ref}
         </a>
       ) : (
-        <Typography.Text code>{row.ref}</Typography.Text>
+        <Typography.Text code style={WRAP_LONG}>
+          {row.ref}
+        </Typography.Text>
       )}
-      {row.note ? <Typography.Text type="secondary">{row.note}</Typography.Text> : null}
+      {row.note ? (
+        <Typography.Text type="secondary" style={WRAP_LONG}>
+          {row.note}
+        </Typography.Text>
+      ) : null}
     </Space>
   );
 }
@@ -269,6 +291,7 @@ export function TaskDetailScreen() {
   const { taskId } = useParams<{ taskId: string }>();
   const id = taskId ?? '';
   const t = useT();
+  const narrow = useMediaQuery(NARROW_QUERY);
 
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   // Bumped by 重试; the effect below is the only place that fetches.
@@ -433,7 +456,11 @@ export function TaskDetailScreen() {
   return (
     <div className="zk-screen">
       <header className="zk-screen__header">
-        <h1 className="zk-screen__title">{task.subject}</h1>
+        {/* The subject is free-form and can be one long token: it wraps rather
+            than widening the column (390px phone, prototype screen 05). */}
+        <h1 className="zk-screen__title" style={WRAP_LONG}>
+          {task.subject}
+        </h1>
       </header>
 
       <Space orientation="vertical" size="large" style={{ width: '100%' }}>
@@ -447,22 +474,34 @@ export function TaskDetailScreen() {
               {
                 key: 'goal',
                 label: t('task.detail.field.goal'),
-                children: task.description || (
-                  <Typography.Text type="secondary">{t('task.detail.goalMissing')}</Typography.Text>
+                children: (
+                  <div style={WRAP_LONG}>
+                    {task.description || (
+                      <Typography.Text type="secondary">{t('task.detail.goalMissing')}</Typography.Text>
+                    )}
+                  </div>
                 ),
               },
               {
                 key: 'owner',
                 label: t('task.detail.field.owner'),
-                children: task.owner || (
-                  <Typography.Text type="secondary">{t('task.detail.ownerMissing')}</Typography.Text>
+                children: (
+                  <div style={WRAP_LONG}>
+                    {task.owner || (
+                      <Typography.Text type="secondary">{t('task.detail.ownerMissing')}</Typography.Text>
+                    )}
+                  </div>
                 ),
               },
               {
                 key: 'blockedBy',
                 label: t('task.detail.field.blockedBy'),
-                children: task.blockedBy?.join('、') || (
-                  <Typography.Text type="secondary">{t('task.detail.blockedNone')}</Typography.Text>
+                children: (
+                  <div style={WRAP_LONG}>
+                    {task.blockedBy?.join('、') || (
+                      <Typography.Text type="secondary">{t('task.detail.blockedNone')}</Typography.Text>
+                    )}
+                  </div>
                 ),
               },
             ]}
@@ -482,7 +521,7 @@ export function TaskDetailScreen() {
                 content:
                   step.detail || step.at ? (
                     <Space orientation="vertical" size={0}>
-                      {step.detail ? <span>{step.detail}</span> : null}
+                      {step.detail ? <span style={WRAP_LONG}>{step.detail}</span> : null}
                       {step.at ? (
                         // Relative time; the absolute stamp (with its zone) is
                         // the hover title (design §12.30).
@@ -549,10 +588,14 @@ export function TaskDetailScreen() {
               items={artifacts}
               rowKey={(row, index) => `${index}:${row.ref}`}
               itemRender={(row) => (
-                <Space size={4} wrap>
-                  <Typography.Text code>{row.ref}</Typography.Text>
+                <Space size={4} wrap style={WRAP_LONG}>
+                  <Typography.Text code style={WRAP_LONG}>
+                    {row.ref}
+                  </Typography.Text>
                   {row.note ? (
-                    <Typography.Text type="secondary">{row.note}</Typography.Text>
+                    <Typography.Text type="secondary" style={WRAP_LONG}>
+                      {row.note}
+                    </Typography.Text>
                   ) : null}
                 </Space>
               )}
@@ -583,6 +626,7 @@ export function TaskDetailScreen() {
                     makes the rest of this section possible. */}
                 <Button
                   type="primary"
+                  size={narrow ? 'large' : undefined}
                   onClick={() => void claim()}
                   loading={busy === 'claim'}
                   disabled={busy !== null && busy !== 'claim'}
@@ -590,6 +634,7 @@ export function TaskDetailScreen() {
                   {t('task.detail.claim')}
                 </Button>
                 <Button
+                  size={narrow ? 'large' : undefined}
                   onClick={() => {
                     setActionError(null);
                     setForm((value) => (value === 'evidence' ? 'none' : 'evidence'));
@@ -599,6 +644,7 @@ export function TaskDetailScreen() {
                   {t('task.detail.submitEvidence')}
                 </Button>
                 <Button
+                  size={narrow ? 'large' : undefined}
                   onClick={() => void accept()}
                   loading={busy === 'accept'}
                   disabled={busy !== null && busy !== 'accept'}
@@ -607,6 +653,7 @@ export function TaskDetailScreen() {
                 </Button>
                 <Button
                   danger
+                  size={narrow ? 'large' : undefined}
                   onClick={() => {
                     setActionError(null);
                     setForm((value) => (value === 'reject' ? 'none' : 'reject'));

@@ -1,8 +1,15 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BoardTask } from '@/api/task';
+import {
+  expectNoHorizontalOverflow,
+  expectWrapsOrEllipsis,
+  installViewport,
+  PHONE_WIDTH,
+  uninstallViewport,
+} from '@/test/viewport';
 import { TeamScreen } from './TeamScreen';
 
 /**
@@ -153,5 +160,38 @@ describe('TeamScreen', () => {
     expect(await screen.findByText('查退款率')).toBeInTheDocument();
     await waitFor(() => expect(api.loadTaskBoard).toHaveBeenCalledTimes(2));
     expect(screen.queryByText('任务板加载失败')).toBeNull();
+  });
+});
+/**
+ * Screen 05 of docs/design/grokbot-ui/README.md: `/team/board` on a phone over
+ * the LAN. A row's subject is a free-form task title, so it is the one thing
+ * that can widen the board; measured in Chromium at 390px it pushed the screen
+ * to 1440px (`.ant-space-item` was `flex: 0 1 auto` with `min-width: auto`, so
+ * the link refused to shrink below its unbroken token).
+ */
+describe('TeamScreen at 390px', () => {
+  const LONG_SUBJECT = `https://example.test/task/${'c'.repeat(150)}`;
+
+  beforeEach(() => {
+    installViewport(PHONE_WIDTH);
+  });
+
+  afterEach(() => {
+    uninstallViewport();
+  });
+
+  it('wraps a long subject instead of widening the board', async () => {
+    api.loadTaskBoard.mockResolvedValue([
+      task('task-1', { subject: LONG_SUBJECT, owner: 'web-engineer' }),
+      task('task-2', { subject: '整理周报' }),
+    ]);
+
+    renderScreen();
+
+    const link = await screen.findByRole('link', { name: LONG_SUBJECT });
+    expect(link).toHaveAttribute('href', '/t/task-1');
+
+    expectNoHorizontalOverflow(document.querySelector('.zk-screen') as Element);
+    expectWrapsOrEllipsis(link, 'the row subject');
   });
 });

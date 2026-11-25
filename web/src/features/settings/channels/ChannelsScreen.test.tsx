@@ -1,7 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { I18nProvider } from '@/i18n';
+import {
+  expectCanShrink,
+  expectNoHorizontalOverflow,
+  expectTapTarget,
+  expectWrapsOrEllipsis,
+  installViewport,
+  PHONE_WIDTH,
+  uninstallViewport,
+} from '@/test/viewport';
 
 /**
  * R27a · the channel settings screen (credentials, webhook sources, notify
@@ -285,5 +294,46 @@ describe('ChannelsScreen — the credential field names are the contract', () =>
     expect(CREDENTIAL_FIELD_NAMES.dingtalk).toEqual(['token', 'signSecret']);
     expect(CREDENTIAL_FIELD_NAMES.feishu).toEqual(['appId', 'appSecret']);
     expect(CREDENTIAL_FIELD_NAMES.email).toEqual(['username', 'password']);
+  });
+});
+
+/**
+ * Screen 05 of docs/design/grokbot-ui/README.md: `/settings/channels` on a phone
+ * over the LAN at ~390px. Two things broke there: a credential id / webhook
+ * source id printed verbatim could widen the row, and 保存 — the screen's only
+ * filled primary — was antd's `middle` size (32px), under a thumb.
+ */
+describe('ChannelsScreen at 390px', () => {
+  const LONG_ID = `credential-${'d'.repeat(150)}`;
+
+  beforeEach(() => {
+    installViewport(PHONE_WIDTH);
+  });
+
+  afterEach(() => {
+    uninstallViewport();
+  });
+
+  it('wraps long ids instead of widening the page', async () => {
+    api.listCredentials.mockResolvedValue([{ kind: 'wechat', id: LONG_ID }]);
+    api.listWebhookSources.mockResolvedValue([{ id: LONG_ID, channel: 'wechat' }]);
+
+    renderScreen();
+
+    const credential = await screen.findByTestId(`channels-credential-wechat-${LONG_ID}`);
+    expectNoHorizontalOverflow(document.querySelector('.zk-screen') as Element);
+    expectWrapsOrEllipsis(within(credential).getByText(LONG_ID), 'the credential id');
+    // The id wraps *inside* a body that is allowed to shrink, so the row's own
+    // action keeps its width instead of being pushed out of the row.
+    expectCanShrink(credential.querySelector('.zk-inbox__body') as Element, 'the credential row body');
+    expect(within(credential).getByRole('button', { name: /删\s*除|Delete/ })).toBeVisible();
+  });
+
+  it('keeps 保存 hittable', async () => {
+    renderScreen();
+
+    const save = await screen.findByTestId('channels-credential-save');
+    expect(save).toBeVisible();
+    expectTapTarget(save);
   });
 });

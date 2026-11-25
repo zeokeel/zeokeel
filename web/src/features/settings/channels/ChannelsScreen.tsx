@@ -18,7 +18,7 @@
  * and offers 重试 (the other two sections stay usable). A failed *write* is
  * reported above the form it came from, because nothing changed.
  */
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   Alert,
   Button,
@@ -50,6 +50,7 @@ import {
   type NotifyRoute,
   type WebhookSourceInfo,
 } from '@/api/channels';
+import { useMediaQuery } from '@/design/use-system-appearance';
 import { describeError } from '@/features/describe-error';
 import { useT } from '@/i18n';
 import type { MessageKey } from '@/i18n';
@@ -91,6 +92,23 @@ function fieldsFor(kind: CredentialKind): readonly CredentialFieldSpec[] {
 
 const KIND_OPTIONS = CREDENTIAL_KINDS.map((kind) => ({ value: kind, label: kind }));
 const CHANNEL_OPTIONS = NOTIFY_CHANNELS.map((channel) => ({ value: channel, label: channel }));
+
+/**
+ * A credential id or webhook source id is printed verbatim and can be one long
+ * token: `overflowWrap: anywhere` keeps it inside the row at 390px instead of
+ * widening the page (`break-word` leaves the intrinsic width at the whole id).
+ */
+const WRAP_LONG: CSSProperties = { overflowWrap: 'anywhere' };
+
+/** A flex child allowed to shrink below its content (`min-width: auto` refuses). */
+const SHRINKABLE: CSSProperties = { flex: 1, minWidth: 0 };
+
+/**
+ * Below this width 保存 — the screen's only filled primary — gets antd's
+ * `large` (40px): `middle`'s 32px is not a thumb target on a phone, and this
+ * screen is the same full web client over the LAN (prototype screen 05).
+ */
+const NARROW_QUERY = '(max-width: 768px)';
 
 function messageOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
@@ -245,8 +263,12 @@ export function ChannelsScreen() {
   return (
     <div className="zk-screen">
       <header className="zk-screen__header">
-        <h1 className="zk-screen__title">{t('channels.title')}</h1>
-        <p className="zk-screen__note">{t('channels.note')}</p>
+        <h1 className="zk-screen__title" style={WRAP_LONG}>
+          {t('channels.title')}
+        </h1>
+        <p className="zk-screen__note" style={WRAP_LONG}>
+          {t('channels.note')}
+        </p>
       </header>
       <Flex vertical gap="large">
         <CredentialsSection />
@@ -261,6 +283,7 @@ export function ChannelsScreen() {
 
 function CredentialsSection() {
   const t = useT();
+  const narrow = useMediaQuery(NARROW_QUERY);
   const [kind, setKind] = useState<CredentialKind>('wechat');
   const [id, setId] = useState('default');
   const [values, setValues] = useState<Record<string, string>>({});
@@ -385,6 +408,7 @@ function CredentialsSection() {
       <Flex gap="small" align="center" wrap>
         <Button
           type="primary"
+          size={narrow ? 'large' : undefined}
           onClick={() => void save()}
           loading={saving}
           disabled={!complete}
@@ -423,8 +447,8 @@ function CredentialsSection() {
               className="zk-inbox__row"
               data-testid={`channels-credential-${row.kind}-${row.id}`}
             >
-              <div className="zk-inbox__body">
-                <div className="zk-inbox__title">
+              <div className="zk-inbox__body" style={SHRINKABLE}>
+                <div className="zk-inbox__title" style={WRAP_LONG}>
                   <Tag>{row.kind}</Tag>
                   <span>{row.id}</span>
                 </div>
@@ -569,8 +593,8 @@ function WebhookSourcesSection() {
               className="zk-inbox__row"
               data-testid={`channels-webhook-${row.id}`}
             >
-              <div className="zk-inbox__body">
-                <div className="zk-inbox__title">
+              <div className="zk-inbox__body" style={SHRINKABLE}>
+                <div className="zk-inbox__title" style={WRAP_LONG}>
                   <Tag>{row.id}</Tag>
                   <span>{row.channel ?? t('channels.webhooks.noChannel')}</span>
                 </div>
@@ -694,8 +718,8 @@ function NotifyRoutesSection() {
                 className="zk-inbox__row"
                 data-testid={`channels-notify-${route.category}`}
               >
-                <div className="zk-inbox__body">
-                  <div className="zk-inbox__title">
+                <div className="zk-inbox__body" style={SHRINKABLE}>
+                  <div className="zk-inbox__title" style={WRAP_LONG}>
                     {/* The category is a protocol value: shown verbatim, never
                         translated (README hard constraint). */}
                     <Tag>{route.category}</Tag>

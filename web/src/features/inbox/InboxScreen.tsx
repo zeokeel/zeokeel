@@ -17,8 +17,8 @@
  * air; the write's own failure is reported next to the queue instead of
  * replacing it, because a failed triage changed nothing.
  */
-import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Empty, Result, Skeleton, Tag } from 'antd';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { Alert, Button, Empty, Flex, Result, Skeleton, Tag } from 'antd';
 import {
   ALL_INBOX_STATUSES,
   dispatchInboxItem,
@@ -27,8 +27,27 @@ import {
   type InboxItem,
   type InboxSnapshot,
 } from '@/api/inbox';
+import { useMediaQuery } from '@/design/use-system-appearance';
 import { useT } from '@/i18n';
 import { formatRelativeTime, groupInboxItems, type InboxSectionKey, type Translate } from './state';
+
+/**
+ * A subject is whatever the channel handed over — often a URL or an id with no
+ * space in it. `overflowWrap: anywhere` is what keeps such a token inside its
+ * row instead of widening the whole screen on a 390px phone; `break-word` is not
+ * enough because it leaves the intrinsic min-content width at the full token.
+ */
+const WRAP_LONG: CSSProperties = { overflowWrap: 'anywhere' };
+
+/** A flex child allowed to shrink below its content (`min-width: auto` refuses). */
+const SHRINKABLE: CSSProperties = { flex: 1, minWidth: 0 };
+
+/**
+ * The tap-target breakpoint. Matches the CSS breakpoints global.css already
+ * uses for narrow layouts (899 / 768 / 480); below it the row verbs grow to
+ * antd's `large` (40px), because a 24px button is not hittable with a thumb.
+ */
+const NARROW_QUERY = '(max-width: 768px)';
 
 /** Section copy. `groupInboxItems` deals in keys so the words stay in the catalogue. */
 function sectionTitle(t: Translate, key: InboxSectionKey): string {
@@ -64,6 +83,7 @@ async function readInbox(): Promise<LoadState> {
 
 export function InboxScreen() {
   const t = useT();
+  const narrow = useMediaQuery(NARROW_QUERY);
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   // Bumped by 重试; the effect below is the only place that fetches.
   const [attempt, setAttempt] = useState(0);
@@ -164,6 +184,7 @@ export function InboxScreen() {
                       key={item.id}
                       item={item}
                       now={state.at}
+                      narrow={narrow}
                       busy={busyId === item.id}
                       decided={section.key === 'triaged'}
                       onDispatch={() =>
@@ -193,6 +214,8 @@ interface InboxRowProps {
   item: InboxItem;
   /** The clock the relative stamp is measured against. */
   now: number;
+  /** Narrow viewport: stack the actions under the subject and grow the verbs. */
+  narrow: boolean;
   /** This row's write is in the air. */
   busy: boolean;
   /** Already decided — no write actions on it any more. */
@@ -201,13 +224,18 @@ interface InboxRowProps {
   onIgnore: () => void;
 }
 
-function InboxRow({ item, now, busy, decided, onDispatch, onIgnore }: InboxRowProps) {
+function InboxRow({ item, now, narrow, busy, decided, onDispatch, onIgnore }: InboxRowProps) {
   const t = useT();
   const stamp = formatRelativeTime(item.receivedAt, now, t);
   return (
-    <li className="zk-inbox__row">
-      <div className="zk-inbox__body">
-        <div className="zk-inbox__title">
+    <li
+      className="zk-inbox__row"
+      // At 390px the actions move under the subject: side by side, a long title
+      // and two verbs cannot both keep their width.
+      style={narrow ? { flexDirection: 'column', alignItems: 'stretch' } : undefined}
+    >
+      <div className="zk-inbox__body" style={SHRINKABLE}>
+        <div className="zk-inbox__title" style={WRAP_LONG}>
           {/* The channel family, not a severity: one tag per row, neutral. */}
           <Tag>{item.source}</Tag>
           <span>{item.title}</span>
@@ -217,20 +245,37 @@ function InboxRow({ item, now, busy, decided, onDispatch, onIgnore }: InboxRowPr
           {item.count > 1 ? <Tag>{t('inbox.work.mergedCount', { count: item.count })}</Tag> : null}
         </div>
         {item.sender || stamp ? (
-          <div className="zk-inbox__meta">
+          // `Flex` rather than two bare spans: `.zk-inbox__meta` has no gap of
+          // its own, so "owner" and "10 分钟前" rendered as the single token
+          // "owner10 分钟前" at 390px (seen in the Chromium pass).
+          <Flex className="zk-inbox__meta" gap="small" wrap>
             {item.sender ? <span>{item.sender}</span> : null}
             {stamp ? <span>{stamp}</span> : null}
-          </div>
+          </Flex>
         ) : null}
       </div>
       {decided ? null : (
-        <div className="zk-inbox__actions">
+        <div
+          className="zk-inbox__actions"
+          // Same width as the subject at 390px, so both verbs stay on screen.
+          style={narrow ? { width: '100%', justifyContent: 'stretch' } : undefined}
+        >
           {/* Neither action is filled: the inbox never suggests a default
               (WEB-CLIENT §8.1 A9's principle for decisions). */}
-          <Button size="small" disabled={busy} onClick={onDispatch}>
+          <Button
+            size={narrow ? 'large' : 'small'}
+            style={narrow ? { flex: 1 } : undefined}
+            disabled={busy}
+            onClick={onDispatch}
+          >
             {t('inbox.work.dispatch')}
           </Button>
-          <Button size="small" disabled={busy} onClick={onIgnore}>
+          <Button
+            size={narrow ? 'large' : 'small'}
+            style={narrow ? { flex: 1 } : undefined}
+            disabled={busy}
+            onClick={onIgnore}
+          >
             {t('inbox.work.ignore')}
           </Button>
         </div>

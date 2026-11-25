@@ -11,13 +11,22 @@
  * it. Copy comes from the catalogue, including the relative stamp, which reuses
  * the `inbox.time.*` keys rather than growing a second vocabulary for "2 分钟前".
  */
-import { useEffect, useState } from 'react';
-import { Button, Empty, Listy, Result, Skeleton, Space, Tag, Typography } from 'antd';
+import { useEffect, useState, type CSSProperties } from 'react';
+import { Button, Empty, Flex, Listy, Result, Skeleton, Space, Tag, Typography } from 'antd';
 import { Link } from 'react-router';
 import { loadTaskBoard, type BoardTask } from '@/api/task';
 import { formatRelativeTime } from '@/features/inbox/state';
 import { useT } from '@/i18n';
 import { groupTasksByStatus } from './board';
+
+/**
+ * A subject is free-form and often one unbroken token (a URL, an id). At 390px
+ * that token used to widen the board to 1440px: `Space` renders each child in an
+ * `.ant-space-item` with `flex: 0 1 auto` **and `min-width: auto`**, so the link
+ * refused to shrink below the token. `overflowWrap: anywhere` also lowers the
+ * intrinsic min-content width to one character, which `break-word` does not.
+ */
+const WRAP_LONG: CSSProperties = { overflowWrap: 'anywhere', minWidth: 0 };
 
 type LoadState =
   | { kind: 'loading' }
@@ -100,7 +109,9 @@ export function TeamScreen() {
   return (
     <div className="zk-screen">
       <header className="zk-screen__header">
-        <h1 className="zk-screen__title">{t('team.board.title')}</h1>
+        <h1 className="zk-screen__title" style={{ overflowWrap: 'anywhere' }}>
+          {t('team.board.title')}
+        </h1>
         {empty ? null : (
           <Space size={4} wrap>
             {filled.map((group) => (
@@ -145,15 +156,20 @@ function BoardRow({ task, now }: BoardRowProps) {
   const stamp = formatRelativeTime(task.updatedAt ?? task.createdAt, now, t);
   return (
     <div data-testid={`team-row-${task.id}`}>
-      <Space size={8} wrap>
+      {/* `Flex` rather than `Space`: its children are the links themselves (no
+          `.ant-space-item` wrapper with `min-width: auto`), so the subject can
+          shrink and wrap at 390px instead of pushing the row out. */}
+      <Flex wrap gap="small" align="baseline">
         {/* The subject is the link: a row with a separate "open" button would
             need two targets for one action. */}
-        <Link to={`/t/${task.id}`}>{task.subject}</Link>
+        <Link to={`/t/${task.id}`} style={WRAP_LONG}>
+          {task.subject}
+        </Link>
         <Typography.Text type="secondary">
           {task.owner || t('team.board.unassigned')}
         </Typography.Text>
         {stamp ? <Typography.Text type="secondary">{stamp}</Typography.Text> : null}
-      </Space>
+      </Flex>
     </div>
   );
 }

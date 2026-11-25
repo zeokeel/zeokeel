@@ -1,9 +1,17 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BoardTask, TaskLease } from '@/api/task';
 import { translate, type MessageKey } from '@/i18n';
+import {
+  expectNoHorizontalOverflow,
+  expectTapTarget,
+  expectWrapsOrEllipsis,
+  installViewport,
+  PHONE_WIDTH,
+  uninstallViewport,
+} from '@/test/viewport';
 import { TaskDetailScreen } from './TaskDetailScreen';
 
 /**
@@ -405,5 +413,68 @@ describe('TaskDetailScreen', () => {
 
     expect(await screen.findByRole('heading', { name: T('task.detail.section.doing') })).toBeInTheDocument();
     expect(api.loadTaskBoard).toHaveBeenCalledTimes(2);
+  });
+});
+/**
+ * Screen 05 of docs/design/grokbot-ui/README.md: the phone opens `/t/:taskId`
+ * over the LAN at ~390px. What used to break: an unbroken subject or evidence
+ * ref made the container 2255px wide (measured in Chromium before the fix), and
+ * the four verbs stayed 32px tall after antd's `middle` size.
+ */
+describe('TaskDetailScreen at 390px', () => {
+  // A subject / ref that is one long token, which is the case that overflowed.
+  const LONG_REF = `https://example.test/evidence/${'b'.repeat(150)}`;
+
+  beforeEach(() => {
+    installViewport(PHONE_WIDTH);
+  });
+
+  afterEach(() => {
+    uninstallViewport();
+  });
+
+  it('does not widen the screen and wraps the subject and the evidence ref', async () => {
+    api.loadTaskBoard.mockResolvedValue([task({ subject: LONG_REF, description: LONG_REF })]);
+    api.loadTaskLease.mockResolvedValue(
+      lease({
+        state: 'review',
+        evidence: [
+          { kind: 'link', ref: LONG_REF, note: LONG_REF },
+          { kind: 'file', ref: LONG_REF },
+        ],
+      }),
+    );
+
+    renderScreen();
+
+    const title = await screen.findByRole('heading', { level: 1 });
+    expect(title).toHaveTextContent(LONG_REF);
+
+    expectNoHorizontalOverflow(document.querySelector('.zk-screen') as Element);
+    expectWrapsOrEllipsis(title, 'the task subject');
+    // §1's goal line and §3/§4's refs can be the same unbroken token.
+    expectWrapsOrEllipsis(document.querySelector('.ant-descriptions-item-content') as Element, 'the goal');
+    const refs = [...document.querySelectorAll('.ant-listy a, .ant-typography code')];
+    expect(refs.length).toBeGreaterThan(0);
+    for (const ref of refs) expectWrapsOrEllipsis(ref, 'an evidence ref');
+  });
+
+  it('keeps the four verbs as tap targets', async () => {
+    api.loadTaskBoard.mockResolvedValue([task({ subject: LONG_REF })]);
+
+    renderScreen();
+
+    const claim = await screen.findByRole('button', { name: label(T('task.detail.claim')) });
+    expect(claim).toBeVisible();
+    expect(claim).toBeEnabled();
+    expectTapTarget(claim);
+    // The other three stay reachable next to it (they wrap, they do not vanish).
+    for (const verb of [
+      T('task.detail.submitEvidence'),
+      T('task.detail.accept'),
+      T('task.detail.reject'),
+    ]) {
+      expectTapTarget(screen.getByRole('button', { name: label(verb) }));
+    }
   });
 });

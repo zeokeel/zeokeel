@@ -1,7 +1,15 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InboxItem, InboxSnapshot } from '@/api/inbox';
+import {
+  expectNoHorizontalOverflow,
+  expectTapTarget,
+  expectWrapsOrEllipsis,
+  installViewport,
+  PHONE_WIDTH,
+  uninstallViewport,
+} from '@/test/viewport';
 import { InboxScreen } from './InboxScreen';
 
 /**
@@ -41,6 +49,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   api.dispatchInboxItem.mockResolvedValue({ taskIds: ['task-9'], created: true });
   api.triageInboxItem.mockResolvedValue(row('inbox-1', { status: 'ignored' }));
+});
+
+afterEach(() => {
+  uninstallViewport();
 });
 
 describe('InboxScreen', () => {
@@ -189,5 +201,76 @@ describe('InboxScreen', () => {
     // The queue itself is still on screen: the write failed, nothing vanished.
     expect(screen.getByText('查退款率')).toBeInTheDocument();
     expect(api.loadInboxSnapshot).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Screen 05 of the interaction prototype: a phone opens this same screen over
+ * the LAN at ~390px, so a long subject must not produce a sideways scrollbar and
+ * the row's one action must stay hittable. The width is installed through
+ * `@/test/viewport` — `window.innerWidth` plus a `matchMedia` that answers
+ * `(max-width: 768px)`, which is the branch `useMediaQuery` reads.
+ */
+describe('InboxScreen at 390px', () => {
+  // 160 characters with no space: an inbox subject that is a URL or an id.
+  const LONG_TITLE = `https://example.test/refund/${'a'.repeat(140)}`;
+
+  beforeEach(() => {
+    installViewport(PHONE_WIDTH);
+  });
+
+  it('does not widen the screen, wraps the subject, and grows the row action', async () => {
+    api.loadInboxSnapshot.mockResolvedValue(
+      snapshot([row('inbox-1', { title: LONG_TITLE, sender: 'owner' })]),
+    );
+
+    render(<InboxScreen />);
+
+    const subject = await screen.findByText(LONG_TITLE);
+    const host = document.querySelector('.zk-screen');
+    expect(host).not.toBeNull();
+
+    // No horizontal scroll on the container that owns the scrollbars.
+    expectNoHorizontalOverflow(host as Element);
+
+    // The subject is the thing that used to widen the row: it must wrap (or
+    // ellipsise) rather than push the container out.
+    expectWrapsOrEllipsis(subject);
+    expectWrapsOrEllipsis(document.querySelector('.zk-inbox__title') as Element, 'the row title');
+
+    // 派成任务 is the row's primary action; antd's `small` is 24px, below a thumb.
+    const dispatch = screen.getByRole('button', { name: '派成任务' });
+    expect(dispatch).toBeVisible();
+    expect(dispatch).toBeEnabled();
+    expectTapTarget(dispatch);
+
+    // Both verbs are reachable in the same row, so neither was pushed off-screen.
+    expect(screen.getByRole('button', { name: /忽\s*略/ })).toBeVisible();
+  });
+
+  it('stacks the row actions under the subject instead of squeezing them', async () => {
+    api.loadInboxSnapshot.mockResolvedValue(
+      snapshot([
+        row('inbox-1', {
+          title: LONG_TITLE,
+          sender: 'owner',
+          receivedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+        }),
+      ]),
+    );
+
+    render(<InboxScreen />);
+
+    await screen.findByText(LONG_TITLE);
+    const rowElement = document.querySelector('.zk-inbox__row') as HTMLElement;
+    // Column direction at 390: the title owns the full width and the actions sit
+    // below it, which is what keeps a long subject from stealing their room.
+    expect(getComputedStyle(rowElement).flexDirection).toBe('column');
+
+    // Sender and stamp are two facts, so they need a gap: without one they read
+    // as the single token "owner10 分钟前" (Chromium pass at 390px).
+    const meta = document.querySelector('.zk-inbox__meta') as HTMLElement;
+    expect(getComputedStyle(meta).display).toBe('flex');
+    expect(Number.parseFloat(getComputedStyle(meta).gap || '0')).toBeGreaterThan(0);
   });
 });
