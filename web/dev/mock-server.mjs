@@ -399,6 +399,8 @@ const mockLeases = new Map();
 const mockCredentials = new Map();
 /** Task -> allowed tool names. */
 const mockTaskTools = new Map();
+/** Task -> approval policy ("none" | "before_start"). */
+const mockTaskApproval = new Map();
 /** Shared team notes, newest first. */
 const mockTeamNotes = [];
 /** QR logins started by the settings screen. */
@@ -1861,6 +1863,40 @@ const wsDispatch = (client, message) => {
       }
       item.status = action;
       return reply({ ...item });
+    }
+    case 'tasks.approval.set': {
+      const id = String(params.id ?? '');
+      const policy = String(params.policy ?? '');
+      if (!id) return fail(-32602, 'invalid_params');
+      if (policy !== 'none' && policy !== 'before_start') return fail(-32600, 'lease: unknown approval policy');
+      mockTaskApproval.set(id, policy);
+      return reply({ policy });
+    }
+    case 'tasks.approval.get': {
+      const id = String(params.id ?? '');
+      const policy = mockTaskApproval.get(id);
+      return reply({ policy: policy ?? 'none', set: policy !== undefined });
+    }
+    case 'tasks.approve': {
+      const id = String(params.id ?? '');
+      // The approver is who said yes; the mock records it on the lease so a
+      // test can tell an approval apart from a plain claim.
+      const approver = String(params.approver ?? '');
+      const held = mockLeases.get(id);
+      if (!held || held.state !== 'awaiting_approval') return fail(-32600, 'lease: not awaiting approval');
+      held.state = 'claimed';
+      held.reviewer = approver;
+      return reply({ ...held, evidence: held.evidence.slice() });
+    }
+    case 'tasks.reject-start': {
+      const id = String(params.id ?? '');
+      const approver = String(params.approver ?? '');
+      const note = String(params.note ?? '');
+      if (!approver || !note) return fail(-32602, 'invalid_params');
+      const held = mockLeases.get(id);
+      if (!held) return fail(-32600, 'lease: not held');
+      mockLeases.delete(id);
+      return reply({ ok: true });
     }
     case 'tasks.tools.set': {
       const id = String(params.id ?? '');

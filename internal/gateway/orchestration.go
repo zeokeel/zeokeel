@@ -165,6 +165,7 @@ func orchestrationError(err error) *protocolError {
 		errors.Is(err, contracts.ErrLeaseNotHeld),
 		errors.Is(err, contracts.ErrLeaseExpired),
 		errors.Is(err, contracts.ErrLeaseEvidenceRequired),
+		errors.Is(err, contracts.ErrLeaseApprovalRequired),
 		errors.Is(err, contracts.ErrLeaseInvalid),
 		errors.Is(err, contracts.ErrTaskToolsInvalid),
 		errors.Is(err, contracts.ErrTaskToolsUnknownTask),
@@ -784,6 +785,115 @@ func (g *Gateway) taskToolsGet(ctx context.Context, raw json.RawMessage) (any, *
 		return map[string]any{"tools": nil}, nil
 	}
 	return taskToolsFromContract(binding), nil
+}
+
+// --- task pre-start approval (G2) ------------------------------------------
+
+// taskApprovalSetParams requires `policy`: a missing field must be a malformed
+// request (-32602), never a silent clear of an approval gate.
+type taskApprovalSetParams struct {
+	ID     string `json:"id"`
+	Policy string `json:"policy"`
+}
+
+// taskApprovalSetResult is the stored policy (normalized by the service).
+type taskApprovalSetResult struct {
+	Policy string `json:"policy"`
+}
+
+// taskApprovalGetResult is the read half. `set` distinguishes "configured" from
+// the default; `policy` is always a real value, never "".
+type taskApprovalGetResult struct {
+	Policy string `json:"policy"`
+	Set    bool   `json:"set"`
+}
+
+type taskApproveParams struct {
+	ID       string `json:"id"`
+	Approver string `json:"approver"`
+}
+
+// taskRejectStartParams requires `note`: a refusal without a reason is what the
+// task screen would show as an unexplained bounce.
+type taskRejectStartParams struct {
+	ID       string `json:"id"`
+	Approver string `json:"approver"`
+	Note     string `json:"note"`
+}
+
+// tasks.approval.set declares whether a task needs confirmation before start.
+func (g *Gateway) taskApprovalSet(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.leaseService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params taskApprovalSetParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(params.Policy) == "" {
+		return nil, errInvalidParams("policy", "want none or before_start")
+	}
+	policy, err := service.SetApproval(ctx, params.ID, params.Policy)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return taskApprovalSetResult{Policy: policy}, nil
+}
+
+// tasks.approval.get answers {policy,set} for a task; a task with no policy
+// answers the default (none, false) rather than an absent shape, so the client
+// has no second empty case to handle.
+func (g *Gateway) taskApprovalGet(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.leaseService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params leaseReadParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	policy, set, err := service.Approval(ctx, params.ID)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	if !set || policy == "" {
+		policy = contracts.TaskApprovalNone
+	}
+	return taskApprovalGetResult{Policy: policy, Set: set}, nil
+}
+
+// tasks.approve lets a parked claim start.
+func (g *Gateway) taskApprove(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.leaseService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params taskApproveParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	lease, err := service.Approve(ctx, params.ID, params.Approver)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return taskLeaseFromContract(lease), nil
+}
+
+// tasks.reject-start refuses a start and returns the task to the pool.
+func (g *Gateway) taskRejectStart(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.leaseService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params taskRejectStartParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if err := service.RejectStart(ctx, params.ID, params.Approver, params.Note); err != nil {
+		return nil, orchestrationError(err)
+	}
+	return map[string]any{"ok": true}, nil
 }
 
 // --- credentials -----------------------------------------------------------

@@ -10,7 +10,7 @@
 | ID | 差距 | 状态 | 证据 / 位置 | 还差什么 |
 |---|---|---|---|---|
 | G1 | 没有 Bot 实体（角色模板+实例） | 🟡 | 会话 + agent preset + 记忆作用域已存在（`internal/modules/agent`、`memorystore`） | 没有"Bot = 模板+记忆作用域+工具授予+默认模型"这一层持久实体 |
-| G2 | 队友开工前确认（`approval: none\|before_start\|before_send`） | ⬜ | — | 任务没有 approval 字段，认领后直接进 in_progress |
+| G2 | 队友开工前确认 | 🟡 | `tasklease`：`tasks.approval.set/get` + `awaiting_approval` 状态 + `tasks.approve` / `tasks.reject-start`（策略随任务持久化，未知值 fail-closed） | `before_send` 未做；无推送域（UI 需轮询）；审批通过/拒绝尚未发通知 |
 | G3 | 任务板租约 | ✅ | `internal/modules/tasklease`（claim/heartbeat/expire，过期回收） | — |
 | G4 | 证据与验收 | ✅ | `tasklease`（无证据拒收）+ `tasks.review` + 验收写团队笔记 | — |
 | G5 | 统一收件箱 | ✅ | `internal/modules/inbox`（去重/配额/TTL/持久化）+ `inbox.dispatch/triage` | — |

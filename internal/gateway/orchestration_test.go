@@ -21,6 +21,7 @@ func TestOrchestrationMethodsAreDispatched(t *testing.T) {
 		"inbox.snapshot", "inbox.dispatch", "inbox.triage",
 		"tasks.lease", "tasks.claim", "tasks.heartbeat", "tasks.submit", "tasks.review",
 		"tasks.tools.set", "tasks.tools.get",
+		"tasks.approval.set", "tasks.approval.get", "tasks.approve", "tasks.reject-start",
 		"approval.token", "approval.action",
 		"notify.route.snapshot", "notify.route.upsert",
 		"webhook.sources", "webhook.source.set", "webhook.source.remove",
@@ -286,5 +287,188 @@ func TestTaskToolsHandlersMapTypedErrors(t *testing.T) {
 	if _, problem := gw.taskToolsGet(ctx, raw); problem == nil || problem.Code != codeInvalidRequest ||
 		!strings.Contains(problem.Message, "unknown task") {
 		t.Fatalf("unknown task problem = %+v, want codeInvalidRequest with the typed text", problem)
+	}
+}
+
+// --- pre-start approval (G2) -----------------------------------------------
+
+// approvalFakeLease is the lease service seen by the four approval handlers: a
+// policy map, one parked claim per task, and one injectable typed error.
+type approvalFakeLease struct {
+	fakeLease
+	policies map[string]string
+	parked   map[string]string // task id -> owner of the parked claim
+	err      error
+}
+
+func (f *approvalFakeLease) SetApproval(_ context.Context, taskID, policy string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	if policy != contracts.TaskApprovalNone && policy != contracts.TaskApprovalBeforeStart {
+		return "", contracts.ErrLeaseInvalid
+	}
+	f.policies[taskID] = policy
+	return policy, nil
+}
+
+func (f *approvalFakeLease) Approval(_ context.Context, taskID string) (string, bool, error) {
+	if f.err != nil {
+		return "", false, f.err
+	}
+	policy, ok := f.policies[taskID]
+	return policy, ok, nil
+}
+
+// Submit honours the injected error too: the gate refuses a submit, which is
+// the exact call a teammate makes and the one the mapping must cover.
+func (f *approvalFakeLease) Submit(context.Context, string, string, []contracts.Evidence) (contracts.TaskLease, error) {
+	if f.err != nil {
+		return contracts.TaskLease{}, f.err
+	}
+	return contracts.TaskLease{}, nil
+}
+
+func (f *approvalFakeLease) Approve(_ context.Context, taskID, approver string) (contracts.TaskLease, error) {
+	if f.err != nil {
+		return contracts.TaskLease{}, f.err
+	}
+	owner, ok := f.parked[taskID]
+	if !ok {
+		return contracts.TaskLease{}, contracts.ErrLeaseNotHeld
+	}
+	delete(f.parked, taskID)
+	return contracts.TaskLease{TaskID: taskID, Owner: owner, State: contracts.LeaseStateClaimed}, nil
+}
+
+func (f *approvalFakeLease) RejectStart(_ context.Context, taskID, approver, note string) error {
+	if f.err != nil {
+		return f.err
+	}
+	if _, ok := f.parked[taskID]; !ok {
+		return contracts.ErrLeaseNotHeld
+	}
+	delete(f.parked, taskID)
+	f.applied = append(f.applied, "reject-start:"+taskID+":"+approver+":"+note)
+	return nil
+}
+
+func TestTaskApprovalHandlersRoundTrip(t *testing.T) {
+	lease := &approvalFakeLease{policies: map[string]string{}, parked: map[string]string{"task-1": "bot-1"}}
+	gw := newReviewGateway(t, lease, nil)
+	ctx := context.Background()
+	marshal := func(params map[string]any) json.RawMessage {
+		t.Helper()
+		raw, err := json.Marshal(params)
+		if err != nil {
+			t.Fatalf("marshal %v: %v", params, err)
+		}
+		return raw
+	}
+
+	// set → the stored policy
+	out, problem := gw.taskApprovalSet(ctx, marshal(map[string]any{"id": "task-1", "policy": "before_start"}))
+	if problem != nil {
+		t.Fatalf("tasks.approval.set: %+v", problem)
+	}
+	if set, ok := out.(taskApprovalSetResult); !ok || set.Policy != contracts.TaskApprovalBeforeStart {
+		t.Fatalf("tasks.approval.set result = (%T) %+v, want before_start", out, out)
+	}
+
+	// get → {policy,set}
+	out, problem = gw.taskApprovalGet(ctx, marshal(map[string]any{"id": "task-1"}))
+	if problem != nil {
+		t.Fatalf("tasks.approval.get: %+v", problem)
+	}
+	if got, ok := out.(taskApprovalGetResult); !ok || got.Policy != contracts.TaskApprovalBeforeStart || !got.Set {
+		t.Fatalf("tasks.approval.get result = (%T) %+v, want (before_start, true)", out, out)
+	}
+	// A task with no policy answers the default, never an empty string.
+	out, problem = gw.taskApprovalGet(ctx, marshal(map[string]any{"id": "task-2"}))
+	if problem != nil {
+		t.Fatalf("tasks.approval.get(no policy): %+v", problem)
+	}
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal absent result: %v", err)
+	}
+	if string(encoded) != `{"policy":"none","set":false}` {
+		t.Fatalf("absent result = %s, want {\"policy\":\"none\",\"set\":false}", encoded)
+	}
+
+	// approve → the lease, now claimed, same owner
+	out, problem = gw.taskApprove(ctx, marshal(map[string]any{"id": "task-1", "approver": "lead"}))
+	if problem != nil {
+		t.Fatalf("tasks.approve: %+v", problem)
+	}
+	if approved, ok := out.(taskLeaseDTO); !ok || approved.State != contracts.LeaseStateClaimed || approved.Owner != "bot-1" {
+		t.Fatalf("tasks.approve result = (%T) %+v, want claimed by bot-1", out, out)
+	}
+
+	// reject-start → {ok:true}, and the parked claim is released
+	lease.parked["task-2"] = "bot-2"
+	out, problem = gw.taskRejectStart(ctx, marshal(map[string]any{
+		"id": "task-2", "approver": "lead", "note": "先别动生产库",
+	}))
+	if problem != nil {
+		t.Fatalf("tasks.reject-start: %+v", problem)
+	}
+	if ok, isMap := out.(map[string]any); !isMap || ok["ok"] != true {
+		t.Fatalf("tasks.reject-start result = (%T) %+v, want {ok:true}", out, out)
+	}
+	if _, still := lease.parked["task-2"]; still {
+		t.Fatal("reject-start left the claim parked")
+	}
+	if len(lease.applied) != 1 || !strings.Contains(lease.applied[0], "reject-start:task-2:lead:") {
+		t.Fatalf("applied = %v, want the recorded refusal", lease.applied)
+	}
+
+	// A missing policy is a malformed request, never a silent "none".
+	if _, problem := gw.taskApprovalSet(ctx, marshal(map[string]any{"id": "task-1"})); problem == nil || problem.Code != codeInvalidParams {
+		t.Fatalf("missing policy problem = %+v, want codeInvalidParams", problem)
+	}
+	if lease.policies["task-1"] != contracts.TaskApprovalBeforeStart {
+		t.Fatalf("a malformed request changed the policy: %q", lease.policies["task-1"])
+	}
+}
+
+// TestTaskApprovalHandlersMapTypedErrors pins the two refusals a client must be
+// able to tell apart: a bad value (-32600, the domain said no) and the gate
+// itself (also -32600, but with the gate's own text so the UI can say why).
+func TestTaskApprovalHandlersMapTypedErrors(t *testing.T) {
+	lease := &approvalFakeLease{policies: map[string]string{}, parked: map[string]string{}}
+	gw := newReviewGateway(t, lease, nil)
+	ctx := context.Background()
+	marshal := func(params map[string]any) json.RawMessage {
+		t.Helper()
+		raw, err := json.Marshal(params)
+		if err != nil {
+			t.Fatalf("marshal %v: %v", params, err)
+		}
+		return raw
+	}
+
+	if _, problem := gw.taskApprovalSet(ctx, marshal(map[string]any{"id": "task-1", "policy": "before_send"})); problem == nil ||
+		problem.Code != codeInvalidRequest || !strings.Contains(problem.Message, "invalid") {
+		t.Fatalf("invalid policy problem = %+v, want codeInvalidRequest with the typed text", problem)
+	}
+
+	// The gate refusing a submit is the case a teammate actually hits.
+	lease.err = contracts.ErrLeaseApprovalRequired
+	submit := marshal(map[string]any{
+		"id": "task-1", "owner": "bot-1",
+		"evidence": []map[string]any{{"kind": "link", "ref": "https://x"}},
+	})
+	if _, problem := gw.taskSubmit(ctx, submit); problem == nil || problem.Code != codeInvalidRequest ||
+		!strings.Contains(problem.Message, "approval required") {
+		t.Fatalf("submit before approval problem = %+v, want codeInvalidRequest with the gate's text", problem)
+	}
+	if _, problem := gw.taskApprove(ctx, marshal(map[string]any{"id": "task-1", "approver": "lead"})); problem == nil ||
+		problem.Code != codeInvalidRequest {
+		t.Fatalf("approve error problem = %+v, want codeInvalidRequest", problem)
+	}
+	if _, problem := gw.taskRejectStart(ctx, marshal(map[string]any{"id": "task-1", "approver": "lead", "note": "no"})); problem == nil ||
+		problem.Code != codeInvalidRequest {
+		t.Fatalf("reject-start error problem = %+v, want codeInvalidRequest", problem)
 	}
 }

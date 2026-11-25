@@ -100,6 +100,20 @@ type TaskLeaseService interface {
 	SetTools(ctx context.Context, taskID string, tools []string) (TaskTools, error)
 	// Tools reports a task's binding; false means the task has none.
 	Tools(ctx context.Context, taskID string) (TaskTools, bool, error)
+	// SetApproval sets the task's pre-start approval policy (G2) and returns
+	// the stored value. Only TaskApprovalNone and TaskApprovalBeforeStart are
+	// accepted; anything else is ErrLeaseInvalid. The policy takes effect at
+	// the next claim — a lease already claimed is never retroactively gated.
+	SetApproval(ctx context.Context, taskID, policy string) (string, error)
+	// Approval reports a task's policy; false means the task carries no
+	// explicit policy (which behaves exactly like TaskApprovalNone).
+	Approval(ctx context.Context, taskID string) (string, bool, error)
+	// Approve lets a parked claim start: awaiting_approval → claimed, keeping
+	// the owner. A task with no parked claim is ErrLeaseNotHeld.
+	Approve(ctx context.Context, taskID, approver string) (TaskLease, error)
+	// RejectStart refuses a start: the claim is released (board pending, owner
+	// cleared) and the refusal is recorded so the task can re-enter the pool.
+	RejectStart(ctx context.Context, taskID, approver, note string) error
 }
 
 // Lease errors are typed so the UI can say "someone else has it" instead of a
@@ -129,3 +143,49 @@ const DefaultLeaseTTL = 10 * time.Minute
 
 // KeyTaskLease is provided by the task lease module.
 var KeyTaskLease = cordis.NewServiceKey[TaskLeaseService]("zeokeel/tasklease")
+
+// Pre-start approval policies (G2). A task may require a human/Lead
+// confirmation before its owner is allowed to start. The gate is a state, not a
+// workflow engine: `before_start` only changes where a claim parks (see
+// LeaseStateAwaitingApproval) and refuses Submit until somebody approves.
+const (
+	// TaskApprovalNone means the task may start as soon as it is claimed. It is
+	// also the default for a task that carries no policy at all.
+	TaskApprovalNone = "none"
+	// TaskApprovalBeforeStart parks a claim in awaiting_approval: the owner is
+	// recorded and the heartbeat keeps the claim alive, but Submit is refused
+	// with ErrLeaseApprovalRequired until Approve moves it to claimed.
+	TaskApprovalBeforeStart = "before_start"
+)
+
+// LeaseStateAwaitingApproval is the parked state of a claim whose task requires
+// approval before start. It is a live claim (owner, deadline, heartbeat), not a
+// separate record: the work is held, it just may not begin.
+const LeaseStateAwaitingApproval = "awaiting_approval"
+
+// TaskApproval is the persisted pre-start approval policy of one board task.
+// Like TaskTools it belongs to the task, not to a lease: releasing or refusing a
+// claim does not erase the policy, because the policy is a property of the work.
+type TaskApproval struct {
+	TaskID string
+	// Policy is one of the TaskApproval values. An unrecognized stored value is
+	// read back as TaskApprovalBeforeStart (fail closed): a gate this build
+	// cannot interpret must not be mistaken for "no gate".
+	Policy string
+	// UpdatedAt is when the policy last changed.
+	UpdatedAt time.Time
+}
+
+// TaskStartRejection records why a claimed task was refused at the gate. The
+// note is durable because a task that reappears in the pool with no explanation
+// looks like a bug to the next owner.
+type TaskStartRejection struct {
+	TaskID   string
+	Approver string
+	Note     string
+	At       time.Time
+}
+
+// ErrLeaseApprovalRequired means Submit arrived while the claim is still parked
+// in awaiting_approval: the work has not been approved to start.
+var ErrLeaseApprovalRequired = errors.New("lease: approval required before start")

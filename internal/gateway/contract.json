@@ -399,6 +399,26 @@
         "sessionId"
       ]
     },
+    "tasks.approval.get": {
+      "required": [
+        "id"
+      ],
+      "optional": []
+    },
+    "tasks.approval.set": {
+      "required": [
+        "id",
+        "policy"
+      ],
+      "optional": []
+    },
+    "tasks.approve": {
+      "required": [
+        "approver",
+        "id"
+      ],
+      "optional": []
+    },
     "tasks.claim": {
       "required": [
         "id",
@@ -416,6 +436,14 @@
     "tasks.lease": {
       "required": [
         "id"
+      ],
+      "optional": []
+    },
+    "tasks.reject-start": {
+      "required": [
+        "approver",
+        "id",
+        "note"
       ],
       "optional": []
     },

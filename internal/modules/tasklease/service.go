@@ -47,6 +47,13 @@ type Service struct {
 	// independent of the leases map: releasing or accepting a lease does not
 	// drop the task's policy.
 	tools map[string]*contracts.TaskTools
+	// approvals keeps the per-task pre-start approval policy (G2). Like tools it
+	// belongs to the task rather than to a lease: refusing or losing a claim
+	// does not change what the work requires.
+	approvals map[string]*contracts.TaskApproval
+	// startRejections keeps the last refused start per task (G2): the note is
+	// what explains why a task came back to the pool.
+	startRejections map[string]*contracts.TaskStartRejection
 	// path is the durable document (dir/leases.json); empty means in-memory only
 	// (NewService, and unit tests that do not care about durability).
 	path string
@@ -56,8 +63,10 @@ type Service struct {
 func NewService(board contracts.TaskBoard, cfg Config) *Service {
 	return &Service{
 		cfg: cfg.normalized(), board: board,
-		leases: make(map[string]*contracts.TaskLease),
-		tools:  make(map[string]*contracts.TaskTools),
+		leases:          make(map[string]*contracts.TaskLease),
+		tools:           make(map[string]*contracts.TaskTools),
+		approvals:       make(map[string]*contracts.TaskApproval),
+		startRejections: make(map[string]*contracts.TaskStartRejection),
 	}
 }
 
@@ -117,7 +126,7 @@ func (s *Service) Claim(ctx context.Context, taskID, owner string) (contracts.Ta
 	defer s.mu.Unlock()
 	lease := &contracts.TaskLease{
 		TaskID: taskID, Owner: owner, Until: now.Add(s.cfg.TTL),
-		Heartbeat: now, State: contracts.LeaseStateClaimed,
+		Heartbeat: now, State: s.stateForClaimLocked(taskID),
 	}
 	s.leases[taskID] = lease
 	if err := s.persistLocked(); err != nil {
@@ -182,6 +191,12 @@ func (s *Service) Submit(ctx context.Context, taskID, owner string, evidence []c
 	lease, err := s.liveLeaseLocked(taskID, owner)
 	if err != nil {
 		return contracts.TaskLease{}, err
+	}
+	// The gate (G2): a parked claim has not been approved to start, so evidence
+	// must not be able to turn it into review. Approval is a separate decision,
+	// not something the owner can assume by submitting.
+	if lease.State == contracts.LeaseStateAwaitingApproval {
+		return contracts.TaskLease{}, fmt.Errorf("%w: %s", contracts.ErrLeaseApprovalRequired, taskID)
 	}
 	lease.Evidence = append([]contracts.Evidence(nil), evidence...)
 	lease.State = contracts.LeaseStateReview

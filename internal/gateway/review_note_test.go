@@ -104,6 +104,16 @@ func (f *fakeLease) SetTools(_ context.Context, taskID string, tools []string) (
 func (f *fakeLease) Tools(context.Context, string) (contracts.TaskTools, bool, error) {
 	return contracts.TaskTools{}, false, nil
 }
+func (f *fakeLease) SetApproval(context.Context, string, string) (string, error) {
+	return contracts.TaskApprovalNone, nil
+}
+func (f *fakeLease) Approval(context.Context, string) (string, bool, error) {
+	return contracts.TaskApprovalNone, false, nil
+}
+func (f *fakeLease) Approve(context.Context, string, string) (contracts.TaskLease, error) {
+	return contracts.TaskLease{}, nil
+}
+func (f *fakeLease) RejectStart(context.Context, string, string, string) error { return nil }
 
 func newReviewGateway(t *testing.T, lease contracts.TaskLeaseService, notes contracts.TeamNotesService) *Gateway {
 	t.Helper()

@@ -827,6 +827,10 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `tasks.review` | `{id,decision:"accept"\|"reject",reviewer,note?}` | `TaskLease` | N | `TaskLeaseService.Accept` / `Reject` | ✅ 已实现 |
 | `tasks.tools.set` | `{id,tools:[string]}` | `TaskTools` | N | `TaskLeaseService.SetTools`（`tools:[]` 清除；名字 `[a-z0-9_.:-]{1,120}`、≤32、不重复；未知任务/非法列表 → `-32600`） | ✅ 已实现 |
 | `tasks.tools.get` | `{id}` | `TaskTools`（无绑定 `{tools:null}`） | Y | `TaskLeaseService.Tools` | ✅ 已实现 |
+| `tasks.approval.set` | `{id,policy:"none"\|"before_start"}` | `{policy}` | N | `TaskLeaseService.SetApproval`（策略属于任务；写进 `leases.json` 的 `approvals` 键；其它值 → `-32600`） | ✅ 已实现 |
+| `tasks.approval.get` | `{id}` | `{policy,set}` | Y | `TaskLeaseService.Approval`（没有策略时答 `{policy:"none",set:false}`） | ✅ 已实现 |
+| `tasks.approve` | `{id,approver}` | `TaskLease`（`awaiting_approval` → `claimed`，保留 owner 并重算租期） | N | `TaskLeaseService.Approve`（没有待批准的租约 → `-32600`） | ✅ 已实现 |
+| `tasks.reject-start` | `{id,approver,note}` | `{ok:true}` | N | `TaskLeaseService.RejectStart`（任务回 pending、清 owner；note 记进 `startRejections`） | ✅ 已实现 |
 | `approval.token` | `{approvalId}` | `{token,expiresAt}` | N | `ApprovalActionService.IssueToken` | ✅ 已实现 |
 | `approval.action` | `{approvalId,decision:"allow"\|"deny",token}` | `{ok:true}` | N | `ApprovalActionService.Apply` | ✅ 已实现 |
 | `notify.plan` | `{category}` | `{channels,deferred,reason?}` | Y | `NotifyRouterService.Plan`（只算不发，渠道健康来自各适配器 Status） | ✅ 已实现 |
@@ -879,6 +883,11 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
   「同意 / 不同意」走同一条 `Resolve`（网关不解析自然语言，解析在 approvals 模块内，`ParseReply`）。
 - 类型化错误映射成 `-32600`（invalid request）并保留原文：`lease: task already claimed`、
   `approval: token expired` 这类话可以直接显示给用户。
+- **开工前确认（G2）**：任务策略为 `before_start` 时 `tasks.claim` 仍会认领（owner 记录、心跳续租），
+  但租约停在 `awaiting_approval`；此时 `tasks.submit` 回 `-32600 lease: approval required before start`。
+  `tasks.approve` 把同一租约转成 `claimed`（保留 owner、重算租期），`tasks.reject-start` 释放认领
+  （任务回 pending、清 owner，note 记进 `leases.json` 的 `startRejections`，下一次认领照常可用）。
+  策略随任务存续，只在**下一次**认领生效，不追溯已经在跑的租约；未知策略值读取时按 `before_start`（fail closed）。
 - capability：`inbox`、`triage`、`tasklease`、`approvalaction`、`notifyroute`、`webhook`、`lead`、`credentials`、`heartbeat`、`browser`、`teamnotes`、`wechatlogin`、`channeldispatch`（十三个服务键都随装配提供；
   缺任何一个，对应方法返回 `-32004 capability_unsupported`）。
 - `webhook.source.set` 的 `secret` 只在请求体里出现：响应、`webhook.sources` 和日志都不回显它。

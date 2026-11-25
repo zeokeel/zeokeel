@@ -48,6 +48,13 @@ type leaseStoreDocument struct {
 	// Tools is the per-task tool binding (M5), same document so one atomic
 	// write covers both halves and there is only one file to quarantine.
 	Tools []contracts.TaskTools `json:"tools,omitempty"`
+	// Approvals is the per-task pre-start approval policy (G2), again additive:
+	// no version bump, so a file written by a build that knows the gate still
+	// loads in a build that does not (which simply ignores the key).
+	Approvals []contracts.TaskApproval `json:"approvals,omitempty"`
+	// StartRejections is the last refused start per task (G2): the approver and
+	// the note, so a task that reappears in the pool carries its explanation.
+	StartRejections []contracts.TaskStartRejection `json:"startRejections,omitempty"`
 }
 
 // Open builds a service whose live leases live in dir/leases.json. A missing
@@ -112,6 +119,31 @@ func Open(dir string, board contracts.TaskBoard, cfg Config) (*Service, error) {
 		stored.Tools = names
 		service.tools[binding.TaskID] = &stored
 	}
+	// Approval policies (G2). Unlike the tool binding this loader is NOT
+	// lenient about an unknown value: an approval gate this build cannot
+	// interpret is read back as before_start (fail closed). Silently treating
+	// it as "none" would open a gate an operator explicitly closed.
+	for _, approval := range document.Approvals {
+		if approval.TaskID == "" {
+			continue
+		}
+		policy, ok := approvalPolicy(approval.Policy)
+		if !ok {
+			policy = contracts.TaskApprovalBeforeStart
+		}
+		stored := approval
+		stored.Policy = policy
+		service.approvals[approval.TaskID] = &stored
+	}
+	// Start refusals are history, not authority: they are restored as written
+	// and never gate a claim on their own (the policy does that).
+	for _, refusal := range document.StartRejections {
+		if refusal.TaskID == "" || refusal.Note == "" {
+			continue
+		}
+		stored := refusal
+		service.startRejections[refusal.TaskID] = &stored
+	}
 	service.mu.Unlock()
 
 	// The dead claims are dropped in memory only; the next mutation rewrites the
@@ -165,6 +197,22 @@ func (s *Service) persistLocked() error {
 	document.Tools = make([]contracts.TaskTools, 0, len(toolIDs))
 	for _, id := range toolIDs {
 		document.Tools = append(document.Tools, *s.tools[id])
+	}
+	approvalIDs := make([]string, 0, len(s.approvals))
+	for id := range s.approvals {
+		approvalIDs = append(approvalIDs, id)
+	}
+	sort.Strings(approvalIDs)
+	for _, id := range approvalIDs {
+		document.Approvals = append(document.Approvals, *s.approvals[id])
+	}
+	refusalIDs := make([]string, 0, len(s.startRejections))
+	for id := range s.startRejections {
+		refusalIDs = append(refusalIDs, id)
+	}
+	sort.Strings(refusalIDs)
+	for _, id := range refusalIDs {
+		document.StartRejections = append(document.StartRejections, *s.startRejections[id])
 	}
 	encoded, err := json.Marshal(document)
 	if err != nil {

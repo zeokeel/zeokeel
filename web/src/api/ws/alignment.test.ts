@@ -44,10 +44,11 @@ function mockCapabilities(): string[] {
 /** Every method the mock's dispatcher handles (`case 'x':` or `if (method === 'x')`). */
 function mockMethods(): string[] {
   const cases = [
-    ...mockSource.matchAll(/case '([a-z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9]+)*)':/g),
+    // Segments may carry hyphens (`tasks.reject-start`), so the parser must too.
+    ...mockSource.matchAll(/case '([a-z][a-zA-Z0-9]*(?:\.[a-z0-9-]+)*)':/g),
   ].map((match) => match[1]);
   const branches = [
-    ...mockSource.matchAll(/method === '([a-z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9]+)*)'/g),
+    ...mockSource.matchAll(/method === '([a-z][a-zA-Z0-9]*(?:\.[a-z0-9-]+)*)'/g),
   ].map((match) => match[1]);
   return [...cases, ...branches];
 }

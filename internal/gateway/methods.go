@@ -373,6 +373,18 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"tasks.tools.get": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.taskToolsGet(ctx, request.Params)
 		},
+		"tasks.approval.set": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.taskApprovalSet(ctx, request.Params)
+		},
+		"tasks.approval.get": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.taskApprovalGet(ctx, request.Params)
+		},
+		"tasks.approve": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.taskApprove(ctx, request.Params)
+		},
+		"tasks.reject-start": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.taskRejectStart(ctx, request.Params)
+		},
 		"approval.token": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.approvalToken(ctx, request.Params)
 		},
