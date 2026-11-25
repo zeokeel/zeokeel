@@ -251,6 +251,18 @@ body {
   padding: var(--zk-space-3) var(--zk-space-6) var(--zk-space-4);
 }
 
+.zk-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-inline-end: var(--zk-space-1);
+  border: 2px solid var(--zk-border-l3);
+  border-top-color: var(--zk-accent);
+  border-radius: var(--zk-radius-max);
+  animation: zk-spin 700ms linear infinite;
+  vertical-align: -1px;
+}
+
 .zk-composer__hint {
   margin-top: var(--zk-space-1);
   font-size: var(--zk-type-xxs);

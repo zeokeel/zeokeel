@@ -625,6 +625,12 @@ export function Composer({
           data-phase={resolvedPhase}
           hidden={Boolean(notice)}
         >
+          {/* The same moving indicator the thinking chain and the bubble use:
+            * the running state had three different faces (round-4 component
+            * audit #9). */}
+          {resolvedPhase === 'running' || resolvedPhase === 'connecting' ? (
+            <span className="zk-spinner" aria-hidden="true" />
+          ) : null}
           {t(hintKey)}
           {commands && commands.length > 0 ? t('composer.hint.commands') : ''}
         </div>
