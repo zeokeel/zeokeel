@@ -292,6 +292,10 @@ func (g *Gateway) inboxDispatch(ctx context.Context, raw json.RawMessage) (any, 
 		}
 		assignee = bot.ID
 		boundTools = bot.AllowedTools
+		// Dispatching to a bot is the only thing that currently "wakes" it: the
+		// LastSeenAt column had no producer, so the settings screen could never
+		// tell a working bot from one that never ran.
+		g.touchBot(ctx, bot)
 	}
 	result, err := service.Apply(ctx, params.ID, contracts.TriageDecision{
 		Action: contracts.InboxActionTask,
@@ -1744,6 +1748,19 @@ func (g *Gateway) skillDraftInstall(ctx context.Context, raw json.RawMessage) (a
 		return nil, orchestrationError(err)
 	}
 	return map[string]any{"installed": true, "name": skill.Name}, nil
+}
+
+// touchBot records that a bot was just handed work. Best-effort: a failed write
+// must not fail the dispatch that already created the task.
+func (g *Gateway) touchBot(ctx context.Context, bot contracts.BotInstance) {
+	bots, ok := g.root.Get(contracts.KeyBots)
+	if !ok || bots == nil {
+		return
+	}
+	bot.LastSeenAt = time.Now()
+	if _, err := bots.Update(ctx, bot); err != nil {
+		g.logger.Printf("gateway: touch bot %s: %v", bot.ID, err)
+	}
 }
 
 // --- bots ------------------------------------------------------------------

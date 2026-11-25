@@ -30,6 +30,7 @@ func (f *fakeBots) Create(_ context.Context, instance contracts.BotInstance) (co
 	return instance, nil
 }
 func (f *fakeBots) Update(_ context.Context, instance contracts.BotInstance) (contracts.BotInstance, error) {
+	f.instances[instance.ID] = instance
 	return instance, nil
 }
 func (f *fakeBots) Get(_ context.Context, id string) (contracts.BotInstance, error) {
@@ -194,3 +195,19 @@ func TestDispatchWithoutABotBehavesAsBefore(t *testing.T) {
 }
 
 var _ = errors.Is
+
+func TestDispatchTouchesTheBot(t *testing.T) {
+	bots := &fakeBots{instances: map[string]contracts.BotInstance{
+		"research": {ID: "research", TemplateID: "lead", Name: "Research"},
+	}}
+	triage := &fakeTriageRecorder{}
+	gw := newDispatchGateway(t, bots, triage, &fakeLeaseTools{})
+
+	raw, _ := json.Marshal(map[string]any{"id": "i1", "subject": "查一下", "botId": "research"})
+	if _, problem := gw.inboxDispatch(context.Background(), raw); problem != nil {
+		t.Fatalf("dispatch: %+v", problem)
+	}
+	if bots.instances["research"].LastSeenAt.IsZero() {
+		t.Fatal("the dispatched bot was not marked as seen")
+	}
+}
