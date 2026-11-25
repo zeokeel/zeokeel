@@ -829,11 +829,16 @@ func (g *Gateway) consumeRunUsage(sessionID string, tokens int) {
 // needs_decision route because that is exactly the situation: work stopped and a
 // person has to decide whether to add budget.
 func (g *Gateway) notifyBudgetStop(ctx context.Context, taskID string, cause error) {
+	text := "任务 " + taskID + " 因预算用尽已停止。\n" + cause.Error() + "\n需要你决定是否追加预算。"
+	// The todo is the durable half: a notification can be missed, an inbox item
+	// waits. One per task, so a long-running stop does not flood the queue. It is
+	// filed before the dispatcher lookup on purpose — a product with no channels
+	// still owes the person this todo.
+	g.raiseInboxEvent(ctx, "event", "budget-stop:"+taskID, "任务 "+taskID+" 因预算停止", text)
 	dispatcher, ok := g.root.Get(contracts.KeyChannelDispatch)
 	if !ok || dispatcher == nil {
 		return
 	}
-	text := "任务 " + taskID + " 因预算用尽已停止。\n" + cause.Error() + "\n需要你决定是否追加预算。"
 	if _, err := dispatcher.Deliver(ctx, contracts.NotifyCategoryNeedsDecision, text); err != nil {
 		g.logger.Printf("gateway: notify budget stop for %s: %v", taskID, err)
 	}
@@ -864,4 +869,26 @@ func (s *runStream) emitRunError(message, kind string) {
 		data["errorKind"] = kind
 	}
 	s.emit(runEvent{name: sseError, data: data})
+}
+
+// raiseInboxEvent turns an internal event into a todo the human can see. This is
+// the generic channel M2 was missing: the inbox is the single entry for work that
+// needs a person, and until now only external adapters could put things in it.
+//
+// It is best-effort: an event that cannot be filed is logged, never allowed to
+// fail the thing that raised it.
+func (g *Gateway) raiseInboxEvent(ctx context.Context, source, dedupKey, title, body string) {
+	inbox, ok := g.root.Get(contracts.KeyInbox)
+	if !ok || inbox == nil {
+		return
+	}
+	if _, _, err := inbox.Add(ctx, contracts.InboxItem{
+		Source:   source,
+		DedupKey: dedupKey,
+		Title:    title,
+		Body:     body,
+		Priority: 50,
+	}); err != nil {
+		g.logger.Printf("gateway: raise inbox event %q: %v", dedupKey, err)
+	}
 }

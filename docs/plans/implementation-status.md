@@ -14,7 +14,7 @@
 | G3 | 任务板租约 | ✅ | `internal/modules/tasklease`（claim/heartbeat/expire，过期回收） | — |
 | G4 | 证据与验收 | ✅ | `tasklease`（无证据拒收）+ `tasks.review` + 验收写团队笔记 | — |
 | G5 | 统一收件箱 | ✅ | `internal/modules/inbox`（去重/配额/TTL/持久化）+ `inbox.dispatch/triage` | — |
-| G6 | routine 触发（cron/webhook/event） | 🟡 | `automation`（定时任务）+ `webhook` 入站 + `heartbeat` 自转 | routine 没绑 Bot，事件触发只有 webhook 一种 |
+| G6 | routine 触发（cron/webhook/event） | 🟡 | `automation` 定时 + `webhook` 入站 + `heartbeat` 自转 + **内部事件 → 收件箱**（`raiseInboxEvent`，按 dedupe key 去重；预算停摆已接） | routine 没绑 Bot；事件源目前只有预算停摆一处，其余事件（审批等待、任务过期）未接 |
 | G7 | 记忆作用域（agent/team + 建议队列） | 🟡 | `teamnotes`（团队笔记 + 人工复核）+ memoryvfs 作用域 | 没有独立的"agent 私有作用域"与建议队列；复核是"通过/驳回"而非队列 |
 | G8 | 产物库（Artifact） | 🟡 | 证据 `kind=file/screenshot` + blobs 存储 | 没有独立产物实体（hash/过期/可见性/任务反向引用） |
 | G9 | 凭据库 | ✅ | `internal/modules/creds`（0600、读路径无字段）+ 适配器读取 | — |
@@ -30,7 +30,7 @@
 |---|---|---|
 | M0 地基 | ✅ | 收件箱→分诊→租约/证据→审批→路由，三层证据：单元/装配/实机（`scripts/verify-live` 12/12） |
 | M1 记忆 | ✅ | 团队笔记 + 复核 + 验收自动沉淀 + agent 私有作用域 + 建议队列（协议 + `/settings/memory` 上的待确认区，采纳/驳回/提议） | — |
-| M2 触发 | 🟡 | webhook 入站 + heartbeat 自转 + automation 定时；缺"事件→收件箱"通用通道 |
+| M2 触发 | 🟡 | webhook 入站 + heartbeat 自转 + automation 定时 + **事件→收件箱**通用通道（去重） | 事件源只接了预算停摆；routine 未绑 Bot |
 | M2.5 MCP 补全 | 🟡 | 批次 A 部分落地：工具白名单已执行、**单次调用超时隔离**（默认 60s，超时后服务器仍可用）、注解说明写进 APPROVAL-SURFACES | 注解→审批的运行时读取、prompts/resources、分页、结构化输出、进度取消未做 |
 | M3 浏览器 | 🟡 | CDP 真连接 + 三个工具 + **每 Bot 独立 browser context**（独立 cookie jar；空 profile 拒绝；并发首开只建一个；关闭释放） | 真浏览器需验证上下文命令经 WS 传输可用与大窗口行为；CDP 上下文不跨浏览器重启（需独立 user-data-dir，属 M5 收尾） |
 | M4 连接器 | 🟡 | 四类渠道 + 出站 + 凭据 + 扫码登录协议 + **邮件按声明的字符集解码**（GBK/Big5/Shift_JIS 等）；**真机验证只做了本地能做的部分** |

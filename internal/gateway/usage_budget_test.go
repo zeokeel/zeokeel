@@ -156,3 +156,71 @@ func TestMeteringNoiseIsNotAnnounced(t *testing.T) {
 		t.Fatalf("a metering error was announced: %v", dispatcher.category)
 	}
 }
+
+type fakeInboxRecorder struct {
+	mu    sync.Mutex
+	items []contracts.InboxItem
+	seen  map[string]bool
+}
+
+func (f *fakeInboxRecorder) Add(_ context.Context, item contracts.InboxItem) (contracts.InboxItem, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.seen == nil {
+		f.seen = map[string]bool{}
+	}
+	if f.seen[item.DedupKey] {
+		return item, true, nil
+	}
+	f.seen[item.DedupKey] = true
+	item.ID = "inbox-1"
+	f.items = append(f.items, item)
+	return item, false, nil
+}
+
+func (f *fakeInboxRecorder) List(context.Context, contracts.InboxFilter) ([]contracts.InboxItem, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]contracts.InboxItem(nil), f.items...), nil
+}
+
+func (f *fakeInboxRecorder) Stats(context.Context) (contracts.InboxStats, error) {
+	return contracts.InboxStats{}, nil
+}
+
+func (f *fakeInboxRecorder) Get(context.Context, string) (contracts.InboxItem, error) {
+	return contracts.InboxItem{}, contracts.ErrInboxUnknownItem
+}
+
+func (f *fakeInboxRecorder) Triage(context.Context, []string, string, []string) (int, error) {
+	return 0, nil
+}
+
+func TestABudgetStopBecomesATodoOnce(t *testing.T) {
+	chat := &fakeChatWithBinder{fakeChat: newFakeChat(), taskID: "task-9"}
+	root := testRoot(t, chat)
+	lease := &fakeConsumeLease{err: contracts.ErrLeaseBudgetExhausted}
+	if _, err := root.Provide(contracts.KeyTaskLease, contracts.TaskLeaseService(lease)); err != nil {
+		t.Fatalf("provide lease: %v", err)
+	}
+	inbox := &fakeInboxRecorder{}
+	if _, err := root.Provide(contracts.KeyInbox, contracts.InboxService(inbox)); err != nil {
+		t.Fatalf("provide inbox: %v", err)
+	}
+	gateway, err := New(root, Options{DataDir: t.TempDir(), Port: -1, Logger: testLogger{t: t}, Out: discardWriter{}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	gateway.consumeRunUsage("s-1", 500)
+	gateway.consumeRunUsage("s-1", 500)
+
+	inbox.mu.Lock()
+	defer inbox.mu.Unlock()
+	if len(inbox.items) != 1 {
+		t.Fatalf("inbox items = %d, want one deduped todo", len(inbox.items))
+	}
+	if inbox.items[0].Source != "event" || !strings.Contains(inbox.items[0].Title, "task-9") {
+		t.Fatalf("item = %+v, want an event todo naming the task", inbox.items[0])
+	}
+}
