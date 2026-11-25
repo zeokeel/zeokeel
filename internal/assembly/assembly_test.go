@@ -144,7 +144,7 @@ func TestProductsAndEntries(t *testing.T) {
 	wantHeadless := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/inbox", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/insights",
-		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/hosttools", "zeokeel/memorystore",
+		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/webhook", "zeokeel/hosttools", "zeokeel/memorystore",
 		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
 	}
 	loaded := make(map[string]bool, len(headless))
@@ -260,7 +260,7 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 
 	instances := loader.Instances()
 	wantIDs := []string{
-		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "tasklease", "notifyroute", "hosttools", "memorystore",
+		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "tasklease", "notifyroute", "webhook", "hosttools", "memorystore",
 		"agent", "automation", "update", "importer", "acp",
 	}
 	gotIDs := make([]string, 0, len(instances))
@@ -326,6 +326,18 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 	}
 	if updated, err := inboxService.Triage(context.Background(), []string{storedItem.ID}, contracts.InboxActionTask, []string{"task-1"}); err != nil || updated != 1 {
 		t.Fatalf("inbox Triage through the assembly = (%d, %v), want (1, nil)", updated, err)
+	}
+
+	// The webhook adapter is the first channel. The headless assembly ships
+	// with no configured sources (a secret does not belong in the assembly
+	// document), so the wiring proof is the typed refusal: the assembled
+	// adapter really consults its source table and never a missing service.
+	webhookService, ok := root.Get(contracts.KeyWebhook)
+	if !ok || webhookService == nil {
+		t.Fatal("KeyWebhook service is not available on the root")
+	}
+	if _, err := webhookService.Receive(context.Background(), "github", "", []byte(`{"title":"x"}`)); !errors.Is(err, contracts.ErrWebhookUnknownSource) {
+		t.Fatalf("webhook Receive with no configured source = %v, want ErrWebhookUnknownSource", err)
 	}
 
 	// Notification routing is pure policy: a bare gateway must still be able to

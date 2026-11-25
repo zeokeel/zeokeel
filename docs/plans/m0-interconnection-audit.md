@@ -36,6 +36,7 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | **四模块链路** inbox → triage → board → lease | 上述四个模块 | — | 装配测试里：Apply 建任务 → Claim → Submit → Accept，board 最终 completed |
 | `contracts.KeyApprovalAction` | approvals 模块（与 KeyApprovals 同源） | 桌面按钮 / 卡片回调 / 聊天回复 | 13 条（token 校验/过期/单次使用/绑单/索引回复/空队列） |
 | `contracts.KeyNotifyRoute` | notifyroute（新，无依赖） | 渠道适配器、gateway | 8 条（默认覆盖/校验/顺序/不健康跳过/inapp 兜底/静音只压非审批/跨午夜/停用） |
+| `contracts.KeyWebhook` | webhook（新，只依赖 inbox） | HTTP 入口（下一步挂载） | 10 条（验签/过期/未知源/重放合并/坏载荷/缺标题/配额透传） |
 | **网关 → 服务键**（11 个方法） | inbox / triage / tasklease / approvalaction | web 客户端、Lead 分诊回合 | 一致性测试（TRANSPORT §5.1 ↔ dispatch ↔ contract.json ↔ ws-contract.ts）+ 载荷映射测试 7 条 |
 | 注册 ↔ 装配一致 | registry | headless.json | `TestEveryRegisteredModuleIsLoaded`（新） |
 
@@ -62,7 +63,7 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 | Lead 的"思考"层（谁来决定 Action/Task） | triage 只执行决定，不做判断；决定来自 Lead 模型 | M0-2b：Lead 分诊回合（agent 侧） |
 | ~~任务板租约/心跳/证据/验收~~ | ✅ 已交付：`tasklease`（TTL/心跳/证据必填/review/accept/reject/expire） | 已交付 |
 | ~~审批 action + 文字回复~~ | ✅ 已交付：`IssueToken` / `Apply` / `ApplyReply`，三条入口最终都落到 `Resolve` | 已交付 |
-| 渠道适配器 | 无（微信/钉钉/飞书/邮件都还没代码） | M0-5，先 webhook，再微信 iLink |
+| 渠道适配器 | 🟡 webhook **内核**已交付（验签/时间窗/去重/配额→inbox），**HTTP 挂载未做**；微信/钉钉/飞书/邮件未开始 | 下一步：`/api/inbound/<source>`（签名即认证，Host 校验保留）+ 微信 iLink |
 | ~~网关协议 `inbox.*` / 租约 / 审批动作~~ | ✅ 9 个方法已实现并同步 TRANSPORT §5.1.13、contract.json、ws-contract.ts | 已交付 |
 | ~~`notify.route.*`（主/备渠道）~~ | ✅ 已交付：router 服务 + `notify.route.snapshot/upsert` + capability `notifyroute` | 已交付 |
 | UI | 未接；效果图只是原型 | 协议稳定后一轮做 |
@@ -103,6 +104,7 @@ scripts/verify.sh --quick（triage 后）       PASS 5/5，63s
 scripts/verify.sh --quick（tasklease 后）   PASS 5/5，67s
 scripts/verify.sh --quick（持久化后）    PASS 5/5，63s
 scripts/verify.sh --quick（notifyroute 后）PASS 5/5，63s；web gen:verify / tsc 通过
+scripts/verify.sh --quick（webhook 后）  PASS 5/5，66s
 scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过
 scripts/verify.sh --quick（approval 后）    PASS 5/5（一次 flaky 后重跑绿）
                                             （首次跑时 gateway 的

@@ -24,6 +24,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/toolkit"
 	"github.com/zeokeel/zeokeel/internal/modules/triage"
 	"github.com/zeokeel/zeokeel/internal/modules/update"
+	"github.com/zeokeel/zeokeel/internal/modules/webhook"
 	"github.com/zeokeel/zeokeel/internal/modules/workspace"
 )
 
@@ -74,6 +75,8 @@ func Registry() *module.Registry {
 	mustRegister(registry, notifyroute.Module())
 	mustRegister(registry, insights.Module())
 	mustRegister(registry, hosttools.Module())
+	// Channel adapters: the webhook is the first one, and it only needs the inbox.
+	mustRegister(registry, webhook.Module())
 	mustRegister(registry, GroupModule())
 	return registry
 }

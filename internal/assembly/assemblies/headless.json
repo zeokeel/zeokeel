@@ -78,6 +78,13 @@
       "config": {}
     },
     {
+      "id": "webhook",
+      "module": "zeokeel/webhook",
+      "config": {
+        "sources": []
+      }
+    },
+    {
       "id": "hosttools",
       "module": "zeokeel/hosttools",
       "config": {
