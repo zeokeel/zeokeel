@@ -159,6 +159,11 @@
       "config": {}
     },
     {
+      "id": "bots",
+      "module": "zeokeel/bots",
+      "config": {}
+    },
+    {
       "id": "agent",
       "module": "zeokeel/agent",
       "config": {

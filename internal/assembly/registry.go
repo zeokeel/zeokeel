@@ -9,6 +9,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/appinfo"
 	"github.com/zeokeel/zeokeel/internal/modules/approvals"
 	"github.com/zeokeel/zeokeel/internal/modules/automation"
+	"github.com/zeokeel/zeokeel/internal/modules/bot"
 	"github.com/zeokeel/zeokeel/internal/modules/browser"
 	"github.com/zeokeel/zeokeel/internal/modules/channeldispatch"
 	"github.com/zeokeel/zeokeel/internal/modules/creds"
@@ -74,6 +75,8 @@ func Registry() *module.Registry {
 	mustRegister(registry, teamnotes.Module())
 	// Skill drafts: proposals a human turns into a real skill later.
 	mustRegister(registry, skilldraft.Module())
+	// Bots: templates and instances a task can be dispatched to.
+	mustRegister(registry, bot.Module())
 	mustRegister(registry, sandbox.Module())
 	mustRegister(registry, toolkit.Module())
 	// triage joins the inbox to the task board: it must come after both.
