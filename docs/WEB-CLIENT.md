@@ -581,6 +581,12 @@ Web 侧风险更高：每个组件自己 `addEventListener('keydown')` 时，**�
 | C4 | 右栏文件树 ↑↓ | 改变当前项并显示预览 | `a4qa-files-tree-select` |
 | C5 | 面包屑「工作区根目录」 | 回树，**不关页签** | `a4qa-files-tree-return` |
 | C6 | 团队入口零值 | 团队/子代理入口**常显**（不显示 0 计数） | `team-turn-persist`、`docs/archive/AGENT-SURFACES.md` S9「零值常显」 |
+| C7 | 待办收件箱「派成任务」 | 该行变「已分诊」，不重复派单 | `inbox-routes.test.tsx`、`InboxScreen.test.tsx` |
+| C8 | 任务详情「提交证据」 | 证据地址为空时按钮禁用；交完 §3 立刻出现该证据 | `TaskDetailScreen.test.tsx` |
+| C9 | 渠道凭据保存 | 保存后密钥**不回显**（列表只有 kind/id），刷新仍在 | `ChannelsScreen.test.tsx` |
+| C10 | 运行状态「立即查一次」 | 计数按下发顺序 read → tick → read（不重复读） | `HealthScreen.test.tsx` |
+| C11 | 共享记忆「驳回」 | 二次确认后才发 `accept:false`，行变「已驳回」 | `TeamMemoryScreen.test.tsx` |
+| C12 | 390px 宽 | 四屏无横向滚动；主操作 ≥40px | `viewport.ts` 用例、`Chat` 审计记录 |
 
 ### 8.4 M2 待补（来自 12 个 surface，本节只登记不展开）
 
