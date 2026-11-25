@@ -37,7 +37,10 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | `contracts.KeyApprovalAction` | approvals 模块（与 KeyApprovals 同源） | 桌面按钮 / 卡片回调 / 聊天回复 | 13 条（token 校验/过期/单次使用/绑单/索引回复/空队列） |
 | `contracts.KeyNotifyRoute` | notifyroute（新，无依赖） | 渠道适配器、gateway | 8 条（默认覆盖/校验/顺序/不健康跳过/inapp 兜底/静音只压非审批/跨午夜/停用） |
 | `contracts.KeyWeChat` | wechat（新，依赖 inbox） | 轮询循环（下一步挂载） | 8 条（入站归一/重投合并/全字段发送/无 token/窗口关闭/空文本/平台失败/401） |
-| `contracts.KeyLead` | lead（新，依赖 inbox + triage） | `lead.run`、自动化 | 5 条（规则命中/忽略/有界/单条失败不中断/不回炉） |
+| `contracts.KeyLead` | lead（依赖 inbox + triage + dataDir） | `lead.run`、自动化 | 5 条循环 + 4 条规则持久化 |
+| `contracts.KeyDingTalk` | dingtalk（依赖 inbox） | 入站路由（待挂） | 17 条（验签/过期/非文本/合并/发送/限速型错误） |
+| `contracts.KeyFeishu` | feishu（依赖 inbox） | 入站路由（待挂） | 24 条（challenge/验签/旧签名/v1 回调/合并/卡片动作/发送/token 铸造） |
+| 租约持久化 | tasklease（+dataDir） | 重启恢复 | 7 条（存活/过期回收/损坏/0600/评审状态） |
 | `contracts.KeyWebhook` | webhook（依赖 inbox + dataDir） | `POST /api/inbound/{source}`、`webhook.sources/source.set/remove` | 10 条收件测试 + 7 条 HTTP 测试 + 6 条 source 管理测试（排序/校验/删除/重启恢复/轮换失效/0600） |
 | **网关 → 服务键**（11 个方法） | inbox / triage / tasklease / approvalaction | web 客户端、Lead 分诊回合 | 一致性测试（TRANSPORT §5.1 ↔ dispatch ↔ contract.json ↔ ws-contract.ts）+ 载荷映射测试 7 条 |
 | 注册 ↔ 装配一致 | registry | headless.json | `TestEveryRegisteredModuleIsLoaded`（新） |
@@ -65,8 +68,10 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 | ~~Lead 的"思考"层~~ | ✅ 已交付**可替换的计划器**：`Planner` 接口 + 确定性 `RulePlanner`（源/关键词/指派人/前缀/忽略），循环保证有界、失败不中断、不回炉；模型版计划器以后替换即可 | 已交付（模型版待接） |
 | ~~任务板租约/心跳/证据/验收~~ | ✅ 已交付：`tasklease`（TTL/心跳/证据必填/review/accept/reject/expire） | 已交付 |
 | ~~审批 action + 文字回复~~ | ✅ 已交付：`IssueToken` / `Apply` / `ApplyReply`，三条入口最终都落到 `Resolve` | 已交付 |
-| 渠道适配器 | 🟡 webhook（内核 + HTTP + source 管理）与**微信 iLink 适配器内核**（轮询入站 / 全字段发送 / 24h 窗口 / context_token）已交付；钉钉、飞书、邮件未开始 | 下一步：微信扫码登录与 token 持久化、轮询循环挂载、真机验证；钉钉/飞书 |
-| 微信真机验证 | 适配器只对**假 iLink 服务**跑过；真实平台的报文与限速尚未验证 | 已知风险 | 上线前必须按 §9.3 真机跑一遍（扫码 → 收发 → 24h 保活） |
+| 渠道适配器 | 🟡 四个渠道的内核都有了：webhook（+HTTP+source 管理）、微信（轮询/发送/token 持久化/轮询循环/保活）、钉钉（验签+收+发）、飞书（challenge+验签+收+卡片动作提取+发）；邮件未开始。**只有 webhook 挂了 HTTP 路由** | 下一步：钉钉/飞书入站路由与卡片回调、凭据存储、真机验证 |
+| 渠道真机验证 | 微信/钉钉/飞书都只对**假服务**跑过（httptest），真实平台的报文、签名实现与限速未验证 | 已知风险 | 上线前每个渠道真机跑一遍（回调回放 + 收发 + 限速） |
+| 钉钉/飞书凭据存储 | 两者 `Token`/`AppSecret`/`SignSecret` 都是 `json:"-"`，只能从配置注入；没有像 webhook 那样的 0600 持久化 | 缺口 | 复用 webhook 的 source store 模式，或统一凭据库 |
+| 钉钉/飞书 HTTP 路由 | 适配器有 `Receive`，但网关只挂了 webhook 的 `/api/inbound/{source}` | 缺口 | 各加一个路由 + 卡回调路由（飞书 challenge 必须回 200） |
 | ~~网关协议 `inbox.*` / 租约 / 审批动作~~ | ✅ 9 个方法已实现并同步 TRANSPORT §5.1.13、contract.json、ws-contract.ts | 已交付 |
 | ~~`notify.route.*`（主/备渠道）~~ | ✅ 已交付：router 服务 + `notify.route.snapshot/upsert` + capability `notifyroute` | 已交付 |
 | UI | 未接；效果图只是原型 | 协议稳定后一轮做 |
@@ -79,6 +84,20 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 - **重启失效**：secret 每次启动随机生成，重启后旧 token 全失效——这是**有意的**（宁可让用户重发一次，也不让旧链接长期有效）；代价写进 §4 已知限制。
 - **能力门控暂缺**：新方法可用，但 `serverCapabilities` 还没加 `inbox/triage/tasklease/approvalaction`（要连带改 contract.json 的 static 列表和 web 生成物）。目前客户端只能"调用后看 `-32004`"，不优雅；列为下一步。
 - **生成链是互联的一部分**：改 dispatch 必须同步 4 处——TRANSPORT §5.1、`contractParams`、`contract.json`（`go run ./gencontract`，**要在包目录里跑**，否则会写到仓库根）、`web/src/design/ws-contract.ts`（`npm run gen:ws-contract`）。漏一处，一致性测试或 `gen:verify` 会红。
+
+## 4c. 并行工作流（2026-11-25，多智能体）
+
+用户要求用多个智能体并行推进整个规划。做法与结果：
+
+| 工作流 | 智能体 | 写作用域 | 结果 |
+|---|---|---|---|
+| 钉钉适配器 | `dingtalk` | `internal/modules/dingtalk/**`、`internal/contracts/dingtalk.go` | 17 测试绿 |
+| 飞书适配器 | `feishu` | `internal/modules/feishu/**`、`internal/contracts/feishu.go` | 24 测试绿 |
+| 微信登录态/轮询 | `wechat` | `internal/modules/wechat/**` | 35 测试绿（含 9 条原有） |
+| 租约与规则持久化 | `persist` | `internal/modules/tasklease/**`、`internal/modules/lead/**` | 27 测试绿 |
+
+规则：**每个智能体只写自己的包**，装配/网关/文档由我串行集成——因为那三处正是之前踩过的"四处同步"热点。
+集成时我补了：registry + headless 条目 + 两个计数锁定清单 + dingtalk/feishu 的装配断言；随后 `verify.sh --quick` 全绿。
 
 ## 5. 互联审计的固定动作（每加一个模块都做）
 
@@ -112,6 +131,7 @@ scripts/verify.sh --quick（inbound 后）  PASS 5/5，64s
 scripts/verify.sh --quick（source 管理后）PASS 5/5，63s
 scripts/verify.sh --quick（lead 后）    PASS 5/5，66s；web gen:verify / tsc 通过
 scripts/verify.sh --quick（wechat 后）  PASS 5/5，67s
+scripts/verify.sh --quick（并行四流集成后）PASS 5/5，66s
 scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过
 scripts/verify.sh --quick（approval 后）    PASS 5/5（一次 flaky 后重跑绿）
                                             （首次跑时 gateway 的
