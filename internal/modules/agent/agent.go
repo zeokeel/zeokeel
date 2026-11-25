@@ -3302,9 +3302,6 @@ func (s *service) handleEvent(ctx context.Context, sessionID, workspaceRoot stri
 							status = "error"
 						}
 					}
-					message.Tools[index].Status = status
-					message.Tools[index].Summary = content
-					message.Tools[index].EndedAt = time.Now()
 					// Classify a failed call from the RAW result text: rig's
 					// OS-sandbox attribution line trails the output and the bounded
 					// summary may cut it off (RG-03). The kind is persisted so a
@@ -3312,7 +3309,18 @@ func (s *service) handleEvent(ctx context.Context, sessionID, workspaceRoot stri
 					errorKind := ""
 					if status == "error" {
 						errorKind = contracts.ClassifyError(nil, event.Result.Content)
+						if errorKind == contracts.MessageErrorKindDenied {
+							// A refusal is a decision, not a malfunction: the
+							// transcript says 已拒绝 and must not carry rig's
+							// English sentence as the card's output (round-6
+							// tools audit D4/N2).
+							status = "denied"
+							content = ""
+						}
 					}
+					message.Tools[index].Status = status
+					message.Tools[index].Summary = content
+					message.Tools[index].EndedAt = time.Now()
 					message.Tools[index].ErrorKind = errorKind
 					resultFields := map[string]any{
 						"id": event.Call.ID, "name": event.Call.Name,

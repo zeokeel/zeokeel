@@ -1131,6 +1131,13 @@ function mapToolStatus(status: string | undefined): string {
     case 'error':
     case 'failed':
       return 'error';
+    // A stop and a refusal are neutral states, never a green 完成
+    // (round-6 tools audit N3/N4).
+    case 'cancelled':
+    case 'canceled':
+      return 'cancelled';
+    case 'denied':
+      return 'denied';
     default:
       return 'ok';
   }

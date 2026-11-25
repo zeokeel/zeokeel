@@ -20,6 +20,7 @@ export function AssistantBody({
   status,
   isLatest = true,
   parkedTool,
+  stopping = false,
 }: {
   message: ZeoMessage;
   status: MessageStatus;
@@ -27,11 +28,14 @@ export function AssistantBody({
   isLatest?: boolean;
   /** The call an approval is waiting on: its node says so instead of 运行中. */
   parkedTool?: { name: string; summary?: string };
+  /** The stop click is in flight: the label must not wait for the abort. */
+  stopping?: boolean;
 }) {
   const t = useT();
   const workSteps = useWorkSteps();
   const streaming = status === 'loading' || status === 'updating';
-  const stopped = !streaming && message.stopReason === 'aborted' && !message.error;
+  const stopped =
+    !message.error && (stopping || (!streaming && message.stopReason === 'aborted'));
 
   return (
     <>

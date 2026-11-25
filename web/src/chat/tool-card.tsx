@@ -21,13 +21,21 @@ export function ToolCardBody({ step }: { step: ToolStep }) {
   const denied =
     step.errorKind === 'denied' ||
     (step.error !== undefined && /denied by approval/i.test(step.error));
-  const failureText = denied
+  // The wire carries the failure text as the step's *output*: the snapshot has
+  // `summary` + `errorKind` and no separate error field, so preferring the
+  // category put the word "network" where the real sentence belongs (round-6
+  // tools audit D3/N1).
+  const outputText =
+    typeof step.output === 'string' && step.output.trim() !== '' ? step.output : null;
+  const failureText = denied || step.status === 'denied'
     ? t('thread.tool.denied')
     : step.error
       ? step.error
-      : step.errorKind
-        ? t('thread.tool.failedBy', { kind: step.errorKind })
-        : null;
+      : outputText
+        ? outputText
+        : step.errorKind
+          ? t('thread.tool.failedBy', { kind: step.errorKind })
+          : null;
 
   return (
     <div className="zk-tool-card">

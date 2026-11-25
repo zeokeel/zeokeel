@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react';
 import { Descriptions } from 'antd';
 import { CodeHighlighter } from '@ant-design/x';
+import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { parseUnifiedDiff, type DiffLine } from '@/api/files';
+import { useDarkMode } from '@/chat/markdown';
 import { useT } from '@/i18n';
 import type { MessageKey } from '@/i18n';
 
@@ -90,6 +92,9 @@ export function CodeBlock({
   maxLines?: number;
 }) {
   const t = useT();
+  // The syntax theme has its own text colours: painting only the background with
+  // a page token left dark-on-dark at 1.3:1 in dark mode (round-6 tools audit N4).
+  const dark = useDarkMode();
   const lines = text.split('\n');
   const clipped = maxLines && lines.length > maxLines;
   const shown = clipped ? lines.slice(0, maxLines).join('\n') : text;
@@ -105,6 +110,7 @@ export function CodeBlock({
           // and the theme's inline style beat the token in dark mode
           // (round-5 tools audit, dark 390: a white block on a black card).
           highlightProps={{
+            style: dark ? oneDark : oneLight,
             customStyle: {
               background: 'var(--zk-bg-strong)',
               fontFamily: 'var(--zk-font-mono)',

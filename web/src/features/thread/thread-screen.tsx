@@ -184,8 +184,12 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
     });
   };
 
+  const [stopping, setStopping] = useState(false);
   const stopRun = () => {
     stoppedByUser.current = true;
+    // Same-frame feedback: the abort and its fallback take 34–75ms to reach the
+    // DOM, and the reader clicked stop *now* (round-6 loop audit R4-1).
+    setStopping(true);
     // `chat.abort()` only closes the client's stream: the gateway keeps running
     // and the next send is a 409 ("a run is active"). Cancel server-side first,
     // then drop the local stream so the UI reacts without waiting for the ack.
@@ -254,6 +258,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   const handoff = (location.state as {
     pendingText?: string;
     pendingAttachments?: StagedAttachment[];
+    attachmentMeta?: Array<{ id: string; name: string; mime: string; bytes: number }>;
   } | null) ?? null;
   const pendingText = handoff?.pendingText;
   const pendingSent = useRef(false);
@@ -261,12 +266,15 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
     if (!pendingText || pendingSent.current) return;
     if (chat.isDefaultMessagesRequesting) return;
     pendingSent.current = true;
+    setStopping(false);
     navigate(location.pathname, { replace: true, state: null });
     const staged = handoff?.pendingAttachments ?? [];
+    const meta = handoff?.attachmentMeta ?? staged.map(({ id, name, mime, bytes }) => ({ id, name, mime, bytes }));
     chat.onRequest({
       sessionId,
       text: pendingText,
       ...(staged.length > 0 ? { attachments: staged.map((item) => item.id) } : {}),
+      ...(meta.length > 0 ? { attachmentMeta: meta } : {}),
     });
   }, [pendingText, handoff, chat, sessionId, navigate, location.pathname]);
 
@@ -295,6 +303,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
       }
     }
     wasRequesting.current = chat.isRequesting;
+    if (!chat.isRequesting) setStopping(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- settle runs once per transition
   }, [chat.isRequesting, reload]);
 
@@ -460,6 +469,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
             sessionId={sessionId}
             // The node the approval belongs to says 等待批准 instead of 运行中.
             parkedTool={pendingApproval ? { name: pendingApproval.tool } : undefined}
+            stopping={stopping}
             focusIndex={matchIndexes.length > 0 ? matchIndexes[cursor] : undefined}
             onRegenerate={regenerate}
             regenerateDisabled={regenerateUnsupported}

@@ -131,6 +131,7 @@ export const zh = {
   'thread.status.awaitingApproval': '等待批准',
   'thread.status.running': '运行中',
   'thread.status.done': '完成',
+  'thread.status.cancelled': '已取消',
   'thread.status.denied': '已拒绝',
   'thread.status.failed': '失败',
   'thread.truncated': '已截断，仅显示前 {max} 行（共 {total} 行）',

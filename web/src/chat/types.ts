@@ -3,7 +3,7 @@ export type MessageStatus = 'local' | 'loading' | 'updating' | 'success' | 'erro
 
 /** The message shape the transcript renders. One object per transcript row. */
 
-export type ToolStepStatus = 'running' | 'ok' | 'error';
+export type ToolStepStatus = 'running' | 'ok' | 'error' | 'cancelled' | 'denied';
 
 /** One model iteration's thinking (the wire's `reasoningSegments` entry). */
 export interface ReasoningSegment {

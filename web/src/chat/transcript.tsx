@@ -49,6 +49,7 @@ export function Transcript({
   messages,
   sessionId,
   parkedTool,
+  stopping = false,
   focusIndex,
   onRegenerate,
   regenerateDisabled,
@@ -61,6 +62,8 @@ export function Transcript({
   sessionId?: string;
   /** The tool call this session is parked on (if an approval is waiting). */
   parkedTool?: { name: string; summary?: string };
+  /** The user just pressed stop: say 已停止 now, let the wire confirm. */
+  stopping?: boolean;
   /** Scroll target requested by the find bar. */
   focusIndex?: number;
   /** B11: retry the last turn through the single run endpoint. */
@@ -290,6 +293,7 @@ export function Transcript({
                           // only place that does (round-3 wire audit).
                           isLatest={row.index === messages.length - 1}
                           parkedTool={row.index === messages.length - 1 ? parkedTool : undefined}
+                          stopping={row.index === messages.length - 1 ? stopping : undefined}
                         />
                         {info.status === 'loading' ? null : (
                           <MessageActions

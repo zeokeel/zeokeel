@@ -127,6 +127,7 @@ export const en: Catalog = {
   'thread.status.awaitingApproval': 'Awaiting approval',
   'thread.status.running': 'Running',
   'thread.status.done': 'Done',
+  'thread.status.cancelled': 'Cancelled',
   'thread.status.denied': 'Denied',
   'thread.status.failed': 'Failed',
   'thread.truncated': 'Truncated: showing the first {max} of {total} lines',

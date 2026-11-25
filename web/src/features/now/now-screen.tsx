@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Composer } from '@/chat/composer';
 import { ComposerFooter, ComposerPickers, useComposerSettings } from '@/chat/composer-status';
-import { uploadBlob, type StagedAttachment } from '@/api/blobs';
+import { rememberStaged, uploadBlob, type StagedAttachment } from '@/api/blobs';
 import { setSetting } from '@/api/gateway';
 import type { SlashCommand } from '@/chat/slash-commands';
 import { ApprovalDock } from '@/features/approvals/approval-dock';
@@ -65,10 +65,18 @@ export function NowScreen() {
     try {
       // Send only what finished uploading: a provisional chip has no blob id.
       const ready = attachments.filter((item) => !item.uploading);
+      // The optimistic bubble needs the names: without the staged metadata it
+      // fell back to a bare 「附件」 until the snapshot landed (round-6 loop audit
+      // R4-6). The thread composer has always done this; this one did not.
+      const meta = ready.map(({ id, name, mime, bytes }) => ({ id, name, mime, bytes }));
+      if (meta.length > 0) rememberStaged(meta);
       const session = await create();
       setDraft('');
       navigate(`/c/${session.id}`, {
-        state: { pendingText: text, ...(ready.length > 0 ? { pendingAttachments: ready } : {}) },
+        state: {
+          pendingText: text,
+          ...(ready.length > 0 ? { pendingAttachments: ready, attachmentMeta: meta } : {}),
+        },
       });
       setAttachments([]);
     } catch (cause) {

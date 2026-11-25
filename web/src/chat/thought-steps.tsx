@@ -287,9 +287,12 @@ function toolItem(
   const meta = toolMeta(step.name);
   // Protocol status → the user's own words; never the raw enum. A refused call
   // is a decision, not a failure (round-5 tools audit D4/D12).
-  const denied = step.errorKind === 'denied';
+  const denied = step.errorKind === 'denied' || step.status === 'denied';
+  const cancelled = step.status === 'cancelled';
   const state = denied
     ? t('thread.status.denied')
+    : cancelled
+      ? t('thread.status.cancelled')
     : parked && step.status === 'running'
       ? // The call has not touched anything yet: it is on the approval card,
         // and "运行中" made the user think the network request had happened
@@ -321,8 +324,11 @@ function toolItem(
     ),
     status:
       step.status === 'running'
-        ? 'loading'
-        : step.status === 'ok' || denied
+        ? parked
+          ? // Parked on the approval card: neither spinning nor finished.
+            'abort'
+          : 'loading'
+        : step.status === 'ok' || denied || cancelled
           ? 'success'
           : 'error',
     collapsible: true,

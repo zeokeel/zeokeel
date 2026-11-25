@@ -6,7 +6,7 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { nodesToText } from './nodes-to-text';
 
 /** The live appearance, read from the one place the app publishes it. */
-function useDarkMode(): boolean {
+export function useDarkMode(): boolean {
   return useSyncExternalStore(
     (notify) => {
       const observer = new MutationObserver(notify);
