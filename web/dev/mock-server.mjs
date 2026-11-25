@@ -405,6 +405,8 @@ const mockTaskApproval = new Map();
 const mockTaskBudgets = new Map();
 /** Task -> message held for approval (approval=before_send). */
 const mockHeldSends = new Map();
+/** Team rules proposed by bots, waiting for a human. */
+const mockNoteSuggestions = [];
 /** Skill drafts proposed by finished tasks. */
 const mockSkillDrafts = [];
 /** Bot templates + instances. */
@@ -2179,6 +2181,48 @@ const wsDispatch = (client, message) => {
       const text = String(params.text ?? '');
       if (!category || !text) return fail(-32602, 'invalid_params');
       return reply({ channel: 'inapp', attempts: ['inapp'], deferred: false });
+    }
+    case 'team.suggestions': {
+      return reply({ suggestions: mockNoteSuggestions.slice(0, Number(params.limit ?? 50)) });
+    }
+    case 'team.suggest': {
+      const title = String(params.title ?? '').trim();
+      if (!title) return fail(-32602, 'invalid_params');
+      const suggestion = {
+        id: `sug-${mockNoteSuggestions.length + 1}`,
+        title,
+        ...(params.body ? { body: String(params.body) } : {}),
+        author: String(params.author ?? 'bot'),
+        at: nowIso(),
+      };
+      mockNoteSuggestions.unshift(suggestion);
+      return reply(suggestion);
+    }
+    case 'team.suggestion.promote': {
+      const id = String(params.id ?? '');
+      // Who promoted it decides the note's provenance on the board.
+      const reviewer = String(params.reviewer ?? '');
+      if (!reviewer) return fail(-32602, 'invalid_params');
+      const index = mockNoteSuggestions.findIndex((row) => row.id === id);
+      if (index < 0) return fail(-32600, 'team note suggestions: unknown suggestion');
+      const [suggestion] = mockNoteSuggestions.splice(index, 1);
+      return reply({
+        id: `mem://user/self/memories/team-note/${suggestion.id}`,
+        title: suggestion.title,
+        ...(suggestion.body ? { body: suggestion.body } : {}),
+        author: suggestion.author,
+        at: suggestion.at,
+        reviewed: false,
+      });
+    }
+    case 'team.suggestion.dismiss': {
+      const id = String(params.id ?? '');
+      const reviewer = String(params.reviewer ?? '');
+      if (!reviewer) return fail(-32602, 'invalid_params');
+      const index = mockNoteSuggestions.findIndex((row) => row.id === id);
+      if (index < 0) return fail(-32600, 'team note suggestions: unknown suggestion');
+      mockNoteSuggestions.splice(index, 1);
+      return reply({ ok: true });
     }
     case 'team.notes': {
       return reply({ notes: mockTeamNotes.slice(0, Number(params.limit ?? 50)) });

@@ -2138,3 +2138,120 @@ func (g *Gateway) taskSendApprove(ctx context.Context, raw json.RawMessage) (any
 		"sent": true, "channel": receipt.Channel, "attempts": receipt.Attempts,
 	}, nil
 }
+
+// --- team note suggestions (M1 queue) --------------------------------------
+
+type noteSuggestionDTO struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Body   string `json:"body,omitempty"`
+	Author string `json:"author,omitempty"`
+	At     string `json:"at,omitempty"`
+}
+
+type noteSuggestionsResult struct {
+	Suggestions []noteSuggestionDTO `json:"suggestions"`
+}
+
+type noteSuggestParams struct {
+	Title  string `json:"title"`
+	Body   string `json:"body,omitempty"`
+	Author string `json:"author,omitempty"`
+}
+
+type noteSuggestionDecisionParams struct {
+	ID       string `json:"id"`
+	Reviewer string `json:"reviewer"`
+}
+
+func noteSuggestionFromContract(suggestion contracts.TeamNoteSuggestion) noteSuggestionDTO {
+	return noteSuggestionDTO{
+		ID: suggestion.ID, Title: suggestion.Title, Body: suggestion.Body,
+		Author: suggestion.Author, At: rfc3339(suggestion.At),
+	}
+}
+
+func (g *Gateway) noteSuggestionsService() (contracts.TeamNoteSuggestions, *protocolError) {
+	service, ok := g.root.Get(contracts.KeyTeamNoteSuggestions)
+	if !ok || service == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "team note suggestions unavailable")
+	}
+	return service, nil
+}
+
+func (g *Gateway) noteSuggestions(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.noteSuggestionsService()
+	if problem != nil {
+		return nil, problem
+	}
+	limit := 50
+	if len(raw) > 0 {
+		var params struct {
+			Limit int `json:"limit,omitempty"`
+		}
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		if params.Limit > 0 && params.Limit <= 200 {
+			limit = params.Limit
+		}
+	}
+	suggestions, err := service.Suggestions(ctx, limit)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	result := noteSuggestionsResult{Suggestions: make([]noteSuggestionDTO, 0, len(suggestions))}
+	for _, suggestion := range suggestions {
+		result.Suggestions = append(result.Suggestions, noteSuggestionFromContract(suggestion))
+	}
+	return result, nil
+}
+
+func (g *Gateway) noteSuggest(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.noteSuggestionsService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params noteSuggestParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	suggestion, err := service.Suggest(ctx, contracts.TeamNoteSuggestion{
+		Title: params.Title, Body: params.Body, Author: params.Author,
+	})
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return noteSuggestionFromContract(suggestion), nil
+}
+
+func (g *Gateway) noteSuggestionPromote(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.noteSuggestionsService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params noteSuggestionDecisionParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	note, err := service.Promote(ctx, params.ID, params.Reviewer)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return teamNoteFromContract(note), nil
+}
+
+func (g *Gateway) noteSuggestionDismiss(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.noteSuggestionsService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params noteSuggestionDecisionParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if err := service.Dismiss(ctx, params.ID, params.Reviewer); err != nil {
+		return nil, orchestrationError(err)
+	}
+	return map[string]any{"ok": true}, nil
+}

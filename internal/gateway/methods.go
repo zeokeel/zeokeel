@@ -480,6 +480,18 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"team.note.record": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.teamNoteRecord(ctx, request.Params)
 		},
+		"team.suggestions": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.noteSuggestions(ctx, request.Params)
+		},
+		"team.suggest": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.noteSuggest(ctx, request.Params)
+		},
+		"team.suggestion.promote": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.noteSuggestionPromote(ctx, request.Params)
+		},
+		"team.suggestion.dismiss": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.noteSuggestionDismiss(ctx, request.Params)
+		},
 		"team.note.review": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.teamNoteReview(ctx, request.Params)
 		},

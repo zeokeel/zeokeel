@@ -857,6 +857,10 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `lead.run` | — | `{scanned,dispatched,ignored,skipped,failed,errors?}` | Y | `LeadService.RunOnce`（有界一轮；已处理的条目不再是 new） | ✅ 已实现 |
 | `wechat.login.start` | — | `{qrId,qrUrl,expiresAt?}` | Y | `WeChatLoginService.StartLogin`（扫码登录） | ✅ 已实现 |
 | `wechat.login.state` | `{qrId}` | `{state,connected}`，`state` ∈ pending/waiting/confirmed/expired | Y | `WeChatLoginService.LoginState`（**expired 是正常答案，不是错误**） | ✅ 已实现 |
+| `team.suggestions` | `{limit?}` | `{suggestions:[{id,title,body?,author?,at?}]}` | Y | `TeamNoteSuggestions.Suggestions`（**提议不在共享板上**） | ✅ 已实现 |
+| `team.suggest` | `{title,body?,author?}` | 同上单条 | N | `TeamNoteSuggestions.Suggest` | ✅ 已实现 |
+| `team.suggestion.promote` | `{id,reviewer}` | `TeamNote` | N | `TeamNoteSuggestions.Promote`（经 Record 落成正式笔记，带作者） | ✅ 已实现 |
+| `team.suggestion.dismiss` | `{id,reviewer}` | `{ok:true}` | N | `TeamNoteSuggestions.Dismiss`（不产生笔记） | ✅ 已实现 |
 | `team.notes` | `{limit?}` | `{notes:[TeamNote]}` | Y | `TeamNotesService.List`（最多 200） | ✅ 已实现 |
 | `team.note.record` | `{id?,taskId?,title,body?,author?}` | `TeamNote` | N | `TeamNotesService.Record` | ✅ 已实现 |
 | `team.note.review` | `{id,reviewer,accept,at?}` | `TeamNote`（含 reviewed/reviewedBy/reviewedAt） | N | `TeamNotesService.Review`（`accept` 必须显式传，缺省拒绝） | ✅ 已实现 |

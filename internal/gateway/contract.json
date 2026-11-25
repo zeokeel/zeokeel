@@ -676,6 +676,35 @@
         "model"
       ]
     },
+    "team.suggest": {
+      "required": [
+        "title"
+      ],
+      "optional": [
+        "author",
+        "body"
+      ]
+    },
+    "team.suggestion.dismiss": {
+      "required": [
+        "id",
+        "reviewer"
+      ],
+      "optional": []
+    },
+    "team.suggestion.promote": {
+      "required": [
+        "id",
+        "reviewer"
+      ],
+      "optional": []
+    },
+    "team.suggestions": {
+      "required": [],
+      "optional": [
+        "limit"
+      ]
+    },
     "team.wait": {
       "required": [
         "id"
