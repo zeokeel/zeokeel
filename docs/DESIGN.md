@@ -29,6 +29,14 @@
 
 ## 0. 使用方式（Scope & precedence）
 
+### 0.0 现状提示（2026-11-25，必读）
+
+原生 UI（`internal/ui`/`uikit`/`mygo`）已于 `S5` 退役，**当前产品只有 Web 客户端**。因此：
+
+- 本文 §1–§8 与附录 B/C 的组件名（`uikit.*`、`ui.*`、mygo）描述的是**已退役的原生期**，保留作历史与设计意图参考，**不是**今天写 UI 的依据；
+- 今天写 Web 客户端按 [WEB-CLIENT.md](WEB-CLIENT.md)（路由/api 层/验收清单）+ `docs/design/grokbot-ui/`（七屏交互）+ `web/src/design/tokens.css`（唯一颜色来源）；
+- 本文 §5（token 语义）与 §3（反模式）中的通用原则仍然有效，组件级映射请以 Web 现行代码与 `web/src/design/` 为准。
+
 ### 0.1 适用对象
 
 | 对象 | 用途 |

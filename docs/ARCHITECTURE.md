@@ -223,10 +223,9 @@ if _, err := ctx.Effect(func() cordis.Effect {
   SSE 运行流 7 事件（`done|error` 必为最后一条、`tool.start` 先于 `tool.result`、断连 ≠ 停止），
   `clientRunId` 幂等，token/Origin 校验，端口协商写 `gateway.json`，
   静态资源托管（`go:embed`，`scripts/build-web-client.sh` 从 `web/dist` 复制）。
-- ✅ **浏览器客户端**（`web/`）：路由 `/`、`/inbox`、`/c/:id`、`/settings`；antd 6 + antd X 2.0；
+- ✅ **浏览器客户端**（`web/`）：路由 `/`、`/inbox/incoming`、`/t/:taskId`、`/team`、`/team/board`、`/skills/drafts`、`/settings/{channels,health,memory,bots}`；antd 6 + antd X 2.0；
   token/图标由 Go 侧生成（`gen:tokens` / `gen:icons`），`gen:verify` 守住生成链。
-- ✅ **后端**：17 个模块（acp agent appinfo approvals automation goal hosttools importer insights
-  memorystore modelcatalog sandbox sessionstore skills toolkit update workspace）全部保留，行为未变；
+- ✅ **后端**：35 个模块（acp agent appinfo approvals automation bot browser channeldispatch creds dingtalk email feishu goal heartbeat hosttools importer inbox insights lead memorystore modelcatalog notifyroute replyrelay sandbox sessionstore skilldraft skills tasklease teamnotes toolkit triage update webhook wechat workspace）；
   Rig toolkit + hosttools 的工具面完整（serve 交互档 8 个 host 工具，headless 5 个）。
 - ✅ **装配**：编译期 registry + 内嵌 assembly（`headless.json`；`serve` 复用其 entries 并加传输覆盖）；
   `Products()` = `[headless]`、`AllProducts()` = `[headless, serve]`；`--product` 默认 `serve`。

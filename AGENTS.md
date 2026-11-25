@@ -33,12 +33,15 @@
 cmd/zeokeel             入口（默认 --product serve；--headless；--acp 是标志；
                         --list-products 输出 headless 与 serve 两个产品）
 internal/gateway        serve 产品：WS 控制面（快照+差值）、SSE 运行流、静态资源、端口协商
-web/                    浏览器客户端：路由 / /inbox /c/:id /settings
+web/                    浏览器客户端：路由 / /inbox /team /skills/drafts /settings/*
 internal/host           进程宿主 + 托盘壳：托盘/热键/通知/设置存储/日志/退出
 internal/contracts      服务契约（chat/approval/plan/team/task/...）——叶子层
-internal/modules/*      后端能力模块（17 个，全部保留）：acp agent appinfo approvals
-                        automation goal hosttools importer insights memorystore modelcatalog
-                        sandbox sessionstore skills toolkit update workspace
+internal/modules/*      后端能力模块（35 个）：acp agent appinfo approvals automation bot browser
+                        channeldispatch creds dingtalk email feishu goal heartbeat
+                        hosttools importer inbox insights lead memorystore modelcatalog
+                        notifyroute replyrelay sandbox sessionstore skilldraft skills
+                        tasklease teamnotes toolkit triage update webhook wechat
+                        workspace
 internal/assembly       装配根：编译期 registry + assemblies/headless.json 预检（serve 复用其 entries）
 internal/design         设计 token（→ 生成 web/src/design/tokens.css）
 internal/brand          品牌层：唯一 hex 来源、主题、字体栈
