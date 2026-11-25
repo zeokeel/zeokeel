@@ -1,0 +1,14 @@
+Return-Path: <owner@example.com>
+Message-ID: <unknown-cte-0010@example.com>
+Date: Wed, 25 Nov 2026 09:40:00 +0800
+From: owner@example.com
+To: bot@example.com
+Subject: x-uuencode body
+MIME-Version: 1.0
+Content-Type: application/octet-stream
+Content-Transfer-Encoding: x-uuencode
+
+begin 644 report.txt
+#86)C;6%R
+`
+end

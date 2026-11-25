@@ -4,14 +4,21 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
+	"mime/multipart"
 	"mime/quotedprintable"
 	"strings"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
+
+// maxMultipartDepth bounds how deep a multipart body may nest (mixed →
+// alternative is depth 1) so a crafted message cannot make the walk recurse
+// forever.
+const maxMultipartDepth = 4
 
 // RawMessage is one message as the IMAP client delivers it: headers already
 // parsed into a map, body still in its transfer encoding (as declared by the
@@ -19,12 +26,15 @@ import (
 // lets the tests drive PollOnce without a mail server.
 type RawMessage struct {
 	// Header is the parsed header map. Lookups are case-insensitive, so a client
-	// may deliver either "Message-ID" or "Message-Id".
+	// may deliver either "Message-ID" or "Message-Id". Content-Type is read to
+	// find a multipart envelope's text/plain part; a folded value may arrive with
+	// its continuation lines still in it (see headerValue).
 	Header map[string][]string
 	// Body is the raw body bytes, still encoded.
 	Body []byte
 	// Encoding is the transfer encoding ("quoted-printable", "base64", "7bit",
-	// "8bit", "binary" or "" for raw).
+	// "8bit", "binary" or "" for raw). For a multipart message it describes the
+	// envelope; each part carries its own.
 	Encoding string
 }
 
@@ -62,14 +72,22 @@ func (a *Adapter) PollOnce(ctx context.Context) (int, error) {
 	}
 
 	ingested := 0
+	// One unreadable mail must not block the mailbox: the message stays unseen
+	// (so the next poll retries it) while every other message is still filed.
+	// The first refusal is returned at the end, so the loop still backs off and
+	// the failure is visible instead of a silent skip.
+	var firstRefusal error
 	for _, message := range messages {
 		messageID := strings.TrimSpace(headerValue(message.Header, "Message-ID"))
 		if messageID == "" {
 			continue // no dedupe identity: filing it would duplicate on re-poll
 		}
-		text, err := decodeRawBody(message)
+		text, err := messageText(message)
 		if err != nil {
-			return ingested, err
+			if firstRefusal == nil {
+				firstRefusal = fmt.Errorf("email: message %s: %w", messageID, err)
+			}
+			continue
 		}
 		from := strings.TrimSpace(headerValue(message.Header, "From"))
 		item := contracts.InboxItem{
@@ -88,7 +106,7 @@ func (a *Adapter) PollOnce(ctx context.Context) (int, error) {
 		a.markInbound()
 		ingested++
 	}
-	return ingested, nil
+	return ingested, firstRefusal
 }
 
 // markInbound records the ingestion time the settings page shows.
@@ -98,30 +116,116 @@ func (a *Adapter) markInbound() {
 	a.mu.Unlock()
 }
 
+// messageText returns the readable text of one message: the decoded body of a
+// single-part message, or the decoded text/plain part of a multipart one.
+//
+// A multipart envelope carries no text of its own. Its boundaries, part headers,
+// per-part transfer encodings and alternative HTML rendition are all transport,
+// and passing the envelope through is how an ordinary mail arrives in the inbox as
+// unreadable MIME (see testdata/README.md).
+func messageText(message RawMessage) (string, error) {
+	mediaType, params := parseContentType(headerValue(message.Header, "Content-Type"))
+	if !strings.HasPrefix(mediaType, "multipart/") {
+		return decodeRawBody(message.Body, message.Encoding)
+	}
+	envelope, err := decodeTransferEncoding(message.Body, message.Encoding)
+	if err != nil {
+		return "", err
+	}
+	return textPlainPart(envelope, mediaType, params["boundary"], 0)
+}
+
+// textPlainPart walks one multipart body looking for its text/plain part,
+// descending into nested multiparts (mixed → alternative is what a mail with an
+// attachment looks like). Non-text parts are skipped rather than converted: HTML is
+// never stripped into text, so an HTML-only mail is refused and stays visible
+// instead of arriving as markup.
+func textPlainPart(body []byte, mediaType, boundary string, depth int) (string, error) {
+	if boundary == "" {
+		return "", fmt.Errorf("%w: %s without a boundary", contracts.ErrEmailBadPayload, mediaType)
+	}
+	if depth > maxMultipartDepth {
+		return "", fmt.Errorf("%w: %s nested deeper than %d levels", contracts.ErrEmailBadPayload, mediaType, maxMultipartDepth)
+	}
+	reader := multipart.NewReader(bytes.NewReader(body), boundary)
+	var nestedErr error
+	for {
+		part, err := reader.NextRawPart()
+		if errors.Is(err, io.EOF) {
+			if nestedErr != nil {
+				return "", nestedErr
+			}
+			return "", fmt.Errorf("%w: %s has no text/plain part", contracts.ErrEmailBadPayload, mediaType)
+		}
+		if err != nil {
+			return "", fmt.Errorf("%w: %s: %v", contracts.ErrEmailBadPayload, mediaType, err)
+		}
+		partType, partParams := parseContentType(part.Header.Get("Content-Type"))
+		// NextRawPart keeps the part bytes exactly as transmitted, so the part's
+		// own transfer encoding is decoded once, below, and never twice.
+		raw, readErr := io.ReadAll(part)
+		part.Close()
+		if readErr != nil {
+			return "", fmt.Errorf("%w: %s: %v", contracts.ErrEmailBadPayload, mediaType, readErr)
+		}
+		if strings.HasPrefix(partType, "multipart/") {
+			text, err := textPlainPart(raw, partType, partParams["boundary"], depth+1)
+			if err == nil {
+				return text, nil
+			}
+			nestedErr = err // a nested multipart without text may still have a sibling
+			continue
+		}
+		if partType != "" && partType != "text/plain" {
+			continue
+		}
+		// RFC 2046 §5.1.1: a part with no Content-Type defaults to text/plain.
+		return decodeRawBody(raw, part.Header.Get("Content-Transfer-Encoding"))
+	}
+}
+
+// parseContentType splits a Content-Type value; a missing or broken one is "".
+func parseContentType(value string) (string, map[string]string) {
+	mediaType, params, err := mime.ParseMediaType(strings.TrimSpace(value))
+	if err != nil {
+		return "", nil
+	}
+	return mediaType, params
+}
+
 // decodeRawBody returns the message text according to its transfer encoding.
-func decodeRawBody(message RawMessage) (string, error) {
-	switch encoding := strings.ToLower(strings.TrimSpace(message.Encoding)); encoding {
+func decodeRawBody(body []byte, encoding string) (string, error) {
+	decoded, err := decodeTransferEncoding(body, encoding)
+	if err != nil {
+		return "", err
+	}
+	return string(decoded), nil
+}
+
+// decodeTransferEncoding undoes the transfer encoding and returns the bytes.
+func decodeTransferEncoding(body []byte, encoding string) ([]byte, error) {
+	switch encoding := strings.ToLower(strings.TrimSpace(encoding)); encoding {
 	case "", "7bit", "8bit", "binary":
-		return string(message.Body), nil
+		return body, nil
 	case "quoted-printable", "quotedprintable", "qprint":
-		if err := validateQuotedPrintable(message.Body); err != nil {
-			return "", fmt.Errorf("%w: quoted-printable: %v", contracts.ErrEmailBadPayload, err)
+		if err := validateQuotedPrintable(body); err != nil {
+			return nil, fmt.Errorf("%w: quoted-printable: %v", contracts.ErrEmailBadPayload, err)
 		}
-		decoded, err := io.ReadAll(quotedprintable.NewReader(bytes.NewReader(message.Body)))
+		decoded, err := io.ReadAll(quotedprintable.NewReader(bytes.NewReader(body)))
 		if err != nil {
-			return "", fmt.Errorf("%w: quoted-printable: %v", contracts.ErrEmailBadPayload, err)
+			return nil, fmt.Errorf("%w: quoted-printable: %v", contracts.ErrEmailBadPayload, err)
 		}
-		return string(decoded), nil
+		return decoded, nil
 	case "base64":
-		decoded, err := decodeBase64Body(message.Body)
+		decoded, err := decodeBase64Body(body)
 		if err != nil {
-			return "", fmt.Errorf("%w: base64: %v", contracts.ErrEmailBadPayload, err)
+			return nil, fmt.Errorf("%w: base64: %v", contracts.ErrEmailBadPayload, err)
 		}
-		return string(decoded), nil
+		return decoded, nil
 	default:
 		// An encoding we cannot decode is not something to guess at: the body
 		// would reach the triage path as garbage.
-		return "", fmt.Errorf("%w: unsupported encoding %q", contracts.ErrEmailBadPayload, message.Encoding)
+		return nil, fmt.Errorf("%w: unsupported encoding %q", contracts.ErrEmailBadPayload, encoding)
 	}
 }
 
@@ -188,7 +292,11 @@ func decodeBase64Body(body []byte) ([]byte, error) {
 	return nil, err
 }
 
-// headerValue looks a header up case-insensitively; the first value wins.
+// headerValue looks a header up case-insensitively; the first value wins. Folding
+// is undone here: an RFC 5322 §2.2.3 folded header reaches the adapter as one value
+// with continuation lines still on it when the client hands the header section
+// through verbatim, and an encoded Subject split across the fold would otherwise
+// carry a line break into the inbox title.
 func headerValue(header map[string][]string, name string) string {
 	for key, values := range header {
 		if !strings.EqualFold(key, name) {
@@ -197,9 +305,20 @@ func headerValue(header map[string][]string, name string) string {
 		if len(values) == 0 {
 			return ""
 		}
-		return values[0]
+		return unfoldHeader(values[0])
 	}
 	return ""
+}
+
+// unfoldHeader removes the line breaks of a folded header value, leaving the
+// continuation line's leading whitespace in place: that whitespace is the word
+// break unfolding is defined to preserve.
+func unfoldHeader(value string) string {
+	if !strings.ContainsAny(value, "\r\n") {
+		return value
+	}
+	value = strings.ReplaceAll(value, "\r\n", "")
+	return strings.ReplaceAll(value, "\n", "")
 }
 
 // titleFor builds the one-line inbox title: the decoded subject, truncated to

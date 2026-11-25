@@ -1,0 +1,11 @@
+Return-Path: <owner@example.com>
+Delivered-To: bot@example.com
+Date: Wed, 25 Nov 2026 09:30:00 +0800
+From: owner@example.com
+To: bot@example.com
+Subject: 没有 Message-ID 的邮件
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+这封邮件没有 Message-ID，无法去重。

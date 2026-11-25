@@ -1,0 +1,13 @@
+Return-Path: <owner@example.com>
+Message-ID: <base64-multiline-0005@example.com>
+Date: Wed, 25 Nov 2026 08:40:00 +0800
+From: owner@example.com
+To: bot@example.com
+Subject: base64 body, wrapped and unpadded
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+YmFzZTY0IOato+aWh++8muacrOWRqOmAgOasvueOhyAzLjEl77yM546v5q+U5LiL6ZmNIDAuNCDk
+uKrnmb7liIbngrnjgIINCuesrOS6jOihjO+8muWkmuihjCBiYXNlNjQg5LiN5b6X5oqK5o2i6KGM
+5bim6L+b5q2j5paH44CCDQo

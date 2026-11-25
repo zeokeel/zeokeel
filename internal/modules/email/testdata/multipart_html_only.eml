@@ -1,0 +1,16 @@
+Return-Path: <owner@example.com>
+Message-ID: <multipart-html-0008@example.com>
+Date: Wed, 25 Nov 2026 09:10:00 +0800
+From: owner@example.com
+To: bot@example.com
+Subject: html only
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="=-zk-html-0008"
+
+This is a multi-part message in MIME format.
+--=-zk-html-0008
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+PGh0bWw+PGJvZHk+PHA+5Y+q5pyJIEhUTUzjgII8L3A+PC9ib2R5PjwvaHRtbD4NCg==
+--=-zk-html-0008--

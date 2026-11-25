@@ -1,0 +1,20 @@
+Return-Path: <owner@example.com>
+Message-ID: <qp-soft-breaks-0004@example.com>
+Date: Wed, 25 Nov 2026 08:30:00 +0800
+From: owner@example.com
+To: bot@example.com
+Subject: quoted-printable soft line breaks
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+=E9=80=80=E6=AC=BE=E7=8E=87 3.1%=EF=BC=88=E7=8E=AF=E6=AF=94 -0.4pp=EF=BC=89=
+=EF=BC=8C=E6=98=8E=E7=BB=86=E8=A7=81=E9=99=84=E8=A1=A8=E3=80=82=E8=BF=99=E6=
+=98=AF=E4=B8=80=E6=AE=B5=E8=A2=AB=E6=95=85=E6=84=8F=E5=86=99=E5=BE=97=E5=BE=
+=88=E9=95=BF=E7=9A=84=E4=B8=AD=E6=96=87=EF=BC=8C=E7=94=A8=E6=9D=A5=E7=A9=BF=
+=E8=BF=87 76 =E5=88=97=E7=9A=84=E8=BD=AF=E6=8D=A2=E8=A1=8C=E8=BE=B9=E7=95=
+=8C=E3=80=82
+=E7=AC=AC=E4=BA=8C=E8=A1=8C=EF=BC=9A=E8=BD=AF=E6=8D=A2=E8=A1=8C=E4=B8=8D=E5=
+=BE=97=E5=9C=A8=E6=AD=A3=E6=96=87=E9=87=8C=E7=95=99=E4=B8=8B=E6=8D=A2=E8=A1=
+=8C=E7=AC=A6=EF=BC=8C=E4=B9=9F=E4=B8=8D=E5=BE=97=E7=95=99=E4=B8=8B=E7=AD=89=
+=E5=8F=B7=E3=80=82

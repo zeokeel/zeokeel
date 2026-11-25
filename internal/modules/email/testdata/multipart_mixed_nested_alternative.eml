@@ -1,0 +1,32 @@
+Return-Path: <owner@example.com>
+Message-ID: <multipart-mixed-0007@example.com>
+Date: Wed, 25 Nov 2026 09:00:00 +0800
+From: owner@example.com
+To: bot@example.com
+Subject: 周末数据快照（附表）
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="=-zk-mix-0007"
+
+This is a multi-part message in MIME format.
+--=-zk-mix-0007
+Content-Type: multipart/alternative; boundary="=-zk-mix-0007-alt"
+
+--=-zk-mix-0007-alt
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+=E9=99=84=E8=A1=A8=E5=9C=A8=E9=99=84=E4=BB=B6=E9=87=8C=E3=80=82
+=E6=AD=A3=E6=96=87=E5=8F=AA=E8=AF=BB=E8=BF=99=E4=B8=80=E6=AE=B5=E3=80=82
+--=-zk-mix-0007-alt
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+PGh0bWw+PGJvZHk+PHA+6ZmE6KGo5Zyo6ZmE5Lu26YeM44CCPC9wPjwvYm9keT48L2h0bWw+DQo=
+--=-zk-mix-0007-alt--
+--=-zk-mix-0007
+Content-Type: application/pdf; name="附表.pdf"
+Content-Disposition: attachment; filename="附表.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQgZmFrZSBhdHRhY2htZW50IGJvZHkgZm9yIHRoZSBmaXh0dXJlDQo=
+--=-zk-mix-0007--

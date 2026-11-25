@@ -1,0 +1,11 @@
+Return-Path: <owner@example.com>
+Message-ID: <rfc2047-charset-0011@example.com>
+Date: Wed, 25 Nov 2026 09:50:00 +0800
+From: owner@example.com
+To: bot@example.com
+Subject: =?gb2312?B?6YCA5qy+?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Transfer-Encoding: 7bit
+
+gb2312 subject body.
