@@ -1067,3 +1067,33 @@ func (g *Gateway) teamNoteReview(ctx context.Context, raw json.RawMessage) (any,
 	}
 	return teamNoteFromContract(note), nil
 }
+
+type heartbeatConfigureParams struct {
+	Enabled         *bool `json:"enabled,omitempty"`
+	LeadIntervalMS  int64 `json:"leadIntervalMs,omitempty"`
+	ChannelInterval int64 `json:"channelIntervalMs,omitempty"`
+}
+
+// heartbeatConfigure retunes or stops the autonomous loop while it runs. It
+// returns the status so the caller sees the effect instead of guessing.
+func (g *Gateway) heartbeatConfigure(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.heartbeatService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params heartbeatConfigureParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	update := contracts.HeartbeatConfig{Enabled: params.Enabled}
+	if params.LeadIntervalMS != 0 {
+		update.LeadInterval = time.Duration(params.LeadIntervalMS) * time.Millisecond
+	}
+	if params.ChannelInterval != 0 {
+		update.ChannelInterval = time.Duration(params.ChannelInterval) * time.Millisecond
+	}
+	if err := service.Configure(ctx, update); err != nil {
+		return nil, orchestrationError(err)
+	}
+	return g.heartbeatStatus(ctx, nil)
+}

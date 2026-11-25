@@ -401,6 +401,8 @@ const mockCredentials = new Map();
 const mockTeamNotes = [];
 /** QR logins started by the settings screen. */
 const mockWechatLogins = [];
+/** Heartbeat loop state the configure method mutates. */
+const mockHeartbeat = { enabled: true, leadIntervalMs: 30000, channelIntervalMs: 60000 };
 const leaseFor = (taskId, owner, state) => {
   const lease = {
     taskId,
@@ -1986,9 +1988,19 @@ const wsDispatch = (client, message) => {
       mockTeamNotes.unshift(note);
       return reply(note);
     }
+    case 'heartbeat.configure': {
+      if (params.leadIntervalMs !== undefined && params.leadIntervalMs < 5000) {
+        return fail(-32602, 'invalid_params');
+      }
+      return reply({
+        running: mockHeartbeat.enabled, leadIntervalMs: Number(params.leadIntervalMs ?? mockHeartbeat.leadIntervalMs),
+        channelIntervalMs: Number(params.channelIntervalMs ?? mockHeartbeat.channelIntervalMs),
+        lastTick: nowIso(), leadRuns: 0, dispatched: 0, polls: 0, newMessages: 0,
+      });
+    }
     case 'heartbeat.status': {
       return reply({
-        running: true, leadIntervalMs: 30000, channelIntervalMs: 60000,
+        running: mockHeartbeat.enabled, leadIntervalMs: 30000, channelIntervalMs: 60000,
         lastTick: nowIso(), leadRuns: 1, dispatched: 0, polls: 0, newMessages: 0,
       });
     }

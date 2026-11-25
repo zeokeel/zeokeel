@@ -119,11 +119,12 @@ var contractParams = map[string]any{
 	"team.notes": struct {
 		Limit int `json:"limit,omitempty"`
 	}{},
-	"team.note.record": teamNotesRecordParams{},
-	"team.note.review": teamNoteReviewParams{},
-	"heartbeat.status": struct{}{},
-	"heartbeat.tick":   struct{}{},
-	"browser.status":   struct{}{},
+	"team.note.record":    teamNotesRecordParams{},
+	"team.note.review":    teamNoteReviewParams{},
+	"heartbeat.status":    struct{}{},
+	"heartbeat.tick":      struct{}{},
+	"heartbeat.configure": heartbeatConfigureParams{},
+	"browser.status":      struct{}{},
 }
 
 // conditionalCapability is one capability that exists only when the assembly

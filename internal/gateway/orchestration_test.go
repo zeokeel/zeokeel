@@ -23,7 +23,7 @@ func TestOrchestrationMethodsAreDispatched(t *testing.T) {
 		"webhook.sources", "webhook.source.set", "webhook.source.remove",
 		"lead.run",
 		"credentials.list", "credentials.set", "credentials.delete",
-		"heartbeat.status", "heartbeat.tick", "browser.status",
+		"heartbeat.status", "heartbeat.tick", "heartbeat.configure", "browser.status",
 		"team.notes", "team.note.record", "team.note.review",
 		"wechat.login.start", "wechat.login.state",
 	}

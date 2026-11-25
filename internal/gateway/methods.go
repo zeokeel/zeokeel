@@ -420,6 +420,9 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"heartbeat.tick": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.heartbeatTick(ctx, request.Params)
 		},
+		"heartbeat.configure": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.heartbeatConfigure(ctx, request.Params)
+		},
 		"browser.status": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.browserStatus(ctx, request.Params)
 		},

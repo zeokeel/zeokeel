@@ -45,7 +45,9 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | `contracts.KeyEmail` | email（依赖 inbox） | 邮件渠道 | 30 条（SMTP 报文/535/IMAP 归一/Message-ID 去重/QP+base64/循环取消） |
 | `contracts.KeyBrowser` | browser（新，无 requires） | 未来工具面 / 任务证据 | 46 测试（含真 ws:// 传输：握手/分片/乱序回复/事件丢弃计数/Close 幂等） |
 | `contracts.KeyHeartbeat` | heartbeat（新，可选 lead/wechat/email） | `heartbeat.status/tick`、运行状态页 | 7 测试（tick/单渠道失败不中断/lead 失败记录/定时停止/禁用不动/状态） |
-| `contracts.KeyTeamNotes` | teamnotes（依赖 memorystore 之后） | 团队共享记忆 | 16 测试（真 provider 的 URI/type/字节上限约束全钉住） |
+| `contracts.KeyTeamNotes` | teamnotes（依赖 memorystore 之后） | 团队共享记忆 + 复核 | 24 测试（真 provider 约束、复核幂等、拒绝在摘要可见） |
+| 渠道报文夹具 | dingtalk/feishu/wechat testdata | 真机前最后一道闸 | 钉钉 11 + 飞书 8 + 微信（本轮）条夹具，按官方形状回放 |
+| `heartbeat.configure` | gateway | 运行状态页可调 | 契约 86 方法；最小间隔 5s |
 | Web 运行状态页 | `web/src/features/settings/health/**` | `/settings/health`（R27b） | 9 测试（调用顺序 read<tick<read、失败不回读、断开空态） |
 | 验收即记忆 | gateway `taskReview` → teamnotes | 任务通过时写共享笔记 | 3 测试（通过写/打回不写/记忆失败不影响验收） |
 | 微信扫码登录 | `wechat` + `wechat.login.start/state` | 设置页扫码接入 | 12 模块测试 + 网关 2 方法（expired 是答案不是错误） |
@@ -77,6 +79,8 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 | F6 | 第二次加模块又触发同一批断言（顺序列表、实例数、`instances[10]`） | 证明 F1/F2 不是偶发 | **已修根因**：改为「存在性」断言 + 按 id 查实例；计数断言删除，换成"必须包含这些模块" |
 | F8 | `TestApprovalsSnapshotDeltaReplay` 在全套并发下偶发 `i/o timeout` | 测试脚手架的首帧读超时只有 5s，整包并发时不够 | ✅ 已修：`wstest` 读超时 5s → 15s（测试夹具，不是产品超时），`-count=3` 连过、全量重跑绿 |
 | F9 | 全量测试时 `internal/modules/planner` 卡满 600s 超时 | 取消测试的假处理器只等测试放行、不等请求断开，`httptest.Server.Close` 被永久阻塞 | ✅ 已修：处理器 `select` 加上 `r.Context().Done()`，`-count=3` 通过 |
+| F10 | 钉钉真实回调一律 `bad signature` | 官方头是 `timestamp`(毫秒) + `sign`，适配器只认 `X-DingTalk-*` 且按秒解析 | ✅ 平台报文夹具撞出并修复；别名保留，单位按量级判断，并有"毫秒头配秒签名必须失败"的反向测试 |
+| F11 | 飞书加密推送被静默 200 | 签名能过、既不认 challenge 也不认事件，于是返回"成功" | ✅ 改为 `ErrFeishuBadPayload`（先验签再判形态） |
 | F7 | **装配链路测出一个真 bug**：`Claim` 对已经指派/进行中的任务再次写 board，被 rig 拒绝 `team task update has no changes`，整次认领失败 | 单模块测试用的是 fake board，永远发现不了；只有真实装配链路能测出来 | 已修：先读当前任务，只写变化过的字段（状态不同才 SetStatus，owner 不同才 Assign） |
 
 ## 4. 尚未接的线（明确空白，不许假装完成）
@@ -169,6 +173,7 @@ web（运行状态页后）: typecheck / lint(25) / test 534 全绿
 web（共享记忆页后）: typecheck / lint(25) / test 551 全绿
 scripts/verify.sh --quick（验收即记忆/扫码登录后）PASS 5/5，67s
 scripts/verify.sh --quick（凭据/浏览器工具后）PASS 5/5，70s
+scripts/verify.sh --quick（复核/配置/夹具后）PASS 5/5，64s
 web（扫码 UI 后）: typecheck / lint(25) / test 560 全绿
 scripts/verify.sh --quick（邮件/计划器/凭据/卡片后）PASS 5/5，64s
 scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过

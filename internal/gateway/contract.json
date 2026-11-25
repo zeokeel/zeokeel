@@ -113,6 +113,14 @@
       ],
       "optional": []
     },
+    "heartbeat.configure": {
+      "required": [],
+      "optional": [
+        "channelIntervalMs",
+        "enabled",
+        "leadIntervalMs"
+      ]
+    },
     "heartbeat.status": {
       "required": [],
       "optional": []

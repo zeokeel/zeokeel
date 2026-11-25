@@ -840,6 +840,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `team.note.review` | `{id,reviewer,accept,at?}` | `TeamNote`（含 reviewed/reviewedBy/reviewedAt） | N | `TeamNotesService.Review`（`accept` 必须显式传，缺省拒绝） | ✅ 已实现 |
 | `heartbeat.status` | — | `{running,leadIntervalMs,channelIntervalMs,lastTick?,leadRuns,dispatched,polls,newMessages,errors?}` | Y | `HeartbeatService.Status` | ✅ 已实现 |
 | `heartbeat.tick` | — | `{leadRuns,dispatched,polls,newMessages,errors?}` | N | `HeartbeatService.Tick`（手动跑一次） | ✅ 已实现 |
+| `heartbeat.configure` | `{enabled?,leadIntervalMs?,channelIntervalMs?}` | 同 `heartbeat.status` | N | `HeartbeatService.Configure`（运行中改节奏/开关，下限 5s） | ✅ 已实现 |
 | `browser.status` | — | `{connected,endpoint?,pages}` | Y | `BrowserService.Status` | ✅ 已实现 |
 | `credentials.list` | `{kind?}` | `{credentials:[{kind,id}]}` | Y | `CredentialStore.List`（**只回身份，不含任何密钥字段**） | ✅ 已实现 |
 | `credentials.set` | `{kind,id,fields}` | `{ok:true}` | N | `CredentialStore.Set` | ✅ 已实现 |
