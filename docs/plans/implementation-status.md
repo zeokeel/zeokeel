@@ -19,7 +19,7 @@
 | G8 | 产物库（Artifact） | 🟡 | 证据 `kind=file/screenshot` + blobs 存储 | 没有独立产物实体（hash/过期/可见性/任务反向引用） |
 | G9 | 凭据库 | ✅ | `internal/modules/creds`（0600、读路径无字段）+ 适配器读取 | — |
 | G10 | 浏览器（CDP，每 Bot 独立 context） | 🟡 | `internal/modules/browser`（真 ws 传输 + 工具） | 没做每 Bot 独立 browser context / profile 隔离 |
-| G11 | 预算与配额（token/时长/并发） | 🟡 | `tasklease`：`tasks.budget.set/get/consume` + `LeaseStateBlocked`（越限停摆、Submit 被拒、Lead 追加预算可恢复；分钟轴按现在的钟重算） | 真实 token 计量未接（没人调 Consume）；每 Bot 并发上限未做；无停摆通知；UI 未展示 |
+| G11 | 预算与配额（token/时长/并发） | 🟡 | `tasks.budget.*` + `LeaseStateBlocked` + **真实计量**（绑定会话每轮结束后按 `usage.totalTokens` 记账） | 每 Bot 并发上限未做；停摆通知未接；UI 未展示用量 |
 | G12 | 从任务沉淀技能 | ✅ | `skilldraft` + 验收自动提议 + `skilldrafts.*`（含 `install` 写入真实 SKILL.md）+ `/skills/drafts` 采纳页 | 重名明确失败（不覆盖），由人改名后重试 |
 | G13 | 工作入口连接器 | ✅ | `webhook`/`wechat`/`dingtalk`/`feishu`/`email` + `channeldispatch` 出站 + 飞书卡片审批 | 真平台凭据下的端到端仍待验证 |
 | G14 | MCP 全量（注解→审批、两级白名单…） | 🟡 | 产品既有 toolkit/MCP 基建；`mcp__*` 走审批门；`tasks.tools` 任务级白名单**且已执行** | 注解→审批映射、prompts/resources、分页、结构化输出、进度取消未做 |

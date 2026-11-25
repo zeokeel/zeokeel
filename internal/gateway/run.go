@@ -150,6 +150,10 @@ type runStream struct {
 	wake     chan struct{}
 
 	stopObserving func()
+
+	// onUsage is called with each turn's total tokens (nil when the gateway
+	// tests build a stream by hand). It never blocks the stream.
+	onUsage func(sessionID string, tokens int)
 }
 
 // handleChatRun serves one turn as text/event-stream.
@@ -261,6 +265,9 @@ func (g *Gateway) beginRun(ctx context.Context, body runRequest) (stream *runStr
 		sessionID:   body.SessionID,
 		turnID:      body.ClientRunID,
 		wake:        make(chan struct{}, 1),
+		// Usage is the only place a run admits what it cost; the task budget
+		// listens here so a bound task can actually be stopped by spend.
+		onUsage: g.consumeRunUsage,
 	}
 	g.runMu.Lock()
 	if g.runs == nil {
@@ -765,6 +772,9 @@ func (s *runStream) emitTool(tool toolCallDTO) {
 // emitPatch converts a message patch into usage/error frames.
 func (s *runStream) emitPatch(fields map[string]any) {
 	if usage, ok := fields["usage"].(*messageUsageDTO); ok && usage != nil {
+		if s.onUsage != nil && usage.TotalTokens > 0 {
+			s.onUsage(s.sessionID, usage.TotalTokens)
+		}
 		s.emit(runEvent{name: sseUsage, data: map[string]any{
 			"turnId":        s.turnID,
 			"inputTokens":   usage.PromptTokens,
@@ -779,6 +789,34 @@ func (s *runStream) emitPatch(fields map[string]any) {
 	if errorText, ok := fields["error"].(string); ok && errorText != "" {
 		kind, _ := fields["errorKind"].(string)
 		s.emitRunError(errorText, kind)
+	}
+}
+
+// consumeRunUsage reports what a turn cost to the task it was working on. It is
+// deliberately quiet: a run and a budget are different concerns, and a metering
+// failure must never turn a finished answer into an error.
+func (g *Gateway) consumeRunUsage(sessionID string, tokens int) {
+	if tokens <= 0 {
+		return
+	}
+	chat, ok := g.root.Get(contracts.KeyChat)
+	if !ok || chat == nil {
+		return
+	}
+	binder, ok := chat.(contracts.SessionTaskBinder)
+	if !ok || binder == nil {
+		return
+	}
+	taskID, err := binder.SessionTask(sessionID)
+	if err != nil || taskID == "" {
+		return
+	}
+	leases, ok := g.root.Get(contracts.KeyTaskLease)
+	if !ok || leases == nil {
+		return
+	}
+	if _, err := leases.Consume(context.Background(), taskID, tokens); err != nil {
+		g.logger.Printf("gateway: consume %d tokens for %s: %v", tokens, taskID, err)
 	}
 }
 
