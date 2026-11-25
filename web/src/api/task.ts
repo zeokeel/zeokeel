@@ -548,3 +548,26 @@ export async function approveSend(input: ApproveSendInput): Promise<SendReceipt>
   if (typeof result.attempts === 'number') receipt.attempts = result.attempts;
   return receipt;
 }
+
+/**
+ * 提出人 — which human asked for this task (`tasks.requestedby.get`).
+ *
+ * The board records the work, the lease records the executor, and this records
+ * the person who asked for it. It is a read of its own for the same reason the
+ * budget is: the screen can show the task without it, so its failure must not
+ * become the task's failure.
+ *
+ * The answer is `{requestedBy: string|null}`, and the two meanings must never be
+ * blurred: a name is "somebody asked for it", while `null` is "the gateway has
+ * nobody on record" — an answer, not a failure. A thrown error is the read
+ * itself having failed, and the caller keeps that distinct from "unknown".
+ *
+ * Absent, `null`, empty and whitespace-only all normalize to `null` here: a name
+ * that is only spaces is not a name, and `提出人 ` with nothing after it would be
+ * an attribution to a person who is not on the row.
+ */
+export async function loadTaskRequester(id: string): Promise<string | null> {
+  const result = await request<{ requestedBy?: string | null }>('tasks.requestedby.get', { id });
+  const name = typeof result.requestedBy === 'string' ? result.requestedBy.trim() : '';
+  return name === '' ? null : name;
+}

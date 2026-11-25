@@ -420,6 +420,10 @@ export const zh = {
   'task.detail.rejectReason': '打回原因',
   'task.detail.rejectReasonPlaceholder': '写清楚哪里不对，队友按这个改',
   'task.detail.rejectSubmit': '确认打回',
+  // 提出人: one line in the header, not a section. Unknown is an answer; a
+  // failed read says nothing at all (a failed attribution is not "unknown").
+  'task.detail.requester.known': '提出人 {name}',
+  'task.detail.requester.unknown': '提出人未知',
   'task.detail.notFound': '找不到这个任务',
   'task.detail.notFoundHint': '它可能已经被删除，或者链接里的编号不对。',
   'task.detail.loadFailed': '任务没读出来',

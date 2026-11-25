@@ -417,6 +417,11 @@ export const en: Catalog = {
   'task.detail.rejectReason': 'Reason for sending it back',
   'task.detail.rejectReasonPlaceholder': 'Say what is wrong so the teammate can fix it',
   'task.detail.rejectSubmit': 'Confirm send-back',
+  // Who asked for it: one line in the header, not a section. Unknown is an
+  // answer; a failed read says nothing at all (a failed attribution is not
+  // "unknown").
+  'task.detail.requester.known': 'Requested by {name}',
+  'task.detail.requester.unknown': 'Requester unknown',
   'task.detail.notFound': 'Task not found',
   'task.detail.notFoundHint': 'It may have been deleted, or the number in the link is wrong.',
   'task.detail.loadFailed': 'Could not load this task',

@@ -63,6 +63,7 @@ import { useT } from '@/i18n';
 import { ExecutionMeans } from './ExecutionMeans';
 import { PendingSend } from './PendingSend';
 import { TaskBudget } from './TaskBudget';
+import { TaskRequester } from './TaskRequester';
 
 /**
  * The acting identity.
@@ -482,6 +483,11 @@ export function TaskDetailScreen() {
         <h1 className="zk-screen__title" style={WRAP_LONG}>
           {task.subject}
         </h1>
+        {/* 提出人: who asked for this, as one caption on the subject — not a
+            sixth section (the five are a contract). It owns its read and writes
+            nothing at all when that read fails: "unknown" is an answer, a
+            failure is not. */}
+        <TaskRequester taskId={id} />
       </header>
 
       <Space orientation="vertical" size="large" style={{ width: '100%' }}>

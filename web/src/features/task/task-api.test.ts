@@ -7,6 +7,7 @@ import {
   loadTaskBoard,
   loadTaskBudget,
   loadTaskLease,
+  loadTaskRequester,
   loadTaskTools,
   reviewTask,
   setTaskTools,
@@ -404,5 +405,57 @@ describe('held send api', () => {
     await expect(approveSend({ id: 'task-1', approver: 'lead' })).resolves.toEqual({
       channel: 'qq',
     });
+  });
+});
+
+/**
+ * 提出人 (`tasks.requestedby.get`): which human asked for the task.
+ *
+ * The read has exactly two meanings and this layer keeps them apart: a name
+ * (somebody asked for it) and `null` (the gateway has no requester on record —
+ * an answer, not a failure). A thrown error is the read itself having failed,
+ * and it is the caller's job to keep that from reading as "unknown".
+ *
+ * Absent, `null` and an empty/blank name all normalize to `null` here: a name
+ * that is only whitespace is not a name, and rendering "提出人 " with nothing
+ * after it would be a claim about a person who does not exist on the row.
+ */
+describe('task requester api', () => {
+  it('reads the requester with {id} and nothing else', async () => {
+    wire.request.mockResolvedValue({ requestedBy: 'alice' });
+
+    const requester = await loadTaskRequester('task-1');
+
+    expect(wire.request).toHaveBeenCalledWith('tasks.requestedby.get', { id: 'task-1' });
+    expect(requester).toBe('alice');
+  });
+
+  it('answers null for {requestedBy:null}: nobody on record, not a failure', async () => {
+    wire.request.mockResolvedValue({ requestedBy: null });
+
+    await expect(loadTaskRequester('task-1')).resolves.toBeNull();
+  });
+
+  it('answers null when the answer omits the field altogether', async () => {
+    // An older gateway still answers the method; the absence is an answer.
+    wire.request.mockResolvedValue({});
+
+    await expect(loadTaskRequester('task-1')).resolves.toBeNull();
+  });
+
+  it('treats an empty or blank name as no requester', async () => {
+    wire.request.mockResolvedValue({ requestedBy: '   ' });
+
+    await expect(loadTaskRequester('task-1')).resolves.toBeNull();
+
+    wire.request.mockResolvedValue({ requestedBy: '' });
+
+    await expect(loadTaskRequester('task-1')).resolves.toBeNull();
+  });
+
+  it('lets a failed read throw: "it did not load" is not "unknown"', async () => {
+    wire.request.mockRejectedValue(new Error('requestedby unavailable'));
+
+    await expect(loadTaskRequester('task-1')).rejects.toThrow('requestedby unavailable');
   });
 });

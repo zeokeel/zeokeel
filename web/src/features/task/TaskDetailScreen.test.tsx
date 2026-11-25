@@ -45,6 +45,9 @@ const api = vi.hoisted(() => ({
   // a parked outbound message; both are its own, like the budget's read.
   loadPendingSend: vi.fn(),
   approveSend: vi.fn(),
+  // 提出人 reads its own row on the task (`tasks.requestedby.get`), in the header
+  // rather than in a section: its failure is silent, never the task's failure.
+  loadTaskRequester: vi.fn(),
   // The 执行手段 block reads this on its own; a failure here is not a failure
   // of the task, so it is a mock of its own.
   loadCapabilities: vi.fn(),
@@ -64,6 +67,7 @@ vi.mock('@/api/task', () => ({
   loadTaskBudget: api.loadTaskBudget,
   loadPendingSend: api.loadPendingSend,
   approveSend: api.approveSend,
+  loadTaskRequester: api.loadTaskRequester,
 }));
 
 vi.mock('@/api/read-models', () => ({
@@ -158,6 +162,11 @@ beforeEach(() => {
   api.approveSend.mockReset();
   // The gateway's answer to a release: the channel that took the message.
   api.approveSend.mockResolvedValue({ channel: 'feishu' });
+  // Nobody is on record as the requester unless a test says so: that is what the
+  // gateway answers with `{requestedBy:null}`, and it is the honest default for
+  // a task dispatched before requesters were recorded.
+  api.loadTaskRequester.mockReset();
+  api.loadTaskRequester.mockResolvedValue(null);
   api.claimTask.mockResolvedValue(lease());
   api.submitTask.mockResolvedValue(lease({ state: 'review' }));
   api.reviewTask.mockResolvedValue(lease({ state: 'done' }));
@@ -1159,6 +1168,104 @@ describe('TaskDetailScreen', () => {
       // The retry promises one thing: exactly one more read of the hold.
       expect(api.loadPendingSend).toHaveBeenCalledTimes(2);
       expect(api.loadTaskBoard).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * 提出人 — which human asked for the task, in one line of the header.
+   *
+   * The board records the work and the lease records the executor; the gateway
+   * now records the person who asked for it (`tasks.requestedby.get`), and until
+   * this line existed the screen never said who. Three answers, and they are not
+   * interchangeable: a name (`提出人 alice`), nobody on record (`提出人未知`) and a
+   * read that failed (**no line at all** — a failed attribution must never read
+   * as "unknown", because that would be a claim this read could not make).
+   *
+   * The line lives in the header, not in a sixth section: the five sections are a
+   * contract (design §5.4). It appears only once the read has answered, so there
+   * is no placeholder line for real copy to shift down.
+   */
+  describe('提出人', () => {
+    it('names the human who asked for it', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadTaskRequester.mockResolvedValue('alice');
+
+      renderScreen();
+
+      const line = await screen.findByTestId('task-requester');
+      expect(line).toHaveTextContent(T('task.detail.requester.known', { name: 'alice' }));
+      expect(api.loadTaskRequester).toHaveBeenCalledWith('task-1');
+      // It belongs to the header: an attribution is not a section of its own.
+      const header = document.querySelector('.zk-screen__header');
+      expect(header).not.toBeNull();
+      expect(header).toContainElement(line);
+    });
+
+    it('says 提出人未知 when the gateway has nobody on record', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadTaskRequester.mockResolvedValue(null);
+
+      renderScreen();
+
+      expect(await screen.findByTestId('task-requester')).toHaveTextContent(
+        T('task.detail.requester.unknown'),
+      );
+    });
+
+    it('renders no line at all when the read fails — never 提出人未知', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadTaskRequester.mockRejectedValue(new Error('requestedby unavailable'));
+      const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+      try {
+        renderScreen();
+
+        // The task is untouched: this read cannot take the screen down, and it
+        // throws nothing at the person.
+        expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('查退款率');
+        expect(screen.queryByTestId('task-requester')).toBeNull();
+        expect(screen.queryByText(T('task.detail.requester.unknown'))).toBeNull();
+        // Silent on screen, but the reason is not swallowed.
+        const logged = debug.mock.calls
+          .map((call) => call.map((part) => String(part)).join(' '))
+          .join('\n');
+        expect(logged).toContain('requestedby unavailable');
+      } finally {
+        debug.mockRestore();
+      }
+    });
+
+    it('renders nothing while the read is in the air — no placeholder line', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      // Never answers: whatever is on screen now is what the resolved read has
+      // not yet earned.
+      api.loadTaskRequester.mockReturnValue(new Promise(() => {}));
+
+      renderScreen();
+
+      expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('查退款率');
+      expect(screen.queryByTestId('task-requester')).toBeNull();
+      expect(document.querySelectorAll('.zk-screen__header p')).toHaveLength(0);
+    });
+
+    it('keeps the five-section contract exactly five with the line present', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadTaskRequester.mockResolvedValue('alice');
+
+      renderScreen();
+
+      // The line landed …
+      expect(await screen.findByTestId('task-requester')).toBeInTheDocument();
+      // … and the page is still the five sections, in the contract order: the
+      // attribution did not become a sixth one.
+      const headings = sectionHeadings();
+      expect(headings).toHaveLength(5);
+      expect(headings).toEqual([
+        T('task.detail.section.doing'),
+        T('task.detail.section.progress'),
+        T('task.detail.section.evidence'),
+        T('task.detail.section.artifacts'),
+        T('task.detail.section.needYou'),
+      ]);
     });
   });
 });

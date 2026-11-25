@@ -35,7 +35,7 @@
 | M3 浏览器 | 🟡 | CDP 真连接 + 三个工具 + **每 Bot 独立 browser context**（独立 cookie jar；空 profile 拒绝；并发首开只建一个；关闭释放） | 真浏览器需验证上下文命令经 WS 传输可用与大窗口行为；CDP 上下文不跨浏览器重启（需独立 user-data-dir，属 M5 收尾） |
 | M4 连接器 | 🟡 | 四类渠道 + 出站 + 凭据 + 扫码登录协议 + **邮件按声明的字符集解码**（GBK/Big5/Shift_JIS 等）；**真机验证只做了本地能做的部分** |
 | M5 浏览器收尾 | ⬜ | 未开工（依赖 M3 的隔离） |
-| M6 共享（多用户） | 🟡 | `users` 模块 + `Allowed` 在入口执行 + `users.*` 协议 + `/settings/users` + `user` 私有记忆作用域 + **任务 `requestedBy` 归属**（派单时按 acting user 记录，跨重启用保留） | 预算未按人归属；渠道身份未绑定；`requestedBy` 尚未在任务页显示；**无登录**（角色是策略不是认证） |
+| M6 共享（多用户） | 🟡 | `users` 模块 + `Allowed` 在入口执行 + `users.*` 协议 + `/settings/users` + `user` 私有记忆作用域 + 任务 `requestedBy` 归属（派单记录、跨重启保留、`tasks.requestedby.get` 可读、任务页显示） | 预算未按人归属；渠道身份未绑定；**无登录**（角色是策略不是认证） |
 
 ## 三、交互面（docs/design/grokbot-interaction-design.md）
 
