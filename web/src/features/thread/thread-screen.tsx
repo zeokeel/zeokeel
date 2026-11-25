@@ -53,7 +53,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   const location = useLocation();
   const navigate = useNavigate();
   const t = useT();
-  const { reload, create } = useSessions();
+  const { reload, create, sessions } = useSessions();
   const { approvals } = useApprovals();
   const sessionApprovalPending = approvals.some((request) => request.sessionId === sessionId);
   const queue = usePromptQueue(sessionId);
@@ -108,13 +108,20 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
     const last = chat.parsedMessages[chat.parsedMessages.length - 1];
     latestText.current = last?.message.text?.length ?? 0;
   }, [chat.parsedMessages]);
+  // A turn started before this page loaded (a refresh mid-run) has no local
+  // stream, but the gateway says the session is running: the composer must offer
+  // Stop instead of inviting a send that would 409 (round-4 loop audit F3).
+  // Without a stream the text does not grow here; the snapshot catches up.
+  const remoteRunning = sessions.find((item) => item.id === sessionId)?.running === true;
+  const running = chat.isRequesting || remoteRunning;
+
   // Coarse turn state for the screen reader, derived from the last row: a
   // per-token live region would re-announce the whole answer on every delta.
   const lastRow = chat.parsedMessages[chat.parsedMessages.length - 1];
   const lastTurnFailed = Boolean(lastRow?.message.error);
   const lastTurnStopped = lastRow?.message.stopReason === 'aborted';
   const lastTurnSettled =
-    !chat.isRequesting && lastRow?.message.role === 'assistant' && lastRow?.status === 'success';
+    !running && lastRow?.message.role === 'assistant' && lastRow?.status === 'success';
 
   const [rateText, setRateText] = useState('');
   useEffect(() => {
@@ -413,7 +420,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
       {/* One coarse announcement per turn instead of a live region on the virtual
           list (which re-announced every token). */}
       <span className="zk-visually-hidden" role="status" aria-live="polite">
-        {chat.isRequesting
+        {running
           ? t('thread.announce.running')
           : lastTurnFailed
             ? t('thread.announce.failed')
@@ -468,7 +475,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
 
       <PromptQueuePanel
         items={queue.items}
-        running={chat.isRequesting}
+        running={running}
         error={queue.error}
         onCancel={(id) => {
           // Cancelling a queued prompt gives the text back: dropping it silently
@@ -510,7 +517,7 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
             permission={composerSettings.permission}
             model={composerSettings.model}
             thinkingMode={composerSettings.thinkingMode}
-            running={chat.isRequesting}
+            running={running}
             rate={chat.isRequesting ? rateText : ''}
             usage={composerSettings.usage}
             onSetting={(key: string, value: string) => void setSetting(key, value)}
@@ -541,11 +548,11 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
         onChange={setDraft}
         onSubmit={send}
         onStop={stopRun}
-        running={chat.isRequesting}
+        running={running}
         // Three states: idle → connecting (submitted, no frame yet) → running.
         // The 30 s blackhole in v0.3.0 sat in "connecting" silently showing the
         // idle hint; now it says so.
-        phase={resolveComposerPhase(chat.isRequesting, turnFrames)}
+        phase={resolveComposerPhase(running, turnFrames)}
         // Only this conversation's approvals block its own composer: a request
         // parked in another session used to disable every input in the product
         // (round-2 F-3 / C-01).

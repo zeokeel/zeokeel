@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { Button, Popover } from 'antd';
+import { useEscClaim } from '@/keyboard/keyboard-provider';
 import type { QueuedPrompt } from '@/api/prompt-queue';
 import { ZkIcon } from '@/design/icons';
 import { useT } from '@/i18n';
@@ -31,6 +33,20 @@ export function PromptQueuePanel({
   onMove: (id: string, index: number) => void;
 }) {
   const t = useT();
+  const [open, setOpen] = useState(false);
+  // Escape closes this panel before it reaches the screen's "stop the turn":
+  // with the panel open, Esc used to abort the run while the reader was looking
+  // at the queue (round-4 loop audit F6). Declared before the early return so the
+  // hook order never depends on the queue being non-empty.
+  useEscClaim({
+    id: 'queue-panel',
+    level: 'overlay',
+    active: open,
+    onEscape: () => {
+      setOpen(false);
+      return true;
+    },
+  });
   if (items.length === 0) return null;
 
   const content = (
@@ -99,6 +115,8 @@ export function PromptQueuePanel({
         placement="topLeft"
         content={content}
         title={t('thread.queue.title')}
+        open={open}
+        onOpenChange={setOpen}
       >
         <Button size="small" type="text">
           {t('thread.queue.count', { count: items.length })}
