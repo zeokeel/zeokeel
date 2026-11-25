@@ -24,6 +24,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/memorystore"
 	"github.com/zeokeel/zeokeel/internal/modules/modelcatalog"
 	"github.com/zeokeel/zeokeel/internal/modules/notifyroute"
+	"github.com/zeokeel/zeokeel/internal/modules/replyrelay"
 	"github.com/zeokeel/zeokeel/internal/modules/sandbox"
 	"github.com/zeokeel/zeokeel/internal/modules/sessionstore"
 	"github.com/zeokeel/zeokeel/internal/modules/skills"
@@ -78,6 +79,8 @@ func Registry() *module.Registry {
 	// The autonomous loop starts last among the work modules: it wants the lead
 	// and the channel adapters to already exist.
 	mustRegister(registry, heartbeat.Module())
+	// The reply relay joins the inbox and the approval action service.
+	mustRegister(registry, replyrelay.Module())
 	// tasklease wraps the task board: it must come after toolkit.
 	mustRegister(registry, tasklease.Module())
 	mustRegister(registry, goal.Module())

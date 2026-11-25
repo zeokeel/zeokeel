@@ -148,7 +148,7 @@ func TestProductsAndEntries(t *testing.T) {
 	wantHeadless := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/inbox", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/insights",
-		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/credentials", "zeokeel/webhook", "zeokeel/wechat", "zeokeel/feishu", "zeokeel/dingtalk", "zeokeel/email", "zeokeel/heartbeat", "zeokeel/browser", "zeokeel/hosttools", "zeokeel/memorystore", "zeokeel/teamnotes",
+		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/credentials", "zeokeel/webhook", "zeokeel/wechat", "zeokeel/feishu", "zeokeel/dingtalk", "zeokeel/email", "zeokeel/replyrelay", "zeokeel/heartbeat", "zeokeel/browser", "zeokeel/hosttools", "zeokeel/memorystore", "zeokeel/teamnotes",
 		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
 	}
 	loaded := make(map[string]bool, len(headless))
@@ -264,7 +264,7 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 
 	instances := loader.Instances()
 	wantIDs := []string{
-		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "notifyroute", "creds", "webhook", "wechat", "feishu", "dingtalk", "email", "heartbeat", "browser", "hosttools", "memorystore", "teamnotes",
+		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "notifyroute", "creds", "webhook", "wechat", "feishu", "dingtalk", "email", "replyrelay", "heartbeat", "browser", "hosttools", "memorystore", "teamnotes",
 		"agent", "automation", "update", "importer", "acp",
 	}
 	gotIDs := make([]string, 0, len(instances))
@@ -393,6 +393,16 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 		ID: "n1", TaskID: "assembly-note", Title: "assembly note", Body: "landed", Author: "bot-1",
 	}); err != nil {
 		t.Fatalf("teamnotes Record through the assembly: %v", err)
+	}
+
+	// The reply relay is wired over the real inbox and approval action service:
+	// a pass on an empty inbox must be a quiet success, not an error.
+	relayService, ok := root.Get(contracts.KeyReplyRelay)
+	if !ok || relayService == nil {
+		t.Fatal("KeyReplyRelay service is not available on the root")
+	}
+	if report, err := relayService.Relay(context.Background()); err != nil || report.Applied != 0 {
+		t.Fatalf("replyrelay Relay = (%+v, %v), want a quiet pass", report, err)
 	}
 
 	// The autonomous loop is running: one pass through the assembled services

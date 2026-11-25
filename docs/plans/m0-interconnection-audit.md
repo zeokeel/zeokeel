@@ -54,6 +54,7 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | Web 共享记忆页 | `web/src/features/settings/memory/**` | `/settings/memory`（R27c） | 18 测试（列表/复核态/确认驳回/失败保留行/窄屏） |
 | 模型计划器装配 | `lead.PlannerFromSettings`（读 `chat.baseURL/apiKey/model`） | `lead.RunOnce` | 4 条（完整→模型/缺项→规则） |
 | `heartbeat.configure` | gateway + 运行状态页控件 | 运行中改节奏/开关 | 3 条模块测试 + 5 条 UI 测试（开关/节奏/失败不翻转/在飞禁用） |
+| `contracts.KeyReplyRelay` | replyrelay（inbox + approval action） | 聊天里回「同意」 | 5 条（归档/非回复不动/非渠道不解析/无待办不报错/同一到达只解析一次） |
 | 渠道报文夹具（微信） | wechat testdata + fixtures | 真机前最后一道闸 | 发现 200+ret_code 当成功、data 信封静默丢弃，均已修 |
 | 渠道报文夹具（邮件） | email testdata + fixtures | 真机前最后一道闸 | 发现 multipart 当原文入库、HTML-only 静默、折叠主题留 CRLF；单封坏信曾阻塞整个邮箱，已改为跳过+上报 |
 | Web 渠道设置 | `web/src/features/settings/channels/**`、`web/src/api/channels.ts` | `/settings/channels`（R27a） | 12 测试；密钥不回显有断言 |
@@ -146,6 +147,11 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 | 连接器失败不再静默：状态与错误文案一起展示 | 同上（`state=failed` 时显示 gateway error） |
 
 **仍缺**：把"某个连接器的某个工具"直接绑到某个任务上作为计划步骤（任务 → 工具的白名单）。这属于执行策略，不是连接器接入；在规划里属于 M3/M5 交界，留待后续。
+
+**聊天回复审批的测试边界**：headless 装配把 approvals 配成 `mode: auto`（请求自动通过，永远没有 pending），
+所以在整装配里跑不通"回同意→批准"这条链。现在的证据是分层的：`approvals.ApplyReply` 自己有解析测试、
+`replyrelay` 模块有"归档/不动/不解析机器来源"的行为测试、装配断言只证明服务已连上。
+真机/手动模式下的完整链路仍待验证（记在这里，而不是假装跑通）。
 
 ## 5. 互联审计的固定动作（每加一个模块都做）
 

@@ -115,6 +115,11 @@
       "config": {}
     },
     {
+      "id": "replyrelay",
+      "module": "zeokeel/replyrelay",
+      "config": {}
+    },
+    {
       "id": "heartbeat",
       "module": "zeokeel/heartbeat",
       "config": {}
