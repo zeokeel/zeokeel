@@ -40,34 +40,51 @@ scripts/channel-verify.sh dingtalk    http://127.0.0.1:<port> <secret>
 
 ## 1. 微信（ClawBot / iLink）
 
-1. 设置页「渠道」→ kind=wechat，填 token（扫码流程拿到后）。
-2. `心跳`（/settings/health）应显示 running，且 last pass 有 polls。
-3. 手机发一条文本 → `/inbox/incoming` 出现 → 派成任务 → 任务板可见。
-4. 通过 Web 回复一条 → 手机收到。
-5. 隔 20h 再点发送：应该**本地拒绝**（`ErrWeChatWindowClosed`），而不是假装成功。
+| # | 操作 | 期望（可观察） | 不通过说明什么 | 状态 |
+|---|---|---|---|---|
+| 1.1 | 设置页「渠道」→ kind=wechat → 扫码登录 | 弹二维码可复制/可扫；登录后 token 落库（`credentials list` 只显示 id，不显示值） | 扫码协议或凭据写入有问题 | ⬜ 待真机 |
+| 1.2 | `/settings/health` → 自转 | running=true，通道轮询周期内 `last pass` 时间前移 | 轮询循环没起来 | ⬜ |
+| 1.3 | 手机发一条文本 | `/inbox/incoming` 出现 1 条（同一条重复发不新增，count 只加 1） | 拉取解析或去重有问题 | ⬜ |
+| 1.4 | 把该条派成任务 → 任务板 | 任务出现，owner 正确 | 收件箱→任务链断 | ⬜ |
+| 1.5 | 用「待发送消息/发送测试」发一条 | 手机真的收到；回执 `channel=wechat` | 发送字段不全（见坑）或窗口过期 | ⬜ |
+| 1.6 | 隔 24h 再发 | **本地拒绝** `ErrWeChatWindowClosed`，不假装成功 | 我们会谎报投递 | ⬜ |
 
 已知坑（做的时候会遇到）：
-- `sendmessage` 少任一字段 → HTTP 200 但**不投递**；
+- `sendmessage` 少任一字段 → HTTP 200 但**不投递**（所以适配器只在 body 明确 ok 时才报 delivered）；
 - `context_token` 必须用当次消息的，不能复用旧的；
 - 24h 窗口只能靠用户再发一条消息刷新，机器人无法主动续期。
 
 ## 2. 钉钉
 
-1. 应用控制台把机器人回调地址设为 `https://<host>/api/inbound/dingtalk`（需公网或内网穿透）。
-2. 用 `scripts/channel-verify.sh dingtalk` 先验签名，再在群里 @机器人 发一条。
-3. 钉钉官方回调头是 `timestamp` + `sign`（时间戳**毫秒**），适配器两种拼写都接受；签名覆盖的是 `timestamp+"\n"+secret`，时间戳按原样参与计算。
+| # | 操作 | 期望（可观察） | 不通过说明什么 | 状态 |
+|---|---|---|---|---|
+| 2.1 | 应用控制台回调地址 = `https://<host>/api/inbound/dingtalk`（需公网/内网穿透） | 平台保存成功 | 网络可达性 | ⬜ |
+| 2.2 | `bash scripts/channel-verify.sh dingtalk --base https://<host> --secret <secret>` | 本地构造的签名请求回 202；错签名回 401 | 适配器签名实现错了 | 🟡 本地已验（符号形状） |
+| 2.3 | 群里 @机器人 发一条 | 1 分钟内进收件箱 | 真实 header 名/时间戳单位与平台不一致 | ⬜ |
+| 2.4 | 回复该条（经审批） | 群里收到；回执 `channel=dingtalk` | 出站映射错 | ⬜ |
+
+钉钉官方回调头是 `timestamp` + `sign`（时间戳**毫秒**），适配器两种拼写都接受；
+签名覆盖 `timestamp+"\n"+secret`，时间戳按原样参与计算。
 
 ## 3. 飞书
 
-1. 事件订阅地址填 `https://<host>/api/inbound/feishu`，平台会先发 `url_verification`——必须回 **200 + challenge**（回 202 会判失败）。
-2. 卡片回调地址填 `https://<host>/api/inbound/feishu/card`；卡片 action.value 必须带 `{approvalId,decision,token}`，否则会被 400 拒绝。
-3. 若开启加密事件（encrypt），当前实现**不支持**，需先在设置里关闭。
+| # | 操作 | 期望（可观察） | 不通过说明什么 | 状态 |
+|---|---|---|---|---|
+| 3.1 | 事件订阅地址 = `https://<host>/api/inbound/feishu` | 平台握手通过（我们回 **200 + challenge**；回 202 会判失败） | 握手响应形状错 | ✅ 本地已验 |
+| 3.2 | 关闭加密（encrypt）后发一条群消息 | 1 分钟内进收件箱 | 事件字段映射 | ⬜ |
+| 3.3 | 开启加密事件 | 我们**明确报错**（`ErrFeishuBadPayload`），不静默 200 | —— | ✅ 已实现（明确不支持） |
+| 3.4 | 卡片回调地址 = `/api/inbound/feishu/card`，action.value 带 `{approvalId,decision,token}` | 点「同意/拒绝」→ 审批被解决，回执可见 | 卡片值解析或令牌校验 | ⬜ |
+| 3.5 | 卡片 value 缺字段 | 400 拒绝（不猜） | 我们猜了用户的意图 | 🟡 本地已验 |
 
 ## 4. 邮件
 
-1. 设置页 kind=email：`username`/`password`（IMAP/SMTP 同一账号）。
-2. 发一封中文主题邮件给自己 → 主题不乱码。
-3. 收一封带 base64 正文的邮件 → 正文正确。
+| # | 操作 | 期望（可观察） | 不通过说明什么 | 状态 |
+|---|---|---|---|---|
+| 4.1 | 设置页 kind=email：`username`/`password` | 保存后凭据只显示 id | 凭据写入 | 🟡 本地已验 |
+| 4.2 | 发一封**中文主题**邮件给自己 | 主题不乱码 | MIME 编码字处理 | ⬜ |
+| 4.3 | 收一封 **GBK 声明**的中文邮件 | 正文正确（不是乱码） | 字符集解码 | ✅ 已实现（本地夹具） |
+| 4.4 | 收一封带 base64 正文的 multipart | 正文正确、附件不混入 | multipart 解析 | ✅ 本地夹具 |
+| 4.5 | 投递一封损坏邮件（截断 base64） | 该封跳过并记录，**其余邮件照常入箱** | 一封坏邮件堵住整个邮箱 | ✅ 本地夹具 |
 
 ## 4b. 已验证的部分（本机真实进程，非 httptest）
 
@@ -190,3 +207,32 @@ SUMMARY 14/14 passed
 ```
 
 预算那次"爆表"是**真的被产品拒绝**，不是测试自己算出来的数：报文里带着 used/max。
+
+## 7. 交给有凭据的人：一次跑完的清单
+
+前提：一台能被平台访问到的机器（公网 IP 或内网穿透），以及 1 个钉钉应用 / 1 个飞书应用 / 1 个微信账号 / 1 个邮箱。
+
+```bash
+# 0) 本机自证（不需要任何凭据，必须全绿）
+bash scripts/verify-live/run.sh              # 期望 SUMMARY 14/14 passed
+
+# 1) 起产品（记下 gateway.json 里的 port 与 token）
+./.cache/zkverify-live --product serve --data-dir ./devdata
+
+# 2) 渠道签名自检（不需要平台在线）
+bash scripts/channel-verify.sh webhook  --base http://127.0.0.1:<port>
+bash scripts/channel-verify.sh dingtalk --base http://<公网地址> --secret <secret>
+bash scripts/channel-verify.sh feishu-challenge --base http://<公网地址>
+
+# 3) 按 §1–§4 的表逐行操作，每行记录：时间、观察到的结果、截图或原始响应
+```
+
+回传给我时请按「行号 + 期望是否达成 + 原始证据」写，例如：
+
+```
+2.3 ✅ 群 @机器人 后 12s 出现在 /inbox/incoming，item id inbox-000004
+2.4 ❌ 回复未送达：回执 channel=inapp，errors=["dingtalk: 请求被拒绝(403)"]
+1.6 ✅ 24h 后发送被本地拒绝：lease: wechat window closed
+```
+
+哪一行没达成，就停在那行——那说明那条链路的真实缺陷，比继续往后跑更有价值。
