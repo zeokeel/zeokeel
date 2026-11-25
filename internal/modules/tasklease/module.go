@@ -50,9 +50,14 @@ func Module() *module.Descriptor[Config] {
 		if _, err := ctx.Provide(contracts.KeyTaskLease, contracts.TaskLeaseService(service)); err != nil {
 			return fmt.Errorf("%s: provide task lease: %w", ModuleID, err)
 		}
+		// The held-send half is its own key: a consumer that only parks outbound
+		// messages should not have to implement thirteen lease methods.
+		if _, err := ctx.Provide(contracts.KeyTaskSendHolder, contracts.TaskSendHolder(service)); err != nil {
+			return fmt.Errorf("%s: provide held sends: %w", ModuleID, err)
+		}
 		return nil
 	}).
-		AddProvides(module.Provides(contracts.KeyTaskLease)).
+		AddProvides(module.Provides(contracts.KeyTaskLease), module.Provides(contracts.KeyTaskSendHolder)).
 		AddRequires(module.Requires(contracts.KeyTaskBoard), module.Requires(contracts.KeyDataDir)).
 		WithName("ZeoKeel task lease (claim, evidence, review)")
 }

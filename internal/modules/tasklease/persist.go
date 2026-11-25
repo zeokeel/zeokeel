@@ -61,6 +61,10 @@ type leaseStoreDocument struct {
 	// survive a restart — a task that already spent its budget may not start the
 	// next process with a full one.
 	Budgets []contracts.TaskBudget `json:"budgets,omitempty"`
+	// HeldSends is the message a before_send task parked (G2, outbound half):
+	// additive like the rest, so an older build simply ignores it. Held text
+	// that vanished on restart would be a message nobody decided about.
+	HeldSends []contracts.HeldSend `json:"heldSends,omitempty"`
 }
 
 // Open builds a service whose live leases live in dir/leases.json. A missing
@@ -129,6 +133,12 @@ func Open(dir string, board contracts.TaskBoard, cfg Config) (*Service, error) {
 	// lenient about an unknown value: an approval gate this build cannot
 	// interpret is read back as before_start (fail closed). Silently treating
 	// it as "none" would open a gate an operator explicitly closed.
+	for _, held := range document.HeldSends {
+		if held.TaskID == "" || held.Text == "" {
+			continue
+		}
+		service.heldSends[held.TaskID] = held.Text
+	}
 	for _, approval := range document.Approvals {
 		if approval.TaskID == "" {
 			continue
@@ -241,6 +251,14 @@ func (s *Service) persistLocked() error {
 	sort.Strings(budgetIDs)
 	for _, id := range budgetIDs {
 		document.Budgets = append(document.Budgets, *s.budgets[id])
+	}
+	heldIDs := make([]string, 0, len(s.heldSends))
+	for id := range s.heldSends {
+		heldIDs = append(heldIDs, id)
+	}
+	sort.Strings(heldIDs)
+	for _, id := range heldIDs {
+		document.HeldSends = append(document.HeldSends, contracts.HeldSend{TaskID: id, Text: s.heldSends[id]})
 	}
 	refusalIDs := make([]string, 0, len(s.startRejections))
 	for id := range s.startRejections {

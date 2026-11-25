@@ -15,8 +15,17 @@ func TestDescriptorMetadata(t *testing.T) {
 	if descriptor.ID != ModuleID {
 		t.Fatalf("module ID = %q, want %q", descriptor.ID, ModuleID)
 	}
-	if len(descriptor.Provides) != 1 || descriptor.Provides[0].Name != contracts.KeyTaskLease.Name() {
-		t.Fatalf("provides = %+v, want the task lease key", descriptor.Provides)
+	// Two keys, one store: the lease itself and the held-send half (a consumer
+	// that only parks outbound messages should not need thirteen lease methods).
+	provided := map[string]bool{}
+	for _, provide := range descriptor.Provides {
+		provided[provide.Name] = true
+	}
+	if !provided[contracts.KeyTaskLease.Name()] || !provided[contracts.KeyTaskSendHolder.Name()] {
+		t.Fatalf("provides = %+v, want the lease and held-send keys", descriptor.Provides)
+	}
+	if len(descriptor.Provides) != 2 {
+		t.Fatalf("provides = %d, want exactly two", len(descriptor.Provides))
 	}
 	required := map[string]bool{}
 	for _, requirement := range descriptor.Requires {

@@ -403,6 +403,8 @@ const mockTaskTools = new Map();
 const mockTaskApproval = new Map();
 /** Task -> budget meter. */
 const mockTaskBudgets = new Map();
+/** Task -> message held for approval (approval=before_send). */
+const mockHeldSends = new Map();
 /** Skill drafts proposed by finished tasks. */
 const mockSkillDrafts = [];
 /** Bot templates + instances. */
@@ -1876,6 +1878,15 @@ const wsDispatch = (client, message) => {
       }
       item.status = action;
       return reply({ ...item });
+    }
+    case 'tasks.send.approve': {
+      const id = String(params.id ?? '');
+      const approver = String(params.approver ?? '');
+      if (!id || !approver) return fail(-32602, 'invalid_params');
+      const held = mockHeldSends.get(id);
+      if (!held) return fail(-32600, 'held send: none for this task');
+      mockHeldSends.delete(id);
+      return reply({ sent: true, channel: 'inapp', attempts: ['inapp'] });
     }
     case 'tasks.budget.set': {
       const id = String(params.id ?? '');

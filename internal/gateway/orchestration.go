@@ -470,7 +470,12 @@ func (g *Gateway) taskReview(ctx context.Context, raw json.RawMessage) (any, *pr
 		g.recordReviewNote(ctx, params.ID, params.Reviewer, params.Note, lease)
 		g.proposeSkillDraft(ctx, params.ID, params.Note, lease)
 	}
-	g.notifyReview(ctx, params.Decision, params.ID, params.Note)
+	// before_send holds the words: the person approved the work, not the message.
+	if g.reviewNeedsSendApproval(ctx, params.ID) {
+		g.holdOutbound(ctx, params.ID, params.Decision, params.Note)
+	} else {
+		g.notifyReview(ctx, params.Decision, params.ID, params.Note)
+	}
 	return taskLeaseFromContract(lease), nil
 }
 
@@ -503,6 +508,43 @@ func (g *Gateway) recordReviewNote(ctx context.Context, taskID, reviewer, note s
 	}); err != nil {
 		g.logger.Printf("gateway: record review note for %s: %v", taskID, err)
 	}
+}
+
+// reviewNeedsSendApproval reports whether this task's policy parks the outbound
+// message instead of sending it.
+func (g *Gateway) reviewNeedsSendApproval(ctx context.Context, taskID string) bool {
+	leases, ok := g.root.Get(contracts.KeyTaskLease)
+	if !ok || leases == nil {
+		return false
+	}
+	policy, set, err := leases.Approval(ctx, taskID)
+	if err != nil || !set {
+		return false
+	}
+	return policy == contracts.TaskApprovalBeforeSend
+}
+
+// holdOutbound parks the message a before_send task wants to send. A failure to
+// park is logged, never fatal: the review already happened.
+func (g *Gateway) holdOutbound(ctx context.Context, taskID, decision, note string) {
+	holder, ok := g.root.Get(contracts.KeyTaskSendHolder)
+	if !ok || holder == nil {
+		return
+	}
+	category := contracts.NotifyCategoryTaskDone
+	text := "任务 " + taskID + " 已通过验收。"
+	if decision != "accept" {
+		category = contracts.NotifyCategoryTaskFailed
+		text = "任务 " + taskID + " 被打回，需要返工。"
+	}
+	if strings.TrimSpace(note) != "" {
+		text += "\n" + note
+	}
+	if err := holder.Hold(ctx, taskID, text); err != nil {
+		g.logger.Printf("gateway: hold outbound for %s: %v", taskID, err)
+		return
+	}
+	g.logger.Printf("gateway: outbound for %s held (%s) until approved", taskID, category)
 }
 
 // notifyReview tells the human that a task settled. It is the first real
@@ -2030,4 +2072,43 @@ func (g *Gateway) botsTemplateGet(ctx context.Context, raw json.RawMessage) (any
 	}
 	dto := botTemplateFromContract(template)
 	return botTemplateGetResult{Template: &dto}, nil
+}
+
+type taskSendApproveParams struct {
+	ID       string `json:"id"`
+	Approver string `json:"approver"`
+}
+
+// taskSendApprove lets a held message leave. Approval is the whole point of the
+// before_send policy, so an unknown task or an empty approver is refused rather
+// than treated as consent.
+func (g *Gateway) taskSendApprove(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	holder, ok := g.root.Get(contracts.KeyTaskSendHolder)
+	if !ok || holder == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "held sends unavailable")
+	}
+	var params taskSendApproveParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(params.Approver) == "" {
+		return nil, errInvalidParams("approver", "approver is required")
+	}
+	text, err := holder.ApproveSend(ctx, params.ID)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	dispatcher, ok := g.root.Get(contracts.KeyChannelDispatch)
+	if !ok || dispatcher == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "channel dispatch unavailable")
+	}
+	receipt, err := dispatcher.Deliver(ctx, contracts.NotifyCategoryTaskDone, text)
+	if err != nil {
+		// The message left the hold but did not reach a channel; report it rather
+		// than pretending the send happened.
+		return nil, orchestrationError(err)
+	}
+	return map[string]any{
+		"sent": true, "channel": receipt.Channel, "attempts": receipt.Attempts,
+	}, nil
 }

@@ -104,7 +104,9 @@ func TestSetApprovalValidation(t *testing.T) {
 	svc, _ := newService(t, board, nil)
 	ctx := context.Background()
 
-	for _, value := range []string{"", "before_send", "approve", "BEFORE_START", "none;"} {
+	// before_send is a real policy now (held outbound message), so the unknown
+	// example has to be a value this build genuinely does not know.
+	for _, value := range []string{"", "before_publish", "approve", "BEFORE_START", "none;"} {
 		t.Run("policy="+value, func(t *testing.T) {
 			if _, err := svc.SetApproval(ctx, "task-1", value); !errors.Is(err, contracts.ErrLeaseInvalid) {
 				t.Fatalf("SetApproval(%q) err = %v, want ErrLeaseInvalid", value, err)
@@ -431,7 +433,7 @@ func TestUnknownPersistedPolicyFailsClosed(t *testing.T) {
 	clock := newClock()
 	cfg := tasklease.Config{Now: clock.now, TTL: time.Minute}
 	ctx := context.Background()
-	seed := `{"version":1,"leases":[],"approvals":[{"TaskID":"task-1","Policy":"before_send"}]}`
+	seed := `{"version":1,"leases":[],"approvals":[{"TaskID":"task-1","Policy":"before_publish"}]}`
 	if err := writeLeaseFile(dir, seed); err != nil {
 		t.Fatalf("seed: %v", err)
 	}

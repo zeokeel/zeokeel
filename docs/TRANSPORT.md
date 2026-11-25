@@ -828,10 +828,11 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `tasks.review` | `{id,decision:"accept"\|"reject",reviewer,note?}` | `TaskLease` | N | `TaskLeaseService.Accept` / `Reject` | ✅ 已实现 |
 | `tasks.tools.set` | `{id,tools:[string]}` | `TaskTools` | N | `TaskLeaseService.SetTools`（`tools:[]` 清除；名字 `[a-z0-9_.:-]{1,120}`、≤32、不重复；未知任务/非法列表 → `-32600`） | ✅ 已实现 |
 | `tasks.tools.get` | `{id}` | `TaskTools`（无绑定 `{tools:null}`） | Y | `TaskLeaseService.Tools` | ✅ 已实现 |
-| `tasks.approval.set` | `{id,policy:"none"\|"before_start"}` | `{policy}` | N | `TaskLeaseService.SetApproval`（策略属于任务；写进 `leases.json` 的 `approvals` 键；其它值 → `-32600`） | ✅ 已实现 |
+| `tasks.approval.set` | `{id,policy:"none"\|"before_start"\|"before_send"}` | `{policy}` | N | `TaskLeaseService.SetApproval`（策略属于任务；写进 `leases.json` 的 `approvals` 键；其它值 → `-32600`） | ✅ 已实现 |
 | `tasks.approval.get` | `{id}` | `{policy,set}` | Y | `TaskLeaseService.Approval`（没有策略时答 `{policy:"none",set:false}`） | ✅ 已实现 |
 | `tasks.approve` | `{id,approver}` | `TaskLease`（`awaiting_approval` → `claimed`，保留 owner 并重算租期） | N | `TaskLeaseService.Approve`（没有待批准的租约 → `-32600`） | ✅ 已实现 |
 | `tasks.reject-start` | `{id,approver,note}` | `{ok:true}` | N | `TaskLeaseService.RejectStart`（任务回 pending、清 owner；note 记进 `startRejections`） | ✅ 已实现 |
+| `tasks.send.approve` | `{id,approver}` | `{sent:true,channel,attempts?}` | N | `TaskSendHolder.ApproveSend` + `ChannelDispatchService.Deliver`（仅 `approval=before_send` 的任务会挂起消息；approver 必填；同一条只发一次） | ✅ 已实现 |
 | `tasks.budget.set` | `{id,maxTokens?,maxMinutes?}` | `{taskId,maxTokens,maxMinutes,usedTokens,startedAt?,exhausted}` | N | `TaskLeaseService.SetBudget`（上限属于任务，写进 `leases.json` 的 `budgets` 键；两轴 0=不限、负数 → `-32600`；替换上限不动用量；兼作"Lead 追加预算"：有余量时被 stop 的租约回到 `claimed`） | ✅ 已实现 |
 | `tasks.budget.get` | `{id}` | 同上；从没设过预算且没有用量时 `{budget:null}` | Y | `TaskLeaseService.Budget` | ✅ 已实现 |
 | `tasks.budget.consume` | `{id,tokens}` | 累加后的 `TaskBudget` | N | `TaskLeaseService.Consume`（用量由测量方上报；`used > max` 越限时租约转 `blocked` 并返回 `-32600`（`lease: task budget exhausted`，报文含 used/max），此后 `tasks.submit` 同样被拒，只有 Lead 调 `tasks.budget.set` 追加预算才继续。显式 `tokens:0` = 只重算时长轴） | ✅ 已实现 |

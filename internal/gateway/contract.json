@@ -556,6 +556,13 @@
         "note"
       ]
     },
+    "tasks.send.approve": {
+      "required": [
+        "approver",
+        "id"
+      ],
+      "optional": []
+    },
     "tasks.snapshot": {
       "required": [],
       "optional": [

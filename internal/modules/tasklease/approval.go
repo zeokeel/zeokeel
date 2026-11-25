@@ -176,6 +176,8 @@ func approvalPolicy(value string) (string, bool) {
 		return contracts.TaskApprovalNone, true
 	case contracts.TaskApprovalBeforeStart:
 		return contracts.TaskApprovalBeforeStart, true
+	case contracts.TaskApprovalBeforeSend:
+		return contracts.TaskApprovalBeforeSend, true
 	}
 	return "", false
 }

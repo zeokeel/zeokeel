@@ -10,7 +10,7 @@
 | ID | 差距 | 状态 | 证据 / 位置 | 还差什么 |
 |---|---|---|---|---|
 | G1 | Bot 实体（模板+实例） | ✅ | `bot` 模块 + `bots.*`（含模板编辑）+ 派单到 Bot + `/settings/bots`；**工具绑定在门禁处真的执行**（`session.bindtask` → 不在绑定内的工具被拒，理由含任务与允许集） | 多用户角色（Owner/Manager/Collaborator）属 M6 第二期 |
-| G2 | 队友开工前确认 | 🟡 | `tasklease`：`tasks.approval.set/get` + `awaiting_approval` 状态 + `tasks.approve` / `tasks.reject-start`（策略随任务持久化，未知值 fail-closed） | `before_send` 未做；无推送域（UI 需轮询）；审批通过/拒绝尚未发通知 |
+| G2 | 队友开工前确认（三态齐） | ✅ | `none` / `before_start`（开工停门口）/ `before_send`（**消息挂起**，`tasks.send.approve` 才发，只发一次，持久化） | UI 未做 before_send 的“待发送”提示；无推送域 |
 | G3 | 任务板租约 | ✅ | `internal/modules/tasklease`（claim/heartbeat/expire，过期回收） | — |
 | G4 | 证据与验收 | ✅ | `tasklease`（无证据拒收）+ `tasks.review` + 验收写团队笔记 | — |
 | G5 | 统一收件箱 | ✅ | `internal/modules/inbox`（去重/配额/TTL/持久化）+ `inbox.dispatch/triage` | — |

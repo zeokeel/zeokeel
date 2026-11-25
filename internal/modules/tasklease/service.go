@@ -58,6 +58,10 @@ type Service struct {
 	// belongs to the task rather than to a lease — a release/re-claim must not
 	// reset the meter — and it is the row the stop reads.
 	budgets map[string]*contracts.TaskBudget
+	// heldSends parks the message of a before_send task until a human approves
+	// it. It lives beside the other task-scoped rows so a restart cannot lose a
+	// message nobody decided about yet.
+	heldSends map[string]string
 	// path is the durable document (dir/leases.json); empty means in-memory only
 	// (NewService, and unit tests that do not care about durability).
 	path string
@@ -72,6 +76,7 @@ func NewService(board contracts.TaskBoard, cfg Config) *Service {
 		approvals:       make(map[string]*contracts.TaskApproval),
 		startRejections: make(map[string]*contracts.TaskStartRejection),
 		budgets:         make(map[string]*contracts.TaskBudget),
+		heldSends:       make(map[string]string),
 	}
 }
 

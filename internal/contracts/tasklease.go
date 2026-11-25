@@ -169,6 +169,12 @@ const (
 	// TaskApprovalNone means the task may start as soon as it is claimed. It is
 	// also the default for a task that carries no policy at all.
 	TaskApprovalNone = "none"
+
+	// TaskApprovalBeforeSend means the task may start, but the message it wants
+	// to send when it settles waits for a human: the text is held with the task
+	// and only leaves the product after `tasks.send.approve`. It is the outbound
+	// half of the same gate before_start puts at the door.
+	TaskApprovalBeforeSend = "before_send"
 	// TaskApprovalBeforeStart parks a claim in awaiting_approval: the owner is
 	// recorded and the heartbeat keeps the claim alive, but Submit is refused
 	// with ErrLeaseApprovalRequired until Approve moves it to claimed.
