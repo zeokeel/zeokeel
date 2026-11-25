@@ -8,7 +8,10 @@ package assembly_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
+	"strconv"
 	"time"
 
 	"errors"
@@ -1007,5 +1010,104 @@ func TestM0ChainEndToEnd(t *testing.T) {
 	plan, err := router.Plan(ctx, contracts.NotifyCategoryApproval, time.Now(), nil)
 	if err != nil || len(plan.Channels) == 0 || plan.Channels[len(plan.Channels)-1] != contracts.NotifyChannelInApp {
 		t.Fatalf("notify plan = (%+v, %v), want in-app terminal channel", plan, err)
+	}
+}
+
+// TestFeishuChainEndToEnd is the second channel through the same assembled chain:
+// a signed Feishu event travels adapter → inbox → lead triage → task board. The
+// webhook chain proved the wire; this proves the adapter's own seam (signature,
+// envelope parsing, dedupe key) really reaches the same services.
+func TestFeishuChainEndToEnd(t *testing.T) {
+	root := newRoot(t)
+	provideHostServices(t, root)
+	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductHeadless, assembly.BuildInfo{
+		Version: "9.9.9", Commit: "deadbeef", BuildTime: "2026-11-06T12:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("load headless: %v", err)
+	}
+	defer func() {
+		if err := loader.Close(); err != nil {
+			t.Errorf("loader.Close: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+	inboxService, ok := root.Get(contracts.KeyInbox)
+	if !ok {
+		t.Fatal("KeyInbox missing")
+	}
+	feishuService, ok := root.Get(contracts.KeyFeishu)
+	if !ok || feishuService == nil {
+		t.Fatal("KeyFeishu missing")
+	}
+	leadService, ok := root.Get(contracts.KeyLead)
+	if !ok {
+		t.Fatal("KeyLead missing")
+	}
+	leadRules, ok := leadService.(contracts.LeadRuleAdmin)
+	if !ok {
+		t.Fatal("lead does not expose rule admin")
+	}
+	board, ok := root.Get(contracts.KeyTaskBoard)
+	if !ok {
+		t.Fatal("KeyTaskBoard missing")
+	}
+
+	if err := leadRules.SetRules(ctx, []contracts.LeadRule{{
+		Source: "feishu", Assignee: "bot-feishu", SubjectPrefix: "飞书：",
+	}}); err != nil {
+		t.Fatalf("SetRules: %v", err)
+	}
+
+	body := []byte(`{"schema":"2.0","header":{"event_type":"im.message.receive_v1"},` +
+		`"event":{"sender":{"sender_id":{"open_id":"ou_1"}},` +
+		`"message":{"message_id":"om_1","chat_id":"oc_1","message_type":"text",` +
+		`"content":"{\"text\":\"帮我看下退款率\"}"}}}`)
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	nonce := "assembly-nonce"
+	// The headless assembly configures no encrypt key, so the signature covers an
+	// empty key — exactly what the adapter computes from its own config.
+	mac := sha256.Sum256(append([]byte(timestamp+nonce), body...))
+	headers := map[string]string{
+		"X-Lark-Signature":         hex.EncodeToString(mac[:]),
+		"X-Lark-Request-Timestamp": timestamp,
+		"X-Lark-Request-Nonce":     nonce,
+	}
+
+	item, merged, err := feishuService.Receive(ctx, headers, body)
+	if err != nil {
+		t.Fatalf("feishu.Receive through the assembly: %v", err)
+	}
+	if merged || item.Source != contracts.FeishuSource || item.Channel != "oc_1" {
+		t.Fatalf("item = %+v merged=%v, want a feishu inbox row", item, merged)
+	}
+
+	report, err := leadService.RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("lead.RunOnce: %v", err)
+	}
+	if report.Dispatched != 1 || report.Failed != 0 {
+		t.Fatalf("lead report = %+v, want the feishu item dispatched", report)
+	}
+
+	tasks, err := board.List(ctx)
+	if err != nil {
+		t.Fatalf("board.List: %v", err)
+	}
+	found := false
+	for _, task := range tasks {
+		if task.Owner == "bot-feishu" && strings.HasPrefix(task.Subject, "飞书：") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("no task owned by bot-feishu on the board: %+v", tasks)
+	}
+
+	updated, err := inboxService.Get(ctx, item.ID)
+	if err != nil || updated.Status != contracts.InboxStatusTask {
+		t.Fatalf("inbox row after triage = (%+v, %v), want status task", updated, err)
 	}
 }
