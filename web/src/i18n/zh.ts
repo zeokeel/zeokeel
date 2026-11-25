@@ -371,6 +371,7 @@ export const zh = {
   'task.detail.progress.rejected': '你打回了',
   'task.detail.progress.evidenceCount': '{count} 条证据',
   'task.detail.evidence.empty': '还没有证据',
+  'task.detail.evidence.failed': '证据没读出来',
   'task.detail.artifacts.empty': '还没有产物',
   'task.detail.evidence.kind.file': '文件',
   'task.detail.evidence.kind.link': '链接',

@@ -21,6 +21,7 @@ const T = (key: MessageKey, params?: Record<string, string | number>) =>
  */
 const api = vi.hoisted(() => ({
   loadTaskBoard: vi.fn(),
+  loadTaskLease: vi.fn(),
   claimTask: vi.fn(),
   heartbeatTask: vi.fn(),
   submitTask: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock('@/api/task', () => ({
   LEASE_STATES: ['claimed', 'review', 'done', 'rejected'],
   EVIDENCE_KINDS: ['file', 'link', 'output', 'screenshot'],
   loadTaskBoard: api.loadTaskBoard,
+  loadTaskLease: api.loadTaskLease,
   claimTask: api.claimTask,
   heartbeatTask: api.heartbeatTask,
   submitTask: api.submitTask,
@@ -79,6 +81,12 @@ function sectionHeadings(): string[] {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // `mockResolvedValueOnce` queues survive `clearAllMocks`, so the lease read is
+  // reset outright: a leftover answer from one test must not steer the next.
+  api.loadTaskLease.mockReset();
+  // No claim unless a test says so: "no lease" is the honest default for a task
+  // nobody has opened.
+  api.loadTaskLease.mockResolvedValue(null);
   api.claimTask.mockResolvedValue(lease());
   api.submitTask.mockResolvedValue(lease({ state: 'review' }));
   api.reviewTask.mockResolvedValue(lease({ state: 'done' }));
@@ -137,6 +145,9 @@ describe('TaskDetailScreen', () => {
 
   it('claims with the task id as the Lead, then re-reads the board', async () => {
     api.loadTaskBoard.mockResolvedValue([task()]);
+    // Opening the task: nobody holds it. After the claim the lease read is what
+    // reports it — the same two reads, now with a claim in the second one.
+    api.loadTaskLease.mockResolvedValueOnce(null).mockResolvedValue(lease());
     const user = userEvent.setup();
 
     renderScreen();
@@ -152,6 +163,9 @@ describe('TaskDetailScreen', () => {
 
   it('keeps 提交证据 disabled until the ref is non-empty, then submits it as evidence', async () => {
     api.loadTaskBoard.mockResolvedValue([task()]);
+    api.loadTaskLease
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(lease({ state: 'review', evidence: [{ kind: 'file', ref: 'out/report.md' }] }));
     const user = userEvent.setup();
 
     renderScreen();
@@ -198,7 +212,10 @@ describe('TaskDetailScreen', () => {
 
   it('shows the submitted evidence and the files it produced', async () => {
     api.loadTaskBoard.mockResolvedValue([task()]);
-    api.submitTask.mockResolvedValue(
+    api.submitTask.mockResolvedValue(lease({ state: 'review' }));
+    // The re-read's lease is what fills §3/§4 — the same shape the gateway
+    // would answer with after a submission.
+    api.loadTaskLease.mockResolvedValueOnce(null).mockResolvedValue(
       lease({
         state: 'review',
         heartbeat: new Date(Date.now() - 120_000).toISOString(),
@@ -226,6 +243,96 @@ describe('TaskDetailScreen', () => {
       'title',
       expect.stringContaining('T'),
     );
+  });
+
+  it('shows the evidence a teammate already submitted, on first open', async () => {
+    api.loadTaskBoard.mockResolvedValue([task({ owner: 'bot-1' })]);
+    // The lease read is the whole point of this surface: no write happens in
+    // this test, so everything §2/§3/§4 show came from `tasks.lease`.
+    api.loadTaskLease.mockResolvedValue(
+      lease({
+        owner: 'bot-1',
+        state: 'review',
+        heartbeat: new Date(Date.now() - 120_000).toISOString(),
+        evidence: [
+          { kind: 'link', ref: 'https://example.com/r', note: '竞品 A' },
+          { kind: 'file', ref: 'out/report.md' },
+        ],
+      }),
+    );
+
+    renderScreen();
+
+    expect(await screen.findByText('https://example.com/r')).toBeInTheDocument();
+    const evidence = screen.getByRole('region', { name: T('task.detail.section.evidence') });
+    expect(within(evidence).queryByText(T('task.detail.evidence.empty'))).toBeNull();
+    expect(within(evidence).queryByRole('alert')).toBeNull();
+    // §2 reports the lease's state, and the timeline knows someone took it.
+    expect(screen.getByText(T('task.status.waiting'))).toBeInTheDocument();
+    expect(screen.getByText(T('task.detail.progress.claimed'))).toBeInTheDocument();
+    // §4 shows the file the submission produced.
+    const artifacts = screen.getByRole('region', { name: T('task.detail.section.artifacts') });
+    expect(within(artifacts).getByText('out/report.md')).toBeInTheDocument();
+    // The read asks for this task and carries no identity: it is read-only.
+    expect(api.loadTaskLease).toHaveBeenCalledWith({ id: 'task-1' });
+  });
+
+  it('says there is no evidence when the lease read answers null', async () => {
+    api.loadTaskBoard.mockResolvedValue([task()]);
+    api.loadTaskLease.mockResolvedValue(null);
+
+    renderScreen();
+
+    const evidence = await screen.findByRole('region', { name: T('task.detail.section.evidence') });
+    expect(within(evidence).getByText(T('task.detail.evidence.empty'))).toBeInTheDocument();
+    // "No lease" is an answer, not a failure: no alert, no retry.
+    expect(within(evidence).queryByRole('alert')).toBeNull();
+    expect(within(evidence).queryByRole('button', { name: label(T('task.detail.retry')) })).toBeNull();
+    const artifacts = screen.getByRole('region', { name: T('task.detail.section.artifacts') });
+    expect(within(artifacts).getByText(T('task.detail.artifacts.empty'))).toBeInTheDocument();
+  });
+
+  it('keeps the task on screen when only the lease read fails', async () => {
+    api.loadTaskBoard.mockResolvedValue([task()]);
+    api.loadTaskLease.mockRejectedValue(new Error('证据服务连不上'));
+
+    renderScreen();
+
+    // The task itself rendered: the row and its goal are there …
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('查退款率');
+    expect(screen.getByText('对比三家竞品的退款政策')).toBeInTheDocument();
+    // … and §3 says which half failed, in the gateway's own words.
+    const evidence = screen.getByRole('region', { name: T('task.detail.section.evidence') });
+    expect(within(evidence).getByText(T('task.detail.evidence.failed'))).toBeInTheDocument();
+    expect(within(evidence).getByText('证据服务连不上')).toBeInTheDocument();
+    // Not the whole-screen failure, and not a false "there is no evidence".
+    expect(screen.queryByText(T('task.detail.loadFailed'))).toBeNull();
+    expect(within(evidence).queryByText(T('task.detail.evidence.empty'))).toBeNull();
+  });
+
+  it('re-reads only the lease when 证据没读出来 offers a retry', async () => {
+    api.loadTaskBoard.mockResolvedValue([task()]);
+    api.loadTaskLease
+      .mockRejectedValueOnce(new Error('证据服务连不上'))
+      .mockResolvedValue(
+        lease({ state: 'review', evidence: [{ kind: 'link', ref: 'https://example.com/r' }] }),
+      );
+    const user = userEvent.setup();
+
+    renderScreen();
+
+    const evidence = await screen.findByRole('region', { name: T('task.detail.section.evidence') });
+    await user.click(within(evidence).getByRole('button', { name: label(T('task.detail.retry')) }));
+
+    expect(await screen.findByText('https://example.com/r')).toBeInTheDocument();
+    // The retry promises one thing: the proof is read again. The board is not.
+    expect(api.loadTaskBoard).toHaveBeenCalledTimes(1);
+    expect(api.loadTaskLease).toHaveBeenCalledTimes(2);
+    expect(
+      within(screen.getByRole('region', { name: T('task.detail.section.evidence') })).queryByRole(
+        'alert',
+      ),
+    ).toBeNull();
   });
 
   it('accepts through the gateway with the reviewer identity', async () => {

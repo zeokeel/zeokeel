@@ -8,11 +8,13 @@
  *   4 产物         the files that proof produced
  *   5 要不要你     "不需要你做什么", or the four verbs that move it on
  *
- * Reading it: there is **no per-task read method** — `tasks.snapshot` answers
- * with the whole board and the screen picks its row out of it. The claim layer
- * (`tasks.claim/submit/review`) has no read either, so the lease — and with it
- * the evidence and the reviewer's note — only becomes known through a write.
- * Before the first write the sections say so by being empty, never by guessing.
+ * Reading it: two reads, one loading state. `tasks.snapshot` answers with the
+ * whole board and the screen picks its row out of it (there is no per-task read);
+ * `tasks.lease` answers with the live claim on that row, which is where the
+ * evidence and the reviewer's note live. The second read is allowed to fail on
+ * its own: a task whose proof did not load still shows its task, with §3 saying
+ * why and offering a retry, because "the evidence did not load" and "this task
+ * has no evidence" are different statements.
  *
  * Every write ends in exactly one re-read (the api is request/response, so a
  * re-read is the only way to observe what the write did to the board); a failed
@@ -42,6 +44,7 @@ import {
 import {
   claimTask,
   loadTaskBoard,
+  loadTaskLease,
   reviewTask,
   submitTask,
   type BoardTask,
@@ -65,7 +68,15 @@ type Translate = ReturnType<typeof useT>;
 /** The read, as a state. Every value is either the gateway's answer or the failure it produced. */
 type LoadState =
   | { kind: 'loading' }
-  | { kind: 'ready'; task: BoardTask; at: number }
+  | {
+      kind: 'ready';
+      task: BoardTask;
+      at: number;
+      /** The live claim, or `null` when nobody holds the task. */
+      lease: TaskLease | null;
+      /** `tasks.lease`'s failure, when the task loaded but the proof did not. */
+      leaseError: string | null;
+    }
   /** The board answered and this id is not on it — not an error. */
   | { kind: 'missing' }
   | { kind: 'error'; message: string };
@@ -80,17 +91,32 @@ function messageOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-async function readTask(taskId: string): Promise<LoadState> {
+/**
+ * The two reads behind one screen state: the board row, then its lease.
+ *
+ * Only the first may fail the screen. The second returns the row with
+ * `leaseError` instead, and `keep` is what the caller already proved — the lease
+ * a write just returned — so a failed re-read cannot throw away evidence the
+ * gateway already acknowledged.
+ */
+async function readTask(taskId: string, keep: TaskLease | null = null): Promise<LoadState> {
+  let board: BoardTask[];
   try {
     // The process-wide board is the one `/t/:taskId` links into.
-    const board = await loadTaskBoard();
-    const task = board.find((row) => row.id === taskId);
-    if (!task) return { kind: 'missing' };
-    // The clock the relative stamps are measured against, captured with the
-    // read so two renders of the same row do not disagree about "2 分钟前".
-    return { kind: 'ready', task, at: Date.now() };
+    board = await loadTaskBoard();
   } catch (cause) {
     return { kind: 'error', message: messageOf(cause) };
+  }
+  const task = board.find((row) => row.id === taskId);
+  if (!task) return { kind: 'missing' };
+  // The clock the relative stamps are measured against, captured with the read
+  // so two renders of the same row do not disagree about "2 分钟前".
+  const at = Date.now();
+  try {
+    const lease = await loadTaskLease({ id: taskId });
+    return { kind: 'ready', task, at, lease, leaseError: null };
+  } catch (cause) {
+    return { kind: 'ready', task, at, lease: keep, leaseError: messageOf(cause) };
   }
 }
 
@@ -178,8 +204,9 @@ interface Step {
 /**
  * What we can honestly say about the way here.
  *
- * With no lease every step below it is unknown (there is no lease read), so the
- * timeline degrades to the one thing the board does tell us: the state word.
+ * With no lease — nobody holds the task, or the lease read itself failed — every
+ * step below it is unknown, so the timeline degrades to the one thing the board
+ * does tell us: the state word.
  */
 function timelineSteps(lease: TaskLease | null, t: Translate): Step[] {
   const steps: Step[] = [];
@@ -246,9 +273,9 @@ export function TaskDetailScreen() {
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   // Bumped by 重试; the effect below is the only place that fetches.
   const [attempt, setAttempt] = useState(0);
-  /** The claim layer's answer, once a write has produced one. */
-  const [lease, setLease] = useState<TaskLease | null>(null);
   const [busy, setBusy] = useState<Pending>(null);
+  /** The evidence retry is a read of its own; it only turns that button. */
+  const [leaseBusy, setLeaseBusy] = useState(false);
   /** A failed write, shown without discarding the row. */
   const [actionError, setActionError] = useState<string | null>(null);
   const [form, setForm] = useState<Form>('none');
@@ -274,9 +301,10 @@ export function TaskDetailScreen() {
     async (work: () => Promise<TaskLease>): Promise<boolean> => {
       setActionError(null);
       try {
-        const next = await work();
-        setLease(next);
-        setState(await readTask(id));
+        // The write proves the lease; `readTask` keeps it if the re-read's own
+        // lease call fails (the board may still answer).
+        const written = await work();
+        setState(await readTask(id, written));
         return true;
       } catch (cause) {
         // The write failed: the row is unchanged, so keep showing it and say why.
@@ -292,6 +320,27 @@ export function TaskDetailScreen() {
   const claim = async () => {
     setBusy('claim');
     await runWrite(() => claimTask({ id, owner: OWNER }));
+  };
+
+  /**
+   * Re-read **only** the lease.
+   *
+   * The task is on screen and its row is fine; what failed was the proof. A
+   * retry that also re-read the board would flash the whole screen for a second
+   * failure in a different half (§3's retry promises exactly one thing).
+   */
+  const retryLease = async () => {
+    setLeaseBusy(true);
+    try {
+      const lease = await loadTaskLease({ id });
+      setState((prev) => (prev.kind === 'ready' ? { ...prev, lease, leaseError: null } : prev));
+    } catch (cause) {
+      setState((prev) =>
+        prev.kind === 'ready' ? { ...prev, leaseError: messageOf(cause) } : prev,
+      );
+    } finally {
+      setLeaseBusy(false);
+    }
   };
 
   const submit = async () => {
@@ -370,7 +419,7 @@ export function TaskDetailScreen() {
     );
   }
 
-  const { task, at } = state;
+  const { task, at, lease, leaseError } = state;
   const status = describeStatus(task, lease, t);
   const steps = timelineSteps(lease, t);
   const visible = expanded ? steps : steps.slice(-3);
@@ -456,7 +505,22 @@ export function TaskDetailScreen() {
         {/* 3 证据 */}
         <section aria-label={t('task.detail.section.evidence')}>
           <Typography.Title level={2}>{t('task.detail.section.evidence')}</Typography.Title>
-          {evidence.length === 0 ? (
+          {leaseError ? (
+            // "The proof did not load" is not "there is no proof": the task stays
+            // on screen and this half says what actually happened.
+            <Alert
+              type="error"
+              showIcon
+              role="alert"
+              title={t('task.detail.evidence.failed')}
+              description={leaseError}
+              action={
+                <Button size="small" loading={leaseBusy} onClick={() => void retryLease()}>
+                  {t('task.detail.retry')}
+                </Button>
+              }
+            />
+          ) : evidence.length === 0 ? (
             <Empty
               description={t('task.detail.evidence.empty')}
               image={Empty.PRESENTED_IMAGE_SIMPLE}

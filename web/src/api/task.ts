@@ -2,20 +2,23 @@
  * One task on the work board: the read plus the claim/review verbs
  * (`tasks.*`, docs/TRANSPORT.md §5.1.8 and §5.1.13).
  *
- * Two halves live here because a task detail screen needs both:
+ * Two reads and one write live here because a task detail screen needs all
+ * three:
  *
  *   read    `tasks.snapshot {sessionId?}` → the board. There is **no per-task
  *           read method**, so the screen picks the row it was opened for out of
  *           the board it fetched (see `features/task/TaskDetailScreen.tsx`).
+ *   read    `tasks.lease {id}` → the live `TaskLease`, or `null` when nobody
+ *           holds the task. Its failure is *not* the task's failure: a task you
+ *           can see but whose proof did not load is still a task.
  *   write   `tasks.claim` / `tasks.heartbeat` / `tasks.submit` / `tasks.review`
  *           — the claim layer above the board, each one answering with the live
  *           `TaskLease`.
  *
- * **The lease is only readable through a write.** The evidence a task carries
- * and the reviewer's note arrive on the `TaskLease` those four methods return;
- * `tasks.snapshot` never contains them. So a screen that has just been opened
- * knows the board row and nothing else, and must not render an empty "证据"
- * section as if it had checked — this module does not invent a read for it.
+ * **The lease has its own read** (`tasks.lease`): the evidence a task carries
+ * and the reviewer's note live on the `TaskLease`, never on the board row, so a
+ * screen that has just been opened reads both — the row from the board and the
+ * proof from the lease — instead of waiting for its first write to see anything.
  *
  * Everything here is request/response: no delta follows, so the screen reads
  * once and re-reads after its own write (`inbox.ts` has the same shape).
@@ -111,6 +114,17 @@ export interface LeaseTarget {
   owner: string;
 }
 
+/**
+ * Reading a lease is read-only, so the only parameter is the task.
+ *
+ * `docs/TRANSPORT.md` §5.1.13 and the generated table both say `{id}` for
+ * `tasks.lease` (the read has its own `leaseReadParams` on the Go side); unlike
+ * claim/submit/review there is no identity in play, so none is sent.
+ */
+export interface LeaseReadInput {
+  id: string;
+}
+
 export interface SubmitTaskInput extends LeaseTarget {
   evidence: readonly TaskEvidence[];
 }
@@ -157,10 +171,10 @@ function boardTaskFromWire(row: BoardTaskWire): BoardTask | null {
 
 /**
  * A lease answer, with the request's own identity as the fallback: a gateway
- * that omits `taskId`/`owner` still produced a lease for *this* task and *this*
- * owner, and rendering `undefined` in the timeline helps nobody.
+ * that omits `taskId` (or `owner`) still answered about *this* task, and
+ * rendering `undefined` in the timeline helps nobody.
  */
-function leaseFromWire(row: LeaseWire, fallback: { id: string; owner: string }): TaskLease {
+function leaseFromWire(row: LeaseWire, fallback: { id: string; owner?: string }): TaskLease {
   const evidence = (row.evidence ?? [])
     .filter((item) => Boolean(item.ref))
     .map((item) => ({
@@ -170,7 +184,7 @@ function leaseFromWire(row: LeaseWire, fallback: { id: string; owner: string }):
     }));
   return {
     taskId: row.taskId || fallback.id,
-    owner: row.owner || fallback.owner,
+    owner: row.owner || fallback.owner || '',
     state: row.state || '',
     ...(row.until ? { until: row.until } : {}),
     ...(row.heartbeat ? { heartbeat: row.heartbeat } : {}),
@@ -196,6 +210,23 @@ export async function loadTaskBoard(sessionId?: string): Promise<BoardTask[]> {
     if (task) tasks.push(task);
   }
   return tasks;
+}
+
+/**
+ * Read the live lease for one task (`tasks.lease`).
+ *
+ * Two wire shapes are legal and both mean the same thing here: a bare
+ * `TaskLease`, or `{lease: null}` when nobody holds the task. `null` is an
+ * answer — "no claim, no evidence" — and must not be turned into an error;
+ * a thrown error means the read itself failed.
+ */
+export async function loadTaskLease(input: LeaseReadInput): Promise<TaskLease | null> {
+  const result = await request<LeaseWire & { lease?: LeaseWire | null }>('tasks.lease', {
+    id: input.id,
+  });
+  const row = Object.prototype.hasOwnProperty.call(result, 'lease') ? result.lease : result;
+  if (!row) return null;
+  return leaseFromWire(row, { id: input.id });
 }
 
 /** Take the task for `owner` (`tasks.claim`, not idempotent). */

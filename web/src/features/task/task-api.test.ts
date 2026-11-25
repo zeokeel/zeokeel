@@ -3,6 +3,7 @@ import {
   claimTask,
   heartbeatTask,
   loadTaskBoard,
+  loadTaskLease,
   reviewTask,
   submitTask,
 } from '@/api/task';
@@ -65,6 +66,36 @@ describe('task api', () => {
     expect(board).toEqual([
       { id: 'task-2', subject: 'task-2', status: 'paused_by_user', owner: 'bot-1' },
     ]);
+  });
+
+  it('reads the lease with {id} and nothing else', async () => {
+    wire.request.mockResolvedValue({
+      taskId: 'task-1',
+      owner: 'bot-1',
+      state: 'review',
+      evidence: [{ kind: 'link', ref: 'https://example.com/r' }],
+    });
+
+    const lease = await loadTaskLease({ id: 'task-1' });
+
+    // docs/TRANSPORT.md §5.1.13 documents the read as read-only: {id}.
+    expect(wire.request).toHaveBeenCalledWith('tasks.lease', { id: 'task-1' });
+    expect(lease?.state).toBe('review');
+    expect(lease?.evidence).toEqual([{ kind: 'link', ref: 'https://example.com/r' }]);
+  });
+
+  it('answers null for {lease:null}, which is "no claim" and not a failure', async () => {
+    wire.request.mockResolvedValue({ lease: null });
+
+    await expect(loadTaskLease({ id: 'task-1' })).resolves.toBeNull();
+  });
+
+  it('unwraps a {lease:{...}} envelope and falls back to the requested id', async () => {
+    wire.request.mockResolvedValue({ lease: { owner: 'bot-1', state: 'claimed' } });
+
+    const lease = await loadTaskLease({ id: 'task-1' });
+
+    expect(lease).toEqual({ taskId: 'task-1', owner: 'bot-1', state: 'claimed' });
   });
 
   it('claims with exactly {id, owner} and returns the lease', async () => {

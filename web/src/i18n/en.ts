@@ -368,6 +368,7 @@ export const en: Catalog = {
   'task.detail.progress.rejected': 'You sent it back',
   'task.detail.progress.evidenceCount': '{count} pieces of evidence',
   'task.detail.evidence.empty': 'No evidence yet',
+  'task.detail.evidence.failed': 'Could not load the evidence',
   'task.detail.artifacts.empty': 'No artifacts yet',
   'task.detail.evidence.kind.file': 'File',
   'task.detail.evidence.kind.link': 'Link',
