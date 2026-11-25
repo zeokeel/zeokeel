@@ -535,6 +535,16 @@
       "required": [],
       "optional": []
     },
+    "wechat.login.start": {
+      "required": [],
+      "optional": []
+    },
+    "wechat.login.state": {
+      "required": [
+        "qrId"
+      ],
+      "optional": []
+    },
     "workspace.list.snapshot": {
       "required": [],
       "optional": []
@@ -616,6 +626,7 @@
       "teamnotes",
       "triage",
       "webhook",
+      "wechatlogin",
       "workspace"
     ],
     "conditional": [

@@ -32,6 +32,22 @@ type fakeILink struct {
 	// header so token persistence can be observed from the wire.
 	polls    int
 	lastAuth string
+
+	// login* drive the QR-login endpoints (login_test.go). Every zero value
+	// makes the endpoint answer with a deterministic payload; a test overrides
+	// only what it cares about. The empty string / zero means "omit that field".
+	loginHTTP     int      // non-zero: both login endpoints fail with this status
+	loginCode     string   // qrcode id returned by getloginqrcode
+	loginURL      string   // qrcode_url returned by getloginqrcode
+	loginTTL      int      // expires_in (seconds) returned by getloginqrcode
+	loginEnvelope bool     // wrap the login payload in {"data": {...}}
+	loginStatus   string   // status reported by getloginstate
+	loginToken    string   // bot_token reported by getloginstate
+	loginMethod   string   // method of the last getloginqrcode call
+	loginCalls    int      // getloginqrcode calls
+	loginPolls    int      // getloginstate calls
+	loginIDs      []string // qrcode ids getloginstate was asked about
+	onLoginState  func()   // runs before getloginstate answers (clock races)
 }
 
 func (f *fakeILink) handler() http.Handler {
@@ -65,6 +81,61 @@ func (f *fakeILink) handler() http.Handler {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	})
+	// The login endpoints: StartLogin asks for a code, LoginState polls it.
+	mux.HandleFunc("/ilink/bot/getloginqrcode", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.loginCalls++
+		f.loginMethod = r.Method
+		status, code, qrURL, ttl, envelope := f.loginHTTP, f.loginCode, f.loginURL, f.loginTTL, f.loginEnvelope
+		f.mu.Unlock()
+		if status != 0 {
+			w.WriteHeader(status)
+			return
+		}
+		payload := map[string]any{}
+		if code != "" {
+			payload["qrcode"] = code
+		}
+		if qrURL != "" {
+			payload["qrcode_url"] = qrURL
+		}
+		if ttl != 0 {
+			payload["expires_in"] = ttl
+		}
+		if envelope {
+			payload = map[string]any{"data": payload}
+		}
+		_ = json.NewEncoder(w).Encode(payload)
+	})
+	mux.HandleFunc("/ilink/bot/getloginstate", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			QRCode string `json:"qrcode"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		f.mu.Lock()
+		status, state, token, envelope, hook := f.loginHTTP, f.loginStatus, f.loginToken, f.loginEnvelope, f.onLoginState
+		f.loginPolls++
+		f.loginIDs = append(f.loginIDs, request.QRCode)
+		f.mu.Unlock()
+		if hook != nil {
+			hook() // lets a test move the clock while the answer is in flight
+		}
+		if status != 0 {
+			w.WriteHeader(status)
+			return
+		}
+		payload := map[string]any{}
+		if state != "" {
+			payload["status"] = state
+		}
+		if token != "" {
+			payload["bot_token"] = token
+		}
+		if envelope {
+			payload = map[string]any{"data": payload}
+		}
+		_ = json.NewEncoder(w).Encode(payload)
 	})
 	return mux
 }

@@ -91,6 +91,8 @@ export const WS_METHODS = [
   'webhook.source.remove',
   'webhook.source.set',
   'webhook.sources',
+  'wechat.login.start',
+  'wechat.login.state',
   'workspace.list.snapshot',
 ] as const;
 
@@ -178,6 +180,8 @@ export const WS_PARAMS: Record<WsMethod, MethodParams> = {
   'webhook.source.remove': { required: ['id'], optional: [] },
   'webhook.source.set': { required: ['id', 'secret'], optional: ['channel'] },
   'webhook.sources': { required: [], optional: [] },
+  'wechat.login.start': { required: [], optional: [] },
+  'wechat.login.state': { required: ['qrId'], optional: [] },
   'workspace.list.snapshot': { required: [], optional: [] },
 };
 
@@ -209,6 +213,7 @@ export const STATIC_CAPABILITIES = [
   'teamnotes',
   'triage',
   'webhook',
+  'wechatlogin',
   'workspace',
 ] as const;
 

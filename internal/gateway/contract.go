@@ -114,6 +114,8 @@ var contractParams = map[string]any{
 	"webhook.source.set":      webhookSourceSetParams{},
 	"webhook.source.remove":   webhookSourceRemoveParams{},
 	"lead.run":                struct{}{},
+	"wechat.login.start":      struct{}{},
+	"wechat.login.state":      wechatLoginStateParams{},
 	"team.notes": struct {
 		Limit int `json:"limit,omitempty"`
 	}{},

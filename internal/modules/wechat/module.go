@@ -39,9 +39,13 @@ func Module() *module.Descriptor[Config] {
 		if _, err := ctx.Provide(contracts.KeyWeChat, contracts.WeChatService(adapter)); err != nil {
 			return fmt.Errorf("%s: provide wechat: %w", ModuleID, err)
 		}
+		// The QR login surface rides the same adapter: one login per process.
+		if _, err := ctx.Provide(contracts.KeyWeChatLogin, contracts.WeChatLoginService(adapter)); err != nil {
+			return fmt.Errorf("%s: provide wechat login: %w", ModuleID, err)
+		}
 		return nil
 	}).
-		AddProvides(module.Provides(contracts.KeyWeChat)).
+		AddProvides(module.Provides(contracts.KeyWeChat), module.Provides(contracts.KeyWeChatLogin)).
 		AddRequires(module.Requires(contracts.KeyInbox), module.Requires(contracts.KeyDataDir)).
 		WithName("ZeoKeel WeChat (ClawBot/iLink) adapter")
 }

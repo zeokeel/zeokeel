@@ -399,6 +399,8 @@ const mockLeases = new Map();
 const mockCredentials = new Map();
 /** Shared team notes, newest first. */
 const mockTeamNotes = [];
+/** QR logins started by the settings screen. */
+const mockWechatLogins = [];
 const leaseFor = (taskId, owner, state) => {
   const lease = {
     taskId,
@@ -1941,6 +1943,20 @@ const wsDispatch = (client, message) => {
       if (at >= 0) mockNotifyRoutes[at] = route;
       else mockNotifyRoutes.push(route);
       return reply({ ...route });
+    }
+    case 'wechat.login.start': {
+      const qrId = `qr-${mockWechatLogins.length + 1}`;
+      mockWechatLogins.push({ qrId, polls: 0 });
+      return reply({ qrId, qrUrl: `https://open.weixin.qq.com/qr/mock-${qrId}`, expiresAt: new Date(Date.now() + 300000).toISOString() });
+    }
+    case 'wechat.login.state': {
+      const qrId = String(params.qrId ?? '');
+      const entry = mockWechatLogins.find((row) => row.qrId === qrId);
+      if (!entry) return reply({ state: 'expired', connected: false });
+      entry.polls += 1;
+      // The mock walks pending -> waiting -> confirmed so the UI can be driven.
+      const state = entry.polls === 1 ? 'pending' : entry.polls === 2 ? 'waiting' : 'confirmed';
+      return reply({ state, connected: state === 'confirmed' });
     }
     case 'team.notes': {
       return reply({ notes: mockTeamNotes.slice(0, Number(params.limit ?? 50)) });

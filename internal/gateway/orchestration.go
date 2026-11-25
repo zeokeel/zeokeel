@@ -950,3 +950,78 @@ func (g *Gateway) teamNoteRecord(ctx context.Context, raw json.RawMessage) (any,
 	}
 	return teamNoteFromContract(note), nil
 }
+
+// --- wechat QR login -------------------------------------------------------
+
+type wechatLoginStartResult struct {
+	QRCodeID  string `json:"qrId"`
+	QRCodeURL string `json:"qrUrl"`
+	ExpiresAt string `json:"expiresAt,omitempty"`
+}
+
+type wechatLoginStateParams struct {
+	QRCodeID string `json:"qrId"`
+}
+
+type wechatLoginStateResult struct {
+	State     string `json:"state"`
+	Connected bool   `json:"connected"`
+	ExpiresAt string `json:"expiresAt,omitempty"`
+}
+
+func (g *Gateway) wechatLoginService() (contracts.WeChatLoginService, *protocolError) {
+	service, ok := g.root.Get(contracts.KeyWeChatLogin)
+	if !ok || service == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "wechat login unavailable")
+	}
+	return service, nil
+}
+
+// wechatLoginStart returns a QR the human scans with the WeChat app.
+func (g *Gateway) wechatLoginStart(ctx context.Context, _ json.RawMessage) (any, *protocolError) {
+	service, problem := g.wechatLoginService()
+	if problem != nil {
+		return nil, problem
+	}
+	login, err := service.StartLogin(ctx)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return wechatLoginStartResult{
+		QRCodeID: login.QRCodeID, QRCodeURL: login.QRCodeURL, ExpiresAt: rfc3339(login.ExpiresAt),
+	}, nil
+}
+
+// wechatLoginState polls one login. "expired" is an answer, not an error: a
+// polling loop that treats it as a failure stops before the user can retry.
+func (g *Gateway) wechatLoginState(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.wechatLoginService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params wechatLoginStateParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	state, _, err := service.LoginState(ctx, params.QRCodeID)
+	if err != nil && !errors.Is(err, contracts.ErrWeChatLoginExpired) {
+		return nil, orchestrationError(err)
+	}
+	connected := false
+	if status, statusErr := g.wechatStatusOrZero(ctx); statusErr == nil {
+		connected = status
+	}
+	return wechatLoginStateResult{State: string(state), Connected: connected}, nil
+}
+
+func (g *Gateway) wechatStatusOrZero(ctx context.Context) (bool, error) {
+	service, ok := g.root.Get(contracts.KeyWeChat)
+	if !ok || service == nil {
+		return false, nil
+	}
+	status, err := service.Status(ctx)
+	if err != nil {
+		return false, err
+	}
+	return status.Connected, nil
+}

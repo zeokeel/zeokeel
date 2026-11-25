@@ -14,8 +14,12 @@ func TestDescriptorMetadata(t *testing.T) {
 	if descriptor.ID != ModuleID {
 		t.Fatalf("module ID = %q, want %q", descriptor.ID, ModuleID)
 	}
-	if len(descriptor.Provides) != 1 || descriptor.Provides[0].Name != contracts.KeyWeChat.Name() {
-		t.Fatalf("provides = %+v, want the wechat key", descriptor.Provides)
+	provided := map[string]bool{}
+	for _, provide := range descriptor.Provides {
+		provided[provide.Name] = true
+	}
+	if !provided[contracts.KeyWeChat.Name()] || !provided[contracts.KeyWeChatLogin.Name()] {
+		t.Fatalf("provides = %v, want the adapter and the QR login surface", provided)
 	}
 	required := make(map[string]bool, len(descriptor.Requires))
 	for _, requirement := range descriptor.Requires {

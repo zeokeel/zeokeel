@@ -47,6 +47,7 @@ var serverCapabilities = []string{
 	"heartbeat",
 	"browser",
 	"teamnotes",
+	"wechatlogin",
 }
 
 // gatewayCapabilities is the handshake's capability list for this gateway
@@ -397,6 +398,12 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		},
 		"lead.run": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.leadRun(ctx, request.Params)
+		},
+		"wechat.login.start": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.wechatLoginStart(ctx, request.Params)
+		},
+		"wechat.login.state": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.wechatLoginState(ctx, request.Params)
 		},
 		"team.notes": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.teamNotes(ctx, request.Params)

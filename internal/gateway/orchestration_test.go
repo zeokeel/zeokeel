@@ -25,6 +25,7 @@ func TestOrchestrationMethodsAreDispatched(t *testing.T) {
 		"credentials.list", "credentials.set", "credentials.delete",
 		"heartbeat.status", "heartbeat.tick", "browser.status",
 		"team.notes", "team.note.record",
+		"wechat.login.start", "wechat.login.state",
 	}
 	methods := SupportedMethods()
 	for _, name := range want {

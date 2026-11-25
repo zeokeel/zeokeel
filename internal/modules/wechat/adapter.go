@@ -118,11 +118,20 @@ type Adapter struct {
 	lastInbound time.Time
 	// botID is the platform identity (changes on every QR login).
 	botID string
+	// logins maps every QR id this adapter issued to its local deadline. It is a
+	// validation aid for the login flow (see login.go), never a credential: a
+	// confirmed state must belong to a code that had not expired yet.
+	logins map[string]time.Time
 }
 
 // NewAdapter wires the adapter without token persistence.
 func NewAdapter(inboxService contracts.InboxService, cfg Config) *Adapter {
-	return &Adapter{inbox: inboxService, cfg: cfg.normalized(), tokens: make(map[string]string)}
+	return &Adapter{
+		inbox:  inboxService,
+		cfg:    cfg.normalized(),
+		tokens: make(map[string]string),
+		logins: make(map[string]time.Time),
+	}
 }
 
 // NewAdapterWithCredentials wires the adapter to the shared credential store.
@@ -463,6 +472,12 @@ func (a *Adapter) setHeaders(request *http.Request, token string) {
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("AuthorizationType", "ilink_bot_token")
 	request.Header.Set("Authorization", "Bearer "+token)
+	setUINHeader(request)
+}
+
+// setUINHeader adds the per-request random id iLink wants on every call,
+// including the login calls that have no token yet.
+func setUINHeader(request *http.Request) {
 	var seed [4]byte
 	_, _ = rand.Read(seed[:])
 	request.Header.Set("X-WECHAT-UIN", base64.StdEncoding.EncodeToString(seed[:]))
