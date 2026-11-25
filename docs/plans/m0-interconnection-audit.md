@@ -48,7 +48,7 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 | F2 | `TestRegistryIsExplicit` 的模块计数写死 `18`（注释还写着 20，早已陈旧） | 陈旧断言：计数一改就得手改，注释还误导 | 已改为 19 并修正注释；**建议**改成"至少包含这些模块"的白名单断言 |
 | F3 | `zeokeel/modelcatalog` 注册了但不在任何装配文档里 | 我一开始以为是新发现并加了一个"注册/装配一致性"守卫，**结果仓库早就有 `TestEveryRegisteredModuleIsComposedIntoAProduct`**——重复守卫已删除；那个守卫里已写明 modelcatalog 与 host/group 是**有意不装配**并附了原因 | 保留原守卫，删除重复；本文件记下这条教训：先读测试再写测试 |
 | F4 | `zeokeel/host/group`（容器模块）也不在 headless entries | 合法：它只在嵌套 group 时被引用，headless 没有 group | 带原因列入例外，不失败 |
-| F5 | inbox 是内存实现（slice 1），重启丢 ⚠️ | 已知限制 | 下一片：接 `KeyDataDir` 做 JSONL/SQLite 持久化，契约不变 |
+| F5 | ~~inbox 是内存实现，重启丢~~ | ✅ 已修：`Open(dir)` 载入 `<data>/inbox/inbox.json`，每次变更原子写（tmp+rename），失败回滚内存；损坏文件**移到一边**并告警，不静默清空 | 持久化测试 6 条（重启恢复/重启后仍去重/状态恢复/损坏报错/无残留 tmp） |
 | F6 | 第二次加模块又触发同一批断言（顺序列表、实例数、`instances[10]`） | 证明 F1/F2 不是偶发 | **已修根因**：改为「存在性」断言 + 按 id 查实例；计数断言删除，换成"必须包含这些模块" |
 | F8 | `internal/gateway` 的 `TestApprovalsSnapshotDeltaReplay` 在整套测试并发时偶发 `i/o timeout`（7s） | 高负载下的时序 flaky，与本次改动无关（单独 `-count=3` 连续通过，全量重跑通过） | 记录在案；后续给该测试加宽松超时或改成事件驱动等待，不掩盖 |
 | F7 | **装配链路测出一个真 bug**：`Claim` 对已经指派/进行中的任务再次写 board，被 rig 拒绝 `team task update has no changes`，整次认领失败 | 单模块测试用的是 fake board，永远发现不了；只有真实装配链路能测出来 | 已修：先读当前任务，只写变化过的字段（状态不同才 SetStatus，owner 不同才 Assign） |
@@ -100,6 +100,7 @@ scripts/verify.sh --quick                   PASS（gofmt / build / vet /
 scripts/verify.sh --quick（triage 后）       PASS 5/5，63s
                                             （中间有一次重跑才绿，记在案）
 scripts/verify.sh --quick（tasklease 后）   PASS 5/5，67s
+scripts/verify.sh --quick（持久化后）    见提交记录
 scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过
 scripts/verify.sh --quick（approval 后）    PASS 5/5，63s
                                             （首次跑时 gateway 的

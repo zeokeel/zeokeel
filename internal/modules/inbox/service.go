@@ -82,6 +82,8 @@ type Service struct {
 	// rate keeps arrival timestamps per source inside the current minute.
 	rate map[string][]time.Time
 	seq  int64
+	// path is the durable document ("", when the service is memory-only).
+	path string
 }
 
 // NewService builds the service from cfg, filling defaults.
@@ -138,6 +140,7 @@ func (s *Service) Add(ctx context.Context, item contracts.InboxItem) (contracts.
 	// existing row instead of becoming a second piece of work.
 	if id, ok := s.dedup[dedupSlot(item.Source, item.DedupKey)]; ok {
 		if existing, ok := s.items[id]; ok && now.Sub(existing.LastSeenAt) <= s.cfg.DedupeWindow {
+			previous := *existing
 			existing.Count++
 			existing.LastSeenAt = now
 			existing.Body = item.Body
@@ -149,6 +152,10 @@ func (s *Service) Add(ctx context.Context, item contracts.InboxItem) (contracts.
 			}
 			if item.Ref != "" {
 				existing.Ref = item.Ref
+			}
+			if err := s.persistLocked(); err != nil {
+				*existing = previous // keep memory and disk in agreement
+				return contracts.InboxItem{}, false, err
 			}
 			return cloneItem(existing), true, nil
 		}
@@ -174,6 +181,12 @@ func (s *Service) Add(ctx context.Context, item contracts.InboxItem) (contracts.
 	stored.ID = fmt.Sprintf("inbox-%06d", s.seq)
 	s.items[stored.ID] = &stored
 	s.dedup[dedupSlot(stored.Source, stored.DedupKey)] = stored.ID
+	if err := s.persistLocked(); err != nil {
+		delete(s.items, stored.ID)
+		delete(s.dedup, dedupSlot(stored.Source, stored.DedupKey))
+		s.seq--
+		return contracts.InboxItem{}, false, err
+	}
 	return cloneItem(&stored), false, nil
 }
 
@@ -276,14 +289,22 @@ func (s *Service) Triage(ctx context.Context, ids []string, action string, taskI
 		}
 	}
 
+	previous := make(map[string]contracts.InboxItem, len(ids))
 	updated := 0
 	for _, id := range ids {
 		stored := s.items[id]
+		previous[id] = *stored
 		stored.Status = status
 		if action == contracts.InboxActionTask {
 			stored.TaskIDs = append([]string(nil), taskIDs...)
 		}
 		updated++
+	}
+	if err := s.persistLocked(); err != nil {
+		for id, snapshot := range previous {
+			*s.items[id] = snapshot
+		}
+		return 0, err
 	}
 	return updated, nil
 }

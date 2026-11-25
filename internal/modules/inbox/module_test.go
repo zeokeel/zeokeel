@@ -21,8 +21,10 @@ func TestDescriptorMetadata(t *testing.T) {
 	if len(descriptor.Provides) != 1 || descriptor.Provides[0].Name != contracts.KeyInbox.Name() {
 		t.Fatalf("provides = %+v, want the inbox key", descriptor.Provides)
 	}
-	if len(descriptor.Requires) != 0 {
-		t.Fatalf("requires = %+v, want none (the entry point must not depend on consumers)", descriptor.Requires)
+	// The only dependency allowed here is the data directory (durability): the
+	// entry point must not depend on any consumer (Lead, task board, approvals).
+	if len(descriptor.Requires) != 1 || descriptor.Requires[0].Name != contracts.KeyDataDir.Name() {
+		t.Fatalf("requires = %+v, want only the data dir", descriptor.Requires)
 	}
 }
 
