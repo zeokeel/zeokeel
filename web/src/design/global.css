@@ -474,6 +474,7 @@ body {
 
 .zk-code-block {
   margin: 0 0 var(--zk-space-3);
+  padding: var(--zk-space-2) var(--zk-space-3);
   border: 1px solid var(--zk-border-subtle);
   border-radius: var(--zk-radius-sm);
   overflow: hidden;
@@ -800,6 +801,10 @@ body {
 .zk-code__scroll {
   max-height: 320px;
   overflow: auto;
+  /* The block itself has no padding (the theme's own padding was zeroed to kill
+   * a double border); the inset lives on the container so glyphs do not touch
+   * the frame. */
+  padding: var(--zk-space-2) var(--zk-space-3);
   /* Flex/grid ancestors default to `min-width: auto`, so one long unbreakable
    * line widened the whole card to 2552px and the inner scroller never scrolled
    * (round-5 md audit #5). */

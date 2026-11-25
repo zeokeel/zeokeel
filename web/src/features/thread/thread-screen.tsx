@@ -199,7 +199,15 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
     // in the middle of a task — so the optimistic 已停止 could not reach the
     // screen any sooner no matter how early it was committed (round-6 final
     // audit R4-1, measured with Tracing).
-    requestAnimationFrame(() => {
+    // The frame callback carries the cancel so the label paints first — but a
+    // hidden or occluded tab may not produce frames at all, and a stop that
+    // never reaches the server is far worse than a late one. Whichever fires
+    // first wins; the other is cancelled.
+    let done = false;
+    const fire = () => {
+      if (done) return;
+      done = true;
+      window.clearTimeout(fallback);
       // `chat.abort()` only closes the client's stream: the gateway keeps
       // running and the next send is a 409 ("a run is active"). Cancel
       // server-side as well.
@@ -212,7 +220,10 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
         // No stream: the next snapshot settles the row.
         void chat.refresh?.(true);
       }
-    });
+    };
+    const frame = requestAnimationFrame(fire);
+    const fallback = window.setTimeout(fire, 100);
+    void frame;
   };
 
   // L5: a running turn is stopped by Esc from anywhere on the screen.
