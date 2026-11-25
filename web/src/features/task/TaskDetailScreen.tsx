@@ -24,6 +24,10 @@
  * Copy comes from the catalogue (`task.detail.*`, and the existing
  * `inbox.time.*` for relative stamps) — this file carries no user-visible
  * string of its own.
+ *
+ * §2 also carries the 执行手段 block (`ExecutionMeans`): what the product can
+ * actually reach (skills, MCP connectors) is the other half of "how is this
+ * getting done", so it is read — and allowed to fail — on its own.
  */
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { useParams } from 'react-router';
@@ -53,6 +57,7 @@ import {
 } from '@/api/task';
 import { useMediaQuery } from '@/design/use-system-appearance';
 import { useT } from '@/i18n';
+import { ExecutionMeans } from './ExecutionMeans';
 
 /**
  * The acting identity.
@@ -538,6 +543,14 @@ export function TaskDetailScreen() {
                 {expanded ? t('task.detail.progress.less') : t('task.detail.progress.more')}
               </Button>
             ) : null}
+
+            {/* 执行手段: the other half of "how is this getting done" — what the
+                team can actually use (skills + MCP connectors, M5). It sits in
+                §2 rather than §5 because it is not a move for the reader to
+                make; §5 is the four verbs, and a settled task shows §5 as
+                "不需要你做什么", which is exactly when a finished task still owes
+                an answer about what did the work. */}
+            <ExecutionMeans />
           </Space>
         </section>
 

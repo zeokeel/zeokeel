@@ -2,6 +2,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ConnectorSummary, SkillSummary } from '@/api/read-models';
 import type { BoardTask, TaskLease } from '@/api/task';
 import { translate, type MessageKey } from '@/i18n';
 import {
@@ -34,6 +35,9 @@ const api = vi.hoisted(() => ({
   heartbeatTask: vi.fn(),
   submitTask: vi.fn(),
   reviewTask: vi.fn(),
+  // The 执行手段 block reads this on its own; a failure here is not a failure
+  // of the task, so it is a mock of its own.
+  loadCapabilities: vi.fn(),
 }));
 
 vi.mock('@/api/task', () => ({
@@ -46,6 +50,28 @@ vi.mock('@/api/task', () => ({
   submitTask: api.submitTask,
   reviewTask: api.reviewTask,
 }));
+
+vi.mock('@/api/read-models', () => ({
+  loadCapabilities: api.loadCapabilities,
+}));
+
+/** One skill row as `GET /api/capabilities` answers it. */
+function skill(name: string, description = `${name} 能做的事`): SkillSummary {
+  return { id: name, name, description, source: 'workspace' };
+}
+
+/** One MCP connector row; the state is what the gateway derived, not a guess. */
+function connector(name: string, overrides: Partial<ConnectorSummary> = {}): ConnectorSummary {
+  return {
+    id: name,
+    name,
+    transport: 'http',
+    tools: 1,
+    status: '已连接',
+    state: 'connected',
+    ...overrides,
+  };
+}
 
 function task(overrides: Partial<BoardTask> = {}): BoardTask {
   return {
@@ -98,6 +124,9 @@ beforeEach(() => {
   api.claimTask.mockResolvedValue(lease());
   api.submitTask.mockResolvedValue(lease({ state: 'review' }));
   api.reviewTask.mockResolvedValue(lease({ state: 'done' }));
+  // An installed product with nothing installed yet: the block still answers,
+  // and no unrelated test has to know about capabilities.
+  api.loadCapabilities.mockResolvedValue({ skills: [], connectors: [], disabled: [] });
 });
 
 describe('TaskDetailScreen', () => {
@@ -413,6 +442,161 @@ describe('TaskDetailScreen', () => {
 
     expect(await screen.findByRole('heading', { name: T('task.detail.section.doing') })).toBeInTheDocument();
     expect(api.loadTaskBoard).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * 执行手段 (M5 visibility).
+   *
+   * The task screen is where a person asks "can this team actually do it?", so
+   * the answer — skills and MCP connectors — belongs on it. What is asserted
+   * here: the block reads `GET /api/capabilities` on its own, names what is
+   * installed, keeps the gateway's own words for a broken connector, and never
+   * takes the task down with it. The block lives inside §2, so the five-section
+   * contract above is unchanged.
+   */
+  describe('执行手段', () => {
+    /** §2, which is where the block nests (see the screen's own note there). */
+    async function progress(): Promise<HTMLElement> {
+      return screen.findByRole('region', { name: T('task.detail.section.progress') });
+    }
+
+    it('lists the skills and connectors this product can use', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadCapabilities.mockResolvedValue({
+        skills: [skill('pdf', '读 PDF 里的表格'), skill('git', '查提交历史')],
+        connectors: [connector('local-mcp', { tools: 2 })],
+        disabled: [],
+      });
+
+      renderScreen();
+
+      const means = within(await progress());
+      // Name plus the one line that says what it does.
+      expect(await means.findByText('pdf')).toBeInTheDocument();
+      expect(means.getByText('读 PDF 里的表格')).toBeInTheDocument();
+      expect(means.getByText('git')).toBeInTheDocument();
+      // The connector and its state, which the gateway derived (round-2 C-04).
+      expect(means.getByText('local-mcp')).toBeInTheDocument();
+      expect(means.getByText(T('screen.capabilities.state.connected'))).toBeInTheDocument();
+      // One read, and it is the capabilities read — not the board again.
+      expect(api.loadCapabilities).toHaveBeenCalledTimes(1);
+      expect(api.loadTaskBoard).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows five skills and reveals the rest with 展开', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadCapabilities.mockResolvedValue({
+        skills: Array.from({ length: 7 }, (_, index) => skill(`s${index + 1}`)),
+        connectors: [],
+        disabled: [],
+      });
+      const user = userEvent.setup();
+
+      renderScreen();
+
+      const means = within(await progress());
+      // Five is the budget: enough to know what is there, not a wall of text.
+      expect(await means.findByText('s5')).toBeInTheDocument();
+      expect(means.queryByText('s6')).toBeNull();
+      expect(means.queryByText('s7')).toBeNull();
+
+      await user.click(means.getByRole('button', { name: label(T('task.detail.progress.more')) }));
+
+      expect(means.getByText('s6')).toBeInTheDocument();
+      expect(means.getByText('s7')).toBeInTheDocument();
+    });
+
+    it('shows an unavailable connector with the gateway’s own error text', async () => {
+      const reason = 'dial tcp 127.0.0.1:9919: connect: connection refused';
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadCapabilities.mockResolvedValue({
+        skills: [],
+        connectors: [
+          connector('broken', { state: 'failed', tools: 0, status: `连接失败: ${reason}`, error: reason }),
+        ],
+        disabled: [],
+      });
+
+      renderScreen();
+
+      const means = within(await progress());
+      // 不可用 is the state word; the reason is the gateway's sentence, verbatim.
+      expect(await means.findByText('不可用')).toBeInTheDocument();
+      expect(means.getByText(reason)).toBeInTheDocument();
+      // A broken connector is never dressed up as a working one.
+      expect(means.queryByText(T('screen.capabilities.state.connected'))).toBeNull();
+    });
+
+    it('lists disabled connectors on a line of their own', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadCapabilities.mockResolvedValue({
+        skills: [],
+        connectors: [connector('live')],
+        disabled: ['old-mcp'],
+      });
+
+      renderScreen();
+
+      const means = within(await progress());
+      const disabledRow = await means.findByTestId('means-disabled');
+      expect(within(disabledRow).getByText(T('screen.capabilities.state.disabled'))).toBeInTheDocument();
+      expect(within(disabledRow).getByText('old-mcp')).toBeInTheDocument();
+      // Two different statements: what is connected, and what is switched off.
+      expect(within(disabledRow).queryByText('live')).toBeNull();
+      expect(means.getByText('live')).toBeInTheDocument();
+    });
+
+    it('says the product has no execution means at all when the API answers empty', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadCapabilities.mockResolvedValue({ skills: [], connectors: [], disabled: [] });
+
+      renderScreen();
+
+      const means = within(await progress());
+      expect(await means.findByText('这个产品还没装任何执行手段')).toBeInTheDocument();
+    });
+
+    it('keeps the task on screen when capabilities fail to load', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadCapabilities.mockRejectedValue(new Error('能力服务连不上'));
+
+      renderScreen();
+
+      // The task itself is still there …
+      expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('查退款率');
+      expect(screen.getByText('对比三家竞品的退款政策')).toBeInTheDocument();
+      // … and §2 says which half failed, with a way to ask again.
+      const means = within(await progress());
+      const alert = await means.findByRole('alert');
+      expect(within(alert).getByText(T('screen.capabilities.loadFailed'))).toBeInTheDocument();
+      expect(within(alert).getByText('能力服务连不上')).toBeInTheDocument();
+      // The panel header carries the same failure, so a collapsed panel cannot
+      // look like an installed product with nothing in it.
+      expect(means.getAllByText(T('screen.capabilities.loadFailed')).length).toBe(2);
+      expect(within(alert).getByRole('button', { name: label(T('task.detail.retry')) })).toBeInTheDocument();
+      // Not the whole-screen failure.
+      expect(screen.queryByText(T('task.detail.loadFailed'))).toBeNull();
+    });
+
+    it('re-reads the capabilities on 重试 without re-reading the board', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadCapabilities
+        .mockRejectedValueOnce(new Error('能力服务连不上'))
+        .mockResolvedValue({ skills: [skill('pdf')], connectors: [], disabled: [] });
+      const user = userEvent.setup();
+
+      renderScreen();
+
+      const region = await progress();
+      await user.click(within(region).getByRole('button', { name: label(T('task.detail.retry')) }));
+
+      expect(await within(region).findByText('pdf')).toBeInTheDocument();
+      // The retry promises one thing: this read happens again.
+      expect(api.loadCapabilities).toHaveBeenCalledTimes(2);
+      expect(api.loadTaskBoard).toHaveBeenCalledTimes(1);
+      // The failure is no longer on screen.
+      expect(within(region).queryByText('能力服务连不上')).toBeNull();
+    });
   });
 });
 /**
