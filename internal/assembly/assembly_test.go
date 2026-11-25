@@ -145,7 +145,7 @@ func TestProductsAndEntries(t *testing.T) {
 	wantHeadless := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/inbox", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/insights",
-		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/webhook", "zeokeel/wechat", "zeokeel/hosttools", "zeokeel/memorystore",
+		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/webhook", "zeokeel/wechat", "zeokeel/feishu", "zeokeel/dingtalk", "zeokeel/hosttools", "zeokeel/memorystore",
 		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
 	}
 	loaded := make(map[string]bool, len(headless))
@@ -261,7 +261,7 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 
 	instances := loader.Instances()
 	wantIDs := []string{
-		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "notifyroute", "webhook", "wechat", "hosttools", "memorystore",
+		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "notifyroute", "webhook", "wechat", "feishu", "dingtalk", "hosttools", "memorystore",
 		"agent", "automation", "update", "importer", "acp",
 	}
 	gotIDs := make([]string, 0, len(instances))
@@ -341,6 +341,23 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 	wechatStatus, err := wechatService.Status(context.Background())
 	if err != nil || wechatStatus.Connected {
 		t.Fatalf("wechat status = (%+v, %v), want disconnected", wechatStatus, err)
+	}
+
+	// The other two channel adapters are wired too, and both answer honestly
+	// before any credential is configured.
+	dingtalkService, ok := root.Get(contracts.KeyDingTalk)
+	if !ok || dingtalkService == nil {
+		t.Fatal("KeyDingTalk service is not available on the root")
+	}
+	if status, err := dingtalkService.Status(context.Background()); err != nil || status.Connected {
+		t.Fatalf("dingtalk status = (%+v, %v), want disconnected", status, err)
+	}
+	feishuService, ok := root.Get(contracts.KeyFeishu)
+	if !ok || feishuService == nil {
+		t.Fatal("KeyFeishu service is not available on the root")
+	}
+	if challenge, ok := feishuService.VerifyURL([]byte(`{"type":"url_verification","challenge":"abc"}`)); !ok || challenge != "abc" {
+		t.Fatalf("feishu VerifyURL = (%q, %v), want the challenge echoed", challenge, ok)
 	}
 
 	// The triage pass is wired over the same inbox and triage services: with no

@@ -9,6 +9,8 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/appinfo"
 	"github.com/zeokeel/zeokeel/internal/modules/approvals"
 	"github.com/zeokeel/zeokeel/internal/modules/automation"
+	"github.com/zeokeel/zeokeel/internal/modules/dingtalk"
+	"github.com/zeokeel/zeokeel/internal/modules/feishu"
 	"github.com/zeokeel/zeokeel/internal/modules/goal"
 	"github.com/zeokeel/zeokeel/internal/modules/hosttools"
 	"github.com/zeokeel/zeokeel/internal/modules/importer"
@@ -82,6 +84,8 @@ func Registry() *module.Registry {
 	// Channel adapters: the webhook is the first one, and it only needs the inbox.
 	mustRegister(registry, webhook.Module())
 	mustRegister(registry, wechat.Module())
+	mustRegister(registry, dingtalk.Module())
+	mustRegister(registry, feishu.Module())
 	mustRegister(registry, GroupModule())
 	return registry
 }

@@ -95,6 +95,16 @@
       "config": {}
     },
     {
+      "id": "feishu",
+      "module": "zeokeel/feishu",
+      "config": {}
+    },
+    {
+      "id": "dingtalk",
+      "module": "zeokeel/dingtalk",
+      "config": {}
+    },
+    {
       "id": "hosttools",
       "module": "zeokeel/hosttools",
       "config": {
