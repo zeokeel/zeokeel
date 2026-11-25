@@ -403,6 +403,8 @@ const mockTaskTools = new Map();
 const mockTaskApproval = new Map();
 /** Task -> budget meter. */
 const mockTaskBudgets = new Map();
+/** Skill drafts proposed by finished tasks. */
+const mockSkillDrafts = [];
 /** Shared team notes, newest first. */
 const mockTeamNotes = [];
 /** QR logins started by the settings screen. */
@@ -2055,6 +2057,33 @@ const wsDispatch = (client, message) => {
       note.reviewedBy = String(params.reviewer ?? '');
       note.reviewedAt = params.at ? String(params.at) : nowIso();
       return reply(note);
+    }
+    case 'skilldrafts.snapshot': {
+      return reply({ drafts: mockSkillDrafts.slice(0, Number(params.limit ?? 50)) });
+    }
+    case 'skilldrafts.propose': {
+      const name = String(params.name ?? '');
+      if (!name) return fail(-32602, 'invalid_params');
+      const draft = {
+        id: `draft-${mockSkillDrafts.length + 1}`,
+        ...(params.taskId ? { taskId: String(params.taskId) } : {}),
+        name,
+        ...(params.summary ? { summary: String(params.summary) } : {}),
+        body: `# ${name}\n\n## When to use\n\n_(to be filled in)_\n`,
+        status: 'pending',
+        createdAt: nowIso(),
+      };
+      mockSkillDrafts.unshift(draft);
+      return reply(draft);
+    }
+    case 'skilldrafts.decide': {
+      if (params.accept === undefined) return fail(-32602, 'invalid_params');
+      const draft = mockSkillDrafts.find((row) => row.id === String(params.id ?? ''));
+      if (!draft) return fail(-32600, 'skilldrafts: unknown draft');
+      if (draft.status === 'rejected' && params.accept) return fail(-32600, 'skilldrafts: draft was rejected');
+      draft.status = params.accept ? 'accepted' : 'rejected';
+      draft.reviewer = String(params.reviewer ?? '');
+      return reply(draft);
     }
     case 'notify.plan': {
       const category = String(params.category ?? '');

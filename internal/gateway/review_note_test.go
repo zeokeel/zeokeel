@@ -286,3 +286,111 @@ func stringsHas(haystack, needle string) bool {
 		return false
 	})()
 }
+
+type fakeSkillDrafts struct {
+	mu     sync.Mutex
+	drafts []contracts.TaskSkillDraft
+	err    error
+}
+
+func (f *fakeSkillDrafts) Draft(_ context.Context, draft contracts.TaskSkillDraft) (contracts.TaskSkillDraft, error) {
+	if f.err != nil {
+		return contracts.TaskSkillDraft{}, f.err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	draft.ID = "draft-" + draft.Name
+	draft.Status = contracts.SkillDraftPending
+	f.drafts = append(f.drafts, draft)
+	return draft, nil
+}
+
+func (f *fakeSkillDrafts) List(context.Context, int) ([]contracts.TaskSkillDraft, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]contracts.TaskSkillDraft(nil), f.drafts...), nil
+}
+
+func (f *fakeSkillDrafts) Decide(_ context.Context, id string, accept bool, reviewer string) (contracts.TaskSkillDraft, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.drafts {
+		if f.drafts[i].ID == id {
+			if accept {
+				f.drafts[i].Status = contracts.SkillDraftAccepted
+			} else {
+				f.drafts[i].Status = contracts.SkillDraftRejected
+			}
+			f.drafts[i].Reviewer = reviewer
+			return f.drafts[i], nil
+		}
+	}
+	return contracts.TaskSkillDraft{}, contracts.ErrSkillDraftUnknown
+}
+
+func TestAcceptProposesASkillDraft(t *testing.T) {
+	drafts := &fakeSkillDrafts{}
+	gw := newReviewGateway(t, &fakeLease{}, nil)
+	if _, err := gw.root.Provide(contracts.KeySkillDrafts, contracts.SkillDraftsService(drafts)); err != nil {
+		t.Fatalf("provide drafts: %v", err)
+	}
+
+	if problem := review(t, gw, map[string]any{
+		"id": "t1", "decision": "accept", "reviewer": "lead", "note": "verified",
+	}); problem != nil {
+		t.Fatalf("review failed: %+v", problem)
+	}
+	drafts.mu.Lock()
+	defer drafts.mu.Unlock()
+	if len(drafts.drafts) != 1 {
+		t.Fatalf("drafts = %+v, want one proposal", drafts.drafts)
+	}
+	if drafts.drafts[0].Status != contracts.SkillDraftPending || drafts.drafts[0].TaskID != "t1" {
+		t.Fatalf("draft = %+v, want a pending proposal tied to the task", drafts.drafts[0])
+	}
+}
+
+func TestRejectDoesNotProposeASkill(t *testing.T) {
+	drafts := &fakeSkillDrafts{}
+	gw := newReviewGateway(t, &fakeLease{}, nil)
+	if _, err := gw.root.Provide(contracts.KeySkillDrafts, contracts.SkillDraftsService(drafts)); err != nil {
+		t.Fatalf("provide drafts: %v", err)
+	}
+	if problem := review(t, gw, map[string]any{
+		"id": "t1", "decision": "reject", "reviewer": "lead", "note": "no",
+	}); problem != nil {
+		t.Fatalf("review failed: %+v", problem)
+	}
+	drafts.mu.Lock()
+	defer drafts.mu.Unlock()
+	if len(drafts.drafts) != 0 {
+		t.Fatalf("a rejected task proposed a skill: %+v", drafts.drafts)
+	}
+}
+
+func TestSkillProposalFailureDoesNotUndoTheReview(t *testing.T) {
+	drafts := &fakeSkillDrafts{err: contracts.ErrSkillDraftInvalid}
+	gw := newReviewGateway(t, &fakeLease{}, nil)
+	if _, err := gw.root.Provide(contracts.KeySkillDrafts, contracts.SkillDraftsService(drafts)); err != nil {
+		t.Fatalf("provide drafts: %v", err)
+	}
+	if problem := review(t, gw, map[string]any{
+		"id": "t1", "decision": "accept", "reviewer": "lead", "note": "ok",
+	}); problem != nil {
+		t.Fatalf("a skill proposal failure failed the review: %+v", problem)
+	}
+}
+
+func TestSkillNameProjectionRefusesHopelessIDs(t *testing.T) {
+	cases := map[string]string{
+		"task-1":        "task-1",
+		"Task 42 / ops": "task-42-ops",
+		"":              "",
+		"!!!":           "",
+	}
+	for input, want := range cases {
+		if got := skillNameFromTaskID(input); got != want {
+			t.Errorf("skillNameFromTaskID(%q) = %q, want %q", input, got, want)
+		}
+	}
+}

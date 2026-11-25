@@ -420,6 +420,7 @@ func (g *Gateway) taskReview(ctx context.Context, raw json.RawMessage) (any, *pr
 	// undo a review the reviewer already made.
 	if params.Decision == "accept" {
 		g.recordReviewNote(ctx, params.ID, params.Reviewer, params.Note, lease)
+		g.proposeSkillDraft(ctx, params.ID, params.Note, lease)
 	}
 	g.notifyReview(ctx, params.Decision, params.ID, params.Note)
 	return taskLeaseFromContract(lease), nil
@@ -1500,4 +1501,175 @@ func (g *Gateway) channelHealth(ctx context.Context) map[string]bool {
 		}
 	}
 	return out
+}
+
+// proposeSkillDraft is the plan's G12 trigger: a finished task proposes a skill.
+// It proposes, never installs — the draft is pending until a human accepts it, and
+// a failure here never touches the review that already happened.
+func (g *Gateway) proposeSkillDraft(ctx context.Context, taskID, note string, lease contracts.TaskLease) {
+	drafts, ok := g.root.Get(contracts.KeySkillDrafts)
+	if !ok || drafts == nil {
+		return
+	}
+	name := skillNameFromTaskID(taskID)
+	if name == "" {
+		return
+	}
+	summary := "从任务 " + taskID + " 沉淀的操作流程。"
+	body := "任务 " + taskID + " 已验收。"
+	if strings.TrimSpace(note) != "" {
+		body += "\n\n验收意见：" + note
+	}
+	if len(lease.Evidence) > 0 {
+		body += "\n\n完成时的证据："
+		for _, evidence := range lease.Evidence {
+			body += "\n- " + evidence.Kind + ": " + evidence.Ref
+		}
+	}
+	if _, err := drafts.Draft(ctx, contracts.TaskSkillDraft{
+		TaskID: taskID, Name: name, Summary: summary, Body: body,
+	}); err != nil {
+		g.logger.Printf("gateway: propose skill draft for %s: %v", taskID, err)
+	}
+}
+
+// skillNameFromTaskID projects a task id onto the skill-name alphabet
+// ([a-z0-9-], 2..64). An id that cannot be projected is not turned into a
+// mangled name — no draft is better than a wrong one.
+func skillNameFromTaskID(taskID string) string {
+	lowered := strings.ToLower(strings.TrimSpace(taskID))
+	var builder strings.Builder
+	lastDash := false
+	for _, r := range lowered {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			builder.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash && builder.Len() > 0 {
+				builder.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	name := strings.Trim(builder.String(), "-")
+	if len(name) > 56 {
+		name = strings.Trim(name[:56], "-")
+	}
+	if len(name) < 2 {
+		return ""
+	}
+	return name
+}
+
+// --- skill drafts ----------------------------------------------------------
+
+type skillDraftDTO struct {
+	ID        string `json:"id"`
+	TaskID    string `json:"taskId,omitempty"`
+	Name      string `json:"name"`
+	Summary   string `json:"summary,omitempty"`
+	Body      string `json:"body,omitempty"`
+	Status    string `json:"status"`
+	Reviewer  string `json:"reviewer,omitempty"`
+	CreatedAt string `json:"createdAt,omitempty"`
+}
+
+type skillDraftsListResult struct {
+	Drafts []skillDraftDTO `json:"drafts"`
+}
+
+type skillDraftProposeParams struct {
+	TaskID  string `json:"taskId,omitempty"`
+	Name    string `json:"name"`
+	Summary string `json:"summary,omitempty"`
+	Body    string `json:"body,omitempty"`
+}
+
+type skillDraftDecideParams struct {
+	ID       string `json:"id"`
+	Accept   *bool  `json:"accept"`
+	Reviewer string `json:"reviewer"`
+}
+
+func skillDraftFromContract(draft contracts.TaskSkillDraft) skillDraftDTO {
+	return skillDraftDTO{
+		ID: draft.ID, TaskID: draft.TaskID, Name: draft.Name, Summary: draft.Summary,
+		Body: draft.Body, Status: draft.Status, Reviewer: draft.Reviewer, CreatedAt: rfc3339(draft.CreatedAt),
+	}
+}
+
+func (g *Gateway) skillDraftsService() (contracts.SkillDraftsService, *protocolError) {
+	service, ok := g.root.Get(contracts.KeySkillDrafts)
+	if !ok || service == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "skill drafts unavailable")
+	}
+	return service, nil
+}
+
+func (g *Gateway) skillDraftsList(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.skillDraftsService()
+	if problem != nil {
+		return nil, problem
+	}
+	limit := 50
+	if len(raw) > 0 {
+		var params struct {
+			Limit int `json:"limit,omitempty"`
+		}
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		if params.Limit > 0 && params.Limit <= 200 {
+			limit = params.Limit
+		}
+	}
+	drafts, err := service.List(ctx, limit)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	result := skillDraftsListResult{Drafts: make([]skillDraftDTO, 0, len(drafts))}
+	for _, draft := range drafts {
+		result.Drafts = append(result.Drafts, skillDraftFromContract(draft))
+	}
+	return result, nil
+}
+
+func (g *Gateway) skillDraftPropose(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.skillDraftsService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params skillDraftProposeParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	draft, err := service.Draft(ctx, contracts.TaskSkillDraft{
+		TaskID: params.TaskID, Name: params.Name, Summary: params.Summary, Body: params.Body,
+	})
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return skillDraftFromContract(draft), nil
+}
+
+// skillDraftDecide accepts or rejects a proposal. accept is a pointer so an
+// omitted field is refused instead of read as a rejection.
+func (g *Gateway) skillDraftDecide(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.skillDraftsService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params skillDraftDecideParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if params.Accept == nil {
+		return nil, errInvalidParams("accept", "accept is required (true or false)")
+	}
+	draft, err := service.Decide(ctx, params.ID, *params.Accept, params.Reviewer)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return skillDraftFromContract(draft), nil
 }

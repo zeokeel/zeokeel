@@ -836,6 +836,9 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `tasks.budget.consume` | `{id,tokens}` | 累加后的 `TaskBudget` | N | `TaskLeaseService.Consume`（用量由测量方上报；`used > max` 越限时租约转 `blocked` 并返回 `-32600`（`lease: task budget exhausted`，报文含 used/max），此后 `tasks.submit` 同样被拒，只有 Lead 调 `tasks.budget.set` 追加预算才继续。显式 `tokens:0` = 只重算时长轴） | ✅ 已实现 |
 | `approval.token` | `{approvalId}` | `{token,expiresAt}` | N | `ApprovalActionService.IssueToken` | ✅ 已实现 |
 | `approval.action` | `{approvalId,decision:"allow"\|"deny",token}` | `{ok:true}` | N | `ApprovalActionService.Apply` | ✅ 已实现 |
+| `skilldrafts.snapshot` | `{limit?}` | `{drafts:[SkillDraft]}` | Y | `SkillDraftsService.List`（最新在前） | ✅ 已实现 |
+| `skilldrafts.propose` | `{taskId?,name,summary?,body?}` | `SkillDraft`（status=pending） | N | `SkillDraftsService.Draft`（六段式模板；草稿永不自动安装） | ✅ 已实现 |
+| `skilldrafts.decide` | `{id,accept,reviewer}` | `SkillDraft` | N | `SkillDraftsService.Decide`（`accept` 必须显式传；驳回不可复活） | ✅ 已实现 |
 | `notify.plan` | `{category}` | `{channels,deferred,reason?}` | Y | `NotifyRouterService.Plan`（只算不发，渠道健康来自各适配器 Status） | ✅ 已实现 |
 | `notify.deliver` | `{category,text}` | `{channel,attempts?,deferred,reason?,errors?}` | N | `ChannelDispatchService.Deliver`（按计划真发；全失败落 inapp 并带每步拒因） | ✅ 已实现 |
 | `notify.route.snapshot` | — | `{routes:[NotifyRoute]}` | Y | `NotifyRouterService.Routes` | ✅ 已实现 |
@@ -891,7 +894,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
   `tasks.approve` 把同一租约转成 `claimed`（保留 owner、重算租期），`tasks.reject-start` 释放认领
   （任务回 pending、清 owner，note 记进 `leases.json` 的 `startRejections`，下一次认领照常可用）。
   策略随任务存续，只在**下一次**认领生效，不追溯已经在跑的租约；未知策略值读取时按 `before_start`（fail closed）。
-- capability：`inbox`、`triage`、`tasklease`、`approvalaction`、`notifyroute`、`webhook`、`lead`、`credentials`、`heartbeat`、`browser`、`teamnotes`、`wechatlogin`、`channeldispatch`（十三个服务键都随装配提供；
+- capability：`inbox`、`triage`、`tasklease`、`approvalaction`、`notifyroute`、`webhook`、`lead`、`credentials`、`heartbeat`、`browser`、`teamnotes`、`wechatlogin`、`channeldispatch`、`skilldrafts`（十四个服务键都随装配提供；
   缺任何一个，对应方法返回 `-32004 capability_unsupported`）。
 - `webhook.source.set` 的 `secret` 只在请求体里出现：响应、`webhook.sources` 和日志都不回显它。
 - `NotifyRoute` 的兜底顺序：`primary` → `fallback[]` → **`inapp` 永远作为最后一档**（交付循环可以在这里停住）；

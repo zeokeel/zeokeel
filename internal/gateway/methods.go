@@ -49,6 +49,7 @@ var serverCapabilities = []string{
 	"teamnotes",
 	"wechatlogin",
 	"channeldispatch",
+	"skilldrafts",
 }
 
 // gatewayCapabilities is the handshake's capability list for this gateway
@@ -438,6 +439,15 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		},
 		"notify.deliver": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.notifyDeliver(ctx, request.Params)
+		},
+		"skilldrafts.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.skillDraftsList(ctx, request.Params)
+		},
+		"skilldrafts.propose": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.skillDraftPropose(ctx, request.Params)
+		},
+		"skilldrafts.decide": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.skillDraftDecide(ctx, request.Params)
 		},
 		"team.notes": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.teamNotes(ctx, request.Params)

@@ -382,6 +382,30 @@
         "sinceRev"
       ]
     },
+    "skilldrafts.decide": {
+      "required": [
+        "accept",
+        "id",
+        "reviewer"
+      ],
+      "optional": []
+    },
+    "skilldrafts.propose": {
+      "required": [
+        "name"
+      ],
+      "optional": [
+        "body",
+        "summary",
+        "taskId"
+      ]
+    },
+    "skilldrafts.snapshot": {
+      "required": [],
+      "optional": [
+        "limit"
+      ]
+    },
     "task.delete": {
       "required": [
         "id"
@@ -717,6 +741,7 @@
       "session.subscribe",
       "settings",
       "settings.set",
+      "skilldrafts",
       "tasklease",
       "teamnotes",
       "triage",
