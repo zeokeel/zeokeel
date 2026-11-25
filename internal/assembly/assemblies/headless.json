@@ -115,6 +115,13 @@
       "config": {}
     },
     {
+      "id": "browser",
+      "module": "zeokeel/browser",
+      "config": {
+        "headless": false
+      }
+    },
+    {
       "id": "hosttools",
       "module": "zeokeel/hosttools",
       "config": {

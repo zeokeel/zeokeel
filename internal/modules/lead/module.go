@@ -35,7 +35,20 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return fmt.Errorf("%s: require data dir: %w", ModuleID, err)
 		}
-		service, err := Open(filepath.Join(dataDir, "lead"), inboxService, triageService, cfg)
+		// The Lead thinks with a model when the chat endpoint is configured, and
+		// with rules otherwise. A partial configuration keeps rules.
+		var settings SettingsReader
+		if value, ok := ctx.Get(contracts.KeySettings); ok && value != nil {
+			settings = value
+		}
+		chosenPlanner, plannerErr := PlannerFromSettings(settings, nil)
+		if plannerErr != nil {
+			if logger, ok := ctx.Get(contracts.KeyLogger); ok && logger != nil {
+				logger.Printf("lead: %v; falling back to the rule planner", plannerErr)
+			}
+			chosenPlanner = RulePlanner{}
+		}
+		service, err := OpenWith(filepath.Join(dataDir, "lead"), inboxService, triageService, chosenPlanner, cfg)
 		if err != nil {
 			if !errors.Is(err, ErrLeadStoreCorrupt) {
 				return fmt.Errorf("%s: open rule store: %w", ModuleID, err)

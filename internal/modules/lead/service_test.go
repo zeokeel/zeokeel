@@ -192,3 +192,55 @@ func TestRunOnceUsesTheInjectedPlanner(t *testing.T) {
 		t.Fatalf("report = %+v applied = %+v", report, triage.applied)
 	}
 }
+
+// The module builds a model planner from the chat settings when they are
+// complete, and keeps the rule planner when they are not: a half-configured
+// endpoint must never silently start deciding on its own.
+type stubSettings map[string]string
+
+func (s stubSettings) Get(key, fallback string) string {
+	if value, ok := s[key]; ok {
+		return value
+	}
+	return fallback
+}
+
+func TestPlannerFromSettings(t *testing.T) {
+	cases := []struct {
+		name     string
+		settings stubSettings
+		wantKind string
+	}{
+		{"complete settings build a model planner", stubSettings{
+			contracts.SettingsChatBaseURL: "https://api.example.com/v1",
+			contracts.SettingsChatAPIKey:  "sk-test",
+			contracts.SettingsChatModel:   "triage-model",
+		}, "model"},
+		{"missing model keeps the rule planner", stubSettings{
+			contracts.SettingsChatBaseURL: "https://api.example.com/v1",
+			contracts.SettingsChatAPIKey:  "sk-test",
+		}, "rules"},
+		{"missing base url keeps the rule planner", stubSettings{
+			contracts.SettingsChatModel: "triage-model",
+		}, "rules"},
+		{"empty settings keep the rule planner", stubSettings{}, "rules"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			planner, err := lead.PlannerFromSettings(tc.settings, nil)
+			if err != nil {
+				t.Fatalf("PlannerFromSettings: %v", err)
+			}
+			switch tc.wantKind {
+			case "model":
+				if _, ok := planner.(lead.ModelPlanner); !ok {
+					t.Fatalf("planner = %T, want a ModelPlanner", planner)
+				}
+			default:
+				if _, ok := planner.(lead.RulePlanner); !ok {
+					t.Fatalf("planner = %T, want the rule planner", planner)
+				}
+			}
+		})
+	}
+}

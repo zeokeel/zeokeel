@@ -9,6 +9,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/appinfo"
 	"github.com/zeokeel/zeokeel/internal/modules/approvals"
 	"github.com/zeokeel/zeokeel/internal/modules/automation"
+	"github.com/zeokeel/zeokeel/internal/modules/browser"
 	"github.com/zeokeel/zeokeel/internal/modules/creds"
 	"github.com/zeokeel/zeokeel/internal/modules/dingtalk"
 	"github.com/zeokeel/zeokeel/internal/modules/email"
@@ -82,6 +83,9 @@ func Registry() *module.Registry {
 	// Notification routing: pure policy, no channel dependency.
 	mustRegister(registry, notifyroute.Module())
 	mustRegister(registry, insights.Module())
+	// Local browser (CDP): no requirements. It loads without an endpoint and
+	// reports disconnected, so a missing or stopped Chrome never blocks boot.
+	mustRegister(registry, browser.Module())
 	mustRegister(registry, hosttools.Module())
 	// Channel adapters: the webhook is the first one, and it only needs the inbox.
 	// Credential store: channel adapters need it, it needs only the data dir.

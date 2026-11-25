@@ -42,7 +42,16 @@ type ruleStoreDocument struct {
 // fresh start (no rules). A corrupt file is reported as ErrLeadStoreCorrupt
 // together with a service whose rule set is empty.
 func Open(dir string, inboxService contracts.InboxService, triage contracts.TriageService, cfg Config) (*Service, error) {
-	service := NewService(inboxService, triage, RulePlanner{}, cfg)
+	return OpenWith(dir, inboxService, triage, RulePlanner{}, cfg)
+}
+
+// OpenWith is Open with an explicit planner (nil means the rule planner). The
+// product uses it to hand the pass a model-backed planner built from settings.
+func OpenWith(dir string, inboxService contracts.InboxService, triage contracts.TriageService, planner Planner, cfg Config) (*Service, error) {
+	if planner == nil {
+		planner = RulePlanner{}
+	}
+	service := NewService(inboxService, triage, planner, cfg)
 	if dir == "" {
 		return service, nil
 	}
