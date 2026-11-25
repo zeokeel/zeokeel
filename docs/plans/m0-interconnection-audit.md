@@ -45,7 +45,7 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | 入站路由（钉钉/飞书） | gateway `inbound.go` | 平台回调 | 6 条（202/签名 401/challenge 200/204/404） |
 | Web「待办收件箱」 | `web/src/features/inbox/**`、`web/src/api/inbox.ts` | `/inbox/incoming` | web 全量 477 tests 绿；旧 `/inbox` 有回归测试 |
 | Web「任务详情」 | `web/src/features/task/**`、`web/src/api/task.ts` | `/t/:taskId`（R3b，无导航） | 22 测试（五段顺序/认领/证据门槛/通过打回/重试） |
-| `tasks.lease` | gateway | 任务详情首屏证据 | 方法表 + 契约 + mock 同步（74 方法） |
+| `tasks.lease` | gateway（独立 `leaseReadParams`，只读 id） | 任务详情首屏证据 | 方法表 + 契约 + mock 同步（74 方法）；屏幕首屏读证据、读失败只降级 §3 |
 | `leadplan`（模型面） | leadplan（新，仅依赖 contracts） | 未来模型计划器 | 17 测试 / 45 断言（提示注入隔离、解析表） |
 | `contracts.KeyWebhook` | webhook（依赖 inbox + dataDir） | `POST /api/inbound/{source}`、`webhook.sources/source.set/remove` | 10 条收件测试 + 7 条 HTTP 测试 + 6 条 source 管理测试（排序/校验/删除/重启恢复/轮换失效/0600） |
 | **网关 → 服务键**（11 个方法） | inbox / triage / tasklease / approvalaction | web 客户端、Lead 分诊回合 | 一致性测试（TRANSPORT §5.1 ↔ dispatch ↔ contract.json ↔ ws-contract.ts）+ 载荷映射测试 7 条 |
@@ -144,6 +144,7 @@ scripts/verify.sh --quick（并行四流集成后）PASS 5/5，66s
 scripts/verify.sh --quick（creds 集成后）PASS 5/5，68s
 web: typecheck / lint(25 既有 warning) / test 453 / gen:verify 全绿
 web（任务详情后）: typecheck / lint(25) / test 477 全绿
+web（lease 首屏后）: typecheck / lint(25) / test 484 / gen:verify 全绿
 scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过
 scripts/verify.sh --quick（approval 后）    PASS 5/5（一次 flaky 后重跑绿）
                                             （首次跑时 gateway 的
