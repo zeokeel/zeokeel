@@ -139,7 +139,7 @@ func TestProductsAndEntries(t *testing.T) {
 		t.Fatalf("Entries(headless): %v", err)
 	}
 	wantHeadless := []string{
-		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
+		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/inbox", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/insights",
 		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/hosttools", "zeokeel/memorystore",
 		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
@@ -214,8 +214,41 @@ func TestRegistryIsExplicit(t *testing.T) {
 			t.Fatalf("Registry() still registers the retired UI module %q", id)
 		}
 	}
-	if got := len(registry.Modules()); got != 18 {
-		t.Fatalf("Registry() modules = %d, want 20", got)
+	if got := len(registry.Modules()); got != 19 {
+		t.Fatalf("Registry() modules = %d, want 19", got)
+	}
+}
+
+// TestEveryRegisteredModuleIsLoaded closes the "registered but never loaded"
+// hole: a module can be added to Registry() (so its tests and imports compile)
+// yet never appear in any embedded assembly, in which case it silently does not
+// exist at runtime. The gateway reuses the headless entries, so headless is the
+// one place every module must appear.
+func TestEveryRegisteredModuleIsLoaded(t *testing.T) {
+	entries, err := assembly.Entries(assembly.ProductHeadless)
+	if err != nil {
+		t.Fatalf("Entries(headless): %v", err)
+	}
+	loaded := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		loaded[entry.Module] = true
+	}
+	// Known exceptions are named with a reason. Anything else that is
+	// registered but not loaded fails the test: that is the silent-dead-module
+	// bug this guard exists for.
+	knownNotLoaded := map[string]string{
+		assembly.GroupModuleID: "container module: only referenced by nested assembly groups, and headless has none",
+		"zeokeel/modelcatalog": "registered but has no assembly entry yet (no consumer today); tracked in docs/plans/m0-interconnection-audit.md",
+	}
+	for _, info := range assembly.Registry().Modules() {
+		if loaded[info.ID] {
+			continue
+		}
+		if reason, ok := knownNotLoaded[info.ID]; ok {
+			t.Logf("module %q is registered but not loaded: %s", info.ID, reason)
+			continue
+		}
+		t.Errorf("module %q is registered but absent from the headless assembly (it will never load)", info.ID)
 	}
 }
 
@@ -248,7 +281,7 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 
 	instances := loader.Instances()
 	wantIDs := []string{
-		"appinfo", "store", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "hosttools", "memorystore",
+		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "hosttools", "memorystore",
 		"agent", "automation", "update", "importer", "acp",
 	}
 	gotIDs := make([]string, len(instances))
@@ -286,6 +319,29 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 		if !found {
 			t.Fatalf("toolkit registry lacks host tool %q", name)
 		}
+	}
+
+	// Inbox wiring: the assembly really provides the single external entry
+	// point, and its rules work through the service the gateway will consume.
+	// This is the interconnection check — a module that boots but provides
+	// nothing (or provides a different key) fails here, not in production.
+	inboxService, ok := root.Get(contracts.KeyInbox)
+	if !ok || inboxService == nil {
+		t.Fatal("KeyInbox service is not available on the root")
+	}
+	storedItem, merged, err := inboxService.Add(context.Background(), contracts.InboxItem{
+		Source: "wechat", Channel: "dm-1", Sender: "owner", DedupKey: "assembly-1", Title: "assembly check",
+	})
+	if err != nil || merged {
+		t.Fatalf("inbox Add = (%+v, %v, %v), want a fresh item", storedItem, merged, err)
+	}
+	if _, merged, err := inboxService.Add(context.Background(), contracts.InboxItem{
+		Source: "wechat", Channel: "dm-1", Sender: "owner", DedupKey: "assembly-1", Title: "assembly check",
+	}); err != nil || !merged {
+		t.Fatalf("inbox dedupe through the assembly = (merged %v, err %v), want merged", merged, err)
+	}
+	if updated, err := inboxService.Triage(context.Background(), []string{storedItem.ID}, contracts.InboxActionTask, []string{"task-1"}); err != nil || updated != 1 {
+		t.Fatalf("inbox Triage through the assembly = (%d, %v), want (1, nil)", updated, err)
 	}
 
 	// Goal v2: the durable per-session goal backend is assembled and the DSH
@@ -422,8 +478,8 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	}()
 
 	instances := loader.Instances()
-	if len(instances) != 16 {
-		t.Fatalf("headless instances = %d, want 16", len(instances))
+	if len(instances) != 17 {
+		t.Fatalf("headless instances = %d, want 17", len(instances))
 	}
 	instance := instances[0]
 	if instance.ID() != "appinfo" || instance.ModuleID() != "zeokeel/appinfo" {
@@ -432,10 +488,10 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	if state := instance.State(); state != cordis.Active {
 		t.Fatalf("appinfo state = %s, want Active", state)
 	}
-	// insights follows workspace, so hosttools shifts to index 9.
-	hostInstance := instances[9]
+	// The inbox follows store, so hosttools shifts to index 10.
+	hostInstance := instances[10]
 	if hostInstance.ID() != "hosttools" || hostInstance.ModuleID() != "zeokeel/hosttools" {
-		t.Fatalf("headless instance[9] = %s/%s, want hosttools/zeokeel/hosttools",
+		t.Fatalf("headless instance[10] = %s/%s, want hosttools/zeokeel/hosttools",
 			hostInstance.ID(), hostInstance.ModuleID())
 	}
 	if state := hostInstance.State(); state != cordis.Active {

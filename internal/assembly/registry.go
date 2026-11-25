@@ -12,6 +12,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/goal"
 	"github.com/zeokeel/zeokeel/internal/modules/hosttools"
 	"github.com/zeokeel/zeokeel/internal/modules/importer"
+	"github.com/zeokeel/zeokeel/internal/modules/inbox"
 	"github.com/zeokeel/zeokeel/internal/modules/insights"
 	"github.com/zeokeel/zeokeel/internal/modules/memorystore"
 	"github.com/zeokeel/zeokeel/internal/modules/modelcatalog"
@@ -45,6 +46,9 @@ func Registry() *module.Registry {
 	registry.AddBuiltin(contracts.KeyDataDir)
 
 	mustRegister(registry, appinfo.Module())
+	// The inbox is the single external entry point: register it before every
+	// consumer so the Lead/triage path can always require it.
+	mustRegister(registry, inbox.Module())
 	mustRegister(registry, sessionstore.Module())
 	mustRegister(registry, approvals.Module())
 	mustRegister(registry, workspace.Module())
