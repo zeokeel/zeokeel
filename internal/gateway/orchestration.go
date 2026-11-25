@@ -259,6 +259,9 @@ type inboxDispatchParams struct {
 	BlockedBy   []string `json:"blockedBy,omitempty"`
 	WriteScopes []string `json:"writeScopes,omitempty"`
 	Note        string   `json:"note,omitempty"`
+	// BotID dispatches to a bot instance: the task is owned by that bot and its
+	// allowed tools become the task's tool binding.
+	BotID string `json:"botId,omitempty"`
 }
 
 type inboxDispatchResult struct {
@@ -276,17 +279,40 @@ func (g *Gateway) inboxDispatch(ctx context.Context, raw json.RawMessage) (any, 
 	if err := decodeParams(raw, &params); err != nil {
 		return nil, err
 	}
+	assignee := params.Assignee
+	var boundTools []string
+	if params.BotID != "" {
+		bots, problem := g.botService()
+		if problem != nil {
+			return nil, problem
+		}
+		bot, err := bots.Get(ctx, params.BotID)
+		if err != nil {
+			return nil, orchestrationError(err)
+		}
+		assignee = bot.ID
+		boundTools = bot.AllowedTools
+	}
 	result, err := service.Apply(ctx, params.ID, contracts.TriageDecision{
 		Action: contracts.InboxActionTask,
 		Task: &contracts.NewTask{
 			Subject: params.Subject, Detail: params.Detail,
 			BlockedBy: params.BlockedBy, WriteScopes: params.WriteScopes,
-			Assignee: params.Assignee,
+			Assignee: assignee,
 		},
 		Note: params.Note,
 	})
 	if err != nil {
 		return nil, orchestrationError(err)
+	}
+	// The bot's tool grant becomes the task's binding: a dispatch to a bot is how
+	// policy stops being a note and starts being a constraint.
+	if len(boundTools) > 0 && len(result.TaskIDs) > 0 {
+		if leases, ok := g.root.Get(contracts.KeyTaskLease); ok && leases != nil {
+			if _, bindErr := leases.SetTools(ctx, result.TaskIDs[0], boundTools); bindErr != nil {
+				g.logger.Printf("gateway: bind bot tools to %s: %v", result.TaskIDs[0], bindErr)
+			}
+		}
 	}
 	return inboxDispatchResult{
 		TaskIDs: result.TaskIDs, Created: result.Created,
@@ -1718,4 +1744,131 @@ func (g *Gateway) skillDraftInstall(ctx context.Context, raw json.RawMessage) (a
 		return nil, orchestrationError(err)
 	}
 	return map[string]any{"installed": true, "name": skill.Name}, nil
+}
+
+// --- bots ------------------------------------------------------------------
+
+type botTemplateDTO struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Role        string   `json:"role,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Model       string   `json:"defaultModel,omitempty"`
+	Prompt      string   `json:"systemPrompt,omitempty"`
+	Tools       []string `json:"allowedTools,omitempty"`
+	MemoryScope string   `json:"memoryScope,omitempty"`
+}
+
+type botInstanceDTO struct {
+	ID          string   `json:"id"`
+	TemplateID  string   `json:"templateId"`
+	Name        string   `json:"name"`
+	Owner       string   `json:"owner,omitempty"`
+	Model       string   `json:"defaultModel,omitempty"`
+	Tools       []string `json:"allowedTools,omitempty"`
+	MemoryScope string   `json:"memoryScope,omitempty"`
+	Status      string   `json:"status"`
+	CreatedAt   string   `json:"createdAt,omitempty"`
+	LastSeenAt  string   `json:"lastSeenAt,omitempty"`
+}
+
+type botsSnapshotResult struct {
+	Templates []botTemplateDTO `json:"templates"`
+	Instances []botInstanceDTO `json:"instances"`
+}
+
+type botsUpsertParams struct {
+	ID          string   `json:"id"`
+	TemplateID  string   `json:"templateId"`
+	Name        string   `json:"name,omitempty"`
+	Owner       string   `json:"owner,omitempty"`
+	Model       string   `json:"defaultModel,omitempty"`
+	Tools       []string `json:"allowedTools,omitempty"`
+	MemoryScope string   `json:"memoryScope,omitempty"`
+	Status      string   `json:"status,omitempty"`
+}
+
+func botTemplateFromContract(template contracts.BotTemplate) botTemplateDTO {
+	return botTemplateDTO{
+		ID: template.ID, Name: template.Name, Role: template.Role, Description: template.Description,
+		Model: template.DefaultModel, Prompt: template.SystemPrompt, Tools: template.AllowedTools,
+		MemoryScope: template.MemoryScope,
+	}
+}
+
+func botInstanceFromContract(instance contracts.BotInstance) botInstanceDTO {
+	return botInstanceDTO{
+		ID: instance.ID, TemplateID: instance.TemplateID, Name: instance.Name, Owner: instance.Owner,
+		Model: instance.DefaultModel, Tools: instance.AllowedTools, MemoryScope: instance.MemoryScope,
+		Status: instance.Status, CreatedAt: rfc3339(instance.CreatedAt), LastSeenAt: rfc3339(instance.LastSeenAt),
+	}
+}
+
+func (g *Gateway) botService() (contracts.BotService, *protocolError) {
+	service, ok := g.root.Get(contracts.KeyBots)
+	if !ok || service == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "bots unavailable")
+	}
+	return service, nil
+}
+
+// botsSnapshot lists templates and instances together: a screen that shows one
+// without the other cannot answer "which bot can I dispatch to?".
+func (g *Gateway) botsSnapshot(ctx context.Context, _ json.RawMessage) (any, *protocolError) {
+	service, problem := g.botService()
+	if problem != nil {
+		return nil, problem
+	}
+	templates, err := service.Templates(ctx)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	instances, err := service.Instances(ctx)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	result := botsSnapshotResult{
+		Templates: make([]botTemplateDTO, 0, len(templates)),
+		Instances: make([]botInstanceDTO, 0, len(instances)),
+	}
+	for _, template := range templates {
+		result.Templates = append(result.Templates, botTemplateFromContract(template))
+	}
+	for _, instance := range instances {
+		result.Instances = append(result.Instances, botInstanceFromContract(instance))
+	}
+	return result, nil
+}
+
+// botsUpsert creates or updates one instance (the natural flow is snapshot →
+// modify → upsert).
+func (g *Gateway) botsUpsert(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.botService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params botsUpsertParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	instance := contracts.BotInstance{
+		ID: params.ID, TemplateID: params.TemplateID, Name: params.Name, Owner: params.Owner,
+		DefaultModel: params.Model, AllowedTools: params.Tools, MemoryScope: params.MemoryScope,
+		Status: params.Status,
+	}
+	existing, getErr := service.Get(ctx, params.ID)
+	var saved contracts.BotInstance
+	var err error
+	if getErr == nil && existing.ID != "" {
+		// Update requires the identity fields from the stored row.
+		instance.TemplateID = existing.TemplateID
+		instance.CreatedAt = existing.CreatedAt
+		saved, err = service.Update(ctx, instance)
+	} else {
+		saved, err = service.Create(ctx, instance)
+	}
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return botInstanceFromContract(saved), nil
 }

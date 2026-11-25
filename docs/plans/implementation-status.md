@@ -9,7 +9,7 @@
 
 | ID | 差距 | 状态 | 证据 / 位置 | 还差什么 |
 |---|---|---|---|---|
-| G1 | Bot 实体（模板+实例） | 🟡 | `bot` 模块：模板/实例持久化（0600、内置 lead 模板）、创建继承模板策略、更新不可改身份、退休终态 | 未绑定活会话（LastSeenAt 无生产者）、无任务→Bot 派单、AllowedTools 只是记录不执行、memory scope 未被执行、无 `bots.*` 协议与设置页 |
+| G1 | Bot 实体（模板+实例） | 🟡 | `bot` 模块 + `bots.snapshot/upsert` + **`inbox.dispatch {botId}` 派单**（任务归 Bot，Bot 的工具授予写进任务白名单） | 未绑定活会话（LastSeenAt 无生产者）；memory scope 未被执行；无设置页 UI；AllowedTools 已能落到任务，但执行侧仍未拦截 |
 | G2 | 队友开工前确认 | 🟡 | `tasklease`：`tasks.approval.set/get` + `awaiting_approval` 状态 + `tasks.approve` / `tasks.reject-start`（策略随任务持久化，未知值 fail-closed） | `before_send` 未做；无推送域（UI 需轮询）；审批通过/拒绝尚未发通知 |
 | G3 | 任务板租约 | ✅ | `internal/modules/tasklease`（claim/heartbeat/expire，过期回收） | — |
 | G4 | 证据与验收 | ✅ | `tasklease`（无证据拒收）+ `tasks.review` + 验收写团队笔记 | — |

@@ -405,6 +405,9 @@ const mockTaskApproval = new Map();
 const mockTaskBudgets = new Map();
 /** Skill drafts proposed by finished tasks. */
 const mockSkillDrafts = [];
+/** Bot templates + instances. */
+const mockBotTemplates = [{ id: 'lead', name: 'Lead', role: 'Lead', memoryScope: 'team' }];
+const mockBots = [];
 /** Shared team notes, newest first. */
 const mockTeamNotes = [];
 /** QR logins started by the settings screen. */
@@ -1834,6 +1837,9 @@ const wsDispatch = (client, message) => {
       });
     }
     case 'inbox.dispatch': {
+      // A dispatch may name a bot; the mock records the owner so the screen can
+      // show which bot took the work.
+      const botId = String(params.botId ?? '');
       const item = mockInbox.items.find((row) => row.id === params.id);
       if (!item) return fail(-32600, 'inbox: unknown item');
       const subject = String(params.subject ?? '').trim();
@@ -1855,6 +1861,7 @@ const wsDispatch = (client, message) => {
       });
       item.status = 'task';
       item.taskIds = [...(item.taskIds ?? []), taskId];
+      if (botId) item.assignee = botId;
       publishTasks('');
       return reply({ taskIds: [taskId], created: true, item: { ...item } });
     }
@@ -2057,6 +2064,28 @@ const wsDispatch = (client, message) => {
       note.reviewedBy = String(params.reviewer ?? '');
       note.reviewedAt = params.at ? String(params.at) : nowIso();
       return reply(note);
+    }
+    case 'bots.snapshot': {
+      return reply({ templates: mockBotTemplates, instances: mockBots });
+    }
+    case 'bots.upsert': {
+      const id = String(params.id ?? '');
+      if (!id) return fail(-32602, 'invalid_params');
+      const existing = mockBots.find((row) => row.id === id);
+      const instance = {
+        id,
+        templateId: existing ? existing.templateId : String(params.templateId ?? ''),
+        name: String(params.name ?? existing?.name ?? id),
+        ...(params.owner ? { owner: String(params.owner) } : {}),
+        ...(params.defaultModel ? { defaultModel: String(params.defaultModel) } : {}),
+        ...(Array.isArray(params.allowedTools) ? { allowedTools: params.allowedTools.map(String) } : {}),
+        memoryScope: String(params.memoryScope ?? existing?.memoryScope ?? 'agent'),
+        status: String(params.status ?? existing?.status ?? 'active'),
+        createdAt: existing ? existing.createdAt : nowIso(),
+      };
+      if (existing) Object.assign(existing, instance);
+      else mockBots.push(instance);
+      return reply(instance);
     }
     case 'skilldrafts.snapshot': {
       return reply({ drafts: mockSkillDrafts.slice(0, Number(params.limit ?? 50)) });
