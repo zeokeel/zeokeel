@@ -48,6 +48,7 @@ function sessionStore(): AnchorStore | null {
 export function Transcript({
   messages,
   sessionId,
+  parkedTool,
   focusIndex,
   onRegenerate,
   regenerateDisabled,
@@ -58,6 +59,8 @@ export function Transcript({
   messages: MessageInfo<ZeoMessage>[];
   /** Needed for per-session restoration; omitted where a test does not care. */
   sessionId?: string;
+  /** The tool call this session is parked on (if an approval is waiting). */
+  parkedTool?: { name: string; summary?: string };
   /** Scroll target requested by the find bar. */
   focusIndex?: number;
   /** B11: retry the last turn through the single run endpoint. */
@@ -286,6 +289,7 @@ export function Transcript({
                           // whether a newer row exists; the transcript is the
                           // only place that does (round-3 wire audit).
                           isLatest={row.index === messages.length - 1}
+                          parkedTool={row.index === messages.length - 1 ? parkedTool : undefined}
                         />
                         {info.status === 'loading' ? null : (
                           <MessageActions

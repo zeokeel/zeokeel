@@ -122,6 +122,7 @@ export const en: Catalog = {
   'thread.rawArguments': 'Raw arguments',
   'thread.backToLatest': 'Back to latest',
   'thread.usage': '{in} in · {out} out',
+  'thread.status.awaitingApproval': 'Awaiting approval',
   'thread.status.running': 'Running',
   'thread.status.done': 'Done',
   'thread.status.denied': 'Denied',

@@ -25,6 +25,7 @@ export function ThoughtSteps({
   mode = 'standard',
   collapse = 'completion',
   isLatest = true,
+  parkedTool,
 }: {
   reasoning: string;
   steps: ToolStep[];
@@ -37,6 +38,8 @@ export function ThoughtSteps({
   collapse?: WorkStepsCollapse;
   /** Whether this is the last row: "next-input" folds once a newer one exists. */
   isLatest?: boolean;
+  /** A tool call waiting on the approval card: its node says 等待批准. */
+  parkedTool?: { name: string; summary?: string };
 }) {
   const t = useT();
   const [userExpanded, setUserExpanded] = useState<string[] | null>(null);
@@ -88,7 +91,12 @@ export function ThoughtSteps({
   // read as "nothing is happening" (round-4 loop audit).
   const stepsOnly = streaming && reasoning;
   if (stepsOnly) {
-    const running = steps.map((step) => toolItem(step, t));
+    // The parked call is the last running step with the approval's tool name.
+    const parkedCallId = parkedTool
+      ? [...steps].reverse().find((step) => step.name === parkedTool.name && step.status === 'running')
+          ?.callId
+      : undefined;
+    const running = steps.map((step) => toolItem(step, t, step.callId === parkedCallId));
     if (running.length === 0) return liveThink;
     const defaultOpen = running
       .filter((item) => item.status === 'loading' || item.status === 'error')
@@ -129,7 +137,9 @@ export function ThoughtSteps({
   const compactMode = mode === 'compact';
   const actionable = steps.filter((step) => step.status !== 'ok');
   const visibleSteps = compactMode && !streaming ? actionable : steps;
-  visibleSteps.forEach((step) => items.push(toolItem(step, t)));
+  visibleSteps.forEach((step) =>
+    items.push(toolItem(step, t, parkedTool?.name === step.name && step.status === 'running')),
+  );
 
   const hiddenSuccesses = compactMode ? steps.length - visibleSteps.length : 0;
   if (compactMode && !streaming && hiddenSuccesses > 0) {
@@ -223,15 +233,24 @@ function withTitleButtons(
   });
 }
 
-function toolItem(step: ToolStep, t: ReturnType<typeof useT>): ThoughtChainItemType {
+function toolItem(
+  step: ToolStep,
+  t: ReturnType<typeof useT>,
+  parked = false,
+): ThoughtChainItemType {
   const meta = toolMeta(step.name);
   // Protocol status → the user's own words; never the raw enum. A refused call
   // is a decision, not a failure (round-5 tools audit D4/D12).
   const denied = step.errorKind === 'denied';
   const state = denied
     ? t('thread.status.denied')
-    : step.status === 'running'
-      ? t('thread.status.running')
+    : parked && step.status === 'running'
+      ? // The call has not touched anything yet: it is on the approval card,
+        // and "运行中" made the user think the network request had happened
+        // (round-5 tools audit D2).
+        t('thread.status.awaitingApproval')
+      : step.status === 'running'
+        ? t('thread.status.running')
       : step.status === 'ok'
         ? t('thread.status.done')
         : t('thread.status.failed');
@@ -254,7 +273,12 @@ function toolItem(step: ToolStep, t: ReturnType<typeof useT>): ThoughtChainItemT
         {state}
       </span>
     ),
-    status: step.status === 'running' ? 'loading' : step.status === 'ok' || denied ? 'success' : 'error',
+    status:
+      step.status === 'running'
+        ? 'loading'
+        : step.status === 'ok' || denied
+          ? 'success'
+          : 'error',
     collapsible: true,
     content: <ToolCardBody step={step} />,
   };

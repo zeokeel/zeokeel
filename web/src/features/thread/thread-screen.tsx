@@ -55,7 +55,8 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   const t = useT();
   const { reload, create, sessions } = useSessions();
   const { approvals } = useApprovals();
-  const sessionApprovalPending = approvals.some((request) => request.sessionId === sessionId);
+  const pendingApproval = approvals.find((request) => request.sessionId === sessionId);
+  const sessionApprovalPending = pendingApproval !== undefined;
   const queue = usePromptQueue(sessionId);
   // B11: the menu item is enabled unless the gateway says otherwise — either by
   // advertising no `regenerate` capability, or by answering 1023 on the first
@@ -446,6 +447,8 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
           <Transcript
             messages={chat.parsedMessages}
             sessionId={sessionId}
+            // The node the approval belongs to says 等待批准 instead of 运行中.
+            parkedTool={pendingApproval ? { name: pendingApproval.tool } : undefined}
             focusIndex={matchIndexes.length > 0 ? matchIndexes[cursor] : undefined}
             onRegenerate={regenerate}
             regenerateDisabled={regenerateUnsupported}

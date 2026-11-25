@@ -126,6 +126,7 @@ export const zh = {
   'thread.rawArguments': '原始参数',
   'thread.backToLatest': '回到最新',
   'thread.usage': '{in} 入 · {out} 出',
+  'thread.status.awaitingApproval': '等待批准',
   'thread.status.running': '运行中',
   'thread.status.done': '完成',
   'thread.status.denied': '已拒绝',

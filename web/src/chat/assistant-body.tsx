@@ -19,11 +19,14 @@ export function AssistantBody({
   message,
   status,
   isLatest = true,
+  parkedTool,
 }: {
   message: ZeoMessage;
   status: MessageStatus;
   /** No newer row follows this one (see `ui.workSteps.collapse`). */
   isLatest?: boolean;
+  /** The call an approval is waiting on: its node says so instead of 运行中. */
+  parkedTool?: { name: string; summary?: string };
 }) {
   const t = useT();
   const workSteps = useWorkSteps();
@@ -40,6 +43,7 @@ export function AssistantBody({
         mode={workSteps.mode}
         collapse={workSteps.collapse}
         isLatest={isLatest}
+        parkedTool={parkedTool}
       />
       {message.text ? <MarkdownBody text={message.text} streaming={streaming} /> : null}
       {/* A settled turn with no prose and no error used to leave a 0-height ghost
