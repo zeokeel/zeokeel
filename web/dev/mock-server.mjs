@@ -408,6 +408,8 @@ const mockSkillDrafts = [];
 /** Bot templates + instances. */
 const mockBotTemplates = [{ id: 'lead', name: 'Lead', role: 'Lead', memoryScope: 'team' }];
 const mockBots = [];
+/** Session -> bound task id ("" clears). */
+const mockSessionBindings = new Map();
 /** Shared team notes, newest first. */
 const mockTeamNotes = [];
 /** QR logins started by the settings screen. */
@@ -2087,6 +2089,15 @@ const wsDispatch = (client, message) => {
       if (index >= 0) mockBotTemplates[index] = template;
       else mockBotTemplates.push(template);
       return reply(template);
+    }
+    case 'session.bindtask': {
+      const sessionId = String(params.sessionId ?? '');
+      if (!sessionId) return fail(-32602, 'invalid_params');
+      // The mock keeps the binding so a screen can read it back; enforcement
+      // itself lives in the agent's gate, which the mock does not simulate.
+      const taskId = String(params.taskId ?? '');
+      mockSessionBindings.set(sessionId, taskId);
+      return reply({ taskId });
     }
     case 'bots.snapshot': {
       return reply({ templates: mockBotTemplates, instances: mockBots });

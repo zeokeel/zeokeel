@@ -256,10 +256,21 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 	// against the policy that will actually dispatch these calls, not against
 	// whichever workspace is current when a call happens.
 	runRoot := s.sessionWorkspaceRoot(sessionID)
-	return gate.Func(func(ctx context.Context, tool rig.Tool, call rig.ToolCall) (rig.Decision, error) {
+	return s.taskBindingGate(sessionID, gate.Func(func(ctx context.Context, tool rig.Tool, call rig.ToolCall) (rig.Decision, error) {
 		name := call.Name
 		if tool != nil && strings.TrimSpace(tool.Name()) != "" {
 			name = tool.Name()
+		}
+		// Task binding (M5, taskbinding.go): a session bound to a board task may
+		// only call the tools that task's binding names. This sits immediately
+		// after the name is resolved and BEFORE every branch that can allow —
+		// the plan/chat whitelists, the per-session permission override, the OS
+		// sandbox exemption, the interaction-tool exemption, the remembered
+		// "always allow" set and the approval dialog — because each of those can
+		// only widen: after them, a remembered tool or a sandbox exemption could
+		// bypass the task's policy. Unbound sessions are unaffected ("" reason).
+		if s.taskBindingDenial(ctx, sessionID, name) != "" {
+			return rig.DecisionDeny, nil
 		}
 		if s.agentModePlan() {
 			if planModeToolAllowed(name) {
@@ -371,5 +382,5 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 		default:
 			return rig.DecisionDeny, nil
 		}
-	})
+	}))
 }

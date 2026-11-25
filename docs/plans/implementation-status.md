@@ -9,7 +9,7 @@
 
 | ID | 差距 | 状态 | 证据 / 位置 | 还差什么 |
 |---|---|---|---|---|
-| G1 | Bot 实体（模板+实例） | 🟡 | `bot` 模块 + `bots.*`（含模板编辑）+ 派单到 Bot（任务归 Bot、工具授予成约束、派单即唤醒）+ `/settings/bots` + 团队笔记支持 `agent` 私有作用域 | **AllowedTools 执行侧仍未拦截**（约束只落在任务上）；模板编辑不回溯已建实例（刻意）；多用户角色未做 |
+| G1 | Bot 实体（模板+实例） | ✅ | `bot` 模块 + `bots.*`（含模板编辑）+ 派单到 Bot + `/settings/bots`；**工具绑定在门禁处真的执行**（`session.bindtask` → 不在绑定内的工具被拒，理由含任务与允许集） | 多用户角色（Owner/Manager/Collaborator）属 M6 第二期 |
 | G2 | 队友开工前确认 | 🟡 | `tasklease`：`tasks.approval.set/get` + `awaiting_approval` 状态 + `tasks.approve` / `tasks.reject-start`（策略随任务持久化，未知值 fail-closed） | `before_send` 未做；无推送域（UI 需轮询）；审批通过/拒绝尚未发通知 |
 | G3 | 任务板租约 | ✅ | `internal/modules/tasklease`（claim/heartbeat/expire，过期回收） | — |
 | G4 | 证据与验收 | ✅ | `tasklease`（无证据拒收）+ `tasks.review` + 验收写团队笔记 | — |
@@ -22,7 +22,7 @@
 | G11 | 预算与配额（token/时长/并发） | 🟡 | `tasklease`：`tasks.budget.set/get/consume` + `LeaseStateBlocked`（越限停摆、Submit 被拒、Lead 追加预算可恢复；分钟轴按现在的钟重算） | 真实 token 计量未接（没人调 Consume）；每 Bot 并发上限未做；无停摆通知；UI 未展示 |
 | G12 | 从任务沉淀技能 | ✅ | `skilldraft` + 验收自动提议 + `skilldrafts.*`（含 `install` 写入真实 SKILL.md）+ `/skills/drafts` 采纳页 | 重名明确失败（不覆盖），由人改名后重试 |
 | G13 | 工作入口连接器 | ✅ | `webhook`/`wechat`/`dingtalk`/`feishu`/`email` + `channeldispatch` 出站 + 飞书卡片审批 | 真平台凭据下的端到端仍待验证 |
-| G14 | MCP 全量（注解→审批、两级白名单…） | 🟡 | 产品既有 toolkit/MCP 基建；`mcp__*` 走审批门；`tasks.tools` 任务级白名单 | 注解→审批的映射、prompts/resources、分页、结构化输出、进度取消未做 |
+| G14 | MCP 全量（注解→审批、两级白名单…） | 🟡 | 产品既有 toolkit/MCP 基建；`mcp__*` 走审批门；`tasks.tools` 任务级白名单**且已执行** | 注解→审批映射、prompts/resources、分页、结构化输出、进度取消未做 |
 
 ## 二、里程碑（M0–M6）
 
@@ -31,7 +31,7 @@
 | M0 地基 | ✅ | 收件箱→分诊→租约/证据→审批→路由，三层证据：单元/装配/实机（`scripts/verify-live` 12/12） |
 | M1 记忆 | 🟡 | 团队笔记 + 复核 + 验收自动沉淀 + **agent 私有作用域（独立 memory 类型，团队板天然看不到）**；缺建议队列 |
 | M2 触发 | 🟡 | webhook 入站 + heartbeat 自转 + automation 定时；缺"事件→收件箱"通用通道 |
-| M2.5 MCP 补全 | ⬜ | 未开工（基建在，补全未做） |
+| M2.5 MCP 补全 | ⬜ | 未开工（基建在，工具白名单执行已落地；注解→审批、prompts/resources 等待做） |
 | M3 浏览器 | 🟡 | CDP 真连接 + 三个工具；缺每 Bot 独立 context、下载拦截 |
 | M4 连接器 | 🟡 | 四类渠道 + 出站 + 凭据 + 扫码登录协议；**真机验证只做了本地能做的部分** |
 | M5 浏览器收尾 | ⬜ | 未开工（依赖 M3 的隔离） |

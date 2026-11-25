@@ -554,6 +554,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `session.rename` | `{sessionId,title}` | `{epoch,rev}` | Y | `SessionRenamer` `chat.go:585`；标题走与 `session.create` 相同的 200 字符/控制字符校验 | ✅ 已实现 |
 | `session.pin` | `{sessionId,pinned}` | `{epoch,rev}` | Y | `SessionPinner` `chat.go:516` | ✅ 已实现 |
 | `session.archive` | `{sessionId,archived}` | `{epoch,rev}` | Y | `SessionArchiver` `chat.go:501` | ✅ 已实现 |
+| `session.bindtask` | `{sessionId,taskId?}` | `{taskId}` | Y | `SessionTaskBinder` `taskbinding.go:48`；绑定 = 一行 settings（`SessionBoundTaskSettingKey` `taskbinding.go:26`），空/省略 `taskId` 解绑；**绑定时 agent 门禁只放行该任务 `tasks.tools.set` 绑定的工具**（网关 `bindSessionTask` `methods.go:1441`，门禁 `taskbinding.go:111`/`plan_mode.go:272`）；任务不存在/无绑定/无租约模块 → 不生效（不会中断 run）；非法 `taskId` → `-32600` | ✅ 已实现 |
 | `session.fork` | `{sessionId}` | `{sessionId}` | N | `SessionForker` `chat.go:544` | 延后 |
 | `session.model.set` | `{sessionId,model}` | `{}` | Y | `SessionModelSwitcher` `chat.go:467` | 延后 |
 | `session.thinking.set` | `{sessionId,modelId,modeId}` | `{}` | Y | 组合 settings 行 `thinking.go:306-313` | 延后 |
@@ -899,6 +900,11 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
   `tasks.approve` 把同一租约转成 `claimed`（保留 owner、重算租期），`tasks.reject-start` 释放认领
   （任务回 pending、清 owner，note 记进 `leases.json` 的 `startRejections`，下一次认领照常可用）。
   策略随任务存续，只在**下一次**认领生效，不追溯已经在跑的租约；未知策略值读取时按 `before_start`（fail closed）。
+- **工具绑定会被真的执行（M5）**：`tasks.tools.set` 只是记录策略；把它变成约束的是 `session.bindtask`
+  —— 绑定后该会话的 agent 门禁只放行任务绑定的那些工具名，且这条判断排在计划模式白名单、会话权限覆盖、
+  OS 沙箱豁免、交互工具、记住的「始终允许」和审批对话框**之前**（那些分支只能放宽，排在它们之后就会被绕过）。
+  任务不存在 / 任务没有绑定 / 装配没有租约模块时绑定不生效（最多记一行日志，绝不中断 run）；
+  空 `taskId` 解绑后立即恢复原来的审批流程。
 - capability：`inbox`、`triage`、`tasklease`、`approvalaction`、`notifyroute`、`webhook`、`lead`、`credentials`、`heartbeat`、`browser`、`teamnotes`、`wechatlogin`、`channeldispatch`、`skilldrafts`、`bots`（十五个服务键都随装配提供；
   缺任何一个，对应方法返回 `-32004 capability_unsupported`）。
 - `webhook.source.set` 的 `secret` 只在请求体里出现：响应、`webhook.sources` 和日志都不回显它。

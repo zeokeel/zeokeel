@@ -197,6 +197,12 @@ func Module() *module.Descriptor[Config] {
 				svc.taskBoard = board
 			}
 		}
+		if taskLease, ok := ctx.Get(contracts.KeyTaskLease); ok && taskLease != nil {
+			// Optional: the task-binding gate needs the lease layer to read a
+			// task's tool binding. Without it (a stripped assembly) the binding
+			// stays recorded but unenforced — the gate is inert, never a failure.
+			svc.taskLease = taskLease
+		}
 		if workspace, ok := ctx.Get(contracts.KeyWorkspace); ok {
 			svc.workspace = workspace
 		}
@@ -477,6 +483,15 @@ type service struct {
 	// taskBoard is the optional per-session shared board; DeleteSession uses its
 	// cleaner hook to remove the conversation's document.
 	taskBoard contracts.TaskBoard
+	// taskLease is optional: the board's lease/binding layer. With it present, a
+	// session bound to a task (contracts.SessionBoundTaskSettingKey) may only
+	// call that task's bound tools (M5, taskbinding.go). nil keeps the previous
+	// behaviour exactly: the binding is recorded but not enforced.
+	taskLease contracts.TaskLeaseService
+	// taskBindingLogMu guards taskBindingLogged, the "one line per inert reason"
+	// set of the task-binding gate; never held while a lease is read.
+	taskBindingLogMu  sync.Mutex
+	taskBindingLogged map[string]bool
 
 	// deletedMu guards deletedSessions. It is a separate lock because the run
 	// goroutine appends events while holding s.mu, and the deleted-session check

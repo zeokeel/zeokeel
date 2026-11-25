@@ -49,6 +49,7 @@ var contractParams = map[string]any{
 	"session.delete":          sessionDeleteParams{},
 	"session.archive":         sessionArchiveParams{},
 	"session.pin":             sessionPinParams{},
+	"session.bindtask":        sessionBindTaskParams{},
 	"session.active.get":      struct{}{},
 	"run.cancel":              sessionParams{},
 	"run.interject":           runInterjectParams{},

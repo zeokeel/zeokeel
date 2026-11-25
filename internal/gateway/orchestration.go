@@ -190,6 +190,10 @@ func orchestrationError(err error) *protocolError {
 		errors.Is(err, contracts.ErrLeaseInvalid),
 		errors.Is(err, contracts.ErrTaskToolsInvalid),
 		errors.Is(err, contracts.ErrTaskToolsUnknownTask),
+		// Binding a session to a task is a request problem (empty session id, a
+		// task id that is not an id): the settings screen must show the field,
+		// not "something broke".
+		errors.Is(err, contracts.ErrSessionTaskBindingInvalid),
 		errors.Is(err, contracts.ErrLeaseBudgetExhausted),
 		errors.Is(err, contracts.ErrInboxUnknownItem),
 		errors.Is(err, contracts.ErrInboxUnknownAction),

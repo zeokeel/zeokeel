@@ -348,6 +348,14 @@
         "archived"
       ]
     },
+    "session.bindtask": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": [
+        "taskId"
+      ]
+    },
     "session.create": {
       "required": [],
       "optional": [

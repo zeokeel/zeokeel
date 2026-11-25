@@ -267,6 +267,9 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"session.pin": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.setSessionFlag(ctx, request.Params, "pin")
 		},
+		"session.bindtask": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.bindSessionTask(ctx, request.Params)
+		},
 		"mcp.reload": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.reloadConnectors(ctx, request.Params)
 		},
@@ -1416,6 +1419,57 @@ type sessionPinParams struct {
 	Pinned    bool   `json:"pinned,omitempty"`
 }
 
+// sessionBindTaskParams is the body of session.bindtask. An omitted or empty
+// taskId clears the binding.
+type sessionBindTaskParams struct {
+	SessionID string `json:"sessionId"`
+	TaskID    string `json:"taskId,omitempty"`
+}
+
+// sessionBindTaskResult is the session.bindtask answer: the binding in effect
+// after the call, so a client renders it without a second read ("" = unbound,
+// including right after a clear).
+type sessionBindTaskResult struct {
+	TaskID string `json:"taskId"`
+}
+
+// bindSessionTask binds one conversation to one board task (M5 enforcement):
+// while bound, the agent's tool gate refuses every tool outside that task's tool
+// binding, whatever the session permission, remembered tools or sandbox state
+// say. The answer carries the effective binding, not the request, so the client
+// never has to guess what was stored.
+func (g *Gateway) bindSessionTask(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	var params sessionBindTaskParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	sessionID, protocolErr := requireSessionID(params.SessionID)
+	if protocolErr != nil {
+		return nil, protocolErr
+	}
+	chat, err := g.chatService()
+	if err != nil {
+		return nil, internalError(err)
+	}
+	binder, ok := chat.(contracts.SessionTaskBinder)
+	if !ok {
+		return nil, appError(codeInternalError, "taskbinding_unavailable", false)
+	}
+	if err := binder.BindSessionTask(ctx, sessionID, params.TaskID); err != nil {
+		return nil, orchestrationError(err)
+	}
+	bound, err := binder.SessionTask(sessionID)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	// The binding is a settings row, so the settings domain is what a watcher
+	// reads it from; refresh it before answering (the same rule as settings.set).
+	if err := g.hub.refreshNow(ctx, domainSettings); err != nil {
+		g.logger.Printf("gateway: refresh settings after bindtask: %v", err)
+	}
+	return sessionBindTaskResult{TaskID: bound}, nil
+}
+
 // renameSession sets a session's display title (TRANSPORT §5.1.1).
 //
 // Renaming is a sidebar concern, so the answer carries the list revision and
@@ -1465,8 +1519,8 @@ func (g *Gateway) deleteSession(ctx context.Context, raw json.RawMessage) (any, 
 		return nil, internalError(err)
 	}
 	// The session's own settings rows (pinned / archived / unread /
-	// allowedTools / model / preset) are keyed by its id and outlive the
-	// conversation otherwise: deleting 7 conversations left 65 rows behind
+	// allowedTools / model / preset / boundTask) are keyed by its id and outlive
+	// the conversation otherwise: deleting 7 conversations left 65 rows behind
 	// (round-3 session audit F4).
 	g.purgeSessionSettings(sessionID)
 	// Keep the cached domain: it is rebuilt from the store, which no longer has

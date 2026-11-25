@@ -34,6 +34,9 @@ func TestOrchestrationMethodsAreDispatched(t *testing.T) {
 		"skilldrafts.snapshot", "skilldrafts.propose", "skilldrafts.decide", "skilldrafts.install",
 		"notify.plan", "notify.deliver", "team.note.review",
 		"wechat.login.start", "wechat.login.state",
+		// The task-binding seam: a session pointed at a task is what makes
+		// tasks.tools.set an enforced policy instead of a recorded note.
+		"session.bindtask",
 	}
 	methods := SupportedMethods()
 	for _, name := range want {
