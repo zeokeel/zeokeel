@@ -22,6 +22,10 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return fmt.Errorf("%s: require inbox: %w", ModuleID, err)
 		}
+		// Stored credentials fill whatever configuration left empty.
+		if store, ok := ctx.Get(contracts.KeyCredentials); ok && store != nil {
+			cfg = loadCredential(cfg, store)
+		}
 		adapter := NewAdapter(inboxService, cfg)
 		if _, err := ctx.Provide(contracts.KeyDingTalk, contracts.DingTalkService(adapter)); err != nil {
 			return fmt.Errorf("%s: provide dingtalk: %w", ModuleID, err)
