@@ -22,9 +22,19 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
   // `/team/members` also starts with `/team`; a nested route must keep its own
   // entry selected.
   const selected =
-    ['/team/board', '/inbox/incoming', '/inbox', '/capabilities', '/automation', '/insights', '/team'].find(
-      (path) => location.pathname.startsWith(path),
-    ) ?? (location.pathname.startsWith('/settings') ? '/settings/model' : '');
+    [
+      '/team/board',
+      '/inbox/incoming',
+      '/inbox',
+      '/capabilities',
+      '/automation',
+      '/insights',
+      '/team',
+      // R27a: the channel surface is its own entry, so it must not inherit the
+      // settings item's selection (`/settings/model`).
+      '/settings/channels',
+    ].find((path) => location.pathname.startsWith(path)) ??
+    (location.pathname.startsWith('/settings') ? '/settings/model' : '');
 
   return (
     <Menu
@@ -73,6 +83,10 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
         // one "who is on the team" (spawn/message/interrupt live here).
         { key: '/team/board', icon: <ZkIcon name="data" />, label: t('team.board.nav') },
         { key: '/settings/model', icon: <ZkIcon name="sliders" />, label: t('shell.settings') },
+        // R27a: channel credentials / webhook sources / notify routes. `send`
+        // (the paper plane) is the delivery direction of everything on that
+        // page; `data` is already taken by the inbound work queue.
+        { key: '/settings/channels', icon: <ZkIcon name="send" />, label: t('channels.title') },
       ]}
     />
   );

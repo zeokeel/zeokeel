@@ -39,6 +39,12 @@ export const ROUTES: RouteMeta[] = [
   { path: '/c/:sessionId/files/*', ref: 'R9/R10', titleKey: 'thread.untitled' },
   { path: '/c/:sessionId/guide', ref: 'R11', titleKey: 'thread.untitled' },
   { path: '/settings/:page', ref: 'R13–R21', titleKey: 'settings.title' },
+  // R27a: channel configuration (`credentials.*`, `webhook.source*`,
+  // `notify.route.*`). Its own entry, not one of the R13–R21 settings pages:
+  // the static path outranks `:page` by length in `routeForPath`, so
+  // `/settings/channels` resolves here while `/settings/model` still resolves
+  // to R13–R21.
+  { path: '/settings/channels', ref: 'R27a', titleKey: 'channels.title' },
   { path: '/automation', ref: 'R22', titleKey: 'shell.automation' },
   { path: '/capabilities', ref: 'R23', titleKey: 'shell.capabilities' },
   { path: '/insights', ref: 'R24', titleKey: 'shell.insights' },

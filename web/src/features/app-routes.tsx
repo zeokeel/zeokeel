@@ -18,6 +18,7 @@ import { TeamScreen } from '@/features/team/TeamScreen';
 import { TeamScreen as TeammatesScreen } from '@/features/team/team-screen';
 import { ContextScreen } from '@/features/thread/context-screen';
 import { NowScreen } from '@/features/now/now-screen';
+import { ChannelsScreen } from '@/features/settings/channels/ChannelsScreen';
 import { SettingsScreen } from '@/features/settings/settings-screen';
 import { NotFoundScreen } from '@/features/not-found-screen';
 import { ChildSessionScreen } from '@/features/thread/child-session-screen';
@@ -90,6 +91,11 @@ export function AppRoutes() {
       <Route path="/c/:sessionId/files/*" element={<ThreadRoute />} />
       <Route path="/c/:sessionId/guide" element={<ThreadRoute />} />
       <Route path="/settings" element={<SettingsScreen />} />
+      {/* R27a: channel credentials / webhook sources / notify routes. Its own
+          route rather than a tenth `settings.ia` page: the rows are not
+          `settings` domain keys, and the surface reads and writes three other
+          domains (credentials, webhook, notify). */}
+      <Route path="/settings/channels" element={<ChannelsScreen />} />
       <Route path="/settings/:page" element={<SettingsScreen />} />
       <Route path="/automation" element={<AutomationScreen />} />
       <Route path="/capabilities" element={<CapabilitiesScreen />} />

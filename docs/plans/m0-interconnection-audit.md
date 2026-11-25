@@ -43,6 +43,9 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | 租约持久化 | tasklease（+dataDir） | 重启恢复 | 7 条（存活/过期回收/损坏/0600/评审状态） |
 | `contracts.KeyCredentials` | creds（依赖 dataDir） | `credentials.list/set/delete`、渠道适配器 | 17 条 + 19 校验子测试；网关 3 方法 + mock 覆盖 |
 | `contracts.KeyEmail` | email（依赖 inbox） | 邮件渠道 | 30 条（SMTP 报文/535/IMAP 归一/Message-ID 去重/QP+base64/循环取消） |
+| `contracts.KeyBrowser` | browser（新，无 requires） | 未来工具面 / 任务证据 | 26 测试（URL 校验先于发送/截图解码/超时/未配置即断开） |
+| 模型计划器装配 | `lead.PlannerFromSettings`（读 `chat.baseURL/apiKey/model`） | `lead.RunOnce` | 4 条（完整→模型/缺项→规则） |
+| Web 渠道设置 | `web/src/features/settings/channels/**`、`web/src/api/channels.ts` | `/settings/channels`（R27a） | 12 测试；密钥不回显有断言 |
 | `planner`（library） | planner（仅依赖 contracts） | 模型计划器 | 14 测试 / 21 断言（线格式/错误分层/预算先于网络/密钥永不入错误） |
 | 模型计划器接入 | `lead.ModelPlanner` + `lib/leadplan` | `lead.RunOnce` | 4 条（映射 task/skip/无模型/驱动整轮） |
 | 入站路由（钉钉/飞书） | gateway `inbound.go` | 平台回调 | 6 条（202/签名 401/challenge 200/204/404） |
@@ -150,6 +153,8 @@ web: typecheck / lint(25 既有 warning) / test 453 / gen:verify 全绿
 web（任务详情后）: typecheck / lint(25) / test 477 全绿
 web（lease 首屏后）: typecheck / lint(25) / test 484 / gen:verify 全绿
 web（团队板后）: typecheck / lint(25) / test 501 全绿
+web（渠道设置后）: typecheck / lint(25) / test 514 全绿
+scripts/verify.sh --quick（浏览器/计划器/渠道设置后）PASS 5/5，67s
 scripts/verify.sh --quick（邮件/计划器/凭据/卡片后）PASS 5/5，64s
 scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过
 scripts/verify.sh --quick（approval 后）    PASS 5/5（一次 flaky 后重跑绿）
