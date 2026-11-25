@@ -60,6 +60,16 @@ export interface BoardTask {
   blockedBy?: string[];
   /** Files this task is allowed to write — the dispatch-time promise. */
   writeScopes?: string[];
+  /**
+   * When the gateway created / last touched the row, RFC 3339. The board screen
+   * renders "2 分钟前" from these (`features/team/TeamScreen.tsx`); a board with
+   * no time is a board whose rows cannot be told apart after a day.
+   *
+   * Added for the team board (R26) — additive, both optional, so every existing
+   * caller is unaffected.
+   */
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 /** One attached proof. `ref` is a path, URL or command-output reference. */
@@ -96,6 +106,8 @@ interface BoardTaskWire {
   owner?: string;
   blockedBy?: string[];
   writeScopes?: string[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 interface LeaseWire {
@@ -166,6 +178,10 @@ function boardTaskFromWire(row: BoardTaskWire): BoardTask | null {
     ...(row.owner ? { owner: row.owner } : {}),
     ...(row.blockedBy && row.blockedBy.length > 0 ? { blockedBy: row.blockedBy } : {}),
     ...(row.writeScopes && row.writeScopes.length > 0 ? { writeScopes: row.writeScopes } : {}),
+    // Kept as the wire's own RFC 3339 strings: the board measures them against
+    // the read's clock, and a `Date` here would freeze the timezone choice.
+    ...(row.createdAt ? { createdAt: row.createdAt } : {}),
+    ...(row.updatedAt ? { updatedAt: row.updatedAt } : {}),
   };
 }
 

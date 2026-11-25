@@ -11,7 +11,11 @@ import { InspectorPanel } from '@/features/inspector/inspector-panel';
 import { useMediaQuery } from '@/design/use-system-appearance';
 import { InsightsScreen } from '@/features/insights/insights-screen';
 import { TaskDetailScreen } from '@/features/task/TaskDetailScreen';
-import { TeamScreen } from '@/features/team/team-screen';
+// Two team surfaces, two URLs: `/team` keeps the roster exactly as R26
+// documented it, and the task board lives at `/team/board` (R26a). Aliased
+// so nobody has to guess which `TeamScreen` is which.
+import { TeamScreen } from '@/features/team/TeamScreen';
+import { TeamScreen as TeammatesScreen } from '@/features/team/team-screen';
 import { ContextScreen } from '@/features/thread/context-screen';
 import { NowScreen } from '@/features/now/now-screen';
 import { SettingsScreen } from '@/features/settings/settings-screen';
@@ -90,7 +94,8 @@ export function AppRoutes() {
       <Route path="/automation" element={<AutomationScreen />} />
       <Route path="/capabilities" element={<CapabilitiesScreen />} />
       <Route path="/insights" element={<InsightsScreen />} />
-      <Route path="/team" element={<TeamScreen />} />
+      <Route path="/team" element={<TeammatesScreen />} />
+      <Route path="/team/board" element={<TeamScreen />} />
       <Route path="/t/:taskId" element={<TaskDetailScreen />} />
       <Route path="*" element={<NotFoundScreen />} />
     </Routes>

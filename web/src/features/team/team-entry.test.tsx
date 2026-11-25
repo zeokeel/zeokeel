@@ -54,6 +54,9 @@ describe('C6 — team entry', () => {
     await screen.findByRole('textbox');
 
     await user.click(await screen.findByRole('menuitem', { name: /团队/ }));
+    // `/team` remains the roster (R26), exactly what C6 pins: the entry is
+    // always there, and zero is an empty surface rather than a hidden entry.
+    // The task board is a sibling at `/team/board`.
     expect(await screen.findByText('还没有队友或子任务')).toBeInTheDocument();
     // The entry stays selected: the surface exists, it is simply empty.
     await waitFor(() =>

@@ -18,10 +18,11 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
   const { approvals } = useApprovals();
   const t = useT();
 
-  // Longest first: `/inbox/incoming` also starts with `/inbox`, and the nested
-  // route must keep its own entry selected.
+  // Longest first: `/inbox/incoming` also starts with `/inbox`, and
+  // `/team/members` also starts with `/team`; a nested route must keep its own
+  // entry selected.
   const selected =
-    ['/inbox/incoming', '/inbox', '/capabilities', '/automation', '/insights', '/team'].find(
+    ['/team/board', '/inbox/incoming', '/inbox', '/capabilities', '/automation', '/insights', '/team'].find(
       (path) => location.pathname.startsWith(path),
     ) ?? (location.pathname.startsWith('/settings') ? '/settings/model' : '');
 
@@ -67,6 +68,10 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
         // C6: always visible, and never with a `0` badge — zero state is an
         // empty surface inside, not a count on the entry.
         { key: '/team', icon: <ZkIcon name="users" />, label: t('shell.team') },
+        // R26b: the roster behind the board. Same icon family (`users`) because
+        // it is the same people; the board answers "what are they doing", this
+        // one "who is on the team" (spawn/message/interrupt live here).
+        { key: '/team/board', icon: <ZkIcon name="data" />, label: t('team.board.nav') },
         { key: '/settings/model', icon: <ZkIcon name="sliders" />, label: t('shell.settings') },
       ]}
     />

@@ -786,6 +786,17 @@ export const zh = {
   'composer.rate': '~{rate} tok/s',
   'composer.dropHint': '松手即添加附件',
   'composer.attachment': '附件',
+
+  // -------------------------------------------------- team task board (R26) --
+  // The six group headings are `task.status.*` (the same words `/t/:taskId`
+  // uses); only the surface's own copy lives here.
+  'team.board.nav': '任务板',
+  'team.board.title': '团队任务',
+  'team.board.empty': '还没有任务。',
+  'team.board.loadFailed': '任务板加载失败',
+  'team.board.retry': '重试',
+  'team.board.unassigned': '没人认领',
+  'team.board.members': '队友',
 } as const;
 
 export type MessageKey = keyof typeof zh;

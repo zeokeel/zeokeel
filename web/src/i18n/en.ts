@@ -782,4 +782,15 @@ export const en: Catalog = {
   'composer.rate': '~{rate} tok/s',
   'composer.dropHint': 'Drop to attach',
   'composer.attachment': 'Attachment',
+
+  // -------------------------------------------------- team task board (R26) --
+  // The six group headings are `task.status.*` (the same words `/t/:taskId`
+  // uses); only the surface's own copy lives here.
+  'team.board.nav': 'Board',
+  'team.board.title': 'Team tasks',
+  'team.board.empty': 'No tasks yet.',
+  'team.board.loadFailed': 'Could not load the task board',
+  'team.board.retry': 'Retry',
+  'team.board.unassigned': 'Unassigned',
+  'team.board.members': 'Teammates',
 };
