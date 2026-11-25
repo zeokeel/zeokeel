@@ -84,7 +84,7 @@ scripts/channel-verify.sh dingtalk    http://127.0.0.1:<port> <secret>
 - [ ] 每条失败都已开 issue 并注明现象/时间
 - [ ] 验证用的临时数据目录已删除（`rm -rf /tmp/zk-verify`）
 
-## 6. 本地自证 harness（`scripts/verify-live/`）
+## 6. 本地自证 harness（含整条 M0 链路）（`scripts/verify-live/`）
 
 上一节的 §4b 是手写的临时证据（一次性的 `/tmp` 脚本、手工贴输出）。本节把它变成**可重跑的
 一条命令**：起真实产品进程，用产品自己的两条传输（WebSocket 控制面 + 签名 HTTP 入口）断言
@@ -160,3 +160,21 @@ SUMMARY 8/8 passed
 - **合并语义**：webhook 同 body 重投应 `merged:true`，但 harness 每次用全新数据目录，
   因此只看到 `count:1,merged:false`；要验合并需在同一数据目录上重跑
   `scripts/channel-verify.sh webhook`（§4b 已记录）。
+
+### 6.5 真实链路的实测输出（2026-11-25 20:47 北京时间）
+
+同一条 harness 在真实进程上把 M0 整条链走通了（12/12 PASS）：
+
+```
+PASS inbound.webhook.signed HTTP 202 {"count":1,"id":"inbox-000001"}
+PASS chain.dispatch taskIds=["task-1"]
+PASS chain.claim-submit-review state=done
+PASS chain.team-note-recorded notes=[{"id":"mem://user/self/memories/team-note/task-1",
+     "title":"任务验收：live harness","author":"verify-live","reviewed":false, ...}]
+PASS tasks.tools.roundtrip get={"taskId":"task-1","tools":["browser_open"]}
+PASS inbound.webhook.bad-signature HTTP 401 webhook: bad signature
+SUMMARY 12/12 passed
+```
+
+这条输出说明：签名投递 → 收件箱 → 派单 → 认领 → 交证据 → 验收 → **自动写入团队记忆** → 工具白名单往返，
+全部发生在**装好的产品**上，而不是测试替身里。

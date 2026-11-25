@@ -467,6 +467,48 @@ async function main() {
       `HTTP ${good.status} (want 202) body=${clip(goodBody, 300)}`,
     );
 
+    // h. the whole M0 chain over the real wire: an inbox row becomes a task, the
+    // task is claimed with evidence and accepted, and the note lands in team
+    // memory. This is the part that a unit test cannot prove — it is the product,
+    // assembled, answering its own protocol.
+    const dispatch = await call('inbox.dispatch', { id: 'inbox-000001', subject: 'live chain task', assignee: 'bot-live' });
+    const taskId = dispatch.result?.taskIds?.[0] ?? dispatch.result?.id ?? '';
+    report('chain.dispatch', Array.isArray(dispatch.result?.taskIds) || Boolean(dispatch.error) === false && Boolean(taskId), `taskIds=${clip(JSON.stringify(dispatch.result?.taskIds ?? dispatch.error ?? null), 200)}`);
+
+    let chainOk = Boolean(taskId);
+    let chainDetail = 'no task id';
+    if (taskId) {
+      const claim = await call('tasks.claim', { id: taskId, owner: 'bot-live' });
+      const submit = claim.error ? claim : await call('tasks.submit', {
+        id: taskId, owner: 'bot-live', evidence: [{ kind: 'link', ref: 'verify-live://evidence' }],
+      });
+      const review = submit.error ? submit : await call('tasks.review', {
+        id: taskId, decision: 'accept', reviewer: 'verify-live', note: 'live harness',
+      });
+      chainOk = !claim.error && !submit.error && !review.error;
+      chainDetail = claim.error
+        ? `claim: ${JSON.stringify(claim.error)}`
+        : submit.error
+          ? `submit: ${JSON.stringify(submit.error)}`
+          : review.error
+            ? `review: ${JSON.stringify(review.error)}`
+            : `state=${review.result?.state}`;
+    }
+    report('chain.claim-submit-review', chainOk, clip(chainDetail, 300));
+
+    // i. the accepted task became team memory (acceptance records a note).
+    const notes = await call('team.notes', { limit: 10 });
+    const noted = Array.isArray(notes.result?.notes) && notes.result.notes.length > 0;
+    report('chain.team-note-recorded', noted, `notes=${clip(JSON.stringify(notes.result?.notes ?? notes.error ?? null), 400)}`);
+
+    // j. a task can name the tools it may use, and the binding comes back.
+    const bound = taskId
+      ? await call('tasks.tools.set', { id: taskId, tools: ['browser_open'] })
+      : { error: { message: 'no task' } };
+    const readBack = taskId ? await call('tasks.tools.get', { id: taskId }) : { error: { message: 'no task' } };
+    const bindingOk = !bound.error && JSON.stringify(readBack.result?.tools ?? []) === JSON.stringify(['browser_open']);
+    report('tasks.tools.roundtrip', bindingOk, `set=${clip(JSON.stringify(bound.error ?? 'ok'), 120)} get=${clip(JSON.stringify(readBack.result ?? readBack.error ?? null), 200)}`);
+
     const wrong = await post(signBody(Buffer.from('verify-secret-wrong'), timestamp, body));
     const wrongBody = (await wrong.text()).trim();
     report(
