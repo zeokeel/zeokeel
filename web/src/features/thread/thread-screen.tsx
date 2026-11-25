@@ -184,12 +184,16 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
     });
   };
 
+  // Same-frame feedback for a stop: the abort and its fallback take 34–75ms to
+  // reach the DOM, and the reader clicked stop *now* (round-6 loop audit R4-1).
+  // The window is bounded (2.5s) so a later run can never inherit the label.
   const [stopping, setStopping] = useState(false);
+  const stoppingTimer = useRef<number | null>(null);
   const stopRun = () => {
     stoppedByUser.current = true;
-    // Same-frame feedback: the abort and its fallback take 34–75ms to reach the
-    // DOM, and the reader clicked stop *now* (round-6 loop audit R4-1).
     setStopping(true);
+    if (stoppingTimer.current !== null) window.clearTimeout(stoppingTimer.current);
+    stoppingTimer.current = window.setTimeout(() => setStopping(false), 2500);
     // `chat.abort()` only closes the client's stream: the gateway keeps running
     // and the next send is a 409 ("a run is active"). Cancel server-side first,
     // then drop the local stream so the UI reacts without waiting for the ack.
@@ -266,7 +270,6 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
     if (!pendingText || pendingSent.current) return;
     if (chat.isDefaultMessagesRequesting) return;
     pendingSent.current = true;
-    setStopping(false);
     navigate(location.pathname, { replace: true, state: null });
     const staged = handoff?.pendingAttachments ?? [];
     const meta = handoff?.attachmentMeta ?? staged.map(({ id, name, mime, bytes }) => ({ id, name, mime, bytes }));
@@ -303,7 +306,6 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
       }
     }
     wasRequesting.current = chat.isRequesting;
-    if (!chat.isRequesting) setStopping(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- settle runs once per transition
   }, [chat.isRequesting, reload]);
 
