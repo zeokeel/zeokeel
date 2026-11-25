@@ -142,7 +142,7 @@ export const WS_PARAMS: Record<WsMethod, MethodParams> = {
   'task.status': { required: ['id', 'status'], optional: ['sessionId'] },
   'tasks.claim': { required: ['id', 'owner'], optional: [] },
   'tasks.heartbeat': { required: ['id', 'owner'], optional: [] },
-  'tasks.lease': { required: ['id', 'owner'], optional: [] },
+  'tasks.lease': { required: ['id'], optional: [] },
   'tasks.review': { required: ['decision', 'id', 'reviewer'], optional: ['note'] },
   'tasks.snapshot': { required: [], optional: ['sessionId'] },
   'tasks.submit': { required: ['evidence', 'id', 'owner'], optional: [] },

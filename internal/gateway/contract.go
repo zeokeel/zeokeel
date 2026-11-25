@@ -98,7 +98,7 @@ var contractParams = map[string]any{
 	"inbox.snapshot":          inboxSnapshotParams{},
 	"inbox.dispatch":          inboxDispatchParams{},
 	"inbox.triage":            inboxTriageParams{},
-	"tasks.lease":             leaseParams{},
+	"tasks.lease":             leaseReadParams{},
 	"tasks.claim":             leaseParams{},
 	"tasks.heartbeat":         leaseParams{},
 	"tasks.submit":            taskSubmitParams{},

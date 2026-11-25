@@ -361,8 +361,7 @@
     },
     "tasks.lease": {
       "required": [
-        "id",
-        "owner"
+        "id"
       ],
       "optional": []
     },

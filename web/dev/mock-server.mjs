@@ -1884,7 +1884,7 @@ const wsDispatch = (client, message) => {
         ref: String(row.ref ?? ''),
         ...(row.note ? { note: String(row.note) } : {}),
       }));
-      held.state = 'submitted';
+      held.state = 'review';
       return reply({ ...held, evidence: held.evidence.slice() });
     }
     case 'tasks.review': {
@@ -1892,9 +1892,12 @@ const wsDispatch = (client, message) => {
       if (!held) return fail(-32600, 'lease: task not held');
       const decision = String(params.decision ?? '');
       if (decision !== 'accept' && decision !== 'reject') return fail(-32602, 'invalid_params');
-      held.state = decision === 'accept' ? 'accepted' : 'rejected';
+      // The contract requires a reviewer; the mock reads it but does not echo it
+      // in the lease (the wire DTO has no reviewer field).
+      const reviewer = String(params.reviewer ?? '');
+      void reviewer;
+      held.state = decision === 'accept' ? 'done' : 'rejected';
       held.reviewNote = String(params.note ?? '');
-      held.reviewer = String(params.reviewer ?? '');
       return reply({ ...held, evidence: held.evidence.slice() });
     }
     case 'approval.token': {

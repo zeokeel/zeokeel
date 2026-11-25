@@ -274,6 +274,13 @@ func (g *Gateway) inboxTriage(ctx context.Context, raw json.RawMessage) (any, *p
 
 // --- task lease ------------------------------------------------------------
 
+// leaseReadParams is a read: only the task id. Keeping it separate from
+// leaseParams stops the generator from marking owner as required for a method
+// that never uses it.
+type leaseReadParams struct {
+	ID string `json:"id"`
+}
+
 type leaseParams struct {
 	ID    string `json:"id"`
 	Owner string `json:"owner"`
