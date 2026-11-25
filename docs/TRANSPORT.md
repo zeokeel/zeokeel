@@ -838,6 +838,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `approval.action` | `{approvalId,decision:"allow"\|"deny",token}` | `{ok:true}` | N | `ApprovalActionService.Apply` | ✅ 已实现 |
 | `skilldrafts.snapshot` | `{limit?}` | `{drafts:[SkillDraft]}` | Y | `SkillDraftsService.List`（最新在前） | ✅ 已实现 |
 | `skilldrafts.propose` | `{taskId?,name,summary?,body?}` | `SkillDraft`（status=pending） | N | `SkillDraftsService.Draft`（六段式模板；草稿永不自动安装） | ✅ 已实现 |
+| `skilldrafts.install` | `{id}` | `{installed:true,name}` | N | 采纳后的草稿写入真实 SKILL.md（重名 → `-32600`；未采纳 → `-32602`） | ✅ 已实现 |
 | `skilldrafts.decide` | `{id,accept,reviewer}` | `SkillDraft` | N | `SkillDraftsService.Decide`（`accept` 必须显式传；驳回不可复活） | ✅ 已实现 |
 | `notify.plan` | `{category}` | `{channels,deferred,reason?}` | Y | `NotifyRouterService.Plan`（只算不发，渠道健康来自各适配器 Status） | ✅ 已实现 |
 | `notify.deliver` | `{category,text}` | `{channel,attempts?,deferred,reason?,errors?}` | N | `ChannelDispatchService.Deliver`（按计划真发；全失败落 inapp 并带每步拒因） | ✅ 已实现 |

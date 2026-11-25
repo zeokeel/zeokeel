@@ -449,6 +449,9 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"skilldrafts.decide": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.skillDraftDecide(ctx, request.Params)
 		},
+		"skilldrafts.install": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.skillDraftInstall(ctx, request.Params)
+		},
 		"team.notes": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.teamNotes(ctx, request.Params)
 		},

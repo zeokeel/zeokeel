@@ -1673,3 +1673,49 @@ func (g *Gateway) skillDraftDecide(ctx context.Context, raw json.RawMessage) (an
 	}
 	return skillDraftFromContract(draft), nil
 }
+
+type skillDraftInstallParams struct {
+	ID string `json:"id"`
+}
+
+// skillDraftInstall turns an accepted draft into a real skill file. Accepting a
+// draft is a decision; installing is a second, explicit act — and a name that
+// already exists is refused rather than silently overwritten.
+func (g *Gateway) skillDraftInstall(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	drafts, problem := g.skillDraftsService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params skillDraftInstallParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	editor, ok := g.root.Get(contracts.KeySkillsEditor)
+	if !ok || editor == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "skills editor unavailable")
+	}
+	list, err := drafts.List(ctx, 200)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	var found *contracts.TaskSkillDraft
+	for i := range list {
+		if list[i].ID == params.ID {
+			found = &list[i]
+			break
+		}
+	}
+	if found == nil {
+		return nil, orchestrationError(contracts.ErrSkillDraftUnknown)
+	}
+	if found.Status != contracts.SkillDraftAccepted {
+		return nil, errInvalidParams("id", "only an accepted draft can be installed")
+	}
+	skill, err := editor.CreateSkill(ctx, contracts.SkillDraft{
+		Name: found.Name, Description: found.Summary, Body: found.Body,
+	})
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return map[string]any{"installed": true, "name": skill.Name}, nil
+}

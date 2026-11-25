@@ -134,6 +134,7 @@ var contractParams = map[string]any{
 	}{},
 	"skilldrafts.propose": skillDraftProposeParams{},
 	"skilldrafts.decide":  skillDraftDecideParams{},
+	"skilldrafts.install": skillDraftInstallParams{},
 	"team.notes": struct {
 		Limit int `json:"limit,omitempty"`
 	}{},

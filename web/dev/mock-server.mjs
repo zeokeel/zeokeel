@@ -2076,6 +2076,12 @@ const wsDispatch = (client, message) => {
       mockSkillDrafts.unshift(draft);
       return reply(draft);
     }
+    case 'skilldrafts.install': {
+      const draft = mockSkillDrafts.find((row) => row.id === String(params.id ?? ''));
+      if (!draft) return fail(-32600, 'skilldrafts: unknown draft');
+      if (draft.status !== 'accepted') return fail(-32602, 'only an accepted draft can be installed');
+      return reply({ installed: true, name: draft.name });
+    }
     case 'skilldrafts.decide': {
       if (params.accept === undefined) return fail(-32602, 'invalid_params');
       const draft = mockSkillDrafts.find((row) => row.id === String(params.id ?? ''));

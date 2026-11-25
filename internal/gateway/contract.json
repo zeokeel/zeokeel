@@ -390,6 +390,12 @@
       ],
       "optional": []
     },
+    "skilldrafts.install": {
+      "required": [
+        "id"
+      ],
+      "optional": []
+    },
     "skilldrafts.propose": {
       "required": [
         "name"
