@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -371,7 +372,44 @@ func (g *Gateway) taskReview(ctx context.Context, raw json.RawMessage) (any, *pr
 	if err != nil {
 		return nil, orchestrationError(err)
 	}
+	// Acceptance is the one moment a task becomes team memory: record what was
+	// done and what proved it, best-effort. A memory store failure must never
+	// undo a review the reviewer already made.
+	if params.Decision == "accept" {
+		g.recordReviewNote(ctx, params.ID, params.Reviewer, params.Note, lease)
+	}
 	return taskLeaseFromContract(lease), nil
+}
+
+// recordReviewNote writes the accepted task into the shared team notes. It
+// deliberately swallows failures after logging: the review already happened.
+func (g *Gateway) recordReviewNote(ctx context.Context, taskID, reviewer, note string, lease contracts.TaskLease) {
+	notes, ok := g.root.Get(contracts.KeyTeamNotes)
+	if !ok || notes == nil {
+		return
+	}
+	title := "任务验收：" + taskID
+	if strings.TrimSpace(note) != "" {
+		title = "任务验收：" + note
+		if len([]rune(title)) > 120 {
+			title = string([]rune(title)[:120])
+		}
+	}
+	body := "任务 " + taskID + " 已验收。"
+	if strings.TrimSpace(note) != "" {
+		body += "\n\n验收意见：" + note
+	}
+	if len(lease.Evidence) > 0 {
+		body += "\n\n证据："
+		for _, evidence := range lease.Evidence {
+			body += "\n- " + evidence.Kind + ": " + evidence.Ref
+		}
+	}
+	if _, err := notes.Record(ctx, contracts.TeamNote{
+		TaskID: taskID, Title: title, Body: body, Author: reviewer,
+	}); err != nil {
+		g.logger.Printf("gateway: record review note for %s: %v", taskID, err)
+	}
 }
 
 // --- approval action -------------------------------------------------------
@@ -825,4 +863,90 @@ func (g *Gateway) browserStatus(ctx context.Context, _ json.RawMessage) (any, *p
 		return nil, orchestrationError(err)
 	}
 	return browserStatusResult{Connected: status.Connected, Endpoint: status.Endpoint, Pages: status.Pages}, nil
+}
+
+// --- shared team notes -----------------------------------------------------
+
+type teamNoteDTO struct {
+	ID     string `json:"id"`
+	TaskID string `json:"taskId,omitempty"`
+	Title  string `json:"title"`
+	Body   string `json:"body,omitempty"`
+	Author string `json:"author,omitempty"`
+	At     string `json:"at,omitempty"`
+}
+
+type teamNotesListResult struct {
+	Notes []teamNoteDTO `json:"notes"`
+}
+
+type teamNotesRecordParams struct {
+	ID     string `json:"id,omitempty"`
+	TaskID string `json:"taskId,omitempty"`
+	Title  string `json:"title"`
+	Body   string `json:"body,omitempty"`
+	Author string `json:"author,omitempty"`
+}
+
+func (g *Gateway) teamNotesService() (contracts.TeamNotesService, *protocolError) {
+	service, ok := g.root.Get(contracts.KeyTeamNotes)
+	if !ok || service == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "team notes unavailable")
+	}
+	return service, nil
+}
+
+func teamNoteFromContract(note contracts.TeamNote) teamNoteDTO {
+	return teamNoteDTO{
+		ID: note.ID, TaskID: note.TaskID, Title: note.Title, Body: note.Body,
+		Author: note.Author, At: rfc3339(note.At),
+	}
+}
+
+// teamNotes lists the shared notes (the memory the team actually reads).
+func (g *Gateway) teamNotes(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.teamNotesService()
+	if problem != nil {
+		return nil, problem
+	}
+	limit := 50
+	if len(raw) > 0 {
+		var params struct {
+			Limit int `json:"limit,omitempty"`
+		}
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		if params.Limit > 0 && params.Limit <= 200 {
+			limit = params.Limit
+		}
+	}
+	notes, err := service.List(ctx, limit)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	result := teamNotesListResult{Notes: make([]teamNoteDTO, 0, len(notes))}
+	for _, note := range notes {
+		result.Notes = append(result.Notes, teamNoteFromContract(note))
+	}
+	return result, nil
+}
+
+// teamNoteRecord writes one shared note.
+func (g *Gateway) teamNoteRecord(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.teamNotesService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params teamNotesRecordParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	note, err := service.Record(ctx, contracts.TeamNote{
+		ID: params.ID, TaskID: params.TaskID, Title: params.Title, Body: params.Body, Author: params.Author,
+	})
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return teamNoteFromContract(note), nil
 }

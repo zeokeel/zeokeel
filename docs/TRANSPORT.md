@@ -833,6 +833,8 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `webhook.source.set` | `{id,secret,channel?}` | `{id,channel?}` | N | `WebhookSourceAdmin.UpsertSource`（id `[a-z0-9-]`、secret ≥16 字节） | ✅ 已实现 |
 | `webhook.source.remove` | `{id}` | `{ok:true}` | N | `WebhookSourceAdmin.RemoveSource` | ✅ 已实现 |
 | `lead.run` | — | `{scanned,dispatched,ignored,skipped,failed,errors?}` | Y | `LeadService.RunOnce`（有界一轮；已处理的条目不再是 new） | ✅ 已实现 |
+| `team.notes` | `{limit?}` | `{notes:[TeamNote]}` | Y | `TeamNotesService.List`（最多 200） | ✅ 已实现 |
+| `team.note.record` | `{id?,taskId?,title,body?,author?}` | `TeamNote` | N | `TeamNotesService.Record` | ✅ 已实现 |
 | `heartbeat.status` | — | `{running,leadIntervalMs,channelIntervalMs,lastTick?,leadRuns,dispatched,polls,newMessages,errors?}` | Y | `HeartbeatService.Status` | ✅ 已实现 |
 | `heartbeat.tick` | — | `{leadRuns,dispatched,polls,newMessages,errors?}` | N | `HeartbeatService.Tick`（手动跑一次） | ✅ 已实现 |
 | `browser.status` | — | `{connected,endpoint?,pages}` | Y | `BrowserService.Status` | ✅ 已实现 |
@@ -869,7 +871,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
   「同意 / 不同意」走同一条 `Resolve`（网关不解析自然语言，解析在 approvals 模块内，`ParseReply`）。
 - 类型化错误映射成 `-32600`（invalid request）并保留原文：`lease: task already claimed`、
   `approval: token expired` 这类话可以直接显示给用户。
-- capability：`inbox`、`triage`、`tasklease`、`approvalaction`、`notifyroute`、`webhook`、`lead`、`credentials`、`heartbeat`、`browser`（十个服务键都随装配提供；
+- capability：`inbox`、`triage`、`tasklease`、`approvalaction`、`notifyroute`、`webhook`、`lead`、`credentials`、`heartbeat`、`browser`、`teamnotes`（十一个服务键都随装配提供；
   缺任何一个，对应方法返回 `-32004 capability_unsupported`）。
 - `webhook.source.set` 的 `secret` 只在请求体里出现：响应、`webhook.sources` 和日志都不回显它。
 - `NotifyRoute` 的兜底顺序：`primary` → `fallback[]` → **`inapp` 永远作为最后一档**（交付循环可以在这里停住）；

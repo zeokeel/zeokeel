@@ -397,6 +397,8 @@ const mockInbox = {
 const mockLeases = new Map();
 /** Channel credentials, kind/id -> {kind,id,fields}. Values are never echoed. */
 const mockCredentials = new Map();
+/** Shared team notes, newest first. */
+const mockTeamNotes = [];
 const leaseFor = (taskId, owner, state) => {
   const lease = {
     taskId,
@@ -1939,6 +1941,23 @@ const wsDispatch = (client, message) => {
       if (at >= 0) mockNotifyRoutes[at] = route;
       else mockNotifyRoutes.push(route);
       return reply({ ...route });
+    }
+    case 'team.notes': {
+      return reply({ notes: mockTeamNotes.slice(0, Number(params.limit ?? 50)) });
+    }
+    case 'team.note.record': {
+      const title = String(params.title ?? '');
+      if (!title) return fail(-32602, 'invalid_params');
+      const note = {
+        id: String(params.id ?? `note-${mockTeamNotes.length + 1}`),
+        ...(params.taskId ? { taskId: String(params.taskId) } : {}),
+        title,
+        ...(params.body ? { body: String(params.body) } : {}),
+        ...(params.author ? { author: String(params.author) } : {}),
+        at: nowIso(),
+      };
+      mockTeamNotes.unshift(note);
+      return reply(note);
     }
     case 'heartbeat.status': {
       return reply({

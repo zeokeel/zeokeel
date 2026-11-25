@@ -453,6 +453,23 @@
       ],
       "optional": []
     },
+    "team.note.record": {
+      "required": [
+        "title"
+      ],
+      "optional": [
+        "author",
+        "body",
+        "id",
+        "taskId"
+      ]
+    },
+    "team.notes": {
+      "required": [],
+      "optional": [
+        "limit"
+      ]
+    },
     "team.send": {
       "required": [
         "id",
@@ -596,6 +613,7 @@
       "settings",
       "settings.set",
       "tasklease",
+      "teamnotes",
       "triage",
       "webhook",
       "workspace"
