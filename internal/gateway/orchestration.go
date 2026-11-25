@@ -2074,6 +2074,32 @@ func (g *Gateway) botsTemplateGet(ctx context.Context, raw json.RawMessage) (any
 	return botTemplateGetResult{Template: &dto}, nil
 }
 
+type taskSendPendingParams struct {
+	ID string `json:"id"`
+}
+
+// taskSendPending reports the message a before_send task is holding, so the task
+// screen can say "there is something waiting for you" instead of the person only
+// finding out by trying to approve.
+func (g *Gateway) taskSendPending(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	holder, ok := g.root.Get(contracts.KeyTaskSendHolder)
+	if !ok || holder == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "held sends unavailable")
+	}
+	var params taskSendPendingParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	text, found, err := holder.Held(ctx, params.ID)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	if !found {
+		return map[string]any{"held": false}, nil
+	}
+	return map[string]any{"held": true, "text": text}, nil
+}
+
 type taskSendApproveParams struct {
 	ID       string `json:"id"`
 	Approver string `json:"approver"`

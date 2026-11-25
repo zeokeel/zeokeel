@@ -563,6 +563,12 @@
       ],
       "optional": []
     },
+    "tasks.send.pending": {
+      "required": [
+        "id"
+      ],
+      "optional": []
+    },
     "tasks.snapshot": {
       "required": [],
       "optional": [

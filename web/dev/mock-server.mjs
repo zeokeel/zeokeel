@@ -1879,6 +1879,11 @@ const wsDispatch = (client, message) => {
       item.status = action;
       return reply({ ...item });
     }
+    case 'tasks.send.pending': {
+      const id = String(params.id ?? '');
+      const held = mockHeldSends.get(id);
+      return reply(held ? { held: true, text: held } : { held: false });
+    }
     case 'tasks.send.approve': {
       const id = String(params.id ?? '');
       const approver = String(params.approver ?? '');

@@ -6,6 +6,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 
@@ -139,5 +140,31 @@ func TestPolicyDecidesWhetherTheMessageIsHeld(t *testing.T) {
 	}
 	if gateway.reviewNeedsSendApproval(context.Background(), "task-8") {
 		t.Fatal("a task without the policy was treated as before_send")
+	}
+}
+
+func TestSendPendingReportsTheHeldMessage(t *testing.T) {
+	holder := &fakeSendHolder{}
+	gateway, _ := newSendGateway(t, holder, &beforeSendLease{taskID: "task-7"})
+
+	empty, problem := gateway.taskSendPending(context.Background(), json.RawMessage(`{"id":"task-7"}`))
+	if problem != nil {
+		t.Fatalf("pending: %+v", problem)
+	}
+	if payload, _ := empty.(map[string]any); payload["held"] != false {
+		t.Fatalf("pending with nothing held = %+v", empty)
+	}
+
+	gateway.holdOutbound(context.Background(), "task-7", "accept", "证据齐全")
+	held, problem := gateway.taskSendPending(context.Background(), json.RawMessage(`{"id":"task-7"}`))
+	if problem != nil {
+		t.Fatalf("pending: %+v", problem)
+	}
+	payload, _ := held.(map[string]any)
+	if payload["held"] != true {
+		t.Fatalf("pending = %+v, want held", held)
+	}
+	if text, _ := payload["text"].(string); !strings.Contains(text, "task-7") {
+		t.Fatalf("text = %q, want the task named", text)
 	}
 }

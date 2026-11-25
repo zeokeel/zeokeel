@@ -22,7 +22,7 @@ func TestOrchestrationMethodsAreDispatched(t *testing.T) {
 		"tasks.lease", "tasks.claim", "tasks.heartbeat", "tasks.submit", "tasks.review",
 		"tasks.tools.set", "tasks.tools.get",
 		"tasks.approval.set", "tasks.approval.get", "tasks.approve", "tasks.reject-start",
-		"tasks.budget.set", "tasks.budget.get", "tasks.budget.consume", "tasks.send.approve",
+		"tasks.budget.set", "tasks.budget.get", "tasks.budget.consume", "tasks.send.pending", "tasks.send.approve",
 		"approval.token", "approval.action",
 		"notify.route.snapshot", "notify.route.upsert",
 		"webhook.sources", "webhook.source.set", "webhook.source.remove",

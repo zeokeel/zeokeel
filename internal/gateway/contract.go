@@ -110,6 +110,7 @@ var contractParams = map[string]any{
 	"tasks.approval.get":      leaseReadParams{},
 	"tasks.approve":           taskApproveParams{},
 	"tasks.reject-start":      taskRejectStartParams{},
+	"tasks.send.pending":      taskSendPendingParams{},
 	"tasks.send.approve":      taskSendApproveParams{},
 	"tasks.budget.set":        taskBudgetSetParams{},
 	"tasks.budget.get":        leaseReadParams{},
