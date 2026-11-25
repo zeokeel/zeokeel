@@ -28,6 +28,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/sessionstore"
 	"github.com/zeokeel/zeokeel/internal/modules/skills"
 	"github.com/zeokeel/zeokeel/internal/modules/tasklease"
+	"github.com/zeokeel/zeokeel/internal/modules/teamnotes"
 	"github.com/zeokeel/zeokeel/internal/modules/toolkit"
 	"github.com/zeokeel/zeokeel/internal/modules/triage"
 	"github.com/zeokeel/zeokeel/internal/modules/update"
@@ -66,6 +67,8 @@ func Registry() *module.Registry {
 	mustRegister(registry, workspace.Module())
 	mustRegister(registry, skills.Module())
 	mustRegister(registry, memorystore.Module())
+	// Shared team notes ride on the memory store, so they load after it.
+	mustRegister(registry, teamnotes.Module())
 	mustRegister(registry, sandbox.Module())
 	mustRegister(registry, toolkit.Module())
 	// triage joins the inbox to the task board: it must come after both.

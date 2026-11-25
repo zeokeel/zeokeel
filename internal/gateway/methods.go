@@ -44,6 +44,8 @@ var serverCapabilities = []string{
 	"webhook",
 	"lead",
 	"credentials",
+	"heartbeat",
+	"browser",
 }
 
 // gatewayCapabilities is the handshake's capability list for this gateway
@@ -394,6 +396,15 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		},
 		"lead.run": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.leadRun(ctx, request.Params)
+		},
+		"heartbeat.status": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.heartbeatStatus(ctx, request.Params)
+		},
+		"heartbeat.tick": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.heartbeatTick(ctx, request.Params)
+		},
+		"browser.status": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.browserStatus(ctx, request.Params)
 		},
 		"team.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.teamSnapshot()

@@ -139,6 +139,11 @@
       "config": {}
     },
     {
+      "id": "teamnotes",
+      "module": "zeokeel/teamnotes",
+      "config": {}
+    },
+    {
       "id": "agent",
       "module": "zeokeel/agent",
       "config": {

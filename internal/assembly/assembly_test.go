@@ -145,7 +145,7 @@ func TestProductsAndEntries(t *testing.T) {
 	wantHeadless := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/inbox", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/insights",
-		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/credentials", "zeokeel/webhook", "zeokeel/wechat", "zeokeel/feishu", "zeokeel/dingtalk", "zeokeel/email", "zeokeel/heartbeat", "zeokeel/browser", "zeokeel/hosttools", "zeokeel/memorystore",
+		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/credentials", "zeokeel/webhook", "zeokeel/wechat", "zeokeel/feishu", "zeokeel/dingtalk", "zeokeel/email", "zeokeel/heartbeat", "zeokeel/browser", "zeokeel/hosttools", "zeokeel/memorystore", "zeokeel/teamnotes",
 		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
 	}
 	loaded := make(map[string]bool, len(headless))
@@ -261,7 +261,7 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 
 	instances := loader.Instances()
 	wantIDs := []string{
-		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "notifyroute", "creds", "webhook", "wechat", "feishu", "dingtalk", "email", "heartbeat", "browser", "hosttools", "memorystore",
+		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "notifyroute", "creds", "webhook", "wechat", "feishu", "dingtalk", "email", "heartbeat", "browser", "hosttools", "memorystore", "teamnotes",
 		"agent", "automation", "update", "importer", "acp",
 	}
 	gotIDs := make([]string, 0, len(instances))
@@ -378,6 +378,18 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 	}
 	if challenge, ok := feishuService.VerifyURL([]byte(`{"type":"url_verification","challenge":"abc"}`)); !ok || challenge != "abc" {
 		t.Fatalf("feishu VerifyURL = (%q, %v), want the challenge echoed", challenge, ok)
+	}
+
+	// Shared team notes are wired over the assembled memory store: a note must
+	// land and come back (the URI lives inside the store's memory subtree).
+	teamNotes, ok := root.Get(contracts.KeyTeamNotes)
+	if !ok || teamNotes == nil {
+		t.Fatal("KeyTeamNotes service is not available on the root")
+	}
+	if _, err := teamNotes.Record(context.Background(), contracts.TeamNote{
+		ID: "n1", TaskID: "assembly-note", Title: "assembly note", Body: "landed", Author: "bot-1",
+	}); err != nil {
+		t.Fatalf("teamnotes Record through the assembly: %v", err)
 	}
 
 	// The autonomous loop is running: one pass through the assembled services

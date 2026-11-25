@@ -23,6 +23,7 @@ func TestOrchestrationMethodsAreDispatched(t *testing.T) {
 		"webhook.sources", "webhook.source.set", "webhook.source.remove",
 		"lead.run",
 		"credentials.list", "credentials.set", "credentials.delete",
+		"heartbeat.status", "heartbeat.tick", "browser.status",
 	}
 	methods := SupportedMethods()
 	for _, name := range want {

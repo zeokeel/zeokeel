@@ -741,3 +741,88 @@ func (g *Gateway) credentialsDelete(ctx context.Context, raw json.RawMessage) (a
 	}
 	return map[string]any{"ok": true}, nil
 }
+
+// --- heartbeat & browser status --------------------------------------------
+
+type heartbeatStatusResult struct {
+	Running         bool     `json:"running"`
+	LeadIntervalMS  int64    `json:"leadIntervalMs"`
+	ChannelInterval int64    `json:"channelIntervalMs"`
+	LastTick        string   `json:"lastTick,omitempty"`
+	LeadRuns        int      `json:"leadRuns"`
+	Dispatched      int      `json:"dispatched"`
+	Polls           int      `json:"polls"`
+	NewMessages     int      `json:"newMessages"`
+	Errors          []string `json:"errors,omitempty"`
+}
+
+type heartbeatTickResult struct {
+	LeadRuns    int      `json:"leadRuns"`
+	Dispatched  int      `json:"dispatched"`
+	Polls       int      `json:"polls"`
+	NewMessages int      `json:"newMessages"`
+	Errors      []string `json:"errors,omitempty"`
+}
+
+func (g *Gateway) heartbeatService() (contracts.HeartbeatService, *protocolError) {
+	service, ok := g.root.Get(contracts.KeyHeartbeat)
+	if !ok || service == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "heartbeat unavailable")
+	}
+	return service, nil
+}
+
+// heartbeatStatus reports the autonomous loop: whether it runs, how often, and
+// what the last pass did. It is the answer to "is the bot actually working?".
+func (g *Gateway) heartbeatStatus(ctx context.Context, _ json.RawMessage) (any, *protocolError) {
+	service, problem := g.heartbeatService()
+	if problem != nil {
+		return nil, problem
+	}
+	status, err := service.Status(ctx)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	result := heartbeatStatusResult{
+		Running: status.Running, LeadIntervalMS: status.LeadInterval.Milliseconds(),
+		ChannelInterval: status.ChannelInterval.Milliseconds(), LastTick: rfc3339(status.LastTick),
+		LeadRuns: status.LastReport.LeadRuns, Dispatched: status.LastReport.Dispatched,
+		Polls: status.LastReport.Polls, NewMessages: status.LastReport.NewMessages,
+		Errors: status.LastReport.Errors,
+	}
+	return result, nil
+}
+
+// heartbeatTick runs one pass now ("马上查一次").
+func (g *Gateway) heartbeatTick(ctx context.Context, _ json.RawMessage) (any, *protocolError) {
+	service, problem := g.heartbeatService()
+	if problem != nil {
+		return nil, problem
+	}
+	report, err := service.Tick(ctx)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return heartbeatTickResult{
+		LeadRuns: report.LeadRuns, Dispatched: report.Dispatched, Polls: report.Polls,
+		NewMessages: report.NewMessages, Errors: report.Errors,
+	}, nil
+}
+
+type browserStatusResult struct {
+	Connected bool   `json:"connected"`
+	Endpoint  string `json:"endpoint,omitempty"`
+	Pages     int    `json:"pages"`
+}
+
+func (g *Gateway) browserStatus(ctx context.Context, _ json.RawMessage) (any, *protocolError) {
+	service, ok := g.root.Get(contracts.KeyBrowser)
+	if !ok || service == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "browser unavailable")
+	}
+	status, err := service.Status(ctx)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return browserStatusResult{Connected: status.Connected, Endpoint: status.Endpoint, Pages: status.Pages}, nil
+}

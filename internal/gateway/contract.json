@@ -62,6 +62,10 @@
         "sinceRev"
       ]
     },
+    "browser.status": {
+      "required": [],
+      "optional": []
+    },
     "context.snapshot": {
       "required": [
         "sessionId"
@@ -107,6 +111,14 @@
       "required": [
         "sessionId"
       ],
+      "optional": []
+    },
+    "heartbeat.status": {
+      "required": [],
+      "optional": []
+    },
+    "heartbeat.tick": {
+      "required": [],
       "optional": []
     },
     "inbox.dispatch": {
@@ -565,8 +577,10 @@
       "approvals",
       "artifacts",
       "ask",
+      "browser",
       "credentials",
       "foreground",
+      "heartbeat",
       "inbox",
       "lead",
       "notify",

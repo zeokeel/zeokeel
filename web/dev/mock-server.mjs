@@ -1940,6 +1940,18 @@ const wsDispatch = (client, message) => {
       else mockNotifyRoutes.push(route);
       return reply({ ...route });
     }
+    case 'heartbeat.status': {
+      return reply({
+        running: true, leadIntervalMs: 30000, channelIntervalMs: 60000,
+        lastTick: nowIso(), leadRuns: 1, dispatched: 0, polls: 0, newMessages: 0,
+      });
+    }
+    case 'heartbeat.tick': {
+      return reply({ leadRuns: 1, dispatched: 0, polls: 0, newMessages: 0 });
+    }
+    case 'browser.status': {
+      return reply({ connected: false, pages: 0 });
+    }
     case 'credentials.list': {
       const kind = String(params.kind ?? '');
       const rows = [...mockCredentials.entries()]
