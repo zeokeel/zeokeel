@@ -3313,8 +3313,9 @@ func (s *service) handleEvent(ctx context.Context, sessionID, workspaceRoot stri
 							// A refusal is a decision, not a malfunction: the
 							// transcript says 已拒绝 and must not carry rig's
 							// English sentence as the card's output (round-6
-							// tools audit D4/N2).
-							status = "denied"
+							// tools audit D4/N2). The status stays "error" — the
+							// call did not run, and `ok:false` is the protocol's
+							// way of saying so; the kind carries the difference.
 							content = ""
 						}
 					}
