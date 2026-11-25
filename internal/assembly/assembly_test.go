@@ -145,7 +145,7 @@ func TestProductsAndEntries(t *testing.T) {
 	wantHeadless := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/inbox", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/insights",
-		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/webhook", "zeokeel/wechat", "zeokeel/feishu", "zeokeel/dingtalk", "zeokeel/hosttools", "zeokeel/memorystore",
+		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/credentials", "zeokeel/webhook", "zeokeel/wechat", "zeokeel/feishu", "zeokeel/dingtalk", "zeokeel/hosttools", "zeokeel/memorystore",
 		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
 	}
 	loaded := make(map[string]bool, len(headless))
@@ -261,7 +261,7 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 
 	instances := loader.Instances()
 	wantIDs := []string{
-		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "notifyroute", "webhook", "wechat", "feishu", "dingtalk", "hosttools", "memorystore",
+		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "notifyroute", "creds", "webhook", "wechat", "feishu", "dingtalk", "hosttools", "memorystore",
 		"agent", "automation", "update", "importer", "acp",
 	}
 	gotIDs := make([]string, 0, len(instances))
@@ -341,6 +341,26 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 	wechatStatus, err := wechatService.Status(context.Background())
 	if err != nil || wechatStatus.Connected {
 		t.Fatalf("wechat status = (%+v, %v), want disconnected", wechatStatus, err)
+	}
+
+	// The credential store is wired under the same data dir the adapters will
+	// read from: a secret written here must come back, and List must not carry it.
+	creds, ok := root.Get(contracts.KeyCredentials)
+	if !ok || creds == nil {
+		t.Fatal("KeyCredentials service is not available on the root")
+	}
+	if err := creds.Set(context.Background(), contracts.Credential{
+		Kind: "wechat", ID: "default", Fields: map[string]string{"token": "assembly-secret"},
+	}); err != nil {
+		t.Fatalf("credentials Set: %v", err)
+	}
+	credential, exists, getErr := creds.Get(context.Background(), "wechat", "default")
+	if getErr != nil || !exists || credential.Fields["token"] != "assembly-secret" {
+		t.Fatalf("credentials Get = (%+v, %v, %v)", credential, exists, getErr)
+	}
+	infos, listErr := creds.List(context.Background(), "wechat")
+	if listErr != nil || len(infos) != 1 || infos[0].ID != "default" {
+		t.Fatalf("credentials List = (%+v, %v)", infos, listErr)
 	}
 
 	// The other two channel adapters are wired too, and both answer honestly

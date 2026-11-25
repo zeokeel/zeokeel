@@ -9,6 +9,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/appinfo"
 	"github.com/zeokeel/zeokeel/internal/modules/approvals"
 	"github.com/zeokeel/zeokeel/internal/modules/automation"
+	"github.com/zeokeel/zeokeel/internal/modules/creds"
 	"github.com/zeokeel/zeokeel/internal/modules/dingtalk"
 	"github.com/zeokeel/zeokeel/internal/modules/feishu"
 	"github.com/zeokeel/zeokeel/internal/modules/goal"
@@ -82,6 +83,8 @@ func Registry() *module.Registry {
 	mustRegister(registry, insights.Module())
 	mustRegister(registry, hosttools.Module())
 	// Channel adapters: the webhook is the first one, and it only needs the inbox.
+	// Credential store: channel adapters need it, it needs only the data dir.
+	mustRegister(registry, creds.Module())
 	mustRegister(registry, webhook.Module())
 	mustRegister(registry, wechat.Module())
 	mustRegister(registry, dingtalk.Module())
