@@ -42,6 +42,7 @@ var serverCapabilities = []string{
 	"approvalaction",
 	"notifyroute",
 	"webhook",
+	"lead",
 }
 
 // gatewayCapabilities is the handshake's capability list for this gateway
@@ -377,6 +378,9 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		},
 		"webhook.source.remove": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.webhookSourceRemove(ctx, request.Params)
+		},
+		"lead.run": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.leadRun(ctx, request.Params)
 		},
 		"team.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.teamSnapshot()

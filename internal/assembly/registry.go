@@ -14,6 +14,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/importer"
 	"github.com/zeokeel/zeokeel/internal/modules/inbox"
 	"github.com/zeokeel/zeokeel/internal/modules/insights"
+	"github.com/zeokeel/zeokeel/internal/modules/lead"
 	"github.com/zeokeel/zeokeel/internal/modules/memorystore"
 	"github.com/zeokeel/zeokeel/internal/modules/modelcatalog"
 	"github.com/zeokeel/zeokeel/internal/modules/notifyroute"
@@ -62,6 +63,8 @@ func Registry() *module.Registry {
 	mustRegister(registry, toolkit.Module())
 	// triage joins the inbox to the task board: it must come after both.
 	mustRegister(registry, triage.Module())
+	// The triage pass joins inbox + triage: it must come after both.
+	mustRegister(registry, lead.Module())
 	// tasklease wraps the task board: it must come after toolkit.
 	mustRegister(registry, tasklease.Module())
 	mustRegister(registry, goal.Module())

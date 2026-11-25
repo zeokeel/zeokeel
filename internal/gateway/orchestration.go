@@ -585,3 +585,39 @@ func (g *Gateway) webhookSourceRemove(ctx context.Context, raw json.RawMessage) 
 	}
 	return map[string]any{"ok": true}, nil
 }
+
+// --- lead triage -----------------------------------------------------------
+
+type leadRunResult struct {
+	Scanned    int      `json:"scanned"`
+	Dispatched int      `json:"dispatched"`
+	Ignored    int      `json:"ignored"`
+	Skipped    int      `json:"skipped"`
+	Failed     int      `json:"failed"`
+	Errors     []string `json:"errors,omitempty"`
+}
+
+func (g *Gateway) leadService() (contracts.LeadService, *protocolError) {
+	service, ok := g.root.Get(contracts.KeyLead)
+	if !ok || service == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "lead unavailable")
+	}
+	return service, nil
+}
+
+// leadRun performs one bounded triage pass. It is idempotent in effect: items
+// already turned into work are not new any more, so a second call is cheap.
+func (g *Gateway) leadRun(ctx context.Context, _ json.RawMessage) (any, *protocolError) {
+	service, problem := g.leadService()
+	if problem != nil {
+		return nil, problem
+	}
+	report, err := service.RunOnce(ctx)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return leadRunResult{
+		Scanned: report.Scanned, Dispatched: report.Dispatched, Ignored: report.Ignored,
+		Skipped: report.Skipped, Failed: report.Failed, Errors: report.Errors,
+	}, nil
+}

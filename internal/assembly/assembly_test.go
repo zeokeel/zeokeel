@@ -144,7 +144,7 @@ func TestProductsAndEntries(t *testing.T) {
 	wantHeadless := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/inbox", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/insights",
-		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/webhook", "zeokeel/hosttools", "zeokeel/memorystore",
+		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/webhook", "zeokeel/hosttools", "zeokeel/memorystore",
 		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
 	}
 	loaded := make(map[string]bool, len(headless))
@@ -260,7 +260,7 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 
 	instances := loader.Instances()
 	wantIDs := []string{
-		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "tasklease", "notifyroute", "webhook", "hosttools", "memorystore",
+		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "notifyroute", "webhook", "hosttools", "memorystore",
 		"agent", "automation", "update", "importer", "acp",
 	}
 	gotIDs := make([]string, 0, len(instances))
@@ -326,6 +326,25 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 	}
 	if updated, err := inboxService.Triage(context.Background(), []string{storedItem.ID}, contracts.InboxActionTask, []string{"task-1"}); err != nil || updated != 1 {
 		t.Fatalf("inbox Triage through the assembly = (%d, %v), want (1, nil)", updated, err)
+	}
+
+	// The triage pass is wired over the same inbox and triage services: with no
+	// rules configured it must scan a fresh item and decline it, never lose it.
+	leadService, ok := root.Get(contracts.KeyLead)
+	if !ok || leadService == nil {
+		t.Fatal("KeyLead service is not available on the root")
+	}
+	if _, _, err := inboxService.Add(context.Background(), contracts.InboxItem{
+		Source: "webhook", Channel: "lead-check", Sender: "owner", DedupKey: "lead-check", Title: "lead check",
+	}); err != nil {
+		t.Fatalf("inbox Add for the lead pass: %v", err)
+	}
+	leadReport, err := leadService.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("lead RunOnce through the assembly: %v", err)
+	}
+	if leadReport.Scanned < 1 || leadReport.Failed != 0 {
+		t.Fatalf("lead report = %+v, want at least one scanned and no failures", leadReport)
 	}
 
 	// The webhook adapter is the first channel. The headless assembly ships

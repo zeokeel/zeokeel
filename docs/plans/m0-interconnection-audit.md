@@ -36,6 +36,7 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | **四模块链路** inbox → triage → board → lease | 上述四个模块 | — | 装配测试里：Apply 建任务 → Claim → Submit → Accept，board 最终 completed |
 | `contracts.KeyApprovalAction` | approvals 模块（与 KeyApprovals 同源） | 桌面按钮 / 卡片回调 / 聊天回复 | 13 条（token 校验/过期/单次使用/绑单/索引回复/空队列） |
 | `contracts.KeyNotifyRoute` | notifyroute（新，无依赖） | 渠道适配器、gateway | 8 条（默认覆盖/校验/顺序/不健康跳过/inapp 兜底/静音只压非审批/跨午夜/停用） |
+| `contracts.KeyLead` | lead（新，依赖 inbox + triage） | `lead.run`、自动化 | 5 条（规则命中/忽略/有界/单条失败不中断/不回炉） |
 | `contracts.KeyWebhook` | webhook（依赖 inbox + dataDir） | `POST /api/inbound/{source}`、`webhook.sources/source.set/remove` | 10 条收件测试 + 7 条 HTTP 测试 + 6 条 source 管理测试（排序/校验/删除/重启恢复/轮换失效/0600） |
 | **网关 → 服务键**（11 个方法） | inbox / triage / tasklease / approvalaction | web 客户端、Lead 分诊回合 | 一致性测试（TRANSPORT §5.1 ↔ dispatch ↔ contract.json ↔ ws-contract.ts）+ 载荷映射测试 7 条 |
 | 注册 ↔ 装配一致 | registry | headless.json | `TestEveryRegisteredModuleIsLoaded`（新） |
@@ -60,7 +61,7 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 | 缺口 | 说明 | 下一步 |
 |---|---|---|
 | ~~inbox → Lead 分诊器~~ | ✅ 已接：`triage.Apply` 把收件箱项变成任务板任务（先建任务再标记，失败不脏写；重复分诊不重复建） | 已交付 |
-| Lead 的"思考"层（谁来决定 Action/Task） | triage 只执行决定，不做判断；决定来自 Lead 模型 | M0-2b：Lead 分诊回合（agent 侧） |
+| ~~Lead 的"思考"层~~ | ✅ 已交付**可替换的计划器**：`Planner` 接口 + 确定性 `RulePlanner`（源/关键词/指派人/前缀/忽略），循环保证有界、失败不中断、不回炉；模型版计划器以后替换即可 | 已交付（模型版待接） |
 | ~~任务板租约/心跳/证据/验收~~ | ✅ 已交付：`tasklease`（TTL/心跳/证据必填/review/accept/reject/expire） | 已交付 |
 | ~~审批 action + 文字回复~~ | ✅ 已交付：`IssueToken` / `Apply` / `ApplyReply`，三条入口最终都落到 `Resolve` | 已交付 |
 | 渠道适配器 | 🟡 webhook **内核 + HTTP 入口 + source 管理**已交付（`webhook.sources/source.set/source.remove`，密钥 0600 持久化、读路径不回显）；微信/钉钉/飞书/邮件未开始 | 下一步：微信 iLink；设置页表单 |
@@ -107,6 +108,7 @@ scripts/verify.sh --quick（notifyroute 后）PASS 5/5，63s；web gen:verify / 
 scripts/verify.sh --quick（webhook 后）  PASS 5/5，66s
 scripts/verify.sh --quick（inbound 后）  PASS 5/5，64s
 scripts/verify.sh --quick（source 管理后）PASS 5/5，63s
+scripts/verify.sh --quick（lead 后）    PASS 5/5，66s；web gen:verify / tsc 通过
 scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过
 scripts/verify.sh --quick（approval 后）    PASS 5/5（一次 flaky 后重跑绿）
                                             （首次跑时 gateway 的

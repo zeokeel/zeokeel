@@ -68,6 +68,11 @@
       "config": {}
     },
     {
+      "id": "lead",
+      "module": "zeokeel/lead",
+      "config": {}
+    },
+    {
       "id": "tasklease",
       "module": "zeokeel/tasklease",
       "config": {}

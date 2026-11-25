@@ -128,6 +128,10 @@
         "protocolVersion"
       ]
     },
+    "lead.run": {
+      "required": [],
+      "optional": []
+    },
     "mcp.reload": {
       "required": [],
       "optional": [
@@ -536,6 +540,7 @@
       "ask",
       "foreground",
       "inbox",
+      "lead",
       "notify",
       "notifyroute",
       "plan",

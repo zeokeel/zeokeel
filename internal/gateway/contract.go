@@ -109,6 +109,7 @@ var contractParams = map[string]any{
 	"webhook.sources":         struct{}{},
 	"webhook.source.set":      webhookSourceSetParams{},
 	"webhook.source.remove":   webhookSourceRemoveParams{},
+	"lead.run":                struct{}{},
 }
 
 // conditionalCapability is one capability that exists only when the assembly
