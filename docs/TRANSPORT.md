@@ -173,8 +173,13 @@ SIGINT/SIGTERM（signals_unix.go:11）
 | GET | `/api/sessions/{id}/memory` | 会话记忆（R5） | `read_models.go` |
 | GET | `/api/files/tree`、`/api/files/content`、`/api/files/diff` | 工作区文件/预览/差异（R8–R11） | `files.go` |
 | GET | `/` 及其余 GET | 内嵌客户端静态资源（未内嵌时 503） | `server.go` |
+| POST | `/api/inbound/{source}` | 渠道入站（webhook）：**签名即认证**，不要求浏览器 token；Host 必须属于本机，带 `Origin` 一律 403，body ≤ 1 MiB | `inbound.go` |
 
 **约定**：`/api/*` 未知路径先鉴权再 404（未鉴权的探测无法测绘端点面，`handleUnknownAPI`）。
+唯一例外是 `/api/inbound/{source}`：它由发送方的 HMAC 签名认证（`X-Zeokeel-Signature: t=<unix>,v1=<hex>`，
+±5 分钟窗口），但要保留 Host 校验并拒绝任何 `Origin`——浏览器页面永远不该驱动一个签名端点。
+状态码：`202` 已入队（`{id,merged,count}`）、`401` 签名无效/过期、`404` 未知 source、`400` 载荷不可用、
+`413` 超限、`429` 配额用尽。
 
 ---
 

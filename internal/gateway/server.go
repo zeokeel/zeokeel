@@ -64,6 +64,10 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request) {
 		// menu. Authenticated like every other API path: a read of the user's
 		// workspace is not public.
 		g.handleFiles(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/inbound/"):
+		// Channel ingress: authenticated by the sender's signature, not by the
+		// browser token (the signature is checked by the webhook adapter).
+		g.handleInbound(w, r)
 	case strings.HasPrefix(r.URL.Path, "/api/"):
 		// Unknown API path: authenticated first (see handleUnknownAPI), so an
 		// unauthenticated probe cannot map the endpoint surface.
