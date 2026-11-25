@@ -118,6 +118,10 @@ var contractParams = map[string]any{
 	"lead.run":                struct{}{},
 	"wechat.login.start":      struct{}{},
 	"wechat.login.state":      wechatLoginStateParams{},
+	"notify.plan": struct {
+		Category string `json:"category"`
+	}{},
+	"notify.deliver": notifyDeliverParams{},
 	"team.notes": struct {
 		Limit int `json:"limit,omitempty"`
 	}{},

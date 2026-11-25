@@ -187,6 +187,19 @@
         "actionId"
       ]
     },
+    "notify.deliver": {
+      "required": [
+        "category",
+        "text"
+      ],
+      "optional": []
+    },
+    "notify.plan": {
+      "required": [
+        "category"
+      ],
+      "optional": []
+    },
     "notify.route.snapshot": {
       "required": [],
       "optional": []
@@ -636,6 +649,7 @@
       "artifacts",
       "ask",
       "browser",
+      "channeldispatch",
       "credentials",
       "foreground",
       "heartbeat",

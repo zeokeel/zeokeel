@@ -1986,6 +1986,15 @@ const wsDispatch = (client, message) => {
       note.reviewedAt = params.at ? String(params.at) : nowIso();
       return reply(note);
     }
+    case 'notify.plan': {
+      const category = String(params.category ?? '');
+      return reply({ channels: ['inapp'], deferred: false, ...(category ? {} : {}) });
+    }
+    case 'notify.deliver': {
+      const text = String(params.text ?? '');
+      if (!text) return fail(-32602, 'invalid_params');
+      return reply({ channel: 'inapp', attempts: ['inapp'], deferred: false });
+    }
     case 'team.notes': {
       return reply({ notes: mockTeamNotes.slice(0, Number(params.limit ?? 50)) });
     }

@@ -27,7 +27,8 @@ func TestOrchestrationMethodsAreDispatched(t *testing.T) {
 		"lead.run",
 		"credentials.list", "credentials.set", "credentials.delete",
 		"heartbeat.status", "heartbeat.tick", "heartbeat.configure", "browser.status",
-		"team.notes", "team.note.record", "team.note.review",
+		"team.notes", "team.note.record",
+		"notify.plan", "notify.deliver", "team.note.review",
 		"wechat.login.start", "wechat.login.state",
 	}
 	methods := SupportedMethods()

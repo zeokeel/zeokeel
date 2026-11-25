@@ -1171,3 +1171,93 @@ func (g *Gateway) heartbeatConfigure(ctx context.Context, raw json.RawMessage) (
 	}
 	return g.heartbeatStatus(ctx, nil)
 }
+
+// --- notification delivery -------------------------------------------------
+
+type notifyDeliverParams struct {
+	Category string `json:"category"`
+	Text     string `json:"text"`
+}
+
+type notifyDeliverResult struct {
+	Channel  string   `json:"channel"`
+	Attempts []string `json:"attempts,omitempty"`
+	Deferred bool     `json:"deferred"`
+	Reason   string   `json:"reason,omitempty"`
+	Errors   []string `json:"errors,omitempty"`
+}
+
+type notifyPlanResult struct {
+	Channels []string `json:"channels"`
+	Deferred bool     `json:"deferred"`
+	Reason   string   `json:"reason,omitempty"`
+}
+
+// notifyPlan shows where a category would go right now, without sending.
+func (g *Gateway) notifyPlan(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	router, ok := g.root.Get(contracts.KeyNotifyRoute)
+	if !ok || router == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "notification routing unavailable")
+	}
+	var params struct {
+		Category string `json:"category"`
+	}
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	plan, err := router.Plan(ctx, params.Category, time.Now(), g.channelHealth(ctx))
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return notifyPlanResult{Channels: plan.Channels, Deferred: plan.Deferred, Reason: plan.Reason}, nil
+}
+
+// notifyDeliver sends one message through the plan and reports what actually
+// happened — including the channels it fell back from.
+func (g *Gateway) notifyDeliver(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	dispatcher, ok := g.root.Get(contracts.KeyChannelDispatch)
+	if !ok || dispatcher == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "channel dispatch unavailable")
+	}
+	var params notifyDeliverParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(params.Text) == "" {
+		return nil, errInvalidParams("text", "text is required")
+	}
+	receipt, err := dispatcher.Deliver(ctx, params.Category, params.Text)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return notifyDeliverResult{
+		Channel: receipt.Channel, Attempts: receipt.Attempts, Deferred: receipt.Deferred,
+		Reason: receipt.Reason, Errors: receipt.Errors,
+	}, nil
+}
+
+// channelHealth is what the router may consider reachable right now.
+func (g *Gateway) channelHealth(ctx context.Context) map[string]bool {
+	out := map[string]bool{}
+	if service, ok := g.root.Get(contracts.KeyWeChat); ok && service != nil {
+		if status, err := service.Status(ctx); err == nil {
+			out[contracts.NotifyChannelWeChat] = status.Connected
+		}
+	}
+	if service, ok := g.root.Get(contracts.KeyDingTalk); ok && service != nil {
+		if status, err := service.Status(ctx); err == nil {
+			out[contracts.NotifyChannelDingTalk] = status.Connected
+		}
+	}
+	if service, ok := g.root.Get(contracts.KeyFeishu); ok && service != nil {
+		if status, err := service.Status(ctx); err == nil {
+			out[contracts.NotifyChannelFeishu] = status.Connected
+		}
+	}
+	if service, ok := g.root.Get(contracts.KeyEmail); ok && service != nil {
+		if status, err := service.Status(ctx); err == nil {
+			out[contracts.NotifyChannelEmail] = status.Connected
+		}
+	}
+	return out
+}
