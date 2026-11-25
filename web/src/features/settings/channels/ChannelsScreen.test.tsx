@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { I18nProvider } from '@/i18n';
 import {
@@ -26,8 +26,11 @@ import {
  *  4. a delete goes through a confirmation, a route save round-trips the
  *     snapshot's own values, and a failed read is reported with 重试.
  *
- * No timers are faked: the screen does not poll, so every assertion here is
- * about one explicit read or one explicit write.
+ * No timers are faked for the three request/response sections: they do not
+ * poll, so every assertion there is about one explicit read or one explicit
+ * write. The 扫码接入 block is the exception — a QR login *is* a poll — and its
+ * describe block owns the fake clock, because a 20 s real wait is the classic
+ * flake when the machine is busy.
  */
 
 const api = vi.hoisted(() => ({
@@ -39,6 +42,8 @@ const api = vi.hoisted(() => ({
   removeWebhookSource: vi.fn(),
   loadNotifyRoutes: vi.fn(),
   upsertNotifyRoute: vi.fn(),
+  startWechatLogin: vi.fn(),
+  pollWechatLoginState: vi.fn(),
 }));
 
 vi.mock('@/api/channels', async (importOriginal) => {
@@ -83,6 +88,11 @@ beforeEach(() => {
     primary: 'wechat',
     enabled: true,
   });
+  api.startWechatLogin.mockResolvedValue({
+    qrId: 'qr-1',
+    qrUrl: 'https://wechat.example/qr/qr-1',
+  });
+  api.pollWechatLoginState.mockResolvedValue({ state: 'pending', connected: false });
 });
 
 describe('ChannelsScreen — the three sections read their own source', () => {
@@ -335,5 +345,259 @@ describe('ChannelsScreen at 390px', () => {
     const save = await screen.findByTestId('channels-credential-save');
     expect(save).toBeVisible();
     expectTapTarget(save);
+  });
+});
+
+/**
+ * 扫码接入 (`wechat.login.start` → `wechat.login.state`).
+ *
+ * A QR login is the surface's only poll, and these tests pin the four rules
+ * that make it a bounded one: it starts only when asked, it shows the code's
+ * own URL, it stops on both terminal answers, and it never leaves a timer (or a
+ * second request in flight) behind. The clock is fake throughout: a real 20 s
+ * wait is a load test, not a correctness test.
+ */
+describe('ChannelsScreen — WeChat scan-to-connect', () => {
+  const POLL_MS = 2000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Let pending promises settle without moving the clock. */
+  async function settle() {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  }
+
+  /** Move the fake clock, flushing the promises each tick produces. */
+  async function advance(ms: number) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  async function renderAndStart() {
+    renderScreen();
+    await settle();
+    fireEvent.click(screen.getByTestId('channels-wechat-login-start'));
+    await settle();
+  }
+
+  it('start shows the code URL and begins polling once per interval', async () => {
+    await renderAndStart();
+
+    expect(api.startWechatLogin).toHaveBeenCalledTimes(1);
+    // The code's own URL, plus the note that says what to do with it: this
+    // client ships no QR renderer, so the link is the honest stand-in.
+    expect(screen.getByTestId('channels-wechat-login-url')).toHaveTextContent(
+      'https://wechat.example/qr/qr-1',
+    );
+    expect(screen.getByText(/用微信扫码打开此链接|Scan this link with WeChat/)).toBeInTheDocument();
+    // Disabled while the login is in flight, so a second code cannot be asked
+    // for mid-poll and abandon the first one.
+    expect(screen.getByTestId('channels-wechat-login-start')).toBeDisabled();
+
+    // Nothing is polled before the first interval elapses.
+    expect(api.pollWechatLoginState).not.toHaveBeenCalled();
+
+    await advance(POLL_MS);
+    expect(api.pollWechatLoginState).toHaveBeenCalledWith('qr-1');
+    expect(screen.getByTestId('channels-wechat-login-state')).toHaveTextContent(
+      /等待扫码|Waiting for the scan/,
+    );
+
+    await advance(POLL_MS);
+    expect(api.pollWechatLoginState).toHaveBeenCalledTimes(2);
+    expect(api.pollWechatLoginState).toHaveBeenNthCalledWith(2, 'qr-1');
+  });
+
+  it('shows each state word and stops for good on confirmed', async () => {
+    api.pollWechatLoginState
+      .mockResolvedValueOnce({ state: 'pending', connected: false })
+      .mockResolvedValueOnce({ state: 'waiting', connected: false })
+      .mockResolvedValueOnce({ state: 'confirmed', connected: true });
+    api.listCredentials.mockResolvedValue([{ kind: 'wechat', id: 'default' }]);
+
+    await renderAndStart();
+    expect(api.listCredentials).toHaveBeenCalledTimes(1);
+
+    await advance(POLL_MS);
+    expect(screen.getByTestId('channels-wechat-login-state')).toHaveTextContent(
+      /等待扫码|Waiting for the scan/,
+    );
+
+    await advance(POLL_MS);
+    // The intermediate state the human can act on: scanned, waiting to confirm.
+    expect(screen.getByTestId('channels-wechat-login-state')).toHaveTextContent(
+      /已扫码，请在手机上确认|Scanned/,
+    );
+
+    await advance(POLL_MS);
+    expect(screen.getByTestId('channels-wechat-login-state')).toHaveTextContent(
+      /已连接|Connected/,
+    );
+    // The credential the login just stored: the section re-reads instead of
+    // assuming the row it thinks the gateway now holds. (`waitFor` is avoided
+    // here on purpose: it would run on the real clock, which this test owns.)
+    await settle();
+    expect(api.listCredentials).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId('channels-wechat-login-start')).toBeEnabled();
+
+    // A confirmed login stops the timer: no request follows it, however long
+    // the page stays open.
+    await advance(POLL_MS * 10);
+    expect(api.pollWechatLoginState).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops on expired and lets the human generate a new code', async () => {
+    api.pollWechatLoginState.mockResolvedValue({ state: 'expired', connected: false });
+
+    await renderAndStart();
+    await advance(POLL_MS);
+
+    expect(screen.getByTestId('channels-wechat-login-state')).toHaveTextContent(
+      /二维码已过期，重新生成|code expired/,
+    );
+    expect(screen.getByTestId('channels-wechat-login-start')).toBeEnabled();
+
+    await advance(POLL_MS * 5);
+    expect(api.pollWechatLoginState).toHaveBeenCalledTimes(1);
+
+    // The button is a real restart: a second code and a fresh poll.
+    api.startWechatLogin.mockResolvedValue({
+      qrId: 'qr-2',
+      qrUrl: 'https://wechat.example/qr/qr-2',
+    });
+    fireEvent.click(screen.getByTestId('channels-wechat-login-start'));
+    await settle();
+    expect(screen.getByTestId('channels-wechat-login-url')).toHaveTextContent(
+      'https://wechat.example/qr/qr-2',
+    );
+    await advance(POLL_MS);
+    expect(api.pollWechatLoginState).toHaveBeenLastCalledWith('qr-2');
+  });
+
+  it('stops polling after ten tries instead of waiting forever', async () => {
+    await renderAndStart();
+
+    await advance(POLL_MS * 10);
+    expect(api.pollWechatLoginState).toHaveBeenCalledTimes(10);
+    expect(screen.getByTestId('channels-wechat-login-state')).toHaveTextContent(
+      /已停止轮询|Polling stopped/,
+    );
+    expect(screen.getByTestId('channels-wechat-login-start')).toBeEnabled();
+
+    await advance(POLL_MS * 5);
+    expect(api.pollWechatLoginState).toHaveBeenCalledTimes(10);
+  });
+
+  it('clears the timer when the page unmounts', async () => {
+    const view = render(
+      <I18nProvider>
+        <ChannelsScreen />
+      </I18nProvider>,
+    );
+    await settle();
+    fireEvent.click(screen.getByTestId('channels-wechat-login-start'));
+    await settle();
+
+    await advance(POLL_MS);
+    expect(api.pollWechatLoginState).toHaveBeenCalledTimes(1);
+
+    view.unmount();
+    await advance(POLL_MS * 10);
+    // No request of any kind follows the unmount: the interval was cleared, and
+    // the reply already in flight cannot reach a gone component.
+    expect(api.pollWechatLoginState).toHaveBeenCalledTimes(1);
+    expect(api.listCredentials).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears the timer when the block goes away (another kind)', async () => {
+    await renderAndStart();
+    await advance(POLL_MS);
+    expect(api.pollWechatLoginState).toHaveBeenCalledTimes(1);
+
+    // 扫码接入 exists for WeChat only; switching away unmounts the block, and
+    // an unmounted block must not keep asking about a code nobody can see.
+    const select = screen.getByTestId('channels-credential-kind-select');
+    fireEvent.mouseDown(select.querySelector('.ant-select-selector') ?? select);
+    const option = document.querySelector('.ant-select-item-option[title="dingtalk"]');
+    expect(option).not.toBeNull();
+    fireEvent.click(option as Element);
+    await settle();
+
+    expect(screen.queryByTestId('channels-wechat-login')).not.toBeInTheDocument();
+    await advance(POLL_MS * 5);
+    expect(api.pollWechatLoginState).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a failed start and does not poll', async () => {
+    api.startWechatLogin.mockRejectedValue(new Error('wechat login unavailable'));
+
+    await renderAndStart();
+
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent(/二维码生成失败|Could not generate the code/);
+    expect(alert).toHaveTextContent('wechat login unavailable');
+    expect(screen.queryByTestId('channels-wechat-login-url')).not.toBeInTheDocument();
+    expect(screen.getByTestId('channels-wechat-login-start')).toBeEnabled();
+
+    await advance(POLL_MS * 10);
+    expect(api.pollWechatLoginState).not.toHaveBeenCalled();
+  });
+
+  it('stops polling when a state read fails, naming that failure', async () => {
+    api.pollWechatLoginState.mockRejectedValue(new Error('gateway went away'));
+
+    await renderAndStart();
+    await advance(POLL_MS);
+
+    const alert = screen.getByRole('alert');
+    // A polling failure is not "could not generate the code": the code exists.
+    expect(alert).toHaveTextContent(/查询扫码状态失败|Could not read the login state/);
+    expect(alert).toHaveTextContent('gateway went away');
+    expect(screen.getByTestId('channels-wechat-login-start')).toBeEnabled();
+
+    await advance(POLL_MS * 5);
+    expect(api.pollWechatLoginState).toHaveBeenCalledTimes(1);
+  });
+
+  it('never has two state requests in the air at once', async () => {
+    // A slow answer: the promise resolves only when this test says so.
+    let release: ((value: { state: string; connected: boolean }) => void) | null = null;
+    api.pollWechatLoginState
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      )
+      .mockResolvedValue({ state: 'pending', connected: false });
+
+    await renderAndStart();
+
+    await advance(POLL_MS);
+    expect(api.pollWechatLoginState).toHaveBeenCalledTimes(1);
+
+    // Three ticks land while the first request is still out: they are skipped,
+    // not queued, so one attempt never becomes four requests.
+    await advance(POLL_MS * 3);
+    expect(api.pollWechatLoginState).toHaveBeenCalledTimes(1);
+
+    // The slow answer arrives; the next tick is a new request again.
+    await act(async () => {
+      release?.({ state: 'waiting', connected: false });
+    });
+    expect(screen.getByTestId('channels-wechat-login-state')).toHaveTextContent(
+      /已扫码，请在手机上确认|Scanned/,
+    );
+    await advance(POLL_MS);
+    expect(api.pollWechatLoginState).toHaveBeenCalledTimes(2);
   });
 });

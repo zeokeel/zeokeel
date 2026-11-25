@@ -849,6 +849,20 @@ export const zh = {
   'channels.notify.enabled': '启用',
   'channels.notify.save': '保存',
   'channels.notify.saved': '已保存',
+  // R28: 扫码接入 — a WeChat login starts with a code a human scans, so the
+  // block shows the code's URL and reports the state the gateway polls.
+  'channels.wechat.title': '扫码接入',
+  'channels.wechat.note': '二维码由网关向微信申请；这一块只在这一轮登录期间轮询它的状态。',
+  'channels.wechat.generate': '生成二维码',
+  'channels.wechat.regenerate': '重新生成',
+  'channels.wechat.scanHint': '用微信扫码打开此链接',
+  'channels.wechat.pending': '等待扫码',
+  'channels.wechat.waiting': '已扫码，请在手机上确认',
+  'channels.wechat.connected': '已连接',
+  'channels.wechat.expired': '二维码已过期，重新生成',
+  'channels.wechat.exhausted': '已停止轮询，请重新生成二维码',
+  'channels.wechat.startFailed': '二维码生成失败',
+  'channels.wechat.pollFailed': '查询扫码状态失败',
 
   // ---------------------------------------------------------------- health --
   // R27b: the run-status screen. Read-only facts about two things that move on

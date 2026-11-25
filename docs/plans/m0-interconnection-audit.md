@@ -93,8 +93,9 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 | 凭据仍未接到适配器 | creds 库有了，但三个适配器仍从 Config 读 `json:"-"` 字段；没人调用 `KeyCredentials` | 缺口 | 适配器启动时 `Get(kind,id)` + 热更新；UI 表单 |
 | 卡片动作未接审批 | 飞书 `CardAction` 提取了 approvalId/decision，但审批 action 需要一次性 token；卡片 value 里还没带 token | 缺口 | 发卡时把 token 放进 `action.value`，回调走 `approval.action` |
 | 模型计划器装配注入 | 零件齐：`planner.New(...)` + `lead.ModelPlanner`；装配层还没读 `chat.baseURL/apiKey/model` 设置去构造 | 小缺口 | 装配/自动化里按设置构造；无配置则保持规则计划器 |
-| 钉钉/飞书未读凭据库 | 只有 wechat 接了 `KeyCredentials`；钉钉/飞书仍从 Config 读 `json:"-"` | 缺口 | 同 wechat 模式复制（kind=dingtalk/feishu） |
-| 扫码登录 UI | 协议与模块已就绪（wechat.login.start/state），设置页还没渲染二维码 | 缺口 | 渠道设置页加"扫码接入"，轮询 2s，expired 自动重启 |
+| ~~钉钉/飞书未读凭据库~~ | ✅ 已交付：两个适配器从凭据库补齐空字段，显式配置仍然优先 | 已交付 |
+| ~~扫码登录 UI~~ | ✅ 已交付：渠道设置页「扫码接入」块（2s 轮询、10 次上限、过期可重启、卸载清表）；无二维码依赖，先显示可复制链接 | 已交付（真二维码需批准一个依赖） |
+| 浏览器工具审批 | browser_open/title/screenshot 已注册为工具，默认走审批门（沙箱只管文件不管网络） | 已定：保持默认询问；若要放过 title 需改 APPROVAL-SURFACES 机器清单 |
 | ~~网关协议 `inbox.*` / 租约 / 审批动作~~ | ✅ 9 个方法已实现并同步 TRANSPORT §5.1.13、contract.json、ws-contract.ts | 已交付 |
 | ~~`notify.route.*`（主/备渠道）~~ | ✅ 已交付：router 服务 + `notify.route.snapshot/upsert` + capability `notifyroute` | 已交付 |
 | UI | 未接；效果图只是原型 | 协议稳定后一轮做 |
@@ -167,6 +168,8 @@ scripts/verify.sh --quick（teamnotes 后）PASS 5/5，75s
 web（运行状态页后）: typecheck / lint(25) / test 534 全绿
 web（共享记忆页后）: typecheck / lint(25) / test 551 全绿
 scripts/verify.sh --quick（验收即记忆/扫码登录后）PASS 5/5，67s
+scripts/verify.sh --quick（凭据/浏览器工具后）PASS 5/5，70s
+web（扫码 UI 后）: typecheck / lint(25) / test 560 全绿
 scripts/verify.sh --quick（邮件/计划器/凭据/卡片后）PASS 5/5，64s
 scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过
 scripts/verify.sh --quick（approval 后）    PASS 5/5（一次 flaky 后重跑绿）

@@ -11,14 +11,26 @@
  *
  * The surface is request/response — none of these methods has a delta stream —
  * so every section reads on mount and **re-reads after its own write**. There is
- * no timer on purpose: a poll would be the only way to notice another client's
- * change, and inventing one is the polling loop the project forbids.
+ * no open-ended timer on purpose: a poll would be the only way to notice another
+ * client's change, and inventing one is the polling loop the project forbids.
+ *
+ * The one exception is 扫码接入 (`wechat.login.start` / `wechat.login.state`):
+ * a QR login is inherently a start-then-poll flow with a human in the middle, so
+ * it polls on a fixed interval, stops at a fixed number of tries, and dies with
+ * its block. Bounded by construction, not by discipline.
  *
  * A failed *read* replaces its own section with an error that names the cause
  * and offers 重试 (the other two sections stay usable). A failed *write* is
  * reported above the form it came from, because nothing changed.
  */
-import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import {
   Alert,
   Button,
@@ -40,14 +52,17 @@ import {
   listCredentials,
   listWebhookSources,
   loadNotifyRoutes,
+  pollWechatLoginState,
   removeWebhookSource,
   setCredential,
   setWebhookSource,
+  startWechatLogin,
   upsertNotifyRoute,
   type CredentialFieldName,
   type CredentialInfo,
   type CredentialKind,
   type NotifyRoute,
+  type WechatLoginStart,
   type WebhookSourceInfo,
 } from '@/api/channels';
 import { useMediaQuery } from '@/design/use-system-appearance';
@@ -258,6 +273,234 @@ function SectionState({
   return null;
 }
 
+/* ------------------------------------------------------- wechat QR login -- */
+
+/**
+ * The copy this block shows, spelled out as keys and nothing else.
+ *
+ * Note for the maintainer: these lived in a local `COPY` table first, because
+ * the task that added the block could not edit the catalogue. `src/i18n`
+ * already owns every user-visible string, and the B5 guard
+ * (`src/i18n/i18n.test.tsx`) fails on any Chinese literal outside it, so the
+ * keys were added to `channels.wechat.*` instead — a local table would have
+ * been a second source of copy that the guard exists to prevent.
+ */
+const WECHAT_LOGIN_KEYS = {
+  title: 'channels.wechat.title',
+  note: 'channels.wechat.note',
+  generate: 'channels.wechat.generate',
+  regenerate: 'channels.wechat.regenerate',
+  scanHint: 'channels.wechat.scanHint',
+  pending: 'channels.wechat.pending',
+  waiting: 'channels.wechat.waiting',
+  connected: 'channels.wechat.connected',
+  expired: 'channels.wechat.expired',
+  exhausted: 'channels.wechat.exhausted',
+  startFailed: 'channels.wechat.startFailed',
+  pollFailed: 'channels.wechat.pollFailed',
+} as const satisfies Record<string, MessageKey>;
+
+/** How often one attempt is checked, and how many checks before giving up. */
+const WECHAT_POLL_INTERVAL_MS = 2000;
+const WECHAT_POLL_MAX_TRIES = 10;
+
+/**
+ * One QR attempt, as a state. `idle` is the state the block starts in; every
+ * other value is an answer from the gateway (or from the request that tried to
+ * reach it), so the button label follows from it and nothing is inferred.
+ */
+type WechatLoginPhase =
+  | { kind: 'idle' }
+  | { kind: 'starting' }
+  | { kind: 'polling'; qrUrl: string; state: string }
+  | { kind: 'confirmed' }
+  | { kind: 'expired' }
+  | { kind: 'exhausted' }
+  | { kind: 'failed'; title: MessageKey; message: string };
+
+/**
+ * 扫码接入 — a WeChat login starts with a code the human scans, so this is the
+ * one place on the surface that polls. Two properties keep it honest:
+ *
+ *  1. **Bounded**: at most {@link WECHAT_POLL_MAX_TRIES} checks, one per
+ *     {@link WECHAT_POLL_INTERVAL_MS}; a code nobody scans dies here instead of
+ *     leaving a request loop behind.
+ *  2. **Bounded in duration too**: the timer is cleared when the attempt ends,
+ *     when this block unmounts (another kind, another screen) and on unmount of
+ *     the page — and a reply that lands afterwards is dropped, not rendered.
+ *
+ * The in-flight ref is what stops the timer from stacking requests: a slow
+ * `wechat.login.state` means the next tick does nothing, so the interval can
+ * never have two requests in the air for one attempt.
+ */
+function WechatQrLogin({ onConnected }: { onConnected: () => void }) {
+  const t = useT();
+  const [phase, setPhase] = useState<WechatLoginPhase>({ kind: 'idle' });
+
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const inFlightRef = useRef(false);
+  const triesRef = useRef(0);
+  // A poll reply must not touch a component that is already gone.
+  const aliveRef = useRef(true);
+
+  const stopPolling = useCallback(() => {
+    if (timerRef.current !== null) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      stopPolling();
+    };
+  }, [stopPolling]);
+
+  const pollOnce = useCallback(
+    async (qrId: string, qrUrl: string) => {
+      // One request per slot: a slow answer skips the ticks that land during it.
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+      triesRef.current += 1;
+      try {
+        const next = await pollWechatLoginState(qrId);
+        if (!aliveRef.current) return;
+        if (next.connected || next.state === 'confirmed') {
+          stopPolling();
+          setPhase({ kind: 'confirmed' });
+          onConnected();
+          return;
+        }
+        if (next.state === 'expired') {
+          stopPolling();
+          setPhase({ kind: 'expired' });
+          return;
+        }
+        if (triesRef.current >= WECHAT_POLL_MAX_TRIES) {
+          stopPolling();
+          setPhase({ kind: 'exhausted' });
+          return;
+        }
+        setPhase({ kind: 'polling', qrUrl, state: next.state });
+      } catch (cause) {
+        if (!aliveRef.current) return;
+        stopPolling();
+        setPhase({ kind: 'failed', title: WECHAT_LOGIN_KEYS.pollFailed, message: messageOf(cause) });
+      } finally {
+        inFlightRef.current = false;
+      }
+    },
+    [onConnected, stopPolling],
+  );
+
+  const start = useCallback(async () => {
+    if (phase.kind === 'starting' || phase.kind === 'polling') return;
+    stopPolling();
+    setPhase({ kind: 'starting' });
+    let login: WechatLoginStart;
+    try {
+      login = await startWechatLogin();
+    } catch (cause) {
+      if (aliveRef.current) {
+        setPhase({ kind: 'failed', title: WECHAT_LOGIN_KEYS.startFailed, message: messageOf(cause) });
+      }
+      return;
+    }
+    // The block may have unmounted while the request was out: a timer nobody
+    // can see, polling a code nobody can read, is exactly the leak to avoid.
+    if (!aliveRef.current) return;
+    triesRef.current = 0;
+    inFlightRef.current = false;
+    setPhase({ kind: 'polling', qrUrl: login.qrUrl, state: 'pending' });
+    timerRef.current = setInterval(
+      () => void pollOnce(login.qrId, login.qrUrl),
+      WECHAT_POLL_INTERVAL_MS,
+    );
+  }, [phase.kind, pollOnce, stopPolling]);
+
+  const inFlight = phase.kind === 'starting' || phase.kind === 'polling';
+  const qrUrl = phase.kind === 'polling' ? phase.qrUrl : null;
+  const stateWord =
+    phase.kind === 'polling'
+      ? phase.state === 'waiting'
+        ? t(WECHAT_LOGIN_KEYS.waiting)
+        : phase.state === 'pending'
+          ? t(WECHAT_LOGIN_KEYS.pending)
+          : // An unknown state is a protocol value: shown verbatim rather than
+            // translated, because a state this build does not know is a fact.
+            phase.state
+      : null;
+
+  return (
+    <div className="zk-field" data-testid="channels-wechat-login">
+      <div className="zk-field__label-row">
+        <span className="zk-field__label">{t(WECHAT_LOGIN_KEYS.title)}</span>
+      </div>
+      <div className="zk-field__control">
+        <Flex vertical gap="small">
+          <p className="zk-field__help">{t(WECHAT_LOGIN_KEYS.note)}</p>
+          <Flex gap="small" align="center" wrap>
+            {/* Not a primary: 保存 stays the screen's only filled button. */}
+            <Button
+              onClick={() => void start()}
+              loading={phase.kind === 'starting'}
+              disabled={inFlight}
+              data-testid="channels-wechat-login-start"
+            >
+              {phase.kind === 'idle'
+                ? t(WECHAT_LOGIN_KEYS.generate)
+                : t(WECHAT_LOGIN_KEYS.regenerate)}
+            </Button>
+            {phase.kind === 'polling' && stateWord ? (
+              <Typography.Text type="secondary" role="status" data-testid="channels-wechat-login-state">
+                {stateWord}
+              </Typography.Text>
+            ) : null}
+            {phase.kind === 'confirmed' ? (
+              <Typography.Text className="zk-notice" role="status" data-testid="channels-wechat-login-state">
+                {t(WECHAT_LOGIN_KEYS.connected)}
+              </Typography.Text>
+            ) : null}
+            {phase.kind === 'expired' || phase.kind === 'exhausted' ? (
+              <Typography.Text type="warning" role="status" data-testid="channels-wechat-login-state">
+                {phase.kind === 'expired'
+                  ? t(WECHAT_LOGIN_KEYS.expired)
+                  : t(WECHAT_LOGIN_KEYS.exhausted)}
+              </Typography.Text>
+            ) : null}
+          </Flex>
+          {qrUrl ? (
+            <>
+              {/* No QR renderer ships with this client, and adding one is not
+                  this screen's call: the code's own URL is shown as selectable
+                  text with the note that says what to do with it. */}
+              <Typography.Paragraph
+                copyable
+                style={WRAP_LONG}
+                data-testid="channels-wechat-login-url"
+              >
+                {qrUrl}
+              </Typography.Paragraph>
+              <Typography.Text type="secondary">{t(WECHAT_LOGIN_KEYS.scanHint)}</Typography.Text>
+            </>
+          ) : null}
+          {phase.kind === 'failed' ? (
+            <Alert
+              type="error"
+              showIcon
+              role="alert"
+              title={t(phase.title)}
+              description={phase.message}
+            />
+          ) : null}
+        </Flex>
+      </div>
+    </div>
+  );
+}
+
 export function ChannelsScreen() {
   const t = useT();
   return (
@@ -294,6 +537,12 @@ function CredentialsSection() {
 
   const read = useCallback(() => listCredentials(kind), [kind]);
   const { state, reload, refresh } = useSectionValue(read, kind);
+
+  // A finished login stored a credential the adapter can use, so the list this
+  // section is showing is stale — re-read it instead of assuming the row.
+  const onWechatConnected = useCallback(() => {
+    void refresh();
+  }, [refresh]);
 
   const spec = CREDENTIAL_FIELDS[kind];
   // Every field of the chosen kind is required by `credentials.set`; a form that
@@ -358,6 +607,10 @@ function CredentialsSection() {
           data-testid="channels-credential-kind-select"
         />
       </Field>
+
+      {/* WeChat is the one kind whose credential a human can obtain here by
+          scanning a code; the other three are typed in below. */}
+      {kind === 'wechat' ? <WechatQrLogin onConnected={onWechatConnected} /> : null}
 
       <Field
         id="channels-credential-id"

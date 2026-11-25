@@ -848,6 +848,21 @@ export const en: Catalog = {
   'channels.notify.enabled': 'Enabled',
   'channels.notify.save': 'Save',
   'channels.notify.saved': 'Saved',
+  // R28: scan-to-connect — a WeChat login starts with a code a human scans, so
+  // the block shows the code's URL and reports the state the gateway polls.
+  'channels.wechat.title': 'Scan to connect',
+  'channels.wechat.note':
+    'The gateway asks WeChat for the code; this block polls it only for the login in progress.',
+  'channels.wechat.generate': 'Generate the code',
+  'channels.wechat.regenerate': 'Generate a new code',
+  'channels.wechat.scanHint': 'Scan this link with WeChat',
+  'channels.wechat.pending': 'Waiting for the scan',
+  'channels.wechat.waiting': 'Scanned — confirm on your phone',
+  'channels.wechat.connected': 'Connected',
+  'channels.wechat.expired': 'The code expired — generate a new one',
+  'channels.wechat.exhausted': 'Polling stopped — generate a new code',
+  'channels.wechat.startFailed': 'Could not generate the code',
+  'channels.wechat.pollFailed': 'Could not read the login state',
 
   // ---------------------------------------------------------------- health --
   // R27b: the run-status screen. Read-only facts about two things that move on

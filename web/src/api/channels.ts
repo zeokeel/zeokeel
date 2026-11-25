@@ -18,6 +18,12 @@
  * Parameters are exactly the ones the generated contract allows
  * (`src/design/ws-contract.ts`); optional values are omitted rather than sent
  * as empty strings, because "absent" and "cleared" are different requests.
+ *
+ * The one exception is `wechat.login.*`: a QR login is a **human-in-the-loop**
+ * flow, so the pair is start-then-poll by design (the gateway answers one
+ * attempt per call and never holds a request open). That poll is bounded — the
+ * screen stops after a fixed number of tries — so it is not the open-ended
+ * polling loop AGENTS.md §3 forbids.
  */
 import { authorizationReady } from './gateway';
 import { gatewayRpc } from './ws/rpc';
@@ -230,4 +236,81 @@ export async function upsertNotifyRoute(input: NotifyRouteInput): Promise<Notify
   const result = await request<Partial<NotifyRoute>>('notify.route.upsert', params);
   // The category and primary are ours; the rest is the router's answer.
   return normalizeRoute({ ...input, ...result, category: input.category, primary: input.primary });
+}
+
+/* --------------------------------------------------------- wechat QR login -- */
+
+/**
+ * The lifecycle of one QR-login attempt (`contracts.WeChatLoginState`).
+ *
+ * These are **protocol values**, not copy: the block compares them and shows
+ * its own words. An unknown value is not an error — it keeps polling, because a
+ * gateway that learns a new intermediate state must not freeze this screen.
+ */
+export const WECHAT_LOGIN_STATES = ['pending', 'waiting', 'confirmed', 'expired'] as const;
+
+export type WechatLoginStateName = (typeof WECHAT_LOGIN_STATES)[number];
+
+/**
+ * One QR-login attempt (`wechat.login.start`: `{}` → `{qrId,qrUrl,expiresAt?}`).
+ *
+ * The flow is two calls on purpose: a settings page must first render the code
+ * and then poll what the human did with it — a blocking call would hold one
+ * request open for minutes. `qrUrl` is what the code encodes; without a QR
+ * renderer the page shows it as a scannable link.
+ */
+export interface WechatLoginStart {
+  qrId: string;
+  qrUrl: string;
+  expiresAt?: string;
+}
+
+/** What `wechat.login.state` reports for one `qrId` (`{qrId}` → `{state,connected}`). */
+export interface WechatLoginState {
+  /** One of `WECHAT_LOGIN_STATES`; unknown values pass through verbatim. */
+  state: string;
+  /** Whether the account is logged in — the adapter's own answer, not `state`'s. */
+  connected: boolean;
+  expiresAt?: string;
+}
+
+/**
+ * Ask the platform for a fresh QR code (`wechat.login.start`).
+ *
+ * A reply with no `qrId`/`qrUrl` cannot be rendered *or* polled, so it fails
+ * here instead of leaving the screen waiting on an attempt that does not exist.
+ */
+export async function startWechatLogin(): Promise<WechatLoginStart> {
+  const result = await request<{ qrId?: string; qrUrl?: string; expiresAt?: string }>(
+    'wechat.login.start',
+    {},
+  );
+  const qrId = String(result.qrId ?? '');
+  const qrUrl = String(result.qrUrl ?? '');
+  if (qrId === '' || qrUrl === '') {
+    throw new Error('wechat.login.start: the gateway returned no QR code');
+  }
+  return {
+    qrId,
+    qrUrl,
+    ...(result.expiresAt ? { expiresAt: String(result.expiresAt) } : {}),
+  };
+}
+
+/**
+ * Poll one attempt (`wechat.login.state`).
+ *
+ * `expired` is an **answer, not a failure**: the gateway reports it as a state
+ * so a polling loop can stop and offer a new code instead of showing an error.
+ */
+export async function pollWechatLoginState(qrId: string): Promise<WechatLoginState> {
+  const result = await request<{ state?: string; connected?: boolean; expiresAt?: string }>(
+    'wechat.login.state',
+    { qrId },
+  );
+  return {
+    state: String(result.state ?? ''),
+    connected: result.connected === true,
+    ...(result.expiresAt ? { expiresAt: String(result.expiresAt) } : {}),
+  };
 }
