@@ -25,6 +25,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/assembly"
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/hosttools"
+	"github.com/zeokeel/zeokeel/internal/modules/webhook"
 )
 
 // --- host service fakes (the process host provides these on the root) ---
@@ -794,5 +795,139 @@ func TestEveryRegisteredModuleIsComposedIntoAProduct(t *testing.T) {
 		}
 		t.Fatalf("module %q is registered but composed into no product; either add it to "+
 			"assemblies/headless.json or record why it is intentionally uncomposed", info.ID)
+	}
+}
+
+// TestM0ChainEndToEnd is the capstone interconnection proof for the Grok Bot M0
+// slice: one signed delivery travels the whole chain on the *assembled*
+// services — webhook → inbox → lead triage → task board → lease (evidence,
+// review) → notification routing. Every step is a real service from the root, so
+// a module wired to the wrong key fails here instead of in production.
+func TestM0ChainEndToEnd(t *testing.T) {
+	root := newRoot(t)
+	provideHostServices(t, root)
+	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductHeadless, assembly.BuildInfo{
+		Version: "9.9.9", Commit: "deadbeef", BuildTime: "2026-11-06T12:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("load headless: %v", err)
+	}
+	defer func() {
+		if err := loader.Close(); err != nil {
+			t.Errorf("loader.Close: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+	inboxService, ok := root.Get(contracts.KeyInbox)
+	if !ok {
+		t.Fatal("KeyInbox missing")
+	}
+	webhookService, ok := root.Get(contracts.KeyWebhook)
+	if !ok {
+		t.Fatal("KeyWebhook missing")
+	}
+	admin, ok := webhookService.(contracts.WebhookSourceAdmin)
+	if !ok {
+		t.Fatal("webhook does not expose source admin")
+	}
+	leadService, ok := root.Get(contracts.KeyLead)
+	if !ok {
+		t.Fatal("KeyLead missing")
+	}
+	leadRules, ok := leadService.(contracts.LeadRuleAdmin)
+	if !ok {
+		t.Fatal("lead does not expose rule admin")
+	}
+	board, ok := root.Get(contracts.KeyTaskBoard)
+	if !ok {
+		t.Fatal("KeyTaskBoard missing")
+	}
+	leaseService, ok := root.Get(contracts.KeyTaskLease)
+	if !ok {
+		t.Fatal("KeyTaskLease missing")
+	}
+	router, ok := root.Get(contracts.KeyNotifyRoute)
+	if !ok {
+		t.Fatal("KeyNotifyRoute missing")
+	}
+
+	// 1. A sender is configured, and the Lead has a rule that dispatches it.
+	secret := []byte("end-to-end-secret-0001")
+	if err := admin.UpsertSource(ctx, contracts.WebhookSource{ID: "github", Secret: secret, DefaultChannel: "repo"}); err != nil {
+		t.Fatalf("UpsertSource: %v", err)
+	}
+	if err := leadRules.SetRules(ctx, []contracts.LeadRule{{
+		Source: "webhook", Assignee: "bot-1", SubjectPrefix: "事件：",
+	}}); err != nil {
+		t.Fatalf("SetRules: %v", err)
+	}
+
+	// 2. A signed delivery arrives.
+	body := []byte(`{"title":"崩溃告警","body":"#12 连续失败","ref":"gh://12"}`)
+	delivery, err := webhookService.Receive(ctx, "github", webhook.Sign(secret, time.Now(), body), body)
+	if err != nil {
+		t.Fatalf("webhook.Receive: %v", err)
+	}
+	if delivery.Item.Source != "webhook" || delivery.Item.Status != contracts.InboxStatusNew {
+		t.Fatalf("delivery = %+v, want a new webhook item", delivery.Item)
+	}
+
+	// 3. One triage pass turns it into a task owned by bot-1.
+	report, err := leadService.RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("lead.RunOnce: %v", err)
+	}
+	if report.Scanned != 1 || report.Dispatched != 1 || report.Failed != 0 {
+		t.Fatalf("lead report = %+v, want one dispatched and no failures", report)
+	}
+	updated, err := inboxService.Get(ctx, delivery.Item.ID)
+	if err != nil || updated.Status != contracts.InboxStatusTask || len(updated.TaskIDs) != 1 {
+		t.Fatalf("inbox item after triage = (%+v, %v), want status task with one id", updated, err)
+	}
+	taskID := updated.TaskIDs[0]
+
+	boardTasks, err := board.List(ctx)
+	if err != nil {
+		t.Fatalf("board.List: %v", err)
+	}
+	var found *contracts.BoardTask
+	for i := range boardTasks {
+		if boardTasks[i].ID == taskID {
+			found = &boardTasks[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("task %q created by triage is not on the board", taskID)
+	}
+	if found.Owner != "bot-1" || !strings.HasPrefix(found.Subject, "事件：") {
+		t.Fatalf("board task = %+v, want owner bot-1 and the rule prefix", found)
+	}
+
+	// 4. The claim layer takes it: evidence is mandatory, review completes it.
+	if _, err := leaseService.Claim(ctx, taskID, "bot-1"); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if _, err := leaseService.Submit(ctx, taskID, "bot-1", nil); !errors.Is(err, contracts.ErrLeaseEvidenceRequired) {
+		t.Fatalf("Submit without evidence = %v, want ErrLeaseEvidenceRequired", err)
+	}
+	if _, err := leaseService.Submit(ctx, taskID, "bot-1", []contracts.Evidence{{Kind: "link", Ref: "gh://12"}}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := leaseService.Accept(ctx, taskID, "lead", "verified"); err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+	boardTasks, _ = board.List(ctx)
+	for _, task := range boardTasks {
+		if task.ID == taskID && task.Status != contracts.TaskStatusCompleted {
+			t.Fatalf("board task %q status = %q after accept", taskID, task.Status)
+		}
+	}
+
+	// 5. Notification routing answers for the approval category.
+	plan, err := router.Plan(ctx, contracts.NotifyCategoryApproval, time.Now(), nil)
+	if err != nil || len(plan.Channels) == 0 || plan.Channels[len(plan.Channels)-1] != contracts.NotifyChannelInApp {
+		t.Fatalf("notify plan = (%+v, %v), want in-app terminal channel", plan, err)
 	}
 }

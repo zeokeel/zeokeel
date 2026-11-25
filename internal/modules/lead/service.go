@@ -9,21 +9,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// Rule is one deterministic triage rule. Empty fields mean "any".
-type Rule struct {
-	Source        string
-	Contains      string
-	Assignee      string
-	SubjectPrefix string
-	DetailPrefix  string
-	// Ignore turns matching items into InboxActionIgnored instead of a task.
-	Ignore bool
-}
+// Rule is the contract rule type (kept as an alias so callers read naturally).
+type Rule = contracts.LeadRule
 
 // Planner decides one item. ok=false means "leave it for a human".
 type Planner interface {
@@ -82,15 +75,43 @@ func (c Config) normalized() Config {
 
 // Service implements contracts.LeadService.
 type Service struct {
-	inbox   contracts.InboxService
-	triage  contracts.TriageService
-	planner Planner
-	cfg     Config
+	inbox  contracts.InboxService
+	triage contracts.TriageService
+	cfg    Config
+
+	// mu guards rules: the settings UI may replace them while a pass runs.
+	mu    sync.Mutex
+	rules []Rule
 }
 
 // NewService wires the pass.
 func NewService(inboxService contracts.InboxService, triage contracts.TriageService, planner Planner, cfg Config) *Service {
-	return &Service{inbox: inboxService, triage: triage, planner: planner, cfg: cfg.normalized()}
+	service := &Service{inbox: inboxService, triage: triage, cfg: cfg.normalized()}
+	if rulePlanner, ok := planner.(RulePlanner); ok {
+		service.rules = append([]Rule(nil), rulePlanner.Rules...)
+	}
+	return service
+}
+
+// Rules implements contracts.LeadRuleAdmin.
+func (s *Service) Rules(ctx context.Context) ([]Rule, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Rule(nil), s.rules...), nil
+}
+
+// SetRules implements contracts.LeadRuleAdmin.
+func (s *Service) SetRules(ctx context.Context, rules []Rule) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rules = append([]Rule(nil), rules...)
+	return nil
 }
 
 // RunOnce implements contracts.LeadService.
@@ -106,8 +127,12 @@ func (s *Service) RunOnce(ctx context.Context) (contracts.LeadReport, error) {
 	}
 
 	report := contracts.LeadReport{Scanned: len(items)}
+	s.mu.Lock()
+	planner := RulePlanner{Rules: append([]Rule(nil), s.rules...)}
+	s.mu.Unlock()
+
 	for _, item := range items {
-		decision, ok, planErr := s.planner.Plan(ctx, item)
+		decision, ok, planErr := planner.Plan(ctx, item)
 		if planErr != nil {
 			report.Failed++
 			report.Errors = append(report.Errors, fmt.Sprintf("%s: plan: %v", item.ID, planErr))
@@ -132,3 +157,4 @@ func (s *Service) RunOnce(ctx context.Context) (contracts.LeadReport, error) {
 }
 
 var _ contracts.LeadService = (*Service)(nil)
+var _ contracts.LeadRuleAdmin = (*Service)(nil)

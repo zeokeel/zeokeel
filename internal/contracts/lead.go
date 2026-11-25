@@ -28,5 +28,25 @@ type LeadService interface {
 	RunOnce(ctx context.Context) (LeadReport, error)
 }
 
+// LeadRule is one deterministic triage rule. Empty fields mean "any". It lives
+// in contracts (not the module) so the settings UI can edit rules through an
+// interface without importing the implementation.
+type LeadRule struct {
+	Source        string
+	Contains      string
+	Assignee      string
+	SubjectPrefix string
+	DetailPrefix  string
+	// Ignore turns matching items into InboxActionIgnored instead of a task.
+	Ignore bool
+}
+
+// LeadRuleAdmin is the editable half of the triage pass: rules are hot-swapped
+// without restarting the process.
+type LeadRuleAdmin interface {
+	Rules(ctx context.Context) ([]LeadRule, error)
+	SetRules(ctx context.Context, rules []LeadRule) error
+}
+
 // KeyLead is provided by the lead module.
 var KeyLead = cordis.NewServiceKey[LeadService]("zeokeel/lead")
