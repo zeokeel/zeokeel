@@ -168,6 +168,23 @@ func (h *handler) complete(w http.ResponseWriter, r *http.Request) {
 		streamer.text(answer, 30*time.Millisecond)
 		streamer.finish("stop", answer)
 		streamer.done()
+	case "thinktwice":
+		// Two thinking rounds around one tool: the transcript must interleave
+		// them, not stack both thoughts above the card.
+		results := toolResultCount(request)
+		if results == 0 {
+			streamer.reasoning("First I should look at the endpoint. ", 20*time.Millisecond)
+			arguments, _ := json.Marshal(map[string]string{"url": "http://" + h.addr + "/health"})
+			streamer.toolCallAt("web_fetch", string(arguments), 0)
+			streamer.finish("tool_calls", "")
+			streamer.done()
+			return
+		}
+		streamer.reasoning("The endpoint answered ok, so I can summarise. ", 20*time.Millisecond)
+		answer := "It answered ok, so here is the summary."
+		streamer.text(answer, 25*time.Millisecond)
+		streamer.finish("stop", answer)
+		streamer.done()
 	case "longcmd":
 		// A tool call whose argument and output are both one long unbreakable
 		// token: the card must scroll inside itself, not widen the transcript.
@@ -239,6 +256,8 @@ func (h *handler) complete(w http.ResponseWriter, r *http.Request) {
 func scenarioOf(model string) string {
 	name := strings.ToLower(model)
 	switch {
+	case strings.Contains(name, "thinktwice"):
+		return "thinktwice"
 	case strings.Contains(name, "longcmd"):
 		return "longcmd"
 	case strings.Contains(name, "thinktool"):
