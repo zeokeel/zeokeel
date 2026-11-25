@@ -2,10 +2,14 @@
  * R27c · 共享记忆 — the team's shared note board (`team.notes`,
  * `team.note.record`, docs/TRANSPORT.md §5.1).
  *
- * Two halves, one read between them:
+ * Two halves and the gate between them:
  *
  *   写一条      title (required), body and author (optional; author defaults to
  *               the Lead, who is the one writing most notes)
+ *   待确认的建议  proposals waiting for a person — `NoteSuggestionQueue`, which
+ *               owns its own read and its own write. A bot proposes a rule and
+ *               nothing reaches the board until someone promotes it, so a
+ *               promotion re-reads the board through `refreshBoard` below.
  *   最近的笔记   the notes exactly as the service returned them, newest first
  *
  * The surface is request/response — neither method has a delta stream — so the
@@ -46,6 +50,7 @@ import { useMediaQuery } from '@/design/use-system-appearance';
 import { describeError } from '@/features/describe-error';
 import { formatRelativeTime } from '@/features/inbox/state';
 import { useT } from '@/i18n';
+import { NoteSuggestionQueue } from './NoteSuggestionQueue';
 
 /**
  * Below this width 记录 — the screen's only filled primary — gets antd's
@@ -193,6 +198,16 @@ export function TeamMemoryScreen() {
     setAttempt((value) => value + 1);
   };
 
+  /**
+   * Re-read the board on request. The suggestion queue calls this after a
+   * promote (which puts a note on the board) **and** after a dismiss: "the board
+   * did not change" is the board's own answer to give, not the queue's to
+   * assume.
+   */
+  const refreshBoard = useCallback(async () => {
+    setState(await readNotes());
+  }, [readNotes]);
+
   // A whitespace-only title is an empty title: the gateway would reject it, and
   // the button should not offer a write it knows will fail.
   const canSubmit = title.trim().length > 0 && !saving;
@@ -302,6 +317,11 @@ export function TeamMemoryScreen() {
             <Alert type="error" showIcon role="alert" closable title={writeError} />
           ) : null}
         </section>
+
+        {/* The gate in front of the board: a bot's rule reaches nobody until a
+            person promotes it here. Above the board on purpose — this queue is
+            what the board below is fed by. */}
+        <NoteSuggestionQueue onBoardChanged={refreshBoard} />
 
         <section className="zk-settings__section" data-testid="memory-notes">
           <div className="zk-screen__header--row">

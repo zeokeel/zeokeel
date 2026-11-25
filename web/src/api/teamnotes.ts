@@ -160,3 +160,116 @@ export async function reviewTeamNote(input: ReviewTeamNoteInput): Promise<TeamNo
   if (input.at) params.at = input.at;
   return fromWire(await request<TeamNoteWire>('team.note.review', params));
 }
+
+/* --------------------------------------------------------- suggestions -- */
+
+/**
+ * One proposed team rule waiting for a person (`team.suggestions`).
+ *
+ * This is the queue **in front of** the board: a bot proposes a rule and
+ * nothing reaches the shared board until a human promotes it — that is what
+ * "团队建议经你批准后另一队友可见" means. `id` identifies the proposal, not the
+ * note a promotion will create.
+ */
+export interface TeamNoteSuggestion {
+  id: string;
+  /** The one-line rule (the contract's only required field). */
+  title: string;
+  /** The explanation, when the proposer wrote one. */
+  body?: string;
+  /** Who proposed it — normally a bot's name. Absent is not an empty name. */
+  author?: string;
+  /** RFC 3339; absent only when the gateway could not stamp the record. */
+  at?: string;
+}
+
+/** One wire suggestion, kept loose: the gateway omits empty fields (`omitempty`). */
+interface TeamNoteSuggestionWire {
+  id?: unknown;
+  title?: unknown;
+  body?: unknown;
+  author?: unknown;
+  at?: unknown;
+}
+
+/** Wire → {@link TeamNoteSuggestion}; absent fields stay absent, as for notes. */
+function suggestionFromWire(raw: TeamNoteSuggestionWire): TeamNoteSuggestion {
+  return {
+    id: typeof raw.id === 'string' ? raw.id : '',
+    title: text(raw.title) ?? '',
+    ...(text(raw.body) ? { body: text(raw.body) } : {}),
+    ...(text(raw.author) ? { author: text(raw.author) } : {}),
+    ...(text(raw.at) ? { at: text(raw.at) } : {}),
+  };
+}
+
+/**
+ * Read the proposal queue once, newest first as the service orders it. No
+ * delta follows — call again after a write.
+ *
+ * `limit` is passed through only when given, for the same reason as
+ * {@link loadTeamNotes}: the gateway's own default is the one to keep.
+ */
+export async function loadNoteSuggestions(limit?: number): Promise<TeamNoteSuggestion[]> {
+  const params: Record<string, unknown> = {};
+  if (limit !== undefined) params.limit = limit;
+
+  const result = await request<{ suggestions?: TeamNoteSuggestionWire[] }>(
+    'team.suggestions',
+    params,
+  );
+  return (result.suggestions ?? []).map(suggestionFromWire);
+}
+
+/** The propose payload: `title` required, `body`/`author` optional (contract). */
+export interface SuggestNoteInput {
+  title: string;
+  body?: string;
+  author?: string;
+}
+
+/**
+ * Queue one proposal (`team.suggest`). It **never touches the board** — only a
+ * promotion does — so a caller that proposes has nothing to re-read but the
+ * queue itself.
+ */
+export async function suggestNote(input: SuggestNoteInput): Promise<TeamNoteSuggestion> {
+  const params: Record<string, unknown> = { title: input.title };
+  if (input.body) params.body = input.body;
+  if (input.author) params.author = input.author;
+  return suggestionFromWire(await request<TeamNoteSuggestionWire>('team.suggest', params));
+}
+
+/** The decision payload both verbs take: which proposal, and who decided. */
+export interface SuggestionDecisionInput {
+  /** The proposal's id, exactly as the queue reported it. */
+  id: string;
+  /** Who is deciding (`lead` for this client's queue). */
+  reviewer: string;
+}
+
+/**
+ * Promote one proposal onto the shared board (`team.suggestion.promote`). The
+ * gateway answers with the note it created, and **both** lists changed: the
+ * queue lost a row and the board gained one, so callers re-read both.
+ */
+export async function promoteSuggestion(input: SuggestionDecisionInput): Promise<TeamNote> {
+  return fromWire(
+    await request<TeamNoteWire>('team.suggestion.promote', {
+      id: input.id,
+      reviewer: input.reviewer,
+    }),
+  );
+}
+
+/**
+ * Dismiss one proposal without creating a note (`team.suggestion.dismiss`). The
+ * gateway answers `{ok:true}`; callers still re-read the queue and the board,
+ * because "the board did not change" is the board's answer to give.
+ */
+export async function dismissSuggestion(input: SuggestionDecisionInput): Promise<void> {
+  await request<{ ok?: unknown }>('team.suggestion.dismiss', {
+    id: input.id,
+    reviewer: input.reviewer,
+  });
+}

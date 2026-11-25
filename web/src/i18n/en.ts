@@ -987,6 +987,24 @@ export const en: Catalog = {
   'memory.saveFailed': 'The note was not recorded',
   'memory.retry': 'Retry',
 
+  // -------------------------------------- memory · suggestions (R27c M1) --
+  'memory.suggest.title': 'Waiting for a decision',
+  'memory.suggest.note':
+    'Rules a bot proposed; none of them shows up in the shared notes below until a person accepts one. This screen does not refresh by itself.',
+  'memory.suggest.empty': 'No suggestions waiting.',
+  'memory.suggest.emptyNote': 'Bots propose rules; a person decides.',
+  'memory.suggest.promote': 'Accept',
+  'memory.suggest.dismiss': 'Dismiss',
+  'memory.suggest.dismissConfirm': 'Dismiss this suggestion? It will not reach the shared notes.',
+  'memory.suggest.dismissOk': 'Yes, dismiss',
+  'memory.suggest.failed': 'The suggestion was not handled',
+  'memory.suggest.loadFailed': 'Could not load the suggestions',
+  'memory.suggest.retry': 'Retry',
+  'memory.suggest.propose.title': 'Or propose one yourself',
+  'memory.suggest.propose.titlePlaceholder': 'A one-line rule',
+  'memory.suggest.propose.bodyPlaceholder': 'Why this rule (optional)',
+  'memory.suggest.propose.submit': 'Propose',
+
   // ------------------------------------------------ skills · drafts (R28) --
   'skills.drafts.title': 'Skill drafts',
   'skills.drafts.note': 'Skills proposed when a task is delivered, newest first; this screen does not refresh by itself.',

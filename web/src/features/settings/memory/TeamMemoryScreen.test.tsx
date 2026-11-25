@@ -38,6 +38,12 @@ const api = vi.hoisted(() => ({
   loadTeamNotes: vi.fn(),
   recordTeamNote: vi.fn(),
   reviewTeamNote: vi.fn(),
+  // The proposal queue above the board is part of this screen; it is stubbed
+  // empty here so these tests keep asserting the board alone.
+  loadNoteSuggestions: vi.fn(),
+  suggestNote: vi.fn(),
+  promoteSuggestion: vi.fn(),
+  dismissSuggestion: vi.fn(),
 }));
 
 vi.mock('@/api/teamnotes', async (importOriginal) => {
@@ -52,6 +58,8 @@ beforeEach(() => {
   // language the way a Chinese user's browser would report it.
   vi.stubGlobal('navigator', { ...navigator, language: 'zh-CN', languages: ['zh-CN'] });
   Object.values(api).forEach((fn) => fn.mockReset());
+  // The queue is read on mount; an empty queue keeps these tests about the board.
+  api.loadNoteSuggestions.mockResolvedValue([]);
 });
 
 afterEach(() => {

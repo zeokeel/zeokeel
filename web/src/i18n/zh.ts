@@ -981,6 +981,24 @@ export const zh = {
   'memory.saveFailed': '笔记没记下来',
   'memory.retry': '重试',
 
+  // -------------------------------------- memory · suggestions (R27c M1) --
+  'memory.suggest.title': '待确认的建议',
+  'memory.suggest.note':
+    '机器人提的规则；没被采纳之前，下面的共享笔记里看不到它。这个页面不自动刷新。',
+  'memory.suggest.empty': '没有待确认的建议。',
+  'memory.suggest.emptyNote': '机器人可以提规则，但由人来决定。',
+  'memory.suggest.promote': '采纳',
+  'memory.suggest.dismiss': '驳回',
+  'memory.suggest.dismissConfirm': '驳回这条建议？它不会进到共享笔记里。',
+  'memory.suggest.dismissOk': '确认驳回',
+  'memory.suggest.failed': '这条建议没处理成功',
+  'memory.suggest.loadFailed': '待确认的建议加载失败',
+  'memory.suggest.retry': '重试',
+  'memory.suggest.propose.title': '或者你自己提一条',
+  'memory.suggest.propose.titlePlaceholder': '一句话规则',
+  'memory.suggest.propose.bodyPlaceholder': '为什么加这条规则（可选）',
+  'memory.suggest.propose.submit': '提议',
+
   // ------------------------------------------------ skills · drafts (R28) --
   'skills.drafts.title': '技能草稿',
   'skills.drafts.note': '任务交付后自动提出的技能建议，最新的在前；这个页面不自动刷新。',
