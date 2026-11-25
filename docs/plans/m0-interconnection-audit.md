@@ -43,7 +43,10 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | 租约持久化 | tasklease（+dataDir） | 重启恢复 | 7 条（存活/过期回收/损坏/0600/评审状态） |
 | `contracts.KeyCredentials` | creds（依赖 dataDir） | 渠道适配器、设置页 | 17 条 + 19 校验子测试（往返/覆盖/深拷贝/List 无字段/损坏/0600/并发） |
 | 入站路由（钉钉/飞书） | gateway `inbound.go` | 平台回调 | 6 条（202/签名 401/challenge 200/204/404） |
-| Web「待办收件箱」 | `web/src/features/inbox/**`、`web/src/api/inbox.ts` | `/inbox/incoming` | web 全量 453 tests 绿；旧 `/inbox` 有回归测试 |
+| Web「待办收件箱」 | `web/src/features/inbox/**`、`web/src/api/inbox.ts` | `/inbox/incoming` | web 全量 477 tests 绿；旧 `/inbox` 有回归测试 |
+| Web「任务详情」 | `web/src/features/task/**`、`web/src/api/task.ts` | `/t/:taskId`（R3b，无导航） | 22 测试（五段顺序/认领/证据门槛/通过打回/重试） |
+| `tasks.lease` | gateway | 任务详情首屏证据 | 方法表 + 契约 + mock 同步（74 方法） |
+| `leadplan`（模型面） | leadplan（新，仅依赖 contracts） | 未来模型计划器 | 17 测试 / 45 断言（提示注入隔离、解析表） |
 | `contracts.KeyWebhook` | webhook（依赖 inbox + dataDir） | `POST /api/inbound/{source}`、`webhook.sources/source.set/remove` | 10 条收件测试 + 7 条 HTTP 测试 + 6 条 source 管理测试（排序/校验/删除/重启恢复/轮换失效/0600） |
 | **网关 → 服务键**（11 个方法） | inbox / triage / tasklease / approvalaction | web 客户端、Lead 分诊回合 | 一致性测试（TRANSPORT §5.1 ↔ dispatch ↔ contract.json ↔ ws-contract.ts）+ 载荷映射测试 7 条 |
 | 注册 ↔ 装配一致 | registry | headless.json | `TestEveryRegisteredModuleIsLoaded`（新） |
@@ -76,6 +79,8 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 | ~~钉钉/飞书 HTTP 路由~~ | ✅ 已交付：`/api/inbound/dingtalk`、`/api/inbound/feishu`（challenge 200、无关事件 204、错误 401/400/503） | 已交付 |
 | 凭据仍未接到适配器 | creds 库有了，但三个适配器仍从 Config 读 `json:"-"` 字段；没人调用 `KeyCredentials` | 缺口 | 适配器启动时 `Get(kind,id)` + 热更新；UI 表单 |
 | 卡片动作未接审批 | 飞书 `CardAction` 提取了 approvalId/decision，但审批 action 需要一次性 token；卡片 value 里还没带 token | 缺口 | 发卡时把 token 放进 `action.value`，回调走 `approval.action` |
+| 模型计划器未接入 | leadplan 库已就绪，lead 已修成"用注入的 planner"；但还没有 provider 适配器与装配注入 | 缺口 | 在装配层构造 `contracts.PlannerModel`（模型目录 + agent 客户端），注入 `lead.NewService` |
+| 钉钉/飞书未读凭据库 | 只有 wechat 接了 `KeyCredentials`；钉钉/飞书仍从 Config 读 `json:"-"` | 缺口 | 同 wechat 模式复制（kind=dingtalk/feishu） |
 | ~~网关协议 `inbox.*` / 租约 / 审批动作~~ | ✅ 9 个方法已实现并同步 TRANSPORT §5.1.13、contract.json、ws-contract.ts | 已交付 |
 | ~~`notify.route.*`（主/备渠道）~~ | ✅ 已交付：router 服务 + `notify.route.snapshot/upsert` + capability `notifyroute` | 已交付 |
 | UI | 未接；效果图只是原型 | 协议稳定后一轮做 |
@@ -138,6 +143,7 @@ scripts/verify.sh --quick（wechat 后）  PASS 5/5，67s
 scripts/verify.sh --quick（并行四流集成后）PASS 5/5，66s
 scripts/verify.sh --quick（creds 集成后）PASS 5/5，68s
 web: typecheck / lint(25 既有 warning) / test 453 / gen:verify 全绿
+web（任务详情后）: typecheck / lint(25) / test 477 全绿
 scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过
 scripts/verify.sh --quick（approval 后）    PASS 5/5（一次 flaky 后重跑绿）
                                             （首次跑时 gateway 的
