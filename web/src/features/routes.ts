@@ -7,7 +7,8 @@ import type { MessageKey } from '@/i18n';
  *
  * Every route below is built and rendered: R1 现在, R2 收件箱, R3 会话,
  * R4 轨迹, R5 记忆, R7 子会话, R8–R10 文件树/预览、R11 检查器 guide、
- * R13–R21 九个设置页、R22 自动化、R23 能力、R24 洞察、R26 团队（看板 + 成员）, plus `*` → NotFound.
+ * R13–R21 九个设置页、R22 自动化、R23 能力、R24 洞察、R26 团队（看板 + 成员）、
+ * R28 技能草稿, plus `*` → NotFound.
  * **A route is either built or not registered** (WEB-CLIENT §1.2): a registered
  * placeholder makes the user believe a feature exists, and the honest mechanism
  * for a missing backend half is capability gating — the entry is not rendered at
@@ -66,6 +67,10 @@ export const ROUTES: RouteMeta[] = [
   // The band shows the section's own name; the task's subject is the screen's
   // `<h1>` (a row title in the band would be stale the moment it is renamed).
   { path: '/t/:taskId', ref: 'R3b', titleKey: 'task.detail.title' },
+  // R28: the skill-drafts queue (`skilldrafts.snapshot`/`skilldrafts.decide`).
+  // A top-level path, not a `settings` page: reviewing a proposal a task left
+  // behind is work on the task board's output, not a client preference.
+  { path: '/skills/drafts', ref: 'R28', titleKey: 'skills.drafts.title' },
 ];
 
 /**

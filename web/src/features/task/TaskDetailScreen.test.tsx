@@ -768,11 +768,14 @@ describe('TaskDetailScreen', () => {
       renderScreen();
 
       const region = within(await progress()).getByTestId('means-capabilities');
+      // Count before the click: under load React may mount twice, and asserting an
+      // absolute number made this test depend on how many mounts happened.
+      const readsBeforeRetry = api.loadCapabilities.mock.calls.length;
       await user.click(within(region).getByRole('button', { name: label(T('task.detail.retry')) }));
 
       expect(await within(region).findByText('pdf')).toBeInTheDocument();
-      // The retry promises one thing: this read happens again.
-      expect(api.loadCapabilities).toHaveBeenCalledTimes(2);
+      // The retry promises one thing: exactly one more read.
+      expect(api.loadCapabilities.mock.calls.length).toBe(readsBeforeRetry + 1);
       expect(api.loadTaskBoard).toHaveBeenCalledTimes(1);
       // The failure is no longer on screen.
       expect(within(region).queryByText('能力服务连不上')).toBeNull();

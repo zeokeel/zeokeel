@@ -39,6 +39,8 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
       // R27c: the shared note board. Its own entry for the same reason: it must
       // not leave the generic settings item selected.
       '/settings/memory',
+      // R28: the skill-drafts queue, also its own entry.
+      '/skills/drafts',
     ].find((path) => location.pathname.startsWith(path)) ??
     (location.pathname.startsWith('/settings') ? '/settings/model' : '');
 
@@ -88,6 +90,15 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
         // it is the same people; the board answers "what are they doing", this
         // one "who is on the team" (spawn/message/interrupt live here).
         { key: '/team/board', icon: <ZkIcon name="data" />, label: t('team.board.nav') },
+        // R28: the skill drafts a finished task proposes. `sparkles` is the
+        // "something was proposed for you" glyph; `file` is the shared note
+        // board, `plugin` the capabilities page, and `check` would promise the
+        // queue is already resolved.
+        {
+          key: '/skills/drafts',
+          icon: <ZkIcon name="sparkles" />,
+          label: t('skills.drafts.title'),
+        },
         { key: '/settings/model', icon: <ZkIcon name="sliders" />, label: t('shell.settings') },
         // R27a: channel credentials / webhook sources / notify routes. `send`
         // (the paper plane) is the delivery direction of everything on that

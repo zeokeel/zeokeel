@@ -958,6 +958,28 @@ export const zh = {
   'memory.loadFailed': '共享笔记加载失败',
   'memory.saveFailed': '笔记没记下来',
   'memory.retry': '重试',
+
+  // ------------------------------------------------ skills · drafts (R28) --
+  'skills.drafts.title': '技能草稿',
+  'skills.drafts.note': '任务交付后自动提出的技能建议，最新的在前；这个页面不自动刷新。',
+  'skills.drafts.honest': '采纳只记录决定，暂时不会安装技能。',
+  'skills.drafts.empty': '还没有技能草稿。',
+  'skills.drafts.emptyNote': '任务被采纳后，这里会出现它提出的技能草稿。',
+  'skills.drafts.status.pending': '待确认',
+  'skills.drafts.status.accepted': '已采纳',
+  'skills.drafts.status.rejected': '已驳回',
+  'skills.drafts.status.unknown': '未知状态',
+  'skills.drafts.accept': '采纳',
+  'skills.drafts.reject': '驳回',
+  'skills.drafts.rejectConfirm': '确认驳回这份技能草稿？',
+  'skills.drafts.rejectOk': '确认驳回',
+  'skills.drafts.failed': '决定没记下来',
+  'skills.drafts.loadFailed': '技能草稿加载失败',
+  'skills.drafts.retry': '重试',
+  'skills.drafts.expand': '展开',
+  'skills.drafts.collapse': '收起',
+  'skills.drafts.taskLink': '任务 {id}',
+  'skills.drafts.reviewer': '决定人 {by}',
 } as const;
 
 export type MessageKey = keyof typeof zh;

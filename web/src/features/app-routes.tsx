@@ -22,6 +22,7 @@ import { ChannelsScreen } from '@/features/settings/channels/ChannelsScreen';
 import { HealthScreen } from '@/features/settings/health/HealthScreen';
 import { TeamMemoryScreen } from '@/features/settings/memory/TeamMemoryScreen';
 import { SettingsScreen } from '@/features/settings/settings-screen';
+import { SkillDraftsScreen } from '@/features/skills/SkillDraftsScreen';
 import { NotFoundScreen } from '@/features/not-found-screen';
 import { ChildSessionScreen } from '@/features/thread/child-session-screen';
 import { MemoryScreen } from '@/features/thread/memory-screen';
@@ -114,6 +115,10 @@ export function AppRoutes() {
       <Route path="/team" element={<TeammatesScreen />} />
       <Route path="/team/board" element={<TeamScreen />} />
       <Route path="/t/:taskId" element={<TaskDetailScreen />} />
+      {/* R28: the skill-drafts queue (`skilldrafts.snapshot` / `.decide`). A
+          top-level route because it reviews what the task board produces — the
+          proposals an accepted task leaves behind — not a client preference. */}
+      <Route path="/skills/drafts" element={<SkillDraftsScreen />} />
       <Route path="*" element={<NotFoundScreen />} />
     </Routes>
   );
