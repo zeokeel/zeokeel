@@ -1076,6 +1076,14 @@ body {
   color: var(--zk-label-tertiary);
 }
 
+/* Sender's own action stack stays mounted (submit bookkeeping) but is not the
+ * visible control: the toolbar below owns send/stop. Restored after a round-4
+ * experiment removed it and the product showed two stop buttons at once
+ * (round-5 loop audit). */
+.zk-composer .ant-sender-actions-list {
+  display: none;
+}
+
 .zk-composer__toolbar {
   display: flex;
   align-items: center;

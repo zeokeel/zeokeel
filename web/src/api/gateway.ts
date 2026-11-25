@@ -1060,12 +1060,18 @@ export async function loadSnapshot(sessionId: string): Promise<SessionSnapshot> 
             iterations: message.usage.iterations,
           }
         : undefined,
+      // `session.interrupted` only means "a turn was unfinished when the process
+      // restarted"; a stop the user just performed arrives as `error=cancelled`.
+      // Reading only the former made a live stop report 回答完成 (round-5 loop
+      // audit F2: 5 of 22 stops showed the right label).
       stopReason:
-        last && session.interrupted
+        last && (message.errorKind === 'cancelled' || message.error === 'cancelled')
           ? 'aborted'
-          : last && message.role === 'assistant'
-            ? 'end_turn'
-            : undefined,
+          : last && session.interrupted
+            ? 'aborted'
+            : last && message.role === 'assistant'
+              ? 'end_turn'
+              : undefined,
       remoteError: message.error,
       remoteErrorKind: message.errorKind,
       streaming: message.streaming,

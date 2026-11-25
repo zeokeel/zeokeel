@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Composer } from '@/chat/composer';
 import { ComposerFooter, ComposerPickers, useComposerSettings } from '@/chat/composer-status';
@@ -28,6 +28,16 @@ export function NowScreen() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [focusRequest, setFocusRequest] = useState(0);
+  // A cold load left focus on <body>: the user could type and nothing happened
+  // until they clicked the field (round-5 loop audit F5). Focusing once, after
+  // mount, is the whole fix; the guard keeps it away from touch screens where
+  // the keyboard would cover the page.
+  useEffect(() => {
+    const fine = window.matchMedia?.('(hover: hover)').matches ?? true;
+    if (!fine) return;
+    const timer = window.setTimeout(() => setFocusRequest((value) => value + 1), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
   const [notice, setNotice] = useState<string | null>(null);
 
   const commands: SlashCommand[] = [
@@ -45,6 +55,7 @@ export function NowScreen() {
   const send = async () => {
     const text = draft.trim();
     if (!text || creating) return;
+    if (attachments.some((item) => item.uploading)) return;
     setCreating(true);
     setError(null);
     // Sending from the landing page creates a session first: that await owns the
@@ -52,10 +63,12 @@ export function NowScreen() {
     // a greyed composer (round-4 loop audit F1). The note says what is happening.
     setNotice(t('now.creatingSession'));
     try {
+      // Send only what finished uploading: a provisional chip has no blob id.
+      const ready = attachments.filter((item) => !item.uploading);
       const session = await create();
       setDraft('');
       navigate(`/c/${session.id}`, {
-        state: { pendingText: text, ...(attachments.length > 0 ? { pendingAttachments: attachments } : {}) },
+        state: { pendingText: text, ...(ready.length > 0 ? { pendingAttachments: ready } : {}) },
       });
       setAttachments([]);
     } catch (cause) {
@@ -129,13 +142,30 @@ export function NowScreen() {
         onAttachFiles={(files) => {
           void (async () => {
             for (const file of files) {
+              // Same provisional chip as the thread composer: the landing page
+              // used to show nothing for the whole upload, and a large file could
+              // be sent before it finished — silently dropped (round-5 loop audit).
+              const provisional = `uploading-${Math.random().toString(36).slice(2)}`;
+              setAttachments((current) => [
+                ...current,
+                {
+                  id: provisional,
+                  name: file.name,
+                  mime: file.type || 'application/octet-stream',
+                  bytes: file.size,
+                  uploading: true,
+                },
+              ]);
               try {
                 const staged = await uploadBlob(file);
                 // A successful attach means the earlier failure no longer
                 // describes the state of the composer.
                 setError(null);
-                setAttachments((current) => [...current, staged]);
+                setAttachments((current) =>
+                  current.map((item) => (item.id === provisional ? staged : item)),
+                );
               } catch (cause) {
+                setAttachments((current) => current.filter((item) => item.id !== provisional));
                 setError(cause instanceof Error && cause.message === 'attachment_too_large'
                   ? t('composer.attachTooLarge')
                   : t('composer.attachFailed'));
@@ -159,11 +189,13 @@ export function NowScreen() {
         onSubmit={() => void send()}
         // Starting a conversation is never blocked by an approval parked in some
         // other session; the dock above still shows it and links to its thread.
-        // While the session is being created the note above the card explains the
-        // pause, and the send/stop slot shows the same running state as a turn.
+        // While the session is being created the note explains the pause; the
+        // composer stays disabled with the send button visible. It must **not**
+        // claim to be running: the stop button would call `onStop`, which has
+        // nothing to stop yet (round-5 loop audit: a no-op stop and a hint that
+        // promised "Esc 停止本轮" while the session was still being created).
         disabled={creating}
         notice={notice ?? undefined}
-        running={creating}
         commands={commands}
       />
     </div>
