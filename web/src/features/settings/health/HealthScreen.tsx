@@ -5,7 +5,8 @@
  *
  * Two honest sections, each with its own read:
  *
- *   自转      running state, the two cadences, the last pass and its counts
+ *   自转      running state, on/off + cadence controls, the two cadences, the
+ *             last pass and its counts
  *   浏览器     connected state, endpoint and page count — or an empty state
  *
  * **There is no timer on purpose.** Neither method has a delta stream, so the
@@ -19,14 +20,21 @@
  * and offers 重试 (the other section keeps working). A failed *write* is
  * reported as-is, because nothing changed and the status on screen is still the
  * last true answer.
+ *
+ * The 自转 controls (`heartbeat.configure`) are the one place this screen sends a
+ * value the user chose. They send **only the field that changed**, and they are
+ * driven by the status the gateway returned: no optimistic flip, so a refused
+ * write leaves the switch where the last real answer put it.
  */
 import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
-import { Alert, Button, Descriptions, Empty, Flex, Skeleton, Tag, Typography } from 'antd';
+import { Alert, Button, Descriptions, Empty, Flex, Select, Skeleton, Switch, Tag, Typography } from 'antd';
 import {
+  configureHeartbeat,
   loadBrowserStatus,
   loadHeartbeatStatus,
   tickHeartbeat,
   type BrowserStatus,
+  type HeartbeatConfig,
   type HeartbeatStatus,
 } from '@/api/health';
 import { describeError } from '@/features/describe-error';
@@ -113,6 +121,8 @@ function useSectionValue<T>(read: () => Promise<T>): {
   state: Loaded<T>;
   reload: () => void;
   refresh: () => Promise<void>;
+  /** Adopt a value the gateway just returned from a write — no second read. */
+  apply: (value: T) => void;
 } {
   const [state, setState] = useState<Loaded<T>>({ kind: 'loading' });
   const [attempt, setAttempt] = useState(0);
@@ -145,7 +155,11 @@ function useSectionValue<T>(read: () => Promise<T>): {
     }
   }, [read]);
 
-  return { state, reload, refresh };
+  const apply = useCallback((value: T) => {
+    setState({ kind: 'ready', value });
+  }, []);
+
+  return { state, reload, refresh, apply };
 }
 
 /** Loading and failure are per section, so one dead read cannot blank the other. */
@@ -223,6 +237,8 @@ function HeartbeatSection() {
   const t = useT();
   const [ticking, setTicking] = useState(false);
   const [tickError, setTickError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
 
   // The reading carries the moment it landed: the relative stamp is computed
   // against that instant, so a re-read after a tick makes "刚刚" true again
@@ -231,7 +247,7 @@ function HeartbeatSection() {
     const status = await loadHeartbeatStatus();
     return { status, at: Date.now() };
   }, []);
-  const { state, reload, refresh } = useSectionValue(read);
+  const { state, reload, refresh, apply } = useSectionValue(read);
 
   const tick = async () => {
     if (ticking) return;
@@ -246,6 +262,24 @@ function HeartbeatSection() {
       setTickError(describeError(cause, t, 'health.tickFailed'));
     } finally {
       setTicking(false);
+    }
+  };
+
+  /**
+   * The one write the user aims at a field: send that field, and adopt the
+   * status that comes back. Nothing is applied when the write fails, so both
+   * controls keep showing the last value the gateway actually reported.
+   */
+  const configure = async (patch: HeartbeatConfig) => {
+    if (saving) return;
+    setSaving(true);
+    setConfigError(null);
+    try {
+      apply({ status: await configureHeartbeat(patch), at: Date.now() });
+    } catch (cause) {
+      setConfigError(describeError(cause, t, 'settings.saveFailed'));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -270,8 +304,80 @@ function HeartbeatSection() {
 
       {tickError ? <Alert type="error" showIcon role="alert" closable title={tickError} /> : null}
 
+      {state.kind === 'ready' ? (
+        <HeartbeatControls
+          status={state.value.status}
+          saving={saving}
+          onChange={(patch) => void configure(patch)}
+        />
+      ) : null}
+
+      {configError ? (
+        <Alert type="error" showIcon role="alert" closable title={configError} />
+      ) : null}
+
       {state.kind === 'ready' ? <HeartbeatFacts reading={state.value} /> : null}
     </Section>
+  );
+}
+
+/** The Lead cadences this screen offers, in milliseconds: 30 s … 15 min. */
+const CADENCES_MS = [30_000, 60_000, 300_000, 900_000];
+
+/**
+ * On/off and cadence for the loop.
+ *
+ * Both controls are *fully controlled by the gateway's status*: they never move
+ * on a click, only on the answer. A switch that flipped first and rolled back
+ * would show a state for as long as the request took — this one cannot.
+ */
+function HeartbeatControls({
+  status,
+  saving,
+  onChange,
+}: {
+  status: HeartbeatStatus;
+  saving: boolean;
+  onChange: (patch: HeartbeatConfig) => void;
+}) {
+  const t = useT();
+  const configured = status.leadIntervalMs;
+  const known = Number.isFinite(configured) && configured > 0;
+
+  // A cadence the gateway reports but this screen does not offer is still
+  // offered *for that value*: a Select whose value matches no option renders a
+  // bare number, which is not a reading of the configured cadence.
+  const cadences =
+    known && !CADENCES_MS.includes(configured)
+      ? [...CADENCES_MS, configured].sort((left, right) => left - right)
+      : CADENCES_MS;
+
+  return (
+    <Flex gap="middle" align="center" wrap data-testid="health-heartbeat-controls">
+      <Flex gap="small" align="center">
+        <Typography.Text>{t('health.heartbeat.title')}</Typography.Text>
+        <Switch
+          checked={status.running}
+          aria-label={t('health.heartbeat.title')}
+          onChange={(enabled) => onChange({ enabled })}
+          // While a write is unanswered neither control accepts another one.
+          disabled={saving}
+          loading={saving}
+          data-testid="health-heartbeat-enabled"
+        />
+      </Flex>
+      <Flex gap="small" align="center">
+        <Typography.Text>{t('health.heartbeat.leadInterval')}</Typography.Text>
+        <Select<number>
+          value={known ? configured : undefined}
+          placeholder="—"
+          options={cadences.map((ms) => ({ value: ms, label: describeInterval(ms, t) }))}
+          onChange={(ms) => onChange({ leadIntervalMs: ms })}
+          disabled={saving}
+          data-testid="health-heartbeat-cadence"
+        />
+      </Flex>
+    </Flex>
   );
 }
 

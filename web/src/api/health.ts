@@ -127,3 +127,53 @@ export async function loadBrowserStatus(): Promise<BrowserStatus> {
     pages: count(result.pages),
   };
 }
+/**
+ * The fields `heartbeat.configure` accepts — each one optional, and an absent
+ * field means "leave as it is" (`WS_PARAMS['heartbeat.configure']` lists all
+ * three under `optional`, none under `required`).
+ *
+ * That is the whole reason a caller must send **only** what the user changed: a
+ * toggle that echoed the current cadence would rewrite a value that may have
+ * been set elsewhere a moment ago.
+ */
+export interface HeartbeatConfig {
+  /** Whether the loop runs at all. */
+  enabled?: boolean;
+  /** Milliseconds between Lead passes. */
+  leadIntervalMs?: number;
+  /** Milliseconds between channel polls. */
+  channelIntervalMs?: number;
+}
+
+/**
+ * Change the loop's state or cadence (`heartbeat.configure`).
+ *
+ * The answer is the resulting status — the same DTO as `heartbeat.status` — so
+ * the caller applies it directly instead of reading again: the response of the
+ * write is already "what the gateway now holds", and a second read would only
+ * add a frame in which the two answers could differ.
+ */
+export async function configureHeartbeat(config: HeartbeatConfig): Promise<HeartbeatStatus> {
+  // Only the fields that were passed: `undefined` is not "the same value", it is
+  // "not this caller's business".
+  const params: Record<string, boolean | number> = {};
+  if (config.enabled !== undefined) params.enabled = config.enabled;
+  if (config.leadIntervalMs !== undefined) params.leadIntervalMs = config.leadIntervalMs;
+  if (config.channelIntervalMs !== undefined) params.channelIntervalMs = config.channelIntervalMs;
+
+  await authorizationReady();
+  const result = await gatewayRpc().request<Partial<HeartbeatStatus>>('heartbeat.configure', params);
+  const lastTick = typeof result.lastTick === 'string' && result.lastTick !== '' ? result.lastTick : undefined;
+  const reported = errors(result.errors);
+  return {
+    running: result.running === true,
+    leadIntervalMs: count(result.leadIntervalMs),
+    channelIntervalMs: count(result.channelIntervalMs),
+    ...(lastTick ? { lastTick } : {}),
+    leadRuns: count(result.leadRuns),
+    dispatched: count(result.dispatched),
+    polls: count(result.polls),
+    newMessages: count(result.newMessages),
+    ...(reported ? { errors: reported } : {}),
+  };
+}
