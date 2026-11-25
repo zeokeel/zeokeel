@@ -48,8 +48,8 @@ function markdownComponents(dark: boolean) {
               padding: 0,
               border: 'none',
               borderRadius: 0,
-              fontSize: 'var(--zk-type-xxs)',
-              lineHeight: 'var(--zk-type-xxs-line)',
+              fontSize: 'var(--zk-type-xs)',
+              lineHeight: 'var(--zk-type-xs-line)',
             },
           }}
           className="zk-code-block"

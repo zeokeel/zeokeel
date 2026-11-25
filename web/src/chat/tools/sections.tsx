@@ -120,8 +120,8 @@ export function CodeBlock({
               borderRadius: 0,
               // The stock light palette also shrank the text to 12.6px/15.1;
               // the block uses the page's own type scale.
-              fontSize: 'var(--zk-type-xxs)',
-              lineHeight: 'var(--zk-type-xxs-line)',
+              fontSize: 'var(--zk-type-xs)',
+              lineHeight: 'var(--zk-type-xs-line)',
             },
           }}
         >
