@@ -311,3 +311,58 @@ func newDispatchGatewayWithBoard(t *testing.T, bots *fakeBots, triage *fakeTriag
 	}
 	return gateway
 }
+
+func TestDispatchRecordsWhoAsked(t *testing.T) {
+	bots := &fakeBots{instances: map[string]contracts.BotInstance{
+		"research": {ID: "research", TemplateID: "lead", Name: "Research"},
+	}}
+	triage := &fakeTriageRecorder{}
+	leases := &fakeLeaseTools{}
+	root := testRoot(t, newFakeChat())
+	if _, err := root.Provide(contracts.KeyBots, contracts.BotService(bots)); err != nil {
+		t.Fatalf("provide bots: %v", err)
+	}
+	if _, err := root.Provide(contracts.KeyTriage, contracts.TriageService(triage)); err != nil {
+		t.Fatalf("provide triage: %v", err)
+	}
+	if _, err := root.Provide(contracts.KeyTaskLease, contracts.TaskLeaseService(leases)); err != nil {
+		t.Fatalf("provide lease: %v", err)
+	}
+	recorder := &fakeRequester{}
+	if _, err := root.Provide(contracts.KeyTaskRequester, contracts.TaskRequester(recorder)); err != nil {
+		t.Fatalf("provide requester: %v", err)
+	}
+	users := &fakeUsers{list: []contracts.User{{ID: "alice", Name: "Alice", Role: contracts.UserRoleOwner}}}
+	if _, err := root.Provide(contracts.KeyUsers, contracts.UserService(users)); err != nil {
+		t.Fatalf("provide users: %v", err)
+	}
+	gateway, err := New(root, Options{DataDir: t.TempDir(), Port: -1, Logger: testLogger{t: t}, Out: discardWriter{}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	raw, _ := json.Marshal(map[string]any{"id": "i1", "subject": "查一下", "botId": "research"})
+	if _, problem := gateway.inboxDispatch(context.Background(), raw); problem != nil {
+		t.Fatalf("dispatch: %+v", problem)
+	}
+	if recorder.user != "alice" || recorder.task != "task-bot" {
+		t.Fatalf("recorded (%q, %q), want (task-bot, alice)", recorder.task, recorder.user)
+	}
+}
+
+type fakeRequester struct {
+	task string
+	user string
+}
+
+func (f *fakeRequester) SetRequestedBy(_ context.Context, taskID, userID string) error {
+	f.task, f.user = taskID, userID
+	return nil
+}
+
+func (f *fakeRequester) RequestedBy(_ context.Context, taskID string) (string, bool, error) {
+	if taskID == f.task {
+		return f.user, true, nil
+	}
+	return "", false, nil
+}

@@ -336,6 +336,15 @@ func (g *Gateway) inboxDispatch(ctx context.Context, raw json.RawMessage) (any, 
 	if err != nil {
 		return nil, orchestrationError(err)
 	}
+	// Who asked for it (M6 attribution): the board knows the work and the lease
+	// knows the executor, but only this says which human wanted it.
+	if requester, ok := g.root.Get(contracts.KeyTaskRequester); ok && requester != nil && len(result.TaskIDs) > 0 {
+		if acting, has := g.actingUser(ctx); has {
+			if err := requester.SetRequestedBy(ctx, result.TaskIDs[0], acting.ID); err != nil {
+				g.logger.Printf("gateway: record requester for %s: %v", result.TaskIDs[0], err)
+			}
+		}
+	}
 	// The bot's tool grant becomes the task's binding: a dispatch to a bot is how
 	// policy stops being a note and starts being a constraint.
 	if len(boundTools) > 0 && len(result.TaskIDs) > 0 {

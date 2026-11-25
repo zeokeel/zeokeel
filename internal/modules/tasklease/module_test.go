@@ -21,11 +21,12 @@ func TestDescriptorMetadata(t *testing.T) {
 	for _, provide := range descriptor.Provides {
 		provided[provide.Name] = true
 	}
-	if !provided[contracts.KeyTaskLease.Name()] || !provided[contracts.KeyTaskSendHolder.Name()] {
-		t.Fatalf("provides = %+v, want the lease and held-send keys", descriptor.Provides)
+	if !provided[contracts.KeyTaskLease.Name()] || !provided[contracts.KeyTaskSendHolder.Name()] ||
+		!provided[contracts.KeyTaskRequester.Name()] {
+		t.Fatalf("provides = %+v, want the lease, held-send and requester keys", descriptor.Provides)
 	}
-	if len(descriptor.Provides) != 2 {
-		t.Fatalf("provides = %d, want exactly two", len(descriptor.Provides))
+	if len(descriptor.Provides) != 3 {
+		t.Fatalf("provides = %d, want exactly three", len(descriptor.Provides))
 	}
 	required := map[string]bool{}
 	for _, requirement := range descriptor.Requires {

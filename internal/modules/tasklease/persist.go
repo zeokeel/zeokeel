@@ -65,6 +65,9 @@ type leaseStoreDocument struct {
 	// additive like the rest, so an older build simply ignores it. Held text
 	// that vanished on restart would be a message nobody decided about.
 	HeldSends []contracts.HeldSend `json:"heldSends,omitempty"`
+	// Requesters is who asked for each task (M6): additive, same document, so the
+	// attribution survives a restart with the work it describes.
+	Requesters []contracts.HeldSend `json:"requesters,omitempty"`
 }
 
 // Open builds a service whose live leases live in dir/leases.json. A missing
@@ -133,6 +136,12 @@ func Open(dir string, board contracts.TaskBoard, cfg Config) (*Service, error) {
 	// lenient about an unknown value: an approval gate this build cannot
 	// interpret is read back as before_start (fail closed). Silently treating
 	// it as "none" would open a gate an operator explicitly closed.
+	for _, requester := range document.Requesters {
+		if requester.TaskID == "" || requester.Text == "" {
+			continue
+		}
+		service.requesters[requester.TaskID] = requester.Text
+	}
 	for _, held := range document.HeldSends {
 		if held.TaskID == "" || held.Text == "" {
 			continue
@@ -251,6 +260,14 @@ func (s *Service) persistLocked() error {
 	sort.Strings(budgetIDs)
 	for _, id := range budgetIDs {
 		document.Budgets = append(document.Budgets, *s.budgets[id])
+	}
+	requesterIDs := make([]string, 0, len(s.requesters))
+	for id := range s.requesters {
+		requesterIDs = append(requesterIDs, id)
+	}
+	sort.Strings(requesterIDs)
+	for _, id := range requesterIDs {
+		document.Requesters = append(document.Requesters, contracts.HeldSend{TaskID: id, Text: s.requesters[id]})
 	}
 	heldIDs := make([]string, 0, len(s.heldSends))
 	for id := range s.heldSends {

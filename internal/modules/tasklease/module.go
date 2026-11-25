@@ -55,9 +55,12 @@ func Module() *module.Descriptor[Config] {
 		if _, err := ctx.Provide(contracts.KeyTaskSendHolder, contracts.TaskSendHolder(service)); err != nil {
 			return fmt.Errorf("%s: provide held sends: %w", ModuleID, err)
 		}
+		if _, err := ctx.Provide(contracts.KeyTaskRequester, contracts.TaskRequester(service)); err != nil {
+			return fmt.Errorf("%s: provide task requester: %w", ModuleID, err)
+		}
 		return nil
 	}).
-		AddProvides(module.Provides(contracts.KeyTaskLease), module.Provides(contracts.KeyTaskSendHolder)).
+		AddProvides(module.Provides(contracts.KeyTaskLease), module.Provides(contracts.KeyTaskSendHolder), module.Provides(contracts.KeyTaskRequester)).
 		AddRequires(module.Requires(contracts.KeyTaskBoard), module.Requires(contracts.KeyDataDir)).
 		WithName("ZeoKeel task lease (claim, evidence, review)")
 }

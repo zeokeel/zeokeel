@@ -62,6 +62,9 @@ type Service struct {
 	// it. It lives beside the other task-scoped rows so a restart cannot lose a
 	// message nobody decided about yet.
 	heldSends map[string]string
+	// requesters is who asked for each task (M6 attribution): the board records
+	// the work and the lease the executor, but neither says which human wanted it.
+	requesters map[string]string
 	// path is the durable document (dir/leases.json); empty means in-memory only
 	// (NewService, and unit tests that do not care about durability).
 	path string
@@ -77,6 +80,7 @@ func NewService(board contracts.TaskBoard, cfg Config) *Service {
 		startRejections: make(map[string]*contracts.TaskStartRejection),
 		budgets:         make(map[string]*contracts.TaskBudget),
 		heldSends:       make(map[string]string),
+		requesters:      make(map[string]string),
 	}
 }
 

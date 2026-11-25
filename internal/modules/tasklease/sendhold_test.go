@@ -61,3 +61,32 @@ func TestHeldSendRejectsAnEmptyMessage(t *testing.T) {
 		t.Fatalf("Hold(blank) = %v, want ErrLeaseInvalid", err)
 	}
 }
+
+// M6 attribution: the board records the work, the lease the executor, and this
+// records the human who asked.
+func TestRequesterSurvivesReopen(t *testing.T) {
+	dir := t.TempDir()
+	board := newFakeBoard("task-1")
+	service, err := tasklease.Open(dir, board, tasklease.Config{})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := service.SetRequestedBy(context.Background(), "task-1", "alice"); err != nil {
+		t.Fatalf("SetRequestedBy: %v", err)
+	}
+	again, err := tasklease.Open(dir, board, tasklease.Config{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	userID, found, err := again.RequestedBy(context.Background(), "task-1")
+	if err != nil || !found || userID != "alice" {
+		t.Fatalf("after reopen RequestedBy = (%q, %v, %v)", userID, found, err)
+	}
+}
+
+func TestRequesterRejectsEmptyParts(t *testing.T) {
+	service, _ := newService(t, newFakeBoard("task-1"), nil)
+	if err := service.SetRequestedBy(context.Background(), "task-1", "  "); !errors.Is(err, contracts.ErrTaskRequesterInvalid) {
+		t.Fatalf("SetRequestedBy(no user) = %v, want ErrTaskRequesterInvalid", err)
+	}
+}
