@@ -28,6 +28,7 @@ export function NowScreen() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [focusRequest, setFocusRequest] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const commands: SlashCommand[] = [
     { name: 'new', description: t('palette.newSession'), run: () => undefined, keepDraft: true },
@@ -46,6 +47,10 @@ export function NowScreen() {
     if (!text || creating) return;
     setCreating(true);
     setError(null);
+    // Sending from the landing page creates a session first: that await owns the
+    // whole 220–584ms a cold start takes, and before this the only feedback was
+    // a greyed composer (round-4 loop audit F1). The note says what is happening.
+    setNotice(t('now.creatingSession'));
     try {
       const session = await create();
       setDraft('');
@@ -56,6 +61,7 @@ export function NowScreen() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t('shell.createFailed'));
     } finally {
+      setNotice(null);
       setCreating(false);
     }
   };
@@ -153,7 +159,11 @@ export function NowScreen() {
         onSubmit={() => void send()}
         // Starting a conversation is never blocked by an approval parked in some
         // other session; the dock above still shows it and links to its thread.
+        // While the session is being created the note above the card explains the
+        // pause, and the send/stop slot shows the same running state as a turn.
         disabled={creating}
+        notice={notice ?? undefined}
+        running={creating}
         commands={commands}
       />
     </div>

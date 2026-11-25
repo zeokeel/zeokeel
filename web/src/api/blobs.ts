@@ -7,13 +7,19 @@
 import { authedFetch } from './http';
 
 export interface StagedAttachment {
-  /** Blob id from the upload. */
+  /** Blob id from the upload (a provisional local id while it is uploading). */
   id: string;
   name: string;
   mime: string;
   bytes: number;
   /** Local preview URL for an image; revoked when the chip is removed. */
   previewUrl?: string;
+  /**
+   * True between the moment the file was picked and the upload's answer: the
+   * chip exists immediately (so a large file does not look frozen) and the send
+   * button waits for it (round-4 component audit #6).
+   */
+  uploading?: boolean;
 }
 
 /** The gateway refuses anything larger; failing here gives a clear message first. */

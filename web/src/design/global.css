@@ -283,6 +283,13 @@ body {
 }
 
 /* A stopped turn is neutral; an error is the only thing that turns red. */
+.zk-msg-empty {
+  margin-top: var(--zk-space-1);
+  font-size: var(--zk-type-xs);
+  line-height: var(--zk-type-xs-line);
+  color: var(--zk-label-tertiary);
+}
+
 .zk-msg-stopped {
   font-size: var(--zk-type-xs);
   color: var(--zk-label-tertiary);
@@ -1148,7 +1155,26 @@ body {
   flex: none;
 }
 
-.zk-composer .zk-attach__text {
+.zk-composer .zk-attach__spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--zk-border-l3);
+  border-top-color: var(--zk-accent);
+  border-radius: var(--zk-radius-max);
+  animation: zk-spin 700ms linear infinite;
+}
+
+.zk-attach--uploading {
+  opacity: 0.8;
+}
+
+@keyframes zk-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.zk-attach__text {
   display: flex;
   flex-direction: column;
   min-width: 0;

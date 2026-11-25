@@ -56,6 +56,7 @@ export const en: Catalog = {
   'now.command.inbox': 'Open the inbox',
   'now.command.settings': 'Open settings',
   'now.command.capabilities': 'Open capabilities',
+  'now.creatingSession': 'Creating the session…',
   'now.command.clear': 'Clear the draft',
 
   // --------------------------------------------------------------- inbox --
@@ -112,6 +113,7 @@ export const en: Catalog = {
   'thread.providerError.unreachable': 'Could not reach the model service (network unreachable)',
   'thread.providerError.openSettings': 'Open settings',
   'thread.providerError.details': 'Details',
+  'thread.emptyAnswer': 'The model returned no content',
   'thread.stopped': 'Stopped',
   'thread.steps.summary': 'Completed {count} steps',
   'thread.reasoning': 'Reasoning',
@@ -698,6 +700,7 @@ export const en: Catalog = {
   'settings.ia.help.mcpWorkspaceOptIn': '1 lets a workspace\'s own MCP config apply.',
   'composer.attach': 'Attach',
   'composer.attachTooLarge': 'Attachment exceeds 10 MB',
+  'composer.uploading': 'Uploading the attachment…',
   'composer.attachFailed': 'Could not upload the attachment',
   'composer.rate': '~{rate} tok/s',
   'composer.dropHint': 'Drop to attach',

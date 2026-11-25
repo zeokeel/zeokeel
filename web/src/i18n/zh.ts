@@ -60,6 +60,7 @@ export const zh = {
   'now.command.inbox': '打开收件箱',
   'now.command.settings': '打开设置',
   'now.command.capabilities': '打开能力',
+  'now.creatingSession': '正在创建会话…',
   'now.command.clear': '清空草稿',
 
   // --------------------------------------------------------------- inbox --
@@ -116,6 +117,7 @@ export const zh = {
   'thread.providerError.unreachable': '连接模型服务失败（网络不可达）',
   'thread.providerError.openSettings': '打开设置',
   'thread.providerError.details': '详情',
+  'thread.emptyAnswer': '模型没有返回内容',
   'thread.stopped': '已停止',
   'thread.steps.summary': '已完成 {count} 个步骤',
   'thread.reasoning': '推理',
@@ -703,6 +705,7 @@ export const zh = {
   'settings.ia.help.mcpWorkspaceOptIn': '1 表示允许工作区自己的 MCP 配置生效。',
   'composer.attach': '添加附件',
   'composer.attachTooLarge': '附件超过 10 MB',
+  'composer.uploading': '正在上传附件…',
   'composer.attachFailed': '附件上传失败',
   'composer.rate': '~{rate} tok/s',
   'composer.dropHint': '松手即添加附件',

@@ -388,6 +388,8 @@ export function Composer({
   }, []);
 
   const empty = value.trim() === '';
+  // An attachment that has not finished uploading cannot be sent yet.
+  const attachmentsUploading = (attachments ?? []).some((item) => item.uploading);
   const hintKey =
     resolvedPhase === 'connecting'
       ? ('composer.hint.connecting' as const)
@@ -514,19 +516,29 @@ export function Composer({
         </div>
       ) : null}
 
+      {attachments?.some((item) => item.uploading) ? (
+        // One line, once: the chips carry their own spinners, this says why the
+        // send button is waiting.
+        <div className="zk-composer__notice" role="status" data-testid="composer-uploading">
+          <span>{t('composer.uploading')}</span>
+        </div>
+      ) : null}
       {attachments && attachments.length > 0 ? (
         <div className="zk-composer__attachments" data-testid="composer-attachments">
           {attachments.map((item) => (
             <Tag
               key={item.id}
-              closable
-              className="zk-attach"
+              closable={!item.uploading}
+              className={`zk-attach${item.uploading ? ' zk-attach--uploading' : ''}`}
               onClose={(event) => {
                 event.preventDefault();
                 onRemoveAttachment?.(item.id);
               }}
               data-testid="composer-attachment"
+              data-uploading={item.uploading ? 'true' : undefined}
+              aria-busy={item.uploading ? true : undefined}
             >
+              {item.uploading ? <span className="zk-attach__spinner" aria-hidden="true" /> : null}
               {item.mime.startsWith('image/') && item.previewUrl ? (
                 <img className="zk-attach__thumb" src={item.previewUrl} alt={item.name} />
               ) : null}
@@ -586,7 +598,7 @@ export function Composer({
                   shape="circle"
                   className="zk-composer__send"
                   icon={<ArrowUpOutlined />}
-                  disabled={empty || disabled}
+                  disabled={empty || disabled || attachmentsUploading}
                   onClick={submit}
                   aria-label={t('composer.send')}
                   title={t('composer.send')}

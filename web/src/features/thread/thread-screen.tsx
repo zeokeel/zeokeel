@@ -139,13 +139,30 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   const [attachError, setAttachError] = useState<string | null>(null);
   const attachFiles = async (files: File[]) => {
     for (const file of files) {
+      // The chip is shown as `uploading` right away: the blob POST is the slow
+      // part, and a chip that appears only afterwards made a 10 MB file look
+      // like the click did nothing (round-4 component audit #6).
+      const provisional = `uploading-${Math.random().toString(36).slice(2)}`;
+      setAttachments((current) => [
+        ...current,
+        {
+          id: provisional,
+          name: file.name,
+          mime: file.type || 'application/octet-stream',
+          bytes: file.size,
+          uploading: true,
+        },
+      ]);
       try {
         const staged = await uploadBlob(file);
         // A successful attach means the earlier failure no longer describes the
         // composer (the landing page already did this; the thread did not).
         setAttachError(null);
-        setAttachments((current) => [...current, staged]);
+        setAttachments((current) =>
+          current.map((item) => (item.id === provisional ? staged : item)),
+        );
       } catch (cause) {
+        setAttachments((current) => current.filter((item) => item.id !== provisional));
         const tooLarge = cause instanceof Error && cause.message === 'attachment_too_large';
         setAttachError(tooLarge ? t('composer.attachTooLarge') : t('composer.attachFailed'));
       }
