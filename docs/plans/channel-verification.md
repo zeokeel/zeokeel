@@ -21,12 +21,12 @@ scripts/channel-verify.sh dingtalk    http://127.0.0.1:<port> <secret>
 
 | 渠道 | 检查项 | 期望 | 实测 | 时间 |
 |---|---|---|---|---|
-| webhook | 正确签名 | 202 + `merged:false` | | |
-| webhook | 错误签名 | 401，且收件箱无新条目 | | |
-| webhook | 同一 body 再投一次 | 202 + `merged:true`、count=2 | | |
+| webhook | 正确签名 | 202 + `merged:false` | ✅ `HTTP 202 {"count":1,"id":"inbox-000001","merged":false}` | 2026-11-25 18:17 |
+| webhook | 错误签名 | 401，且收件箱无新条目 | ✅ `HTTP 401 webhook: bad signature`，收件箱未新增 | 2026-11-25 18:17 |
+| webhook | 同一 body 再投一次 | 202 + `merged:true`、count=2 | ✅ `HTTP 202 {"count":2,"id":"inbox-000001","merged":true}` | 2026-11-25 18:17 |
 | dingtalk | 正确签名回调 | 202 | | |
 | dingtalk | 超时时间戳 | 401（`stale`） | | |
-| feishu | URL 握手 | 200 + 原样 challenge | | |
+| feishu | URL 握手 | 200 + 原样 challenge | ✅ `HTTP 200 {"challenge":"verify-challenge"}` | 2026-11-25 18:17 |
 | feishu | 文本事件 | 202，收件箱出现条目 | | |
 | feishu | 卡片按钮 | 点「同意」后审批被应用；改掉 token 后 403 | | |
 | 微信 | 扫码登录 | 设置页显示已连接 | | |
@@ -68,6 +68,15 @@ scripts/channel-verify.sh dingtalk    http://127.0.0.1:<port> <secret>
 1. 设置页 kind=email：`username`/`password`（IMAP/SMTP 同一账号）。
 2. 发一封中文主题邮件给自己 → 主题不乱码。
 3. 收一封带 base64 正文的邮件 → 正文正确。
+
+## 4b. 已验证的部分（本机真实进程，非 httptest）
+
+方法：用 `.cache/zkverify` 起真实 `--product serve`（数据目录 `.cache/verify-run`，预置
+`webhook/sources.json`），再用 `scripts/channel-verify.sh` 打真实 HTTP。
+
+已通过：webhook 正确签名（202）/ 错误签名（401）/ 重投合并（count=2）、飞书握手（200 + challenge）。
+
+未覆盖（仍需真机）：钉钉回调的真实 header 名、飞书事件与卡片的平台签名、微信/邮件全链路。
 
 ## 5. 结论记录
 
