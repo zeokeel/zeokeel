@@ -496,6 +496,36 @@ async function main() {
     }
     report('chain.claim-submit-review', chainOk, clip(chainDetail, 300));
 
+    // h2. the approval gate and the budget, on the real product: a policy round-trips
+    // and a budget stops a runaway task with a readable refusal.
+    const gateSet = taskId
+      ? await call('tasks.approval.set', { id: taskId, policy: 'before_start' })
+      : { error: { message: 'no task' } };
+    const gated = taskId
+      ? await call('tasks.approval.get', { id: taskId })
+      : { error: { message: 'no task' } };
+    report(
+      'approval.policy-roundtrip',
+      !gateSet.error && gated.result?.policy === 'before_start' && gated.result?.set === true,
+      `set=${clip(JSON.stringify(gateSet.error ?? 'ok'), 80)} get=${clip(JSON.stringify(gated.result ?? gated.error), 120)}`,
+    );
+
+    const budget = taskId
+      ? await call('tasks.budget.set', { id: taskId, maxTokens: 100 })
+      : { error: { message: 'no task' } };
+    const spent = taskId
+      ? await call('tasks.budget.consume', { id: taskId, tokens: 40 })
+      : { error: { message: 'no task' } };
+    const over = taskId
+      ? await call('tasks.budget.consume', { id: taskId, tokens: 200 })
+      : { error: { message: 'no task' } };
+    const failedLoud = Boolean(budget.error) || Boolean(spent.error) || Boolean(over.error);
+    report(
+      'budget.stops-at-the-ceiling',
+      !budget.error && !spent.error && failedLoud,
+      `set=${clip(JSON.stringify(budget.error ?? 'ok'), 80)} used40=${clip(JSON.stringify(spent.result ?? spent.error), 120)} used240=${clip(JSON.stringify(over.error ?? 'ok'), 160)}`,
+    );
+
     // i. the accepted task became team memory (acceptance records a note).
     const notes = await call('team.notes', { limit: 10 });
     const noted = Array.isArray(notes.result?.notes) && notes.result.notes.length > 0;

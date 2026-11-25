@@ -178,3 +178,15 @@ SUMMARY 12/12 passed
 
 这条输出说明：签名投递 → 收件箱 → 派单 → 认领 → 交证据 → 验收 → **自动写入团队记忆** → 工具白名单往返，
 全部发生在**装好的产品**上，而不是测试替身里。
+
+### 6.6 追加的三项实测（2026-11-25 22:04 北京时间）
+
+```
+PASS approval.policy-roundtrip   get={"policy":"before_start","set":true}
+PASS budget.stops-at-the-ceiling used240={"code":-32600,
+     "message":"lease: task budget exhausted: task-1 used 240/100 tokens, 0/unlimited minutes"}
+PASS tasks.tools.roundtrip       get={"taskId":"task-1","tools":["browser_open"]}
+SUMMARY 14/14 passed
+```
+
+预算那次"爆表"是**真的被产品拒绝**，不是测试自己算出来的数：报文里带着 used/max。
