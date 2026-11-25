@@ -33,6 +33,13 @@ var serverCapabilities = []string{
 	"prompts",
 	"notify",
 	"foreground",
+	// Orchestration: the inbox is the single external entry point, triage turns
+	// its items into work, the lease layer owns claims/evidence/review, and the
+	// approval action answers a pending request from any entry point.
+	"inbox",
+	"triage",
+	"tasklease",
+	"approvalaction",
 }
 
 // gatewayCapabilities is the handshake's capability list for this gateway

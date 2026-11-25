@@ -153,10 +153,12 @@ export const WS_PARAMS: Record<WsMethod, MethodParams> = {
 
 /** Capabilities every build provides. */
 export const STATIC_CAPABILITIES = [
+  'approvalaction',
   'approvals',
   'artifacts',
   'ask',
   'foreground',
+  'inbox',
   'notify',
   'plan',
   'prompts',
@@ -168,6 +170,8 @@ export const STATIC_CAPABILITIES = [
   'session.subscribe',
   'settings',
   'settings.set',
+  'tasklease',
+  'triage',
   'workspace',
 ] as const;
 

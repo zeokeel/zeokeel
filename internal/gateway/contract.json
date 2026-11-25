@@ -495,10 +495,12 @@
   ],
   "capabilities": {
     "static": [
+      "approvalaction",
       "approvals",
       "artifacts",
       "ask",
       "foreground",
+      "inbox",
       "notify",
       "plan",
       "prompts",
@@ -510,6 +512,8 @@
       "session.subscribe",
       "settings",
       "settings.set",
+      "tasklease",
+      "triage",
       "workspace"
     ],
     "conditional": [
