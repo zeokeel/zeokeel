@@ -401,6 +401,8 @@ const mockCredentials = new Map();
 const mockTaskTools = new Map();
 /** Task -> approval policy ("none" | "before_start"). */
 const mockTaskApproval = new Map();
+/** Task -> budget meter. */
+const mockTaskBudgets = new Map();
 /** Shared team notes, newest first. */
 const mockTeamNotes = [];
 /** QR logins started by the settings screen. */
@@ -1863,6 +1865,38 @@ const wsDispatch = (client, message) => {
       }
       item.status = action;
       return reply({ ...item });
+    }
+    case 'tasks.budget.set': {
+      const id = String(params.id ?? '');
+      if (!id) return fail(-32602, 'invalid_params');
+      const previous = mockTaskBudgets.get(id) ?? { taskId: id, maxTokens: 0, maxMinutes: 0, usedTokens: 0, exhausted: false };
+      const maxTokens = params.maxTokens === undefined ? previous.maxTokens : Number(params.maxTokens);
+      const maxMinutes = params.maxMinutes === undefined ? previous.maxMinutes : Number(params.maxMinutes);
+      if (maxTokens < 0 || maxMinutes < 0) return fail(-32600, 'lease: negative budget');
+      const budget = { ...previous, maxTokens, maxMinutes, exhausted: maxTokens > 0 && previous.usedTokens > maxTokens };
+      mockTaskBudgets.set(id, budget);
+      return reply(budget);
+    }
+    case 'tasks.budget.get': {
+      const id = String(params.id ?? '');
+      const budget = mockTaskBudgets.get(id);
+      return reply(budget ? budget : { budget: null });
+    }
+    case 'tasks.budget.consume': {
+      const id = String(params.id ?? '');
+      const tokens = Number(params.tokens ?? 0);
+      const previous = mockTaskBudgets.get(id);
+      if (!previous) return fail(-32600, 'lease: no budget');
+      const used = previous.usedTokens + tokens;
+      const exhausted = previous.maxTokens > 0 && used > previous.maxTokens;
+      const budget = { ...previous, usedTokens: used, exhausted };
+      mockTaskBudgets.set(id, budget);
+      if (exhausted) {
+        const held = mockLeases.get(id);
+        if (held) held.state = 'blocked';
+        return fail(-32600, 'lease: task budget exhausted');
+      }
+      return reply(budget);
     }
     case 'tasks.approval.set': {
       const id = String(params.id ?? '');

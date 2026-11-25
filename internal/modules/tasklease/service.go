@@ -54,6 +54,10 @@ type Service struct {
 	// startRejections keeps the last refused start per task (G2): the note is
 	// what explains why a task came back to the pool.
 	startRejections map[string]*contracts.TaskStartRejection
+	// budgets keeps the per-task cost ceiling (G11). Like tools and approvals it
+	// belongs to the task rather than to a lease — a release/re-claim must not
+	// reset the meter — and it is the row the stop reads.
+	budgets map[string]*contracts.TaskBudget
 	// path is the durable document (dir/leases.json); empty means in-memory only
 	// (NewService, and unit tests that do not care about durability).
 	path string
@@ -67,6 +71,7 @@ func NewService(board contracts.TaskBoard, cfg Config) *Service {
 		tools:           make(map[string]*contracts.TaskTools),
 		approvals:       make(map[string]*contracts.TaskApproval),
 		startRejections: make(map[string]*contracts.TaskStartRejection),
+		budgets:         make(map[string]*contracts.TaskBudget),
 	}
 }
 
@@ -197,6 +202,12 @@ func (s *Service) Submit(ctx context.Context, taskID, owner string, evidence []c
 	// not something the owner can assume by submitting.
 	if lease.State == contracts.LeaseStateAwaitingApproval {
 		return contracts.TaskLease{}, fmt.Errorf("%w: %s", contracts.ErrLeaseApprovalRequired, taskID)
+	}
+	// The stop (G11): a claim parked by its own budget is waiting for the Lead to
+	// decide. Letting Submit through would make the ceiling advisory — the work
+	// would keep being spent until the owner felt like stopping.
+	if lease.State == contracts.LeaseStateBlocked {
+		return contracts.TaskLease{}, fmt.Errorf("%w: %s is blocked", contracts.ErrLeaseBudgetExhausted, taskID)
 	}
 	lease.Evidence = append([]contracts.Evidence(nil), evidence...)
 	lease.State = contracts.LeaseStateReview

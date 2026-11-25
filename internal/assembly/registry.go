@@ -28,6 +28,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/replyrelay"
 	"github.com/zeokeel/zeokeel/internal/modules/sandbox"
 	"github.com/zeokeel/zeokeel/internal/modules/sessionstore"
+	"github.com/zeokeel/zeokeel/internal/modules/skilldraft"
 	"github.com/zeokeel/zeokeel/internal/modules/skills"
 	"github.com/zeokeel/zeokeel/internal/modules/tasklease"
 	"github.com/zeokeel/zeokeel/internal/modules/teamnotes"
@@ -71,6 +72,8 @@ func Registry() *module.Registry {
 	mustRegister(registry, memorystore.Module())
 	// Shared team notes ride on the memory store, so they load after it.
 	mustRegister(registry, teamnotes.Module())
+	// Skill drafts: proposals a human turns into a real skill later.
+	mustRegister(registry, skilldraft.Module())
 	mustRegister(registry, sandbox.Module())
 	mustRegister(registry, toolkit.Module())
 	// triage joins the inbox to the task board: it must come after both.

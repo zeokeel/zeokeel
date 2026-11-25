@@ -419,6 +419,28 @@
       ],
       "optional": []
     },
+    "tasks.budget.consume": {
+      "required": [
+        "id",
+        "tokens"
+      ],
+      "optional": []
+    },
+    "tasks.budget.get": {
+      "required": [
+        "id"
+      ],
+      "optional": []
+    },
+    "tasks.budget.set": {
+      "required": [
+        "id"
+      ],
+      "optional": [
+        "maxMinutes",
+        "maxTokens"
+      ]
+    },
     "tasks.claim": {
       "required": [
         "id",

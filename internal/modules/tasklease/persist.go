@@ -55,6 +55,12 @@ type leaseStoreDocument struct {
 	// StartRejections is the last refused start per task (G2): the approver and
 	// the note, so a task that reappears in the pool carries its explanation.
 	StartRejections []contracts.TaskStartRejection `json:"startRejections,omitempty"`
+	// Budgets is the per-task cost ceiling (G11), additive like tools and
+	// approvals: no version bump, so a build that knows the stop loads a file
+	// that carries budgets and an older build ignores the key. The meter must
+	// survive a restart — a task that already spent its budget may not start the
+	// next process with a full one.
+	Budgets []contracts.TaskBudget `json:"budgets,omitempty"`
 }
 
 // Open builds a service whose live leases live in dir/leases.json. A missing
@@ -135,6 +141,28 @@ func Open(dir string, board contracts.TaskBoard, cfg Config) (*Service, error) {
 		stored.Policy = policy
 		service.approvals[approval.TaskID] = &stored
 	}
+	// Budgets (G11). The row is restored as written except for two derivations:
+	// a negative limit/usage is clamped to 0 (the write path never produces one,
+	// and a hand-edited value must not invent a stop out of nowhere), and
+	// Exhausted is recomputed with the clock of *this* process, because a minutes
+	// budget may well have run out while the product was down.
+	for _, budget := range document.Budgets {
+		if budget.TaskID == "" {
+			continue
+		}
+		stored := budget
+		if stored.MaxTokens < 0 {
+			stored.MaxTokens = 0
+		}
+		if stored.MaxMinutes < 0 {
+			stored.MaxMinutes = 0
+		}
+		if stored.UsedTokens < 0 {
+			stored.UsedTokens = 0
+		}
+		stored.Exhausted = stored.Exhausted || budgetExhausted(stored, now)
+		service.budgets[budget.TaskID] = &stored
+	}
 	// Start refusals are history, not authority: they are restored as written
 	// and never gate a claim on their own (the policy does that).
 	for _, refusal := range document.StartRejections {
@@ -205,6 +233,14 @@ func (s *Service) persistLocked() error {
 	sort.Strings(approvalIDs)
 	for _, id := range approvalIDs {
 		document.Approvals = append(document.Approvals, *s.approvals[id])
+	}
+	budgetIDs := make([]string, 0, len(s.budgets))
+	for id := range s.budgets {
+		budgetIDs = append(budgetIDs, id)
+	}
+	sort.Strings(budgetIDs)
+	for _, id := range budgetIDs {
+		document.Budgets = append(document.Budgets, *s.budgets[id])
 	}
 	refusalIDs := make([]string, 0, len(s.startRejections))
 	for id := range s.startRejections {

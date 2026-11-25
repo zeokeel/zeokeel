@@ -69,6 +69,19 @@ type taskToolsDTO struct {
 	UpdatedAt string   `json:"updatedAt,omitempty"`
 }
 
+// taskBudgetDTO is the per-task cost ceiling (G11). The limits are not
+// omitempty: 0 means "unlimited" and the client must be able to tell that from a
+// missing field, while `exhausted` is always present because it is the stop the
+// UI keys on (a task blocked for budget shows used/limit and asks the Lead).
+type taskBudgetDTO struct {
+	TaskID     string `json:"taskId"`
+	MaxTokens  int    `json:"maxTokens"`
+	MaxMinutes int    `json:"maxMinutes"`
+	UsedTokens int    `json:"usedTokens"`
+	StartedAt  string `json:"startedAt,omitempty"`
+	Exhausted  bool   `json:"exhausted"`
+}
+
 // --- mapping ---------------------------------------------------------------
 
 func rfc3339(value time.Time) string {
@@ -110,6 +123,14 @@ func taskToolsFromContract(binding contracts.TaskTools) taskToolsDTO {
 		dto.Tools = append([]string(nil), binding.Tools...)
 	}
 	return dto
+}
+
+func taskBudgetFromContract(budget contracts.TaskBudget) taskBudgetDTO {
+	return taskBudgetDTO{
+		TaskID: budget.TaskID, MaxTokens: budget.MaxTokens, MaxMinutes: budget.MaxMinutes,
+		UsedTokens: budget.UsedTokens, StartedAt: rfc3339(budget.StartedAt),
+		Exhausted: budget.Exhausted,
+	}
 }
 
 func evidenceFromDTO(rows []evidenceDTO) []contracts.Evidence {
@@ -169,6 +190,7 @@ func orchestrationError(err error) *protocolError {
 		errors.Is(err, contracts.ErrLeaseInvalid),
 		errors.Is(err, contracts.ErrTaskToolsInvalid),
 		errors.Is(err, contracts.ErrTaskToolsUnknownTask),
+		errors.Is(err, contracts.ErrLeaseBudgetExhausted),
 		errors.Is(err, contracts.ErrInboxUnknownItem),
 		errors.Is(err, contracts.ErrInboxUnknownAction),
 		errors.Is(err, contracts.ErrInboxInvalid),
@@ -894,6 +916,91 @@ func (g *Gateway) taskRejectStart(ctx context.Context, raw json.RawMessage) (any
 		return nil, orchestrationError(err)
 	}
 	return map[string]any{"ok": true}, nil
+}
+
+// --- task budget (G11) -----------------------------------------------------
+
+// taskBudgetSetParams carries the two ceilings. Both are optional: an omitted
+// field is 0, which the module reads as unlimited, so "raise the token ceiling
+// and leave the clock alone" is expressible without a second method. `id` is
+// required. Negative values are rejected by the module (-32600), not clamped
+// here — a negative ceiling is a caller bug, not a budget.
+type taskBudgetSetParams struct {
+	ID         string `json:"id"`
+	MaxTokens  int    `json:"maxTokens,omitempty"`
+	MaxMinutes int    `json:"maxMinutes,omitempty"`
+}
+
+// taskBudgetConsumeParams requires `tokens` (no omitempty): the accounting source
+// reports usage, and a missing measurement must be a malformed request rather
+// than a silent 0 that looks like "no change". An explicit 0 is legal — it is how
+// a caller re-checks a time budget without reporting new tokens.
+type taskBudgetConsumeParams struct {
+	ID     string `json:"id"`
+	Tokens int    `json:"tokens"`
+}
+
+// tasks.budget.set declares a task's ceiling and is also how the Lead resumes a
+// stopped task (the claim goes back to claimed when there is headroom).
+func (g *Gateway) taskBudgetSet(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.leaseService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params taskBudgetSetParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	budget, err := service.SetBudget(ctx, params.ID, contracts.TaskBudget{
+		MaxTokens: params.MaxTokens, MaxMinutes: params.MaxMinutes,
+	})
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return taskBudgetFromContract(budget), nil
+}
+
+// tasks.budget.get is the read half. A task with no budget answers
+// {"budget":null} — the same absent shape as tasks.lease / tasks.tools.get — but
+// a task whose usage was reported against an unlimited budget answers the row,
+// because "spent 1200 tokens, no ceiling" is information the task screen needs.
+func (g *Gateway) taskBudgetGet(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.leaseService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params leaseReadParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	budget, found, err := service.Budget(ctx, params.ID)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	if !found {
+		return map[string]any{"budget": nil}, nil
+	}
+	return taskBudgetFromContract(budget), nil
+}
+
+// tasks.budget.consume reports usage and applies the stop. Crossing a ceiling is
+// a typed domain refusal (-32600, with used/limit in the message): the write did
+// happen — the tokens are counted — so the client re-reads the row to show it,
+// and the task is already blocked by the time this returns.
+func (g *Gateway) taskBudgetConsume(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.leaseService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params taskBudgetConsumeParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	budget, err := service.Consume(ctx, params.ID, params.Tokens)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return taskBudgetFromContract(budget), nil
 }
 
 // --- credentials -----------------------------------------------------------

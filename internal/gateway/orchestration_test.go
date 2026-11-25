@@ -22,6 +22,7 @@ func TestOrchestrationMethodsAreDispatched(t *testing.T) {
 		"tasks.lease", "tasks.claim", "tasks.heartbeat", "tasks.submit", "tasks.review",
 		"tasks.tools.set", "tasks.tools.get",
 		"tasks.approval.set", "tasks.approval.get", "tasks.approve", "tasks.reject-start",
+		"tasks.budget.set", "tasks.budget.get", "tasks.budget.consume",
 		"approval.token", "approval.action",
 		"notify.route.snapshot", "notify.route.upsert",
 		"webhook.sources", "webhook.source.set", "webhook.source.remove",
@@ -470,5 +471,178 @@ func TestTaskApprovalHandlersMapTypedErrors(t *testing.T) {
 	if _, problem := gw.taskRejectStart(ctx, marshal(map[string]any{"id": "task-1", "approver": "lead", "note": "no"})); problem == nil ||
 		problem.Code != codeInvalidRequest {
 		t.Fatalf("reject-start error problem = %+v, want codeInvalidRequest", problem)
+	}
+}
+
+// --- per-task budget (G11) -------------------------------------------------
+
+// budgetFakeLease is the lease service seen by the three budget handlers: one
+// row per task and one injectable typed error. It deliberately does not
+// re-implement the ceiling arithmetic (the module tests own that) — what the
+// gateway must get right is the wire shape and the mapping.
+type budgetFakeLease struct {
+	fakeLease
+	rows map[string]contracts.TaskBudget
+	err  error
+}
+
+func (f *budgetFakeLease) SetBudget(_ context.Context, taskID string, budget contracts.TaskBudget) (contracts.TaskBudget, error) {
+	if f.err != nil {
+		return contracts.TaskBudget{}, f.err
+	}
+	if budget.MaxTokens < 0 || budget.MaxMinutes < 0 {
+		return contracts.TaskBudget{}, contracts.ErrLeaseInvalid
+	}
+	stored := contracts.TaskBudget{TaskID: taskID, MaxTokens: budget.MaxTokens, MaxMinutes: budget.MaxMinutes}
+	if previous, ok := f.rows[taskID]; ok {
+		stored.UsedTokens = previous.UsedTokens
+		stored.StartedAt = previous.StartedAt
+	}
+	f.rows[taskID] = stored
+	return stored, nil
+}
+
+func (f *budgetFakeLease) Budget(_ context.Context, taskID string) (contracts.TaskBudget, bool, error) {
+	if f.err != nil {
+		return contracts.TaskBudget{}, false, f.err
+	}
+	row, ok := f.rows[taskID]
+	return row, ok, nil
+}
+
+func (f *budgetFakeLease) Consume(_ context.Context, taskID string, tokens int) (contracts.TaskBudget, error) {
+	if f.err != nil {
+		return contracts.TaskBudget{}, f.err
+	}
+	row := f.rows[taskID]
+	row.TaskID = taskID
+	row.UsedTokens += tokens
+	if row.StartedAt.IsZero() {
+		row.StartedAt = time.Date(2026, 11, 25, 9, 0, 0, 0, time.UTC)
+	}
+	if row.MaxTokens > 0 && row.UsedTokens > row.MaxTokens {
+		row.Exhausted = true
+		f.rows[taskID] = row
+		return row, contracts.ErrLeaseBudgetExhausted
+	}
+	f.rows[taskID] = row
+	return row, nil
+}
+
+func TestTaskBudgetHandlersRoundTrip(t *testing.T) {
+	lease := &budgetFakeLease{rows: map[string]contracts.TaskBudget{}}
+	gw := newReviewGateway(t, lease, nil)
+	ctx := context.Background()
+	marshal := func(params map[string]any) json.RawMessage {
+		t.Helper()
+		raw, err := json.Marshal(params)
+		if err != nil {
+			t.Fatalf("marshal %v: %v", params, err)
+		}
+		return raw
+	}
+
+	// set → the stored ceilings, on the wire as maxTokens/maxMinutes.
+	out, problem := gw.taskBudgetSet(ctx, marshal(map[string]any{
+		"id": "task-1", "maxTokens": 1000, "maxMinutes": 30,
+	}))
+	if problem != nil {
+		t.Fatalf("tasks.budget.set: %+v", problem)
+	}
+	budget, ok := out.(taskBudgetDTO)
+	if !ok || budget.TaskID != "task-1" || budget.MaxTokens != 1000 || budget.MaxMinutes != 30 {
+		t.Fatalf("tasks.budget.set result = (%T) %+v, want task-1 1000/30", out, out)
+	}
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal DTO: %v", err)
+	}
+	// The limits are always present (0 means unlimited) and exhausted always
+	// present: the client must be able to tell "no ceiling" from "absent".
+	for _, want := range []string{
+		`"taskId":"task-1"`, `"maxTokens":1000`, `"maxMinutes":30`,
+		`"usedTokens":0`, `"exhausted":false`,
+	} {
+		if !strings.Contains(string(encoded), want) {
+			t.Fatalf("DTO = %s, missing %s", encoded, want)
+		}
+	}
+
+	// get → the same row.
+	out, problem = gw.taskBudgetGet(ctx, marshal(map[string]any{"id": "task-1"}))
+	if problem != nil {
+		t.Fatalf("tasks.budget.get: %+v", problem)
+	}
+	if got, ok := out.(taskBudgetDTO); !ok || got.MaxTokens != 1000 {
+		t.Fatalf("tasks.budget.get result = (%T) %+v, want the stored ceiling", out, out)
+	}
+
+	// get on a task with no budget → {budget:null}, the same absent shape as
+	// tasks.lease.
+	out, problem = gw.taskBudgetGet(ctx, marshal(map[string]any{"id": "task-2"}))
+	if problem != nil {
+		t.Fatalf("tasks.budget.get(absent): %+v", problem)
+	}
+	encoded, err = json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal absent result: %v", err)
+	}
+	if string(encoded) != `{"budget":null}` {
+		t.Fatalf("absent result = %s, want {\"budget\":null}", encoded)
+	}
+
+	// consume → the accumulated row.
+	out, problem = gw.taskBudgetConsume(ctx, marshal(map[string]any{"id": "task-1", "tokens": 120}))
+	if problem != nil {
+		t.Fatalf("tasks.budget.consume: %+v", problem)
+	}
+	if spent, ok := out.(taskBudgetDTO); !ok || spent.UsedTokens != 120 || spent.Exhausted {
+		t.Fatalf("tasks.budget.consume result = (%T) %+v, want 120 used", out, out)
+	}
+
+	// A negative ceiling is a domain refusal (-32600), not a clamped value.
+	if _, problem := gw.taskBudgetSet(ctx, marshal(map[string]any{"id": "task-1", "maxTokens": -1})); problem == nil ||
+		problem.Code != codeInvalidRequest {
+		t.Fatalf("negative maxTokens problem = %+v, want codeInvalidRequest", problem)
+	}
+	if lease.rows["task-1"].MaxTokens != 1000 {
+		t.Fatalf("a rejected set changed the ceiling: %+v", lease.rows["task-1"])
+	}
+}
+
+// TestTaskBudgetHandlersMapTypedErrors pins the stop on the wire: crossing a
+// ceiling is the domain saying no (-32600, with used/limit in the text), not an
+// internal failure (-32603). The write did happen, so the client re-reads.
+func TestTaskBudgetHandlersMapTypedErrors(t *testing.T) {
+	lease := &budgetFakeLease{rows: map[string]contracts.TaskBudget{}}
+	gw := newReviewGateway(t, lease, nil)
+	ctx := context.Background()
+	marshal := func(params map[string]any) json.RawMessage {
+		t.Helper()
+		raw, err := json.Marshal(params)
+		if err != nil {
+			t.Fatalf("marshal %v: %v", params, err)
+		}
+		return raw
+	}
+
+	lease.rows["task-1"] = contracts.TaskBudget{TaskID: "task-1", MaxTokens: 10}
+	if _, problem := gw.taskBudgetConsume(ctx, marshal(map[string]any{"id": "task-1", "tokens": 11})); problem == nil ||
+		problem.Code != codeInvalidRequest || !strings.Contains(problem.Message, "budget exhausted") {
+		t.Fatalf("exhausted consume problem = %+v, want codeInvalidRequest with the typed text", problem)
+	}
+
+	lease.err = contracts.ErrLeaseBudgetExhausted
+	if _, problem := gw.taskBudgetConsume(ctx, marshal(map[string]any{"id": "task-2", "tokens": 1})); problem == nil ||
+		problem.Code != codeInvalidRequest {
+		t.Fatalf("typed consume error problem = %+v, want codeInvalidRequest", problem)
+	}
+	if _, problem := gw.taskBudgetGet(ctx, marshal(map[string]any{"id": "task-1"})); problem == nil ||
+		problem.Code != codeInvalidRequest {
+		t.Fatalf("typed get error problem = %+v, want codeInvalidRequest", problem)
+	}
+	if _, problem := gw.taskBudgetSet(ctx, marshal(map[string]any{"id": "task-1", "maxTokens": 5})); problem == nil ||
+		problem.Code != codeInvalidRequest {
+		t.Fatalf("typed set error problem = %+v, want codeInvalidRequest", problem)
 	}
 }

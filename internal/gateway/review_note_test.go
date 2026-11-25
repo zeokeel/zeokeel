@@ -114,6 +114,15 @@ func (f *fakeLease) Approve(context.Context, string, string) (contracts.TaskLeas
 	return contracts.TaskLease{}, nil
 }
 func (f *fakeLease) RejectStart(context.Context, string, string, string) error { return nil }
+func (f *fakeLease) SetBudget(context.Context, string, contracts.TaskBudget) (contracts.TaskBudget, error) {
+	return contracts.TaskBudget{}, nil
+}
+func (f *fakeLease) Budget(context.Context, string) (contracts.TaskBudget, bool, error) {
+	return contracts.TaskBudget{}, false, nil
+}
+func (f *fakeLease) Consume(context.Context, string, int) (contracts.TaskBudget, error) {
+	return contracts.TaskBudget{}, nil
+}
 
 func newReviewGateway(t *testing.T, lease contracts.TaskLeaseService, notes contracts.TeamNotesService) *Gateway {
 	t.Helper()

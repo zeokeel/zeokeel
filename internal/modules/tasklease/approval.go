@@ -182,7 +182,14 @@ func approvalPolicy(value string) (string, bool) {
 
 // stateForClaimLocked is where the gate lives: the one place a claim asks
 // whether this task needs confirmation before it may start. Callers hold s.mu.
+//
+// The budget stop (G11) is asked first and answers blocked: a task that ran out
+// of budget must not restart as claimed under a new owner, because "the last
+// owner gave up" is not a budget decision — that is the Lead's call.
 func (s *Service) stateForClaimLocked(taskID string) string {
+	if row, ok := s.budgets[taskID]; ok && row.Exhausted {
+		return contracts.LeaseStateBlocked
+	}
 	if row, ok := s.approvals[taskID]; ok && row.Policy == contracts.TaskApprovalBeforeStart {
 		return contracts.LeaseStateAwaitingApproval
 	}

@@ -154,6 +154,11 @@
       "config": {}
     },
     {
+      "id": "skilldraft",
+      "module": "zeokeel/skilldraft",
+      "config": {}
+    },
+    {
       "id": "agent",
       "module": "zeokeel/agent",
       "config": {

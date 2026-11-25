@@ -114,6 +114,23 @@ type TaskLeaseService interface {
 	// RejectStart refuses a start: the claim is released (board pending, owner
 	// cleared) and the refusal is recorded so the task can re-enter the pool.
 	RejectStart(ctx context.Context, taskID, approver, note string) error
+	// SetBudget sets a task's budget (G11) and returns the stored row. The
+	// limits come from the argument; the usage (UsedTokens/StartedAt) is kept
+	// from the stored row unless the argument carries its own, so raising a
+	// ceiling never resets the meter. Negative values are ErrLeaseInvalid and
+	// zero means unlimited. Setting a budget is also how the Lead resumes a
+	// stopped task: a blocked claim with headroom goes back to claimed, while a
+	// budget that is still over the limit keeps the stop.
+	SetBudget(ctx context.Context, taskID string, budget TaskBudget) (TaskBudget, error)
+	// Budget reports a task's budget; false means none was ever set (or usage
+	// was never reported, which behaves exactly like an unlimited budget).
+	Budget(ctx context.Context, taskID string) (TaskBudget, bool, error)
+	// Consume adds measured usage and applies the stop: when a limit is crossed
+	// the row is marked Exhausted, the live lease moves to LeaseStateBlocked, and
+	// the error is ErrLeaseBudgetExhausted — with the budget still returned, so
+	// the caller can show used/limit. A task with no budget row accumulates
+	// against an unlimited one: accounting may start before anyone sets a limit.
+	Consume(ctx context.Context, taskID string, tokens int) (TaskBudget, error)
 }
 
 // Lease errors are typed so the UI can say "someone else has it" instead of a
@@ -189,3 +206,42 @@ type TaskStartRejection struct {
 // ErrLeaseApprovalRequired means Submit arrived while the claim is still parked
 // in awaiting_approval: the work has not been approved to start.
 var ErrLeaseApprovalRequired = errors.New("lease: approval required before start")
+
+// LeaseStateBlocked is the parked state of a claim that was stopped by its own
+// budget (G11). It is a live claim like awaiting_approval — owner, deadline and
+// heartbeat still hold the task — but the work may not be submitted: the task is
+// waiting for the Lead to decide whether to add budget or wrap up. Resuming is
+// SetBudget (the Lead's decision), never a retry by the owner.
+const LeaseStateBlocked = "blocked"
+
+// TaskBudget is the per-task cost ceiling (G11). The plan puts the shape of the
+// limit here and the *measurement* elsewhere: whoever owns the model call reports
+// usage through Consume, and this layer owns the only thing that cannot be
+// delegated — the stop.
+//
+// Zero means unlimited on either axis. The two axes are deliberately joined in
+// one row: "this task may spend 200k tokens or 30 minutes" is one decision, and
+// splitting it would let a task pass one gate while failing the other.
+type TaskBudget struct {
+	TaskID string
+	// MaxTokens is the token ceiling; 0 = unlimited.
+	MaxTokens int
+	// MaxMinutes is the wall-clock ceiling measured from StartedAt; 0 = unlimited.
+	MaxMinutes int
+	// UsedTokens is what the accounting source has reported so far. It is never
+	// derived here: this layer does not see model calls, it only adds up what it
+	// is told.
+	UsedTokens int
+	// StartedAt is when the first usage was reported — the clock MaxMinutes runs
+	// on. A budget row with no usage yet has a zero StartedAt.
+	StartedAt time.Time
+	// Exhausted is the stop. It is sticky until somebody re-budgets the task
+	// (SetBudget): a stop that clears itself on the next tick would be advice,
+	// not a stop.
+	Exhausted bool
+}
+
+// ErrLeaseBudgetExhausted means Consume crossed a task's budget. The budget is
+// still returned with the error so the caller can show used/limit; the lease (if
+// any) is already parked in LeaseStateBlocked by then.
+var ErrLeaseBudgetExhausted = errors.New("lease: task budget exhausted")
