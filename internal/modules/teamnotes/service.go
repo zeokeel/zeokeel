@@ -32,6 +32,14 @@ const NoteType = "team-note"
 // enumerates that subtree — would never see a note.
 const URIPrefix = "mem://user/self/memories/team-note/"
 
+// Agent-scoped notes live under their own memory type and subtree. That is the
+// whole enforcement: a team listing filters on the team type, so a bot's private
+// note cannot appear on the shared board even by accident.
+const (
+	AgentNoteType  = "agent-note"
+	AgentURIPrefix = "mem://user/self/memories/agent-note/"
+)
+
 // Validation limits. The notes' own budgets are rune counts (a CJK title and a
 // Latin one get the same room); MaxTitleBytes is the store's separate hard cap.
 const (
@@ -314,6 +322,15 @@ func (s *Service) noteOf(ctx context.Context, item contracts.MemoryItem) contrac
 
 // validate rejects notes the note board cannot render honestly.
 func validate(note contracts.TeamNote) error {
+	switch note.Scope {
+	case "", contracts.NoteScopeTeam:
+	case contracts.NoteScopeAgent:
+		if strings.TrimSpace(note.Owner) == "" {
+			return invalid("agent-scoped note needs an owner")
+		}
+	default:
+		return invalid("unknown scope %q", note.Scope)
+	}
 	switch {
 	case note.Title == "":
 		return invalid("title is empty")
@@ -342,10 +359,23 @@ func unknown(id, format string, args ...any) error {
 
 // noteURI is the deterministic memory URI of one note.
 func noteURI(note contracts.TeamNote) string {
-	if slug, ok := taskSlug(note.TaskID); ok {
-		return URIPrefix + slug
+	prefix := URIPrefix
+	if note.Scope == contracts.NoteScopeAgent {
+		prefix = AgentURIPrefix + agentSlug(note.Owner) + "/"
 	}
-	return URIPrefix + generatedID(note)
+	if slug, ok := taskSlug(note.TaskID); ok {
+		return prefix + slug
+	}
+	return prefix + generatedID(note)
+}
+
+// agentSlug projects a bot id onto the URI charset; an id that cannot be
+// projected keeps its own generated segment so two bots never share a subtree.
+func agentSlug(owner string) string {
+	if slug, ok := taskSlug(owner); ok {
+		return slug
+	}
+	return generatedID(contracts.TeamNote{Author: owner})
 }
 
 // taskSlug projects a task id onto the URI charset [a-z0-9-]. A task id that
@@ -426,9 +456,13 @@ func taskIDFromURI(uri string) string {
 // draftOf builds the memory write for one note. Record and Review both go
 // through it so the stored shape can never drift between them.
 func draftOf(note contracts.TeamNote, state reviewState) contracts.MemoryDraft {
+	memoryType := NoteType
+	if note.Scope == contracts.NoteScopeAgent {
+		memoryType = AgentNoteType
+	}
 	return contracts.MemoryDraft{
 		URI:      note.ID,
-		Type:     NoteType,
+		Type:     memoryType,
 		Title:    note.Title,
 		Summary:  summaryOf(note, state),
 		Overview: metaBlock(note, state),

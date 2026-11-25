@@ -42,6 +42,17 @@ type fakeMemory struct {
 	getCalls  int
 }
 
+// typesSeen reports the memory types written so far, in write order.
+func (f *fakeMemory) typesSeen() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	seen := make([]string, 0, len(f.writes))
+	for _, draft := range f.writes {
+		seen = append(seen, draft.Type)
+	}
+	return seen
+}
+
 func newFakeMemory() *fakeMemory {
 	return &fakeMemory{
 		rows:   make(map[string]contracts.MemoryDetail),

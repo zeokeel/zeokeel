@@ -37,6 +37,15 @@ type TeamNote struct {
 	// ReviewedAt is when the review happened (zero when Reviewed is false). It
 	// is not At: a note keeps the time it was recorded.
 	ReviewedAt time.Time
+
+	// Scope decides who may read the note: NoteScopeTeam (the default) is the
+	// shared board every bot and human reads; NoteScopeAgent is private to the
+	// bot named in Owner. The store enforces it by writing agent notes under a
+	// different memory type, so a team listing cannot see them by accident.
+	Scope string
+	// Owner is the bot an agent-scoped note belongs to (required when Scope is
+	// agent; ignored otherwise).
+	Owner string
 }
 
 // TeamNoteReview is one human review of a stored note. Accepting a note is the
@@ -55,6 +64,14 @@ type TeamNoteReview struct {
 	// At is when the review happened (zero means "now").
 	At time.Time
 }
+
+// Note scopes.
+const (
+	// NoteScopeTeam is the shared board (the default).
+	NoteScopeTeam = "team"
+	// NoteScopeAgent is private to one bot.
+	NoteScopeAgent = "agent"
+)
 
 // TeamNotesService is the team's shared note board over the memory store. It is
 // deliberately tiny: notes are append/replace records, not a task system. Notes
