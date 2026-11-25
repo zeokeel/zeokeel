@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,6 +26,21 @@ import (
 
 // DefaultBaseURL is the official iLink host.
 const DefaultBaseURL = "https://ilinkai.weixin.qq.com"
+
+// DefaultPollInterval is the pause between polls after a successful one.
+const DefaultPollInterval = 30 * time.Second
+
+// BackoffInitial and BackoffMax bound the retry schedule Run uses while the
+// platform is unavailable (2s doubling to 1m).
+const (
+	BackoffInitial = 2 * time.Second
+	BackoffMax     = time.Minute
+)
+
+// KeepaliveWarnAfter is how old the newest inbound message may get before
+// NeedsKeepalive reports true. The reply window is contracts.WeChatWindow (24h);
+// warning at 20h leaves four hours for the user to message the bot again.
+const KeepaliveWarnAfter = contracts.WeChatWindow - 4*time.Hour
 
 // maxTitleRunes keeps an inbox title scannable; the full text stays in Body.
 const maxTitleRunes = 60
@@ -84,6 +100,10 @@ type Adapter struct {
 	inbox contracts.InboxService
 	cfg   Config
 
+	// store is the optional login-token store. nil means the token lives only in
+	// memory for this process (tests, or a host without a data directory).
+	store *TokenStore
+
 	mu sync.Mutex
 	// tokens is the latest context token per user: a reply must ride the token
 	// of the message it answers.
@@ -94,9 +114,70 @@ type Adapter struct {
 	botID string
 }
 
-// NewAdapter wires the adapter.
+// NewAdapter wires the adapter without token persistence.
 func NewAdapter(inboxService contracts.InboxService, cfg Config) *Adapter {
 	return &Adapter{inbox: inboxService, cfg: cfg.normalized(), tokens: make(map[string]string)}
+}
+
+// OpenAdapter wires the adapter with a token store and restores the persisted
+// login, so a restart reports Connected without a new QR scan.
+//
+// A nil store is allowed (no persistence). A corrupt token.json yields an error
+// wrapping ErrTokenStoreCorrupt and leaves the file untouched — the caller
+// quarantines it (see Module) and then calls OpenAdapter again. An explicit
+// cfg.Token wins over the stored one: assembly configuration is authoritative,
+// and a stale login must not override an operator's token.
+func OpenAdapter(inboxService contracts.InboxService, cfg Config, store *TokenStore) (*Adapter, error) {
+	adapter := NewAdapter(inboxService, cfg)
+	adapter.store = store
+	if store == nil || strings.TrimSpace(adapter.cfg.Token) != "" {
+		return adapter, nil
+	}
+	token, ok, err := store.Load()
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		adapter.cfg.Token = token
+	}
+	return adapter, nil
+}
+
+// SetToken records the login token from the QR flow and persists it when a store
+// is configured. The token is persisted *before* it is adopted, so a failed write
+// cannot leave an in-memory login that silently disappears on the next restart;
+// the error tells the caller the login did not stick. A new login also drops the
+// previous identity's context tokens (they are scoped to the bot account and
+// would be rejected by the platform).
+func (a *Adapter) SetToken(token string) error {
+	token = strings.TrimSpace(token)
+	a.mu.Lock()
+	store := a.store
+	a.mu.Unlock()
+
+	if store != nil {
+		if err := store.Save(token); err != nil {
+			return fmt.Errorf("wechat: persist token: %w", err)
+		}
+	}
+
+	a.mu.Lock()
+	a.cfg.Token = token
+	a.tokens = make(map[string]string)
+	a.mu.Unlock()
+	return nil
+}
+
+// ClearToken logs out: the token is dropped from memory and from the store.
+func (a *Adapter) ClearToken() error {
+	return a.SetToken("")
+}
+
+// token returns the current login token ("" = not connected).
+func (a *Adapter) token() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.cfg.Token
 }
 
 // PollOnce implements contracts.WeChatService.
@@ -104,7 +185,7 @@ func (a *Adapter) PollOnce(ctx context.Context) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	if a.cfg.Token == "" {
+	if a.token() == "" {
 		return 0, contracts.ErrWeChatUnauthorized
 	}
 	body, _ := json.Marshal(map[string]any{})
@@ -175,7 +256,7 @@ func (a *Adapter) Send(ctx context.Context, toUserID, text string) error {
 	if strings.TrimSpace(text) == "" {
 		return contracts.ErrWeChatEmptyMessage
 	}
-	if a.cfg.Token == "" {
+	if a.token() == "" {
 		return contracts.ErrWeChatUnauthorized
 	}
 
@@ -245,12 +326,96 @@ func (a *Adapter) Status(ctx context.Context) (contracts.WeChatStatus, error) {
 	return status, nil
 }
 
+// NeedsKeepalive reports whether the 24h reply window is close enough to closing
+// that the user should be nudged to message the bot again (the window cannot be
+// refreshed from our side: only an inbound message restarts it). False before any
+// inbound message, since there is no window to keep alive yet. The adapter never
+// sends that nudge itself — the caller owns messaging.
+func (a *Adapter) NeedsKeepalive(now time.Time) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.lastInbound.IsZero() {
+		return false
+	}
+	return now.Sub(a.lastInbound) > KeepaliveWarnAfter
+}
+
+// Run polls the platform until ctx is canceled. After a successful poll it waits
+// interval; while the platform is unavailable it backs off exponentially
+// (BackoffInitial doubling, capped at BackoffMax) so an outage does not turn into
+// a request flood; a rejected login token is terminal and returned immediately.
+// Cancellation returns nil — stopping on request is not a failure.
+func (a *Adapter) Run(ctx context.Context, interval time.Duration) error {
+	if interval <= 0 {
+		interval = DefaultPollInterval
+	}
+	attempt := 0
+	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+		_, err := a.PollOnce(ctx)
+		if ctx.Err() != nil {
+			return nil
+		}
+		switch {
+		case err == nil:
+			attempt = 0
+			if !sleepCtx(ctx, interval) {
+				return nil
+			}
+		case errors.Is(err, contracts.ErrWeChatUnauthorized):
+			return contracts.ErrWeChatUnauthorized
+		default:
+			// Transient: unavailable platform, inbox hiccup, decode failure. All
+			// of them are worth retrying, slowly.
+			attempt++
+			if !sleepCtx(ctx, backoffDelay(attempt)) {
+				return nil
+			}
+		}
+	}
+}
+
+// backoffDelay is the retry schedule: 2s, 4s, 8s … capped at BackoffMax.
+func backoffDelay(attempt int) time.Duration {
+	if attempt < 1 {
+		return BackoffInitial
+	}
+	delay := BackoffInitial
+	for i := 1; i < attempt; i++ {
+		if delay >= BackoffMax/2 {
+			return BackoffMax
+		}
+		delay *= 2
+	}
+	if delay > BackoffMax {
+		return BackoffMax
+	}
+	return delay
+}
+
+// sleepCtx waits d, returning false when ctx was canceled first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
 // setHeaders copies the iLink header contract (bearer token + a per-request
 // random uint32 so the platform cannot correlate requests by a fixed id).
 func (a *Adapter) setHeaders(request *http.Request) {
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("AuthorizationType", "ilink_bot_token")
-	request.Header.Set("Authorization", "Bearer "+a.cfg.Token)
+	request.Header.Set("Authorization", "Bearer "+a.token())
 	var seed [4]byte
 	_, _ = rand.Read(seed[:])
 	request.Header.Set("X-WECHAT-UIN", base64.StdEncoding.EncodeToString(seed[:]))

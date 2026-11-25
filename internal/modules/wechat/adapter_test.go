@@ -28,6 +28,10 @@ type fakeILink struct {
 	sends     []map[string]any
 	sendError int
 	status    int
+	// polls counts getupdates calls; lastAuth keeps the newest Authorization
+	// header so token persistence can be observed from the wire.
+	polls    int
+	lastAuth string
 }
 
 func (f *fakeILink) handler() http.Handler {
@@ -37,6 +41,8 @@ func (f *fakeILink) handler() http.Handler {
 		updates := f.updates
 		f.updates = nil
 		status := f.status
+		f.polls++
+		f.lastAuth = r.Header.Get("Authorization")
 		f.mu.Unlock()
 		if status != 0 {
 			w.WriteHeader(status)
@@ -239,4 +245,18 @@ func TestPollSurfacesUnauthorized(t *testing.T) {
 	if _, err := adapter.PollOnce(context.Background()); !errors.Is(err, contracts.ErrWeChatUnauthorized) {
 		t.Fatalf("err = %v, want ErrWeChatUnauthorized", err)
 	}
+}
+
+// lastAuthHeader / pollCount expose the newest request state to the token and
+// poll-loop tests without reaching into the fake's fields.
+func (f *fakeILink) lastAuthHeader() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastAuth
+}
+
+func (f *fakeILink) pollCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.polls
 }
