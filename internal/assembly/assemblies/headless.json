@@ -115,6 +115,11 @@
       "config": {}
     },
     {
+      "id": "heartbeat",
+      "module": "zeokeel/heartbeat",
+      "config": {}
+    },
+    {
       "id": "browser",
       "module": "zeokeel/browser",
       "config": {

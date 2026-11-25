@@ -15,6 +15,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/email"
 	"github.com/zeokeel/zeokeel/internal/modules/feishu"
 	"github.com/zeokeel/zeokeel/internal/modules/goal"
+	"github.com/zeokeel/zeokeel/internal/modules/heartbeat"
 	"github.com/zeokeel/zeokeel/internal/modules/hosttools"
 	"github.com/zeokeel/zeokeel/internal/modules/importer"
 	"github.com/zeokeel/zeokeel/internal/modules/inbox"
@@ -71,6 +72,9 @@ func Registry() *module.Registry {
 	mustRegister(registry, triage.Module())
 	// The triage pass joins inbox + triage: it must come after both.
 	mustRegister(registry, lead.Module())
+	// The autonomous loop starts last among the work modules: it wants the lead
+	// and the channel adapters to already exist.
+	mustRegister(registry, heartbeat.Module())
 	// tasklease wraps the task board: it must come after toolkit.
 	mustRegister(registry, tasklease.Module())
 	mustRegister(registry, goal.Module())
