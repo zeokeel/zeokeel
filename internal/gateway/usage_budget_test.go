@@ -6,6 +6,7 @@ package gateway
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 
@@ -84,5 +85,74 @@ func TestUnboundOrCheapRunsDoNotConsume(t *testing.T) {
 	defer lease.mu.Unlock()
 	if len(lease.consumed) != 0 {
 		t.Fatalf("consumed = %v, want nothing", lease.consumed)
+	}
+}
+
+type fakeNotifyDispatch struct {
+	mu       sync.Mutex
+	category []string
+	texts    []string
+}
+
+func (f *fakeNotifyDispatch) Deliver(_ context.Context, category, text string) (contracts.DispatchReceipt, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.category = append(f.category, category)
+	f.texts = append(f.texts, text)
+	return contracts.DispatchReceipt{Channel: contracts.NotifyChannelInApp}, nil
+}
+
+func TestBudgetStopTellsTheHumanToDecide(t *testing.T) {
+	chat := &fakeChatWithBinder{fakeChat: newFakeChat(), taskID: "task-9"}
+	root := testRoot(t, chat)
+	lease := &fakeConsumeLease{err: contracts.ErrLeaseBudgetExhausted}
+	if _, err := root.Provide(contracts.KeyTaskLease, contracts.TaskLeaseService(lease)); err != nil {
+		t.Fatalf("provide lease: %v", err)
+	}
+	dispatcher := &fakeNotifyDispatch{}
+	if _, err := root.Provide(contracts.KeyChannelDispatch, contracts.ChannelDispatchService(dispatcher)); err != nil {
+		t.Fatalf("provide dispatch: %v", err)
+	}
+	gw, err := New(root, Options{DataDir: t.TempDir(), Port: -1, Logger: testLogger{t: t}, Out: discardWriter{}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	gw.consumeRunUsage("s-1", 500)
+
+	dispatcher.mu.Lock()
+	defer dispatcher.mu.Unlock()
+	if len(dispatcher.category) != 1 {
+		t.Fatalf("notifications = %v, want one", dispatcher.category)
+	}
+	if dispatcher.category[0] != contracts.NotifyCategoryNeedsDecision {
+		t.Fatalf("category = %q, want needs_decision", dispatcher.category[0])
+	}
+	if !strings.Contains(dispatcher.texts[0], "task-9") {
+		t.Fatalf("text = %q, want the task named", dispatcher.texts[0])
+	}
+}
+
+func TestMeteringNoiseIsNotAnnounced(t *testing.T) {
+	chat := &fakeChatWithBinder{fakeChat: newFakeChat(), taskID: "task-9"}
+	root := testRoot(t, chat)
+	lease := &fakeConsumeLease{err: contracts.ErrLeaseInvalid}
+	if _, err := root.Provide(contracts.KeyTaskLease, contracts.TaskLeaseService(lease)); err != nil {
+		t.Fatalf("provide lease: %v", err)
+	}
+	dispatcher := &fakeNotifyDispatch{}
+	if _, err := root.Provide(contracts.KeyChannelDispatch, contracts.ChannelDispatchService(dispatcher)); err != nil {
+		t.Fatalf("provide dispatch: %v", err)
+	}
+	gw, err := New(root, Options{DataDir: t.TempDir(), Port: -1, Logger: testLogger{t: t}, Out: discardWriter{}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	gw.consumeRunUsage("s-1", 500)
+	dispatcher.mu.Lock()
+	defer dispatcher.mu.Unlock()
+	if len(dispatcher.category) != 0 {
+		t.Fatalf("a metering error was announced: %v", dispatcher.category)
 	}
 }

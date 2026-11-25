@@ -817,6 +817,25 @@ func (g *Gateway) consumeRunUsage(sessionID string, tokens int) {
 	}
 	if _, err := leases.Consume(context.Background(), taskID, tokens); err != nil {
 		g.logger.Printf("gateway: consume %d tokens for %s: %v", tokens, taskID, err)
+		// The stop itself is the lease's job; telling the human is this one's.
+		// Only the budget stop is announced here — a metering error is noise.
+		if errors.Is(err, contracts.ErrLeaseBudgetExhausted) {
+			g.notifyBudgetStop(context.Background(), taskID, err)
+		}
+	}
+}
+
+// notifyBudgetStop asks the human what to do about a stopped task. It uses the
+// needs_decision route because that is exactly the situation: work stopped and a
+// person has to decide whether to add budget.
+func (g *Gateway) notifyBudgetStop(ctx context.Context, taskID string, cause error) {
+	dispatcher, ok := g.root.Get(contracts.KeyChannelDispatch)
+	if !ok || dispatcher == nil {
+		return
+	}
+	text := "任务 " + taskID + " 因预算用尽已停止。\n" + cause.Error() + "\n需要你决定是否追加预算。"
+	if _, err := dispatcher.Deliver(ctx, contracts.NotifyCategoryNeedsDecision, text); err != nil {
+		g.logger.Printf("gateway: notify budget stop for %s: %v", taskID, err)
 	}
 }
 
