@@ -45,6 +45,10 @@ export const ROUTES: RouteMeta[] = [
   // `/settings/channels` resolves here while `/settings/model` still resolves
   // to R13–R21.
   { path: '/settings/channels', ref: 'R27a', titleKey: 'channels.title' },
+  // R27b: run status (`heartbeat.status`/`heartbeat.tick`, `browser.status`).
+  // Same shape as R27a — a static path that outranks `/settings/:page` by
+  // length — because neither surface is a `settings` domain row.
+  { path: '/settings/health', ref: 'R27b', titleKey: 'health.title' },
   { path: '/automation', ref: 'R22', titleKey: 'shell.automation' },
   { path: '/capabilities', ref: 'R23', titleKey: 'shell.capabilities' },
   { path: '/insights', ref: 'R24', titleKey: 'shell.insights' },

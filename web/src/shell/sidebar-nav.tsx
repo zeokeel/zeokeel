@@ -33,6 +33,9 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
       // R27a: the channel surface is its own entry, so it must not inherit the
       // settings item's selection (`/settings/model`).
       '/settings/channels',
+      // R27b: the run-status surface has its own entry too, so it cannot
+      // inherit the settings item's selection either.
+      '/settings/health',
     ].find((path) => location.pathname.startsWith(path)) ??
     (location.pathname.startsWith('/settings') ? '/settings/model' : '');
 
@@ -87,6 +90,10 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean } = {}) 
         // (the paper plane) is the delivery direction of everything on that
         // page; `data` is already taken by the inbound work queue.
         { key: '/settings/channels', icon: <ZkIcon name="send" />, label: t('channels.title') },
+        // R27b: run status (heartbeat + automation browser). `plug` is the
+        // "is it connected and alive" glyph; `activity` is already the insights
+        // entry and `clock` the automation one.
+        { key: '/settings/health', icon: <ZkIcon name="plug" />, label: t('health.title') },
       ]}
     />
   );

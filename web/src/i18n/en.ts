@@ -848,4 +848,48 @@ export const en: Catalog = {
   'channels.notify.enabled': 'Enabled',
   'channels.notify.save': 'Save',
   'channels.notify.saved': 'Saved',
+
+  // ---------------------------------------------------------------- health --
+  // R27b: the run-status screen. Read-only facts about two things that move on
+  // their own (the heartbeat, the automation browser); the only write is
+  // "run one pass now", and its result is re-read from the gateway.
+  'health.title': 'Run status',
+  'health.note':
+    'Heartbeat and browser are read-only here; this page does not poll — read it again when you need to.',
+  'health.retry': 'Retry',
+  'health.loadFailed': 'Could not load the run status',
+  'health.tickFailed': 'The manual pass failed',
+  'health.refresh': 'Refresh',
+  'health.heartbeat.title': 'Heartbeat',
+  'health.heartbeat.note':
+    'The scheduled Lead and channel passes; every number below is from the last pass.',
+  'health.heartbeat.running': 'Running',
+  'health.heartbeat.stopped': 'Not running',
+  'health.heartbeat.tick': 'Run a pass now',
+  'health.heartbeat.leadInterval': 'Lead interval',
+  'health.heartbeat.channelInterval': 'Channel interval',
+  'health.heartbeat.lastTick': 'Last pass',
+  'health.heartbeat.never': 'has not run yet',
+  'health.heartbeat.leadRuns': 'Lead runs',
+  'health.heartbeat.dispatched': 'Dispatched',
+  'health.heartbeat.polls': 'Channel polls',
+  'health.heartbeat.newMessages': 'New messages',
+  'health.heartbeat.errorCount': 'Errors in the last pass ({count})',
+  'health.browser.title': 'Browser',
+  'health.browser.note': 'The automation browser; the connection itself is made in settings.',
+  'health.browser.connected': 'Connected',
+  'health.browser.disconnected': 'Not connected',
+  'health.browser.endpoint': 'Endpoint',
+  'health.browser.pages': 'Pages',
+  'health.browser.empty': 'No browser is connected yet.',
+  'health.browser.emptyHint':
+    'Once a browser is connected in settings, its endpoint and page count show up here.',
+  'health.interval.everyMillis': 'every {count} ms',
+  'health.interval.everySeconds': 'every {count} s',
+  'health.interval.everyMinutes': 'every {count} min',
+  'health.interval.everyHours': 'every {count} h',
+  'health.age.justNow': 'just now',
+  'health.age.minutes': '{count} min ago',
+  'health.age.hours': '{count} h ago',
+  'health.age.days': '{count} d ago',
 };

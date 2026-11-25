@@ -19,6 +19,7 @@ import { TeamScreen as TeammatesScreen } from '@/features/team/team-screen';
 import { ContextScreen } from '@/features/thread/context-screen';
 import { NowScreen } from '@/features/now/now-screen';
 import { ChannelsScreen } from '@/features/settings/channels/ChannelsScreen';
+import { HealthScreen } from '@/features/settings/health/HealthScreen';
 import { SettingsScreen } from '@/features/settings/settings-screen';
 import { NotFoundScreen } from '@/features/not-found-screen';
 import { ChildSessionScreen } from '@/features/thread/child-session-screen';
@@ -96,6 +97,11 @@ export function AppRoutes() {
           `settings` domain keys, and the surface reads and writes three other
           domains (credentials, webhook, notify). */}
       <Route path="/settings/channels" element={<ChannelsScreen />} />
+      {/* R27b: run status — the heartbeat and the automation browser. Its own
+          route for the same reason R27a has one: these are `heartbeat.*` /
+          `browser.status` reads, not `settings` domain rows. The static path
+          outranks `:page` in `routeForPath`, so this resolves first. */}
+      <Route path="/settings/health" element={<HealthScreen />} />
       <Route path="/settings/:page" element={<SettingsScreen />} />
       <Route path="/automation" element={<AutomationScreen />} />
       <Route path="/capabilities" element={<CapabilitiesScreen />} />

@@ -849,6 +849,47 @@ export const zh = {
   'channels.notify.enabled': '启用',
   'channels.notify.save': '保存',
   'channels.notify.saved': '已保存',
+
+  // ---------------------------------------------------------------- health --
+  // R27b: the run-status screen. Read-only facts about two things that move on
+  // their own (the heartbeat, the automation browser); the only write is
+  // "run one pass now", and its result is re-read from the gateway.
+  'health.title': '运行状态',
+  'health.note': '自转与浏览器都是只读状态；这个页面不轮询，需要时手动读一次。',
+  'health.retry': '重试',
+  'health.loadFailed': '运行状态加载失败',
+  'health.tickFailed': '手动查一次失败',
+  'health.refresh': '刷新',
+  'health.heartbeat.title': '自转',
+  'health.heartbeat.note': 'Lead 与渠道的定时轮询；下面的数字都是最近一轮的结果。',
+  'health.heartbeat.running': '运行中',
+  'health.heartbeat.stopped': '未运行',
+  'health.heartbeat.tick': '立即查一次',
+  'health.heartbeat.leadInterval': 'Lead 间隔',
+  'health.heartbeat.channelInterval': '渠道间隔',
+  'health.heartbeat.lastTick': '上次轮询',
+  'health.heartbeat.never': '还没有跑过',
+  'health.heartbeat.leadRuns': 'Lead 检查',
+  'health.heartbeat.dispatched': '派发任务',
+  'health.heartbeat.polls': '渠道轮询',
+  'health.heartbeat.newMessages': '新消息',
+  'health.heartbeat.errorCount': '最近一轮的错误（{count}）',
+  'health.browser.title': '浏览器',
+  'health.browser.note': '自动化的浏览器连接；连接本身在设置里建立。',
+  'health.browser.connected': '已连接',
+  'health.browser.disconnected': '未连接',
+  'health.browser.endpoint': '端点',
+  'health.browser.pages': '页面数',
+  'health.browser.empty': '还没连接浏览器。',
+  'health.browser.emptyHint': '在设置里连接浏览器后，这里会显示端点与页面数。',
+  'health.interval.everyMillis': '每 {count} 毫秒',
+  'health.interval.everySeconds': '每 {count} 秒',
+  'health.interval.everyMinutes': '每 {count} 分钟',
+  'health.interval.everyHours': '每 {count} 小时',
+  'health.age.justNow': '刚刚',
+  'health.age.minutes': '{count} 分钟前',
+  'health.age.hours': '{count} 小时前',
+  'health.age.days': '{count} 天前',
 } as const;
 
 export type MessageKey = keyof typeof zh;
