@@ -55,10 +55,14 @@ func (g *Gateway) handleInbound(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	service, ok := g.root.Get(contracts.KeyWebhook)
-	if !ok || service == nil {
-		http.NotFound(w, r)
-		return
+	var webhook contracts.WebhookService
+	if sourceID != "dingtalk" && sourceID != "feishu" {
+		service, ok := g.root.Get(contracts.KeyWebhook)
+		if !ok || service == nil {
+			http.NotFound(w, r)
+			return
+		}
+		webhook = service
 	}
 
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, inboundMaxBody))
@@ -72,7 +76,16 @@ func (g *Gateway) handleInbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := service.Receive(r.Context(), sourceID, r.Header.Get(contracts.WebhookSignatureHeader), body)
+	switch sourceID {
+	case "dingtalk":
+		g.handleDingTalkInbound(w, r, body)
+		return
+	case "feishu":
+		g.handleFeishuInbound(w, r, body)
+		return
+	}
+
+	result, err := webhook.Receive(r.Context(), sourceID, r.Header.Get(contracts.WebhookSignatureHeader), body)
 	if err != nil {
 		status := inboundStatus(err)
 		if status == http.StatusInternalServerError {
@@ -91,6 +104,66 @@ func (g *Gateway) handleInbound(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// headerMap copies the request headers into the adapter's case-insensitive map.
+func headerMap(r *http.Request) map[string]string {
+	out := make(map[string]string, len(r.Header))
+	for key, values := range r.Header {
+		if len(values) > 0 {
+			out[key] = values[0]
+		}
+	}
+	return out
+}
+
+// handleDingTalkInbound serves the DingTalk chat-bot callback.
+func (g *Gateway) handleDingTalkInbound(w http.ResponseWriter, r *http.Request, body []byte) {
+	service, ok := g.root.Get(contracts.KeyDingTalk)
+	if !ok || service == nil {
+		http.NotFound(w, r)
+		return
+	}
+	item, merged, err := service.Receive(r.Context(), headerMap(r), body)
+	if err != nil {
+		http.Error(w, err.Error(), inboundStatus(err))
+		return
+	}
+	writeInboundAccepted(w, item.ID, merged, item.Count)
+}
+
+// handleFeishuInbound serves the Feishu event callback. The URL handshake must
+// be answered 200 with the challenge; every other payload is a message.
+func (g *Gateway) handleFeishuInbound(w http.ResponseWriter, r *http.Request, body []byte) {
+	service, ok := g.root.Get(contracts.KeyFeishu)
+	if !ok || service == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if challenge, ok := service.VerifyURL(body); ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{"challenge": challenge})
+		return
+	}
+	item, merged, err := service.Receive(r.Context(), headerMap(r), body)
+	if err != nil {
+		http.Error(w, err.Error(), inboundStatus(err))
+		return
+	}
+	if item.ID == "" {
+		// A verified but irrelevant event (wrong event type, non-text message).
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeInboundAccepted(w, item.ID, merged, item.Count)
+}
+
+// writeInboundAccepted answers a delivery that reached the inbox.
+func writeInboundAccepted(w http.ResponseWriter, id string, merged bool, count int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "merged": merged, "count": count})
+}
+
 // inboundStatus maps the adapter's typed errors to HTTP codes.
 func inboundStatus(err error) int {
 	switch {
@@ -102,6 +175,17 @@ func inboundStatus(err error) int {
 		return http.StatusBadRequest
 	case errors.Is(err, contracts.ErrInboxRateLimited), errors.Is(err, contracts.ErrInboxFull):
 		return http.StatusTooManyRequests
+	case errors.Is(err, contracts.ErrDingTalkBadSignature), errors.Is(err, contracts.ErrDingTalkStaleTimestamp),
+		errors.Is(err, contracts.ErrDingTalkUnauthorized),
+		errors.Is(err, contracts.ErrFeishuBadSignature), errors.Is(err, contracts.ErrFeishuStale),
+		errors.Is(err, contracts.ErrFeishuUnauthorized):
+		return http.StatusUnauthorized
+	case errors.Is(err, contracts.ErrDingTalkInvalid), errors.Is(err, contracts.ErrDingTalkUnsupportedMessage),
+		errors.Is(err, contracts.ErrDingTalkEmptyMessage),
+		errors.Is(err, contracts.ErrFeishuBadPayload), errors.Is(err, contracts.ErrFeishuEmptyMessage):
+		return http.StatusBadRequest
+	case errors.Is(err, contracts.ErrDingTalkUnavailable), errors.Is(err, contracts.ErrFeishuUnavailable):
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
 	}
