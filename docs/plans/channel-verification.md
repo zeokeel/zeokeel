@@ -83,3 +83,80 @@ scripts/channel-verify.sh dingtalk    http://127.0.0.1:<port> <secret>
 - [ ] 四个渠道全部通过
 - [ ] 每条失败都已开 issue 并注明现象/时间
 - [ ] 验证用的临时数据目录已删除（`rm -rf /tmp/zk-verify`）
+
+## 6. 本地自证 harness（`scripts/verify-live/`）
+
+上一节的 §4b 是手写的临时证据（一次性的 `/tmp` 脚本、手工贴输出）。本节把它变成**可重跑的
+一条命令**：起真实产品进程，用产品自己的两条传输（WebSocket 控制面 + 签名 HTTP 入口）断言
+自己的行为，并把原始回答逐条打印出来——**证据由被测进程产生，不是脚本的假设**。
+
+它**不替代**本文档 §1–§4 的真机清单：整条链路都在本机 `127.0.0.1`、不接触任何平台。
+
+### 6.1 怎么跑
+
+```bash
+scripts/verify-live/run.sh          # 零参数；退出码 0 = 全部 PASS
+```
+
+它顺序做这几件事（代码即注释，逐条对应 `run.sh`）：
+
+1. `go build -o .cache/zkverify-live ./cmd/zeokeel` —— 被测二进制就是仓库当前代码；
+2. 新建数据目录 `.cache/verify-live/<UTC 时间戳>/`，预置 `webhook/sources.json`
+   （`id=verify`，secret 为 `verify-secret-0123456789` 的 base64，`channel=verify`）——
+   入站路径在启动前就配好，不需要先走 WS 设置往返；
+3. 后台起 `./.cache/zkverify-live --product serve --data-dir <dir>`，轮询
+   `<dir>/gateway.json`（最多 30s）读**真实** port 与 token；
+4. 跑 `node scripts/verify-live/checks.mjs --port N --token T --dir D`；
+5. SIGTERM 停进程（10s 后仍未退则 SIGKILL），打印数据目录与 `product.log` 路径，
+   以 checks 的退出码退出。
+
+产物（每次运行一份，可留作证据）：`gateway.json`（运行期）、`product.log`（进程日志）、
+`inbox/`、`credentials/`、`zeokeel.db`（被断言过的真实状态）。
+
+### 6.2 覆盖了什么
+
+`checks.mjs` 零依赖（只用 node 的 `net`/`crypto`）：先用 `POST /auth` 换 `zk` cookie，
+再在裸 socket 上手写 RFC 6455 握手（带 `Origin`，网关 §3.2 C3 要求；Node 内置
+`WebSocket` 无法设 cookie/Origin，所以不用它），`initialize` → `ready`（§4.2：`ready`
+之前除 `initialize`/`ready`/`ping` 外一律 `not_ready`），然后逐条：
+
+| 检查 | 断言 | 传输 |
+|---|---|---|
+| `initialize.capabilities` | 13 项能力齐全（inbox/triage/tasklease/approvalaction/notifyroute/webhook/lead/credentials/heartbeat/browser/teamnotes/wechatlogin/channeldispatch） | WS |
+| `notify.plan.approval` | `category:"approval"` 的计划末位是 `inapp` | WS |
+| `tasks.tools.get.unknown` | 不存在的任务返回 `{"tools":null}` 或带 code 的类型化错误——两种都算 PASS，记录的是"它怎么回答" | WS |
+| `heartbeat.status` | `running=true` 且 `leadIntervalMs>0` | WS |
+| `inbox.snapshot` | `items` 是数组（全新目录应为空） | WS |
+| `credentials.list` | `credentials.set{kind:wechat,id:live,fields.token=live-secret}` 后列表含 `live`，且原始响应里**不含** `live-secret` | WS |
+| `inbound.webhook.signed` | 正确 HMAC（`t=<unix>,v1=<hex sha256 of "<ts>.<body>">`）→ 202 | HTTP |
+| `inbound.webhook.bad-signature` | 同一 body 换错 secret → 401 | HTTP |
+
+每行输出 `PASS|FAIL <name> <原始回答>`，末尾一行 `SUMMARY n/m passed`；**只有全 PASS 才退出 0**。
+
+### 6.3 实测（2026-11-25 20:46 北京时间，本机真实进程）
+
+```
+port: 9932
+PASS initialize.capabilities missing=[] capabilities=["session.list","session.snapshot",…,"channeldispatch","context","tasks","regenerate","edi…"]
+PASS notify.plan.approval channels=["inapp"] last="inapp" deferred=false reason=undefined
+PASS tasks.tools.get.unknown result {"tools":null}
+PASS heartbeat.status running=true leadIntervalMs=30000 channelIntervalMs=60000
+PASS inbox.snapshot items=[] count=0
+PASS credentials.list set={"ok":true} list={"credentials":[{"kind":"wechat","id":"live"}]} containsLive=true leakedSecret=false
+PASS inbound.webhook.signed HTTP 202 (want 202) body={"count":1,"id":"inbox-000001","merged":false}
+PASS inbound.webhook.bad-signature HTTP 401 (want 401) body=webhook: bad signature
+SUMMARY 8/8 passed
+```
+
+### 6.4 它证明不了什么（仍需真机 / 仍需人）
+
+- **真实平台报文**：钉钉 `timestamp`+`sign` 的真实形态与 header 名、飞书事件与卡片回调的
+  平台签名、微信 `sendmessage` 的字段坑与 24h 窗口、邮件 IMAP/SMTP 编解码——本 harness
+  不解析任何平台报文，这些仍按 §1–§4 在真机做。
+- **出站投递**：`notify.deliver` 到真实渠道、`channeldispatch` 的重试/回退，需要真实凭据与
+  真实网络；本机只验证了 `notify.plan` 的通道选择。
+- **模型的真实运行**：`/api/chat/run` 的 SSE 全链路与审批停面需要模型 key，本 harness 不跑。
+- **浏览器渲染**：这是协议级证据，不是 UI 证据；页面行为仍看 `npm run e2e:cold`。
+- **合并语义**：webhook 同 body 重投应 `merged:true`，但 harness 每次用全新数据目录，
+  因此只看到 `count:1,merged:false`；要验合并需在同一数据目录上重跑
+  `scripts/channel-verify.sh webhook`（§4b 已记录）。
