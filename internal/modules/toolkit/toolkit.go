@@ -54,7 +54,8 @@ type MCPServer struct {
 	Env  []string `json:"env,omitempty"`
 	// Headers are extra request headers (for example Authorization).
 	Headers map[string]string `json:"headers,omitempty"`
-	// TimeoutMs bounds one request (0 = 30s).
+	// TimeoutMs bounds one request and one tool call for this server
+	// (0 = mcpDefaultCallTimeout, 60s; see mcp_call_timeout.go).
 	TimeoutMs int `json:"timeoutMs,omitempty"`
 	// Auth is the HTTP authentication mode for this row (nil = none).
 	Auth *contracts.MCPAuthConfig `json:"auth,omitempty"`

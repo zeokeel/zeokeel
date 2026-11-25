@@ -367,7 +367,18 @@ func (c *mcpController) syncRuntimeLocked() {
 		name := tool.Name()
 		row := owners[index]
 		if !existing[name] {
-			if err := c.registry.Register(tool); err != nil {
+			// Register every MCP tool through its server's per-call budget so one
+			// slow server can fail a single call instead of holding the turn
+			// (mcp_call_timeout.go). The wrapper only wraps Invoke, so the
+			// registry, tool_search and the approval surface see the real tool.
+			timeout := mcpDefaultCallTimeout
+			server := "remote"
+			if row != nil {
+				timeout = mcpServerCallTimeout(row.plan.server)
+				server = pluginDisplayName(row.plan.server.Name, row.client)
+			}
+			registeredTool := withMCPCallTimeout(tool, server, timeout)
+			if err := c.registry.Register(registeredTool); err != nil {
 				// A registry-level collision is not a model-visible tool: do not
 				// track or count it (the Plugins row counts registered tools).
 				c.logf("[toolkit] mcp: skip tool %q: %v", name, err)

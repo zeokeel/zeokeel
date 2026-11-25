@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/zeokeel/zeokeel-rig/tools/mcp"
 
@@ -51,9 +50,12 @@ func mcpStartConfig(server MCPServer) mcp.Config {
 		Env:        cleanMCPArgs(server.Env),
 		ServerName: strings.TrimSpace(server.Name),
 		ClientName: "ZeoKeel",
-	}
-	if server.TimeoutMs > 0 {
-		cfg.Timeout = time.Duration(server.TimeoutMs) * time.Millisecond
+		// Hand the connection the same per-call budget the tool wrapper enforces
+		// (row TimeoutMs, else mcpDefaultCallTimeout): otherwise the transport's
+		// own 30s default would fire first and the caller would see a bare context
+		// deadline instead of *MCPCallTimeoutError. Startup/reconnect stay bounded
+		// by mcpStartupOverallTimeout, so this does not lengthen activation.
+		Timeout: mcpServerCallTimeout(server),
 	}
 	return cfg
 }
@@ -81,9 +83,8 @@ func mcpClientConfig(server MCPServer) (mcp.Config, error) {
 			Headers:    headers,
 			ServerName: server.Name,
 			ClientName: "ZeoKeel",
-		}
-		if server.TimeoutMs > 0 {
-			cfg.Timeout = time.Duration(server.TimeoutMs) * time.Millisecond
+			// Same per-call budget as the tool wrapper (see mcpStartConfig).
+			Timeout: mcpServerCallTimeout(server),
 		}
 		return cfg, nil
 	default:

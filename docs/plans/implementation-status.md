@@ -19,7 +19,7 @@
 | G8 | 产物库（Artifact） | 🟡 | 证据 `kind=file/screenshot` + blobs 存储 | 没有独立产物实体（hash/过期/可见性/任务反向引用） |
 | G9 | 凭据库 | ✅ | `internal/modules/creds`（0600、读路径无字段）+ 适配器读取 | — |
 | G10 | 浏览器（CDP，每 Bot 独立 context） | 🟡 | `internal/modules/browser`（真 ws 传输 + 工具） | 没做每 Bot 独立 browser context / profile 隔离 |
-| G11 | 预算与配额（token/时长/并发） | 🟡 | `tasks.budget.*` + `LeaseStateBlocked` + **真实计量**（绑定会话每轮结束后按 `usage.totalTokens` 记账） | 每 Bot 并发上限未做；停摆通知未接；UI 未展示用量 |
+| G11 | 预算与配额（token/时长/并发） | 🟡 | `tasks.budget.*` + 真实计量 + 停摆通知 + 任务页预算块 + **每 Bot 并发 1**（派单时检查在飞租约并拒绝，理由点名占用任务） | 配额（跨任务合计）未做 |
 | G12 | 从任务沉淀技能 | ✅ | `skilldraft` + 验收自动提议 + `skilldrafts.*`（含 `install` 写入真实 SKILL.md）+ `/skills/drafts` 采纳页 | 重名明确失败（不覆盖），由人改名后重试 |
 | G13 | 工作入口连接器 | ✅ | `webhook`/`wechat`/`dingtalk`/`feishu`/`email` + `channeldispatch` 出站 + 飞书卡片审批 | 真平台凭据下的端到端仍待验证 |
 | G14 | MCP 全量（注解→审批、两级白名单…） | 🟡 | 产品既有 toolkit/MCP 基建；`mcp__*` 走审批门；`tasks.tools` 任务级白名单**且已执行** | 注解→审批映射、prompts/resources、分页、结构化输出、进度取消未做 |
@@ -31,7 +31,7 @@
 | M0 地基 | ✅ | 收件箱→分诊→租约/证据→审批→路由，三层证据：单元/装配/实机（`scripts/verify-live` 12/12） |
 | M1 记忆 | 🟡 | 团队笔记 + 复核 + 验收自动沉淀 + **agent 私有作用域（独立 memory 类型，团队板天然看不到）**；缺建议队列 |
 | M2 触发 | 🟡 | webhook 入站 + heartbeat 自转 + automation 定时；缺"事件→收件箱"通用通道 |
-| M2.5 MCP 补全 | ⬜ | 未开工（基建在，工具白名单执行已落地；注解→审批、prompts/resources 等待做） |
+| M2.5 MCP 补全 | 🟡 | 批次 A 部分落地：工具白名单已执行、**单次调用超时隔离**（默认 60s，超时后服务器仍可用）、注解说明写进 APPROVAL-SURFACES | 注解→审批的运行时读取、prompts/resources、分页、结构化输出、进度取消未做 |
 | M3 浏览器 | 🟡 | CDP 真连接 + 三个工具；缺每 Bot 独立 context、下载拦截 |
 | M4 连接器 | 🟡 | 四类渠道 + 出站 + 凭据 + 扫码登录协议；**真机验证只做了本地能做的部分** |
 | M5 浏览器收尾 | ⬜ | 未开工（依赖 M3 的隔离） |
