@@ -41,6 +41,9 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | `contracts.KeyDingTalk` | dingtalk（依赖 inbox） | 入站路由（待挂） | 17 条（验签/过期/非文本/合并/发送/限速型错误） |
 | `contracts.KeyFeishu` | feishu（依赖 inbox） | 入站路由（待挂） | 24 条（challenge/验签/旧签名/v1 回调/合并/卡片动作/发送/token 铸造） |
 | 租约持久化 | tasklease（+dataDir） | 重启恢复 | 7 条（存活/过期回收/损坏/0600/评审状态） |
+| `contracts.KeyCredentials` | creds（依赖 dataDir） | 渠道适配器、设置页 | 17 条 + 19 校验子测试（往返/覆盖/深拷贝/List 无字段/损坏/0600/并发） |
+| 入站路由（钉钉/飞书） | gateway `inbound.go` | 平台回调 | 6 条（202/签名 401/challenge 200/204/404） |
+| Web「待办收件箱」 | `web/src/features/inbox/**`、`web/src/api/inbox.ts` | `/inbox/incoming` | web 全量 453 tests 绿；旧 `/inbox` 有回归测试 |
 | `contracts.KeyWebhook` | webhook（依赖 inbox + dataDir） | `POST /api/inbound/{source}`、`webhook.sources/source.set/remove` | 10 条收件测试 + 7 条 HTTP 测试 + 6 条 source 管理测试（排序/校验/删除/重启恢复/轮换失效/0600） |
 | **网关 → 服务键**（11 个方法） | inbox / triage / tasklease / approvalaction | web 客户端、Lead 分诊回合 | 一致性测试（TRANSPORT §5.1 ↔ dispatch ↔ contract.json ↔ ws-contract.ts）+ 载荷映射测试 7 条 |
 | 注册 ↔ 装配一致 | registry | headless.json | `TestEveryRegisteredModuleIsLoaded`（新） |
@@ -70,8 +73,9 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 | ~~审批 action + 文字回复~~ | ✅ 已交付：`IssueToken` / `Apply` / `ApplyReply`，三条入口最终都落到 `Resolve` | 已交付 |
 | 渠道适配器 | 🟡 四个渠道的内核都有了：webhook（+HTTP+source 管理）、微信（轮询/发送/token 持久化/轮询循环/保活）、钉钉（验签+收+发）、飞书（challenge+验签+收+卡片动作提取+发）；邮件未开始。**只有 webhook 挂了 HTTP 路由** | 下一步：钉钉/飞书入站路由与卡片回调、凭据存储、真机验证 |
 | 渠道真机验证 | 微信/钉钉/飞书都只对**假服务**跑过（httptest），真实平台的报文、签名实现与限速未验证 | 已知风险 | 上线前每个渠道真机跑一遍（回调回放 + 收发 + 限速） |
-| 钉钉/飞书凭据存储 | 两者 `Token`/`AppSecret`/`SignSecret` 都是 `json:"-"`，只能从配置注入；没有像 webhook 那样的 0600 持久化 | 缺口 | 复用 webhook 的 source store 模式，或统一凭据库 |
-| 钉钉/飞书 HTTP 路由 | 适配器有 `Receive`，但网关只挂了 webhook 的 `/api/inbound/{source}` | 缺口 | 各加一个路由 + 卡回调路由（飞书 challenge 必须回 200） |
+| ~~钉钉/飞书 HTTP 路由~~ | ✅ 已交付：`/api/inbound/dingtalk`、`/api/inbound/feishu`（challenge 200、无关事件 204、错误 401/400/503） | 已交付 |
+| 凭据仍未接到适配器 | creds 库有了，但三个适配器仍从 Config 读 `json:"-"` 字段；没人调用 `KeyCredentials` | 缺口 | 适配器启动时 `Get(kind,id)` + 热更新；UI 表单 |
+| 卡片动作未接审批 | 飞书 `CardAction` 提取了 approvalId/decision，但审批 action 需要一次性 token；卡片 value 里还没带 token | 缺口 | 发卡时把 token 放进 `action.value`，回调走 `approval.action` |
 | ~~网关协议 `inbox.*` / 租约 / 审批动作~~ | ✅ 9 个方法已实现并同步 TRANSPORT §5.1.13、contract.json、ws-contract.ts | 已交付 |
 | ~~`notify.route.*`（主/备渠道）~~ | ✅ 已交付：router 服务 + `notify.route.snapshot/upsert` + capability `notifyroute` | 已交付 |
 | UI | 未接；效果图只是原型 | 协议稳定后一轮做 |
@@ -132,6 +136,8 @@ scripts/verify.sh --quick（source 管理后）PASS 5/5，63s
 scripts/verify.sh --quick（lead 后）    PASS 5/5，66s；web gen:verify / tsc 通过
 scripts/verify.sh --quick（wechat 后）  PASS 5/5，67s
 scripts/verify.sh --quick（并行四流集成后）PASS 5/5，66s
+scripts/verify.sh --quick（creds 集成后）PASS 5/5，68s
+web: typecheck / lint(25 既有 warning) / test 453 / gen:verify 全绿
 scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过
 scripts/verify.sh --quick（approval 后）    PASS 5/5（一次 flaky 后重跑绿）
                                             （首次跑时 gateway 的
