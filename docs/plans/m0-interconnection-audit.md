@@ -53,8 +53,9 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | 微信扫码登录 | `wechat` + `wechat.login.start/state` | 设置页扫码接入 | 12 模块测试 + 网关 2 方法（expired 是答案不是错误） |
 | Web 共享记忆页 | `web/src/features/settings/memory/**` | `/settings/memory`（R27c） | 18 测试（列表/复核态/确认驳回/失败保留行/窄屏） |
 | 模型计划器装配 | `lead.PlannerFromSettings`（读 `chat.baseURL/apiKey/model`） | `lead.RunOnce` | 4 条（完整→模型/缺项→规则） |
-| `heartbeat.configure` | gateway + 运行状态页 | 运行中改节奏/开关 | 3 条模块测试（改节奏生效/拒绝过快/运行中关闭再开） |
+| `heartbeat.configure` | gateway + 运行状态页控件 | 运行中改节奏/开关 | 3 条模块测试 + 5 条 UI 测试（开关/节奏/失败不翻转/在飞禁用） |
 | 渠道报文夹具（微信） | wechat testdata + fixtures | 真机前最后一道闸 | 发现 200+ret_code 当成功、data 信封静默丢弃，均已修 |
+| 渠道报文夹具（邮件） | email testdata + fixtures | 真机前最后一道闸 | 发现 multipart 当原文入库、HTML-only 静默、折叠主题留 CRLF；单封坏信曾阻塞整个邮箱，已改为跳过+上报 |
 | Web 渠道设置 | `web/src/features/settings/channels/**`、`web/src/api/channels.ts` | `/settings/channels`（R27a） | 12 测试；密钥不回显有断言 |
 | `planner`（library） | planner（仅依赖 contracts） | 模型计划器 | 14 测试 / 21 断言（线格式/错误分层/预算先于网络/密钥永不入错误） |
 | 模型计划器接入 | `lead.ModelPlanner` + `lib/leadplan` | `lead.RunOnce` | 4 条（映射 task/skip/无模型/驱动整轮） |
@@ -194,6 +195,7 @@ scripts/verify.sh --quick（验收即记忆/扫码登录后）PASS 5/5，67s
 scripts/verify.sh --quick（凭据/浏览器工具后）PASS 5/5，70s
 scripts/verify.sh --quick（复核/配置/夹具后）PASS 5/5，69s
 web（复核 UI 后）: typecheck / lint(25) / test 575 全绿
+web（循环控件后）: typecheck / lint(25) / test 580 全绿
 web（扫码 UI 后）: typecheck / lint(25) / test 560 全绿
 scripts/verify.sh --quick（邮件/计划器/凭据/卡片后）PASS 5/5，64s
 scripts/verify.sh --quick（网关方法后）PASS 5/5，63s；web `gen:verify` 全绿、`tsc --noEmit` 通过
