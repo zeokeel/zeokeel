@@ -26,6 +26,11 @@ func Module() *module.Descriptor[Config] {
 		if _, err := ctx.Provide(contracts.KeyTeamNotes, contracts.TeamNotesService(service)); err != nil {
 			return fmt.Errorf("%s: provide team notes: %w", ModuleID, err)
 		}
+		// The suggestion queue is its own key: a consumer that only queues
+		// proposals should not have to implement the whole note board.
+		if _, err := ctx.Provide(contracts.KeyTeamNoteSuggestions, contracts.TeamNoteSuggestions(service)); err != nil {
+			return fmt.Errorf("%s: provide note suggestions: %w", ModuleID, err)
+		}
 		if memory == nil {
 			if logger, ok := ctx.Get(contracts.KeyLogger); ok && logger != nil {
 				logger.Printf("teamnotes: no memory service in this product; shared notes are unavailable")
@@ -33,7 +38,7 @@ func Module() *module.Descriptor[Config] {
 		}
 		return nil
 	}).
-		AddProvides(module.Provides(contracts.KeyTeamNotes)).
+		AddProvides(module.Provides(contracts.KeyTeamNotes), module.Provides(contracts.KeyTeamNoteSuggestions)).
 		AddOptionalRequires(module.Requires(contracts.KeyMemoryService)).
 		WithName("ZeoKeel team notes")
 }

@@ -122,6 +122,20 @@ type createTargetResult struct {
 	TargetID string `json:"targetId"`
 }
 
+// decodeCreateTarget reads Target.createTarget's reply. Both the default-context
+// and the in-context form answer with the same shape, so the parsing (and its
+// diagnostics) lives in one place.
+func decodeCreateTarget(raw json.RawMessage) (createTargetResult, error) {
+	var result createTargetResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return createTargetResult{}, fmt.Errorf("%w: createTarget reply: %v", ErrProtocol, err)
+	}
+	if result.TargetID == "" {
+		return createTargetResult{}, fmt.Errorf("%w: createTarget returned no targetId", ErrProtocol)
+	}
+	return result, nil
+}
+
 // Open creates a page target for rawURL. The URL is validated first; Title is
 // left empty until the caller asks, because document.title only exists after
 // the navigation commits.
@@ -133,12 +147,9 @@ func (c *CDP) Open(ctx context.Context, rawURL string) (contracts.PageInfo, erro
 	if err != nil {
 		return contracts.PageInfo{}, err
 	}
-	var result createTargetResult
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return contracts.PageInfo{}, fmt.Errorf("%w: createTarget reply: %v", ErrProtocol, err)
-	}
-	if result.TargetID == "" {
-		return contracts.PageInfo{}, fmt.Errorf("%w: createTarget returned no targetId", ErrProtocol)
+	result, err := decodeCreateTarget(raw)
+	if err != nil {
+		return contracts.PageInfo{}, err
 	}
 	return contracts.PageInfo{
 		ID:       result.TargetID,
@@ -146,6 +157,119 @@ func (c *CDP) Open(ctx context.Context, rawURL string) (contracts.PageInfo, erro
 		Title:    "",
 		OpenedAt: c.now(),
 	}, nil
+}
+
+// createBrowserContextParams is Target.createBrowserContext's documented input.
+// disposeOnDetach is pinned to false on purpose: a context that dies with the
+// CDP connection would silently log the bot out on every reconnect, and its
+// cookie jar would be gone.
+type createBrowserContextParams struct {
+	DisposeOnDetach bool `json:"disposeOnDetach"`
+}
+
+type createBrowserContextResult struct {
+	BrowserContextID string `json:"browserContextId"`
+}
+
+// CreateBrowserContext asks the browser for a new, empty browser context and
+// returns its id. A browser context is a separate cookie jar (cookies,
+// localStorage, IndexedDB, cache): two of them never see each other's logins,
+// which is what "two bots, two accounts" actually means.
+//
+// This is a browser-level command: it rides on the plain context, never on a
+// page session.
+func (c *CDP) CreateBrowserContext(ctx context.Context) (string, error) {
+	raw, err := c.send(ctx, "Target.createBrowserContext", createBrowserContextParams{DisposeOnDetach: false})
+	if err != nil {
+		return "", err
+	}
+	var result createBrowserContextResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", fmt.Errorf("%w: createBrowserContext reply: %v", ErrProtocol, err)
+	}
+	if result.BrowserContextID == "" {
+		return "", fmt.Errorf("%w: createBrowserContext returned no browserContextId", ErrProtocol)
+	}
+	return result.BrowserContextID, nil
+}
+
+// createTargetInContextParams is Target.createTarget's documented input with
+// the context selector attached. newWindow is deliberately absent: inside a
+// browser context the page is a tab of that context's browsing session.
+type createTargetInContextParams struct {
+	URL              string `json:"url"`
+	BrowserContextID string `json:"browserContextId"`
+}
+
+// OpenInContext creates a page target inside browserContextID. The URL is
+// validated before anything is sent, exactly as in Open, so a bad URL cannot
+// create a target (or a context) at all.
+func (c *CDP) OpenInContext(ctx context.Context, rawURL, browserContextID string) (contracts.PageInfo, error) {
+	if err := ValidateURL(rawURL); err != nil {
+		return contracts.PageInfo{}, err
+	}
+	if browserContextID == "" {
+		// Fail closed. An empty browserContextId would create the page in the
+		// *default* context, i.e. inside every other bot's cookie jar — the one
+		// mistake this whole mechanism exists to prevent.
+		return contracts.PageInfo{}, fmt.Errorf("%w: createTarget needs a browser context id", ErrProtocol)
+	}
+	raw, err := c.send(ctx, "Target.createTarget", createTargetInContextParams{
+		URL:              rawURL,
+		BrowserContextID: browserContextID,
+	})
+	if err != nil {
+		return contracts.PageInfo{}, err
+	}
+	result, err := decodeCreateTarget(raw)
+	if err != nil {
+		return contracts.PageInfo{}, err
+	}
+	return contracts.PageInfo{
+		ID:       result.TargetID,
+		URL:      rawURL,
+		Title:    "",
+		OpenedAt: c.now(),
+	}, nil
+}
+
+// disposeBrowserContextParams is Target.disposeBrowserContext's documented
+// input. Disposing closes every target of that context and destroys its cookie
+// jar, so it is only ever issued for a context this client created.
+type disposeBrowserContextParams struct {
+	BrowserContextID string `json:"browserContextId"`
+}
+
+type disposeBrowserContextResult struct {
+	Success bool `json:"success"`
+}
+
+// DisposeBrowserContext destroys the browser context (and therefore every page
+// and cookie inside it). An empty id is refused before the send: the protocol
+// spells "dispose everything I own" as Target.disposeBrowserContext with no
+// params, and that is not something a page-level close should ever reach by
+// accident.
+func (c *CDP) DisposeBrowserContext(ctx context.Context, browserContextID string) error {
+	if browserContextID == "" {
+		return fmt.Errorf("%w: disposeBrowserContext needs a browser context id", ErrProtocol)
+	}
+	raw, err := c.send(ctx, "Target.disposeBrowserContext", disposeBrowserContextParams{BrowserContextID: browserContextID})
+	if err != nil {
+		return err
+	}
+	// Older browser versions answered with an empty result; only a *negative*
+	// success is treated as a failure (same tolerance as Close).
+	if len(raw) == 0 {
+		return nil
+	}
+	var result disposeBrowserContextResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("%w: disposeBrowserContext reply: %v", ErrProtocol, err)
+	}
+	if !result.Success {
+		return fmt.Errorf("%w: browser refused to dispose context %q", contracts.ErrBrowserNotFound, browserContextID)
+	}
+	return nil
 }
 
 // evaluateParams is Runtime.evaluate's documented input (returnByValue keeps

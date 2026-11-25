@@ -86,3 +86,40 @@ var (
 
 // KeyBrowser is provided by the browser module.
 var KeyBrowser = cordis.NewServiceKey[BrowserService]("zeokeel/browser")
+
+// BrowserProfiles is the OPTIONAL profile-scoped browser surface. It is
+// deliberately a separate interface rather than three more methods on
+// BrowserService: a read-only consumer (a status surface, a fake in a test) must
+// not be forced to implement profile juggling just to open one page.
+//
+// A "profile" is a name the product uses for one bot's identity in the browser.
+// In CDP terms it is a browser context: its own cookie jar, localStorage,
+// IndexedDB and cache. That is the real isolation boundary — NOT a separate
+// window, and not a separate tab — so two bots logged into different accounts on
+// the same site genuinely cannot see each other's session. Pages opened through
+// BrowserService.Open belong to the browser's default context and to no profile
+// (""), which is also where the human's own logins live.
+//
+// Callers that need profiles assert this interface; KeyBrowser keeps handing out
+// the smaller BrowserService.
+type BrowserProfiles interface {
+	// OpenInProfile creates a page for an http/https URL inside profileID's
+	// browser context, creating the context on first use and reusing it
+	// afterwards (so the cookies persist across pages and across calls). An
+	// empty profileID returns ErrBrowserInvalid: "no profile" is spelled Open.
+	OpenInProfile(ctx context.Context, profileID string, url string) (PageInfo, error)
+	// CloseProfile disposes profileID's browser context, which closes its pages
+	// and destroys its cookie jar, and forgets the profile. Closing a profile
+	// this adapter never opened is a no-op (nil error, nothing sent).
+	CloseProfile(ctx context.Context, profileID string) error
+	// ProfileFor reports which profile a page belongs to. ok reports whether
+	// the page is known at all; the profile is "" for pages opened through
+	// BrowserService.Open (the default context).
+	ProfileFor(ctx context.Context, pageID string) (profileID string, ok bool, err error)
+}
+
+// ErrBrowserInvalid means the caller passed an argument that cannot name a
+// browser resource (today: an empty profile id). Nothing was sent to the
+// browser. It is distinct from ErrBrowserBadURL so a caller can fix the call
+// instead of showing a URL problem.
+var ErrBrowserInvalid = errors.New("browser: invalid argument")

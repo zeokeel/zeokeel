@@ -57,7 +57,8 @@ func (c Config) normalized() Config {
 	return c
 }
 
-// Adapter implements contracts.BrowserService over a CDP endpoint.
+// Adapter implements contracts.BrowserService over a CDP endpoint. It also
+// implements the optional contracts.BrowserProfiles surface (profiles.go).
 type Adapter struct {
 	endpoint string
 	headless bool
@@ -67,6 +68,17 @@ type Adapter struct {
 
 	mu    sync.Mutex
 	pages map[string]contracts.PageInfo
+	// pageProfile maps a page id to the profile that owns it. A page with no
+	// entry was opened through Open and lives in the browser's default context.
+	pageProfile map[string]string
+
+	// profilesMu guards contexts and serializes context creation, so two
+	// concurrent first opens of the same profile cannot each spawn a context.
+	// It is only ever held across a createBrowserContext round trip, never
+	// across page-level sends.
+	profilesMu sync.Mutex
+	// contexts maps a profile id to its CDP browser context id.
+	contexts map[string]string
 }
 
 // New validates the wiring and builds the adapter. A nil transport with a
@@ -78,12 +90,14 @@ func New(cfg Config) (*Adapter, error) {
 		return nil, fmt.Errorf("%w: endpoint %q configured without a transport", contracts.ErrBrowserUnavailable, cfg.Endpoint)
 	}
 	return &Adapter{
-		endpoint: cfg.Endpoint,
-		headless: cfg.Headless,
-		timeout:  cfg.Timeout,
-		probe:    cfg.Probe,
-		cdp:      NewCDP(cfg.Transport, cfg.Now),
-		pages:    make(map[string]contracts.PageInfo),
+		endpoint:    cfg.Endpoint,
+		headless:    cfg.Headless,
+		timeout:     cfg.Timeout,
+		probe:       cfg.Probe,
+		cdp:         NewCDP(cfg.Transport, cfg.Now),
+		pages:       make(map[string]contracts.PageInfo),
+		pageProfile: make(map[string]string),
+		contexts:    make(map[string]string),
 	}, nil
 }
 
@@ -153,6 +167,9 @@ func (a *Adapter) Close(ctx context.Context, pageID string) error {
 	}
 	a.mu.Lock()
 	delete(a.pages, pageID)
+	// The page is gone from this adapter's bookkeeping either way; a profile
+	// mapping left behind would make ProfileFor answer for a dead target.
+	delete(a.pageProfile, pageID)
 	a.mu.Unlock()
 	return nil
 }
@@ -224,6 +241,7 @@ func (a *Adapter) mapError(ctx context.Context, err error) error {
 	}
 	switch {
 	case errors.Is(err, contracts.ErrBrowserBadURL),
+		errors.Is(err, contracts.ErrBrowserInvalid),
 		errors.Is(err, contracts.ErrBrowserPermissionDenied),
 		errors.Is(err, contracts.ErrBrowserNotFound):
 		return err

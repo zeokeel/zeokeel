@@ -40,8 +40,15 @@ func TestDescriptorMetadata(t *testing.T) {
 	if descriptor.ID != teamnotes.ModuleID {
 		t.Fatalf("module ID = %q, want %q", descriptor.ID, teamnotes.ModuleID)
 	}
-	if len(descriptor.Provides) != 1 || descriptor.Provides[0].Name != contracts.KeyTeamNotes.Name() {
-		t.Fatalf("provides = %+v, want the team notes key", descriptor.Provides)
+	provided := map[string]bool{}
+	for _, provide := range descriptor.Provides {
+		provided[provide.Name] = true
+	}
+	if !provided[contracts.KeyTeamNotes.Name()] || !provided[contracts.KeyTeamNoteSuggestions.Name()] {
+		t.Fatalf("provides = %+v, want the notes and suggestion-queue keys", descriptor.Provides)
+	}
+	if len(descriptor.Provides) != 2 {
+		t.Fatalf("provides = %d, want exactly two", len(descriptor.Provides))
 	}
 	if len(descriptor.Requires) != 1 {
 		t.Fatalf("requires = %+v, want exactly the optional memory service", descriptor.Requires)
