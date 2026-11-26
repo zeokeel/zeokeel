@@ -34,3 +34,9 @@
 # scripts/build-web-client.sh (the .keep marker keeps go:embed compiling).
 /internal/gateway/webclient/dist/*
 !/internal/gateway/webclient/dist/.keep
+
+# Go module cache used by the sandbox (deps download here, several hundred MB)
+/.gomodcache/
+
+# Runtime memory artifacts (memoryvfs v2 migration leftovers): data, not source.
+/internal/modules/agent/memory/
