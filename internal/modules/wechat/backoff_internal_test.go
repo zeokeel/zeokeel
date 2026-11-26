@@ -1,44 +1,35 @@
 package wechat
 
-// Internal TDD for the backoff schedule: Run must not hammer the platform, and
-// the schedule itself (2s doubling to 1m) is a documented contract, so it is
-// tested directly instead of by sleeping for minutes.
+// Internal TDD for the two timing contracts the adapter's Run relies on: the
+// retry schedule and the keepalive window.
 
 import (
 	"testing"
 	"time"
+
+	"github.com/zeokeel/zeokeel/internal/lib/backoff"
 )
 
-func TestBackoffDelaySchedule(t *testing.T) {
-	cases := []struct {
-		attempt int
-		want    time.Duration
-	}{
-		{0, BackoffInitial},
-		{-3, BackoffInitial},
-		{1, 2 * time.Second},
-		{2, 4 * time.Second},
-		{3, 8 * time.Second},
-		{4, 16 * time.Second},
-		{5, 32 * time.Second},
-		{6, BackoffMax},
-		{7, BackoffMax},
-		{1000, BackoffMax},
+// The retry schedule (2s doubling to 1m) lives in internal/lib/backoff now —
+// backoff_test.go pins the whole ladder there. What this test protects is the
+// pair of numbers this adapter's doc comment promises: Run must not hammer the
+// platform, so the shared schedule it calls must still be 2s doubling to 1m.
+func TestRetryScheduleIsTheDocumentedContract(t *testing.T) {
+	if backoff.Initial != 2*time.Second {
+		t.Fatalf("backoff.Initial = %v, want 2s", backoff.Initial)
 	}
-	for _, testCase := range cases {
-		if got := backoffDelay(testCase.attempt); got != testCase.want {
-			t.Errorf("backoffDelay(%d) = %v, want %v", testCase.attempt, got, testCase.want)
-		}
+	if backoff.Max != time.Minute {
+		t.Fatalf("backoff.Max = %v, want 1m", backoff.Max)
+	}
+	if got := backoff.Delay(1); got != 2*time.Second {
+		t.Fatalf("backoff.Delay(1) = %v, want 2s", got)
+	}
+	if got := backoff.Delay(6); got != time.Minute {
+		t.Fatalf("backoff.Delay(6) = %v, want the 1m ceiling", got)
 	}
 }
 
-func TestBackoffConstants(t *testing.T) {
-	if BackoffInitial != 2*time.Second {
-		t.Fatalf("BackoffInitial = %v, want 2s", BackoffInitial)
-	}
-	if BackoffMax != time.Minute {
-		t.Fatalf("BackoffMax = %v, want 1m", BackoffMax)
-	}
+func TestKeepaliveWarnAfter(t *testing.T) {
 	if KeepaliveWarnAfter != 20*time.Hour {
 		t.Fatalf("KeepaliveWarnAfter = %v, want 20h", KeepaliveWarnAfter)
 	}

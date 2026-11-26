@@ -14,18 +14,12 @@ import (
 	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/lib/backoff"
 )
 
 // DefaultPollInterval is the pause between successful polls. Mail is not a chat:
 // minutes, not seconds.
 const DefaultPollInterval = 5 * time.Minute
-
-// BackoffInitial and BackoffMax bound the retry schedule Run uses while the mail
-// server is unavailable (2s doubling to 1m).
-const (
-	BackoffInitial = 2 * time.Second
-	BackoffMax     = time.Minute
-)
 
 // maxTitleRunes keeps an inbox title scannable; the full text stays in Body.
 const maxTitleRunes = 60
@@ -103,10 +97,10 @@ func (a *Adapter) configured() bool {
 }
 
 // Run polls the mailbox until ctx is canceled: it polls immediately, then waits
-// interval between polls; while the server is unavailable it backs off
-// exponentially (BackoffInitial doubling, capped at BackoffMax) so an outage does
-// not turn into a login flood. A rejected login is terminal and returned
-// immediately. Cancellation returns nil — stopping on request is not a failure.
+// interval between polls; while the server is unavailable it backs off on the
+// shared backoff schedule (2s doubling, capped at 1m) so an outage does not turn
+// into a login flood. A rejected login is terminal and returned immediately.
+// Cancellation returns nil — stopping on request is not a failure.
 func (a *Adapter) Run(ctx context.Context, interval time.Duration) error {
 	if interval <= 0 {
 		interval = DefaultPollInterval
@@ -123,7 +117,7 @@ func (a *Adapter) Run(ctx context.Context, interval time.Duration) error {
 		switch {
 		case err == nil:
 			attempt = 0
-			if !sleepCtx(ctx, interval) {
+			if !backoff.Sleep(ctx, interval) {
 				return nil
 			}
 		case errors.Is(err, contracts.ErrEmailUnauthorized):
@@ -132,43 +126,10 @@ func (a *Adapter) Run(ctx context.Context, interval time.Duration) error {
 			// Transient: unreachable server, inbox hiccup, undecodable message.
 			// All of them are worth retrying, slowly.
 			attempt++
-			if !sleepCtx(ctx, backoffDelay(attempt)) {
+			if !backoff.Sleep(ctx, backoff.Delay(attempt)) {
 				return nil
 			}
 		}
-	}
-}
-
-// backoffDelay is the retry schedule: 2s, 4s, 8s … capped at BackoffMax.
-func backoffDelay(attempt int) time.Duration {
-	if attempt < 1 {
-		return BackoffInitial
-	}
-	delay := BackoffInitial
-	for i := 1; i < attempt; i++ {
-		if delay >= BackoffMax/2 {
-			return BackoffMax
-		}
-		delay *= 2
-	}
-	if delay > BackoffMax {
-		return BackoffMax
-	}
-	return delay
-}
-
-// sleepCtx waits d, returning false when ctx was canceled first.
-func sleepCtx(ctx context.Context, d time.Duration) bool {
-	if d <= 0 {
-		return ctx.Err() == nil
-	}
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
 	}
 }
 

@@ -1,30 +1,25 @@
-// Raw websocket transport for the CDP client.
+// Websocket transport for the CDP client.
 //
-// This file is the only place in the module that knows the wire: the RFC 6455
-// client handshake, the frame codec, and the CDP envelope. It deliberately uses
-// nothing but the standard library (net, crypto/sha1, encoding/base64,
-// encoding/binary), because the browser capability must work in a build with no
-// third-party dependencies at all.
+// This file is the only place in the module that knows the wire. The RFC 6455
+// part of it — the client handshake, the frame codec (masking, extended
+// lengths, fragmentation), ping/pong and the close handshake — is
+// github.com/coder/websocket's job. What stays here is the CDP envelope and the
+// transport's concurrency shape.
 //
-// Shape of the thing: one reader goroutine owns every read. Sends allocate an
-// id, write a command frame, and wait on a per-id channel; the reader matches
-// replies to those channels and routes id-less frames (CDP events) to a bounded
-// public channel. A socket failure fails every pending Send and closes the
-// events channel exactly once, so callers never see a half-open transport.
+// Shape of the thing: one reader goroutine owns every read (the library allows
+// exactly one live reader, and something must always read or control frames go
+// unanswered). Sends allocate an id, write a command message, and wait on a
+// per-id channel; the reader matches replies to those channels and routes
+// id-less frames (CDP events) to a bounded public channel. A socket failure
+// fails every pending Send and closes the events channel exactly once, so
+// callers never see a half-open transport.
 package browser
 
 import (
-	"bufio"
 	"context"
-	"crypto/rand"
-	"crypto/sha1"
-	"crypto/tls"
-	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -32,6 +27,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -41,40 +38,25 @@ const (
 	// leaves Timeout zero. It is short on purpose: a local browser either has a
 	// debugging port open or it does not.
 	DefaultDialTimeout = 15 * time.Second
-	// DefaultMaxFrameBytes caps one frame (and one reassembled fragmented
-	// message) at 32 MiB. A screenshot is far below this; anything above it is
-	// not a CDP message and must not be buffered.
+	// DefaultMaxFrameBytes caps one incoming message (the library reassembles
+	// fragmented frames before the cap applies) at 32 MiB. A screenshot is far
+	// below this; anything above it is not a CDP message and must not be
+	// buffered.
 	DefaultMaxFrameBytes = 32 << 20
 	// DefaultEventBuffer is how many demuxed events the transport holds before
 	// it starts dropping the oldest one.
 	DefaultEventBuffer = 256
-
-	// wsAcceptGUID is the fixed string RFC 6455 §1.3 appends to the client key.
-	wsAcceptGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 )
-
-// WebSocket opcodes (RFC 6455 §5.2).
-const (
-	opContinuation byte = 0x0
-	opText         byte = 0x1
-	opBinary       byte = 0x2
-	opClose        byte = 0x8
-	opPing         byte = 0x9
-	opPong         byte = 0xA
-)
-
-// closeNormal is the RFC 6455 §7.4.1 code for "normal closure".
-const closeNormal = 1000
 
 // DialOptions configures one websocket connection. The zero value is usable.
 type DialOptions struct {
 	// Timeout bounds the TCP connect and the handshake (zero =
-	// DefaultDialTimeout). It also bounds a single frame write, so a stalled
+	// DefaultDialTimeout). It also bounds a single message write, so a stalled
 	// peer cannot block Send forever.
 	Timeout time.Duration
-	// MaxFrameBytes caps the payload of one incoming frame and of one
-	// reassembled fragmented message (zero = DefaultMaxFrameBytes). A frame
-	// above the cap tears the connection down instead of being buffered.
+	// MaxFrameBytes caps the payload of one incoming message (zero =
+	// DefaultMaxFrameBytes). A message above the cap tears the connection down
+	// instead of being buffered.
 	MaxFrameBytes int
 	// Origin, when set, is sent as the Origin header. Chrome refuses
 	// DevTools websocket handshakes that carry a foreign Origin, so this is
@@ -134,21 +116,18 @@ func (e *CDPError) Unwrap() error { return contracts.ErrBrowserUnavailable }
 // straight into Config.Transport. It is safe for concurrent Send calls; Events
 // and Close may be used from any goroutine.
 type WS struct {
-	conn   net.Conn
-	reader *bufio.Reader
-	opts   DialOptions
-
-	// writeMu serialises frame writes (commands, pongs, the closing frame).
-	writeMu sync.Mutex
+	conn *websocket.Conn
+	opts DialOptions
 
 	// mu guards the id counter, the pending table and the closed flag. It is
 	// taken by enqueue/forget/deliver/teardown, never while a write is in
 	// flight, so a slow peer cannot block teardown past the write deadline.
-	mu      sync.Mutex
-	nextID  uint64
-	pending map[uint64]chan sendResult
-	closed  bool
-	failErr error
+	mu       sync.Mutex
+	nextID   uint64
+	pending  map[uint64]chan sendResult
+	closed   bool
+	graceful bool
+	failErr  error
 
 	events  chan Event
 	dropped atomic.Uint64
@@ -185,23 +164,30 @@ func DialTransport(ctx context.Context, endpoint string, opts DialOptions) (*WS,
 		return nil, err
 	}
 
+	// Only the handshake headers are ours; the library builds the request.
+	//
+	// DialOptions.Timeout is enforced through dialCtx alone. It is a handshake
+	// deadline and nothing else: no deadline may survive onto the live socket
+	// (TestDialTimeoutDoesNotBoundTheLiveConnection pins that).
+	dialOptions := &websocket.DialOptions{HTTPHeader: http.Header{}}
+	if opts.Origin != "" {
+		dialOptions.HTTPHeader.Set("Origin", opts.Origin)
+	}
+	// The library's dial is bounded by the context; everything after it (reads,
+	// writes, the close handshake) is bounded by the options below instead.
 	dialCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
-	conn, err := dialWebSocket(dialCtx, target)
+	conn, _, err := websocket.Dial(dialCtx, target.String(), dialOptions)
 	if err != nil {
-		return nil, mapDialError(ctx, err)
+		return nil, mapDialError(err)
 	}
-	reader, err := wsHandshake(dialCtx, conn, target, opts.Origin)
-	if err != nil {
-		_ = conn.Close()
-		return nil, mapDialError(ctx, err)
-	}
-	// The handshake deadline was a dial deadline; frames manage their own.
-	_ = conn.SetDeadline(time.Time{})
+	// The library's read limit is a per-message limit, which is what the cap
+	// means: one oversized message is refused before it is buffered, and the
+	// connection is torn down rather than left in a half-read state.
+	conn.SetReadLimit(int64(opts.MaxFrameBytes))
 
 	ws := &WS{
 		conn:    conn,
-		reader:  reader,
 		opts:    opts,
 		pending: make(map[uint64]chan sendResult),
 		events:  make(chan Event, DefaultEventBuffer),
@@ -240,7 +226,7 @@ func (w *WS) Send(ctx context.Context, method string, params any) (json.RawMessa
 	if err != nil {
 		return nil, err
 	}
-	if err := w.writeFrame(opText, payload); err != nil {
+	if err := w.writeMessage(payload); err != nil {
 		failure := socketFailure(err)
 		w.teardown(failure)
 		return nil, failure
@@ -277,14 +263,19 @@ func (w *WS) Close() error {
 	}
 	w.mu.Lock()
 	closed := w.closed
+	if !closed {
+		w.graceful = true
+	}
 	w.mu.Unlock()
 	if closed {
 		return nil
 	}
-	// Best effort: tell the peer this is a normal closure, but never wait for a
-	// peer (or a Send) that has stopped making progress. teardown below is the
-	// idempotent part (it holds the sync.Once).
-	w.writeCloseFrame()
+	// Best effort: tell the peer this is a normal closure. The library writes
+	// the close frame and then waits (bounded internally) for the peer's reply,
+	// so it runs off the caller's goroutine — Close itself never waits for a
+	// peer that has stopped making progress. teardown below is the idempotent,
+	// non-blocking part.
+	go func() { _ = w.conn.Close(websocket.StatusNormalClosure, "") }()
 	w.teardown(nil)
 	return nil
 }
@@ -325,8 +316,8 @@ func (w *WS) failure() error {
 	return w.closedErrorLocked()
 }
 
-// teardown closes the socket, fails every pending Send and closes the events
-// channel exactly once. reason is what callers waiting on the wire will see.
+// teardown fails every pending Send, closes the events channel and releases the
+// socket exactly once. reason is what callers waiting on the wire will see.
 func (w *WS) teardown(reason error) {
 	w.closeOnce.Do(func() {
 		if reason == nil {
@@ -334,6 +325,7 @@ func (w *WS) teardown(reason error) {
 		}
 		reason = socketFailure(reason)
 		w.mu.Lock()
+		graceful := w.graceful
 		w.closed = true
 		w.failErr = reason
 		pending := w.pending
@@ -348,73 +340,55 @@ func (w *WS) teardown(reason error) {
 			default:
 			}
 		}
-		_ = w.conn.Close()
+		if !graceful {
+			// Close (the graceful path) owns the socket: it is writing the close
+			// frame and then hangs up. Every other path tears it down here,
+			// without a handshake, so a reader blocked on a dead peer returns.
+			_ = w.conn.CloseNow()
+		}
 	})
 }
 
 // readLoop owns every read from the socket until it fails, the peer closes, or
-// a protocol violation tears the connection down.
+// the library refuses a message. Control frames (ping, pong, close) never reach
+// this loop: the library answers a ping with the same payload, drops a pong,
+// and echoes a close before reporting it.
 func (w *WS) readLoop() {
-	var (
-		fragmented bool
-		assembled  []byte
-	)
 	for {
-		fin, opcode, payload, err := w.readFrame()
+		// No context deadline: reads block until the peer speaks or the socket
+		// dies, and teardown closes the socket under every exit path, which is
+		// what unblocks this call.
+		_, payload, err := w.conn.Read(context.Background())
 		if err != nil {
-			w.teardown(socketFailure(err))
+			w.teardown(w.readFailure(err))
 			return
 		}
-		switch opcode {
-		case opText, opBinary:
-			if fragmented {
-				w.teardown(fmt.Errorf("%w: websocket: new data frame inside a fragmented message", ErrProtocol))
-				return
-			}
-			if fin {
-				if !w.dispatch(payload) {
-					return
-				}
-				continue
-			}
-			fragmented = true
-			assembled = append(assembled[:0], payload...)
-		case opContinuation:
-			if !fragmented {
-				w.teardown(fmt.Errorf("%w: websocket: continuation frame without a start", ErrProtocol))
-				return
-			}
-			assembled = append(assembled, payload...)
-			if len(assembled) > w.opts.MaxFrameBytes {
-				w.teardown(frameTooLarge(len(assembled), w.opts.MaxFrameBytes))
-				return
-			}
-			if fin {
-				fragmented = false
-				message := assembled
-				assembled = nil
-				if !w.dispatch(message) {
-					return
-				}
-			}
-		case opPing:
-			if err := w.writeFrame(opPong, payload); err != nil {
-				w.teardown(socketFailure(err))
-				return
-			}
-		case opPong:
-			// Keepalive acknowledgement: the reader drops it. It must never
-			// reach Events() or a waiting Send.
-		case opClose:
-			// Reply with a close frame then hang up; pending Sends fail.
-			w.writeCloseFrame()
-			w.teardown(fmt.Errorf("%w: peer closed the websocket", contracts.ErrBrowserUnavailable))
-			return
-		default:
-			w.teardown(fmt.Errorf("%w: websocket: unsupported opcode 0x%x", ErrProtocol, opcode))
+		if !w.dispatch(payload) {
 			return
 		}
 	}
+}
+
+// readFailure maps a dead read to the transport's errors.
+func (w *WS) readFailure(err error) error {
+	switch {
+	case errors.Is(err, websocket.ErrMessageTooBig):
+		// The library refuses the message at the read limit; the cap that
+		// matters to the caller is ours, so the error names ours.
+		return frameTooLarge(w.opts.MaxFrameBytes)
+	case websocket.CloseStatus(err) != -1:
+		return fmt.Errorf("%w: peer closed the websocket", contracts.ErrBrowserUnavailable)
+	default:
+		return socketFailure(err)
+	}
+}
+
+// writeMessage writes one text message under DialOptions.Timeout, so a stalled
+// browser cannot block Send forever.
+func (w *WS) writeMessage(payload []byte) error {
+	writeCtx, cancel := context.WithTimeout(context.Background(), w.opts.Timeout)
+	defer cancel()
+	return w.conn.Write(writeCtx, websocket.MessageText, payload)
 }
 
 // dispatch routes one complete data message. It reports false when the message
@@ -505,134 +479,6 @@ func (w *WS) pushEvent(event Event) {
 	}
 }
 
-// readFrame reads one frame and returns its payload (already unmasked).
-func (w *WS) readFrame() (fin bool, opcode byte, payload []byte, err error) {
-	var head [2]byte
-	if _, err := io.ReadFull(w.reader, head[:]); err != nil {
-		return false, 0, nil, err
-	}
-	fin = head[0]&0x80 != 0
-	if head[0]&0x70 != 0 {
-		return false, 0, nil, fmt.Errorf("%w: websocket: reserved bits set in frame header", ErrProtocol)
-	}
-	opcode = head[0] & 0x0f
-	masked := head[1]&0x80 != 0
-
-	length := int64(head[1] & 0x7f)
-	switch length {
-	case 126:
-		var ext [2]byte
-		if _, err := io.ReadFull(w.reader, ext[:]); err != nil {
-			return false, 0, nil, err
-		}
-		length = int64(binary.BigEndian.Uint16(ext[:]))
-	case 127:
-		var ext [8]byte
-		if _, err := io.ReadFull(w.reader, ext[:]); err != nil {
-			return false, 0, nil, err
-		}
-		raw := binary.BigEndian.Uint64(ext[:])
-		if raw > uint64(1<<62) {
-			return false, 0, nil, fmt.Errorf("%w: websocket: frame length %d is out of range", ErrProtocol, raw)
-		}
-		length = int64(raw)
-	}
-	if length < 0 || length > int64(w.opts.MaxFrameBytes) {
-		// Do not read the payload: the connection is not trustworthy any more,
-		// and buffering it is exactly what the cap forbids.
-		return false, 0, nil, frameTooLarge(int(length), w.opts.MaxFrameBytes)
-	}
-	if opcode >= opClose && (!fin || length > 125) {
-		return false, 0, nil, fmt.Errorf("%w: websocket: malformed control frame", ErrProtocol)
-	}
-
-	var mask [4]byte
-	if masked {
-		if _, err := io.ReadFull(w.reader, mask[:]); err != nil {
-			return false, 0, nil, err
-		}
-	}
-	if length == 0 {
-		return fin, opcode, nil, nil
-	}
-	payload = make([]byte, int(length))
-	if _, err := io.ReadFull(w.reader, payload); err != nil {
-		return false, 0, nil, err
-	}
-	if masked {
-		for i := range payload {
-			payload[i] ^= mask[i%4]
-		}
-	}
-	return fin, opcode, payload, nil
-}
-
-// writeFrame writes one masked client frame. CDP commands are small; a single
-// frame is always enough (the transport never fragments what it sends).
-func (w *WS) writeFrame(opcode byte, payload []byte) error {
-	return w.writeFrameDeadline(opcode, payload, time.Now().Add(w.opts.Timeout))
-}
-
-// writeCloseFrame sends a normal-closure frame without ever waiting for the
-// write lock: if a Send is already mid-write the peer is not reading, and
-// queueing behind it would make Close as slow as that stalled write.
-func (w *WS) writeCloseFrame() {
-	if !w.writeMu.TryLock() {
-		return
-	}
-	defer w.writeMu.Unlock()
-	_ = w.writeFrameLocked(opClose, closePayload(closeNormal), time.Now().Add(100*time.Millisecond))
-}
-
-// writeFrameDeadline writes one masked client frame with an explicit deadline.
-func (w *WS) writeFrameDeadline(opcode byte, payload []byte, deadline time.Time) error {
-	w.writeMu.Lock()
-	defer w.writeMu.Unlock()
-	return w.writeFrameLocked(opcode, payload, deadline)
-}
-
-// writeFrameLocked writes one masked client frame; writeMu must be held.
-func (w *WS) writeFrameLocked(opcode byte, payload []byte, deadline time.Time) error {
-	var mask [4]byte
-	if _, err := io.ReadFull(rand.Reader, mask[:]); err != nil {
-		return fmt.Errorf("websocket: mask key: %w", err)
-	}
-	length := len(payload)
-	header := make([]byte, 0, 14)
-	header = append(header, 0x80|opcode) // FIN | opcode
-	switch {
-	case length < 126:
-		header = append(header, byte(length)|0x80)
-	case length <= 0xffff:
-		header = append(header, 126|0x80, byte(length>>8), byte(length))
-	default:
-		header = append(header, 127|0x80)
-		var ext [8]byte
-		binary.BigEndian.PutUint64(ext[:], uint64(length))
-		header = append(header, ext[:]...)
-	}
-	header = append(header, mask[:]...)
-
-	frame := make([]byte, len(header)+length)
-	copy(frame, header)
-	for i := 0; i < length; i++ {
-		frame[len(header)+i] = payload[i] ^ mask[i%4]
-	}
-
-	_ = w.conn.SetWriteDeadline(deadline)
-	if _, err := w.conn.Write(frame); err != nil {
-		return err
-	}
-	return nil
-}
-
-// closePayload encodes a close frame body (status code only).
-func closePayload(code uint16) []byte {
-	var buf [2]byte
-	binary.BigEndian.PutUint16(buf[:], code)
-	return buf[:]
-}
-
 // encodeCommand marshals a CDP command envelope. The session id is a context
 // property (WithSession), never a method parameter.
 func encodeCommand(id uint64, method string, params any, session string) ([]byte, error) {
@@ -643,7 +489,9 @@ func encodeCommand(id uint64, method string, params any, session string) ([]byte
 	return payload, nil
 }
 
-// parseEndpoint validates a ws:// or wss:// endpoint.
+// parseEndpoint validates a ws:// or wss:// endpoint. The library would accept
+// http(s) too (treating them as ws/wss), so the scheme check stays here: a CDP
+// endpoint is documented as ws:// or wss:// and a typo must fail loudly.
 func parseEndpoint(endpoint string) (*url.URL, error) {
 	raw := strings.TrimSpace(endpoint)
 	if raw == "" {
@@ -666,116 +514,10 @@ func parseEndpoint(endpoint string) (*url.URL, error) {
 	return parsed, nil
 }
 
-// dialWebSocket opens the TCP (and, for wss, TLS) connection.
-func dialWebSocket(ctx context.Context, target *url.URL) (net.Conn, error) {
-	port := target.Port()
-	if port == "" {
-		if strings.EqualFold(target.Scheme, "wss") {
-			port = "443"
-		} else {
-			port = "80"
-		}
-	}
-	dialer := net.Dialer{}
-	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(target.Hostname(), port))
-	if err != nil {
-		return nil, err
-	}
-	if strings.EqualFold(target.Scheme, "wss") {
-		secure := tls.Client(conn, &tls.Config{
-			ServerName: target.Hostname(),
-			MinVersion: tls.VersionTLS12,
-		})
-		if err := secure.HandshakeContext(ctx); err != nil {
-			_ = conn.Close()
-			return nil, err
-		}
-		return secure, nil
-	}
-	return conn, nil
-}
-
-// wsHandshake performs the RFC 6455 client handshake and verifies the reply.
-// The returned reader carries any bytes the server sent right after the 101
-// response.
-func wsHandshake(ctx context.Context, conn net.Conn, target *url.URL, origin string) (*bufio.Reader, error) {
-	var nonce [16]byte
-	if _, err := io.ReadFull(rand.Reader, nonce[:]); err != nil {
-		return nil, fmt.Errorf("%w: websocket: handshake nonce: %v", contracts.ErrBrowserUnavailable, err)
-	}
-	key := base64.StdEncoding.EncodeToString(nonce[:])
-
-	requestURI := target.RequestURI()
-	if requestURI == "" {
-		requestURI = "/"
-	}
-	var request strings.Builder
-	fmt.Fprintf(&request, "GET %s HTTP/1.1\r\n", requestURI)
-	fmt.Fprintf(&request, "Host: %s\r\n", target.Host)
-	request.WriteString("Upgrade: websocket\r\n")
-	request.WriteString("Connection: Upgrade\r\n")
-	fmt.Fprintf(&request, "Sec-WebSocket-Key: %s\r\n", key)
-	request.WriteString("Sec-WebSocket-Version: 13\r\n")
-	if origin != "" {
-		fmt.Fprintf(&request, "Origin: %s\r\n", origin)
-	}
-	request.WriteString("\r\n")
-
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
-	} else {
-		_ = conn.SetDeadline(time.Now().Add(DefaultDialTimeout))
-	}
-	if _, err := io.WriteString(conn, request.String()); err != nil {
-		// Left unwrapped: mapDialError decides whether this is a timeout or an
-		// unavailable browser.
-		return nil, fmt.Errorf("websocket: handshake write: %w", err)
-	}
-
-	reader := bufio.NewReaderSize(conn, 4096)
-	resp, err := http.ReadResponse(reader, &http.Request{Method: http.MethodGet})
-	if err != nil {
-		return nil, fmt.Errorf("websocket: handshake read: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusSwitchingProtocols {
-		return nil, fmt.Errorf("%w: websocket: handshake rejected with %s", contracts.ErrBrowserUnavailable, resp.Status)
-	}
-	if !strings.EqualFold(strings.TrimSpace(resp.Header.Get("Upgrade")), "websocket") {
-		return nil, fmt.Errorf("%w: websocket: handshake missing Upgrade: websocket", contracts.ErrBrowserUnavailable)
-	}
-	if !headerHasToken(resp.Header.Get("Connection"), "upgrade") {
-		return nil, fmt.Errorf("%w: websocket: handshake missing Connection: Upgrade", contracts.ErrBrowserUnavailable)
-	}
-	want := acceptKey(key)
-	if got := strings.TrimSpace(resp.Header.Get("Sec-WebSocket-Accept")); got != want {
-		return nil, fmt.Errorf("%w: websocket: handshake accept mismatch (got %q, want %q)", contracts.ErrBrowserUnavailable, got, want)
-	}
-	return reader, nil
-}
-
-// acceptKey computes base64(sha1(key + GUID)), the value the server must echo.
-func acceptKey(key string) string {
-	sum := sha1.Sum([]byte(key + wsAcceptGUID)) // SHA-1 is mandated by RFC 6455 §4.2.2, not chosen here.
-	return base64.StdEncoding.EncodeToString(sum[:])
-}
-
-// headerHasToken reports whether a comma-separated header holds token
-// (case-insensitive), i.e. `Connection: keep-alive, Upgrade`.
-func headerHasToken(value, token string) bool {
-	for _, part := range strings.Split(value, ",") {
-		if strings.EqualFold(strings.TrimSpace(part), token) {
-			return true
-		}
-	}
-	return false
-}
-
 // frameTooLarge is the one size error: it names the cap so a log line explains
 // itself.
-func frameTooLarge(size, cap int) error {
-	return fmt.Errorf("%w: frame too large: %d bytes exceeds the %d-byte cap", contracts.ErrBrowserUnavailable, size, cap)
+func frameTooLarge(limit int) error {
+	return fmt.Errorf("%w: frame too large: the message exceeds the %d-byte cap", contracts.ErrBrowserUnavailable, limit)
 }
 
 // socketFailure wraps a wire error with the "cannot talk to the browser" error.
@@ -804,17 +546,19 @@ func mapCtxError(ctx context.Context, err error) error {
 }
 
 // mapDialError classifies a failed connect/handshake.
-func mapDialError(ctx context.Context, err error) error {
+func mapDialError(err error) error {
 	if err == nil {
 		return nil
 	}
 	if errors.Is(err, contracts.ErrBrowserUnavailable) {
 		return err
 	}
+	// Classify by the error itself: a dial that ran out of time carries the
+	// deadline in its chain, and the net error says so too. The caller's context
+	// is not consulted — by the time a rejection comes back it may simply have
+	// expired, and a refused handshake is not a timeout.
 	var netErr net.Error
-	if errors.Is(err, context.DeadlineExceeded) ||
-		errors.Is(ctx.Err(), context.DeadlineExceeded) ||
-		(errors.As(err, &netErr) && netErr.Timeout()) {
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
 		return fmt.Errorf("%w: dial: %w", contracts.ErrBrowserTimeout, err)
 	}
 	return fmt.Errorf("%w: %w", contracts.ErrBrowserUnavailable, err)

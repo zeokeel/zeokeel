@@ -363,3 +363,266 @@ func TestAutomationScheduleRejectsNegativeClockFields(t *testing.T) {
 		}
 	}
 }
+
+// TestNextAutomationRunCronMatchesPreMigrationParser pins the five-field cron
+// run instants to the values the hand-written parser produced before the
+// github.com/robfig/cron/v3 migration: every entry below was dumped from that
+// implementation and is asserted here unchanged, so the swap cannot drift.
+//
+// The table also pins the parts robfig gets "for free" but differently: the
+// Vixie day rule when a day field starts with '*' (a stepped "*" is ignored, so
+// "0 0 */2 * 1" fires on Mondays only), DST gaps and repeats, impossible dates
+// (zero, not an endless search), and Feb 29 gaps wider than robfig's own
+// five-year search horizon.
+func TestNextAutomationRunCronMatchesPreMigrationParser(t *testing.T) {
+	location := shanghai(t)
+	cases := []struct {
+		spec string
+		from time.Time
+		want []time.Time
+	}{
+		{
+			spec: "*/15 * * * *",
+			from: time.Date(2026, 1, 1, 10, 3, 30, 0, time.UTC),
+			want: []time.Time{
+				time.Date(2026, 1, 1, 10, 15, 0, 0, time.UTC),
+				time.Date(2026, 1, 1, 10, 30, 0, 0, time.UTC),
+				time.Date(2026, 1, 1, 10, 45, 0, 0, time.UTC),
+			},
+		},
+		{
+			spec: "0 9 * * 1-5",
+			from: time.Date(2026, 1, 9, 1, 30, 0, 0, time.UTC),
+			want: []time.Time{
+				time.Date(2026, 1, 12, 1, 0, 0, 0, time.UTC),
+				time.Date(2026, 1, 13, 1, 0, 0, 0, time.UTC),
+				time.Date(2026, 1, 14, 1, 0, 0, 0, time.UTC),
+			},
+		},
+		{
+			spec: "cron 0 9 * * 1-5 Asia/Shanghai",
+			from: time.Date(2026, 1, 9, 9, 30, 0, 0, location),
+			want: []time.Time{
+				time.Date(2026, 1, 12, 9, 0, 0, 0, location),
+				time.Date(2026, 1, 13, 9, 0, 0, 0, location),
+			},
+		},
+		{
+			spec: "cron 0 9 * * 1-5 UTC",
+			from: time.Date(2026, 1, 12, 8, 59, 59, 0, location),
+			want: []time.Time{
+				time.Date(2026, 1, 12, 9, 0, 0, 0, time.UTC),
+				time.Date(2026, 1, 13, 9, 0, 0, 0, time.UTC),
+			},
+		},
+		{
+			spec: "30 8 1 * *",
+			from: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC),
+			want: []time.Time{
+				time.Date(2026, 2, 1, 8, 30, 0, 0, location),
+				time.Date(2026, 3, 1, 8, 30, 0, 0, location),
+			},
+		},
+		{
+			spec: "cron 30 8 1 * * UTC",
+			from: time.Date(2026, 12, 31, 23, 59, 0, 0, time.UTC),
+			want: []time.Time{
+				time.Date(2027, 1, 1, 8, 30, 0, 0, time.UTC),
+				time.Date(2027, 2, 1, 8, 30, 0, 0, time.UTC),
+			},
+		},
+		{
+			// Leap-year boundary: the default zone is Asia/Shanghai, so Feb 29
+			// 00:00 local is the previous day 16:00 UTC.
+			spec: "0 0 29 2 *",
+			from: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
+			want: []time.Time{
+				time.Date(2028, 2, 28, 16, 0, 0, 0, time.UTC),
+				time.Date(2032, 2, 28, 16, 0, 0, 0, time.UTC),
+			},
+		},
+		{
+			spec: "cron 0 0 29 2 * UTC",
+			from: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+			want: []time.Time{
+				time.Date(2028, 2, 29, 0, 0, 0, 0, time.UTC),
+				time.Date(2032, 2, 29, 0, 0, 0, 0, time.UTC),
+			},
+		},
+		{
+			// 2100 is not a leap year: the next Feb 29 is seven years out, past
+			// robfig's own five-year search window.
+			spec: "cron 0 0 29 2 * Asia/Shanghai",
+			from: time.Date(2097, 3, 1, 0, 0, 0, 0, time.UTC),
+			want: []time.Time{
+				time.Date(2104, 2, 28, 16, 0, 0, 0, time.UTC),
+				time.Date(2108, 2, 28, 16, 0, 0, 0, time.UTC),
+			},
+		},
+		{
+			// The 31st only exists in some months.
+			spec: "cron 0 0 31 * * UTC",
+			from: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
+			want: []time.Time{
+				time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, 5, 31, 0, 0, 0, 0, time.UTC),
+			},
+		},
+		{
+			// Neither day field starts with '*': either matches (Mondays, plus
+			// the 1st of every month).
+			spec: "cron 0 0 1 * 1 UTC",
+			from: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
+			want: []time.Time{
+				time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, 1, 12, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, 1, 19, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, 1, 26, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
+			},
+		},
+		{
+			// A stepped star day-of-month is still a star field, so the Vixie
+			// rule ignores it and only the weekday restricts.
+			spec: "cron 0 0 */2 * 1 UTC",
+			from: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
+			want: []time.Time{
+				time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, 1, 12, 0, 0, 0, 0, time.UTC),
+			},
+		},
+		{
+			// Same on the weekday side: every day, not every other day.
+			spec: "cron 0 0 * * */2 UTC",
+			from: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
+			want: []time.Time{
+				time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC),
+			},
+		},
+		{
+			// 02:00 does not exist on 2026-03-08 in New York: that day is skipped.
+			spec: "cron 0 2 * * * America/New_York",
+			from: time.Date(2026, 3, 8, 5, 0, 0, 0, time.UTC),
+			want: []time.Time{
+				time.Date(2026, 3, 9, 6, 0, 0, 0, time.UTC),
+				time.Date(2026, 3, 10, 6, 0, 0, 0, time.UTC),
+			},
+		},
+		{
+			// 01:30 happens twice on 2026-11-01 in New York (EDT then EST): the
+			// earlier instant fires once and the repeat is not a second run.
+			spec: "cron 30 1 * * * America/New_York",
+			from: time.Date(2026, 11, 1, 4, 0, 0, 0, time.UTC),
+			want: []time.Time{
+				time.Date(2026, 11, 1, 5, 30, 0, 0, time.UTC),
+				time.Date(2026, 11, 2, 6, 30, 0, 0, time.UTC),
+			},
+		},
+		{
+			// From inside the repeated hour, the earlier instant already passed,
+			// so the next run is the following day.
+			spec: "cron 30 1 * * * America/New_York",
+			from: time.Date(2026, 11, 1, 5, 45, 0, 0, time.UTC),
+			want: []time.Time{
+				time.Date(2026, 11, 2, 6, 30, 0, 0, time.UTC),
+			},
+		},
+		{
+			// A date rule that can never match yields no upcoming run.
+			spec: "cron 0 0 31 4 * UTC",
+			from: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			want: nil,
+		},
+	}
+	for _, testCase := range cases {
+		if len(testCase.want) == 0 {
+			next, err := NextAutomationRun(testCase.spec, testCase.from)
+			if err != nil {
+				t.Fatalf("NextAutomationRun(%q): %v", testCase.spec, err)
+			}
+			if !next.IsZero() {
+				t.Fatalf("NextAutomationRun(%q, %s) = %s, want no upcoming run",
+					testCase.spec, testCase.from, next.UTC())
+			}
+			continue
+		}
+		cursor := testCase.from
+		for index, want := range testCase.want {
+			next, err := NextAutomationRun(testCase.spec, cursor)
+			if err != nil {
+				t.Fatalf("NextAutomationRun(%q): %v", testCase.spec, err)
+			}
+			if !next.Equal(want) {
+				t.Fatalf("NextAutomationRun(%q, %s) run %d = %s, want %s",
+					testCase.spec, testCase.from, index, next.UTC(), want.UTC())
+			}
+			cursor = next
+		}
+	}
+}
+
+// TestAutomationCronDialectVsRobfig records the syntax gap between the DSH
+// five-field dialect (still the wire shape) and github.com/robfig/cron/v3,
+// which now computes the run instants:
+//
+//   - DSH keeps rejecting the robfig extensions `MON`, `?`, `L`, `W`, `#`,
+//     a Saturday+Sunday `7`, a bare `N/step` ("5/2" means "5-max/2" in robfig)
+//     and descriptors such as `@daily`; those never validated before either.
+//   - DSH folds a day-of-week 7 onto Sunday, which robfig does not accept.
+//   - DSH treats any day field whose text starts with '*' as a star field
+//     (ignored by the Vixie day rule, as Vixie/cronie do); robfig clears its
+//     star bit for a stepped field, so the DSH rule wins here.
+func TestAutomationCronDialectVsRobfig(t *testing.T) {
+	rejected := []string{
+		"cron 0 9 * * MON UTC",             // robfig accepts month/weekday names
+		"cron 0 9 ? * * UTC",               // robfig treats ? as *
+		"cron 0 9 L * * UTC",               // robfig rejects L too, DSH says why
+		"cron 5/2 * * * * UTC",             // robfig reads N/step as N-max/step
+		"cron 0 9 * * 8 UTC",               // out of range for both
+		"cron @daily UTC",                  // descriptors are not part of the dialect
+		"cron 0 0 * * 1,2,3,4,5,6,7,8 UTC", // one bad element fails the field
+	}
+	for _, spec := range rejected {
+		if _, err := ParseAutomationSchedule(spec); err == nil {
+			t.Fatalf("ParseAutomationSchedule(%q) accepted an expression outside the DSH dialect", spec)
+		}
+	}
+	// 7 is Sunday in DSH and canonicalises to 0, as it always did.
+	schedule, err := ParseAutomationSchedule("cron 0 0 * * 7 UTC")
+	if err != nil {
+		t.Fatalf("ParseAutomationSchedule(cron 0 0 * * 7): %v", err)
+	}
+	if got := schedule.CronExpression(); got != "0 0 * * 0" {
+		t.Fatalf("CronExpression = %q, want %q", got, "0 0 * * 0")
+	}
+	if next, err := NextAutomationRun("cron 0 0 * * 7 UTC", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("NextAutomationRun: %v", err)
+	} else if want := time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC); !next.Equal(want) {
+		t.Fatalf("cron 7 next = %s, want Sunday %s", next.UTC(), want)
+	}
+}
+
+// TestAutomationCronRejectsWithoutPanic checks that a malformed expression is a
+// plain error (robfig's parser panics on some inputs when used directly).
+func TestAutomationCronRejectsWithoutPanic(t *testing.T) {
+	invalid := []string{
+		"cron * * * * * *", "cron 1-2-3 * * * * UTC", "cron */a * * * * UTC",
+		"cron 1, * * * * UTC", "cron ,1 * * * * UTC", "cron - * * * * UTC",
+		"cron 1- * * * * UTC", "cron */ * * * * UTC", "cron 0 0 0-0 * * UTC",
+		"cron 0 0 * * 9 UTC", "cron 0 0 32 * * UTC", "cron 0 0 * 0 * UTC",
+	}
+	for _, spec := range invalid {
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("ParseAutomationSchedule(%q) panicked: %v", spec, recovered)
+				}
+			}()
+			if _, err := ParseAutomationSchedule(spec); err == nil {
+				t.Fatalf("ParseAutomationSchedule(%q) accepted an invalid expression", spec)
+			}
+		}()
+	}
+}

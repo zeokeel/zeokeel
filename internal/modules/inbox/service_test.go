@@ -209,6 +209,74 @@ func TestRateLimitWindowSlides(t *testing.T) {
 	}
 }
 
+// The budget is a token bucket now: burst MaxPerMinute, then one slot back every
+// minute/MaxPerMinute. These tests pin that shape against the service clock, so
+// they move time instead of sleeping.
+func TestRateLimitRefillsGradually(t *testing.T) {
+	svc, clock := newService(t, func(c *inbox.Config) { c.MaxPerMinute = 2 })
+	ctx := context.Background()
+
+	for i := 0; i < 2; i++ {
+		if _, _, err := svc.Add(ctx, item("wechat", fmt.Sprintf("k%d", i), "ok")); err != nil {
+			t.Fatalf("add %d: %v", i, err)
+		}
+	}
+	if _, _, err := svc.Add(ctx, item("wechat", "k-overflow", "x")); !errors.Is(err, contracts.ErrInboxRateLimited) {
+		t.Fatalf("third add err = %v, want ErrInboxRateLimited", err)
+	}
+
+	// Half of the 30s refill interval: still nothing.
+	clock.advance(15 * time.Second)
+	if _, _, err := svc.Add(ctx, item("wechat", "k-too-soon", "x")); !errors.Is(err, contracts.ErrInboxRateLimited) {
+		t.Fatalf("add at half interval err = %v, want ErrInboxRateLimited", err)
+	}
+
+	// A full refill interval (30s at 2/min) buys exactly one slot, no more.
+	clock.advance(15 * time.Second)
+	if _, _, err := svc.Add(ctx, item("wechat", "k-refilled", "x")); err != nil {
+		t.Fatalf("add after one refill interval: %v", err)
+	}
+	if _, _, err := svc.Add(ctx, item("wechat", "k-greedy", "x")); !errors.Is(err, contracts.ErrInboxRateLimited) {
+		t.Fatalf("second add with no tokens err = %v, want ErrInboxRateLimited", err)
+	}
+}
+
+func TestRateLimitBoundaryIsAFullMinute(t *testing.T) {
+	svc, clock := newService(t, func(c *inbox.Config) { c.MaxPerMinute = 1 })
+	ctx := context.Background()
+
+	if _, _, err := svc.Add(ctx, item("wechat", "k1", "a")); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	clock.advance(time.Minute - time.Nanosecond)
+	if _, _, err := svc.Add(ctx, item("wechat", "k2", "b")); !errors.Is(err, contracts.ErrInboxRateLimited) {
+		t.Fatalf("just before a minute err = %v, want ErrInboxRateLimited", err)
+	}
+	// At exactly one minute the token is back — the same instant the old
+	// "timestamp after now-1m" cutoff released it.
+	clock.advance(time.Nanosecond)
+	if _, _, err := svc.Add(ctx, item("wechat", "k3", "c")); err != nil {
+		t.Fatalf("at exactly one minute: %v", err)
+	}
+}
+
+// The budget is charged before dedupe, so a duplicate flood cannot bypass it and
+// still merges: the third copy is refused, not folded in.
+func TestRateLimitIsChargedBeforeDedupe(t *testing.T) {
+	svc, _ := newService(t, func(c *inbox.Config) { c.MaxPerMinute = 2 })
+	ctx := context.Background()
+
+	if _, _, err := svc.Add(ctx, item("wechat", "same", "a")); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	if _, merged, err := svc.Add(ctx, item("wechat", "same", "a")); err != nil || !merged {
+		t.Fatalf("second = (%v, %v), want (nil, true)", err, merged)
+	}
+	if _, _, err := svc.Add(ctx, item("wechat", "same", "a")); !errors.Is(err, contracts.ErrInboxRateLimited) {
+		t.Fatalf("third err = %v, want ErrInboxRateLimited (duplicates must not bypass the budget)", err)
+	}
+}
+
 func TestTriageTaskRecordsTaskIDs(t *testing.T) {
 	svc, _ := newService(t, nil)
 	ctx := context.Background()

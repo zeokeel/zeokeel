@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
@@ -79,8 +81,10 @@ type Service struct {
 	items map[string]*contracts.InboxItem
 	// dedup maps source\x00key to the live item id.
 	dedup map[string]string
-	// rate keeps arrival timestamps per source inside the current minute.
-	rate map[string][]time.Time
+	// rate holds one token bucket per source: at most MaxPerMinute arrivals,
+	// refilling at MaxPerMinute/60s. It keeps no arrival history, so nothing has
+	// to be trimmed as time passes.
+	rate map[string]*rate.Limiter
 	seq  int64
 	// path is the durable document ("", when the service is memory-only).
 	path string
@@ -92,8 +96,29 @@ func NewService(cfg Config) *Service {
 		cfg:   cfg.normalized(),
 		items: make(map[string]*contracts.InboxItem),
 		dedup: make(map[string]string),
-		rate:  make(map[string][]time.Time),
+		rate:  make(map[string]*rate.Limiter),
 	}
+}
+
+// limiter returns the source's token bucket, creating it on first use: a burst of
+// MaxPerMinute, refilling one token every minute/MaxPerMinute. That is the same
+// budget the previous per-source timestamp slice enforced (N inside any minute),
+// spelled without the history it had to window and trim. The bucket is O(1), so a
+// source that goes quiet costs nothing to keep — but note the map still holds one
+// entry per source ever seen, exactly as the old map did.
+func (s *Service) limiter(source string) *rate.Limiter {
+	if limiter, ok := s.rate[source]; ok {
+		return limiter
+	}
+	interval := time.Minute / time.Duration(s.cfg.MaxPerMinute)
+	if interval <= 0 {
+		// More than 60e9 events a minute: keep a whole-minute burst and a
+		// nanosecond refill rather than rate.Every's "Inf" (= no limit at all).
+		interval = time.Nanosecond
+	}
+	limiter := rate.NewLimiter(rate.Every(interval), s.cfg.MaxPerMinute)
+	s.rate[source] = limiter
+	return limiter
 }
 
 func dedupSlot(source, key string) string { return source + "\x00" + key }
@@ -121,20 +146,12 @@ func (s *Service) Add(ctx context.Context, item contracts.InboxItem) (contracts.
 	now := s.cfg.Now()
 
 	// The rate budget is checked before dedupe so a flood of duplicates cannot
-	// bypass it, and it is per source so one noisy channel cannot starve others.
-	budget := s.rate[item.Source]
-	cutoff := now.Add(-time.Minute)
-	kept := budget[:0]
-	for _, at := range budget {
-		if at.After(cutoff) {
-			kept = append(kept, at)
-		}
-	}
-	if len(kept) >= s.cfg.MaxPerMinute {
-		s.rate[item.Source] = kept
+	// bypass it, and it is one bucket per source so one noisy channel cannot
+	// starve others. The bucket is asked at the service's own clock, which is why
+	// tests can move time without sleeping.
+	if !s.limiter(item.Source).AllowN(now, 1) {
 		return contracts.InboxItem{}, false, contracts.ErrInboxRateLimited
 	}
-	s.rate[item.Source] = append(kept, now)
 
 	// Dedupe: the same thing happening again inside the window folds into the
 	// existing row instead of becoming a second piece of work.

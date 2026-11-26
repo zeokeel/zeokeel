@@ -10,6 +10,7 @@ import (
 	"time"
 	_ "time/tzdata" // 墙钟计划接受 IANA 时区；不依赖宿主操作系统的时区数据库（与 rig 选择器一致）
 
+	"github.com/robfig/cron/v3"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 )
 
@@ -301,7 +302,11 @@ type AutomationSchedule struct {
 	timezone string
 	location *time.Location
 	weekdays []int
-	cron     *automationCron
+	// cronExpression is the canonical five-field expression and cronSchedule
+	// the github.com/robfig/cron/v3 schedule that computes its run instants
+	// (both set for AutomationScheduleCron only).
+	cronExpression string
+	cronSchedule   cron.Schedule
 }
 
 // ParseAutomationSchedule validates spec and returns its parsed schedule.
@@ -473,14 +478,15 @@ func parseAutomationCronSelector(fields []string, spec string) (AutomationSchedu
 	if err != nil {
 		return AutomationSchedule{}, err
 	}
-	cron, err := parseAutomationCron(fields[1:6])
+	expression, cronSchedule, err := compileAutomationCron(fields[1:6])
 	if err != nil {
 		return AutomationSchedule{}, fmt.Errorf("schedule %q: %w", spec, err)
 	}
-	canonical := fmt.Sprintf("cron %s %s", cron.expression, canonicalZone)
+	canonical := fmt.Sprintf("cron %s %s", expression, canonicalZone)
 	return AutomationSchedule{
 		spec: canonical, kind: AutomationScheduleCron,
-		timezone: canonicalZone, location: location, cron: cron,
+		timezone: canonicalZone, location: location,
+		cronExpression: expression, cronSchedule: cronSchedule,
 	}, nil
 }
 
@@ -507,7 +513,7 @@ func parseAutomationBareCron(fields []string, spec string) (AutomationSchedule, 
 		}
 		return AutomationSchedule{spec: fmt.Sprintf("*/%d * * * *", interval), kind: AutomationScheduleEveryMinutes, every: interval}, nil
 	}
-	cron, err := parseAutomationCron(fields[:5])
+	expression, cronSchedule, err := compileAutomationCron(fields[:5])
 	if err != nil {
 		return AutomationSchedule{}, fmt.Errorf("schedule %q: %w", spec, err)
 	}
@@ -524,10 +530,11 @@ func parseAutomationBareCron(fields []string, spec string) (AutomationSchedule, 
 		}
 		return newAutomationDailySchedule("", hour, minute, 0, 0, canonicalZone)
 	}
-	canonical := fmt.Sprintf("cron %s %s", cron.expression, canonicalZone)
+	canonical := fmt.Sprintf("cron %s %s", expression, canonicalZone)
 	return AutomationSchedule{
 		spec: canonical, kind: AutomationScheduleCron,
-		timezone: canonicalZone, location: location, cron: cron,
+		timezone: canonicalZone, location: location,
+		cronExpression: expression, cronSchedule: cronSchedule,
 	}, nil
 }
 
@@ -739,10 +746,10 @@ func (s AutomationSchedule) TimeZone() string { return s.timezone }
 // CronExpression returns the canonical five-field expression of a cron
 // schedule ("" for other kinds).
 func (s AutomationSchedule) CronExpression() string {
-	if s.kind != AutomationScheduleCron || s.cron == nil {
+	if s.kind != AutomationScheduleCron {
 		return ""
 	}
-	return s.cron.expression
+	return s.cronExpression
 }
 
 // At returns the absolute instant of a once-at schedule.
@@ -778,7 +785,9 @@ func (s AutomationSchedule) Next(from time.Time) time.Time {
 		return next
 	case AutomationScheduleHourly:
 		return time.Date(from.Year(), from.Month(), from.Day(), from.Hour(), 0, 0, 0, from.Location()).Add(time.Hour)
-	case AutomationScheduleDaily, AutomationScheduleWeekly, AutomationScheduleCron:
+	case AutomationScheduleCron:
+		return s.nextCron(from)
+	case AutomationScheduleDaily, AutomationScheduleWeekly:
 		return s.nextWallClock(from)
 	case AutomationScheduleEverySeconds, AutomationScheduleOnceAfter:
 		return from.Add(time.Duration(s.seconds) * time.Second)
@@ -818,6 +827,56 @@ func (s AutomationSchedule) nextWallClock(from time.Time) time.Time {
 	return time.Time{}
 }
 
+// nextCron finds the first five-field occurrence strictly after from.
+//
+// The instants come from github.com/robfig/cron/v3, which applies the Vixie
+// day-of-month/day-of-week rule, leap years and DST against the wall clock the
+// base time is expressed in — so the base time is converted to the schedule's
+// time zone first (robfig reads the location from the time it is given). Its
+// search gives up after five years; the search restarts in five-year steps so
+// the DSH horizon stays nine years (Feb 29 can be eight years apart).
+//
+// A DST fall-back names one wall clock twice and robfig reports both instants;
+// cron follows the daily/weekly kinds here, firing a wall clock once per date at
+// its earlier instant, so a repeated occurrence collapses onto that instant.
+func (s AutomationSchedule) nextCron(from time.Time) time.Time {
+	if s.cronSchedule == nil {
+		return time.Time{}
+	}
+	location := s.location
+	if location == nil {
+		loaded, _, err := loadAutomationLocation(s.timezone)
+		if err != nil {
+			return time.Time{}
+		}
+		location = loaded
+	}
+	local := from.In(location)
+	cursor := local
+	// Three five-year windows cover the nine-year horizon with margin.
+	for window := 0; window < 3; window++ {
+		for attempt := 0; attempt < 3; attempt++ {
+			next := s.cronSchedule.Next(cursor)
+			if next.IsZero() {
+				break
+			}
+			next = next.In(location)
+			wall := automationWallInstant(next.Year(), next.Month(), next.Day(),
+				next.Hour(), next.Minute(), next.Second(), next.Nanosecond()/int(time.Millisecond), location)
+			if wall.IsZero() || wall.Equal(next) {
+				return next
+			}
+			if wall.After(local) {
+				return wall
+			}
+			// The repeated (later) instant of a wall clock that already fired.
+			cursor = next
+		}
+		cursor = cursor.AddDate(5, 0, 0)
+	}
+	return time.Time{}
+}
+
 // matchesLocalDate reports whether a local date matches the wall-clock rule.
 func (s AutomationSchedule) matchesLocalDate(weekday time.Weekday, month time.Month, dayOfMonth int) bool {
 	switch s.kind {
@@ -831,8 +890,6 @@ func (s AutomationSchedule) matchesLocalDate(weekday time.Weekday, month time.Mo
 			}
 		}
 		return false
-	case AutomationScheduleCron:
-		return s.cron != nil && s.cron.matchesDate(weekday, month, dayOfMonth)
 	default:
 		return false
 	}
@@ -841,23 +898,6 @@ func (s AutomationSchedule) matchesLocalDate(weekday time.Weekday, month time.Mo
 // firstWallInstant returns the first matching instant on one local date that is
 // strictly after from (zero when the date has none).
 func (s AutomationSchedule) firstWallInstant(year int, month time.Month, dayOfMonth int, from time.Time, location *time.Location) time.Time {
-	if s.kind == AutomationScheduleCron {
-		for hour := 0; hour < 24; hour++ {
-			if !s.cron.hours[hour] {
-				continue
-			}
-			for minute := 0; minute < 60; minute++ {
-				if !s.cron.minutes[minute] {
-					continue
-				}
-				candidate := automationWallInstant(year, month, dayOfMonth, hour, minute, 0, 0, location)
-				if !candidate.IsZero() && candidate.After(from) {
-					return candidate
-				}
-			}
-		}
-		return time.Time{}
-	}
 	candidate := automationWallInstant(year, month, dayOfMonth, s.hour, s.minute, s.second, s.millis, location)
 	if candidate.IsZero() || !candidate.After(from) {
 		return time.Time{}
@@ -889,91 +929,82 @@ func NextAutomationRun(spec string, from time.Time) (time.Time, error) {
 }
 
 // --- five-field Vixie cron (DSH dialect) -----------------------------------
+//
+// The DSH dialect is the classic five-field Vixie shape — minute, hour,
+// day-of-month, month, day-of-week — where each field is `*`, a value, `a-b`,
+// `*/n`, `a-b/n`, or a comma-separated list of those, evaluated on a wall
+// clock. `compileAutomationCron` is the syntax gate and the canonical speller
+// (the wire shape `cron <five fields> [zone]` and its canonical form must not
+// drift); the run instants come from github.com/robfig/cron/v3, whose
+// `cron.ParseStandard` schedule applies the Vixie day-of-month/day-of-week
+// rule, leap years and DST.
 
-// automationCron is one parsed five-field Vixie expression.
-type automationCron struct {
-	expression  string
-	minutes     [60]bool
-	hours       [24]bool
-	daysOfMonth [32]bool
-	months      [13]bool
-	daysOfWeek  [7]bool // Sunday=0 .. Saturday=6 (input value 7 folds onto 0)
-	domStar     bool
-	dowStar     bool
-}
-
-// matchesDate applies the Vixie day rule: when either the day-of-month or the
-// day-of-week field starts with '*', both fields must match; when neither does,
-// either may match.
-func (c *automationCron) matchesDate(weekday time.Weekday, month time.Month, dayOfMonth int) bool {
-	if month < 1 || month > 12 || !c.months[int(month)] {
-		return false
-	}
-	domMatch := dayOfMonth >= 1 && dayOfMonth <= 31 && c.daysOfMonth[dayOfMonth]
-	dowMatch := c.daysOfWeek[int(weekday)%7]
-	switch {
-	case c.domStar && c.dowStar:
-		return true
-	case c.domStar:
-		return dowMatch
-	case c.dowStar:
-		return domMatch
-	default:
-		return domMatch || dowMatch
-	}
-}
-
-// parseAutomationCron parses the five fields of a Vixie expression, rejecting
-// the names/L/W/#/question-mark/seconds-field extensions DSH rejects.
-func parseAutomationCron(fields []string) (*automationCron, error) {
+// compileAutomationCron validates the five DSH cron fields and returns their
+// canonical spelling together with the robfig/cron schedule that computes the
+// run instants. Invalid expressions return an error, never a panic.
+func compileAutomationCron(fields []string) (string, cron.Schedule, error) {
 	if len(fields) != 5 {
-		return nil, fmt.Errorf("cron needs exactly five fields (minute hour day-of-month month day-of-week)")
+		return "", nil, fmt.Errorf("cron needs exactly five fields (minute hour day-of-month month day-of-week)")
 	}
-	minutes, minuteStar, err := parseAutomationCronField(fields[0], 0, 59, "minute")
+	minutes, minuteStar, err := expandAutomationCronField(fields[0], 0, 59, "minute")
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	hours, hourStar, err := parseAutomationCronField(fields[1], 0, 23, "hour")
+	hours, hourStar, err := expandAutomationCronField(fields[1], 0, 23, "hour")
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	daysOfMonth, domStar, err := parseAutomationCronField(fields[2], 1, 31, "day-of-month")
+	daysOfMonth, domStar, err := expandAutomationCronField(fields[2], 1, 31, "day-of-month")
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	months, monthStar, err := parseAutomationCronField(fields[3], 1, 12, "month")
+	months, monthStar, err := expandAutomationCronField(fields[3], 1, 12, "month")
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	daysOfWeekRaw, dowStar, err := parseAutomationCronField(fields[4], 0, 7, "day-of-week")
+	daysOfWeekRaw, dowStar, err := expandAutomationCronField(fields[4], 0, 7, "day-of-week")
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	cron := &automationCron{domStar: domStar, dowStar: dowStar}
-	copy(cron.minutes[:], minutes)
-	copy(cron.hours[:], hours)
-	copy(cron.daysOfMonth[:], daysOfMonth)
-	copy(cron.months[:], months)
 	daysOfWeek := make([]bool, 7)
 	for value := 0; value <= 7; value++ {
 		if daysOfWeekRaw[value] {
-			cron.daysOfWeek[value%7] = true
 			daysOfWeek[value%7] = true
 		}
 	}
-	cron.expression = strings.Join([]string{
-		renderAutomationCronField(minutes, 0, 59, minuteStar),
-		renderAutomationCronField(hours, 0, 23, hourStar),
-		renderAutomationCronField(daysOfMonth, 1, 31, domStar),
-		renderAutomationCronField(months, 1, 12, monthStar),
-		renderAutomationCronField(daysOfWeek, 0, 6, dowStar),
-	}, " ")
-	return cron, nil
+	minuteText := renderAutomationCronField(minutes, 0, 59, minuteStar)
+	hourText := renderAutomationCronField(hours, 0, 23, hourStar)
+	dayOfMonthText := renderAutomationCronField(daysOfMonth, 1, 31, domStar)
+	monthText := renderAutomationCronField(months, 1, 12, monthStar)
+	dayOfWeekText := renderAutomationCronField(daysOfWeek, 0, 6, dowStar)
+	canonical := strings.Join([]string{minuteText, hourText, dayOfMonthText, monthText, dayOfWeekText}, " ")
+
+	// A day field whose source text starts with '*' only sets the Vixie star
+	// flag — it is not a day restriction — so spell it "*" for the scheduler.
+	// That also keeps robfig/cron honest: it drops its own star bit for a
+	// stepped field ("*/2"), which would otherwise turn "0 0 */2 * 1" into
+	// "odd days or Mondays" instead of "Mondays".
+	scheduledDayOfMonth, scheduledDayOfWeek := dayOfMonthText, dayOfWeekText
+	if domStar {
+		scheduledDayOfMonth = "*"
+	}
+	if dowStar {
+		scheduledDayOfWeek = "*"
+	}
+	scheduled := strings.Join([]string{minuteText, hourText, scheduledDayOfMonth, monthText, scheduledDayOfWeek}, " ")
+	schedule, err := cron.ParseStandard(scheduled)
+	if err != nil {
+		return "", nil, fmt.Errorf("cron expression %q is not a five-field Vixie expression: %w", canonical, err)
+	}
+	return canonical, schedule, nil
 }
 
-// parseAutomationCronField expands one cron field into its matching values and
-// reports whether the source text starts with '*' (the Vixie star flag).
-func parseAutomationCronField(text string, lo, hi int, name string) ([]bool, bool, error) {
+// expandAutomationCronField expands one DSH cron field into its matching values
+// and reports whether the source text starts with '*' (the Vixie star flag).
+// It also defines the accepted element grammar: `*`, a value, `a-b`, `*/n`,
+// `a-b/n`, and comma-separated lists of those — no names, no `?`, `L`, `W` or
+// `#`, and no bare `N/step`.
+func expandAutomationCronField(text string, lo, hi int, name string) ([]bool, bool, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil, false, fmt.Errorf("cron %s field must not be empty", name)

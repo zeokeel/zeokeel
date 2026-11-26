@@ -29,6 +29,24 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
+// The fake server decodes and encodes frames by hand, so it spells the RFC 6455
+// vocabulary out itself. It must not borrow the transport's dialect: a fixture
+// that agrees with the code under test proves nothing.
+const (
+	wireOpContinuation byte = 0x0
+	wireOpText         byte = 0x1
+	wireOpBinary       byte = 0x2
+	wireOpClose        byte = 0x8
+	wireOpPing         byte = 0x9
+	wireOpPong         byte = 0xA
+
+	// wireCloseNormal is the RFC 6455 §7.4.1 code for "normal closure".
+	wireCloseNormal = 1000
+
+	// wireAcceptGUID is the fixed string RFC 6455 §1.3 appends to the key.
+	wireAcceptGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+)
+
 // wsFrame is one decoded frame, in either direction.
 type wsFrame struct {
 	fin     bool
@@ -284,7 +302,7 @@ func (p *wsPeer) nextCommand() (wsRequest, error) {
 			return wsRequest{}, err
 		}
 		switch frame.opcode {
-		case opText, opBinary:
+		case wireOpText, wireOpBinary:
 			payload := frame.payload
 			fin := frame.fin
 			for !fin {
@@ -293,7 +311,7 @@ func (p *wsPeer) nextCommand() (wsRequest, error) {
 				if err != nil {
 					return wsRequest{}, err
 				}
-				if next.opcode != opContinuation {
+				if next.opcode != wireOpContinuation {
 					p.server.violationf("expected a continuation frame, got 0x%x", next.opcode)
 					return wsRequest{}, errors.New("bad fragmentation")
 				}
@@ -307,9 +325,9 @@ func (p *wsPeer) nextCommand() (wsRequest, error) {
 			}
 			p.server.record(request)
 			return request, nil
-		case opClose:
+		case wireOpClose:
 			return wsRequest{}, io.EOF
-		case opPing, opPong:
+		case wireOpPing, wireOpPong:
 			p.server.recordControl(frame.opcode, frame.payload)
 		default:
 			p.server.violationf("unexpected client opcode 0x%x", frame.opcode)
@@ -346,7 +364,7 @@ func (p *wsPeer) writeFrame(opcode byte, fin bool, payload []byte) error {
 }
 
 func (p *wsPeer) writeText(payload []byte) error {
-	return p.writeFrame(opText, true, payload)
+	return p.writeFrame(wireOpText, true, payload)
 }
 
 func (p *wsPeer) writeControl(opcode byte, payload []byte) error {
@@ -421,9 +439,9 @@ func drainPeer(p *wsPeer) {
 			return
 		}
 		switch frame.opcode {
-		case opPing, opPong:
+		case wireOpPing, wireOpPong:
 			p.server.recordControl(frame.opcode, frame.payload)
-		case opClose:
+		case wireOpClose:
 			return
 		}
 	}
@@ -553,6 +571,20 @@ func TestDialTransportRoundTrip(t *testing.T) {
 	}
 	if server.hasOriginHeader() {
 		t.Errorf("Origin = %q, want absent when DialOptions.Origin is empty", server.handshakeHeader("origin"))
+	}
+	server.requireClean(t)
+}
+
+func TestDialTimeoutDoesNotBoundTheLiveConnection(t *testing.T) {
+	server := newWSServer(t, wsServerOptions{})
+	ws := dialTestWS(t, server, DialOptions{Timeout: 200 * time.Millisecond})
+
+	// The dial deadline is a handshake deadline: once the socket is up, no part
+	// of it may survive onto the live connection (an http.Client deadline, or a
+	// read deadline set for the handshake, would each kill it when it fires).
+	time.Sleep(600 * time.Millisecond) // three dial timeouts
+	if _, err := ws.Send(context.Background(), "Target.getTargets", nil); err != nil {
+		t.Fatalf("Send after the dial deadline passed: %v", err)
 	}
 	server.requireClean(t)
 }
@@ -818,7 +850,7 @@ func TestEventsAreDemuxedFromReplies(t *testing.T) {
 	server := newWSServer(t, wsServerOptions{script: func(p *wsPeer) {
 		// A keepalive the client must answer, then a command, then an event
 		// and the reply that completes the command.
-		if err := p.writeControl(opPing, []byte("keepalive")); err != nil {
+		if err := p.writeControl(wireOpPing, []byte("keepalive")); err != nil {
 			return
 		}
 		request, err := p.nextCommand()
@@ -863,8 +895,8 @@ func TestEventsAreDemuxedFromReplies(t *testing.T) {
 	}
 
 	// The client answered the ping (RFC 6455 §5.5.3), with the same payload.
-	waitFor(t, "pong", func() bool { return len(server.controlsOf(opPong)) > 0 })
-	if pongs := server.controlsOf(opPong); string(pongs[0]) != "keepalive" {
+	waitFor(t, "pong", func() bool { return len(server.controlsOf(wireOpPong)) > 0 })
+	if pongs := server.controlsOf(wireOpPong); string(pongs[0]) != "keepalive" {
 		t.Errorf("pong payload = %q, want keepalive", pongs[0])
 	}
 	server.requireClean(t)
@@ -885,14 +917,14 @@ func TestFragmentedMessagesAreReassembled(t *testing.T) {
 		}
 		// Split the reply across three frames: text + 2 continuations.
 		cuts := []int{len(reply) / 3, 2 * len(reply) / 3}
-		_ = p.writeFrame(opText, false, reply[:cuts[0]])
-		_ = p.writeFrame(opContinuation, false, reply[cuts[0]:cuts[1]])
-		_ = p.writeFrame(opContinuation, true, reply[cuts[1]:])
+		_ = p.writeFrame(wireOpText, false, reply[:cuts[0]])
+		_ = p.writeFrame(wireOpContinuation, false, reply[cuts[0]:cuts[1]])
+		_ = p.writeFrame(wireOpContinuation, true, reply[cuts[1]:])
 
 		// An event fragmented the same way.
 		event := []byte(`{"method":"Page.frameNavigated","params":{"frameId":"F-1"}}`)
-		_ = p.writeFrame(opText, false, event[:10])
-		_ = p.writeFrame(opContinuation, true, event[10:])
+		_ = p.writeFrame(wireOpText, false, event[:10])
+		_ = p.writeFrame(wireOpContinuation, true, event[10:])
 	}})
 	ws := dialTestWS(t, server, DialOptions{})
 
@@ -989,12 +1021,57 @@ func TestOversizedFrameTearsDownWithTypedError(t *testing.T) {
 	}
 }
 
+func TestSocketFailureFailsEveryPendingSend(t *testing.T) {
+	server := newWSServer(t, wsServerOptions{script: func(p *wsPeer) {
+		// Read two commands and answer neither, then close: both Sends are in
+		// flight when the socket dies.
+		if _, err := p.nextCommand(); err != nil {
+			return
+		}
+		if _, err := p.nextCommand(); err != nil {
+			return
+		}
+		_ = p.writeControl(wireOpClose, wireClosePayload(wireCloseNormal))
+		_, _ = io.Copy(io.Discard, p.reader)
+	}})
+	ws := dialTestWS(t, server, DialOptions{})
+
+	const sends = 2
+	failures := make(chan error, sends)
+	for i := 0; i < sends; i++ {
+		go func() {
+			_, err := ws.Send(context.Background(), "Page.enable", nil)
+			failures <- err
+		}()
+	}
+	for i := 0; i < sends; i++ {
+		select {
+		case err := <-failures:
+			if !errors.Is(err, contracts.ErrBrowserUnavailable) {
+				t.Errorf("pending Send %d = %v, want ErrBrowserUnavailable", i, err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("a pending Send was left waiting after the socket failed")
+		}
+	}
+	// The events channel closes exactly once (a second close would panic) and
+	// delivers nothing after the failure.
+	select {
+	case _, ok := <-ws.Events():
+		if ok {
+			t.Error("an event was delivered after the socket failed")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the events channel was not closed by the failure")
+	}
+}
+
 func TestPeerCloseTearsDown(t *testing.T) {
 	server := newWSServer(t, wsServerOptions{script: func(p *wsPeer) {
 		if _, err := p.nextCommand(); err != nil {
 			return
 		}
-		_ = p.writeControl(opClose, closePayload(closeNormal))
+		_ = p.writeControl(wireOpClose, wireClosePayload(wireCloseNormal))
 		// Drain whatever the client still writes (its close reply).
 		_, _ = io.Copy(io.Discard, p.reader)
 	}})
@@ -1081,8 +1158,8 @@ func TestCloseIsIdempotent(t *testing.T) {
 			if err != nil {
 				return
 			}
-			if frame.opcode == opClose {
-				p.server.recordControl(opClose, frame.payload)
+			if frame.opcode == wireOpClose {
+				p.server.recordControl(wireOpClose, frame.payload)
 				return
 			}
 		}
@@ -1106,7 +1183,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 	if _, err := ws.Send(context.Background(), "Page.enable", nil); !errors.Is(err, contracts.ErrBrowserUnavailable) {
 		t.Errorf("Send after Close = %v, want ErrBrowserUnavailable", err)
 	}
-	waitFor(t, "the client close frame", func() bool { return len(server.controlsOf(opClose)) > 0 })
+	waitFor(t, "the client close frame", func() bool { return len(server.controlsOf(wireOpClose)) > 0 })
 	server.requireClean(t)
 }
 
@@ -1116,8 +1193,11 @@ func TestDialTransportRejectsBadHandshakes(t *testing.T) {
 		want    string
 	}{
 		"http status": {options: wsServerOptions{rejectStatus: http.StatusForbidden}, want: "403"},
-		"bad accept":  {options: wsServerOptions{breakAccept: true}, want: "handshake accept mismatch"},
-		"no upgrade":  {options: wsServerOptions{noUpgrade: true}, want: "Upgrade"},
+		// The transport delegates the RFC 6455 handshake to coder/websocket, so
+		// the wording of a wire violation is the library's. What is pinned here
+		// is unchanged: a server that echoes the wrong accept value is refused.
+		"bad accept": {options: wsServerOptions{breakAccept: true}, want: "invalid Sec-WebSocket-Accept"},
+		"no upgrade": {options: wsServerOptions{noUpgrade: true}, want: "Upgrade"},
 	}
 
 	for name, testCase := range cases {
@@ -1308,11 +1388,18 @@ func TestAdapterOperationTimeoutOverWSIsATimeout(t *testing.T) {
 	}
 }
 
+// wireClosePayload encodes a close frame body (status code only).
+func wireClosePayload(code uint16) []byte {
+	var buf [2]byte
+	binary.BigEndian.PutUint16(buf[:], code)
+	return buf[:]
+}
+
 // testAccept computes the value the server must echo. It is written out here,
 // rather than reusing the product helper, so a broken accept check in ws.go
 // cannot make the handshake test agree with itself.
 func testAccept(key string) string {
-	sum := sha1.Sum([]byte(key + wsAcceptGUID)) //nolint:gosec // SHA-1 is fixed by RFC 6455.
+	sum := sha1.Sum([]byte(key + wireAcceptGUID)) //nolint:gosec // SHA-1 is fixed by RFC 6455.
 	return base64.StdEncoding.EncodeToString(sum[:])
 }
 

@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/coder/websocket"
 )
 
 // client is one WebSocket connection: one browser tab.
@@ -168,17 +170,17 @@ func (f *outFrame) encode() ([]byte, error) {
 func (c *client) readLoop(ctx context.Context) {
 	var buffer []byte
 	for {
-		opcode, payload, err := c.conn.readMessage()
+		messageType, payload, err := c.conn.readMessage()
 		if err != nil {
 			c.close()
 			return
 		}
-		if opcode != wsOpText {
+		if messageType != websocket.MessageText {
 			// The control plane is JSON text only; binary frames are ignored
 			// rather than misparsed.
 			continue
 		}
-		debugf("read %d bytes opcode=%d", len(payload), opcode)
+		debugf("read %d bytes type=%d", len(payload), messageType)
 		lines, rest, err := splitLines(buffer, payload, MaxFrameBytes)
 		if err != nil {
 			c.enqueueResponse(rpcResponse{JSONRPC: "2.0", Error: appError(codeBackpressure, "frame_too_large", false)})

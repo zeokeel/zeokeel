@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/lib/backoff"
 )
 
 // DefaultBaseURL is the official iLink host.
@@ -29,13 +30,6 @@ const DefaultBaseURL = "https://ilinkai.weixin.qq.com"
 
 // DefaultPollInterval is the pause between polls after a successful one.
 const DefaultPollInterval = 30 * time.Second
-
-// BackoffInitial and BackoffMax bound the retry schedule Run uses while the
-// platform is unavailable (2s doubling to 1m).
-const (
-	BackoffInitial = 2 * time.Second
-	BackoffMax     = time.Minute
-)
 
 // KeepaliveWarnAfter is how old the newest inbound message may get before
 // NeedsKeepalive reports true. The reply window is contracts.WeChatWindow (24h);
@@ -478,9 +472,9 @@ func (a *Adapter) NeedsKeepalive(now time.Time) bool {
 }
 
 // Run polls the platform until ctx is canceled. After a successful poll it waits
-// interval; while the platform is unavailable it backs off exponentially
-// (BackoffInitial doubling, capped at BackoffMax) so an outage does not turn into
-// a request flood; a rejected login token is terminal and returned immediately.
+// interval; while the platform is unavailable it backs off on the shared
+// backoff schedule (2s doubling, capped at 1m) so an outage does not turn into a
+// request flood; a rejected login token is terminal and returned immediately.
 // Cancellation returns nil — stopping on request is not a failure.
 func (a *Adapter) Run(ctx context.Context, interval time.Duration) error {
 	if interval <= 0 {
@@ -498,7 +492,7 @@ func (a *Adapter) Run(ctx context.Context, interval time.Duration) error {
 		switch {
 		case err == nil:
 			attempt = 0
-			if !sleepCtx(ctx, interval) {
+			if !backoff.Sleep(ctx, interval) {
 				return nil
 			}
 		case errors.Is(err, contracts.ErrWeChatUnauthorized):
@@ -507,43 +501,10 @@ func (a *Adapter) Run(ctx context.Context, interval time.Duration) error {
 			// Transient: unavailable platform, inbox hiccup, decode failure. All
 			// of them are worth retrying, slowly.
 			attempt++
-			if !sleepCtx(ctx, backoffDelay(attempt)) {
+			if !backoff.Sleep(ctx, backoff.Delay(attempt)) {
 				return nil
 			}
 		}
-	}
-}
-
-// backoffDelay is the retry schedule: 2s, 4s, 8s … capped at BackoffMax.
-func backoffDelay(attempt int) time.Duration {
-	if attempt < 1 {
-		return BackoffInitial
-	}
-	delay := BackoffInitial
-	for i := 1; i < attempt; i++ {
-		if delay >= BackoffMax/2 {
-			return BackoffMax
-		}
-		delay *= 2
-	}
-	if delay > BackoffMax {
-		return BackoffMax
-	}
-	return delay
-}
-
-// sleepCtx waits d, returning false when ctx was canceled first.
-func sleepCtx(ctx context.Context, d time.Duration) bool {
-	if d <= 0 {
-		return ctx.Err() == nil
-	}
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
 	}
 }
 

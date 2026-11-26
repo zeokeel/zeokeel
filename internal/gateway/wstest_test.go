@@ -13,6 +13,11 @@ import (
 	"time"
 )
 
+// wireOpText is the RFC 6455 opcode of a text frame. This fixture decodes server
+// frames by hand, so it spells the wire vocabulary out itself instead of
+// borrowing the server's.
+const wireOpText byte = 0x1
+
 // testWSConn is a minimal RFC 6455 client: enough to prove the gateway's
 // handshake, framing and method dispatch over a real loopback socket. The
 // client masks its frames as a browser does.
@@ -147,7 +152,7 @@ func (c *testWSConn) receive(predicate func(method string) bool) map[string]any 
 	}
 	for {
 		opcode, payload := c.readMessage()
-		if opcode != wsOpText {
+		if opcode != wireOpText {
 			continue
 		}
 		var frame map[string]any

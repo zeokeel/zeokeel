@@ -3,25 +3,51 @@
 // (2026-11 audit AR-22: the host must not import a backend module for a pure
 // function).
 //
-// Pragmatic semver comparison ported from the old shell's updater:
-// MAJOR[.MINOR[.PATCH]][-prerelease][+build]. Missing components are 0, a
-// prerelease sorts before its release and numeric prerelease identifiers sort
-// before alphanumeric ones.
+// Ordering is delegated to golang.org/x/mod/semver (semver 2.0.0 precedence:
+// MAJOR.MINOR.PATCH, then prerelease identifiers — numeric ones by value,
+// alphanumeric ones lexically, numeric before alphanumeric, a shorter set
+// before a longer one that shares its prefix — with build metadata ignored and
+// a prerelease sorting before its release). This package is only the adapter
+// between that implementation and the project's conventions:
+//
+//   - x/mod/semver requires a "v" prefix. Release tags carry one ("v0.4.1")
+//     while the VERSION file does not ("0.4.1"), so Parse accepts both, plus
+//     the uppercase "V" the previous hand-written parser tolerated.
+//   - A missing minor/patch is read as 0 (x/mod/semver already accepts vMAJOR
+//     and vMAJOR.MINOR as shorthands), so "1.2" == "1.2.0".
+//   - x/mod/semver compares an invalid string as *less than* a valid one and
+//     returns 0 when both are invalid, so feeding it unvalidated input would
+//     silently turn "the version is garbage" into "the versions are equal".
+//     Every entry point here validates with semver.IsValid first and returns an
+//     error instead, so a caller that ignores the error cannot mistake a
+//     malformed version for an equal one.
 package version
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+
+	"golang.org/x/mod/semver"
 )
 
 // Version is one parsed semver-ish version.
+//
+// The fields the hand-written parser exposed (major/minor/patch int, pre
+// []string) were unexported and unreadable outside this package, so nothing
+// outside loses access by their removal: x/mod/semver is now the single source
+// of truth for both parsing and ordering, and the mapping is
+// major/minor/patch -> the padded "vMAJOR.MINOR.PATCH" core of form,
+// pre -> its "-PRERELEASE" suffix, build metadata -> dropped (it never affects
+// precedence).
 type Version struct {
-	major, minor, patch int
-	pre                 []string
+	// form is the x/mod/semver canonical form: "v" prefixed, minor and patch
+	// padded with zeros when absent, build metadata stripped.
+	form string
 }
 
 // CompareVersions compares two semver-ish versions: -1 when a < b, 0 when
-// equal, +1 when a > b. Invalid input returns an error.
+// equal, +1 when a > b. Invalid input returns an error (never a silent 0).
 func CompareVersions(a, b string) (int, error) {
 	left, err := Parse(a)
 	if err != nil {
@@ -31,123 +57,44 @@ func CompareVersions(a, b string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return compareVersion(left, right), nil
+	return semver.Compare(left.form, right.form), nil
 }
 
-// Parse parses MAJOR[.MINOR[.PATCH]][-prerelease][+build]. A leading "v" (the
-// tag convention of the release pipeline) is accepted and ignored, so the
-// running binary's -ldflags version (v1.2.3) compares like 1.2.3. Callers that
-// only validate a version string can discard the returned Version.
+// Parse parses MAJOR[.MINOR[.PATCH]][-prerelease][+build] and returns an error
+// for anything x/mod/semver rejects (the semver 2.0.0 grammar: numeric
+// components without leading zeros, non-empty dot-separated prerelease
+// identifiers). A leading "v" (the tag convention of the release pipeline) is
+// accepted and ignored, so the running binary's -ldflags version (v1.2.3)
+// compares like 1.2.3. Callers that only validate a version string can discard
+// the returned Version.
 func Parse(raw string) (Version, error) {
-	var parsed Version
+	form, err := canonicalForm(raw)
+	if err != nil {
+		return Version{}, err
+	}
+	return Version{form: form}, nil
+}
+
+// canonicalForm normalises a project version string into the shape
+// golang.org/x/mod/semver accepts, or explains why it cannot.
+func canonicalForm(raw string) (string, error) {
 	text := strings.TrimSpace(raw)
 	if text == "" {
-		return parsed, fmt.Errorf("empty version")
+		return "", errors.New("empty version")
 	}
-	if len(text) > 1 && (text[0] == 'v' || text[0] == 'V') {
+	// The "v" tag prefix is optional in project input and mandatory for
+	// x/mod/semver; the previous parser also accepted an uppercase "V".
+	if text[0] == 'v' || text[0] == 'V' {
 		text = text[1:]
 	}
-	if index := strings.IndexByte(text, '+'); index >= 0 {
-		text = text[:index]
+	tagged := "v" + text
+	// IsValid is the guard against semver.Compare's "invalid compares as 0"
+	// behaviour: without it a malformed version would look equal to any other
+	// malformed version and lower than every valid one.
+	if !semver.IsValid(tagged) {
+		return "", fmt.Errorf("invalid version %q", raw)
 	}
-	core := text
-	if index := strings.IndexByte(text, '-'); index >= 0 {
-		core = text[:index]
-		prerelease := text[index+1:]
-		if prerelease == "" {
-			return parsed, fmt.Errorf("empty prerelease in %q", raw)
-		}
-		parsed.pre = strings.Split(prerelease, ".")
-		for _, identifier := range parsed.pre {
-			if identifier == "" {
-				return parsed, fmt.Errorf("empty prerelease identifier in %q", raw)
-			}
-		}
-	}
-	parts := strings.Split(core, ".")
-	if len(parts) > 3 {
-		return parsed, fmt.Errorf("too many version components in %q", raw)
-	}
-	numbers := [3]int{}
-	for index, part := range parts {
-		if part == "" {
-			return parsed, fmt.Errorf("empty version component in %q", raw)
-		}
-		value := 0
-		for _, character := range part {
-			if character < '0' || character > '9' {
-				return parsed, fmt.Errorf("non-numeric version component %q in %q", part, raw)
-			}
-			value = value*10 + int(character-'0')
-		}
-		numbers[index] = value
-	}
-	parsed.major, parsed.minor, parsed.patch = numbers[0], numbers[1], numbers[2]
-	return parsed, nil
-}
-
-func compareVersion(left, right Version) int {
-	if comparison := compareInt(left.major, right.major); comparison != 0 {
-		return comparison
-	}
-	if comparison := compareInt(left.minor, right.minor); comparison != 0 {
-		return comparison
-	}
-	if comparison := compareInt(left.patch, right.patch); comparison != 0 {
-		return comparison
-	}
-	switch {
-	case len(left.pre) == 0 && len(right.pre) == 0:
-		return 0
-	case len(left.pre) == 0:
-		return 1
-	case len(right.pre) == 0:
-		return -1
-	}
-	for index := 0; index < len(left.pre) && index < len(right.pre); index++ {
-		if comparison := comparePrereleaseID(left.pre[index], right.pre[index]); comparison != 0 {
-			return comparison
-		}
-	}
-	return compareInt(len(left.pre), len(right.pre))
-}
-
-func comparePrereleaseID(left, right string) int {
-	leftNumber, leftNumeric := numericID(left)
-	rightNumber, rightNumeric := numericID(right)
-	switch {
-	case leftNumeric && rightNumeric:
-		return compareInt(leftNumber, rightNumber)
-	case leftNumeric:
-		return -1
-	case rightNumeric:
-		return 1
-	default:
-		return strings.Compare(left, right)
-	}
-}
-
-func numericID(value string) (int, bool) {
-	if value == "" {
-		return 0, false
-	}
-	number := 0
-	for _, character := range value {
-		if character < '0' || character > '9' {
-			return 0, false
-		}
-		number = number*10 + int(character-'0')
-	}
-	return number, true
-}
-
-func compareInt(left, right int) int {
-	switch {
-	case left < right:
-		return -1
-	case left > right:
-		return 1
-	default:
-		return 0
-	}
+	// Canonical pads a missing minor/patch and drops build metadata, so the
+	// stored form is comparable as well as printable.
+	return semver.Canonical(tagged), nil
 }

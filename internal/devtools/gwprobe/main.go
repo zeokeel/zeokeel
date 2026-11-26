@@ -17,20 +17,18 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/coder/websocket"
 )
 
 func main() {
@@ -50,7 +48,7 @@ func main() {
 	defer cancel()
 
 	probe := &probe{addr: *addr, token: *token, text: *text}
-	if err := probe.connect(); err != nil {
+	if err := probe.connect(ctx); err != nil {
 		fatalf("connect: %v", err)
 	}
 	defer probe.close()
@@ -66,7 +64,7 @@ func main() {
 	case "slow":
 		err = probe.runSlow(ctx)
 	case "update":
-		err = probe.runUpdate()
+		err = probe.runUpdate(ctx)
 	default:
 		fatalf("unknown mode %q (plain | approval | cancel | slow | update)", *mode)
 	}
@@ -82,13 +80,18 @@ func fatalf(format string, args ...any) {
 	os.Exit(1)
 }
 
+// maxFrameBytes is the gateway's documented JSON-RPC frame limit
+// (gateway.MaxFrameBytes, 16 MiB). The probe sets it on its own socket so a
+// runaway frame hits the same cap the product does instead of the library's
+// 32 KiB default.
+const maxFrameBytes = 16 << 20
+
 // probe is one client session against the gateway.
 type probe struct {
 	addr      string
 	token     string
 	text      string
-	conn      net.Conn
-	reader    *bufio.Reader
+	conn      *websocket.Conn
 	http      *http.Client
 	origin    string
 	sessionID string
@@ -96,7 +99,7 @@ type probe struct {
 }
 
 // connect opens the control-plane socket and completes the handshake.
-func (p *probe) connect() error {
+func (p *probe) connect(ctx context.Context) error {
 	p.origin = "http://" + p.addr
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -106,33 +109,28 @@ func (p *probe) connect() error {
 	if err := p.authenticate(); err != nil {
 		return err
 	}
-	conn, err := net.DialTimeout("tcp", p.addr, 5*time.Second)
+	// The token and the origin ride as handshake headers, exactly as the browser
+	// sends them; the library owns the rest of the handshake.
+	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	conn, response, err := websocket.Dial(dialCtx, "ws://"+p.addr+"/ws", &websocket.DialOptions{
+		HTTPHeader: http.Header{
+			"Origin":        {p.origin},
+			"Authorization": {"Bearer " + p.token},
+		},
+	})
 	if err != nil {
+		if response != nil && response.StatusCode != http.StatusSwitchingProtocols {
+			return fmt.Errorf("ws handshake answered %s (is the token current?): %w", response.Status, err)
+		}
 		return err
 	}
+	conn.SetReadLimit(maxFrameBytes)
 	p.conn = conn
-	key := make([]byte, 16)
-	if _, err := rand.Read(key); err != nil {
+	if err := p.call(ctx, "initialize", map[string]any{"clientName": "gwprobe", "protocolVersion": 1}); err != nil {
 		return err
 	}
-	request := "GET /ws HTTP/1.1\r\nHost: " + p.addr + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
-		"Sec-WebSocket-Key: " + base64.StdEncoding.EncodeToString(key) + "\r\nSec-WebSocket-Version: 13\r\n" +
-		"Origin: " + p.origin + "\r\nAuthorization: Bearer " + p.token + "\r\n\r\n"
-	if _, err := io.WriteString(conn, request); err != nil {
-		return err
-	}
-	p.reader = bufio.NewReader(conn)
-	response, err := http.ReadResponse(p.reader, &http.Request{Method: http.MethodGet})
-	if err != nil {
-		return err
-	}
-	if response.StatusCode != http.StatusSwitchingProtocols {
-		return fmt.Errorf("ws handshake answered %s (is the token current?)", response.Status)
-	}
-	if err := p.call("initialize", map[string]any{"clientName": "gwprobe", "protocolVersion": 1}); err != nil {
-		return err
-	}
-	return p.call("ready", nil)
+	return p.call(ctx, "ready", nil)
 }
 
 // authenticate exchanges the token for the session cookie (§3.1).
@@ -158,34 +156,32 @@ func (p *probe) authenticate() error {
 // close drops the socket.
 func (p *probe) close() {
 	if p.conn != nil {
-		_ = p.conn.Close()
+		_ = p.conn.CloseNow()
 		p.conn = nil
 	}
 }
 
 // call sends one request and returns its result.
-func (p *probe) call(method string, params any) error {
-	_, err := p.callResult(method, params)
+func (p *probe) call(ctx context.Context, method string, params any) error {
+	_, err := p.callResult(ctx, method, params)
 	return err
 }
 
 // callResult sends one request, skipping notifications, and returns the result.
-func (p *probe) callResult(method string, params any) (map[string]any, error) {
+func (p *probe) callResult(ctx context.Context, method string, params any) (map[string]any, error) {
 	p.nextID++
 	id := p.nextID
 	payload, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
 	if err != nil {
 		return nil, err
 	}
-	if err := writeFrame(p.conn, append(payload, '\n')); err != nil {
+	if err := p.writeText(ctx, append(payload, '\n')); err != nil {
 		return nil, err
 	}
-	deadline := time.Now().Add(20 * time.Second)
+	readCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
 	for {
-		if err := p.conn.SetReadDeadline(deadline); err != nil {
-			return nil, err
-		}
-		frame, err := readJSONFrame(p.reader)
+		frame, err := p.readJSON(readCtx)
 		if err != nil {
 			return nil, err
 		}
@@ -207,13 +203,11 @@ func (p *probe) callResult(method string, params any) (map[string]any, error) {
 }
 
 // nextNotification waits for one notification with the given method.
-func (p *probe) nextNotification(method string, timeout time.Duration) (map[string]any, error) {
-	deadline := time.Now().Add(timeout)
+func (p *probe) nextNotification(ctx context.Context, method string, timeout time.Duration) (map[string]any, error) {
+	readCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	for {
-		if err := p.conn.SetReadDeadline(deadline); err != nil {
-			return nil, err
-		}
-		frame, err := readJSONFrame(p.reader)
+		frame, err := p.readJSON(readCtx)
 		if err != nil {
 			return nil, err
 		}
@@ -224,8 +218,8 @@ func (p *probe) nextNotification(method string, timeout time.Duration) (map[stri
 }
 
 // createSession makes a conversation through the protocol.
-func (p *probe) createSession(title string) error {
-	result, err := p.callResult("session.create", map[string]any{"title": title})
+func (p *probe) createSession(ctx context.Context, title string) error {
+	result, err := p.callResult(ctx, "session.create", map[string]any{"title": title})
 	if err != nil {
 		return err
 	}
@@ -316,7 +310,7 @@ func (s *stream) drainTo(done string) ([]string, error) {
 
 // runPlain is the minimal turn: create, run, stream, done.
 func (p *probe) runPlain(ctx context.Context) error {
-	if err := p.createSession("gwprobe plain"); err != nil {
+	if err := p.createSession(ctx, "gwprobe plain"); err != nil {
 		return err
 	}
 	run, err := p.startRun("gwprobe-plain")
@@ -340,7 +334,7 @@ func (p *probe) runPlain(ctx context.Context) error {
 
 // runApproval parks on the approval card, allows it, and expects the tool result.
 func (p *probe) runApproval(ctx context.Context) error {
-	if err := p.createSession("gwprobe approval"); err != nil {
+	if err := p.createSession(ctx, "gwprobe approval"); err != nil {
 		return err
 	}
 	run, err := p.startRun("gwprobe-approval")
@@ -349,7 +343,7 @@ func (p *probe) runApproval(ctx context.Context) error {
 	}
 	defer func() { _ = run.body.Close() }()
 
-	frame, err := p.nextNotification("approvals.delta", 20*time.Second)
+	frame, err := p.nextNotification(ctx, "approvals.delta", 20*time.Second)
 	if err != nil {
 		return fmt.Errorf("no approvals.delta (does the scripted model request a gated tool?): %w", err)
 	}
@@ -364,7 +358,7 @@ func (p *probe) runApproval(ctx context.Context) error {
 	if id == "" {
 		return errors.New("the pending approval has no id")
 	}
-	if err := p.call("approval.resolve", map[string]any{"id": id, "decision": "allow"}); err != nil {
+	if err := p.call(ctx, "approval.resolve", map[string]any{"id": id, "decision": "allow"}); err != nil {
 		return err
 	}
 	fmt.Println("approval.resolve allow -> ok")
@@ -384,7 +378,7 @@ func (p *probe) runApproval(ctx context.Context) error {
 
 // runCancel stops a run by protocol and expects the session to settle.
 func (p *probe) runCancel(ctx context.Context) error {
-	if err := p.createSession("gwprobe cancel"); err != nil {
+	if err := p.createSession(ctx, "gwprobe cancel"); err != nil {
 		return err
 	}
 	run, err := p.startRun("gwprobe-cancel")
@@ -394,7 +388,7 @@ func (p *probe) runCancel(ctx context.Context) error {
 	if _, _, err := run.next(); err != nil {
 		return fmt.Errorf("no first event: %w", err)
 	}
-	if err := p.call("run.cancel", map[string]any{"sessionId": p.sessionID}); err != nil {
+	if err := p.call(ctx, "run.cancel", map[string]any{"sessionId": p.sessionID}); err != nil {
 		return err
 	}
 	fmt.Println("run.cancel -> ok")
@@ -404,7 +398,7 @@ func (p *probe) runCancel(ctx context.Context) error {
 
 // runSlow proves a dropped SSE socket is not a stop request (§4.6).
 func (p *probe) runSlow(ctx context.Context) error {
-	if err := p.createSession("gwprobe slow"); err != nil {
+	if err := p.createSession(ctx, "gwprobe slow"); err != nil {
 		return err
 	}
 	run, err := p.startRun("gwprobe-slow")
@@ -426,7 +420,7 @@ func (p *probe) runSlow(ctx context.Context) error {
 func (p *probe) expectSessionSettled(ctx context.Context, _ bool) error {
 	sawRunning := false
 	for {
-		result, err := p.callResult("session.snapshot", map[string]any{"sessionId": p.sessionID})
+		result, err := p.callResult(ctx, "session.snapshot", map[string]any{"sessionId": p.sessionID})
 		if err != nil {
 			return err
 		}
@@ -454,56 +448,19 @@ func (p *probe) expectSessionSettled(ctx context.Context, _ bool) error {
 	}
 }
 
-// --- minimal RFC 6455 client (text frames, client masking) -----------------
+// --- websocket helpers (the library owns the framing) ----------------------
 
-// writeFrame writes one masked text frame.
-func writeFrame(conn net.Conn, payload []byte) error {
-	mask := make([]byte, 4)
-	if _, err := rand.Read(mask); err != nil {
-		return err
-	}
-	head := []byte{0x81}
-	switch {
-	case len(payload) < 126:
-		head = append(head, 0x80|byte(len(payload)))
-	case len(payload) <= 0xffff:
-		head = append(head, 0x80|126, 0, 0)
-		binary.BigEndian.PutUint16(head[len(head)-2:], uint16(len(payload)))
-	default:
-		head = append(head, 0x80|127, 0, 0, 0, 0, 0, 0, 0, 0)
-		binary.BigEndian.PutUint64(head[len(head)-8:], uint64(len(payload)))
-	}
-	masked := make([]byte, len(payload))
-	for i := range payload {
-		masked[i] = payload[i] ^ mask[i%4]
-	}
-	_, err := conn.Write(append(append(head, mask...), masked...))
-	return err
+// writeText writes one text message (one line, as §4.1 frames it).
+func (p *probe) writeText(ctx context.Context, payload []byte) error {
+	writeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	return p.conn.Write(writeCtx, websocket.MessageText, payload)
 }
 
-// readJSONFrame reads one text frame and decodes it.
-func readJSONFrame(reader *bufio.Reader) (map[string]any, error) {
-	var head [2]byte
-	if _, err := io.ReadFull(reader, head[:]); err != nil {
-		return nil, err
-	}
-	length := int64(head[1] & 0x7f)
-	switch length {
-	case 126:
-		var extended [2]byte
-		if _, err := io.ReadFull(reader, extended[:]); err != nil {
-			return nil, err
-		}
-		length = int64(binary.BigEndian.Uint16(extended[:]))
-	case 127:
-		var extended [8]byte
-		if _, err := io.ReadFull(reader, extended[:]); err != nil {
-			return nil, err
-		}
-		length = int64(binary.BigEndian.Uint64(extended[:]))
-	}
-	payload := make([]byte, length)
-	if _, err := io.ReadFull(reader, payload); err != nil {
+// readJSON reads one message and decodes it.
+func (p *probe) readJSON(ctx context.Context) (map[string]any, error) {
+	_, payload, err := p.conn.Read(ctx)
+	if err != nil {
 		return nil, err
 	}
 	var frame map[string]any
@@ -520,8 +477,8 @@ func readJSONFrame(reader *bufio.Reader) (map[string]any, error) {
 // It deliberately does not require a release to be available: whether GitHub is
 // reachable decides `available`/`error`, and both are legitimate answers. What
 // is asserted is that the browser's path to the update backend is wired.
-func (p *probe) runUpdate() error {
-	status, err := p.callResult("update.status", nil)
+func (p *probe) runUpdate(ctx context.Context) error {
+	status, err := p.callResult(ctx, "update.status", nil)
 	if err != nil {
 		return fmt.Errorf("update.status: %w", err)
 	}
@@ -531,7 +488,7 @@ func (p *probe) runUpdate() error {
 	}
 	fmt.Printf("update.status: current=%s latest=%v staged=%v\n", current, status["latestVersion"], status["staged"] != nil)
 
-	checked, err := p.callResult("update.check", nil)
+	checked, err := p.callResult(ctx, "update.check", nil)
 	if err != nil {
 		// A protocol error here means the method is missing or the backend is not
 		// wired: that is the failure this probe exists to catch.
