@@ -691,3 +691,48 @@ go test ./...          → 0 FAIL，56 包 ok（少了 design/brand/icons 三个
 normify_validate       → 0 error / 40 warning
 normify_build          → 221 模块 / 181 叶子 / 415 API / 129 依赖 / 深度 5
 ```
+
+---
+
+## 19. 剩下的收尾（2026-11-26 续）
+
+### 19.1 拆掉 `agent.prompt.preset`（599 行）
+
+同样是"一个叶子里装了六件事"的症状。拆成容器 + 6 个子模块，每个都能单独评审：
+
+| 子模块 | 回答的问题 |
+|---|---|
+| `roles` | 角色从哪来（内置逐字段合并在用户行之下，省略 `tools` 保留内置白名单） |
+| `binding` | 会话绑定哪个角色（每会话一行设置，删会话清成 `""`） |
+| `instructions` | 角色对 prompt 说什么（人格在前、提示在后，追加而非覆盖） |
+| `surface` | 角色能调什么（白名单 / deny / MCP server 范围 / skill 范围；工具面 + 闸门） |
+| `delegation` | 委派子代理变成什么（强制 executor，绝不继承 lead 人格） |
+| `admin` | 怎么编辑名册（只写用户行；内置只能覆盖，删覆盖即恢复） |
+
+`dep/unanchored` 98 → 97；仍在报"偏大"的最大叶子从 599 行降到 241 行（`surface`）。
+
+### 19.2 一处更正：automation 的调度状态**不是**内存态
+
+上一轮我把 `automation`/`insights` 列为"状态仍在内存、重启会丢"，这一轮核查后是错的：
+`automation` 的注册表就是 `automations.json`（`DefaultFileName`），`NextRun` 也在其中持久化，
+scheduler 的 claim/deliver/settle 状态机在 rig 的 durable store 里。**不需要改**。
+
+值得保留的结论：真正内存态的只有 `notifyroute` 的 `notified` 去重集合（已限界）与
+heartbeat 的运行时计时——前者按设计可丢，后者重启重算即可。
+
+### 19.3 install 代码的措辞与去留
+
+`host/install*.go` 仍在处理 `installer`（NSIS）/`dmg`/`AppImage` 这些**已退役桌面版本**的产物。
+它们不是死代码：一个几年前装的老版本升级到现在的归档版，**必须**还能应用这些形态。
+改的是注释——现在明确写着"这些形态属于退役的桌面发布，保留是为了升级路径；新发布是 archive/binary"，
+并把 `host.go` 里"重新打开新 app"改成"重新打开新 binary"，免得下一个人把迁移代码当垃圾删掉。
+
+### 19.4 验证
+
+```
+go build ./...   → 通过
+go vet ./...     → 干净
+go test ./...    → 0 FAIL，56 包 ok
+normify_validate → 0 error / 40 warning
+normify_build    → 221 模块 / 181 叶子 / 415 API / 129 依赖 / 深度 5
+```

@@ -147,7 +147,7 @@ func defaultDataDir() string {
 func Main(args []string) int {
 	// Hidden update-helper modes run before flag parsing and before mygo is
 	// initialized: the updater spawns this same executable to wait for the old
-	// process to quit and then start the installer / reopen the new app without
+	// process to quit and then apply the update / reopen the new binary without
 	// any shell quoting. They never open a window or touch the single-instance
 	// lock.
 	if handled, code := runUpdateHelper(args); handled {

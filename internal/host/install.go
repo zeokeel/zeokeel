@@ -47,9 +47,12 @@ const (
 
 	// pending install kinds. The update module writes one of them; a plan
 	// written by an older version has none and installs as a binary.
-	// "installer" (Windows NSIS setup) and "dmg" (macOS disk image) need a
-	// user-visible launch: startup keeps them for the in-app install command
-	// (see InstallPendingUpdateNow).
+	//
+	// "installer" (Windows NSIS setup) and "dmg" (macOS disk image) belong to
+	// the RETIRED desktop releases: current releases ship one archive with the
+	// server binary. They stay because the upgrade path out of a desktop build
+	// still has to apply one — deleting them would strand every install older
+	// than the browser pivot. "archive"/"binary" are what new releases carry.
 	installKindInstaller = "installer"
 	installKindDMG       = "dmg"
 	installKindBinary    = "binary"
@@ -648,8 +651,8 @@ func validateStagedFile(stagedPath string) (string, error) {
 // pendingUpdate is a pending install after the plan metadata was read: the plan's
 // identity plus the resolved staged path below <dataDir>/updates. SHA256 is the
 // expected checksum; the staged bytes are only hashed when the plan is actually
-// applied (see verifyPendingUpdate), so skipping an installer/dmg on startup
-// does not read hundreds of megabytes (F10).
+// applied (see verifyPendingUpdate), so skipping a legacy installer/dmg on
+// startup does not read hundreds of megabytes (F10).
 type pendingUpdate struct {
 	// Version is the staged release version.
 	Version string

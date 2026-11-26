@@ -1,12 +1,15 @@
 package host
 
 // Immediate install: the in-app "install update and restart" action applies an
-// already staged update without waiting for the next start. The Windows NSIS
-// setup installer runs detached after the app quits; macOS mounts the signed dmg
-// and swaps the .app bundle in place; AppImage/binary/archive replace the running
-// executable and relaunch it. Every OS process and the executable path go through
-// the update* seams below, so tests never start a real installer and never
-// replace the test binary.
+// already staged update without waiting for the next start.
+//
+// Two eras meet here. Current releases ship one archive containing the server
+// binary: it is unpacked and the running executable is replaced, then relaunched.
+// Installer/dmg/AppImage are shapes the retired desktop releases used, and they
+// still work because an install that is a few versions behind upgrades through
+// this path. Every OS process and the executable path go through the update*
+// seams below, so tests never start a real installer and never replace the test
+// binary.
 
 import (
 	"errors"
