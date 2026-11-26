@@ -209,7 +209,19 @@ func Module() *module.Descriptor[Config] {
 			// skills so the user can re-enable them).
 			var visibleSkills contracts.SkillsService = skillStore
 			if hasSettings {
-				visibleSkills = filteredSkillStore{inner: skillStore, settings: settingsService}
+				visibleSkills = filteredSkillStore{
+					inner:    skillStore,
+					settings: settingsService,
+					scope: func(callCtx context.Context) ([]string, bool) {
+						// Resolved per call: the role scope lives behind the agent's
+						// service key, which may not exist yet at activation.
+						scope, ok := ctx.Get(contracts.KeySkillScope)
+						if !ok || scope == nil {
+							return nil, false
+						}
+						return scope.AllowedSkills(callCtx)
+					},
+				}
 			}
 			for _, tool := range skill.Tools(visibleSkills) {
 				tools = append(tools, newTrustAwareSkillTool(tool, visibleSkills, rootOf))

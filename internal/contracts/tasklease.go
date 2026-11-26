@@ -169,7 +169,43 @@ var (
 	// lease owner is the executing identity, so reviewing your own work is
 	// refused instead of being recorded as an audit.
 	ErrLeaseReviewerIsOwner = errors.New("lease: reviewer is the executor")
+	// ErrLeaseReviewerRoleMismatch means the reviewer IS the executor role
+	// (contracts.PresetExecutorID) even though the identity differs from the
+	// owner. The automatic audit loop (M1) is role-shaped: a session running as
+	// the executor cannot sign off work, or "audit" would only mean "a second
+	// name for the same role". The auditor role and a plain user identity are
+	// the two reviewers the loop accepts.
+	ErrLeaseReviewerRoleMismatch = errors.New("lease: the executor role may not review")
+	// ErrLeaseReworkExhausted means the task used every automatic rework round
+	// (DefaultMaxRework unless configured otherwise). Claim and Submit refuse it
+	// so the loop cannot spend forever; the task is the human's until
+	// ResetRework records their decision to give it another try.
+	ErrLeaseReworkExhausted = errors.New("lease: rework ceiling reached")
 )
+
+// DefaultMaxRework is how many automatic rework rounds one task may take before
+// it escalates to the human. Three is deliberate: the first rejection is a
+// normal correction, the second is a sign the brief was wrong, and by the third
+// more automatic attempts mostly spend tokens — a person should either rewrite
+// the brief or take the work over.
+const DefaultMaxRework = 3
+
+// TaskRework is the rework accounting of one task: how many rejections the
+// automatic loop already absorbed, the policy ceiling, and whether the task is
+// waiting for a human instead of for another attempt.
+//
+// It lives per task, not per lease: releasing or losing a claim must not hand a
+// task a fresh budget of automatic rounds (the same reason tools, approvals and
+// budgets are task-scoped).
+type TaskRework struct {
+	TaskID string
+	// Rounds is the number of rejections recorded so far.
+	Rounds int
+	// Max is the configured ceiling (Config.MaxRework, DefaultMaxRework by default).
+	Max int
+	// Exhausted reports Rounds >= Max: automatic dispatch must stop.
+	Exhausted bool
+}
 
 // TaskReview is one recorded review decision (accept or reject). It outlives
 // the lease: Accept/Reject drop the lease from the live table (the board keeps

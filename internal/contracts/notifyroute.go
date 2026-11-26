@@ -2,7 +2,9 @@ package contracts
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -27,6 +29,11 @@ const (
 	NotifyCategoryTaskFailed    = "task_failed"
 	NotifyCategoryInboxDigest   = "inbox_digest"
 	NotifyCategoryDailySummary  = "daily_summary"
+	// SettingNotifyRoutes persists the router's book (the user's bindings).
+	SettingNotifyRoutes = "notify.routes"
+	// NotifyCategoryReport is a finished task/workflow report (M4). Informative,
+	// so quiet hours apply; never a reason to block the work.
+	NotifyCategoryReport = "report"
 )
 
 // NotifyRoute is one category's delivery policy: a primary channel, ordered
@@ -56,6 +63,22 @@ type DeliveryPlan struct {
 	Reason string
 }
 
+// NotifyCategories is the canonical order of the routing vocabulary: one row per
+// category, in the order the UI lists them. A new category must be added here as
+// well as to the router's defaults — `report` was routed correctly for a while
+// but invisible in Routes() because only the module knew the order.
+func NotifyCategories() []string {
+	return []string{
+		NotifyCategoryApproval,
+		NotifyCategoryNeedsDecision,
+		NotifyCategoryTaskDone,
+		NotifyCategoryTaskFailed,
+		NotifyCategoryInboxDigest,
+		NotifyCategoryReport,
+		NotifyCategoryDailySummary,
+	}
+}
+
 // NotifyRouterService decides where notifications go. It never sends anything:
 // the channel layer executes the plan.
 type NotifyRouterService interface {
@@ -74,3 +97,30 @@ var ErrNotifyRouteInvalid = errors.New("notifyroute: invalid route")
 
 // KeyNotifyRoute is provided by the notify route module.
 var KeyNotifyRoute = cordis.NewServiceKey[NotifyRouterService]("zeokeel/notifyroute")
+
+// ParseNotifyRoutes decodes the notify.routes settings row. Empty returns nil;
+// a malformed row is an error the router degrades from (defaults) rather than
+// failing activation on.
+func ParseNotifyRoutes(raw string) ([]NotifyRoute, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	var routes []NotifyRoute
+	if err := json.Unmarshal([]byte(raw), &routes); err != nil {
+		return nil, err
+	}
+	return routes, nil
+}
+
+// EncodeNotifyRoutes renders the notify.routes settings row.
+func EncodeNotifyRoutes(routes []NotifyRoute) (string, error) {
+	if routes == nil {
+		routes = []NotifyRoute{}
+	}
+	encoded, err := json.Marshal(routes)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}

@@ -8,6 +8,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/agent"
 	"github.com/zeokeel/zeokeel/internal/modules/appinfo"
 	"github.com/zeokeel/zeokeel/internal/modules/approvals"
+	"github.com/zeokeel/zeokeel/internal/modules/audit"
 	"github.com/zeokeel/zeokeel/internal/modules/automation"
 	"github.com/zeokeel/zeokeel/internal/modules/bot"
 	"github.com/zeokeel/zeokeel/internal/modules/browser"
@@ -28,6 +29,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/modelcatalog"
 	"github.com/zeokeel/zeokeel/internal/modules/notifyroute"
 	"github.com/zeokeel/zeokeel/internal/modules/replyrelay"
+	"github.com/zeokeel/zeokeel/internal/modules/reports"
 	"github.com/zeokeel/zeokeel/internal/modules/sandbox"
 	"github.com/zeokeel/zeokeel/internal/modules/sessionstore"
 	"github.com/zeokeel/zeokeel/internal/modules/skilldraft"
@@ -40,6 +42,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/users"
 	"github.com/zeokeel/zeokeel/internal/modules/webhook"
 	"github.com/zeokeel/zeokeel/internal/modules/wechat"
+	"github.com/zeokeel/zeokeel/internal/modules/workflow"
 	"github.com/zeokeel/zeokeel/internal/modules/workspace"
 )
 
@@ -94,10 +97,19 @@ func Registry() *module.Registry {
 	mustRegister(registry, replyrelay.Module())
 	// The dispatcher executes the routing plan against the adapters.
 	mustRegister(registry, channeldispatch.Module())
+	// Structured reports (M4): kept even when no channel is bound; delivery is
+	// optional, so it registers after the dispatcher it prefers to use.
+	mustRegister(registry, reports.Module())
 	// tasklease wraps the task board: it must come after toolkit.
 	mustRegister(registry, tasklease.Module())
 	mustRegister(registry, goal.Module())
 	mustRegister(registry, agent.Module())
+	// The audit loop joins the chat service to the lease layer: it must come
+	// after both (it opens auditor sessions and reads the review queue).
+	mustRegister(registry, audit.Module())
+	// The workflow runner projects stage tasks onto the board and dispatches
+	// them through the chat service: after the board, chat and the audit loop.
+	mustRegister(registry, workflow.Module())
 	mustRegister(registry, automation.Module())
 	mustRegister(registry, update.Module())
 	mustRegister(registry, importer.Module())

@@ -2547,3 +2547,485 @@ func (g *Gateway) taskRequestedBy(ctx context.Context, raw json.RawMessage) (any
 	}
 	return map[string]any{"requestedBy": userID}, nil
 }
+
+// --- rework ceiling (M1) ----------------------------------------------------
+
+// taskReworkParams is the body of tasks.rework.get / tasks.rework.reset.
+type taskReworkParams struct {
+	ID string `json:"id"`
+}
+
+// taskReworkDTO is one task's rework accounting.
+type taskReworkDTO struct {
+	TaskID string `json:"id"`
+	Rounds int    `json:"rounds"`
+	Max    int    `json:"max"`
+	// Exhausted reports that the automatic loop stopped: the task is the
+	// human's until tasks.rework.reset. The UI shows this instead of "in
+	// progress", which would claim work that is not happening.
+	Exhausted bool `json:"exhausted"`
+}
+
+// reworkReader is the rework half of the lease service.
+type reworkReader interface {
+	Rework(ctx context.Context, taskID string) (contracts.TaskRework, error)
+	ResetRework(ctx context.Context, taskID string) error
+}
+
+// taskReworkGet answers "how many automatic rounds does this task have left".
+func (g *Gateway) taskReworkGet(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.leaseService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params taskReworkParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(params.ID) == "" {
+		return nil, errInvalidParams("id", "task id is required")
+	}
+	reader, ok := service.(reworkReader)
+	if !ok {
+		return nil, appError(codeInternalError, "rework_unavailable", false)
+	}
+	rework, err := reader.Rework(ctx, params.ID)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return taskReworkDTO{TaskID: rework.TaskID, Rounds: rework.Rounds, Max: rework.Max, Exhausted: rework.Exhausted}, nil
+}
+
+// taskReworkReset is the human's decision to give an escalated task another
+// automatic attempt. It needs the same permission as any other approval: the
+// person is spending the machine's work, not reading a status.
+func (g *Gateway) taskReworkReset(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	if problem := g.requireAction(ctx, contracts.ActionApprove); problem != nil {
+		return nil, problem
+	}
+	service, problem := g.leaseService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params taskReworkParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(params.ID) == "" {
+		return nil, errInvalidParams("id", "task id is required")
+	}
+	reader, ok := service.(reworkReader)
+	if !ok {
+		return nil, appError(codeInternalError, "rework_unavailable", false)
+	}
+	if err := reader.ResetRework(ctx, params.ID); err != nil {
+		return nil, orchestrationError(err)
+	}
+	rework, err := reader.Rework(ctx, params.ID)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return taskReworkDTO{TaskID: rework.TaskID, Rounds: rework.Rounds, Max: rework.Max, Exhausted: rework.Exhausted}, nil
+}
+
+// --- staged workflows (M2) -------------------------------------------------
+
+// workflowStageParams is one stage of a definition as the client sends it.
+type workflowStageParams struct {
+	ID         string   `json:"id"`
+	Name       string   `json:"name,omitempty"`
+	Role       string   `json:"role,omitempty"`
+	Prompt     string   `json:"prompt,omitempty"`
+	Acceptance string   `json:"acceptance,omitempty"`
+	DependsOn  []string `json:"dependsOn,omitempty"`
+	// Tools is the stage task's tool binding (M3b): the executor may only call
+	// these.
+	Tools []string `json:"tools,omitempty"`
+}
+
+// workflowPutParams is the body of workflow.put (create or replace).
+type workflowPutParams struct {
+	ID          string                `json:"id"`
+	Name        string                `json:"name"`
+	Description string                `json:"description,omitempty"`
+	Stages      []workflowStageParams `json:"stages"`
+}
+
+// workflowIDParams is the body of workflow.delete / workflow.run.start.
+type workflowIDParams struct {
+	ID string `json:"id"`
+}
+
+type workflowStageDTO struct {
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Role       string   `json:"role"`
+	Prompt     string   `json:"prompt,omitempty"`
+	Acceptance string   `json:"acceptance,omitempty"`
+	DependsOn  []string `json:"dependsOn,omitempty"`
+	Tools      []string `json:"tools,omitempty"`
+}
+
+type workflowDTO struct {
+	ID          string             `json:"id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description,omitempty"`
+	Stages      []workflowStageDTO `json:"stages"`
+}
+
+type workflowStageStateDTO struct {
+	StageID   string `json:"stageId"`
+	TaskID    string `json:"taskId,omitempty"`
+	SessionID string `json:"sessionId,omitempty"`
+	Status    string `json:"status"`
+}
+
+type workflowRunDTO struct {
+	ID         string                  `json:"id"`
+	WorkflowID string                  `json:"workflowId"`
+	Status     string                  `json:"status"`
+	Stages     []workflowStageStateDTO `json:"stages"`
+	CreatedAt  string                  `json:"createdAt,omitempty"`
+}
+
+type workflowSnapshotResult struct {
+	Workflows []workflowDTO    `json:"workflows"`
+	Runs      []workflowRunDTO `json:"runs"`
+}
+
+// workflowService resolves the workflow backend or reports the capability as
+// unsupported (an assembly without the module).
+func (g *Gateway) workflowService() (contracts.WorkflowService, *protocolError) {
+	service, ok := g.root.Get(contracts.KeyWorkflow)
+	if !ok || service == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "workflow unavailable")
+	}
+	return service, nil
+}
+
+// workflowSnapshot answers the definitions and the runs in one call: the screen
+// that shows both must not be able to see one without the other.
+func (g *Gateway) workflowSnapshot(ctx context.Context, _ json.RawMessage) (any, *protocolError) {
+	service, problem := g.workflowService()
+	if problem != nil {
+		return nil, problem
+	}
+	workflows, err := service.List(ctx)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	runs, err := service.Runs(ctx)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	result := workflowSnapshotResult{
+		Workflows: make([]workflowDTO, 0, len(workflows)),
+		Runs:      make([]workflowRunDTO, 0, len(runs)),
+	}
+	for _, wf := range workflows {
+		dto := workflowDTO{ID: wf.ID, Name: wf.Name, Description: wf.Description, Stages: make([]workflowStageDTO, 0, len(wf.Stages))}
+		for _, stage := range wf.Stages {
+			dto.Stages = append(dto.Stages, workflowStageDTO{
+				ID: stage.ID, Name: stage.Name, Role: stage.Role,
+				Prompt: stage.Prompt, Acceptance: stage.Acceptance, DependsOn: stage.DependsOn,
+				Tools: stage.Tools,
+			})
+		}
+		result.Workflows = append(result.Workflows, dto)
+	}
+	for _, run := range runs {
+		dto := workflowRunDTO{ID: run.ID, WorkflowID: run.WorkflowID, Status: run.Status, Stages: make([]workflowStageStateDTO, 0, len(run.Stages))}
+		if !run.CreatedAt.IsZero() {
+			dto.CreatedAt = rfc3339(run.CreatedAt)
+		}
+		for _, stage := range run.Stages {
+			dto.Stages = append(dto.Stages, workflowStageStateDTO{StageID: stage.StageID, TaskID: stage.TaskID, SessionID: stage.SessionID, Status: stage.Status})
+		}
+		result.Runs = append(result.Runs, dto)
+	}
+	return result, nil
+}
+
+// workflowPut creates or replaces one definition. Authoring a pipeline is a
+// dispatch-shaped act (it spends the machine's work), so it needs the dispatch
+// permission — not the approval one, which is reserved for answering a request.
+func (g *Gateway) workflowPut(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	if problem := g.requireAction(ctx, contracts.ActionDispatch); problem != nil {
+		return nil, problem
+	}
+	service, problem := g.workflowService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params workflowPutParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	wf := contracts.Workflow{ID: params.ID, Name: params.Name, Description: params.Description}
+	for _, stage := range params.Stages {
+		wf.Stages = append(wf.Stages, contracts.WorkflowStage{
+			ID: stage.ID, Name: stage.Name, Role: stage.Role,
+			Prompt: stage.Prompt, Acceptance: stage.Acceptance, DependsOn: stage.DependsOn,
+			Tools: stage.Tools,
+		})
+	}
+	stored, err := service.Put(ctx, wf)
+	if err != nil {
+		// A validation failure is a request problem, not an internal one: the
+		// message names the field and the client shows it verbatim.
+		if errors.Is(err, contracts.ErrWorkflowInvalid) || errors.Is(err, contracts.ErrWorkflowCycle) {
+			return nil, protocolErrorWithMessage(codeInvalidParams, err.Error())
+		}
+		return nil, orchestrationError(err)
+	}
+	return map[string]any{"id": stored.ID}, nil
+}
+
+// workflowDelete removes one definition. Deleting is the harder-to-undo half, so
+// it takes the approve permission.
+func (g *Gateway) workflowDelete(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	if problem := g.requireAction(ctx, contracts.ActionApprove); problem != nil {
+		return nil, problem
+	}
+	service, problem := g.workflowService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params workflowIDParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if err := service.Delete(ctx, params.ID); err != nil {
+		return nil, orchestrationError(err)
+	}
+	return map[string]any{"id": params.ID}, nil
+}
+
+// workflowRunStart opens a run and dispatches its roots.
+func (g *Gateway) workflowRunStart(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	if problem := g.requireAction(ctx, contracts.ActionDispatch); problem != nil {
+		return nil, problem
+	}
+	service, problem := g.workflowService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params workflowIDParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	run, err := service.Start(ctx, params.ID)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return map[string]any{"runId": run.ID, "status": run.Status}, nil
+}
+
+// workflowAdvance runs one pass now (the diagnostics surface and tests); the
+// module's ticker calls the same method.
+func (g *Gateway) workflowAdvance(ctx context.Context, _ json.RawMessage) (any, *protocolError) {
+	service, problem := g.workflowService()
+	if problem != nil {
+		return nil, problem
+	}
+	report, err := service.Advance(ctx)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return map[string]any{
+		"runs": report.Runs, "dispatched": report.Dispatched,
+		"completed": report.Completed, "errors": report.Errors,
+	}, nil
+}
+
+// --- agent presets (roles, M3) ----------------------------------------------
+
+// presetParams is the body of presets.put: one role definition.
+type presetParams struct {
+	ID    string   `json:"id"`
+	Name  string   `json:"name"`
+	Tools []string `json:"tools,omitempty"`
+	Deny  []string `json:"deny,omitempty"`
+	// MCPServers / Skills are the role's capability domains (M3b).
+	MCPServers []string `json:"mcpServers,omitempty"`
+	Skills     []string `json:"skills,omitempty"`
+	Prompt     string   `json:"prompt,omitempty"`
+	Persona    string   `json:"persona,omitempty"`
+	Model      string   `json:"model,omitempty"`
+	Order      int      `json:"order,omitempty"`
+}
+
+type presetIDParams struct {
+	ID string `json:"id"`
+}
+
+type presetDTO struct {
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Tools      []string `json:"tools,omitempty"`
+	Deny       []string `json:"deny,omitempty"`
+	MCPServers []string `json:"mcpServers,omitempty"`
+	Skills     []string `json:"skills,omitempty"`
+	Prompt     string   `json:"prompt,omitempty"`
+	Persona    string   `json:"persona,omitempty"`
+	Model      string   `json:"model,omitempty"`
+	Order      int      `json:"order,omitempty"`
+	// Builtin marks a shipped role (lead/executor/auditor): the UI shows it as
+	// non-deletable and offers "reset to default" instead of "delete".
+	Builtin bool `json:"builtin,omitempty"`
+}
+
+type presetSnapshotResult struct {
+	Presets []presetDTO `json:"presets"`
+}
+
+func (g *Gateway) presetService() (contracts.AgentPresetService, *protocolError) {
+	service, ok := g.root.Get(contracts.KeyAgentPresets)
+	if !ok || service == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "agent presets unavailable")
+	}
+	return service, nil
+}
+
+// presetSnapshot lists the effective roster (built-ins merged under user rows).
+func (g *Gateway) presetSnapshot(ctx context.Context, _ json.RawMessage) (any, *protocolError) {
+	service, problem := g.presetService()
+	if problem != nil {
+		return nil, problem
+	}
+	presets, err := service.List(ctx)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	builtin := map[string]bool{}
+	for _, preset := range contracts.BuiltinAgentPresets() {
+		builtin[preset.ID] = true
+	}
+	result := presetSnapshotResult{Presets: make([]presetDTO, 0, len(presets))}
+	for _, preset := range presets {
+		result.Presets = append(result.Presets, presetDTO{
+			ID: preset.ID, Name: preset.Name, Tools: preset.Tools, Deny: preset.Deny,
+			MCPServers: preset.MCPServers, Skills: preset.Skills,
+			Prompt: preset.Prompt, Persona: preset.Persona, Model: preset.Model,
+			Order: preset.Order, Builtin: builtin[preset.ID],
+		})
+	}
+	return result, nil
+}
+
+// presetPut creates or overrides one role. Editing a role changes what the
+// machine may do, so it takes the approve permission.
+func (g *Gateway) presetPut(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	if problem := g.requireAction(ctx, contracts.ActionApprove); problem != nil {
+		return nil, problem
+	}
+	service, problem := g.presetService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params presetParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	stored, err := service.Put(ctx, contracts.AgentPreset{
+		ID: params.ID, Name: params.Name, Tools: params.Tools, Deny: params.Deny,
+		MCPServers: params.MCPServers, Skills: params.Skills,
+		Prompt: params.Prompt, Persona: params.Persona, Model: params.Model, Order: params.Order,
+	})
+	if err != nil {
+		if errors.Is(err, contracts.ErrAgentPresetInvalid) {
+			return nil, protocolErrorWithMessage(codeInvalidParams, err.Error())
+		}
+		return nil, orchestrationError(err)
+	}
+	return map[string]any{"id": stored.ID}, nil
+}
+
+// presetDelete removes a user role (or the override of a built-in).
+func (g *Gateway) presetDelete(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	if problem := g.requireAction(ctx, contracts.ActionApprove); problem != nil {
+		return nil, problem
+	}
+	service, problem := g.presetService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params presetIDParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if err := service.Delete(ctx, params.ID); err != nil {
+		switch {
+		case errors.Is(err, contracts.ErrPresetBuiltin):
+			return nil, protocolErrorWithMessage(codeInvalidParams, "a built-in role cannot be deleted; reset its override instead")
+		case errors.Is(err, contracts.ErrPresetNotFound):
+			return nil, protocolErrorWithMessage(codeInvalidParams, "unknown role")
+		}
+		return nil, orchestrationError(err)
+	}
+	return map[string]any{"id": params.ID}, nil
+}
+
+// --- structured reports (M4) -----------------------------------------------
+
+type reportsSnapshotParams struct {
+	Limit int `json:"limit,omitempty"`
+}
+
+type reportDeliverParams struct {
+	ID string `json:"id"`
+}
+
+func (g *Gateway) reportService() (contracts.ReportService, *protocolError) {
+	service, ok := g.root.Get(contracts.KeyReports)
+	if !ok || service == nil {
+		return nil, protocolErrorWithMessage(codeCapabilityUnsupported, "reports unavailable")
+	}
+	return service, nil
+}
+
+// reportsSnapshot lists the newest reports (the "what did it tell me" screen).
+func (g *Gateway) reportsSnapshot(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.reportService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params reportsSnapshotParams
+	if len(raw) > 0 {
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+	}
+	rows, err := service.List(ctx, params.Limit)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	return map[string]any{"reports": rows}, nil
+}
+
+// reportsDeliver sends one stored report again (the human asks for it).
+func (g *Gateway) reportsDeliver(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	if problem := g.requireAction(ctx, contracts.ActionDispatch); problem != nil {
+		return nil, problem
+	}
+	service, problem := g.reportService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params reportDeliverParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	delivery, err := service.Deliver(ctx, params.ID)
+	if err != nil {
+		if errors.Is(err, contracts.ErrReportNotFound) {
+			return nil, protocolErrorWithMessage(codeInvalidParams, "unknown report")
+		}
+		return nil, orchestrationError(err)
+	}
+	return map[string]any{
+		"reportId": delivery.ReportID, "channel": delivery.Channel,
+		"deferred": delivery.Deferred, "reason": delivery.Reason,
+		"attempts": delivery.Attempts, "errors": delivery.Errors,
+	}, nil
+}

@@ -30,8 +30,20 @@ func TestDefaultsCoverEveryCategory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Routes: %v", err)
 	}
-	if len(routes) != 6 {
-		t.Fatalf("routes = %d, want 6 default categories", len(routes))
+	if len(routes) != len(contracts.NotifyCategories()) {
+		t.Fatalf("routes = %d, want %d default categories (one per known category)", len(routes), len(contracts.NotifyCategories()))
+	}
+	seen := map[string]bool{}
+	for _, route := range routes {
+		if seen[route.Category] {
+			t.Fatalf("category %q listed twice", route.Category)
+		}
+		seen[route.Category] = true
+	}
+	for _, category := range contracts.NotifyCategories() {
+		if !seen[category] {
+			t.Fatalf("category %q has no default route", category)
+		}
 	}
 	for _, route := range routes {
 		if route.Primary != contracts.NotifyChannelInApp {

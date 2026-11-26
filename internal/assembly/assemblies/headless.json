@@ -130,6 +130,11 @@
       "config": {}
     },
     {
+      "id": "reports",
+      "module": "zeokeel/reports",
+      "config": {}
+    },
+    {
       "id": "heartbeat",
       "module": "zeokeel/heartbeat",
       "config": {}
@@ -181,6 +186,16 @@
         "requireFinishReason": true,
         "memory": true
       }
+    },
+    {
+      "id": "audit",
+      "module": "zeokeel/audit",
+      "config": {}
+    },
+    {
+      "id": "workflow",
+      "module": "zeokeel/workflow",
+      "config": {}
     },
     {
       "id": "automation",

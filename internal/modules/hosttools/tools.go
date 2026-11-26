@@ -67,7 +67,7 @@ var planReviewToolNames = []string{ToolPlanReview, ToolExitPlanMode}
 // model submit a plan and stall with the task silently unfinished. ask_user and
 // the remaining tools keep their behavior; a missing capability becomes a
 // readable model-facing tool error instead of failing activation.
-func newTools(capabilities hostcaps.Host, interactive bool, goalStore hostcaps.RevisionGoalStore) []rig.Tool {
+func newTools(capabilities hostcaps.Host, interactive bool, goalStore hostcaps.RevisionGoalStore, tasks taskDeps, reports reportDeps) []rig.Tool {
 	wanted := make(map[string]bool, len(rigHostToolNames))
 	for _, name := range rigHostToolNames {
 		wanted[name] = true
@@ -85,6 +85,11 @@ func newTools(capabilities hostcaps.Host, interactive bool, goalStore hostcaps.R
 		tools = append(tools, tool)
 	}
 	tools = append(tools, &presentTool{presenter: capabilities.Presenter})
+	// The task tools (M1) are product-owned: they need the session ⇄ task
+	// binding and the durable lease layer. Registered in every product; a
+	// product without a board answers each call with a readable error.
+	tools = append(tools, newTaskTools(tasks)...)
+	tools = append(tools, &reportTool{deps: reports})
 	return tools
 }
 

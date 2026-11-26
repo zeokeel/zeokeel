@@ -1,25 +1,28 @@
 // Package host is ZeoKeel's process host.
 //
-// It owns everything the kernel and the UI root do not: the command line, the
-// data directory, the settings and log files, the mygo application lifecycle
-// (main thread, window, quit) and the headless product.
+// It owns what the kernel does not: the command line, the data directory, the
+// settings and log files, the assembly choice, and the shutdown order. The
+// product's user interface is a browser SPA served by the gateway over
+// WebSocket JSON-RPC and HTTP read models — the host does not render anything.
 //
-// The host is deliberately thin. For the desktop product it:
+// Two products run from this one package:
 //
-//  1. creates the kernel root context and provides the services modules
-//     require (settings, log, and the uiroot UI services);
-//  2. loads one embedded assembly on the main thread inside mygo's WhenReady
-//     callback, so every UI module registers its contributions on the UI
-//     thread;
-//  3. validates the UI root, creates the window around uiroot's single view
-//     function and wires window invalidation to it;
-//  4. runs the event loop and unwinds in order on quit: close the assembly
-//     (UI contributions unregister in reverse), close the window, dispose the
-//     kernel root.
+//   - `zeokeel serve` starts the gateway (WS + HTTP), optionally opening the
+//     browser, and owns the kernel root the modules are loaded into. The
+//     gateway provides the browser-facing UI services (foreground session,
+//     toast anchor, locale) — they are per-connection state, not process state;
+//   - `zeokeel headless` / `dsh --headless` loads the registry with an assembly
+//     that has no browser surface at all: it prints the instance states and
+//     waits for SIGINT/SIGTERM. It never touches the display environment.
 //
-// For the headless product it loads the same registry with an assembly that has
-// no UI modules, prints the instance states and waits for SIGINT/SIGTERM. It
-// never touches mygo, uiroot or the display environment.
+// In both cases the host provides exactly three backend services — data
+// directory, settings, log — and the modules are wired only through contracts
+// service keys, so an assembly can add or drop modules without the host
+// knowing their names.
+//
+// A desktop shell (tray, hotkey, mygo window) still exists under this package
+// from the retired native product; it compiles, but it is not part of either
+// product path above and nothing on the browser path may depend on it.
 package host
 
 import (

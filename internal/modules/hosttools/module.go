@@ -107,7 +107,35 @@ func ModuleWithHost(host *hostcaps.Host) *module.Descriptor[Config] {
 			return service
 		})
 
-		for _, tool := range newTools(capabilities, cfg.Interactive, goalStore) {
+		// The task tools resolve the lease layer and the session binder at call
+		// time: this module may activate before either exists.
+		tasks := taskDeps{
+			lease: func() (taskLeaseService, bool) {
+				service, ok := ctx.Get(contracts.KeyTaskLease)
+				if !ok || service == nil {
+					return nil, false
+				}
+				return service, true
+			},
+			binder: func() (taskBinder, bool) {
+				chat, ok := ctx.Get(contracts.KeyChat)
+				if !ok || chat == nil {
+					return nil, false
+				}
+				binder, ok := chat.(contracts.SessionTaskBinder)
+				return binder, ok
+			},
+		}
+
+		reports := reportDeps{service: func() (reportService, bool) {
+			service, ok := ctx.Get(contracts.KeyReports)
+			if !ok || service == nil {
+				return nil, false
+			}
+			return service, true
+		}}
+
+		for _, tool := range newTools(capabilities, cfg.Interactive, goalStore, tasks, reports) {
 			if err := registry.Register(tool); err != nil {
 				return fmt.Errorf("%s: register %q: %w", ModuleID, tool.Name(), err)
 			}

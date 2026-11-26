@@ -275,6 +275,32 @@
         "sinceRev"
       ]
     },
+    "presets.delete": {
+      "required": [
+        "id"
+      ],
+      "optional": []
+    },
+    "presets.put": {
+      "required": [
+        "id",
+        "name"
+      ],
+      "optional": [
+        "deny",
+        "mcpServers",
+        "model",
+        "order",
+        "persona",
+        "prompt",
+        "skills",
+        "tools"
+      ]
+    },
+    "presets.snapshot": {
+      "required": [],
+      "optional": []
+    },
     "prompts.enqueue": {
       "required": [
         "prompt",
@@ -320,6 +346,18 @@
     "ready": {
       "required": [],
       "optional": []
+    },
+    "reports.deliver": {
+      "required": [
+        "id"
+      ],
+      "optional": []
+    },
+    "reports.snapshot": {
+      "required": [],
+      "optional": [
+        "limit"
+      ]
     },
     "run.cancel": {
       "required": [
@@ -588,6 +626,18 @@
       ],
       "optional": []
     },
+    "tasks.rework.get": {
+      "required": [
+        "id"
+      ],
+      "optional": []
+    },
+    "tasks.rework.reset": {
+      "required": [
+        "id"
+      ],
+      "optional": []
+    },
     "tasks.send.approve": {
       "required": [
         "approver",
@@ -808,6 +858,36 @@
       ],
       "optional": []
     },
+    "workflow.advance": {
+      "required": [],
+      "optional": []
+    },
+    "workflow.delete": {
+      "required": [
+        "id"
+      ],
+      "optional": []
+    },
+    "workflow.put": {
+      "required": [
+        "id",
+        "name",
+        "stages"
+      ],
+      "optional": [
+        "description"
+      ]
+    },
+    "workflow.run.start": {
+      "required": [
+        "id"
+      ],
+      "optional": []
+    },
+    "workflow.snapshot": {
+      "required": [],
+      "optional": []
+    },
     "workspace.list.snapshot": {
       "required": [],
       "optional": []
@@ -906,8 +986,16 @@
         "when": "SessionEditor"
       },
       {
+        "name": "presets",
+        "when": "KeyAgentPresets"
+      },
+      {
         "name": "regenerate",
         "when": "SessionRegenerator"
+      },
+      {
+        "name": "reports",
+        "when": "KeyReports"
       },
       {
         "name": "tasks",
@@ -920,6 +1008,10 @@
       {
         "name": "update",
         "when": "KeyUpdate"
+      },
+      {
+        "name": "workflow",
+        "when": "KeyWorkflow"
       }
     ]
   }

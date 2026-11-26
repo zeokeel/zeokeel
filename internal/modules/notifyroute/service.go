@@ -6,6 +6,8 @@ package notifyroute
 import (
 	"context"
 	"fmt"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,6 +53,10 @@ func defaultRoutes() map[string]contracts.NotifyRoute {
 			Category: contracts.NotifyCategoryInboxDigest, Primary: contracts.NotifyChannelInApp,
 			QuietHours: quiet, Enabled: true,
 		},
+		contracts.NotifyCategoryReport: {
+			Category: contracts.NotifyCategoryReport, Primary: contracts.NotifyChannelInApp,
+			QuietHours: quiet, Enabled: true,
+		},
 		contracts.NotifyCategoryDailySummary: {
 			Category: contracts.NotifyCategoryDailySummary, Primary: contracts.NotifyChannelInApp,
 			QuietHours: quiet, Enabled: true,
@@ -58,10 +64,15 @@ func defaultRoutes() map[string]contracts.NotifyRoute {
 	}
 }
 
-// Service is the in-memory router (settings-backed persistence is a later slice).
+// Service is the router. Routes are persisted to the settings row
+// (contracts.SettingNotifyRoutes) so a restart keeps the user's bindings: a
+// route that silently resets to "in-app only" would make WeChat delivery look
+// broken for no visible reason.
 type Service struct {
-	mu     sync.Mutex
-	routes map[string]contracts.NotifyRoute
+	mu       sync.Mutex
+	routes   map[string]contracts.NotifyRoute
+	settings contracts.SettingsService
+	logger   contracts.Logger
 }
 
 // NewService builds the router. initial (optional) replaces the defaults.
@@ -83,17 +94,24 @@ func (s *Service) Routes(ctx context.Context) ([]contracts.NotifyRoute, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Stable order: the six categories in their declared order.
-	order := []string{
-		contracts.NotifyCategoryApproval, contracts.NotifyCategoryNeedsDecision,
-		contracts.NotifyCategoryTaskDone, contracts.NotifyCategoryTaskFailed,
-		contracts.NotifyCategoryInboxDigest, contracts.NotifyCategoryDailySummary,
-	}
-	out := make([]contracts.NotifyRoute, 0, len(order))
-	for _, category := range order {
+	out := make([]contracts.NotifyRoute, 0, len(contracts.NotifyCategories()))
+	for _, category := range contracts.NotifyCategories() {
 		if route, ok := s.routes[category]; ok {
 			out = append(out, cloneRoute(route))
 		}
+	}
+	// Anything stored under a category this build does not know about is still
+	// listed, after the known ones: hiding it would make a route the user edited
+	// (on a newer build) look like it never existed.
+	extra := make([]string, 0, len(s.routes))
+	for category := range s.routes {
+		if !slices.Contains(contracts.NotifyCategories(), category) {
+			extra = append(extra, category)
+		}
+	}
+	sort.Strings(extra)
+	for _, category := range extra {
+		out = append(out, cloneRoute(s.routes[category]))
 	}
 	return out, nil
 }
@@ -109,6 +127,55 @@ func (s *Service) Upsert(ctx context.Context, route contracts.NotifyRoute) error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.routes[route.Category] = cloneRoute(route)
+	return s.persistLocked()
+}
+
+// WithSettings attaches the settings store and loads any persisted routes.
+func (s *Service) WithSettings(settings contracts.SettingsService, logger contracts.Logger) *Service {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settings = settings
+	s.logger = logger
+	if settings == nil {
+		return s
+	}
+	routes, err := contracts.ParseNotifyRoutes(settings.Get(contracts.SettingNotifyRoutes, ""))
+	if err != nil {
+		if logger != nil {
+			logger.Printf("[notifyroute] ignoring unreadable %s row: %v", contracts.SettingNotifyRoutes, err)
+		}
+		return s
+	}
+	for _, route := range routes {
+		if err := validateRoute(route); err != nil {
+			continue
+		}
+		s.routes[route.Category] = cloneRoute(route)
+	}
+	return s
+}
+
+// persistLocked writes the whole book (a route edit is rare; a partial write
+// would be a worse contract than a slightly larger row).
+func (s *Service) persistLocked() error {
+	if s.settings == nil {
+		return nil
+	}
+	rows := make([]contracts.NotifyRoute, 0, len(s.routes))
+	for _, route := range s.routes {
+		rows = append(rows, cloneRoute(route))
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Category < rows[j].Category })
+	encoded, err := contracts.EncodeNotifyRoutes(rows)
+	if err != nil {
+		return fmt.Errorf("notifyroute: encode routes: %w", err)
+	}
+	if err := s.settings.Set(contracts.SettingNotifyRoutes, encoded); err != nil {
+		if s.logger != nil {
+			s.logger.Printf("[notifyroute] persist routes: %v", err)
+		}
+		return nil
+	}
 	return nil
 }
 

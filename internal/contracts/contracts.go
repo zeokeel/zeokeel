@@ -78,74 +78,13 @@ type AppInfo struct {
 	GoVersion string
 }
 
-// Slot names used by the host and modules.
-//
-// The model is region -> slot -> item: the host owns the layout container of a
-// reserved region and renders its slots in order; a module owns the content it
-// contributes. Modules may also register their own slots (use a module prefix,
-// e.g. "session.transcript.turn") and render them from their own Build with
-// UIRuntime.RenderSlot, which lets one module expose extension points to other
-// modules without the host knowing about them.
-const (
-	// Window top bar.
-
-	// Main sidebar.
-	SlotSidebarPrimary = "sidebar.primary"
-	SlotSidebarNav     = "sidebar.nav"
-	SlotSidebarTree    = "sidebar.tree"
-	SlotSidebarFooter  = "sidebar.footer"
-
-	// Screen surface (the screen body itself is registered via RegisterScreen).
-	// Header/Actions/Tabs are contributed by a screen module into the HOST's
-	// top-level header: the host renders them in one tinted band with its own
-	// palette/inspector controls, so a screen never stacks a second header row
-	// under the window chrome.
-	SlotScreenHeader  = "screen.header"
-	SlotScreenActions = "screen.actions"
-	SlotScreenTabs    = "screen.tabs"
-	SlotScreenFooter  = "screen.footer"
-
-	// Home screen (rendered by the ui/home module).
-	SlotHomeHero     = "home.hero"
-	SlotHomeComposer = "home.composer"
-	SlotHomeRecent   = "home.recent"
-
-	// Session / conversation screen (rendered by the ui/session module).
-	SlotSessionHeaderBrand   = "session.header.brand"
-	SlotSessionHeaderTabs    = "session.header.tabs" // 页头横条：Chat / Trajectory / Memory
-	SlotSessionHeaderActions = "session.header.actions"
-	SlotSessionBanner        = "session.banner"
-	SlotSessionTranscript    = "session.transcript"
-	SlotSessionTrajectory    = "session.trajectory"     // 轨迹主体
-	SlotSessionTrajectoryBar = "session.trajectory.bar" // 轨迹旁的一横条
-	SlotSessionPanelLeft     = "session.panel.left"
-	SlotSessionPanelRight    = "session.panel.right"
-	SlotSessionRightRail     = "session.right.rail"
-	SlotSessionComposerTop   = "session.composer.top"
-	SlotSessionComposerInput = "session.composer.input"
-	SlotSessionComposerBar   = "session.composer.toolbar"
-	SlotSessionStatus        = "session.status"
-
-	// Settings surface (the settings sidebar is host-rendered, pages are
-	// contributed via RegisterSettingsPage).
-	SlotSettingsSidebar    = "settings.sidebar"
-	SlotSettingsHeader     = "settings.header"
-	SlotSettingsPageBody   = "settings.page.body"
-	SlotSettingsPageFooter = "settings.page.footer"
-
-	// Global overlays.
-	SlotOverlayPrefix  = "overlay."
-	SlotOverlayDialogs = "overlay.dialogs"
-	SlotOverlayToasts  = "overlay.toasts"
-)
+// The native UI shell (uiroot slots, navigator, theme, screen list) is gone with
+// the desktop product: the browser transport owns every UI service now. Its keys
+// live in the files this package is split into (toastanchor.go, foreground.go).
 
 // Service keys: the name is the stable contract, the type is checked by the
 // kernel at Provide/Require time and by module.Validate at assembly preflight.
 var (
-	// KeyNavigator is provided by the browser transport host (gateway.Provide).
-	KeyNavigator = cordis.NewServiceKey[Navigator]("zeokeel/ui/navigator")
-	// KeyTheme is provided by the browser transport host (gateway.Provide).
-	KeyTheme = cordis.NewServiceKey[ThemeService]("zeokeel/ui/theme")
 	// KeyLocale is provided by the browser transport host (gateway.Provide).
 	KeyLocale = cordis.NewServiceKey[LocaleService]("zeokeel/ui/locale")
 	// KeySettings is provided by the process host (internal/host).
@@ -159,24 +98,7 @@ var (
 	// (toolcatalog.go) instead.
 	// KeyLogger is provided by the process host; modules log through it.
 	KeyLogger = cordis.NewServiceKey[Logger]("zeokeel/log")
-
-	// KeyUIRegistryOfScreens is a read-only view of registered screens for
-	// modules that need to navigate (the host provides it, in the native
-	// product alongside the UI runtime). Kept as an interface so modules never
-	// import the runtime implementation.
-	KeyScreenLister = cordis.NewServiceKey[ScreenLister]("zeokeel/ui/screens")
 )
-
-// Navigator is host-owned navigation state. Modules push screens or open
-// settings; they never mutate the host's layout directly.
-type Navigator interface {
-	Current() string
-	Push(screenID string) error
-	Back() bool
-	SettingsOpen() bool
-	ToggleSettings()
-	CloseSettings()
-}
 
 // ThemeService is the host theme switch (System/Light/Dark lives in settings).
 type ThemeService interface {
@@ -225,6 +147,3 @@ type Logger interface {
 }
 
 // ScreenLister exposes the registered screen IDs in render order.
-type ScreenLister interface {
-	Screens() []string
-}

@@ -371,6 +371,17 @@ func Module() *module.Descriptor[Config] {
 				return fmt.Errorf("agent: provide session log exporter: %w", err)
 			}
 		}
+		// Role administration (M3): the CRUD half of presets.agents, provided by
+		// the module that owns the row so the reader and the writer can never
+		// disagree about where roles live.
+		if _, err := ctx.Provide(contracts.KeyAgentPresets, contracts.AgentPresetService(&presetAdmin{service: svc})); err != nil {
+			return fmt.Errorf("agent: provide agent presets: %w", err)
+		}
+		// The skill scope (M3b): the toolkit's skill store asks per call which
+		// skills this session's role allows.
+		if _, err := ctx.Provide(contracts.KeySkillScope, contracts.SkillScope(svc)); err != nil {
+			return fmt.Errorf("agent: provide skill scope: %w", err)
+		}
 		_, err = ctx.Provide(contracts.KeyChat, contracts.ChatService(svc))
 		return err
 	}).
@@ -381,6 +392,8 @@ func Module() *module.Descriptor[Config] {
 			module.Provides(contracts.KeyTeam),
 			module.Provides(contracts.KeyChildAgents),
 			module.Provides(contracts.KeySessionLogExporter),
+			module.Provides(contracts.KeyAgentPresets),
+			module.Provides(contracts.KeySkillScope),
 		).
 		AddRequires(module.Requires(hosttools.KeyRegistry)).
 		AddRequires(module.Requires(contracts.KeySettings)).

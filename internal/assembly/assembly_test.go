@@ -145,8 +145,8 @@ func TestProductsAndEntries(t *testing.T) {
 	wantHeadless := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/inbox", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/insights",
-		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/clilink", "zeokeel/notifyroute", "zeokeel/credentials", "zeokeel/webhook", "zeokeel/wechat", "zeokeel/feishu", "zeokeel/dingtalk", "zeokeel/email", "zeokeel/replyrelay", "zeokeel/channeldispatch", "zeokeel/heartbeat", "zeokeel/browser", "zeokeel/hosttools", "zeokeel/memorystore", "zeokeel/teamnotes", "zeokeel/skilldraft", "zeokeel/bots", "zeokeel/users",
-		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
+		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/clilink", "zeokeel/notifyroute", "zeokeel/credentials", "zeokeel/webhook", "zeokeel/wechat", "zeokeel/feishu", "zeokeel/dingtalk", "zeokeel/email", "zeokeel/replyrelay", "zeokeel/channeldispatch", "zeokeel/reports", "zeokeel/heartbeat", "zeokeel/browser", "zeokeel/hosttools", "zeokeel/memorystore", "zeokeel/teamnotes", "zeokeel/skilldraft", "zeokeel/bots", "zeokeel/users",
+		"zeokeel/agent", "zeokeel/audit", "zeokeel/workflow", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
 	}
 	loaded := make(map[string]bool, len(headless))
 	for _, entry := range headless {
@@ -261,8 +261,10 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 
 	instances := loader.Instances()
 	wantIDs := []string{
-		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "clilink", "notifyroute", "creds", "webhook", "wechat", "feishu", "dingtalk", "email", "replyrelay", "channeldispatch", "heartbeat", "browser", "hosttools", "memorystore", "teamnotes", "skilldraft", "bots", "users",
-		"agent", "automation", "update", "importer", "acp",
+		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit",
+		"tasklease", "clilink", "notifyroute", "creds", "webhook", "wechat", "feishu", "dingtalk", "email", "replyrelay",
+		"channeldispatch", "reports", "heartbeat", "browser", "hosttools", "memorystore", "teamnotes", "skilldraft", "bots", "users", "agent",
+		"triage", "lead", "audit", "workflow", "automation", "update", "importer", "acp",
 	}
 	gotIDs := make([]string, 0, len(instances))
 	for _, instance := range instances {
@@ -797,16 +799,12 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	if warnings := loader.Warnings(); len(warnings) != 0 {
 		t.Fatalf("headless warnings = %v, want none", warnings)
 	}
-	// The product genuinely has no UI: no UI service was provided and the
-	// headless assembly never asks for one.
-	// No window-owned service is provided at all any more: the browser
-	// transport provides its own (gateway.Provide), and the process host
-	// contributes only data dir/settings/log.
-	if _, ok := root.Get(contracts.KeyNavigator); ok {
-		t.Fatal("the headless root unexpectedly has a navigator service")
-	}
-	if _, ok := root.Get(contracts.KeyTheme); ok {
-		t.Fatal("the headless root unexpectedly has a theme service")
+	// The product genuinely has no UI: every UI service belongs to the browser
+	// transport (gateway.Provide), and the process host contributes only data
+	// dir/settings/log. The native shell's own keys are gone with it; the one
+	// remaining browser-owned service is the right probe.
+	if _, ok := root.Get(contracts.KeyForegroundSession); ok {
+		t.Fatal("the headless root unexpectedly has a foreground-session service")
 	}
 	info, ok := root.Get(contracts.KeyAppInfo)
 	if !ok {

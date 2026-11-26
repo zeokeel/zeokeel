@@ -27,6 +27,11 @@ type Config struct {
 	// close was recorded (the module logs it). Never used for policy: the row is
 	// already written, and a nil hook must not change behaviour.
 	OnDirectClose func(taskID, actor, source string) `json:"-"`
+	// MaxRework is the automatic rework ceiling (M1): how many rejections a task
+	// may absorb before it stops being dispatched and becomes the human's.
+	// Non-positive keeps contracts.DefaultMaxRework, so an assembly that does not
+	// mention it still cannot loop forever.
+	MaxRework int `json:"maxRework"`
 }
 
 func (c Config) normalized() Config {
@@ -35,6 +40,9 @@ func (c Config) normalized() Config {
 	}
 	if c.TTL <= 0 {
 		c.TTL = contracts.DefaultLeaseTTL
+	}
+	if c.MaxRework <= 0 {
+		c.MaxRework = contracts.DefaultMaxRework
 	}
 	return c
 }
@@ -75,6 +83,11 @@ type Service struct {
 	// describes, so the explanation has to live somewhere else or it is lost the
 	// moment it is written (contracts.TaskReview).
 	reviews map[string][]contracts.TaskReview
+	// rework counts the automatic rework rounds of each task (M1). Task-scoped
+	// like tools/approvals/budgets: a re-claim must not reset the budget of
+	// automatic attempts, and the count is what stops the audit loop from
+	// spending forever.
+	rework map[string]int
 	// path is the durable document (dir/leases.json); empty means in-memory only
 	// (NewService, and unit tests that do not care about durability).
 	path string
@@ -92,6 +105,7 @@ func NewService(board contracts.TaskBoard, cfg Config) *Service {
 		heldSends:       make(map[string]string),
 		requesters:      make(map[string]string),
 		reviews:         make(map[string][]contracts.TaskReview),
+		rework:          make(map[string]int),
 	}
 }
 
@@ -111,6 +125,15 @@ func (s *Service) Claim(ctx context.Context, taskID, owner string) (contracts.Ta
 	}
 
 	s.mu.Lock()
+	// The automatic loop's ceiling (M1): a task that exhausted its rework rounds
+	// is not dispatched again by anyone until a human resets it. This is the one
+	// place that can stop a paying loop, so it is checked before the stale-claim
+	// branch: a ceiling that only applied to fresh tasks would be bypassed by
+	// every expiry.
+	if s.reworkExhaustedLocked(taskID) {
+		s.mu.Unlock()
+		return contracts.TaskLease{}, contracts.ErrLeaseReworkExhausted
+	}
 	now := s.cfg.Now()
 	if existing, ok := s.leases[taskID]; ok {
 		if now.Before(existing.Until) {
@@ -213,6 +236,12 @@ func (s *Service) Submit(ctx context.Context, taskID, owner string, evidence []c
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Submitting past the ceiling would let the owner turn an escalated task into
+	// "review" — i.e. back into the automatic loop — without the human decision
+	// ResetRework exists to record.
+	if s.reworkExhaustedLocked(taskID) {
+		return contracts.TaskLease{}, contracts.ErrLeaseReworkExhausted
+	}
 	lease, err := s.liveLeaseLocked(taskID, owner)
 	if err != nil {
 		return contracts.TaskLease{}, err
@@ -258,7 +287,17 @@ func (s *Service) Accept(ctx context.Context, taskID, reviewer, note string) (co
 		s.mu.Unlock()
 		return contracts.TaskLease{}, contracts.ErrLeaseReviewerIsOwner
 	}
+	// The audit role rule (M1): once the identity is known to differ, the role
+	// still may not be the executor's. Hiding the review tool from the executor's
+	// allowlist is the first line of defence; this is the second, and it is the
+	// one an audit trail is checked against.
+	if reviewerRoleIsExecutor(reviewer) {
+		s.mu.Unlock()
+		return contracts.TaskLease{}, contracts.ErrLeaseReviewerRoleMismatch
+	}
 	s.recordReviewLocked(taskID, reviewer, contracts.TaskReviewAccept, note)
+	// A finished task carries no rework debt into its next life (M1).
+	s.clearReworkLocked(taskID)
 	lease.State = contracts.LeaseStateDone
 	lease.ReviewNote = note
 	done := cloneLease(lease)
@@ -293,7 +332,19 @@ func (s *Service) Reject(ctx context.Context, taskID, reviewer, reason string) (
 		s.mu.Unlock()
 		return contracts.TaskLease{}, contracts.ErrLeaseReviewerIsOwner
 	}
+	// The audit role rule (M1): once the identity is known to differ, the role
+	// still may not be the executor's. Hiding the review tool from the executor's
+	// allowlist is the first line of defence; this is the second, and it is the
+	// one an audit trail is checked against.
+	if reviewerRoleIsExecutor(reviewer) {
+		s.mu.Unlock()
+		return contracts.TaskLease{}, contracts.ErrLeaseReviewerRoleMismatch
+	}
 	s.recordReviewLocked(taskID, reviewer, contracts.TaskReviewReject, reason)
+	// One rejection = one automatic rework round (M1). The bump lands in the same
+	// atomic write as the review row, so a crash cannot lose the count that stops
+	// the loop while keeping the rejection that caused it.
+	s.bumpReworkLocked(taskID)
 	lease.State = contracts.LeaseStateRejected
 	lease.ReviewNote = reason
 	rejected := cloneLease(lease)

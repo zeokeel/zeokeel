@@ -1,10 +1,13 @@
 package contracts
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+
+	cordis "github.com/zeokeel/zeokeel-kernel"
 )
 
 // PromptPreset is one reusable prompt/persona template offered in the composer
@@ -58,6 +61,30 @@ type AgentPreset struct {
 	Name string `json:"name"`
 	// Tools is the tool allowlist (empty = every registered tool).
 	Tools []string `json:"tools,omitempty"`
+	// Deny is the tool denylist: names this role may never call, even when the
+	// allowlist is empty (which means "everything"). It exists because a role
+	// like the executor keeps the full surface but must not be able to sign off
+	// its own work: "all tools except task_review" cannot be expressed as an
+	// allowlist without freezing the catalog.
+	//
+	// Deny is checked before every allow branch in the gate, so it cannot be
+	// widened by a remembered "always allow", a sandbox exemption or an approval
+	// dialog. A name in both Tools and Deny is a contradiction and is refused at
+	// write time rather than resolved silently.
+	Deny []string `json:"deny,omitempty"`
+	// MCPServers restricts the MCP servers this role may use (M3b). Empty means
+	// "every configured server" (today's behaviour); naming servers narrows the
+	// role to them, which is the only way to give one role a filesystem MCP and
+	// another a browser MCP without inventing a tool list per server.
+	//
+	// Names are the server names from the MCP settings; the model-visible tool
+	// names are mcp__<server>__<tool>, so the filter is a prefix match and the
+	// gate repeats it (a surface that omits a tool is not a rule).
+	MCPServers []string `json:"mcpServers,omitempty"`
+	// Skills restricts the skills this role may load (M3b). Empty means "every
+	// skill the product discovers"; naming skills is how a role gets exactly the
+	// playbooks it needs.
+	Skills []string `json:"skills,omitempty"`
 	// Prompt is extra system-prompt guidance appended after the persona.
 	Prompt string `json:"prompt,omitempty"`
 	// Persona is the persona prefix text appended after the base prompt and
@@ -71,6 +98,54 @@ type AgentPreset struct {
 
 // SettingAgentPresets stores the user-edited agent presets as a JSON array.
 const SettingAgentPresets = "presets.agents"
+
+// AgentPresetService is the role CRUD surface (M3): the roles a lead can create,
+// edit and remove without hand-writing the presets.agents row.
+//
+// It only ever writes USER rows. Built-in roles (lead/executor/auditor) stay
+// shipped: editing one stores an override, and deleting that override restores
+// the built-in rather than removing the role — otherwise a session running as
+// "lead" would lose its tools the moment somebody tidied the roster.
+type AgentPresetService interface {
+	// List returns the effective roster (built-ins merged under user rows),
+	// sorted for a stable picker.
+	List(ctx context.Context) ([]AgentPreset, error)
+	Get(ctx context.Context, id string) (AgentPreset, bool, error)
+	// Put creates or overrides one role after validating it.
+	Put(ctx context.Context, preset AgentPreset) (AgentPreset, error)
+	// Delete removes a user row (or the override of a built-in).
+	Delete(ctx context.Context, id string) error
+}
+
+// KeyAgentPresets is provided by the agent module.
+var KeyAgentPresets = cordis.NewServiceKey[AgentPresetService]("zeokeel/agent-presets")
+
+// SkillScope reports the skills the calling session's role allows (M3b).
+//
+// The toolkit's skill store consults it on every List/Read: enforcement lives
+// where the tool reads the catalog, so a skill outside the role cannot be loaded
+// even by a replayed or hand-written call. restricted=false means "the role names
+// no skills" — unrestricted, the historical behaviour — which is deliberately
+// different from "an empty allowlist means none".
+type SkillScope interface {
+	AllowedSkills(ctx context.Context) (names []string, restricted bool)
+}
+
+// KeySkillScope is provided by the agent module.
+var KeySkillScope = cordis.NewServiceKey[SkillScope]("zeokeel/skill-scope")
+
+// Preset errors are typed: the gateway answers 404/400 from the sentinel, never
+// by matching message text.
+var (
+	// ErrPresetNotFound means no user row and no built-in has that id.
+	ErrPresetNotFound = errors.New("preset: not found")
+	// ErrPresetBuiltin means the caller tried to delete a shipped role that has
+	// no user override to remove.
+	ErrPresetBuiltin = errors.New("preset: a built-in role cannot be deleted")
+	// ErrAgentPresetInvalid means a role definition failed validation (blank id
+	// or name, contradictory allow/deny, a blank tool name).
+	ErrAgentPresetInvalid = errors.New("preset: invalid")
+)
 
 // ParseAgentPresets decodes the presets.agents settings row. Empty returns
 // nil; malformed JSON is an error.
@@ -143,6 +218,37 @@ func ValidateAgentPresets(raw string) error {
 		for _, tool := range preset.Tools {
 			if strings.TrimSpace(tool) == "" {
 				return fmt.Errorf("%s[%d] (%s) lists a blank tool name: it is not a tool and cannot be allowed", SettingAgentPresets, index, id)
+			}
+		}
+		// Deny (M3): a blank name denies nothing, and a name in both lists is a
+		// contradiction — the reader would have to pick a winner silently, and
+		// whichever it picked would be wrong half the time.
+		allowed := make(map[string]bool, len(preset.Tools))
+		for _, tool := range preset.Tools {
+			allowed[strings.TrimSpace(tool)] = true
+		}
+		denied := make(map[string]bool, len(preset.Deny))
+		for _, tool := range preset.Deny {
+			name := strings.TrimSpace(tool)
+			if name == "" {
+				return fmt.Errorf("%s[%d] (%s) lists a blank denied tool name: it denies nothing", SettingAgentPresets, index, id)
+			}
+			if denied[name] {
+				return fmt.Errorf("%s[%d] (%s) denies %q twice", SettingAgentPresets, index, id, name)
+			}
+			if allowed[name] {
+				return fmt.Errorf("%s[%d] (%s) both allows and denies %q", SettingAgentPresets, index, id, name)
+			}
+			denied[name] = true
+		}
+		for _, server := range preset.MCPServers {
+			if strings.TrimSpace(server) == "" {
+				return fmt.Errorf("%s[%d] (%s) lists a blank MCP server name: it selects nothing", SettingAgentPresets, index, id)
+			}
+		}
+		for _, skill := range preset.Skills {
+			if strings.TrimSpace(skill) == "" {
+				return fmt.Errorf("%s[%d] (%s) lists a blank skill name: it selects nothing", SettingAgentPresets, index, id)
 			}
 		}
 	}
@@ -247,12 +353,18 @@ func BuiltinAgentPresets() []AgentPreset {
 				"- 你不写代码、不改文件、不执行命令：你的工具集里没有这些工具，看到需要动手的步骤就派出去。\n" +
 				"- 派单时写清目标、验收标准与写入范围，让执行者不需要回来问。\n" +
 				"- 审计与执行必须由不同角色完成：验收时用审计角色（auditor）或由用户确认，绝不以执行者身份自审。\n" +
-				"- 汇报时给出证据（命令与输出原文、测试名、文件路径），不要只说\"已完成\"。",
+				"- 汇报时给出证据（命令与输出原文、测试名、文件路径），不要只说\"已完成\"；" +
+				"收尾用 report 工具（目标 / 证据 / 待决问题 / 结论）向用户汇报，一段聊天文字不算报告。",
 			Tools: []string{
 				// 编排：派单、等待、协作、共享任务板。
 				"spawn_teammate", "list_agents", "wait_agent", "send_message",
 				"team_task_create", "team_task_list", "team_task_get", "team_task_update",
 				"subagent", "subagent_fork",
+				// Assigning the tools a dispatched task may use (M3b): the
+				// binding is enforced by the agent's task gate.
+				"task_tools",
+				// The structured closing report (M4).
+				"report",
 				// 只读上下文：读代码/文件/记忆/技能目录，用于整理上下文与审计。
 				"read_file", "list_dir", "glob", "grep",
 				"memory", "skill", "skills",
@@ -269,6 +381,9 @@ func BuiltinAgentPresets() []AgentPreset {
 				"完成后提交证据（命令与输出原文、测试名、改动文件路径）。遇到范围外的改动不要顺手做，" +
 				"在结果里说明并交回编排者。",
 			// 空 allowlist = 全部工具：执行者需要完整表面（写文件、shell、测试）。
+			// Deny 只拿掉验收工具：执行者能提交自己的证据，但不能给自己的活签字
+			// （租约层还会再拒一次，见 ErrLeaseReviewerRoleMismatch）。
+			Deny: []string{"task_review"},
 		},
 		{
 			ID:    PresetAuditorID,
@@ -283,6 +398,10 @@ func BuiltinAgentPresets() []AgentPreset {
 				"memory", "skill", "skills",
 				"spill_read", "tool_search",
 				"team_task_list", "team_task_get",
+				// The verdict (M1): the auditor is the only role whose allowlist
+				// names it, and the lease layer would refuse an executor reviewer
+				// even if a hand-edited preset added it back.
+				"task_review",
 				"send_message", "present",
 			},
 		},

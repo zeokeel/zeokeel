@@ -123,7 +123,7 @@ func TestModuleRegistersHostTools(t *testing.T) {
 		}
 	}
 	want := []string{
-		ToolAskUser, ToolCreateGoal, ToolExitPlanMode, ToolGetGoal, ToolPlanReview, ToolPresent, ToolUpdateGoal,
+		ToolAskUser, ToolCreateGoal, ToolExitPlanMode, ToolGetGoal, ToolPlanReview, ToolPresent, ToolReport, ToolTaskReview, ToolTaskSubmit, ToolTaskTools, ToolUpdateGoal,
 	}
 	if len(names) != len(want) {
 		t.Fatalf("registered tools = %v, want %v", names, want)
@@ -154,7 +154,7 @@ func TestNonInteractiveProductOmitsPlanTools(t *testing.T) {
 	for _, spec := range product.registry.Specs() {
 		names = append(names, spec.Name)
 	}
-	want := []string{ToolAskUser, ToolCreateGoal, ToolGetGoal, ToolPresent, ToolUpdateGoal}
+	want := []string{ToolAskUser, ToolCreateGoal, ToolGetGoal, ToolPresent, ToolReport, ToolTaskReview, ToolTaskSubmit, ToolTaskTools, ToolUpdateGoal}
 	if len(names) != len(want) {
 		t.Fatalf("non-interactive registered tools = %v, want %v", names, want)
 	}
@@ -314,8 +314,8 @@ func TestMissingCapabilitiesAreToolErrors(t *testing.T) {
 
 func TestModuleCloseUnregistersTools(t *testing.T) {
 	product := loadProduct(t, nil, false)
-	if got := len(product.registry.Specs()); got != 5 {
-		t.Fatalf("tools after load = %d, want 5 (non-interactive product without plan tools)", got)
+	if got := len(product.registry.Specs()); got != 9 {
+		t.Fatalf("tools after load = %d, want 9 (non-interactive product without plan tools)", got)
 	}
 	if err := product.loader.Close(); err != nil {
 		t.Fatalf("loader.Close: %v", err)

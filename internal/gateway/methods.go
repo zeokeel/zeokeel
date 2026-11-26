@@ -92,6 +92,15 @@ func (g *Gateway) hasConditionalCapability(when string) bool {
 	case "KeyTaskBoard":
 		board, ok := g.root.Get(contracts.KeyTaskBoard)
 		return ok && board != nil
+	case "KeyWorkflow":
+		service, ok := g.root.Get(contracts.KeyWorkflow)
+		return ok && service != nil
+	case "KeyAgentPresets":
+		service, ok := g.root.Get(contracts.KeyAgentPresets)
+		return ok && service != nil
+	case "KeyReports":
+		service, ok := g.root.Get(contracts.KeyReports)
+		return ok && service != nil
 	case "SessionRegenerator":
 		chat, err := g.chatService()
 		if err != nil {
@@ -552,6 +561,42 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		},
 		"team.activity": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.teamActivity(request.Params)
+		},
+		"reports.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.reportsSnapshot(ctx, request.Params)
+		},
+		"reports.deliver": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.reportsDeliver(ctx, request.Params)
+		},
+		"presets.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.presetSnapshot(ctx, request.Params)
+		},
+		"presets.put": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.presetPut(ctx, request.Params)
+		},
+		"presets.delete": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.presetDelete(ctx, request.Params)
+		},
+		"workflow.snapshot": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.workflowSnapshot(ctx, request.Params)
+		},
+		"workflow.put": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.workflowPut(ctx, request.Params)
+		},
+		"workflow.delete": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.workflowDelete(ctx, request.Params)
+		},
+		"workflow.run.start": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.workflowRunStart(ctx, request.Params)
+		},
+		"workflow.advance": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.workflowAdvance(ctx, request.Params)
+		},
+		"tasks.rework.get": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.taskReworkGet(ctx, request.Params)
+		},
+		"tasks.rework.reset": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.taskReworkReset(ctx, request.Params)
 		},
 		"task.delete": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.taskDelete(ctx, request.Params)

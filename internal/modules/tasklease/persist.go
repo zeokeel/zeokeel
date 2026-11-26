@@ -73,6 +73,11 @@ type leaseStoreDocument struct {
 	// Additive like the rest: no version bump, and a build that does not know
 	// the key simply ignores it.
 	Reviews []contracts.TaskReview `json:"reviews,omitempty"`
+	// Rework is the automatic rework counter per task (M1): additive and
+	// task-scoped, restored as written. It is authority (it gates Claim and
+	// Submit), so a corrupt or negative row is clamped to zero rather than
+	// silently disabling the ceiling — the ceiling must fail closed, never open.
+	Rework []contracts.TaskRework `json:"rework,omitempty"`
 }
 
 // Open builds a service whose live leases live in dir/leases.json. A missing
@@ -211,6 +216,16 @@ func Open(dir string, board contracts.TaskBoard, cfg Config) (*Service, error) {
 		stored := refusal
 		service.startRejections[refusal.TaskID] = &stored
 	}
+	// Rework rounds are authority, unlike the rows above: they decide whether a
+	// task may be claimed or submitted again. A negative or missing count is
+	// clamped to 0 (the write path never produces one), and a task without an id
+	// carries nothing.
+	for _, rework := range document.Rework {
+		if rework.TaskID == "" || rework.Rounds <= 0 {
+			continue
+		}
+		service.rework[rework.TaskID] = rework.Rounds
+	}
 	service.mu.Unlock()
 
 	// The dead claims are dropped in memory only; the next mutation rewrites the
@@ -304,6 +319,14 @@ func (s *Service) persistLocked() error {
 	sort.Strings(reviewIDs)
 	for _, id := range reviewIDs {
 		document.Reviews = append(document.Reviews, s.reviews[id]...)
+	}
+	reworkIDs := make([]string, 0, len(s.rework))
+	for id := range s.rework {
+		reworkIDs = append(reworkIDs, id)
+	}
+	sort.Strings(reworkIDs)
+	for _, id := range reworkIDs {
+		document.Rework = append(document.Rework, s.reworkLocked(id))
 	}
 	refusalIDs := make([]string, 0, len(s.startRejections))
 	for id := range s.startRejections {

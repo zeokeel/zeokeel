@@ -88,6 +88,17 @@ func (s *service) clearSessionPresetRow(sessionID string) {
 	}
 }
 
+// isBuiltinPreset reports whether id names a shipped role.
+func (s *service) isBuiltinPreset(id string) bool {
+	id = strings.TrimSpace(id)
+	for _, preset := range contracts.BuiltinAgentPresets() {
+		if preset.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 // effectiveAgentPresets merges the built-in roles under the presets.agents row:
 // a user row overrides a built-in with the same ID, extra user presets are
 // appended in their own order. Rows without an ID/name are dropped (malformed
@@ -431,6 +442,24 @@ func (s *service) filterSessionToolsWith(tools []rig.Tool, preset contracts.Agen
 	if len(preset.Tools) > 0 {
 		tools = filterToolsByAllowlist(tools, preset.Tools)
 	}
+	// Role-scoped MCP servers (M3b): a tool from a server the role does not name
+	// is not offered at all.
+	if len(preset.MCPServers) > 0 {
+		allowed := mcpServerSet(preset.MCPServers)
+		kept := make([]rig.Tool, 0, len(tools))
+		for _, tool := range tools {
+			if server, isMCP := mcpToolServer(tool.Name()); isMCP && !allowed[server] {
+				continue
+			}
+			kept = append(kept, tool)
+		}
+		tools = kept
+	}
+	// Deny (M3) is applied after the allowlist and before the runtime mode: a
+	// denied tool is never offered, even by a role whose allowlist is "everything".
+	if len(preset.Deny) > 0 {
+		tools = withoutToolNames(tools, preset.Deny)
+	}
 	return filterToolsForMode(tools, s.runtimeMode())
 }
 
@@ -494,7 +523,27 @@ func (s *service) presetToolsDenialForRole(presetID, name string) string {
 // presetToolsDenialForPreset is the shared body of the two above.
 func presetToolsDenialForPreset(preset contracts.AgentPreset, name string) string {
 	name = strings.TrimSpace(name)
-	if name == "" || len(preset.Tools) == 0 {
+	if name == "" {
+		return ""
+	}
+	// Deny is checked first and independently of the allowlist: "everything
+	// except X" is exactly the role shape an empty allowlist cannot express, and
+	// a denied name must not be rescued by a remembered "always allow" or an
+	// approval dialog further down the gate.
+	for _, denied := range preset.Deny {
+		if strings.TrimSpace(denied) == name {
+			return fmt.Sprintf("角色 %s 禁止使用工具 %s；这次调用被拒绝", preset.ID, name)
+		}
+	}
+	// Role-scoped MCP servers (M3b) are checked before the allowlist: an MCP tool
+	// from a server the role does not name is refused whether the allowlist is
+	// empty ("everything") or names it.
+	if len(preset.MCPServers) > 0 {
+		if server, isMCP := mcpToolServer(name); isMCP && !mcpServerSet(preset.MCPServers)[server] {
+			return fmt.Sprintf("角色 %s 只允许 MCP server %v；%s 属于 %s，这次调用被拒绝", preset.ID, preset.MCPServers, name, server)
+		}
+	}
+	if len(preset.Tools) == 0 {
 		return ""
 	}
 	if runtimeCapabilityTools[name] {
@@ -580,4 +629,48 @@ func (s *service) disabledTools() map[string]bool {
 		}
 	}
 	return disabled
+}
+
+// mcpToolServer splits a model-visible MCP tool name (mcp__<server>__<tool>) into
+// its server. Anything else is not an MCP tool.
+func mcpToolServer(name string) (string, bool) {
+	const prefix = "mcp__"
+	name = strings.TrimSpace(name)
+	if !strings.HasPrefix(name, prefix) {
+		return "", false
+	}
+	rest := strings.TrimPrefix(name, prefix)
+	index := strings.Index(rest, "__")
+	if index <= 0 {
+		return "", false
+	}
+	return rest[:index], true
+}
+
+// mcpServerSet is the lookup form of a preset's server list.
+func mcpServerSet(servers []string) map[string]bool {
+	set := make(map[string]bool, len(servers))
+	for _, server := range servers {
+		if trimmed := strings.TrimSpace(server); trimmed != "" {
+			set[trimmed] = true
+		}
+	}
+	return set
+}
+
+// AllowedSkills implements contracts.SkillScope: the skills the session's role
+// names, or "unrestricted" when it names none (or has no role).
+func (s *service) AllowedSkills(ctx context.Context) ([]string, bool) {
+	if s == nil {
+		return nil, false
+	}
+	sessionID := strings.TrimSpace(contracts.AgentSessionFromContext(ctx))
+	if sessionID == "" {
+		return nil, false
+	}
+	preset, ok := s.agentPresetForSession(sessionID)
+	if !ok || len(preset.Skills) == 0 {
+		return nil, false
+	}
+	return append([]string(nil), preset.Skills...), true
 }
