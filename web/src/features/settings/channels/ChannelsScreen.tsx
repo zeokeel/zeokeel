@@ -86,7 +86,10 @@ interface CredentialFieldSpec {
  */
 const FIELD_COPY: Record<CredentialFieldName, { labelKey: MessageKey; secret: boolean }> = {
   token: { labelKey: 'channels.field.token', secret: true },
-  signSecret: { labelKey: 'channels.field.signSecret', secret: true },
+  // The robot code is an identity the platform matches the token against, not a
+  // secret: it is shown in clear, and it is as required as the token because
+  // every send body carries it.
+  robotCode: { labelKey: 'channels.field.robotCode', secret: false },
   appId: { labelKey: 'channels.field.appId', secret: false },
   appSecret: { labelKey: 'channels.field.appSecret', secret: true },
   username: { labelKey: 'channels.field.username', secret: false },

@@ -13,6 +13,7 @@ package sandbox
 
 import (
 	"runtime"
+	"strings"
 	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -103,9 +104,20 @@ func (s *service) Runner() rigsandbox.Runner {
 }
 
 // Status returns the settings/diagnostics read model.
+//
+// Confinement is derived from what the runner actually reports, not from
+// "a runner object exists": a runner that reports EnforcementNone confines
+// nothing, and since commands no longer park on an approval card (2026-11-26)
+// that difference is the whole fence. The state is therefore reported, so the
+// settings/status surface can say "no OS confinement" instead of implying one.
 func (s *service) Status() contracts.SandboxStatus {
 	if s == nil {
-		return contracts.SandboxStatus{Platform: runtime.GOOS}
+		return contracts.SandboxStatus{
+			Platform:           runtime.GOOS,
+			Confinement:        contracts.SandboxConfinementNone,
+			CommandsUnconfined: true,
+			Note:               confinementNote("", "no sandbox service is assembled"),
+		}
 	}
 	status := contracts.SandboxStatus{
 		Available: s.Available(),
@@ -114,5 +126,36 @@ func (s *service) Status() contracts.SandboxStatus {
 	if !status.Available && s.probeError != nil {
 		status.Reason = s.probeError.Error()
 	}
+	runner := s.Runner()
+	var enforcement rigsandbox.Enforcement
+	if runner != nil {
+		_, enforcement, _ = rigsandbox.RunnerStatus(runner)
+	}
+	if runner != nil && enforcement != rigsandbox.EnforcementNone {
+		status.Confinement = contracts.SandboxConfinementOS
+		return status
+	}
+	status.Confinement = contracts.SandboxConfinementNone
+	status.CommandsUnconfined = true
+	reason := status.Reason
+	if runner != nil {
+		reason = "the runner reports enforcement " + string(enforcement)
+	}
+	status.Note = confinementNote(reason, "")
 	return status
+}
+
+// confinementNote renders the one sentence a status surface shows for an
+// unconfined command fence. Both the sandbox module (settings surface) and the
+// agent's log record use it, so the two can never disagree about what the user
+// is being told.
+func confinementNote(reason, fallback string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = strings.TrimSpace(fallback)
+	}
+	if reason == "" {
+		reason = "no usable OS sandbox runner on this host"
+	}
+	return "Shell commands run without OS confinement (" + reason + "): the working-directory write rule is an application rule, not an enforced boundary."
 }

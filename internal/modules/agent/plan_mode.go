@@ -205,9 +205,12 @@ func (s *service) agentModePlan() bool {
 // The per-session "workspace" override auto-allows the shared
 // contracts.WorkspaceAutoAllowedTools set: the workspace file tools plus
 // read-only/informational tools that cannot leave or modify the workspace.
-// Tools that can leave the workspace (shell, network, MCP, settings writes and
-// unknown tools) fall through to the approvals service, and the same frozen list
-// is read by the approvals service so the two layers cannot drift.
+// Tools that can leave the workspace (network, settings writes and unknown
+// tools) fall through to the approvals service, and the same frozen list is read
+// by the approvals service so the two layers cannot drift. Two families are
+// exempt outside that list as well, by product decision (2026-11-26, personal
+// helper): the shell family (OS sandbox exemption, see sandbox.go) and the MCP
+// family (mcp__ prefix, see contracts.IsMCPTool).
 
 // approvalModeNever is the approvals service's headless deny-all policy value
 // (approvals.ModeNever). It is not a selectable UI permission mode: stored
@@ -244,19 +247,41 @@ var interactionTools = map[string]bool{
 // checked on every call (highest priority); then an optional per-session
 // permission override applies (full allows everything, read-only allows the
 // shared contracts.ReadOnlyAutoAllowedTools set, workspace allows the
-// contracts.WorkspaceAutoAllowedTools set); interaction/presentation host tools
-// are then allowed without an approval prompt (their own overlay is the user
-// interaction); otherwise the approvals service's global policy applies.
+// contracts.WorkspaceAutoAllowedTools set); the OS sandbox exempts the command
+// family (confined: silent, unconfined: recorded); the MCP family is exempt by
+// prefix; interaction/presentation host tools are then allowed without an
+// approval prompt (their own overlay is the user interaction); otherwise the
+// approvals service's global policy applies.
 func (s *service) gate(sessionIDs ...string) rig.Gate {
 	sessionID := ""
 	if len(sessionIDs) > 0 {
 		sessionID = strings.TrimSpace(sessionIDs[0])
 	}
+	return s.gateForRole(sessionID, "")
+}
+
+// gateForRole is gate() for a run executing as rolePresetID instead of the
+// session's own preset ("" = the session's own).
+//
+// It exists because a delegated child deliberately runs as a DIFFERENT role from
+// its parent: the child of a lead session executes (contracts.PresetExecutorID)
+// while the parent orchestrates. Judging the child's calls against the parent's
+// allowlist would deny the very write/shell calls the child was asked to make —
+// the surface and the veto have to come from the same role.
+func (s *service) gateForRole(sessionID, rolePresetID string) rig.Gate {
+	sessionID = strings.TrimSpace(sessionID)
+	rolePresetID = strings.TrimSpace(rolePresetID)
 	// Snapshot the run's tool root once: the sandbox exemption must be judged
 	// against the policy that will actually dispatch these calls, not against
 	// whichever workspace is current when a call happens.
 	runRoot := s.sessionWorkspaceRoot(sessionID)
-	return s.taskBindingGate(sessionID, gate.Func(func(ctx context.Context, tool rig.Tool, call rig.ToolCall) (rig.Decision, error) {
+	presetDenial := func(name string) string {
+		if rolePresetID != "" {
+			return s.presetToolsDenialForRole(rolePresetID, name)
+		}
+		return s.presetToolsDenial(sessionID, name)
+	}
+	return s.presetToolsGate(sessionID, rolePresetID, s.taskBindingGate(sessionID, gate.Func(func(ctx context.Context, tool rig.Tool, call rig.ToolCall) (rig.Decision, error) {
 		name := call.Name
 		if tool != nil && strings.TrimSpace(tool.Name()) != "" {
 			name = tool.Name()
@@ -270,6 +295,18 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 		// only widen: after them, a remembered tool or a sandbox exemption could
 		// bypass the task's policy. Unbound sessions are unaffected ("" reason).
 		if s.taskBindingDenial(ctx, sessionID, name) != "" {
+			return rig.DecisionDeny, nil
+		}
+		// Role boundary (preset.go, 2026-11-26): a session that selected an
+		// agent preset with a tool allowlist may only call the tools it names.
+		// Same position and same reason as the task binding above: it sits
+		// BEFORE every branch that can allow (plan/chat whitelists, the
+		// per-session permission override, the sandbox exemption, interaction
+		// tools, the remembered "always allow" set and the approval dialog), so
+		// a remembered tool cannot widen a role. It is what lets the built-in
+		// lead role be unable — not merely unwilling — to write files or run
+		// commands. Sessions with no preset are unaffected.
+		if presetDenial(name) != "" {
 			return rig.DecisionDeny, nil
 		}
 		if s.agentModePlan() {
@@ -290,30 +327,29 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 			}
 			return rig.DecisionDeny, nil
 		}
-		if override := s.sessionPermission(sessionID); override != "" {
-			switch override {
-			case contracts.PermissionFull:
+		if override := strings.TrimSpace(s.sessionPermission(sessionID)); override != "" {
+			// The judgement comes from overridePermission (permission_policy.go),
+			// not from an inline switch: the model-facing policy sentence is
+			// rendered from the same function, so "what the prompt promises" and
+			// "what the gate decides" cannot drift for this layer (2026-11-26
+			// audit, 高: a read-only override refused shell/MCP while the prompt
+			// still called them exempt).
+			switch overridePermission(override, name) {
+			case permissionAllowed:
 				return rig.DecisionAllow, nil
-			case contracts.PermissionReadOnly:
+			case permissionRefused:
 				// A session-level read-only override is a hard restriction: a
 				// tool outside the read-only set must never fall through to the
 				// global (often workspace-write) policy, which would silently
 				// auto-allow write_file. Interaction host tools and tools the
 				// user explicitly remembered for this session stay allowed.
-				if contracts.ReadOnlyAutoAllowed(name) {
-					return rig.DecisionAllow, nil
-				}
 				if interactionTools[name] || s.allowedToolForSession(sessionID, name) {
-					if s.approvals != nil && strings.EqualFold(strings.TrimSpace(s.approvals.Mode()), approvalModeNever) {
+					if s.denyAllApprovalPolicy() {
 						return rig.DecisionDeny, nil
 					}
 					return rig.DecisionAllow, nil
 				}
 				return rig.DecisionDeny, nil
-			case contracts.PermissionWorkspace:
-				if contracts.WorkspaceAutoAllowed(name) {
-					return rig.DecisionAllow, nil
-				}
 			}
 		}
 		// OS sandbox: the SDK decides whether this shell call is already confined
@@ -323,9 +359,51 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 		// their veto, and before the interaction/remembered/approval branches so
 		// no dialog is requested. An explicit headless deny-all policy still
 		// denies: skipping the prompt must never bypass it.
+		//
+		// A missing approvals service does NOT get a veto here: this call is
+		// confined by the OS, so it never needed an approval — the fail-closed
+		// rule below is about calls that would have to ask.
 		if s.sandboxedCommand(ctx, runRoot, tool, call) {
-			if s.approvals != nil && strings.EqualFold(strings.TrimSpace(s.approvals.Mode()), approvalModeNever) {
+			if s.denyAllApprovalPolicy() {
 				return rig.DecisionDeny, nil
+			}
+			return rig.DecisionAllow, nil
+		}
+		// Command family without SDK-certified confinement (personal-helper
+		// permission model, 2026-11-26): shell commands never park on an approval
+		// card while the sandbox module is assembled. This branch is the honest
+		// other half of the sandbox exemption above — the call runs, but there is
+		// no OS-level constraint on it any more, and recordUnconfinedShell says so
+		// once per session+tool instead of letting the difference degrade into a
+		// generic "approved". Explicit restrictions keep their veto: the plan/chat
+		// whitelists and the per-session override ran earlier, and the headless
+		// deny-all policy still denies.
+		//
+		// It must also deny when the assembly has no approvals service at all:
+		// "there is a sandbox module" is not the same as "somebody is
+		// accountable for this call", and skipping the fail-closed branch below
+		// by position would make the exemption the one hole in the policy.
+		if s.shellCommandExempt(runRoot, tool, call) {
+			if decision, err, vetoed := s.exemptionVeto(); vetoed {
+				return decision, err
+			}
+			s.recordUnconfinedShell(sessionID, name, runRoot)
+			return rig.DecisionAllow, nil
+		}
+		// MCP family: the model calls the user's own MCP servers as ordinary
+		// tools, and an approval card in front of every call only interrupts work
+		// (personal-helper permission model, 2026-11-26). The family is matched by
+		// the mcp__ prefix (contracts.IsMCPTool) because the concrete tool names
+		// are runtime data. Explicit restrictions still veto: plan/chat whitelists
+		// and the per-session read-only override ran earlier, and the headless
+		// deny-all policy still denies.
+		//
+		// Like the command family it must not jump over the fail-closed branch:
+		// without an approvals service this product would otherwise allow every
+		// long-tail MCP tool silently.
+		if contracts.IsMCPTool(name) {
+			if decision, err, vetoed := s.exemptionVeto(); vetoed {
+				return decision, err
 			}
 			return rig.DecisionAllow, nil
 		}
@@ -334,7 +412,7 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 			// it must still deny the interaction tools even though the default
 			// approval prompt is skipped for them. It is not a UI permission
 			// mode (no stored row maps to it any more).
-			if s.approvals != nil && strings.EqualFold(strings.TrimSpace(s.approvals.Mode()), approvalModeNever) {
+			if s.denyAllApprovalPolicy() {
 				return rig.DecisionDeny, nil
 			}
 			return rig.DecisionAllow, nil
@@ -343,7 +421,7 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 		// longer asks. Plan/chat modes and a headless deny-all policy keep
 		// their veto: the remembered set only skips the prompt.
 		if s.allowedToolForSession(sessionID, name) {
-			if s.approvals != nil && strings.EqualFold(strings.TrimSpace(s.approvals.Mode()), approvalModeNever) {
+			if s.denyAllApprovalPolicy() {
 				return rig.DecisionDeny, nil
 			}
 			return rig.DecisionAllow, nil
@@ -382,5 +460,36 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 		default:
 			return rig.DecisionDeny, nil
 		}
-	}))
+	})))
+}
+
+// denyAllApprovalPolicy reports whether this assembly's approval policy is the
+// headless deny-all sentinel (Mode() == "never"). It is a veto, not a default:
+// every branch that skips the approval prompt checks it first.
+func (s *service) denyAllApprovalPolicy() bool {
+	return s != nil && s.approvals != nil &&
+		strings.EqualFold(strings.TrimSpace(s.approvals.Mode()), approvalModeNever)
+}
+
+// exemptionVeto is the guard every exemption that runs PAST the approval dialog
+// has to consult before allowing a call.
+//
+// Two rules, both of which used to live only at the end of the chain:
+//
+//  1. No approvals service → deny with a readable error (fail-closed). The
+//     exemption branches sit before the approval branch, so without this check a
+//     sandbox-module assembly with no approvals service would allow the command
+//     and MCP families silently — the exact opposite of the promise made below.
+//  2. Deny-all policy (headless) → deny without asking.
+//
+// vetoed reports whether the caller must return (decision, err) immediately.
+func (s *service) exemptionVeto() (rig.Decision, error, bool) {
+	if s == nil || s.approvals == nil {
+		return rig.DecisionDeny, fmt.Errorf(
+			"tool approval requires an approvals service; this product has none"), true
+	}
+	if s.denyAllApprovalPolicy() {
+		return rig.DecisionDeny, nil, true
+	}
+	return "", nil, false
 }

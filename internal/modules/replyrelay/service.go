@@ -22,11 +22,22 @@ func (c Config) enabled() bool { return c.Enabled == nil || *c.Enabled }
 
 // channelSources are the inbox sources whose text may be a human reply. Webhook
 // and cron text is machine input and must never answer an approval.
+//
+// DingTalk and Feishu are absent on purpose: they are outbound only and can no
+// longer file an inbox row, so their text could only ever be a leftover from an
+// older ingest path — never a fresh human reply
+// (docs/research/channel-capabilities.md §6).
+//
+// Email is absent for a stronger reason: **the sender is not authenticated**.
+// The adapter files whatever the mailbox holds and takes the `From` header as an
+// unverified Sender string (internal/modules/email/imap.go); there is no
+// allowlist, no signature and no header check. ApplyReply then answers the
+// *global* pending queue by position (internal/modules/approvals/action.go), so
+// a mail whose body is "1 同意" from anyone at all would resolve whatever
+// approval happens to be first. The instruction entries are Web and WeChat only;
+// making email a human source here would turn a mailbox into an approval bypass.
 var channelSources = map[string]bool{
-	"wechat":   true,
-	"dingtalk": true,
-	"feishu":   true,
-	"email":    true,
+	"wechat": true,
 }
 
 // Service implements contracts.ReplyRelayService.

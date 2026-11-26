@@ -1,112 +1,27 @@
 package feishu_test
 
-// TDD for the Feishu (Lark) open-platform adapter. The platform rules that cost
-// real money to learn the hard way are the tests: the signature is
-// sha256(timestamp + nonce + encryptKey + rawBody) over the *raw* bytes (a
-// re-encoded body never matches), an old timestamp is a replay, and a url
-// verification handshake must echo the challenge without writing an inbox row.
-//
-// The signing helpers below are written from the platform contract, not from
-// the adapter's code: if the two drift apart, every test here goes red.
+// TDD for the Feishu (Lark) outbound adapter. Everything here is the outbound
+// half of the platform contract: the message body shape, the tenant-token mint
+// and cache, and the error mapping a caller's fallback logic depends on. The
+// ingress (signature scheme, url_verification handshake, event parsing, card
+// actions) is gone by decision — see docs/research/channel-capabilities.md §6 —
+// and internal/contracts/channel_surface_test.go pins that it does not come back.
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/modules/feishu"
-	"github.com/zeokeel/zeokeel/internal/modules/inbox"
 )
 
-const (
-	testEncryptKey = "enc-key-1"
-	testToken      = "t-tenant-token"
-)
-
-// digest is hex(sha256(parts...)) — the shape Feishu puts in X-Lark-Signature.
-func digest(parts ...[]byte) string {
-	sum := sha256.New()
-	for _, part := range parts {
-		sum.Write(part)
-	}
-	return hex.EncodeToString(sum.Sum(nil))
-}
-
-// signatureV2 is the documented scheme: timestamp + nonce + encryptKey + body.
-func signatureV2(timestamp int64, nonce, encryptKey string, body []byte) string {
-	return digest([]byte(strconv.FormatInt(timestamp, 10)), []byte(nonce), []byte(encryptKey), body)
-}
-
-// signatureLegacy is the older-bot scheme: the same secret and body, but no
-// nonce (see the adapter's doc comment for why this is still accepted).
-func signatureLegacy(timestamp int64, encryptKey string, body []byte) string {
-	return digest([]byte(strconv.FormatInt(timestamp, 10)), []byte(encryptKey), body)
-}
-
-func signedHeaders(timestamp int64, nonce, encryptKey string, body []byte) map[string]string {
-	return map[string]string{
-		"X-Lark-Request-Timestamp": strconv.FormatInt(timestamp, 10),
-		"X-Lark-Request-Nonce":     nonce,
-		"X-Lark-Signature":         signatureV2(timestamp, nonce, encryptKey, body),
-	}
-}
-
-// textEvent builds an im.message.receive_v1 push with a JSON-encoded text body,
-// exactly as the platform sends it (content is a *string* holding JSON).
-func textEvent(messageID, chatID, openID, text string) []byte {
-	content, _ := json.Marshal(map[string]string{"text": text})
-	payload := map[string]any{
-		"schema": "2.0",
-		"header": map[string]any{
-			"event_id":    "ev-" + messageID,
-			"event_type":  "im.message.receive_v1",
-			"create_time": "1750000000000",
-			"token":       "verification-token",
-			"app_id":      "cli_test",
-			"tenant_key":  "tenant",
-		},
-		"event": map[string]any{
-			"sender": map[string]any{
-				"sender_id":   map[string]any{"open_id": openID, "union_id": "on_x", "user_id": "u_x"},
-				"sender_type": "user",
-			},
-			"message": map[string]any{
-				"message_id":   messageID,
-				"chat_id":      chatID,
-				"chat_type":    "p2p",
-				"message_type": "text",
-				"content":      string(content),
-				"create_time":  "1750000000000",
-			},
-		},
-	}
-	encoded, _ := json.Marshal(payload)
-	return encoded
-}
-
-func challengeBody(challenge string) []byte {
-	encoded, _ := json.Marshal(map[string]string{"type": "url_verification", "challenge": challenge})
-	return encoded
-}
-
-// clock is the adapter's injected clock, so "stale" is deterministic.
-type clock struct {
-	mu sync.Mutex
-	t  time.Time
-}
-
-func (c *clock) now() time.Time          { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
-func (c *clock) advance(d time.Duration) { c.mu.Lock(); c.t = c.t.Add(d); c.mu.Unlock() }
+const testToken = "t-tenant-token"
 
 type sentMessage struct {
 	path   string
@@ -188,8 +103,6 @@ func (f *fakePlatform) lastSend() (sentMessage, bool) {
 type fixture struct {
 	adapter  *feishu.Adapter
 	platform *fakePlatform
-	inbox    contracts.InboxService
-	clk      *clock
 	baseURL  string
 }
 
@@ -204,292 +117,15 @@ func newFixtureWith(t *testing.T, mutate func(*feishu.Config)) *fixture {
 	server := httptest.NewServer(platform.handler())
 	t.Cleanup(server.Close)
 
-	clk := &clock{t: time.Date(2026, 11, 25, 9, 0, 0, 0, time.UTC)}
-	inboxService := inbox.NewService(inbox.Config{Now: clk.now, MaxPerMinute: 1000})
 	cfg := feishu.Config{
-		BaseURL:    server.URL,
-		Token:      testToken,
-		EncryptKey: testEncryptKey,
-		Now:        clk.now,
+		BaseURL: server.URL,
+		Token:   testToken,
 	}
 	if mutate != nil {
 		mutate(&cfg)
 	}
-	adapter := feishu.NewAdapter(inboxService, cfg)
-	return &fixture{adapter: adapter, platform: platform, inbox: inboxService, clk: clk, baseURL: server.URL}
-}
-
-// headersNow signs body with the fixture clock (the platform's timestamp).
-func (f *fixture) headersNow(nonce string, body []byte) map[string]string {
-	return signedHeaders(f.clk.now().Unix(), nonce, testEncryptKey, body)
-}
-
-func (f *fixture) inboxItems(t *testing.T) []contracts.InboxItem {
-	t.Helper()
-	items, err := f.inbox.List(context.Background(), contracts.InboxFilter{})
-	if err != nil {
-		t.Fatalf("inbox list: %v", err)
-	}
-	return items
-}
-
-func TestVerifyURLEchoesTheChallengeWithoutIngesting(t *testing.T) {
-	f := newFixture(t)
-	body := challengeBody("ch-12345")
-
-	challenge, ok := f.adapter.VerifyURL(body)
-	if !ok || challenge != "ch-12345" {
-		t.Fatalf("VerifyURL = (%q, %v), want (ch-12345, true)", challenge, ok)
-	}
-
-	item, merged, err := f.adapter.Receive(context.Background(), f.headersNow("n1", body), body)
-	if err != nil {
-		t.Fatalf("Receive(challenge): %v", err)
-	}
-	if merged || item.ID != "" {
-		t.Fatalf("challenge produced an inbox item: %+v", item)
-	}
-	if items := f.inboxItems(t); len(items) != 0 {
-		t.Fatalf("inbox = %+v, want no writes for a challenge", items)
-	}
-}
-
-func TestVerifyURLRejectsNonChallengePayloads(t *testing.T) {
-	f := newFixture(t)
-	if _, ok := f.adapter.VerifyURL(textEvent("om_1", "oc_1", "ou_1", "hi")); ok {
-		t.Fatal("VerifyURL accepted an event body")
-	}
-	if _, ok := f.adapter.VerifyURL([]byte("not json")); ok {
-		t.Fatal("VerifyURL accepted garbage")
-	}
-	if _, ok := f.adapter.VerifyURL([]byte(`{"type":"url_verification"}`)); ok {
-		t.Fatal("VerifyURL accepted a challenge without a challenge value")
-	}
-}
-
-func TestChallengeWithABadSignatureIsStillRejected(t *testing.T) {
-	f := newFixture(t)
-	body := challengeBody("ch-1")
-	headers := f.headersNow("n1", body)
-	headers["X-Lark-Signature"] = signatureV2(f.clk.now().Unix(), "n1", "wrong-key", body)
-	if _, _, err := f.adapter.Receive(context.Background(), headers, body); !errors.Is(err, contracts.ErrFeishuBadSignature) {
-		t.Fatalf("err = %v, want ErrFeishuBadSignature", err)
-	}
-}
-
-func TestReceiveRejectsBadSignature(t *testing.T) {
-	f := newFixture(t)
-	body := textEvent("om_1", "oc_1", "ou_1", "帮我查退款率")
-	headers := f.headersNow("n1", body)
-	headers["X-Lark-Signature"] = strings.Repeat("0", 64)
-
-	if _, _, err := f.adapter.Receive(context.Background(), headers, body); !errors.Is(err, contracts.ErrFeishuBadSignature) {
-		t.Fatalf("err = %v, want ErrFeishuBadSignature", err)
-	}
-	if items := f.inboxItems(t); len(items) != 0 {
-		t.Fatalf("inbox = %+v, want no writes for an unsigned request", items)
-	}
-}
-
-func TestReceiveRejectsMissingSignatureHeaders(t *testing.T) {
-	f := newFixture(t)
-	body := textEvent("om_1", "oc_1", "ou_1", "hi")
-	if _, _, err := f.adapter.Receive(context.Background(), map[string]string{}, body); !errors.Is(err, contracts.ErrFeishuBadSignature) {
-		t.Fatalf("err = %v, want ErrFeishuBadSignature", err)
-	}
-	headers := f.headersNow("n1", body)
-	delete(headers, "X-Lark-Request-Timestamp")
-	if _, _, err := f.adapter.Receive(context.Background(), headers, body); !errors.Is(err, contracts.ErrFeishuBadSignature) {
-		t.Fatalf("err = %v, want ErrFeishuBadSignature without a timestamp", err)
-	}
-}
-
-func TestReceiveRejectsStaleRequests(t *testing.T) {
-	f := newFixture(t)
-	body := textEvent("om_1", "oc_1", "ou_1", "hi")
-	stale := f.clk.now().Add(-1 * (contracts.FeishuMaxClockSkew + time.Minute)).Unix()
-
-	if _, _, err := f.adapter.Receive(context.Background(), signedHeaders(stale, "n1", testEncryptKey, body), body); !errors.Is(err, contracts.ErrFeishuStale) {
-		t.Fatalf("err = %v, want ErrFeishuStale", err)
-	}
-	future := f.clk.now().Add(contracts.FeishuMaxClockSkew + time.Minute).Unix()
-	if _, _, err := f.adapter.Receive(context.Background(), signedHeaders(future, "n1", testEncryptKey, body), body); !errors.Is(err, contracts.ErrFeishuStale) {
-		t.Fatalf("future-dated err = %v, want ErrFeishuStale", err)
-	}
-}
-
-func TestReceiveAcceptsTheLegacySignatureScheme(t *testing.T) {
-	f := newFixture(t)
-	body := textEvent("om_legacy", "oc_1", "ou_1", "老机器人")
-	timestamp := f.clk.now().Unix()
-	headers := map[string]string{
-		"X-Lark-Request-Timestamp": strconv.FormatInt(timestamp, 10),
-		"X-Lark-Signature":         signatureLegacy(timestamp, testEncryptKey, body),
-	}
-
-	item, merged, err := f.adapter.Receive(context.Background(), headers, body)
-	if err != nil {
-		t.Fatalf("Receive(legacy): %v", err)
-	}
-	if merged || item.ID == "" || item.Source != contracts.FeishuSource {
-		t.Fatalf("item = %+v, want one feishu item", item)
-	}
-}
-
-func TestReceiveIngestsATextMessage(t *testing.T) {
-	f := newFixture(t)
-	body := textEvent("om_100", "oc_chat", "ou_sender", "帮我看下昨天的退款率")
-
-	item, merged, err := f.adapter.Receive(context.Background(), f.headersNow("n1", body), body)
-	if err != nil {
-		t.Fatalf("Receive: %v", err)
-	}
-	if merged {
-		t.Fatal("first arrival reported as a merge")
-	}
-	if item.Source != contracts.FeishuSource {
-		t.Fatalf("source = %q, want %q", item.Source, contracts.FeishuSource)
-	}
-	if item.Channel != "oc_chat" || item.Sender != "ou_sender" {
-		t.Fatalf("channel/sender = (%q, %q)", item.Channel, item.Sender)
-	}
-	if item.DedupKey != "feishu:om_100" {
-		t.Fatalf("dedupe key = %q, want feishu:om_100", item.DedupKey)
-	}
-	if item.Body != "帮我看下昨天的退款率" || item.Title != "帮我看下昨天的退款率" {
-		t.Fatalf("body/title = (%q, %q)", item.Body, item.Title)
-	}
-	if item.Ref != "om_100" {
-		t.Fatalf("ref = %q, want the message id", item.Ref)
-	}
-	if item.Count != 1 {
-		t.Fatalf("count = %d, want 1", item.Count)
-	}
-
-	status, err := f.adapter.Status(context.Background())
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-	if !status.Connected || !status.LastInbound.Equal(f.clk.now()) {
-		t.Fatalf("status = %+v, want connected with last inbound at the event time", status)
-	}
-}
-
-func TestReceiveMergesPlatformRetries(t *testing.T) {
-	f := newFixture(t)
-	body := textEvent("om_dupe", "oc_chat", "ou_sender", "hi")
-
-	if _, merged, err := f.adapter.Receive(context.Background(), f.headersNow("n1", body), body); err != nil || merged {
-		t.Fatalf("first receive = (%v, %v), want a new item", merged, err)
-	}
-	if _, merged, err := f.adapter.Receive(context.Background(), f.headersNow("n2", body), body); err != nil || !merged {
-		t.Fatalf("second receive = (%v, %v), want a merge", merged, err)
-	}
-	items := f.inboxItems(t)
-	if len(items) != 1 || items[0].Count != 2 {
-		t.Fatalf("items = %+v, want one item with count 2", items)
-	}
-}
-
-func TestReceiveAcceptsTheV1EventCallbackShape(t *testing.T) {
-	f := newFixture(t)
-	// v1: type=event_callback at the top, the kind in event.type, no header.
-	body := []byte(`{"type":"event_callback","event":{"type":"message","sender":{"sender_id":{"open_id":"ou_v1"}},"message":{"message_id":"om_v1","chat_id":"oc_v1","message_type":"text","content":"{\"text\":\"老版本回调\"}"}}}`)
-	item, merged, err := f.adapter.Receive(context.Background(), f.headersNow("n1", body), body)
-	if err != nil {
-		t.Fatalf("Receive(v1): %v", err)
-	}
-	if merged || item.Source != contracts.FeishuSource || item.Channel != "oc_v1" || item.Sender != "ou_v1" {
-		t.Fatalf("item = %+v, want one v1 feishu item", item)
-	}
-	if item.DedupKey != "feishu:om_v1" || item.Body != "老版本回调" {
-		t.Fatalf("item = %+v", item)
-	}
-
-	// A v1 callback for another event kind must still be ignored, not misread
-	// as a message with missing ids.
-	other := []byte(`{"type":"event_callback","event":{"type":"event","event_type":"im.chat.member.bot.added_v1"}}`)
-	if item, _, err := f.adapter.Receive(context.Background(), f.headersNow("n2", other), other); err != nil || item.ID != "" {
-		t.Fatalf("v1 non-message = (%+v, %v), want it ignored", item, err)
-	}
-}
-
-func TestReceiveIgnoresUnrelatedEvents(t *testing.T) {
-	f := newFixture(t)
-	// A non-message event we do not ingest.
-	body := []byte(`{"schema":"2.0","header":{"event_type":"im.chat.member.bot.added_v1"},"event":{}}`)
-	if item, merged, err := f.adapter.Receive(context.Background(), f.headersNow("n1", body), body); err != nil || merged || item.ID != "" {
-		t.Fatalf("member-added = (%+v, %v, %v), want it ignored", item, merged, err)
-	}
-
-	// An image message: the channel is text-only for now, so it must not
-	// become an empty inbox row.
-	imageBody := []byte(`{"schema":"2.0","header":{"event_type":"im.message.receive_v1"},"event":{"sender":{"sender_id":{"open_id":"ou_1"}},"message":{"message_id":"om_img","chat_id":"oc_1","message_type":"image","content":"{\"image_key\":\"img_1\"}"}}}`)
-	if item, _, err := f.adapter.Receive(context.Background(), f.headersNow("n2", imageBody), imageBody); err != nil || item.ID != "" {
-		t.Fatalf("image = (%+v, %v), want it ignored", item, err)
-	}
-	if items := f.inboxItems(t); len(items) != 0 {
-		t.Fatalf("inbox = %+v, want nothing ingested", items)
-	}
-}
-
-func TestReceiveRejectsBadPayloads(t *testing.T) {
-	f := newFixture(t)
-	body := []byte("{not json")
-	if _, _, err := f.adapter.Receive(context.Background(), f.headersNow("n1", body), body); !errors.Is(err, contracts.ErrFeishuBadPayload) {
-		t.Fatalf("garbage err = %v, want ErrFeishuBadPayload", err)
-	}
-
-	// A text message without an identity cannot be filed.
-	missing := []byte(`{"schema":"2.0","header":{"event_type":"im.message.receive_v1"},"event":{"sender":{"sender_id":{"open_id":"ou_1"}},"message":{"message_type":"text","chat_id":"oc_1","content":"{\"text\":\"hi\"}"}}}`)
-	if _, _, err := f.adapter.Receive(context.Background(), f.headersNow("n2", missing), missing); !errors.Is(err, contracts.ErrFeishuBadPayload) {
-		t.Fatalf("missing id err = %v, want ErrFeishuBadPayload", err)
-	}
-
-	// A text message whose content is not JSON.
-	brokenContent := []byte(`{"schema":"2.0","header":{"event_type":"im.message.receive_v1"},"event":{"sender":{"sender_id":{"open_id":"ou_1"}},"message":{"message_id":"om_x","chat_id":"oc_1","message_type":"text","content":"plain"}}}`)
-	if _, _, err := f.adapter.Receive(context.Background(), f.headersNow("n3", brokenContent), brokenContent); !errors.Is(err, contracts.ErrFeishuBadPayload) {
-		t.Fatalf("bad content err = %v, want ErrFeishuBadPayload", err)
-	}
-	if items := f.inboxItems(t); len(items) != 0 {
-		t.Fatalf("inbox = %+v, want no writes for bad payloads", items)
-	}
-}
-
-func TestCardActionExtractsTheDecision(t *testing.T) {
-	f := newFixture(t)
-
-	v2 := []byte(`{"schema":"2.0","header":{"event_type":"card.action.trigger"},"event":{"operator":{"open_id":"ou_1"},"action":{"tag":"button","value":{"approvalId":"ap_42","decision":"allow"}}}}`)
-	approvalID, decision, ok := f.adapter.CardAction(v2)
-	if !ok || approvalID != "ap_42" || decision != contracts.FeishuDecisionAllow {
-		t.Fatalf("v2 = (%q, %q, %v)", approvalID, decision, ok)
-	}
-
-	// Legacy top-level action, with the value carried as a JSON string.
-	legacy := []byte(`{"open_id":"ou_1","action":{"tag":"button","value":"{\"approvalId\":\"ap_7\",\"decision\":\"deny\"}"}}`)
-	approvalID, decision, ok = f.adapter.CardAction(legacy)
-	if !ok || approvalID != "ap_7" || decision != contracts.FeishuDecisionDeny {
-		t.Fatalf("legacy = (%q, %q, %v)", approvalID, decision, ok)
-	}
-}
-
-func TestCardActionAbsentReturnsFalse(t *testing.T) {
-	f := newFixture(t)
-	cases := map[string]string{
-		"no action":        `{"schema":"2.0","header":{"event_type":"card.action.trigger"},"event":{}}`,
-		"no value":         `{"schema":"2.0","header":{"event_type":"card.action.trigger"},"event":{"action":{"tag":"button"}}}`,
-		"no approval id":   `{"event":{"action":{"value":{"decision":"allow"}}}}`,
-		"unknown decision": `{"event":{"action":{"value":{"approvalId":"ap_1","decision":"maybe"}}}}`,
-		"garbage":          `not json`,
-	}
-	for name, body := range cases {
-		if approvalID, decision, ok := f.adapter.CardAction([]byte(body)); ok {
-			t.Fatalf("%s: extracted (%q, %q), want ok=false", name, approvalID, decision)
-		}
-	}
-	if platform, ok := f.platform.lastSend(); ok {
-		t.Fatalf("card action touched the platform: %+v", platform)
-	}
+	adapter := feishu.NewAdapter(cfg)
+	return &fixture{adapter: adapter, platform: platform, baseURL: server.URL}
 }
 
 func TestSendPostsTheMessage(t *testing.T) {
@@ -535,6 +171,16 @@ func TestSendRejectsEmptyText(t *testing.T) {
 	}
 	if _, ok := f.platform.lastSend(); ok {
 		t.Fatal("an empty message was posted to the platform")
+	}
+}
+
+func TestSendRejectsAnEmptyReceiveID(t *testing.T) {
+	f := newFixture(t)
+	if err := f.adapter.Send(context.Background(), "  ", "hi"); !errors.Is(err, contracts.ErrFeishuBadPayload) {
+		t.Fatalf("err = %v, want ErrFeishuBadPayload for a missing chat", err)
+	}
+	if _, ok := f.platform.lastSend(); ok {
+		t.Fatal("a send without a chat id was posted to the platform")
 	}
 }
 
@@ -645,7 +291,7 @@ func TestStatusWithoutCredentialsIsDisconnected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	if status.Connected || !status.LastInbound.IsZero() {
-		t.Fatalf("status = %+v, want disconnected and never seen", status)
+	if status.Connected {
+		t.Fatalf("status = %+v, want disconnected", status)
 	}
 }

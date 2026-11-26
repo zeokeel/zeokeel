@@ -52,11 +52,13 @@ import {
   claimTask,
   loadTaskBoard,
   loadTaskLease,
+  loadTaskReviews,
   reviewTask,
   submitTask,
   type BoardTask,
   type TaskEvidence,
   type TaskLease,
+  type TaskReview,
 } from '@/api/task';
 import { useMediaQuery } from '@/design/use-system-appearance';
 import { useT } from '@/i18n';
@@ -66,13 +68,18 @@ import { TaskBudget } from './TaskBudget';
 import { TaskRequester } from './TaskRequester';
 
 /**
- * The acting identity.
+ * The acting identities — roles, not people.
  *
- * Hard-coded until the shell knows who is signed in: `/t/:taskId` is the Lead's
- * own screen, so the claim it makes is the Lead's. Submitting or reviewing as
- * anybody else would need an identity the gateway does not hand out yet.
+ * This product has exactly one human, so "somebody else must review it" cannot
+ * mean a second person: it means a *different role*. The gateway enforces
+ * exactly that — `tasks.review` refuses a reviewer equal to the lease owner
+ * (`lease: reviewer is the executor`, `contracts.ErrLeaseReviewerIsOwner`) —
+ * which is why doing the work and auditing it use two different identities
+ * here. Claim/submit act as the executor role; accept/reject act as the
+ * auditor role. Using one constant for both would be self-review.
  */
-const OWNER = 'lead';
+const EXECUTOR = 'executor';
+const AUDITOR = 'auditor';
 
 /**
  * A subject, a goal or an evidence ref is often one unbroken token (a URL, a
@@ -103,6 +110,10 @@ type LoadState =
       lease: TaskLease | null;
       /** `tasks.lease`'s failure, when the task loaded but the proof did not. */
       leaseError: string | null;
+      /** The durable review log (`tasks.reviews`), oldest first. */
+      reviews: TaskReview[];
+      /** `tasks.reviews`'s failure — its own read, its own failure. */
+      reviewsError: string | null;
     }
   /** The board answered and this id is not on it — not an error. */
   | { kind: 'missing' }
@@ -139,12 +150,25 @@ async function readTask(taskId: string, keep: TaskLease | null = null): Promise<
   // The clock the relative stamps are measured against, captured with the read
   // so two renders of the same row do not disagree about "2 分钟前".
   const at = Date.now();
+  // Two independent reads behind the same section: the live claim (evidence and
+  // the note) and the durable review log. Each is allowed to fail on its own —
+  // "the proof did not load" and "the audit trail did not load" are different
+  // statements, and neither may take the task down.
+  let lease: TaskLease | null = keep;
+  let leaseError: string | null = null;
   try {
-    const lease = await loadTaskLease({ id: taskId });
-    return { kind: 'ready', task, at, lease, leaseError: null };
+    lease = await loadTaskLease({ id: taskId });
   } catch (cause) {
-    return { kind: 'ready', task, at, lease: keep, leaseError: messageOf(cause) };
+    leaseError = messageOf(cause);
   }
+  let reviews: TaskReview[] = [];
+  let reviewsError: string | null = null;
+  try {
+    reviews = await loadTaskReviews({ id: taskId });
+  } catch (cause) {
+    reviewsError = messageOf(cause);
+  }
+  return { kind: 'ready', task, at, lease, leaseError, reviews, reviewsError };
 }
 
 /** Board status + lease state → one of the six status words (design §6.1). */
@@ -226,6 +250,13 @@ interface Step {
   at?: string;
   /** The one step that is a failure carries the error colour, not the accent. */
   failed?: boolean;
+  /**
+   * A step nobody reviewed: the task was closed directly (`task.status` or
+   * `team_task_update`), so the timeline must say so instead of borrowing the
+   * "accepted" wording. It is not a failure — the work may be fine — but it is
+   * the one step that tells the reader the audit trail has a hole.
+   */
+  unaudited?: boolean;
 }
 
 /**
@@ -235,7 +266,7 @@ interface Step {
  * step below it is unknown, so the timeline degrades to the one thing the board
  * does tell us: the state word.
  */
-function timelineSteps(lease: TaskLease | null, t: Translate): Step[] {
+function timelineSteps(lease: TaskLease | null, reviews: readonly TaskReview[], t: Translate): Step[] {
   const steps: Step[] = [];
   if (lease) {
     if (lease.heartbeat) {
@@ -252,10 +283,12 @@ function timelineSteps(lease: TaskLease | null, t: Translate): Step[] {
         detail: t('task.detail.progress.evidenceCount', { count }),
       });
     }
-    if (lease.state === 'done') {
+    // A live lease may still carry the decision (the write answered with it
+    // before the row was re-read); the log below is what makes it survive.
+    if (lease.state === 'done' && reviews.length === 0) {
       steps.push({ label: t('task.detail.progress.accepted'), detail: lease.reviewNote });
     }
-    if (lease.state === 'rejected') {
+    if (lease.state === 'rejected' && reviews.length === 0) {
       steps.push({
         label: t('task.detail.progress.rejected'),
         detail: lease.reviewNote,
@@ -263,8 +296,51 @@ function timelineSteps(lease: TaskLease | null, t: Translate): Step[] {
       });
     }
   }
+  // The durable half: every recorded decision, oldest first. This is the only
+  // place a review still shows after `tasks.review` deleted the lease it
+  // described — without it an accepted task looked like it was never reviewed.
+  for (const review of reviews) {
+    const failed = review.decision === 'reject';
+    // `direct_close` / verdict `unaudited` is a close that skipped the review —
+    // the gateway records it so a terminal state cannot be silent. Rendering it
+    // as "accepted" would turn "nobody looked at this" into "somebody approved
+    // it", which is the exact lie the audit row exists to prevent.
+    const unaudited = review.decision === 'direct_close' || review.verdict === 'unaudited';
+    if (unaudited) {
+      steps.push({
+        label: t('task.detail.progress.directClose'),
+        detail: review.findings,
+        at: review.at,
+        unaudited: true,
+      });
+      continue;
+    }
+    const who = roleLabel(review.reviewer, t);
+    steps.push({
+      label: failed
+        ? t('task.detail.progress.rejectedBy', { reviewer: who })
+        : t('task.detail.progress.acceptedBy', { reviewer: who }),
+      detail: review.findings,
+      at: review.at,
+      ...(failed ? { failed: true } : {}),
+    });
+  }
   steps.push({ label: t('task.detail.progress.now') });
   return steps;
+}
+
+/** The role word for a reviewer identity (roles are preset ids). */
+function roleLabel(reviewer: string, t: Translate): string {
+  switch (reviewer) {
+    case 'lead':
+      return t('task.detail.role.lead');
+    case 'executor':
+      return t('task.detail.role.executor');
+    case 'auditor':
+      return t('task.detail.role.auditor');
+    default:
+      return reviewer;
+  }
 }
 
 /**
@@ -310,6 +386,8 @@ export function TaskDetailScreen() {
   const [busy, setBusy] = useState<Pending>(null);
   /** The evidence retry is a read of its own; it only turns that button. */
   const [leaseBusy, setLeaseBusy] = useState(false);
+  /** The audit-trail retry is a third independent read. */
+  const [reviewsBusy, setReviewsBusy] = useState(false);
   /** A failed write, shown without discarding the row. */
   const [actionError, setActionError] = useState<string | null>(null);
   const [form, setForm] = useState<Form>('none');
@@ -364,7 +442,7 @@ export function TaskDetailScreen() {
 
   const claim = async () => {
     setBusy('claim');
-    await runWrite(() => claimTask({ id, owner: OWNER }));
+    await runWrite(() => claimTask({ id, owner: EXECUTOR }));
   };
 
   /**
@@ -374,6 +452,22 @@ export function TaskDetailScreen() {
    * retry that also re-read the board would flash the whole screen for a second
    * failure in a different half (§3's retry promises exactly one thing).
    */
+  const retryReviews = async () => {
+    setReviewsBusy(true);
+    try {
+      const reviews = await loadTaskReviews({ id });
+      setState((prev) =>
+        prev.kind === 'ready' ? { ...prev, reviews, reviewsError: null } : prev,
+      );
+    } catch (cause) {
+      setState((prev) =>
+        prev.kind === 'ready' ? { ...prev, reviewsError: messageOf(cause) } : prev,
+      );
+    } finally {
+      setReviewsBusy(false);
+    }
+  };
+
   const retryLease = async () => {
     setLeaseBusy(true);
     try {
@@ -395,7 +489,7 @@ export function TaskDetailScreen() {
     if (!value) return;
     setBusy('submit');
     const ok = await runWrite(() =>
-      submitTask({ id, owner: OWNER, evidence: [{ kind: evidenceKindFor(value), ref: value }] }),
+      submitTask({ id, owner: EXECUTOR, evidence: [{ kind: evidenceKindFor(value), ref: value }] }),
     );
     if (ok) {
       setForm('none');
@@ -405,14 +499,14 @@ export function TaskDetailScreen() {
 
   const accept = async () => {
     setBusy('accept');
-    await runWrite(() => reviewTask({ id, decision: 'accept', reviewer: OWNER }));
+    await runWrite(() => reviewTask({ id, decision: 'accept', reviewer: AUDITOR }));
   };
 
   const reject = async () => {
     const note = reason.trim();
     if (!note) return;
     setBusy('reject');
-    const ok = await runWrite(() => reviewTask({ id, decision: 'reject', reviewer: OWNER, note }));
+    const ok = await runWrite(() => reviewTask({ id, decision: 'reject', reviewer: AUDITOR, note }));
     if (ok) {
       setForm('none');
       setReason('');
@@ -464,9 +558,9 @@ export function TaskDetailScreen() {
     );
   }
 
-  const { task, at, lease, leaseError } = state;
+  const { task, at, lease, leaseError, reviews, reviewsError } = state;
   const status = describeStatus(task, lease, t);
-  const steps = timelineSteps(lease, t);
+  const steps = timelineSteps(lease, reviews, t);
   const visible = expanded ? steps : steps.slice(-3);
   const evidence = lease?.evidence ?? [];
   // 产物 are the submitted files: the lease is the only thing that carries
@@ -544,7 +638,10 @@ export function TaskDetailScreen() {
               items={visible.map((step, index) => ({
                 key: `${step.label}-${index}`,
                 title: step.label,
-                color: step.failed ? 'red' : undefined,
+                // Failure is the error colour; an unaudited close is a warning
+                // (the log has a hole a human may want to fill), never the
+                // accent an accepted review gets.
+                color: step.failed ? 'red' : step.unaudited ? 'orange' : undefined,
                 content:
                   step.detail || step.at ? (
                     <Space orientation="vertical" size={0}>
@@ -564,6 +661,24 @@ export function TaskDetailScreen() {
               <Button size="small" onClick={() => setExpanded((value) => !value)}>
                 {expanded ? t('task.detail.progress.less') : t('task.detail.progress.more')}
               </Button>
+            ) : null}
+
+            {/* The audit trail is its own read with its own failure: an empty
+                timeline under a since-deleted lease must not read as "nobody
+                reviewed this". */}
+            {reviewsError ? (
+              <Alert
+                type="error"
+                showIcon
+                role="alert"
+                title={t('task.detail.reviews.failed')}
+                description={reviewsError}
+                action={
+                  <Button size="small" loading={reviewsBusy} onClick={() => void retryReviews()}>
+                    {t('task.detail.retry')}
+                  </Button>
+                }
+              />
             ) : null}
 
             {/* 执行手段: the other half of "how is this getting done" — what the

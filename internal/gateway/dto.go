@@ -33,6 +33,11 @@ type sessionInfoDTO struct {
 	PermissionScope       string     `json:"permissionScope,omitempty"`
 	EffectiveApprovalMode string     `json:"effectiveApprovalMode,omitempty"`
 	EffectiveSandboxMode  string     `json:"effectiveSandboxMode,omitempty"`
+	// PresetID is the role the session selected; PresetProblem is a stable code
+	// when that role cannot be resolved (the session then has no tools). Both are
+	// `omitempty`: a healthy session must not look diagnosed.
+	PresetID      string `json:"presetId,omitempty"`
+	PresetProblem string `json:"presetProblem,omitempty"`
 }
 
 // sessionDTO is one conversation read model (contracts.ChatSession).
@@ -151,6 +156,8 @@ func newSessionInfoDTO(info contracts.ChatSessionInfo) sessionInfoDTO {
 		PermissionScope:       info.PermissionScope,
 		EffectiveApprovalMode: info.EffectiveApprovalMode,
 		EffectiveSandboxMode:  info.EffectiveSandboxMode,
+		PresetID:              info.PresetID,
+		PresetProblem:         info.PresetProblem,
 	}
 }
 

@@ -72,11 +72,12 @@ func TestSetSessionPresetAndCleanup(t *testing.T) {
 	if err := svc.DeleteSession(sessionID); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}
-	svc.mu.Lock()
-	_, present := svc.sessionPresets[sessionID]
-	svc.mu.Unlock()
-	if present {
-		t.Fatal("preset selection survived session deletion")
+	// The selection is a settings row now (it must survive a restart), so the
+	// delete has to clear that row: a reused session id must not inherit the
+	// deleted conversation's role. The row is cleared rather than removed
+	// because SettingsService has no delete API; "" reads back as "no preset".
+	if row := svc.settings.(*fakeSettings).values[contracts.SessionPresetSettingKey(sessionID)]; row != "" {
+		t.Fatalf("preset row after session deletion = %q, want cleared", row)
 	}
 }
 

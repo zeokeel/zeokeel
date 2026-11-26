@@ -26,6 +26,10 @@ export const SETTING_KEYS = {
   chatFontSize: 'ui.chatFontSize',
   /** SettingChatMode */
   chatMode: 'chat.mode',
+  /** SettingCLIDingtalkPath */
+  cliDingtalkPath: 'cli.dingtalk.path',
+  /** SettingCLIFeishuPath */
+  cliFeishuPath: 'cli.feishu.path',
   /** SettingCloseToTray */
   closeToTray: 'ui.closeToTray',
   /** SettingGlobalHotkey */
@@ -113,6 +117,7 @@ export const SETTING_KEY_LIST: readonly SettingKey[] = Object.values(SETTING_KEY
 export const SETTING_KEY_PREFIXES = [
   'agent.',
   'chat.',
+  'cli.',
   'lsp.',
   'mcp.',
   'modelcatalog.',

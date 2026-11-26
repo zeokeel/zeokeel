@@ -9,9 +9,14 @@ import (
 )
 
 // Inbox statuses. The inbox is the single external entry point of the product:
-// every channel (WeChat, DingTalk, Feishu, email, webhooks, cron, teammate
-// proposals) lands here first, and only the Lead triages it. Nothing else may
-// turn an external event into work.
+// every inbound event lands here first, and only the Lead triages it. Nothing
+// else may turn an external event into work.
+//
+// Three adapters file rows today: WeChat (single chat), webhooks (signed
+// machine input) and email (latent — its IMAP client is injected by the host and
+// the product ships none). DingTalk and Feishu are **outbound only**: they are
+// notification targets, never sources, so a row is never produced for them
+// (docs/research/channel-capabilities.md §6).
 const (
 	InboxStatusNew      = "new"
 	InboxStatusTriaged  = "triaged"
@@ -34,8 +39,10 @@ const (
 type InboxItem struct {
 	// ID is the inbox-assigned identity (stable across merges).
 	ID string
-	// Source is the channel family: wechat, dingtalk, feishu, email, webhook,
-	// cron, teammate.
+	// Source is the channel family that filed the row: "wechat" or "webhook"
+	// (and "email" once a host injects an IMAP client). DingTalk and Feishu never
+	// appear here — they are outbound notification targets only
+	// (docs/research/channel-capabilities.md §6).
 	Source string
 	// Channel is the platform-side conversation identity (chat id, thread,
 	// repo, mailbox).

@@ -9,9 +9,11 @@ package toolkit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	rig "github.com/zeokeel/zeokeel-rig"
 	"github.com/zeokeel/zeokeel-rig/tools/team"
@@ -30,12 +32,23 @@ type taskBoardAdapter struct {
 	// loadOK records that the durable document existed and parsed (even if it
 	// was a valid empty board); false means missing/corrupt/unreadable.
 	loadOK bool
+	// closeMu guards closeObserver, which the lease module installs at activation
+	// while tool calls may already be running.
+	closeMu sync.RWMutex
+	// closeObserver is the audit sink for tasks that reach a terminal state
+	// without a lease review (contracts.TaskCloseAuditor). Nil means this
+	// assembly has no lease layer, so there is nowhere to record it.
+	closeObserver contracts.TaskCloseAuditor
+	// logf is the board service's logger (nil-safe: an adapter built outside the
+	// service, e.g. a memory board in a unit test, has none).
+	logf func(string, ...any)
 }
 
 var (
-	_ contracts.TaskBoard         = (*taskBoardAdapter)(nil)
-	_ contracts.TaskAssigner      = (*taskBoardAdapter)(nil)
-	_ contracts.TaskBoardRestorer = (*taskBoardAdapter)(nil)
+	_ contracts.TaskBoard               = (*taskBoardAdapter)(nil)
+	_ contracts.TaskAssigner            = (*taskBoardAdapter)(nil)
+	_ contracts.TaskBoardRestorer       = (*taskBoardAdapter)(nil)
+	_ contracts.TaskCloseObserverSetter = (*taskBoardAdapter)(nil)
 )
 
 // newTaskBoard wraps one rig task manager and its SDK store.
@@ -146,6 +159,12 @@ func (b *taskBoardAdapter) SetStatus(ctx context.Context, id, status string) (co
 		return contracts.BoardTask{}, fmt.Errorf("toolkit: task board: %w", err)
 	}
 	b.persist()
+	// No close audit here on purpose: TaskLeaseService.Accept completes the board
+	// through this same method right after recording its own review, and a hook
+	// at this layer would append an "unaudited" row to every properly reviewed
+	// task. The audited closes are the entry points that bypass the lease — the
+	// gateway's task.status command and the model's team_task_update tool — and
+	// they record themselves (see notifyDirectClose callers).
 	return boardTaskFromRig(updated), nil
 }
 
@@ -237,6 +256,55 @@ func (b *taskBoardAdapter) isDeleted(id string) bool {
 	return false
 }
 
+// Entry points that can move a task into a terminal state without a lease
+// review. They are named so the audit row and the UI say which one did it.
+const (
+	// taskCloseSourceStatus is the gateway's `task.status` command (the
+	// complete/stop chip in the task panel).
+	taskCloseSourceStatus = "tasks.status"
+	// taskCloseSourceTool is the model-facing `team_task_update` tool
+	// (action=complete, or action=edit with status=completed).
+	taskCloseSourceTool = "team_task_update"
+	// taskCloseActorUser is the identity behind the UI's commands: this product
+	// has one human, and the gateway has no per-user identity to name.
+	taskCloseActorUser = "user"
+	// taskCloseActorAgent is the identity behind a model-initiated close.
+	taskCloseActorAgent = "agent"
+)
+
+// SetTaskCloseObserver implements contracts.TaskCloseObserverSetter: the lease
+// module installs its review-log writer here at activation. Nil is valid and
+// means "this assembly has no review log to write to".
+func (b *taskBoardAdapter) SetTaskCloseObserver(observer contracts.TaskCloseAuditor) {
+	if b == nil {
+		return
+	}
+	b.closeMu.Lock()
+	b.closeObserver = observer
+	b.closeMu.Unlock()
+}
+
+// notifyDirectClose records one unaudited close when this board has a sink and
+// the task really is in a terminal state. A failure is logged, never returned:
+// the task is already completed, and turning the audit write into a failed
+// command would make the client retry a write that succeeded.
+func (b *taskBoardAdapter) notifyDirectClose(ctx context.Context, task contracts.BoardTask, actor, source string) {
+	if b == nil || task.Status != contracts.TaskStatusCompleted {
+		return
+	}
+	b.closeMu.RLock()
+	observer := b.closeObserver
+	b.closeMu.RUnlock()
+	if observer == nil {
+		return
+	}
+	if err := observer.RecordDirectClose(ctx, task.ID, actor, source); err != nil {
+		if b.logf != nil {
+			b.logf("[toolkit] record unaudited close of task %s: %v", task.ID, err)
+		}
+	}
+}
+
 // boardTaskFromRig converts one rig task into the product BoardTask.
 func boardTaskFromRig(task rig.TeamTask) contracts.BoardTask {
 	return contracts.BoardTask{
@@ -275,11 +343,48 @@ func (t *persistingTaskTool) Schema() map[string]any { return t.inner.Schema() }
 // list/get must not rewrite the document (that previously recreated a retired
 // legacy document after migration).
 func (t *persistingTaskTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
+	// The status before the call: a close is a transition, not a state, so a
+	// no-op update on an already-completed task must not add an audit row.
+	before := ""
+	if t.inner.Name() == "team_task_update" {
+		if id := taskUpdateID(call.Arguments); id != "" {
+			if task, getErr := t.board.manager.Get(ctx, id); getErr == nil {
+				before = task.Status
+			}
+		}
+	}
 	result, err := t.inner.Invoke(ctx, call)
 	if err == nil && !result.IsError && taskToolMutates(t.inner.Name()) {
 		t.board.persist()
+		if t.inner.Name() == "team_task_update" {
+			// The model can close a task with this tool (action=complete, or
+			// action=edit with status=completed) — the second path that used to
+			// leave no audit row. The action/status vocabulary is the SDK's, so
+			// the board is re-read instead of the arguments being re-parsed: what
+			// matters is the state the call produced, not the spelling it used.
+			// Pre-completed tasks are skipped, so a no-op update does not look
+			// like a fresh close.
+			if id := taskUpdateID(call.Arguments); id != "" && before != contracts.TaskStatusCompleted {
+				if task, getErr := t.board.manager.Get(ctx, id); getErr == nil {
+					t.board.notifyDirectClose(ctx, boardTaskFromRig(task), taskCloseActorAgent, taskCloseSourceTool)
+				}
+			}
+		}
 	}
 	return result, err
+}
+
+// taskUpdateID reads the task id out of one team_task_update call. An unreadable
+// argument blob is "no id": the call either failed (no persist) or updated
+// nothing, so there is no close to record.
+func taskUpdateID(arguments string) string {
+	var payload struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(arguments)), &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.ID)
 }
 
 // taskToolMutates reports whether a task tool changes the board.

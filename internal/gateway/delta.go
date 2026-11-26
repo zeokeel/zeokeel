@@ -356,7 +356,11 @@ func equalSessionInfo(a, b sessionInfoDTO) bool {
 		a.Running == b.Running && a.Waiting == b.Waiting && a.Unread == b.Unread &&
 		equalTimePointer(a.UpdatedAt, b.UpdatedAt) && a.Origin == b.Origin &&
 		a.PermissionScope == b.PermissionScope && a.EffectiveApprovalMode == b.EffectiveApprovalMode &&
-		a.EffectiveSandboxMode == b.EffectiveSandboxMode
+		a.EffectiveSandboxMode == b.EffectiveSandboxMode &&
+		// The role and its diagnosis are part of the row: a session whose role
+		// stopped resolving (or was fixed) must reach every open client as a
+		// row change, or the warning would never appear (or never go away).
+		a.PresetID == b.PresetID && a.PresetProblem == b.PresetProblem
 }
 
 // equalToolCall compares two tool cards by value.

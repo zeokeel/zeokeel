@@ -51,6 +51,12 @@ import {
   type HeartbeatStatus,
   type NotifyCategory,
 } from '@/api/health';
+import {
+  SANDBOX_CONFINEMENT_NONE,
+  SANDBOX_CONFINEMENT_OS,
+  loadSandboxStatus,
+  type SandboxStatus,
+} from '@/api/sandbox';
 import { describeError } from '@/features/describe-error';
 import { useT } from '@/i18n';
 import type { MessageKey } from '@/i18n';
@@ -241,6 +247,7 @@ export function HealthScreen() {
         <p className="zk-screen__note">{t('health.note')}</p>
       </header>
       <Flex vertical gap="large">
+        <SandboxSection />
         <HeartbeatSection />
         <DeliverySection />
         <BrowserSection />
@@ -783,6 +790,120 @@ function BrowserFacts({ status }: { status: BrowserStatus }) {
           <Typography.Text type="secondary">{t('health.browser.emptyHint')}</Typography.Text>
         </div>
       )}
+    </>
+  );
+}
+
+/* ---------------------------------------------------------------- sandbox -- */
+
+/**
+ * The OS fence for shell commands — the one status row that is not about a
+ * moving part but about a boundary (2026-11-26 permission model).
+ *
+ * Commands never park on an approval card, so this row is where the user can
+ * see whether anything actually confines them. Three states, never merged:
+ *
+ *   os       the runner reports real enforcement — the write fence is real
+ *   none     no OS runner (or one that reports none) — commands run with the
+ *            process's own permissions, and the working-directory rule is a rule
+ *            the model must follow rather than a boundary the OS enforces
+ *   "" (empty / unknown)  no sandbox module is assembled; commands stay behind
+ *            the approval gate, so "unconfined" would be the wrong word
+ */
+function SandboxSection() {
+  const t = useT();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const read = useCallback(() => loadSandboxStatus(), []);
+  const { state, reload, refresh } = useSectionValue(read);
+
+  const reread = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  return (
+    <Section
+      title={t('health.sandbox.title')}
+      note={t('health.sandbox.note')}
+      testId="health-sandbox"
+      action={
+        <Button
+          onClick={() => void reread()}
+          loading={refreshing}
+          disabled={refreshing}
+          data-testid="health-sandbox-refresh"
+        >
+          {t('health.refresh')}
+        </Button>
+      }
+    >
+      <SectionState state={state} onRetry={reload} />
+      {state.kind === 'ready' ? <SandboxFacts status={state.value} /> : null}
+    </Section>
+  );
+}
+
+function SandboxFacts({ status }: { status: SandboxStatus }) {
+  const t = useT();
+  // The warning state is the one that must not be quiet: on a host without an OS
+  // runner, "commands run without asking" also means "nothing enforces the write
+  // rule". `warning` (not `error`) because nothing failed — the user asked for
+  // no prompts, and this is the other half of that trade.
+  const unconfined = status.commandsUnconfined;
+  return (
+    <>
+      <Flex gap="small" align="center" wrap>
+        {status.confinement === SANDBOX_CONFINEMENT_OS ? (
+          <Tag color="success" data-testid="health-sandbox-state">
+            {t('health.sandbox.confined')}
+          </Tag>
+        ) : status.confinement === SANDBOX_CONFINEMENT_NONE ? (
+          <Tag color="warning" data-testid="health-sandbox-state">
+            {t('health.sandbox.unconfined')}
+          </Tag>
+        ) : (
+          <Tag data-testid="health-sandbox-state">{t('health.sandbox.unknown')}</Tag>
+        )}
+        <Typography.Text type="secondary" data-testid="health-sandbox-platform">
+          {status.platform || '—'}
+        </Typography.Text>
+      </Flex>
+
+      {unconfined ? (
+        // The gateway's own sentence is quoted first; the screen adds what it
+        // means for the user's own data, because "no OS confinement" alone reads
+        // like a configuration detail.
+        <Alert
+          type="warning"
+          showIcon
+          data-testid="health-sandbox-warning"
+          title={t('health.sandbox.unconfinedTitle')}
+          description={
+            status.note ?? t('health.sandbox.unconfinedBody')
+          }
+        />
+      ) : null}
+
+      <Descriptions size="small" column={1}>
+        <Descriptions.Item label={t('health.sandbox.scope')}>
+          <span data-testid="health-sandbox-scope">
+            {unconfined ? t('health.sandbox.scopeUnconfined') : t('health.sandbox.scopeConfined')}
+          </span>
+        </Descriptions.Item>
+        {status.reason ? (
+          <Descriptions.Item label={t('health.sandbox.reason')}>
+            <span data-testid="health-sandbox-reason" style={WRAP_LONG}>
+              {status.reason}
+            </span>
+          </Descriptions.Item>
+        ) : null}
+      </Descriptions>
     </>
   );
 }

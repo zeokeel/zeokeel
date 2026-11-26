@@ -72,6 +72,52 @@ describe('inbox api', () => {
     });
   });
 
+  it('passes the wake-up record through so the screen can report what happened', async () => {
+    // The gateway answers a dispatch with `dispatch` when it consulted the
+    // wake-up connector: a started run (sessionId + the lead role) or the reason
+    // it did not run (error / skipped). Dropping that field is how "the task has
+    // an owner and nobody is working on it" became invisible in the client.
+    wire.request.mockResolvedValue({
+      taskIds: ['task-9'],
+      created: true,
+      dispatch: {
+        taskId: 'task-9',
+        sessionId: 'sess-1',
+        presetId: 'lead',
+      },
+    });
+
+    const started = await dispatchInboxItem({
+      id: 'inbox-1',
+      subject: '查退款率',
+      assignee: 'lead',
+    });
+
+    expect(started.dispatch).toEqual({ taskId: 'task-9', sessionId: 'sess-1', presetId: 'lead' });
+
+    wire.request.mockResolvedValue({
+      taskIds: ['task-10'],
+      created: true,
+      dispatch: {
+        taskId: 'task-10',
+        skipped: '任务预算已耗尽，不唤醒',
+      },
+    });
+
+    const skipped = await dispatchInboxItem({
+      id: 'inbox-2',
+      subject: '整理周报',
+      assignee: 'lead',
+    });
+
+    expect(skipped.dispatch).toEqual({ taskId: 'task-10', skipped: '任务预算已耗尽，不唤醒' });
+    // No dispatch record at all (any other assignee) stays absent, not undefined
+    // fields the screen would have to guess about.
+    wire.request.mockResolvedValue({ taskIds: ['task-11'], created: true });
+    const plain = await dispatchInboxItem({ id: 'inbox-3', subject: '写周报' });
+    expect(plain.dispatch).toBeUndefined();
+  });
+
   it('triages with {id, action}', async () => {
     wire.request.mockResolvedValue({
       id: 'inbox-1',

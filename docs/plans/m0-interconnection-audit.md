@@ -34,12 +34,12 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | **三模块链路** inbox → triage → task board | inbox + triage + toolkit | — | 装配测试里：Add → Apply(task) → board.List 里能找到同一 id，且 inbox 行变 task |
 | `contracts.KeyTaskLease` | `internal/modules/tasklease`（新） | 未来的派遣器、gateway | 10 条（抢占/心跳/证据必填/验收/打回/过期/释放/防双开） |
 | **四模块链路** inbox → triage → board → lease | 上述四个模块 | — | 装配测试里：Apply 建任务 → Claim → Submit → Accept，board 最终 completed |
-| `contracts.KeyApprovalAction` | approvals 模块（与 KeyApprovals 同源） | 桌面按钮 / 卡片回调 / 聊天回复 | 13 条（token 校验/过期/单次使用/绑单/索引回复/空队列） |
+| `contracts.KeyApprovalAction` | approvals 模块（与 KeyApprovals 同源） | 桌面按钮 / ~~卡片回调（2026-11-26 已删）~~ / 聊天回复（**仅微信**，见 §4） | 13 条（token 校验/过期/单次使用/绑单/索引回复/空队列） |
 | `contracts.KeyNotifyRoute` | notifyroute（新，无依赖） | 渠道适配器、gateway | 8 条（默认覆盖/校验/顺序/不健康跳过/inapp 兜底/静音只压非审批/跨午夜/停用） |
 | `contracts.KeyWeChat` | wechat（新，依赖 inbox） | 轮询循环（下一步挂载） | 8 条（入站归一/重投合并/全字段发送/无 token/窗口关闭/空文本/平台失败/401） |
 | `contracts.KeyLead` | lead（依赖 inbox + triage + dataDir） | `lead.run`、自动化 | 5 条循环 + 4 条规则持久化 |
-| `contracts.KeyDingTalk` | dingtalk（依赖 inbox） | 入站路由（待挂） | 17 条（验签/过期/非文本/合并/发送/限速型错误） |
-| `contracts.KeyFeishu` | feishu（依赖 inbox） | 入站路由（待挂） | 24 条（challenge/验签/旧签名/v1 回调/合并/卡片动作/发送/token 铸造） |
+| `contracts.KeyDingTalk` | dingtalk（**只出站**，2026-11-26 起不再依赖 inbox） | 通知投递（`Send`+`Status`） | 17 条（验签/过期/非文本/合并/发送/限速型错误） |
+| `contracts.KeyFeishu` | feishu（**只出站**，2026-11-26 起不再依赖 inbox） | 通知投递（`Send`+`Status`） | 24 条（challenge/验签/旧签名/v1 回调/合并/卡片动作/发送/token 铸造） |
 | 租约持久化 | tasklease（+dataDir） | 重启恢复 | 7 条（存活/过期回收/损坏/0600/评审状态） |
 | `contracts.KeyCredentials` | creds（依赖 dataDir） | `credentials.list/set/delete`、渠道适配器 | 17 条 + 19 校验子测试；网关 3 方法 + mock 覆盖 |
 | `contracts.KeyEmail` | email（依赖 inbox） | 邮件渠道 | 30 条（SMTP 报文/535/IMAP 归一/Message-ID 去重/QP+base64/循环取消） |
@@ -65,7 +65,7 @@ serve 产品**复用 headless 的 entries**（`ServeEntries()` 只覆盖 approva
 | Web 渠道设置 | `web/src/features/settings/channels/**`、`web/src/api/channels.ts` | `/settings/channels`（R27a） | 12 测试；密钥不回显有断言 |
 | `planner`（library） | planner（仅依赖 contracts） | 模型计划器 | 14 测试 / 21 断言（线格式/错误分层/预算先于网络/密钥永不入错误） |
 | 模型计划器接入 | `lead.ModelPlanner` + `lib/leadplan` | `lead.RunOnce` | 4 条（映射 task/skip/无模型/驱动整轮） |
-| 入站路由（钉钉/飞书） | gateway `inbound.go` | 平台回调 | 6 条（202/签名 401/challenge 200/204/404） |
+| ~~入站路由（钉钉/飞书）~~ | ~~gateway `inbound.go`~~ **已下线（2026-11-26）**：路由、验签与卡片回调一起删除，那 6 条测试同时删除；`/api/inbound` 只剩通用 `webhook` | 平台回调 | ~~6 条~~ 0 条（钉钉格式报文现在是 webhook 适配器的 404/401） |
 | Web「待办收件箱」 | `web/src/features/inbox/**`、`web/src/api/inbox.ts` | `/inbox/incoming` | web 全量 477 tests 绿；旧 `/inbox` 有回归测试 |
 | Web「任务详情」 | `web/src/features/task/**`、`web/src/api/task.ts` | `/t/:taskId`（R3b，无导航） | 22 测试（五段顺序/认领/证据门槛/通过打回/重试） |
 | `tasks.lease` | gateway（独立 `leaseReadParams`，只读 id） | 任务详情首屏证据 | 方法表 + 契约 + mock 同步（74 方法）；屏幕首屏读证据、读失败只降级 §3 |
@@ -100,11 +100,11 @@ inbox 的模块定位：**它是入口，不依赖任何人**（`Requires` 为�
 | ~~Lead 的"思考"层~~ | ✅ 已交付**可替换的计划器**：`Planner` 接口 + 确定性 `RulePlanner`（源/关键词/指派人/前缀/忽略），循环保证有界、失败不中断、不回炉；模型版计划器以后替换即可 | 已交付（模型版待接） |
 | ~~任务板租约/心跳/证据/验收~~ | ✅ 已交付：`tasklease`（TTL/心跳/证据必填/review/accept/reject/expire） | 已交付 |
 | ~~审批 action + 文字回复~~ | ✅ 已交付：`IssueToken` / `Apply` / `ApplyReply`，三条入口最终都落到 `Resolve` | 已交付 |
-| 渠道适配器 | 🟡 四个渠道的内核都有了：webhook（+HTTP+source 管理）、微信（轮询/发送/token 持久化/轮询循环/保活）、钉钉（验签+收+发）、飞书（challenge+验签+收+卡片动作提取+发）；邮件未开始。**只有 webhook 挂了 HTTP 路由** | 下一步：钉钉/飞书入站路由与卡片回调、凭据存储、真机验证 |
+| 渠道适配器 | 🟡 四个渠道的内核：webhook（+HTTP+source 管理）、微信（轮询/发送/token 持久化/轮询循环/保活）、钉钉（**只出站**：验签/收发/卡片都是历史能力，已删）、飞书（**只出站**：同上）；邮件未开始。**只有 webhook 挂了 HTTP 路由** | 下一步：微信真机验证、凭据存储 |
 | 渠道真机验证 | 微信/钉钉/飞书都只对**假服务**跑过（httptest），真实平台的报文、签名实现与限速未验证 | 已知风险 | 上线前每个渠道真机跑一遍（回调回放 + 收发 + 限速） |
-| ~~钉钉/飞书 HTTP 路由~~ | ✅ 已交付：`/api/inbound/dingtalk`、`/api/inbound/feishu`（challenge 200、无关事件 204、错误 401/400/503） | 已交付 |
+| ~~钉钉/飞书 HTTP 路由~~ | ~~✅ 已交付：`/api/inbound/dingtalk`、`/api/inbound/feishu`~~ **已下线（2026-11-26，产品改为个人助手）**：两条入站路由与卡片回调一起删除，钉钉/飞书只保留出站（`Send`+`Status`），`/api/inbound` 只剩通用 `webhook` 源 | 保留出站；决策见 [../research/channel-capabilities.md](../research/channel-capabilities.md) §6 |
 | 凭据仍未接到适配器 | creds 库有了，但三个适配器仍从 Config 读 `json:"-"` 字段；没人调用 `KeyCredentials` | 缺口 | 适配器启动时 `Get(kind,id)` + 热更新；UI 表单 |
-| 卡片动作未接审批 | 飞书 `CardAction` 提取了 approvalId/decision，但审批 action 需要一次性 token；卡片 value 里还没带 token | 缺口 | 发卡时把 token 放进 `action.value`，回调走 `approval.action` |
+| ~~卡片动作未接审批~~ | 已作废：飞书 `CardAction` 与卡片回调随入站一起删除（2026-11-26），卡片按钮不再能解决审批 | 不再是缺口 | 无（审批入口只有 Web 与微信对话式回复） |
 | 模型计划器装配注入 | 零件齐：`planner.New(...)` + `lead.ModelPlanner`；装配层还没读 `chat.baseURL/apiKey/model` 设置去构造 | 小缺口 | 装配/自动化里按设置构造；无配置则保持规则计划器 |
 | ~~钉钉/飞书未读凭据库~~ | ✅ 已交付：两个适配器从凭据库补齐空字段，显式配置仍然优先 | 已交付 |
 | ~~扫码登录 UI~~ | ✅ 已交付：渠道设置页「扫码接入」块（2s 轮询、10 次上限、过期可重启、卸载清表）；无二维码依赖，先显示可复制链接 | 已交付（真二维码需批准一个依赖） |

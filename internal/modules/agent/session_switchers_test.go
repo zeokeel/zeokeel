@@ -150,7 +150,10 @@ func TestSessionPermissionWorkspaceAllowsPathTools(t *testing.T) {
 			t.Fatalf("workspace gate %q = %v, want allow", tool, got)
 		}
 	}
-	for _, tool := range []string{"bash", "web_fetch", "mcp__server__run", "unknown_tool"} {
+	// bash and the MCP family are exempt by product decision (2026-11-26), so
+	// only the network/settings families and unknown names still consult the
+	// global policy.
+	for _, tool := range []string{"web_fetch", "web_search", "settings_set", "unknown_tool"} {
 		if got := gateDecision(t, svc, sessionID, tool); got != rig.DecisionDeny {
 			t.Fatalf("workspace gate %q = %v, want the global deny", tool, got)
 		}

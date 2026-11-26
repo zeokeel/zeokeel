@@ -55,6 +55,24 @@ const (
 	SettingToolkitDeniedGlobs = "toolkit.deniedGlobs"
 )
 
+// External-CLI link settings: where the vendor CLIs live. They are not limits,
+// so they get their own block. The agent reads them on every run (it renders
+// them into the runtime context) and the clilink module reads them on every
+// Refresh, so a change applies without a restart.
+const (
+	// SettingCLIDingtalkPath overrides where the DingTalk CLI (`dws`) lives: an
+	// absolute path to the executable. Unset (the default) means the clilink
+	// module falls back to a PATH lookup, and "neither" means not-installed —
+	// a normal state, never an error, and never a boot blocker. The path is what
+	// the model is told (see clilink.go), because a service process
+	// started from a desktop shell routinely does NOT inherit the user's nvm /
+	// npm-bin PATH, so "just run dws" would fail there.
+	SettingCLIDingtalkPath = "cli.dingtalk.path"
+	// SettingCLIFeishuPath is the Feishu CLI (`lark-cli`) equivalent of
+	// SettingCLIDingtalkPath.
+	SettingCLIFeishuPath = "cli.feishu.path"
+)
+
 // Bounds of the capability settings. The settings page validates against them
 // and the modules clamp any stored value that falls outside (hand-edited rows).
 const (

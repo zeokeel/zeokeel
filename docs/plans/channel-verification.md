@@ -3,6 +3,11 @@
 > 本文件是 **上线门槛**，不是介绍。适配器都只对假服务器（httptest）验证过；
 > 真实平台的报文形状、签名实现与限速没有一处被真机确认。
 > 每一项都要贴出命令与原始输出，没贴等于没做。
+>
+> **2026-11-26 变更：钉钉与飞书的入站项全部下线。** 它们是个人助手的通知出口，不是指令入口
+> （决策记录见 [../research/channel-capabilities.md](../research/channel-capabilities.md) §6）。
+> 因此本文件只剩两类要做真机的事：**通用 webhook 入站**与**各渠道出站送达**；钉钉/飞书的
+> 回调、验签、握手、卡片按钮不再验收——相关代码也已删除，不是"没验"而是"不存在"。
 
 ## 0. 通用准备
 
@@ -10,11 +15,9 @@
 # 1) 起产品（临时数据目录），记下打印的 URL
 go run ./cmd/zeokeel --product serve --data-dir /tmp/zk-verify
 # 2) 在 Web 设置页「渠道」里录入凭据 / webhook 来源（或直接调 credentials.set）
-# 3) 下面的脚本都以该 URL 为参数
-scripts/channel-verify.sh feishu-challenge http://127.0.0.1:<port>
+# 3) 下面的脚本都以该 URL 为参数（只剩 webhook：钉钉/飞书是出站渠道，没有入站可验）
 scripts/channel-verify.sh webhook     http://127.0.0.1:<port> <sourceID> <secret>
 scripts/channel-verify.sh webhook     http://127.0.0.1:<port> <sourceID> <wrong-secret> --expect-fail
-scripts/channel-verify.sh dingtalk    http://127.0.0.1:<port> <secret>
 ```
 
 记录表（每格都要填）：
@@ -24,11 +27,8 @@ scripts/channel-verify.sh dingtalk    http://127.0.0.1:<port> <secret>
 | webhook | 正确签名 | 202 + `merged:false` | ✅ `HTTP 202 {"count":1,"id":"inbox-000001","merged":false}` | 2026-11-25 18:17 |
 | webhook | 错误签名 | 401，且收件箱无新条目 | ✅ `HTTP 401 webhook: bad signature`，收件箱未新增 | 2026-11-25 18:17 |
 | webhook | 同一 body 再投一次 | 202 + `merged:true`、count=2 | ✅ `HTTP 202 {"count":2,"id":"inbox-000001","merged":true}` | 2026-11-25 18:17 |
-| dingtalk | 正确签名回调 | 202 | | |
-| dingtalk | 超时时间戳 | 401（`stale`） | | |
-| feishu | URL 握手 | 200 + 原样 challenge | ✅ `HTTP 200 {"challenge":"verify-challenge"}` | 2026-11-25 18:17 |
-| feishu | 文本事件 | 202，收件箱出现条目 | | |
-| feishu | 卡片按钮 | 点「同意」后审批被应用；改掉 token 后 403 | | |
+| dingtalk | 入站回调 | —（已下线：钉钉只出站） | — | 2026-11-26 |
+| feishu | 入站事件/握手/卡片 | —（已下线：飞书只出站） | — | 2026-11-26 |
 | 微信 | 扫码登录 | 设置页显示已连接 | | |
 | 微信 | 收一条文本 | 收件箱出现，`/inbox/incoming` 可见 | | |
 | 微信 | 回一条文本 | 手机上收到，且 `context_token` 用的是当次消息 | | |
@@ -54,27 +54,31 @@ scripts/channel-verify.sh dingtalk    http://127.0.0.1:<port> <secret>
 - `context_token` 必须用当次消息的，不能复用旧的；
 - 24h 窗口只能靠用户再发一条消息刷新，机器人无法主动续期。
 
-## 2. 钉钉
+## 2. 钉钉：已下线（只出站）
+
+钉钉不再做入站：回调地址、验签、时间戳窗口、`channel-verify.sh dingtalk` 模式全部随代码删除
+（`internal/modules/dingtalk` 现在只有 `Send` + `Status`）。理由：这是个人助手，同事在群里 @ 机器人
+不应该能把消息打进持有本机数据的 agent（决策记录见 [../research/channel-capabilities.md](../research/channel-capabilities.md) §6）。
+
+仍需真机验收的只剩**出站**：
 
 | # | 操作 | 期望（可观察） | 不通过说明什么 | 状态 |
 |---|---|---|---|---|
-| 2.1 | 应用控制台回调地址 = `https://<host>/api/inbound/dingtalk`（需公网/内网穿透） | 平台保存成功 | 网络可达性 | ⬜ |
-| 2.2 | `bash scripts/channel-verify.sh dingtalk --base https://<host> --secret <secret>` | 本地构造的签名请求回 202；错签名回 401 | 适配器签名实现错了 | 🟡 本地已验（符号形状） |
-| 2.3 | 群里 @机器人 发一条 | 1 分钟内进收件箱 | 真实 header 名/时间戳单位与平台不一致 | ⬜ |
-| 2.4 | 回复该条（经审批） | 群里收到；回执 `channel=dingtalk` | 出站映射错 | ⬜ |
+| 2.4 | 让通知路由选中 dingtalk 后投递一条（`notify.deliver` / 回执） | 群里收到；回执 `channel=dingtalk` | 出站映射错（robotCode / openConversationId / msgKey） | ⬜ |
 
-钉钉官方回调头是 `timestamp` + `sign`（时间戳**毫秒**），适配器两种拼写都接受；
-签名覆盖 `timestamp+"\n"+secret`，时间戳按原样参与计算。
+## 3. 飞书：已下线（只出站）
 
-## 3. 飞书
+飞书不再做入站：事件订阅地址、URL 握手（`{"type":"url_verification"}` 回 200 + challenge）、
+加密事件拒绝路径、卡片按钮回调 `/api/inbound/feishu/card` 全部随代码删除
+（`internal/modules/feishu` 现在只有 `Send` + `Status`）。**卡片按钮不再能解决审批**——审批只走
+Web（允许/始终允许/拒绝三值）与微信对话式回复。理由同上（channel-capabilities §6）。
+
+仍需真机验收的只剩**出站**：
 
 | # | 操作 | 期望（可观察） | 不通过说明什么 | 状态 |
 |---|---|---|---|---|
-| 3.1 | 事件订阅地址 = `https://<host>/api/inbound/feishu` | 平台握手通过（我们回 **200 + challenge**；回 202 会判失败） | 握手响应形状错 | ✅ 本地已验 |
-| 3.2 | 关闭加密（encrypt）后发一条群消息 | 1 分钟内进收件箱 | 事件字段映射 | ⬜ |
-| 3.3 | 开启加密事件 | 我们**明确报错**（`ErrFeishuBadPayload`），不静默 200 | —— | ✅ 已实现（明确不支持） |
-| 3.4 | 卡片回调地址 = `/api/inbound/feishu/card`，action.value 带 `{approvalId,decision,token}` | 点「同意/拒绝」→ 审批被解决，回执可见 | 卡片值解析或令牌校验 | ⬜ |
-| 3.5 | 卡片 value 缺字段 | 400 拒绝（不猜） | 我们猜了用户的意图 | 🟡 本地已验 |
+| 3.6 | 让通知路由选中 feishu 后投递一条 | 群里收到；回执 `channel=feishu` | 出站映射错（receive_id_type=chat_id / content 是 JSON 字符串） | ⬜ |
+| 3.7 | 只配 `appId`+`appSecret`（不配 token）再投递 | 自动换取 tenant token 并送达 | tenant token 换取/缓存错 | ⬜ |
 
 ## 4. 邮件
 
@@ -91,9 +95,12 @@ scripts/channel-verify.sh dingtalk    http://127.0.0.1:<port> <secret>
 方法：用 `.cache/zkverify` 起真实 `--product serve`（数据目录 `.cache/verify-run`，预置
 `webhook/sources.json`），再用 `scripts/channel-verify.sh` 打真实 HTTP。
 
-已通过：webhook 正确签名（202）/ 错误签名（401）/ 重投合并（count=2）、飞书握手（200 + challenge）。
+已通过：webhook 正确签名（202）/ 错误签名（401）/ 重投合并（count=2）。
 
-未覆盖（仍需真机）：钉钉回调的真实 header 名、飞书事件与卡片的平台签名、微信/邮件全链路。
+飞书握手（200 + challenge）曾在本节记录为通过；该路径已于 2026-11-26 随入站能力一起删除，
+证据仅作历史保留。
+
+未覆盖（仍需真机）：**钉钉/飞书的真实出站送达**、微信/邮件全链路。
 
 ## 5. 结论记录
 
@@ -167,8 +174,8 @@ SUMMARY 8/8 passed
 
 ### 6.4 它证明不了什么（仍需真机 / 仍需人）
 
-- **真实平台报文**：钉钉 `timestamp`+`sign` 的真实形态与 header 名、飞书事件与卡片回调的
-  平台签名、微信 `sendmessage` 的字段坑与 24h 窗口、邮件 IMAP/SMTP 编解码——本 harness
+- **真实平台报文**：钉钉/飞书只做**出站**（入站已下线，§2/§3），所以它们的真实报文形态
+  只剩发送侧；微信 `sendmessage` 的字段坑与 24h 窗口、邮件 IMAP/SMTP 编解码——本 harness
   不解析任何平台报文，这些仍按 §1–§4 在真机做。
 - **出站投递**：`notify.deliver` 到真实渠道、`channeldispatch` 的重试/回退，需要真实凭据与
   真实网络；本机只验证了 `notify.plan` 的通道选择。
@@ -211,6 +218,7 @@ SUMMARY 14/14 passed
 ## 7. 交给有凭据的人：一次跑完的清单
 
 前提：一台能被平台访问到的机器（公网 IP 或内网穿透），以及 1 个钉钉应用 / 1 个飞书应用 / 1 个微信账号 / 1 个邮箱。
+钉钉/飞书只验出站（§2/§3），所以两者都不需要暴露回调地址。
 
 ```bash
 # 0) 本机自证（不需要任何凭据，必须全绿）
@@ -219,10 +227,8 @@ bash scripts/verify-live/run.sh              # 期望 SUMMARY 14/14 passed
 # 1) 起产品（记下 gateway.json 里的 port 与 token）
 ./.cache/zkverify-live --product serve --data-dir ./devdata
 
-# 2) 渠道签名自检（不需要平台在线）
-bash scripts/channel-verify.sh webhook  --base http://127.0.0.1:<port>
-bash scripts/channel-verify.sh dingtalk --base http://<公网地址> --secret <secret>
-bash scripts/channel-verify.sh feishu-challenge --base http://<公网地址>
+# 2) 入站签名自检（不需要平台在线；只剩 webhook）
+bash scripts/channel-verify.sh webhook http://127.0.0.1:<port> <sourceID> <secret>
 
 # 3) 按 §1–§4 的表逐行操作，每行记录：时间、观察到的结果、截图或原始响应
 ```

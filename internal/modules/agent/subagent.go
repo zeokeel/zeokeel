@@ -143,18 +143,24 @@ func (s *service) subagentRunnerOptions() rigagent.RunnerOptions {
 // resolved connection.
 func (s *service) runSubagent(ctx context.Context, prompt, name string, req contracts.SubagentRequest,
 	cfg contracts.ChatConfig, active string) (contracts.SubagentResult, error) {
-	// Children start from the same model-visible surface as their parent run: the
-	// user's disabled-tool settings, the session preset allowlist and the runtime
-	// mode whitelist all apply. The orchestration tools are then removed so a
-	// child can never recurse (the runner also enforces this independently).
-	childTools := withoutToolNames(s.toolsForSession(active), subagentExcludedTools())
-	// Children inherit the same complete prompt as their parent run (identity,
+	// Children start from the parent session's model-visible surface — the user's
+	// disabled-tool settings, the preset allowlist and the runtime mode whitelist
+	// — except that an orchestrator's child runs as the executor role
+	// (delegatedToolsForSession): inheriting the lead's read-only allowlist would
+	// hand the delegated work to an agent that cannot write the files it was
+	// asked to write. The orchestration tools are then removed so a child can
+	// never recurse (the runner also enforces this independently).
+	childTools := withoutToolNames(s.delegatedToolsForSession(active), subagentExcludedTools())
+	// Children get the same complete prompt as their parent run (identity,
 	// environment, workspace instructions, preset and per-tool guidance), with
-	// guidance and mode line rendered for exactly the filtered surface. The
+	// guidance and mode line rendered for exactly the filtered surface — and,
+	// when the parent is an orchestrator, with the executor role's persona in
+	// place of the parent's (delegatedSystemPrompt): a subagent told "you never
+	// modify files" by the lead would refuse the work it exists to do. The
 	// workspace root is the parent session's project; the child's tools are
 	// scoped to it so a concurrent workspace switch cannot redirect them.
 	workspaceRoot := s.sessionWorkspaceRoot(active)
-	cfg.SystemPrompt = s.buildRunSystemPrompt(ctx, active, cfg, toolNameSet(childTools), workspaceRoot)
+	cfg.SystemPrompt = s.delegatedSystemPrompt(ctx, active, cfg, toolNameSet(childTools), workspaceRoot)
 	provider, err := s.newProvider(cfg, s.thinkingParamsForSession(active, cfg.Model))
 	if err != nil {
 		return contracts.SubagentResult{}, fmt.Errorf("agent: subagent %q: create provider: %w", name, err)

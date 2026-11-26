@@ -81,14 +81,23 @@ type taskBoardService struct {
 	// retire a store whose adapter was already evicted from the cache (a tool
 	// resolved before the deletion may still hold it).
 	stores sync.Map
+	// closeMu guards closeObserver, which activation installs while boards may
+	// already be created on other goroutines (mu is taken with it, and taking one
+	// lock inside the other would deadlock the adapter paths).
+	closeMu sync.Mutex
+	// closeObserver is the audit sink for tasks closed without a lease review.
+	// It is installed by the lease module (contracts.TaskCloseObserverSetter) and
+	// copied onto every adapter this service creates.
+	closeObserver contracts.TaskCloseAuditor
 }
 
 var (
-	_ contracts.TaskBoard         = (*taskBoardService)(nil)
-	_ contracts.TaskAssigner      = (*taskBoardService)(nil)
-	_ contracts.SessionTaskBoard  = (*taskBoardService)(nil)
-	_ contracts.TaskBoardRestorer = (*taskBoardService)(nil)
-	_ contracts.TaskBoardCleaner  = (*taskBoardService)(nil)
+	_ contracts.TaskBoard               = (*taskBoardService)(nil)
+	_ contracts.TaskAssigner            = (*taskBoardService)(nil)
+	_ contracts.SessionTaskBoard        = (*taskBoardService)(nil)
+	_ contracts.TaskBoardRestorer       = (*taskBoardService)(nil)
+	_ contracts.TaskBoardCleaner        = (*taskBoardService)(nil)
+	_ contracts.TaskCloseObserverSetter = (*taskBoardService)(nil)
 )
 
 // newTaskBoardService returns the board service for dataDir ("" keeps every
@@ -251,6 +260,11 @@ func (s *taskBoardService) newAdapter(sessionID string, load bool) *taskBoardAda
 	)
 	s.registerStore(store)
 	board := newTaskBoard(manager, store)
+	board.logf = s.logf
+	// Every adapter the service hands out must carry the audit sink: the lease
+	// module installs it once, and a board created afterwards would otherwise
+	// close tasks silently.
+	board.SetTaskCloseObserver(s.currentCloseObserver())
 	if !load || store.Path() == "" {
 		return board
 	}
@@ -678,6 +692,37 @@ func (s *taskBoardService) Assign(ctx context.Context, id, owner string) (contra
 		return contracts.BoardTask{}, err
 	}
 	return board.Assign(ctx, id, owner)
+}
+
+// SetTaskCloseObserver implements contracts.TaskCloseObserverSetter: the lease
+// module installs the review-log writer here at activation.
+//
+// The observer reaches the legacy board and every cached session board, not only
+// boards created later: those are exactly the ones a user can already see and
+// close (2026-11-26 audit, 高: a completion that leaves no audit row is the bug).
+func (s *taskBoardService) SetTaskCloseObserver(observer contracts.TaskCloseAuditor) {
+	s.closeMu.Lock()
+	s.closeObserver = observer
+	s.closeMu.Unlock()
+	s.mu.Lock()
+	boards := make([]*taskBoardAdapter, 0, len(s.sessions)+1)
+	if s.legacy != nil {
+		boards = append(boards, s.legacy)
+	}
+	for _, board := range s.sessions {
+		boards = append(boards, board)
+	}
+	s.mu.Unlock()
+	for _, board := range boards {
+		board.SetTaskCloseObserver(observer)
+	}
+}
+
+// currentCloseObserver reads the installed sink for a board being created.
+func (s *taskBoardService) currentCloseObserver() contracts.TaskCloseAuditor {
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
+	return s.closeObserver
 }
 
 // TaskBoardForSession implements contracts.SessionTaskBoard: the session UI

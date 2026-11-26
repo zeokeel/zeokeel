@@ -240,13 +240,23 @@ func buildRootScopedWith(cfg Config, root string, timeout time.Duration, mode sa
 		builtinOpts = append(builtinOpts, builtin.WithRunner(runner))
 	}
 	bash, pwsh := shellTools(goos, lookPath)
+	// Read scope (permission model 2026-11-26): the read-only file tools get
+	// their own policy so absolute paths may leave the workspace while every
+	// write stays inside it. Same session cwd, so relative paths still follow
+	// working_directory. See newReadPolicy in toolkit.go for why the split lives
+	// here and not in one rig policy.
+	readPolicy := newReadPolicy(cfg, root, timeout)
+	readTools := readToolSet(readPolicy, workingDirectory.Current)
 	tools := make([]rig.Tool, 0, 32)
 	// The built-in policy set is the six file tools plus the bash tool: keep the
 	// file tools on every platform, drop only the shell tool that cannot work
-	// there.
+	// there. The four pure readers are replaced by the read-policy instances.
 	for _, tool := range builtin.NewWithPolicyOptions(policy, builtinOpts...) {
 		if !bash && tool.Name() == builtin.ToolBash {
 			continue
+		}
+		if reader, ok := readTools[tool.Name()]; ok {
+			tool = reader
 		}
 		tools = append(tools, tool)
 	}
@@ -255,7 +265,9 @@ func buildRootScopedWith(cfg Config, root string, timeout time.Duration, mode sa
 	}
 	tools = append(tools,
 		editor.New(policy, editor.WithWorkingDirectory(workingDirectory.Current)),
-		image.New(policy, image.WithWorkingDirectory(workingDirectory.Current)))
+		// read_image only reads, so it follows the read scope like the readers
+		// above.
+		image.New(readPolicy, image.WithWorkingDirectory(workingDirectory.Current)))
 	// DSH's bash tool owns background execution (run_in_background); the
 	// product keeps only the job observer half (output/kill/list). job_start and
 	// job_wait are deliberately not model-facing.
@@ -274,13 +286,21 @@ func buildRootScopedWith(cfg Config, root string, timeout time.Duration, mode sa
 	// (request_sandbox_access; the approval gate decides, since it is not in the
 	// read-only set). Both are bound to this build's policy, so a workspace or
 	// permission change rebuilds them.
-	statusOpts := []sandboxstatus.Option{}
-	if runner != nil {
-		statusOpts = append(statusOpts, sandboxstatus.WithRunnerInfo(func() (string, sandbox.Enforcement) {
-			name, enforcement, _ := sandbox.RunnerStatus(runner)
-			return name, enforcement
-		}))
-	}
+	//
+	// The runner block is always reported, with enforcement "none" when no runner
+	// was injected: commands are exempt from approval either way, so a
+	// sandbox_status that silently omitted the runner would leave the model (and
+	// whoever reads the session) unable to tell "confined" from "unconstrained".
+	statusOpts := []sandboxstatus.Option{sandboxstatus.WithRunnerInfo(func() (string, sandbox.Enforcement) {
+		if runner == nil {
+			return "none", sandbox.EnforcementNone
+		}
+		name, enforcement, _ := sandbox.RunnerStatus(runner)
+		if strings.TrimSpace(name) == "" {
+			name = "unknown"
+		}
+		return name, enforcement
+	})}
 	tools = append(tools,
 		sandboxstatus.New(policy, statusOpts...),
 		sandboxgrant.New(policy),

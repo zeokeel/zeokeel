@@ -80,7 +80,7 @@ func TestEnvironmentBlock(t *testing.T) {
 		"The bash tool is not available on this machine.",
 		`Working directory: D:\work\demo.`,
 		"File policy: workspace-write",
-		"modify files inside it only",
+		"modify files inside the working directory only",
 	} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("environment block lacks %q: %q", want, block)
@@ -99,36 +99,107 @@ func TestEnvironmentBlock(t *testing.T) {
 	}
 }
 
-// TestApprovalPolicyLines pins one sentence per effective approval policy and
-// the workspace default for unknown/missing modes.
+// TestApprovalPolicyLines pins what the model-facing sentence must still
+// guarantee now that it is rendered from the claim table: the tier label every
+// preset (and every legacy spelling) normalizes to, the anti-caution clause where
+// a dialog is possible, and the absence of the "sandboxed shell" phrasing.
+//
+// It no longer pins the prose itself. The literal sentences it used to pin were
+// the reason a false claim could stay green: they were written from the preset
+// alone and ignored whether an approvals service, a deny-all policy or a command
+// policy existed. What the sentence says about each family is checked against the
+// REAL gate in permission_policy_test.go (TestApprovalSentenceAgreesWithTheGate);
+// this test only keeps the wording's contract (label, caution, no sandbox lie).
 func TestApprovalPolicyLines(t *testing.T) {
-	workspaceSentence := "Approval policy: workspace — file tools and read-only/informational tools run without approval; shell, network, settings writes and other tools may ask for approval. Do not abandon a needed operation because of this policy; use a tool normally and follow the dialog guidance (the user may choose always-allow-in-this-session)."
-	readOnlySentence := "Approval policy: read-only — read-only and informational tools run without approval; file writes, shell, network, settings writes and other tools may ask for approval. Do not abandon a needed operation because of this policy; use a tool normally and follow the dialog guidance (the user may choose always-allow-in-this-session)."
+	// The shipped assembly's tier: approvals service, sandbox module, the command
+	// policy commands are dispatched under, and no deny-all policy.
+	shipped := func(mode string) approvalPolicy {
+		return approvalPolicy{Mode: mode, ApprovalsAvailable: true, SandboxAssembled: true,
+			CommandPolicyAvailable: true, Confinement: contracts.SandboxConfinementOS}
+	}
 	cases := []struct {
-		mode string
-		want string
+		mode      string
+		wantLabel string
 	}{
-		{contracts.PermissionWorkspace, workspaceSentence},
-		{contracts.PermissionFull, "Approval policy: full — no approval prompts are shown."},
-		{"auto", "Approval policy: full — no approval prompts are shown."},
-		{contracts.PermissionReadOnly, readOnlySentence},
+		{contracts.PermissionWorkspace, "workspace"},
+		{contracts.PermissionFull, "full"},
+		{"auto", "full"},
+		{contracts.PermissionReadOnly, "read-only"},
 		// Retired ask/never spellings (legacy stored rows and headless assembly
 		// policies) normalize to the read-only preset.
-		{contracts.PermissionAsk, readOnlySentence},
-		{contracts.PermissionNever, readOnlySentence},
-		{"", workspaceSentence},
-		{"bogus", workspaceSentence},
+		{contracts.PermissionAsk, "read-only"},
+		{contracts.PermissionNever, "read-only"},
+		{"", "workspace"},
+		{"bogus", "workspace"},
 	}
 	for _, tc := range cases {
-		if got := approvalPolicyLine(tc.mode); got != tc.want {
-			t.Fatalf("approvalPolicyLine(%q) = %q, want %q", tc.mode, got, tc.want)
+		policy := shipped(tc.mode)
+		sentence := approvalPolicyLine(policy)
+		if !strings.HasPrefix(sentence, "Approval policy: "+tc.wantLabel+" — ") {
+			t.Fatalf("approvalPolicyLine(%q) = %q, want the %q label", tc.mode, sentence, tc.wantLabel)
+		}
+		claims := approvalPolicyClaims(policy)
+		if len(familiesWith(claims, dispositionAllowed)) == len(claims) {
+			// Nothing to prompt about: only the full preset reaches this form.
+			if want := "Approval policy: " + tc.wantLabel + " — no approval prompts are shown."; sentence != want {
+				t.Fatalf("approvalPolicyLine(%q) = %q, want %q", tc.mode, sentence, want)
+			}
+			continue
+		}
+		// Otherwise the sentence must state the claim table's own dispositions
+		// rather than a hand-written claim about them.
+		if want := claimSentence(claims); !strings.Contains(sentence, want) {
+			t.Fatalf("approvalPolicyLine(%q) = %q, want it to state %q", tc.mode, sentence, want)
 		}
 	}
 	// The workspace sentence must not make the model abandon needed work.
-	workspace := approvalPolicyLine(contracts.PermissionWorkspace)
+	workspace := approvalPolicyLine(shipped(contracts.PermissionWorkspace))
 	if !strings.Contains(workspace, "Do not abandon a needed operation") ||
 		!strings.Contains(workspace, "follow the dialog guidance") {
 		t.Fatalf("workspace approval sentence lost its anti-caution clause: %q", workspace)
+	}
+	// The phrase "sandboxed shell commands" was true only while a command had to
+	// be confined to skip the prompt. Commands are now exempt either way, so on a
+	// host with no runner that wording claims a fence nothing enforces — the
+	// exact lie the 2026-11-26 audit found (README-style honesty rule).
+	for _, mode := range []string{contracts.PermissionWorkspace, contracts.PermissionReadOnly, contracts.PermissionFull} {
+		if strings.Contains(approvalPolicyLine(shipped(mode)), "sandboxed shell") {
+			t.Fatalf("approvalPolicyLine(%q) still claims every command is sandboxed: %q", mode, approvalPolicyLine(shipped(mode)))
+		}
+	}
+}
+
+// TestUnconfinedCommandsLineDisclosesTheMissingFence pins the host-specific half:
+// the model is told the working-directory rule is not OS-enforced when this host
+// has no runner, and is told nothing extra when commands ARE confined.
+func TestUnconfinedCommandsLineDisclosesTheMissingFence(t *testing.T) {
+	// The shipped assembly: the sandbox module AND the command policy the
+	// exemption is judged under (without the policy the command family keeps the
+	// approval flow, and "unconfined" would describe nothing).
+	unconfined := unconfinedCommandsLine(approvalPolicy{Mode: contracts.PermissionWorkspace, ApprovalsAvailable: true,
+		SandboxAssembled: true, CommandPolicyAvailable: true, Confinement: contracts.SandboxConfinementNone})
+	if unconfined == "" {
+		t.Fatal("no disclosure for a host without an OS sandbox runner")
+	}
+	for _, want := range []string{"OS confinement: none", "no OS sandbox runner", "not a boundary the OS enforces", "sandbox_status"} {
+		if !strings.Contains(unconfined, want) {
+			t.Fatalf("disclosure %q lacks %q", unconfined, want)
+		}
+	}
+	// Confined hosts, assemblies without a sandbox module ("" = unknown, commands
+	// stay behind the approval gate) and full access (already disclosed) get no
+	// second sentence.
+	for _, confinement := range []string{contracts.SandboxConfinementOS, ""} {
+		policy := approvalPolicy{Mode: contracts.PermissionWorkspace, ApprovalsAvailable: true,
+			SandboxAssembled: true, CommandPolicyAvailable: true, Confinement: confinement}
+		if got := unconfinedCommandsLine(policy); got != "" {
+			t.Fatalf("confinement %q produced a disclosure: %q", confinement, got)
+		}
+	}
+	full := approvalPolicy{Mode: contracts.PermissionFull, ApprovalsAvailable: true,
+		SandboxAssembled: true, CommandPolicyAvailable: true, Confinement: contracts.SandboxConfinementNone}
+	if got := unconfinedCommandsLine(full); got != "" {
+		t.Fatalf("full access repeated the disclosure: %q", got)
 	}
 }
 

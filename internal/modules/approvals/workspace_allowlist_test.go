@@ -48,7 +48,9 @@ func TestWorkspaceModeAutoAllowsSharedList(t *testing.T) {
 }
 
 // TestWorkspaceModeKeepsLeavingToolsAsking covers the complement of the shared
-// list: shell, network, MCP, settings writes and unknown tools still queue.
+// list: shell, network, settings writes and unknown tools still queue. The MCP
+// family is covered by TestWorkspaceModeAutoAllowsMCPFamily (it is exempt by
+// prefix, not a map member, since the 2026-11-26 permission model).
 func TestWorkspaceModeKeepsLeavingToolsAsking(t *testing.T) {
 	settings := newFakeSettings(nil)
 	settings.setPermission(contracts.PermissionWorkspace)
@@ -56,7 +58,7 @@ func TestWorkspaceModeKeepsLeavingToolsAsking(t *testing.T) {
 
 	for _, tool := range []string{
 		"bash", "pwsh", "web_fetch", "web_search", "settings_set",
-		"mcp__server__run", "unknown_tool", "",
+		"unknown_tool", "",
 	} {
 		results := startRequest(context.Background(), svc, contracts.ApprovalRequest{Tool: tool})
 		waitFor(t, tool+" pending", func() bool { return len(svc.Pending()) == 1 })
@@ -70,6 +72,31 @@ func TestWorkspaceModeKeepsLeavingToolsAsking(t *testing.T) {
 		if result := waitResult(t, results); result.decision != contracts.ApprovalAllow {
 			t.Fatalf("%q decision = %q, want the resolved allow", tool, result.decision)
 		}
+	}
+}
+
+// TestWorkspaceModeAutoAllowsMCPFamily pins the prefix family: every MCP tool
+// name is answered allow immediately in the workspace policy, without a
+// notification (the card never appears).
+func TestWorkspaceModeAutoAllowsMCPFamily(t *testing.T) {
+	settings := newFakeSettings(nil)
+	settings.setPermission(contracts.PermissionWorkspace)
+	svc, _ := newPermissionService(t, ModeAsk, settings)
+	notifications := atomic.Int32{}
+	if _, err := svc.Subscribe(func() { notifications.Add(1) }); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	for _, tool := range []string{"mcp__server__run", "mcp__zk-test-mcp__mcp_echo_marker", "  mcp__padded__tool  "} {
+		decision, err := svc.Request(context.Background(), contracts.ApprovalRequest{Tool: tool})
+		if err != nil || decision != contracts.ApprovalAllow {
+			t.Fatalf("%q decision = %q/%v, want allow without queueing", tool, decision, err)
+		}
+	}
+	if pending := svc.Pending(); len(pending) != 0 {
+		t.Fatalf("pending = %v, want none for the MCP family", pending)
+	}
+	if got := notifications.Load(); got != 0 {
+		t.Fatalf("notifications = %d, want 0 for the MCP family", got)
 	}
 }
 

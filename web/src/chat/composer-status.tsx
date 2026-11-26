@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Select, Space, Typography } from 'antd';
+import { Alert, Select, Space, Typography } from 'antd';
 import { loadModels, type ModelRow } from '@/api/read-models';
 import { subscribeContext, subscribeSettings } from '@/api/gateway';
 import type { SettingsRows } from '@/api/gateway';
@@ -34,6 +34,15 @@ export interface ComposerSlotProps {
   /** Live output rate while a turn streams ("232"), measured from the deltas. */
   rate?: string;
   onInterject?: (text: string) => void;
+  /**
+   * The role this session selected, and a stable code when the build cannot
+   * resolve it (`unknown-preset`). Both come from the session list row — this is
+   * not a second read. A broken role leaves the session with no tools and every
+   * call refused, so the reason belongs where the conversation is
+   * (2026-11-26 audit, 高); a healthy session renders nothing extra.
+   */
+  presetId?: string;
+  presetProblem?: string;
   usage?: {
     turns?: number;
     steps?: number;
@@ -126,6 +135,19 @@ export function ComposerPickers(props: ComposerSlotProps) {
 
   return (
     <div className="zk-composer-pickers" data-testid="composer-pickers">
+      {/* The diagnosis half of a broken role: the gate refuses every call
+          fail-closed, and without this line the conversation simply looks dead.
+          Warning, not error: it is a state the user fixes by picking a role. */}
+      {props.presetProblem ? (
+        <Alert
+          type="warning"
+          showIcon
+          role="alert"
+          data-testid="composer-preset-problem"
+          title={t('session.preset.problem.title', { presetId: props.presetId ?? '' })}
+          description={t('session.preset.problem.help')}
+        />
+      ) : null}
       <Space size={2} wrap>
         <Select
           size="small"

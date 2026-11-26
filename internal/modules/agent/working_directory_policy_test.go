@@ -20,7 +20,7 @@ import (
 
 func TestWorkingDirectoryLineThreeStates(t *testing.T) {
 	root := "/work/project"
-	workspaceLine := "Working directory: /work/project. File policy: workspace-write; the file tools may modify files inside it only."
+	workspaceLine := "Working directory: /work/project. File policy: workspace-write; the file tools may read files anywhere on this machine, and may modify files inside the working directory only."
 	cases := []struct {
 		mode     string
 		contains []string
@@ -28,7 +28,7 @@ func TestWorkingDirectoryLineThreeStates(t *testing.T) {
 	}{
 		{
 			mode:     contracts.PermissionWorkspace,
-			contains: []string{"File policy: workspace-write", "modify files inside it only"},
+			contains: []string{"File policy: workspace-write", "read files anywhere", "modify files inside the working directory only"},
 		},
 		{
 			mode:     contracts.PermissionReadOnly,
@@ -38,7 +38,7 @@ func TestWorkingDirectoryLineThreeStates(t *testing.T) {
 		{
 			mode:     contracts.PermissionFull,
 			contains: []string{"File policy: full-access", "not confined to this directory"},
-			absent:   []string{"workspace-write", "inside it only"},
+			absent:   []string{"workspace-write", "working directory only"},
 		},
 		{
 			mode:     "",

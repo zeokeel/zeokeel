@@ -8,6 +8,8 @@ import (
 
 	rigsandbox "github.com/zeokeel/zeokeel-rig/sandbox"
 	"github.com/zeokeel/zeokeel-rig/sandbox/osrunner"
+
+	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
 // fakeRunner records whether it was called and can fail.
@@ -88,6 +90,71 @@ func TestNilServiceReturnsNilRunner(t *testing.T) {
 	if status := svc.Status(); status.Available {
 		t.Fatalf("nil service Status = %+v", status)
 	}
+}
+
+// A runner that reports no enforcement confines nothing: since commands never
+// park on an approval card (2026-11-26), Status must say "none" here instead of
+// letting "a runner object exists" pass for a fence (2026-11-26 audit, severe #1).
+type noneEnforcingRunner struct{ fakeRunner }
+
+func (r *noneEnforcingRunner) RunnerName() string { return "nothing" }
+
+func (r *noneEnforcingRunner) RunnerEnforcement() rigsandbox.Enforcement {
+	return rigsandbox.EnforcementNone
+}
+
+func (r *noneEnforcingRunner) RunnerLimits() string { return "" }
+
+// TestStatusReportsConfinement pins the label a settings/status surface shows:
+// "os" only when the runner reports real enforcement, "none" (with a sentence)
+// for a host without a runner and for a runner that confines nothing.
+func TestStatusReportsConfinement(t *testing.T) {
+	t.Run("confining runner", func(t *testing.T) {
+		svc := newTestService(t, func(osrunner.Config) (rigsandbox.Runner, error) {
+			return &fakeRunner{}, nil
+		})
+		status := svc.Status()
+		if status.Confinement != contracts.SandboxConfinementOS {
+			t.Fatalf("Confinement = %q, want %q", status.Confinement, contracts.SandboxConfinementOS)
+		}
+		if status.CommandsUnconfined {
+			t.Fatal("CommandsUnconfined = true for a confining runner")
+		}
+		if status.Note != "" {
+			t.Fatalf("Note = %q, want empty when confined", status.Note)
+		}
+	})
+	t.Run("runner reports no enforcement", func(t *testing.T) {
+		svc := newTestService(t, func(osrunner.Config) (rigsandbox.Runner, error) {
+			return &noneEnforcingRunner{}, nil
+		})
+		status := svc.Status()
+		if status.Confinement != contracts.SandboxConfinementNone || !status.CommandsUnconfined {
+			t.Fatalf("Status = %+v, want unconfined (a runner object is not a fence)", status)
+		}
+		if !strings.Contains(status.Note, "without OS confinement") {
+			t.Fatalf("Note = %q, want the honest sentence", status.Note)
+		}
+	})
+	t.Run("no runner on this host", func(t *testing.T) {
+		svc := newTestService(t, func(osrunner.Config) (rigsandbox.Runner, error) {
+			return nil, errors.New("no bwrap here")
+		})
+		status := svc.Status()
+		if status.Confinement != contracts.SandboxConfinementNone || !status.CommandsUnconfined {
+			t.Fatalf("Status = %+v, want unconfined", status)
+		}
+		if !strings.Contains(status.Note, "no bwrap here") {
+			t.Fatalf("Note = %q, want the probe reason verbatim", status.Note)
+		}
+	})
+	t.Run("nil service", func(t *testing.T) {
+		var svc *service
+		status := svc.Status()
+		if status.Confinement != contracts.SandboxConfinementNone || !status.CommandsUnconfined || status.Note == "" {
+			t.Fatalf("nil service Status = %+v, want an honest unconfined row", status)
+		}
+	})
 }
 
 // 探测使用配置的超时；未配置时用 osrunner 默认值。

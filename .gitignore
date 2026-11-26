@@ -15,6 +15,9 @@
 /.probe/
 /.cache/
 
+# Go build cache used by the sandbox (GOMODCACHE/GOCACHE live here, several GB)
+/.gocache/
+
 # Local secrets — never commit API keys or managed endpoints.
 .env
 .env.*

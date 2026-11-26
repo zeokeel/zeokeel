@@ -99,6 +99,28 @@ describe('composer status', () => {
     await waitFor(() => expect(screen.queryByTestId('composer-thinking')).toBeNull());
   });
 
+  /**
+   * The role problem (2026-11-26 audit, 高): a session whose selected role no
+   * longer resolves has NO tools and every call is refused. The composer is where
+   * the conversation is, so it is where the reason has to appear — and only then:
+   * a healthy session must not gain a warning strip.
+   */
+  it('shows the unresolvable role, and nothing at all when the role is fine', async () => {
+    stubFetch();
+    const { rerender } = render(
+      <ComposerPickers {...baseProps} presetId="ghost" presetProblem="unknown-preset" />,
+    );
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('ghost');
+    expect(alert.textContent).toContain('工具调用会被拒绝');
+
+    // A resolvable role, and a session with no role at all: no warning.
+    rerender(<ComposerPickers {...baseProps} presetId="lead" />);
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    rerender(<ComposerPickers {...baseProps} />);
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  });
+
   it('renders the usage line from the context numbers', async () => {
     stubFetch();
     render(

@@ -12,28 +12,25 @@ import (
 // ModuleID is the stable module identity used by assembly documents.
 const ModuleID = "zeokeel/feishu"
 
-// Module is the Feishu (Lark) adapter descriptor: it requires the inbox and
-// provides contracts.KeyFeishu. App credentials and the encrypt key arrive
-// through configuration (the settings/credential store persists them later);
-// without them the adapter reports unauthorized instead of pretending to be
-// connected.
+// Module is the Feishu (Lark) sender descriptor: it requires nothing but the
+// credential store and provides contracts.KeyFeishu. App credentials arrive
+// through configuration or the credential store; without them the adapter reports
+// unauthorized instead of pretending to be connected.
+//
+// It deliberately does not require the inbox: Feishu is outbound only, so it must
+// not be able to file a message (docs/research/channel-capabilities.md §6).
 func Module() *module.Descriptor[Config] {
 	return module.Define(ModuleID, func(ctx cordis.Context, cfg Config) error {
-		inboxService, err := ctx.Require(contracts.KeyInbox)
-		if err != nil {
-			return fmt.Errorf("%s: require inbox: %w", ModuleID, err)
-		}
 		// Stored credentials fill whatever configuration left empty.
 		if store, ok := ctx.Get(contracts.KeyCredentials); ok && store != nil {
 			cfg = loadCredential(cfg, store)
 		}
-		adapter := NewAdapter(inboxService, cfg)
+		adapter := NewAdapter(cfg)
 		if _, err := ctx.Provide(contracts.KeyFeishu, contracts.FeishuService(adapter)); err != nil {
 			return fmt.Errorf("%s: provide feishu: %w", ModuleID, err)
 		}
 		return nil
 	}).
 		AddProvides(module.Provides(contracts.KeyFeishu)).
-		AddRequires(module.Requires(contracts.KeyInbox)).
-		WithName("ZeoKeel Feishu (Lark) adapter")
+		WithName("ZeoKeel Feishu (Lark) sender")
 }

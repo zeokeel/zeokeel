@@ -18,7 +18,7 @@
  * replacing it, because a failed triage changed nothing.
  */
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
-import { Alert, Button, Empty, Flex, Result, Skeleton, Tag } from 'antd';
+import { Alert, Button, Empty, Flex, Result, Select, Skeleton, Tag } from 'antd';
 import {
   ALL_INBOX_STATUSES,
   dispatchInboxItem,
@@ -29,6 +29,7 @@ import {
 } from '@/api/inbox';
 import { useMediaQuery } from '@/design/use-system-appearance';
 import { useT } from '@/i18n';
+import { DISPATCH_ASSIGNEES } from './assignees';
 import { formatRelativeTime, groupInboxItems, type InboxSectionKey, type Translate } from './state';
 
 /**
@@ -58,6 +59,21 @@ type LoadState =
   | { kind: 'loading' }
   | { kind: 'ready'; snapshot: InboxSnapshot; at: number }
   | { kind: 'error'; message: string };
+
+/**
+ * What the last dispatch said about itself.
+ *
+ * A dispatch can succeed as a *write* and still wake nobody: the gateway creates
+ * the task and then reports `dispatch.skipped` (no budget headroom, the
+ * concurrency ceiling) or `dispatch.error` (the run could not start). Both mean
+ * "the task has an owner and nothing is working on it", which is the state a user
+ * mistakes for progress — so it is shown, verbatim, and it is *not* an error of
+ * the write (`skipped` is a decision, `error` is a failure).
+ */
+type DispatchNotice = {
+  tone: 'warning' | 'error';
+  message: string;
+};
 
 function messageOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
@@ -91,6 +107,8 @@ export function InboxScreen() {
   const [busyId, setBusyId] = useState<string | null>(null);
   /** A failed write (dispatch/triage), shown without discarding the list. */
   const [actionError, setActionError] = useState<string | null>(null);
+  /** A dispatch that woke nobody, or failed to: the task exists either way. */
+  const [dispatchNotice, setDispatchNotice] = useState<DispatchNotice | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,6 +123,7 @@ export function InboxScreen() {
   const decide = useCallback(async (item: InboxItem, work: () => Promise<unknown>) => {
     setBusyId(item.id);
     setActionError(null);
+    setDispatchNotice(null);
     try {
       await work();
       // Exactly one re-read after the write — the only refresh this surface does.
@@ -116,6 +135,30 @@ export function InboxScreen() {
       setBusyId(null);
     }
   }, []);
+
+  /**
+   * Dispatch one item, optionally to a role, and keep what the gateway answered.
+   *
+   * The assignee is what makes a wake-up possible at all (only the lead role
+   * starts a run), and `dispatch` is the only way to learn whether one started.
+   */
+  const dispatch = useCallback(
+    (item: InboxItem, assignee?: string) =>
+      void decide(item, async () => {
+        const result = await dispatchInboxItem({
+          id: item.id,
+          subject: item.title,
+          ...(assignee ? { assignee } : {}),
+        });
+        const outcome = result.dispatch;
+        if (outcome?.error) {
+          setDispatchNotice({ tone: 'error', message: outcome.error });
+        } else if (outcome?.skipped) {
+          setDispatchNotice({ tone: 'warning', message: outcome.skipped });
+        }
+      }),
+    [decide],
+  );
 
   if (state.kind === 'loading') {
     return (
@@ -165,6 +208,20 @@ export function InboxScreen() {
           />
         ) : null}
 
+        {dispatchNotice ? (
+          // `warning`, not `error`: a skipped dispatch is a policy decision the
+          // user may want to act on (add budget, wait for a slot), and the task
+          // really was created. The reason is the gateway's own sentence.
+          <Alert
+            type={dispatchNotice.tone}
+            showIcon
+            role="alert"
+            closable
+            title={dispatchNotice.message}
+            onClose={() => setDispatchNotice(null)}
+          />
+        ) : null}
+
         {empty ? (
           <Empty
             description={t('inbox.work.empty')}
@@ -187,13 +244,10 @@ export function InboxScreen() {
                       narrow={narrow}
                       busy={busyId === item.id}
                       decided={section.key === 'triaged'}
-                      onDispatch={() =>
-                        void decide(item, () =>
-                          // The item's own line is the subject: the queue is a
-                          // triage surface, so the reader confirms, not retypes.
-                          dispatchInboxItem({ id: item.id, subject: item.title }),
-                        )
-                      }
+                      // The item's own line is the subject: the queue is a
+                      // triage surface, so the reader confirms, not retypes. The
+                      // role is the one thing it cannot confirm for them.
+                      onDispatch={(assignee) => dispatch(item, assignee)}
                       onIgnore={() =>
                         void decide(item, () =>
                           triageInboxItem({ id: item.id, action: 'ignored' }),
@@ -220,13 +274,23 @@ interface InboxRowProps {
   busy: boolean;
   /** Already decided — no write actions on it any more. */
   decided: boolean;
-  onDispatch: () => void;
+  /** Dispatch, optionally to a role the reader picked for this row. */
+  onDispatch: (assignee?: string) => void;
   onIgnore: () => void;
 }
 
 function InboxRow({ item, now, narrow, busy, decided, onDispatch, onIgnore }: InboxRowProps) {
   const t = useT();
   const stamp = formatRelativeTime(item.receivedAt, now, t);
+  /**
+   * The role this row is dispatched to, per row and not per screen: two items
+   * pulled from the same channel routinely belong to different roles, and a
+   * screen-wide selection would silently hand the second one to the first's owner.
+   *
+   * Nothing is preselected. Dispatch is a decision, and the screen does not take
+   * it for the reader (the same reason neither verb here is a filled button).
+   */
+  const [assignee, setAssignee] = useState<string | undefined>(undefined);
   return (
     <li
       className="zk-inbox__row"
@@ -260,13 +324,28 @@ function InboxRow({ item, now, narrow, busy, decided, onDispatch, onIgnore }: In
           // Same width as the subject at 390px, so both verbs stay on screen.
           style={narrow ? { width: '100%', justifyContent: 'stretch' } : undefined}
         >
+          {/* Who takes it. A value here is a preset id: the backend wakes the
+              lead role and only that one, so "派给谁" is the difference between a
+              task somebody runs and a row on a board. */}
+          <Select
+            data-testid={`inbox-assignee-${item.id}`}
+            aria-label={t('task.detail.field.owner')}
+            placeholder={t('task.detail.ownerMissing')}
+            value={assignee}
+            allowClear
+            size={narrow ? 'large' : 'small'}
+            disabled={busy}
+            style={narrow ? { flex: 1 } : undefined}
+            onChange={(value: string | undefined) => setAssignee(value || undefined)}
+            options={DISPATCH_ASSIGNEES.map(({ value, key }) => ({ value, label: t(key) }))}
+          />
           {/* Neither action is filled: the inbox never suggests a default
               (WEB-CLIENT §8.1 A9's principle for decisions). */}
           <Button
             size={narrow ? 'large' : 'small'}
             style={narrow ? { flex: 1 } : undefined}
             disabled={busy}
-            onClick={onDispatch}
+            onClick={() => onDispatch(assignee)}
           >
             {t('inbox.work.dispatch')}
           </Button>

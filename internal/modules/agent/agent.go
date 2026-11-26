@@ -439,9 +439,6 @@ type service struct {
 	// (ask/workspace/full/never); they live until session deletion or process
 	// exit and never persist to settings.
 	sessionPermissions map[string]string
-	// sessionPresets stores the optional per-session agent-preset selection
-	// (preset ID); cleared on session deletion, never persisted.
-	sessionPresets map[string]string
 	// allowedToolsMu serializes the read-modify-write of the per-session
 	// "always allow" tool set persisted in settings, so parallel tool calls
 	// cannot lose entries.
@@ -492,6 +489,11 @@ type service struct {
 	// set of the task-binding gate; never held while a lease is read.
 	taskBindingLogMu  sync.Mutex
 	taskBindingLogged map[string]bool
+
+	// unconfinedShellNoted records the "session+tool" pairs already logged once
+	// by recordUnconfinedShell (sandbox.go): a command the gate ran without an
+	// approval prompt *and* without OS confinement. Guarded by s.mu.
+	unconfinedShellNoted map[string]bool
 
 	// deletedMu guards deletedSessions. It is a separate lock because the run
 	// goroutine appends events while holding s.mu, and the deleted-session check
@@ -653,7 +655,6 @@ func newService(cfg Config, registry *rigtools.Registry, settings contracts.Sett
 		approvals:          approvals,
 		sessions:           make(map[string]*sessionState),
 		sessionPermissions: make(map[string]string),
-		sessionPresets:     make(map[string]string),
 		deletedSessions:    make(map[string]struct{}),
 		inbox:              inbox.New(inboxLog),
 		contextTimelines:   make(map[string]*contextTimeline),
@@ -2034,7 +2035,6 @@ func (s *service) DeleteSession(sessionID string) error {
 	cancel := state.cancel
 	delete(s.sessions, sessionID)
 	delete(s.sessionPermissions, sessionID)
-	delete(s.sessionPresets, sessionID)
 	s.listVersion++
 	// Tombstone the ID before the run goroutine can observe the cancellation:
 	// the cancelled run still persists the tool round it was in the middle of
@@ -2055,6 +2055,9 @@ func (s *service) DeleteSession(sessionID string) error {
 	// with the session. The settings row is best effort (the session is already
 	// gone; a failed cleanup must not fail the delete).
 	s.clearAllowedToolsRow(sessionID)
+	// The selected agent preset (role) belongs to the session the same way: a
+	// reused id must not inherit a deleted conversation's role.
+	s.clearSessionPresetRow(sessionID)
 	// The prompt inbox belongs to the session: drop it (the durable events were
 	// deleted with the row, so no queue event is appended — that would recreate
 	// the session).
@@ -2200,7 +2203,18 @@ func (s *service) fillPermissionDisclosure(infos []contracts.ChatSessionInfo) {
 	if len(infos) == 0 {
 		return
 	}
-	sandboxMode := s.effectiveSandboxMode()
+	// ONE settings snapshot for the whole frame: the global sandbox mode and every
+	// session's role row come from it, so a disclosure never turns into a
+	// per-session settings read (AR-20 — this is the frame the list cache exists
+	// to make cheap).
+	var rows map[string]string
+	if s.settings != nil {
+		rows = s.settings.All()
+	}
+	sandboxMode := contracts.NormalizePermissionMode(rows[contracts.SettingAgentPermission])
+	if s.settings == nil {
+		sandboxMode = contracts.PermissionWorkspace
+	}
 	approvalMode := s.globalApprovalMode()
 	for index := range infos {
 		infos[index].EffectiveSandboxMode = sandboxMode
@@ -2208,6 +2222,11 @@ func (s *service) fillPermissionDisclosure(infos []contracts.ChatSessionInfo) {
 			infos[index].EffectiveApprovalMode = approvalMode
 		}
 	}
+	// The role each session selected and whether it resolves: a role that no
+	// longer exists leaves the session with no tools and every call refused, so it
+	// must be visible in the row the sidebar/composer already read
+	// (2026-11-26 audit, 高).
+	s.fillPresetDisclosure(infos, rows)
 }
 
 // effectiveSandboxMode resolves the actual OS file-sandbox mode: the global

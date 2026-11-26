@@ -3,56 +3,54 @@ package contracts
 import (
 	"context"
 	"errors"
-	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 )
 
-// DingTalk channel adapter. DingTalk delivers chat-bot messages by HTTP
-// callback, signed with the app secret, so the adapter is a *verified receiver*
-// plus a thin outbound call: it never decides what to reply, it only files the
-// inbound text in the inbox and delivers the answer back to the conversation.
-const (
-	// DingTalkMaxSkew is how far the callback timestamp may sit from local now.
-	// Beyond it the request is a replay and is refused.
-	DingTalkMaxSkew = time.Hour
-)
+// DingTalk channel adapter — **outbound only**.
+//
+// DingTalk is not an instruction entry: a colleague @-ing the bot in a group
+// must not be able to push a message into the personal agent that holds this
+// machine's data. The adapter therefore keeps exactly the sender surface — one
+// plain-text send plus the account state the settings page reads — and has no
+// callback, signature or inbox path at all (see
+// docs/research/channel-capabilities.md §6 for the decision record).
 
 // DingTalkStatus is the account state the settings page shows.
+//
+// Connected answers the only question the caller needs — "would a send work?" —
+// and every send body carries BOTH the access token and the robot code
+// (`{"robotCode": ..., "openConversationId": ...}`). A row holding one of them
+// cannot deliver anything, so it is not connected: reporting it as connected put
+// a healthy-looking channel into the notification plan and turned every real
+// send into a 400 from the platform.
 type DingTalkStatus struct {
-	// Connected reports whether an access token is configured.
+	// Connected reports whether both halves of the credential are configured:
+	// an access token and a robot code.
 	Connected bool
-	// LastInbound is the last time a verified callback arrived (zero = never).
-	LastInbound time.Time
+	// Reason is the human-readable answer for why Connected is false ("" when
+	// connected). It names the missing field so a settings page can say what to
+	// fill in instead of showing a bare "not connected".
+	Reason string
+	// MissingFields lists the credential field names that are absent, in the
+	// order the form asks for them (`token`, `robotCode`). Empty when connected.
+	MissingFields []string
 }
 
-// DingTalkService is the adapter surface.
+// DingTalkService is the adapter surface: a sender and its status.
 type DingTalkService interface {
-	// Receive verifies a chat-bot callback, normalizes the text message into an
-	// inbox item and records it. headers carries the raw callback headers (the
-	// adapter looks the signature headers up case-insensitively). merged reports
-	// that the platform retried a message already in the inbox.
-	Receive(ctx context.Context, headers map[string]string, body []byte) (item InboxItem, merged bool, err error)
 	// Send delivers one plain-text reply to the conversation.
 	Send(ctx context.Context, chatID, text string) error
 	// Status reports the account state.
 	Status(ctx context.Context) (DingTalkStatus, error)
 }
 
-// DingTalk errors are typed so the HTTP layer can pick a status code and the
-// caller can fall back to another channel.
+// DingTalk errors are typed so the caller can fall back to another channel.
 var (
-	// ErrDingTalkBadSignature means the callback signature did not match.
-	ErrDingTalkBadSignature = errors.New("dingtalk: bad signature")
-	// ErrDingTalkStaleTimestamp means the callback timestamp is outside the
-	// allowed skew (a replay or a badly skewed clock).
-	ErrDingTalkStaleTimestamp = errors.New("dingtalk: stale timestamp")
-	// ErrDingTalkInvalid means the callback body is malformed or misses the
-	// identity fields needed to file it.
-	ErrDingTalkInvalid = errors.New("dingtalk: invalid callback")
-	// ErrDingTalkUnsupportedMessage means the callback is valid but carries a
-	// message type the adapter does not ingest (images, rich text, ...).
-	ErrDingTalkUnsupportedMessage = errors.New("dingtalk: unsupported message type")
+	// ErrDingTalkInvalid means the outbound call is missing an identity field the
+	// platform requires — no conversation id to send to, or no robot code to send
+	// as. Both are refused locally: the request would only produce a 400.
+	ErrDingTalkInvalid = errors.New("dingtalk: invalid request")
 	// ErrDingTalkUnauthorized means the access token was missing or rejected.
 	ErrDingTalkUnauthorized = errors.New("dingtalk: unauthorized")
 	// ErrDingTalkUnavailable means the platform call failed.

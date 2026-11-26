@@ -8,8 +8,10 @@ import {
   loadTaskBudget,
   loadTaskLease,
   loadTaskRequester,
+  loadTaskReviews,
   loadTaskTools,
   reviewTask,
+  setTaskBudget,
   setTaskTools,
   submitTask,
 } from '@/api/task';
@@ -209,6 +211,59 @@ describe('task api', () => {
   });
 });
 
+describe('task reviews api', () => {
+  it('reads the audit trail with {id} and keeps decision + verdict raw', async () => {
+    wire.request.mockResolvedValue({
+      reviews: [
+        {
+          taskId: 'task-1',
+          reviewer: 'auditor',
+          role: 'auditor',
+          decision: 'reject',
+          verdict: 'fail',
+          findings: '缺来源',
+          at: '2026-11-26T10:00:00Z',
+        },
+      ],
+    });
+
+    const reviews = await loadTaskReviews({ id: 'task-1' });
+
+    expect(wire.request).toHaveBeenCalledWith('tasks.reviews', { id: 'task-1' });
+    expect(reviews).toEqual([
+      {
+        taskId: 'task-1',
+        reviewer: 'auditor',
+        role: 'auditor',
+        decision: 'reject',
+        verdict: 'fail',
+        findings: '缺来源',
+        at: '2026-11-26T10:00:00Z',
+      },
+    ]);
+  });
+
+  it('treats a never-reviewed task as an empty list, not an error', async () => {
+    // The gateway answers {reviews:null} for a task nobody reviewed; that is a
+    // statement the screen renders, not a failure it must handle.
+    wire.request.mockResolvedValue({ reviews: null });
+
+    await expect(loadTaskReviews({ id: 'task-1' })).resolves.toEqual([]);
+  });
+
+  it('drops a row without a decision or verdict instead of rendering a half review', async () => {
+    wire.request.mockResolvedValue({
+      reviews: [{ taskId: 'task-1', reviewer: 'auditor' }, { decision: 'accept', verdict: 'pass' }],
+    });
+
+    const reviews = await loadTaskReviews({ id: 'task-1' });
+
+    expect(reviews).toEqual([
+      { taskId: 'task-1', reviewer: '', decision: 'accept', verdict: 'pass' },
+    ]);
+  });
+});
+
 /**
  * 工具绑定 (M5 execution policy): `tasks.tools.get` / `tasks.tools.set`.
  *
@@ -309,6 +364,46 @@ describe('task budget api', () => {
       usedTokens: 120,
       startedAt: '2026-11-25T09:00:00Z',
       exhausted: false,
+    });
+  });
+
+  it('writes the ceiling with exactly the two numbers, and no invented fields', async () => {
+    wire.request.mockResolvedValue({
+      taskId: 'task-1',
+      maxTokens: 500000,
+      maxMinutes: 30,
+      usedTokens: 1000,
+      exhausted: false,
+    });
+
+    const budget = await setTaskBudget({ id: 'task-1', maxTokens: 500000, maxMinutes: 30 });
+
+    expect(wire.request).toHaveBeenCalledWith('tasks.budget.set', {
+      id: 'task-1',
+      maxTokens: 500000,
+      maxMinutes: 30,
+    });
+    // The write answers with the row in force, and the caller keeps it: that is
+    // what lets the block redraw from the gateway's answer instead of a guess.
+    expect(budget.maxTokens).toBe(500000);
+    expect(budget.exhausted).toBe(false);
+  });
+
+  it('sends 0 to clear a ceiling — it is a value, not an absence', async () => {
+    wire.request.mockResolvedValue({
+      taskId: 'task-1',
+      maxTokens: 0,
+      maxMinutes: 0,
+      usedTokens: 7,
+      exhausted: false,
+    });
+
+    await setTaskBudget({ id: 'task-1', maxTokens: 0, maxMinutes: 0 });
+
+    expect(wire.request).toHaveBeenCalledWith('tasks.budget.set', {
+      id: 'task-1',
+      maxTokens: 0,
+      maxMinutes: 0,
     });
   });
 

@@ -12,6 +12,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/bot"
 	"github.com/zeokeel/zeokeel/internal/modules/browser"
 	"github.com/zeokeel/zeokeel/internal/modules/channeldispatch"
+	"github.com/zeokeel/zeokeel/internal/modules/clilink"
 	"github.com/zeokeel/zeokeel/internal/modules/creds"
 	"github.com/zeokeel/zeokeel/internal/modules/dingtalk"
 	"github.com/zeokeel/zeokeel/internal/modules/email"
@@ -102,6 +103,11 @@ func Registry() *module.Registry {
 	mustRegister(registry, importer.Module())
 	mustRegister(registry, acp.Module())
 	mustRegister(registry, modelcatalog.Module())
+	// External CLI links: resolve where a vendor CLI lives (dws / lark-cli),
+	// probe its version and report whether its skill bundle is indexed. It
+	// requires only the logger — no endpoint, no channel, no inbox — and a
+	// missing CLI is a reported state, never a boot failure.
+	mustRegister(registry, clilink.Module())
 	// Notification routing: pure policy, no channel dependency.
 	mustRegister(registry, notifyroute.Module())
 	mustRegister(registry, insights.Module())

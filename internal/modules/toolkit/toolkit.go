@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ import (
 
 	rig "github.com/zeokeel/zeokeel-rig"
 	"github.com/zeokeel/zeokeel-rig/sandbox"
+	"github.com/zeokeel/zeokeel-rig/tools/builtin"
 	"github.com/zeokeel/zeokeel-rig/tools/misc"
 	"github.com/zeokeel/zeokeel-rig/tools/schedule"
 	"github.com/zeokeel/zeokeel-rig/tools/skill"
@@ -593,4 +595,73 @@ func newPolicy(cfg Config, root string, timeout time.Duration, mode sandbox.Mode
 		options = append(options, sandbox.WithCommandAllowlist(commands...))
 	}
 	return sandbox.New(options...)
+}
+
+// newReadPolicy builds the policy that governs the *reading* file tools only
+// (read_file, list_dir, glob, grep, read_image).
+//
+// Permission model (2026-11-26, personal helper): the model may read anywhere on
+// the machine; only writes stay inside the workspace. Rig fuses the two scopes in
+// one Policy — ResolvePath fences every path to Roots(), and WritableRoots()
+// includes those same Roots, so widening Roots to "/" would also widen the
+// writable surface (in-process and in the OS runner profile rendered from
+// WritableRoots). There is no read/write split option in rig v0.38.1, so the
+// split is expressed here by binding the read-only tools to a second policy:
+//
+//   - root first, so relative paths keep resolving against the workspace (the
+//     first root is the relative-path base and the session cwd is relative to
+//     it);
+//   - the filesystem root second, so absolute paths resolve anywhere;
+//   - ModeReadOnly, so this policy can never write even if a tool were bound to
+//     it by mistake and tried.
+//
+// The write surface is untouched: the shell, editors, apply_patch, undo and the
+// sandbox_status read model all keep newPolicy's workspace-scoped policy, which
+// is also the one the OS runner renders. See docs/APPROVAL-SURFACES.md §S4.3 for
+// the limits of this split.
+func newReadPolicy(cfg Config, root string, timeout time.Duration) *sandbox.Policy {
+	return sandbox.New(
+		sandbox.WithRoots(root, filesystemReadRoot()),
+		sandbox.WithMode(sandbox.ModeReadOnly),
+		sandbox.WithHidden(hiddenPatterns(cfg.DeniedGlobs)...),
+		sandbox.WithNetwork(cfg.Network),
+		sandbox.WithTimeout(timeout),
+		sandbox.WithMaxOutputBytes(cfg.MaxOutputBytes),
+	)
+}
+
+// filesystemReadRoot is the root that widens absolute-path reads to the whole
+// machine: "/" on unix, the process volume root (e.g. `C:\`) on Windows — other
+// volumes need their own policy root, which no product surface exposes today.
+func filesystemReadRoot() string {
+	if wd, err := os.Getwd(); err == nil {
+		if volume := filepath.VolumeName(wd); volume != "" {
+			return volume + string(filepath.Separator)
+		}
+	}
+	return string(filepath.Separator)
+}
+
+// readOnlyFileTools are the file tools bound to the read policy. They are the
+// tools whose whole job is reading; the writers (write_file, edit_file,
+// str_replace_editor, apply_patch, undo) stay on the workspace policy.
+var readOnlyFileTools = map[string]bool{
+	builtin.ToolReadFile: true,
+	builtin.ToolListDir:  true,
+	builtin.ToolGlob:     true,
+	builtin.ToolGrep:     true,
+}
+
+// readToolSet builds the read-only file tools under readPolicy, keyed by name.
+// The write policy's instances are replaced by these in buildRootScopedWith, so
+// one build still exposes exactly one tool of each name.
+func readToolSet(readPolicy *sandbox.Policy, cwd func() string) map[string]rig.Tool {
+	tools := builtin.NewWithPolicyOptions(readPolicy, builtin.WithWorkingDirectory(cwd))
+	out := make(map[string]rig.Tool, len(readOnlyFileTools))
+	for _, tool := range tools {
+		if readOnlyFileTools[tool.Name()] {
+			out[tool.Name()] = tool
+		}
+	}
+	return out
 }

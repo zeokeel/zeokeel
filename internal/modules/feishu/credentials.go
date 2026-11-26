@@ -3,6 +3,10 @@ package feishu
 // Credentials from the shared store: the settings page writes one row per
 // channel and the adapter reads it at activation, so app secrets never live in an
 // assembly document. Explicit configuration wins over the stored row.
+//
+// A row may still carry the historical `encryptKey` field: it is ignored here
+// (kept in the store so old data round-trips, never read, because there is no
+// event callback whose signature it could cover any more).
 
 import (
 	"context"
@@ -21,9 +25,6 @@ func ApplyCredential(cfg Config, fields map[string]string) Config {
 	}
 	if cfg.AppSecret == "" {
 		cfg.AppSecret = fields["appSecret"]
-	}
-	if cfg.EncryptKey == "" {
-		cfg.EncryptKey = fields["encryptKey"]
 	}
 	if cfg.Token == "" {
 		cfg.Token = fields["token"]

@@ -55,6 +55,15 @@ export interface SessionSummary {
   messageCount?: number;
   workspaceId?: string;
   effectiveApprovalMode?: string;
+  /**
+   * The role this session selected (`contracts.ChatSessionInfo.PresetID`), and a
+   * stable code when that role cannot be resolved in this build
+   * (`unknown-preset`). A session with a broken role has NO tools and every call
+   * is refused, so the composer renders the problem; both fields are absent when
+   * there is nothing to say (2026-11-26 audit, 高).
+   */
+  presetId?: string;
+  presetProblem?: string;
 }
 
 export interface SnapshotStep {

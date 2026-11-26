@@ -56,7 +56,7 @@ export const NOTIFY_CHANNELS: readonly string[] = [
 /** The field keys a credential bundle may carry (see `Credential.field` in Go). */
 export type CredentialFieldName =
   | 'token'
-  | 'signSecret'
+  | 'robotCode'
   | 'appId'
   | 'appSecret'
   | 'username'
@@ -72,7 +72,15 @@ export type CredentialFieldName =
  */
 export const CREDENTIAL_FIELD_NAMES: Record<CredentialKind, readonly CredentialFieldName[]> = {
   wechat: ['token'],
-  dingtalk: ['token', 'signSecret'],
+  // DingTalk is outbound only and needs TWO values: the robot access token and
+  // the robot code. The platform's send body always carries `robotCode`
+  // (`internal/modules/dingtalk/adapter.go`), so a row with only a token is a
+  // credential no send can use — the request goes out with an empty robotCode
+  // and comes back 400. Both are therefore form fields, and a half-filled form
+  // is not saveable. The robot code is an identity, not a secret (the form shows
+  // it in clear); no `signSecret` field exists, that belonged to the retired
+  // callback signature, which no adapter reads any more.
+  dingtalk: ['token', 'robotCode'],
   feishu: ['appId', 'appSecret'],
   email: ['username', 'password'],
 };

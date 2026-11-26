@@ -1,12 +1,26 @@
 package agent
 
 // Agent presets: a named persona/prompt fragment, optional default model and
-// optional model-visible tool allowlist. A session stores only the preset ID;
-// every run resolves the preset fresh from the presets.agents settings row so
-// edits apply on the next turn. Preset instructions are appended after the base
+// optional model-visible tool allowlist. A session stores only the preset ID
+// (one settings row, contracts.SessionPresetSettingKey); every run resolves the
+// preset fresh from the presets.agents row plus the built-in roles so edits
+// apply on the next turn. Preset instructions are appended after the base
 // prompt and workspace instructions: base → AGENTS.md → persona → prompt.
+//
+// Two boundaries live here:
+//
+//   - The allowlist is a real veto, not prompt hygiene. toolsForSession already
+//     hid the tools, but a hidden tool is only "not offered": the model can
+//     still ask for it (a stale transcript, a teammate's serialized call). The
+//     gate branch in presetToolsDenial refuses it, which is what makes the lead
+//     role unable to write files or run commands rather than merely unwilling.
+//   - A delegated child does not inherit an orchestrator's persona. Children are
+//     executors: they get the executor role's persona and tool surface instead
+//     of the parent's "do not touch anything" discipline (see
+//     delegatedRolePreset / delegatedSystemPrompt).
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -20,6 +34,11 @@ import (
 // SetSessionPreset implements contracts.SessionPresetSetter: it selects one
 // configured agent preset for a session ("" clears it). Unknown sessions and
 // unknown preset IDs are rejected.
+//
+// The selection is persisted as a `session.<id>.preset` settings row, so it
+// survives a restart with the conversation. The in-memory map this used to
+// write meant a gateway restart silently demoted an orchestrating session back
+// to a plain coding agent.
 func (s *service) SetSessionPreset(sessionID, presetID string) error {
 	sessionID = strings.TrimSpace(sessionID)
 	presetID = strings.TrimSpace(presetID)
@@ -27,41 +46,110 @@ func (s *service) SetSessionPreset(sessionID, presetID string) error {
 	_, ok := s.sessions[sessionID]
 	s.mu.Unlock()
 	if !ok {
-		return fmt.Errorf("agent: unknown chat session %q", sessionID)
+		return fmt.Errorf("%w: unknown chat session %q", contracts.ErrSessionPresetInvalid, sessionID)
 	}
 	if presetID != "" {
 		if _, found := s.agentPresetByID(presetID); !found {
-			return fmt.Errorf("agent: unknown agent preset %q", presetID)
+			return fmt.Errorf("%w: unknown agent preset %q", contracts.ErrSessionPresetInvalid, presetID)
 		}
 	}
-	s.mu.Lock()
-	if presetID == "" {
-		delete(s.sessionPresets, sessionID)
-	} else {
-		s.sessionPresets[sessionID] = presetID
+	if s.settings == nil {
+		return ErrSettingsUnavailable
 	}
-	s.mu.Unlock()
-	return nil
+	return s.settings.Set(contracts.SessionPresetSettingKey(sessionID), presetID)
 }
 
 // SessionPreset reports the session's selected preset ID ("" when none).
 func (s *service) SessionPreset(sessionID string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.sessionPresets[strings.TrimSpace(sessionID)]
+	return s.sessionPresetRow(sessionID)
 }
 
-// effectiveAgentPresets parses the presets.agents row, preserving its order and
-// dropping rows without an ID/name (malformed JSON behaves as no presets).
-func (s *service) effectiveAgentPresets() []contracts.AgentPreset {
+// sessionPresetRow reads the raw selection row ("" when the session has none).
+func (s *service) sessionPresetRow(sessionID string) string {
 	if s.settings == nil {
-		return nil
+		return ""
 	}
-	presets, err := contracts.ParseAgentPresets(s.settings.Get(contracts.SettingAgentPresets, ""))
-	if err != nil {
-		s.logger.Printf("[agent] parse %s: %v", contracts.SettingAgentPresets, err)
-		return nil
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ""
 	}
+	return strings.TrimSpace(s.settings.Get(contracts.SessionPresetSettingKey(sessionID), ""))
+}
+
+// clearSessionPresetRow forgets a deleted session's selection. SettingsService
+// has no delete call, so the row is cleared to "" — which reads back as "no
+// preset" everywhere, exactly like a row that never existed.
+func (s *service) clearSessionPresetRow(sessionID string) {
+	if s.settings == nil {
+		return
+	}
+	if err := s.settings.Set(contracts.SessionPresetSettingKey(sessionID), ""); err != nil {
+		s.logger.Printf("[agent] clear preset of deleted session %s: %v", sessionID, err)
+	}
+}
+
+// effectiveAgentPresets merges the built-in roles under the presets.agents row:
+// a user row overrides a built-in with the same ID, extra user presets are
+// appended in their own order. Rows without an ID/name are dropped (malformed
+// JSON behaves as "no user presets" rather than as "no roles at all").
+//
+// A user row that reuses a built-in role ID replaces that role field by field,
+// with ONE exception: an omitted `tools` field keeps the built-in allowlist
+// (mergeUserPresetOverBuiltin). See that function for why.
+func (s *service) effectiveAgentPresets() []contracts.AgentPreset {
+	var user []contracts.AgentPreset
+	if s.settings != nil {
+		parsed, err := contracts.ParseAgentPresets(s.settings.Get(contracts.SettingAgentPresets, ""))
+		if err != nil {
+			s.logger.Printf("[agent] parse %s: %v", contracts.SettingAgentPresets, err)
+		}
+		user = parsed
+	}
+	builtin := normalizeAgentPresets(contracts.BuiltinAgentPresets())
+	out := make([]contracts.AgentPreset, 0, len(builtin)+len(user))
+	index := make(map[string]int, len(builtin)+len(user))
+	for _, preset := range builtin {
+		index[preset.ID] = len(out)
+		out = append(out, preset)
+	}
+	for _, preset := range normalizeAgentPresets(user) {
+		if at, ok := index[preset.ID]; ok {
+			out[at] = mergeUserPresetOverBuiltin(out[at], preset)
+			continue
+		}
+		index[preset.ID] = len(out)
+		out = append(out, preset)
+	}
+	return out
+}
+
+// mergeUserPresetOverBuiltin folds one user row over the built-in role it
+// reuses the ID of.
+//
+// Every field the row carries wins (name, persona, prompt, model, order). The
+// tool allowlist is the exception: an ABSENT `tools` field inherits the built-in
+// one, and only an explicit `"tools": []` clears it. The reason is the product
+// semantics written everywhere else — an empty allowlist means "every tool" —
+// so a user row that only edits the persona used to widen the built-in lead into
+// the full surface silently, while the persona text it just edited still said
+// "your tool set has none of these tools" (2026-11-26 audit, 中高). One of the
+// two statements had to lose; the enforced one wins, and the sentence the model
+// reads stays true.
+//
+// The inherited slice is copied: a built-in preset is returned fresh per call,
+// but sharing a backing array with the caller's view invites an aliasing bug the
+// day somebody mutates a preset in place.
+func mergeUserPresetOverBuiltin(builtin, row contracts.AgentPreset) contracts.AgentPreset {
+	merged := row
+	if merged.Tools == nil {
+		merged.Tools = append([]string(nil), builtin.Tools...)
+	}
+	return merged
+}
+
+// normalizeAgentPresets trims one preset list and drops rows that cannot be
+// selected (no id or no display name).
+func normalizeAgentPresets(presets []contracts.AgentPreset) []contracts.AgentPreset {
 	out := make([]contracts.AgentPreset, 0, len(presets))
 	for _, preset := range presets {
 		preset.ID = strings.TrimSpace(preset.ID)
@@ -72,19 +160,35 @@ func (s *service) effectiveAgentPresets() []contracts.AgentPreset {
 		preset.Persona = strings.TrimSpace(preset.Persona)
 		preset.Prompt = strings.TrimSpace(preset.Prompt)
 		preset.Model = strings.TrimSpace(preset.Model)
-		tools := make([]string, 0, len(preset.Tools))
-		for _, tool := range preset.Tools {
-			if trimmed := strings.TrimSpace(tool); trimmed != "" {
-				tools = append(tools, trimmed)
-			}
-		}
-		preset.Tools = tools
+		preset.Tools = normalizePresetTools(preset.Tools)
 		out = append(out, preset)
 	}
 	return out
 }
 
-// agentPresetByID resolves one preset from the settings row.
+// normalizePresetTools trims one allowlist while preserving the difference the
+// rest of this file depends on: nil (the `tools` field is absent) is not the same
+// as an empty non-nil slice (an explicit `"tools": []`). An absent field inherits
+// a built-in role's allowlist; an explicit empty one clears it (and, for a plain
+// preset, means "every tool").
+//
+// The loop used to rebuild the slice unconditionally, which turned every absent
+// field into an explicit empty one and made the two indistinguishable before the
+// merge ever saw them.
+func normalizePresetTools(tools []string) []string {
+	if tools == nil {
+		return nil
+	}
+	out := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		if trimmed := strings.TrimSpace(tool); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+// agentPresetByID resolves one preset from the effective set.
 func (s *service) agentPresetByID(id string) (contracts.AgentPreset, bool) {
 	id = strings.TrimSpace(id)
 	for _, preset := range s.effectiveAgentPresets() {
@@ -96,9 +200,10 @@ func (s *service) agentPresetByID(id string) (contracts.AgentPreset, bool) {
 }
 
 // agentPresetForSessionLocked resolves the selected preset for a session. The
-// caller holds s.mu (reading settings itself is goroutine-safe).
+// caller holds s.mu (reading settings itself is goroutine-safe); the name is
+// historical and kept so the call sites read the same.
 func (s *service) agentPresetForSessionLocked(sessionID string) (contracts.AgentPreset, bool) {
-	id := strings.TrimSpace(s.sessionPresets[sessionID])
+	id := s.sessionPresetRow(sessionID)
 	if id == "" {
 		return contracts.AgentPreset{}, false
 	}
@@ -123,6 +228,11 @@ func (s *service) presetInstructionFragments(sessionID string) []string {
 	if !ok {
 		return nil
 	}
+	return presetFragments(preset)
+}
+
+// presetFragments renders one preset's instruction fragments in prompt order.
+func presetFragments(preset contracts.AgentPreset) []string {
 	fragments := make([]string, 0, 2)
 	for _, fragment := range []string{preset.Persona, preset.Prompt} {
 		if fragment = strings.TrimSpace(fragment); fragment != "" {
@@ -132,15 +242,175 @@ func (s *service) presetInstructionFragments(sessionID string) []string {
 	return fragments
 }
 
-// agentPresetForSession reads the selected preset without the service lock.
+// agentPresetForSession reads the selected preset without the service lock. A
+// row that names a preset this build does not have reads back as "not found",
+// exactly like "no preset" — callers that must tell the two apart use
+// sessionPresetResolution.
 func (s *service) agentPresetForSession(sessionID string) (contracts.AgentPreset, bool) {
-	s.mu.Lock()
-	id := strings.TrimSpace(s.sessionPresets[strings.TrimSpace(sessionID)])
-	s.mu.Unlock()
+	id := s.sessionPresetRow(sessionID)
 	if id == "" {
 		return contracts.AgentPreset{}, false
 	}
 	return s.agentPresetByID(id)
+}
+
+// sessionPresetResolution resolves a session's role and keeps the raw row, so a
+// caller can distinguish the two "no preset" cases:
+//
+//   - rowID == "": the session never selected a role. Unrestricted, the
+//     historical behaviour, and the reason the role stays optional.
+//   - rowID != "" and !found: the session HAS a selection this build cannot
+//     resolve (the preset was deleted, or `settings.set` wrote
+//     `session.<id>.preset` directly and bypassed SetSessionPreset's check).
+//     This is a broken role, not an absent one, and every caller treats it
+//     fail-closed: the gate refuses tool calls (presetToolsDenial) and the
+//     surface offers nothing (toolsForSession) instead of falling back to "no
+//     role ⇒ every tool" — which is what a bad settings write used to buy.
+func (s *service) sessionPresetResolution(sessionID string) (preset contracts.AgentPreset, rowID string, found bool) {
+	rowID = s.sessionPresetRow(sessionID)
+	if rowID == "" {
+		return contracts.AgentPreset{}, "", false
+	}
+	preset, found = s.agentPresetByID(rowID)
+	return preset, rowID, found
+}
+
+// presetIDsFromRows lists the role ids this build can resolve, from ONE settings
+// snapshot: the built-in roles plus the `presets.agents` row. Malformed JSON
+// contributes nothing, which is exactly what the read side does — such a row is
+// now visible as "the role does not resolve" instead of only being logged.
+func presetIDsFromRows(rows map[string]string) map[string]bool {
+	builtin := normalizeAgentPresets(contracts.BuiltinAgentPresets())
+	ids := make(map[string]bool, len(builtin))
+	for _, preset := range builtin {
+		ids[preset.ID] = true
+	}
+	user, err := contracts.ParseAgentPresets(rows[contracts.SettingAgentPresets])
+	if err != nil {
+		return ids
+	}
+	for _, preset := range normalizeAgentPresets(user) {
+		ids[preset.ID] = true
+	}
+	return ids
+}
+
+// fillPresetDisclosure sets PresetID / PresetProblem from a single settings
+// snapshot.
+//
+// The fail-closed half of a broken role already existed — no tools, every call
+// refused — but only in the gate and in one log line, so the chat screen looked
+// like an ordinary conversation that had stopped working (2026-11-26 audit, 高).
+// This is the same judgement in a form a client can draw: the stored id, and a
+// code (never a message, a path or a stack) when it does not resolve.
+//
+// rows is the frame's snapshot, not a per-session read: the session list cache
+// exists so a steady-state frame costs O(1) settings reads, and a disclosure is
+// not a reason to give that up (AR-20).
+func (s *service) fillPresetDisclosure(infos []contracts.ChatSessionInfo, rows map[string]string) {
+	if len(infos) == 0 || s.settings == nil {
+		return
+	}
+	known := presetIDsFromRows(rows)
+	for index := range infos {
+		rowID := strings.TrimSpace(rows[contracts.SessionPresetSettingKey(infos[index].ID)])
+		if rowID == "" {
+			// No stored role: nothing to disclose, and the session is unrestricted.
+			continue
+		}
+		infos[index].PresetID = rowID
+		if !known[rowID] {
+			infos[index].PresetProblem = contracts.PresetProblemUnknown
+		}
+	}
+}
+
+// unknownPresetDenial is the model-visible refusal for a session whose stored
+// role does not exist. It names the row and the two ways out: selecting a role
+// that exists, or clearing the row.
+func unknownPresetDenial(sessionID, rowID, name string) string {
+	reason := fmt.Sprintf("会话选的角色 %q 在本产品里不存在", rowID)
+	if sessionID != "" {
+		reason = fmt.Sprintf("会话选的角色 %q 在本产品里不存在（%s）", rowID, contracts.SessionPresetSettingKey(sessionID))
+	}
+	if name != "" {
+		reason += fmt.Sprintf("；按未知角色拒绝执行工具 %s", name)
+	}
+	return reason + "。这不等于\"没有角色\"：请用 session.preset.set 重新选择一个存在的角色，或把该行清空。"
+}
+
+// delegatedRolePreset resolves the role a delegated child run of sessionID
+// executes as. An orchestrator's children are executors: the lead either writes
+// nothing (enforced by its allowlist) or delegates work that must be done by
+// someone who can. Any other preset keeps the historical behaviour (children
+// inherit nothing extra), so this only changes sessions that opted into a role.
+func (s *service) delegatedRolePreset(sessionID string) (contracts.AgentPreset, bool) {
+	parent, ok := s.agentPresetForSession(sessionID)
+	if !ok {
+		return contracts.AgentPreset{}, false
+	}
+	switch parent.ID {
+	case contracts.PresetLeadID, contracts.PresetAuditorID:
+		return s.agentPresetByID(contracts.PresetExecutorID)
+	}
+	return contracts.AgentPreset{}, false
+}
+
+// delegatedToolsForSession is the model-visible surface of a delegated child.
+// When the parent session runs as an orchestrator the child gets the executor
+// role's surface (an orchestrator allowlist would otherwise leave the child
+// unable to write the very files it was asked to write); every other session
+// keeps the historical "same surface as the parent" rule.
+func (s *service) delegatedToolsForSession(sessionID string) []rig.Tool {
+	if role, ok := s.delegatedRolePreset(sessionID); ok {
+		return s.filterSessionToolsWith(s.enabledRegistryTools(), role)
+	}
+	return s.toolsForSession(sessionID)
+}
+
+// delegatedSystemPrompt builds the system prompt of a delegated child that runs
+// as a different role from its parent session.
+//
+// The parent's preset sections are replaced, not appended to: appending "you
+// are an executor, do the work" after "you never write files" is a
+// contradiction the model has to resolve, and the section order decides who
+// wins. Workspace instructions, the base prompt and every runtime section stay
+// byte-identical, so the child still knows where it is and what it may do.
+func (s *service) delegatedSystemPrompt(ctx context.Context, sessionID string, cfg contracts.ChatConfig,
+	toolNames map[string]bool, workspaceRoot string) string {
+	prompt, sections := s.buildRunSystemPromptSections(ctx, sessionID, cfg, toolNames, workspaceRoot)
+	role, ok := s.delegatedRolePreset(sessionID)
+	if !ok {
+		return prompt
+	}
+	roleSections := make([]contracts.PromptSection, 0, 2)
+	for index, fragment := range presetFragments(role) {
+		id := PromptSectionPresetPersona
+		if index > 0 {
+			id = PromptSectionPresetPrompt
+		}
+		if section := newPromptSection(id, "preset", fragment); section.ID != "" {
+			roleSections = append(roleSections, section)
+		}
+	}
+	out := make([]contracts.PromptSection, 0, len(sections)+len(roleSections))
+	inserted := false
+	for _, section := range sections {
+		if section.ID == PromptSectionPresetPersona || section.ID == PromptSectionPresetPrompt {
+			// Replace at the position the parent preset occupied, so the order
+			// stays base → workspace → persona → prompt.
+			if !inserted {
+				out = append(out, roleSections...)
+				inserted = true
+			}
+			continue
+		}
+		out = append(out, section)
+	}
+	if !inserted {
+		out = append(out, roleSections...)
+	}
+	return renderPromptSections(out)
 }
 
 // toolsForSession returns the registry tools the model may see in one session:
@@ -148,20 +418,94 @@ func (s *service) agentPresetForSession(sessionID string) (contracts.AgentPreset
 // narrows the surface (empty allowlist keeps every tool, registration order is
 // preserved), and the runtime mode (plan/minimal/creator) keeps only the tools
 // its gate would allow. The gate still denies non-whitelisted calls fail-closed:
-// filtering is prompt hygiene, not the security boundary. Delegated child runs
-// (subagent/team) start from the same surface before excluding orchestration
-// tools, so a preset allowlist applies everywhere.
+// filtering is prompt hygiene, the security boundary is presetToolsDenial.
+// Delegated child runs (subagent/team) resolve their own role's surface first
+// (delegatedToolsForSession) and then exclude orchestration tools.
 func (s *service) toolsForSession(sessionID string) []rig.Tool {
 	return s.filterSessionTools(sessionID, s.enabledRegistryTools())
 }
 
-// filterSessionTools applies the session preset allowlist and the runtime mode
-// to a tool set.
-func (s *service) filterSessionTools(sessionID string, tools []rig.Tool) []rig.Tool {
-	if preset, ok := s.agentPresetForSession(sessionID); ok && len(preset.Tools) > 0 {
+// filterSessionToolsWith applies one preset's allowlist and the runtime mode to
+// a tool set.
+func (s *service) filterSessionToolsWith(tools []rig.Tool, preset contracts.AgentPreset) []rig.Tool {
+	if len(preset.Tools) > 0 {
 		tools = filterToolsByAllowlist(tools, preset.Tools)
 	}
 	return filterToolsForMode(tools, s.runtimeMode())
+}
+
+// filterSessionTools applies the session preset allowlist and the runtime mode
+// to a tool set (the session form of filterSessionToolsWith).
+//
+// A session whose stored role does not exist gets NO tools: the gate refuses
+// every call anyway (presetToolsDenial), and offering a surface the gate will
+// deny only teaches the model to retry.
+func (s *service) filterSessionTools(sessionID string, tools []rig.Tool) []rig.Tool {
+	preset, rowID, found := s.sessionPresetResolution(sessionID)
+	switch {
+	case rowID == "":
+		return filterToolsForMode(tools, s.runtimeMode())
+	case !found:
+		return nil
+	default:
+		return s.filterSessionToolsWith(tools, preset)
+	}
+}
+
+// presetToolsDenial returns the model-visible reason a session's preset
+// allowlist refuses name, or "" when the call may proceed.
+//
+// It is the enforcement half of the surface filter: a tool that is not offered
+// is still callable — the model may replay an old call, a teammate may reuse a
+// serialized one — so the gate refuses it here, before plan mode, the session
+// permission override, the sandbox exemption and the approval dialog (each of
+// those can only widen). An empty allowlist means "every tool", a session with
+// no preset is unrestricted, and the runtime capability tools (spill_read,
+// tool_search) are never removed by an allowlist because they are the
+// read-back path for oversized results rather than a capability to grant.
+func (s *service) presetToolsDenial(sessionID, name string) string {
+	preset, rowID, found := s.sessionPresetResolution(sessionID)
+	switch {
+	case rowID == "":
+		return ""
+	case !found:
+		return unknownPresetDenial(sessionID, rowID, name)
+	default:
+		return presetToolsDenialForPreset(preset, name)
+	}
+}
+
+// presetToolsDenialForRole is presetToolsDenial for a role resolved by id: a
+// delegated child runs as the executor role while its session may be a lead.
+func (s *service) presetToolsDenialForRole(presetID, name string) string {
+	presetID = strings.TrimSpace(presetID)
+	if presetID == "" {
+		return ""
+	}
+	preset, ok := s.agentPresetByID(presetID)
+	if !ok {
+		// A role id that resolves to nothing (the delegated role of a session
+		// whose preset row is broken) is refused, not treated as "every tool".
+		return unknownPresetDenial("", presetID, name)
+	}
+	return presetToolsDenialForPreset(preset, name)
+}
+
+// presetToolsDenialForPreset is the shared body of the two above.
+func presetToolsDenialForPreset(preset contracts.AgentPreset, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" || len(preset.Tools) == 0 {
+		return ""
+	}
+	if runtimeCapabilityTools[name] {
+		return ""
+	}
+	for _, allowed := range preset.Tools {
+		if allowed == name {
+			return ""
+		}
+	}
+	return fmt.Sprintf("角色 %s 只允许这些工具：%v；这次调用 %s 被拒绝", preset.ID, preset.Tools, name)
 }
 
 // runtimeCapabilityTools are kept even when a preset allowlist does not name

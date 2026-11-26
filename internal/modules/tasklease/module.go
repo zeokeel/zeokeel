@@ -30,6 +30,17 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return fmt.Errorf("%s: require data dir: %w", ModuleID, err)
 		}
+		logger := func(format string, args ...any) {}
+		if log, ok := ctx.Get(contracts.KeyLogger); ok && log != nil {
+			logger = log.Printf
+		}
+		if cfg.OnDirectClose == nil {
+			// The unaudited-close row is written by the review log; this line is
+			// the operator's copy of it, not a second record.
+			cfg.OnDirectClose = func(taskID, actor, source string) {
+				logger("[tasklease] task %s closed via %s by %s without a lease review", taskID, source, actor)
+			}
+		}
 		service, err := Open(filepath.Join(dataDir, "tasklease"), board, cfg)
 		if err != nil {
 			if !errors.Is(err, ErrLeaseStoreCorrupt) {
@@ -46,6 +57,13 @@ func Module() *module.Descriptor[Config] {
 			if logger, ok := ctx.Get(contracts.KeyLogger); ok && logger != nil {
 				logger.Printf("tasklease: corrupt lease store moved to %s; starting with no live leases", quarantined)
 			}
+		}
+		// Every path that can move a task into a terminal state must leave an
+		// audit row, and the lease layer owns that log. The board learns about
+		// this service here, at activation, because the dependency runs the other
+		// way (the lease requires the board).
+		if setter, ok := board.(contracts.TaskCloseObserverSetter); ok {
+			setter.SetTaskCloseObserver(service)
 		}
 		if _, err := ctx.Provide(contracts.KeyTaskLease, contracts.TaskLeaseService(service)); err != nil {
 			return fmt.Errorf("%s: provide task lease: %w", ModuleID, err)

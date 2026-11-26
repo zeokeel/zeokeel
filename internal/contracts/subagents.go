@@ -119,8 +119,12 @@ var productReadOnlyAdditions = map[string]bool{
 // ReadOnlyAutoAllowedTools is the set of tools the read-only preset runs without
 // an approval prompt: the SDK's read-only set minus the documented product
 // removals, plus the product-only informational tools. Everything else
-// (workspace writes, shell, network, MCP, settings writes and unknown tools)
-// asks. It is the read-only subset of WorkspaceAutoAllowedTools.
+// (workspace writes, shell, network, settings writes and unknown tools) asks. It
+// is the read-only subset of WorkspaceAutoAllowedTools.
+//
+// The MCP family is deliberately NOT here: the read-only preset is this
+// product's hard "do not touch anything" restriction, and an MCP tool's effects
+// happen on the other side of a server, outside any fence this product applies.
 var ReadOnlyAutoAllowedTools = composeReadOnlyTools()
 
 // composeReadOnlyTools derives the read-only set from the SDK list plus the
@@ -163,13 +167,32 @@ var workspaceStateTools = map[string]bool{
 	"memory": true,
 }
 
+// MCPToolPrefix is the model-visible prefix of every MCP tool name
+// (mcp__<server>__<tool>).
+//
+// The MCP family is exempt from the approval prompt as a *prefix family*, not as
+// an enumerated list: the concrete names are runtime data (whatever the user's
+// servers expose), so a frozen list could never cover them. Product decision
+// (2026-11-26, personal-helper permission model): an approval card in front of
+// every MCP call only interrupts normal work — the boundary that matters is
+// "can it write / can it send data out", not "ask again for each call".
+const MCPToolPrefix = "mcp__"
+
+// IsMCPTool reports whether name belongs to the MCP tool family.
+func IsMCPTool(name string) bool {
+	return strings.HasPrefix(strings.TrimSpace(name), MCPToolPrefix)
+}
+
 // WorkspaceAutoAllowedTools is the set of tools the default workspace
 // (workspace-write) preset runs without an approval prompt: the read-only set
-// plus the workspace write tools. Everything that can leave the workspace,
-// mutate app settings, reach the network, spawn MCP work or is unknown still
-// asks. The agent gate and the approvals service both read this one list so the
-// two layers cannot drift apart; it is composed from ReadOnlyAutoAllowedTools
-// so the read-only subset cannot be duplicated out of sync.
+// plus the workspace write tools. Tools that can leave the workspace (network,
+// settings writes), the shell family (exempt through the OS sandbox instead, see
+// docs/APPROVAL-SURFACES.md) and unknown tools still ask; the MCP family is
+// auto-allowed by prefix rather than by name, so it is not in this map — use
+// WorkspaceAutoAllowed, not a map lookup. The agent gate and the approvals
+// service both read this one list so the two layers cannot drift apart; it is
+// composed from ReadOnlyAutoAllowedTools so the read-only subset cannot be
+// duplicated out of sync.
 var WorkspaceAutoAllowedTools = composeAutoAllowedTools(
 	ReadOnlyAutoAllowedTools, workspaceWriteFileTools, workspaceStateTools)
 
@@ -193,7 +216,12 @@ func ReadOnlyAutoAllowed(tool string) bool {
 }
 
 // WorkspaceAutoAllowed reports whether the default workspace preset runs one
-// tool without asking for approval.
+// tool without asking for approval: a member of the frozen shared list, or any
+// MCP tool (the mcp__ prefix family, see MCPToolPrefix).
 func WorkspaceAutoAllowed(tool string) bool {
-	return WorkspaceAutoAllowedTools[strings.TrimSpace(tool)]
+	name := strings.TrimSpace(tool)
+	if WorkspaceAutoAllowedTools[name] {
+		return true
+	}
+	return IsMCPTool(name)
 }

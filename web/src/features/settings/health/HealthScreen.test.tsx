@@ -22,6 +22,7 @@ import { I18nProvider } from '@/i18n';
  */
 
 const api = vi.hoisted(() => ({
+  loadSandboxStatus: vi.fn(),
   loadHeartbeatStatus: vi.fn(),
   tickHeartbeat: vi.fn(),
   configureHeartbeat: vi.fn(),
@@ -33,6 +34,11 @@ const api = vi.hoisted(() => ({
 vi.mock('@/api/health', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/health')>();
   return { ...actual, ...api };
+});
+
+vi.mock('@/api/sandbox', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/sandbox')>();
+  return { ...actual, loadSandboxStatus: api.loadSandboxStatus };
 });
 
 import { HealthScreen } from './HealthScreen';
@@ -105,6 +111,14 @@ beforeEach(() => {
     connected: true,
     endpoint: 'http://127.0.0.1:9222',
     pages: 3,
+  });
+  // Default: a host WITH an OS runner (the quiet state). The unconfined cases
+  // below override it explicitly.
+  api.loadSandboxStatus.mockResolvedValue({
+    available: true,
+    platform: 'linux',
+    confinement: 'os',
+    commandsUnconfined: false,
   });
   // The delivery section starts from a clean plan/receipt: each test that cares
   // gives the answer it wants to pin.
@@ -563,5 +577,80 @@ describe('HealthScreen — 投递 shows the plan and the receipt the gateway ret
     expect(alert).toHaveTextContent('channeldispatch: every channel failed: feishu 500');
     // Nothing was delivered, so no receipt is invented.
     expect(screen.queryByTestId('health-delivery-receipt')).toBeNull();
+  });
+});
+
+describe('HealthScreen — the shell-confinement row is the command fence made visible', () => {
+  /**
+   * Commands never ask for approval in this product (2026-11-26 permission
+   * model), so a host without an OS runner runs them unconfined. The audit's
+   * finding was that this difference lived only in a log line the client cannot
+   * see; these tests pin that the status page now shows it — and that the two
+   * other states are not rounded to the same tag.
+   */
+  it('says OS-confined, with the scope sentence, when a runner reports enforcement', async () => {
+    renderScreen();
+
+    expect(await screen.findByTestId('health-sandbox-state')).toHaveTextContent(/OS 已约束|OS-confined/);
+    expect(screen.getByTestId('health-sandbox-scope')).toHaveTextContent(
+      /工作目录与私有临时目录|working directory and private temporary directories/,
+    );
+    expect(screen.getByTestId('health-sandbox-platform')).toHaveTextContent('linux');
+    // Nothing to warn about, so no warning card is invented.
+    expect(screen.queryByTestId('health-sandbox-warning')).toBeNull();
+    expect(api.loadSandboxStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the unconfined warning, quoting the gateway, instead of a quiet tag', async () => {
+    api.loadSandboxStatus.mockResolvedValue({
+      available: false,
+      platform: 'linux',
+      reason: 'bwrap: not installed',
+      confinement: 'none',
+      commandsUnconfined: true,
+      note:
+        'Shell commands run without OS confinement (bwrap: not installed): the working-directory write rule is an application rule, not an enforced boundary.',
+    });
+    renderScreen();
+
+    expect(await screen.findByTestId('health-sandbox-state')).toHaveTextContent(/无 OS 约束|No OS confinement/);
+    const warning = screen.getByTestId('health-sandbox-warning');
+    // The gateway's own sentence is what the user reads; the screen does not
+    // paraphrase "which host has no runner".
+    expect(warning).toHaveTextContent('bwrap: not installed');
+    expect(warning).toHaveTextContent(/not an enforced boundary|不是 OS 强制执行的边界/);
+    expect(screen.getByTestId('health-sandbox-scope')).toHaveTextContent(
+      /任何路径都可写|any path the process can write/,
+    );
+    expect(screen.getByTestId('health-sandbox-reason')).toHaveTextContent('bwrap: not installed');
+  });
+
+  it('does not call an assembly without a sandbox module "confined"', async () => {
+    // Empty confinement = unknown (no sandbox module): commands stay behind the
+    // approval gate there, so neither "confined" nor "unconfined" is true.
+    api.loadSandboxStatus.mockResolvedValue({
+      available: false,
+      platform: 'linux',
+      confinement: '',
+      commandsUnconfined: false,
+    });
+    renderScreen();
+
+    expect(await screen.findByTestId('health-sandbox-state')).toHaveTextContent(
+      /未装配沙箱模块|No sandbox module/,
+    );
+    expect(screen.queryByTestId('health-sandbox-warning')).toBeNull();
+  });
+
+  it('a failed read stays inside its own section', async () => {
+    api.loadSandboxStatus.mockRejectedValueOnce(new Error('unknown method: sandbox.status'));
+    renderScreen();
+
+    // Its own section reports the failure…
+    await waitFor(() => expect(screen.getByTestId('health-sandbox')).toHaveTextContent(
+      /sandbox.status/,
+    ));
+    // …and the heartbeat keeps working.
+    expect(await screen.findByTestId('health-heartbeat-running')).toBeInTheDocument();
   });
 });

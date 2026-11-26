@@ -97,6 +97,29 @@ export interface TaskLease {
   reviewNote?: string;
 }
 
+/**
+ * One recorded review decision (`contracts.TaskReview`, `tasks.reviews`).
+ *
+ * This is the durable half of a review: `tasks.review` deletes the lease it
+ * describes, so `tasks.lease` answers `null` exactly when the audit trail
+ * starts mattering. `verdict` is the machine-readable outcome (`pass`/`fail`)
+ * and `decision` the verb, so a screen never has to infer one from the other.
+ */
+export interface TaskReview {
+  taskId: string;
+  reviewer: string;
+  /** The reviewer's role (a preset id such as `lead` / `auditor`), when it has one. */
+  role?: string;
+  /** `accept` / `reject`, kept raw for the same reason as the lease state. */
+  decision: string;
+  /** `pass` / `fail`. */
+  verdict: string;
+  /** The reviewer's note (the reject reason, or an accept note). */
+  findings?: string;
+  /** RFC 3339. */
+  at?: string;
+}
+
 /** Rows as they arrive on the wire (`omitempty` on every optional field). */
 interface BoardTaskWire {
   id?: string;
@@ -108,6 +131,16 @@ interface BoardTaskWire {
   writeScopes?: string[];
   createdAt?: string;
   updatedAt?: string;
+}
+
+interface ReviewWire {
+  taskId?: string;
+  reviewer?: string;
+  role?: string;
+  decision?: string;
+  verdict?: string;
+  findings?: string;
+  at?: string;
 }
 
 interface LeaseWire {
@@ -299,6 +332,34 @@ export async function reviewTask(input: ReviewTaskInput): Promise<TaskLease> {
 }
 
 /**
+ * Read the recorded review decisions of one task (`tasks.reviews`).
+ *
+ * Oldest first. An empty array is an answer ("never reviewed"); a thrown error
+ * means the read itself failed. This is a separate read from `tasks.lease`
+ * because the two cannot answer the same question: the lease is deleted by the
+ * very decision this list records.
+ */
+export async function loadTaskReviews(input: LeaseReadInput): Promise<TaskReview[]> {
+  const result = await request<{ reviews?: ReviewWire[] | null }>('tasks.reviews', {
+    id: input.id,
+  });
+  const reviews: TaskReview[] = [];
+  for (const row of result.reviews ?? []) {
+    if (!row.decision || !row.verdict) continue;
+    reviews.push({
+      taskId: row.taskId || input.id,
+      reviewer: row.reviewer || '',
+      decision: row.decision,
+      verdict: row.verdict,
+      ...(row.role ? { role: row.role } : {}),
+      ...(row.findings ? { findings: row.findings } : {}),
+      ...(row.at ? { at: row.at } : {}),
+    });
+  }
+  return reviews;
+}
+
+/**
  * The tool binding of one task (`contracts.TaskTools`, M5 execution policy).
  *
  * A lease says *who* is working on a task; this says *what that work may touch*.
@@ -456,6 +517,37 @@ export async function loadTaskBudget(id: string): Promise<TaskBudget | null> {
   const row = Object.prototype.hasOwnProperty.call(result, 'budget') ? result.budget : result;
   if (!row) return null;
   return taskBudgetFromWire(row, id);
+}
+
+/** What a ceiling write carries: the two limits, in the gateway's own units. */
+export interface TaskBudgetSetInput {
+  id: string;
+  /** Token ceiling; `0` clears it (unlimited), it is not an absence. */
+  maxTokens: number;
+  /** Wall-clock ceiling in minutes; `0` clears it. */
+  maxMinutes: number;
+}
+
+/**
+ * Set the ceiling of one task (`tasks.budget.set`).
+ *
+ * Before this existed the budget block could read a ceiling and never change it:
+ * a dispatched task gets a 200k/30min row automatically, and `tasks.budget.set`
+ * had no client at all. The gateway answers with the row in force (usage kept,
+ * `exhausted` re-derived from usage versus the new limits), so the block redraws
+ * from the answer rather than from a guess.
+ *
+ * The gateway guards this write with a permission action, so a refusal is a real
+ * answer: it is thrown, and the block shows the gateway's own words instead of
+ * inventing a reason (see `features/task/TaskBudget.tsx`).
+ */
+export async function setTaskBudget(input: TaskBudgetSetInput): Promise<TaskBudget> {
+  const result = await request<TaskBudgetWire>('tasks.budget.set', {
+    id: input.id,
+    maxTokens: input.maxTokens,
+    maxMinutes: input.maxMinutes,
+  });
+  return taskBudgetFromWire(result, input.id);
 }
 
 /**

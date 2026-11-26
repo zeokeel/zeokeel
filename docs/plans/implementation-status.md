@@ -21,7 +21,7 @@
 | G10 | 浏览器（CDP，每 Bot 独立 context） | 🟡 | `internal/modules/browser`（真 ws 传输 + 工具） | 没做每 Bot 独立 browser context / profile 隔离 |
 | G11 | 预算与配额（token/时长/并发） | 🟡 | `tasks.budget.*` + 真实计量 + 停摆通知 + 任务页预算块 + 每 Bot 并发 1 | 跨任务/按人配额未做（M6 归属） |
 | G12 | 从任务沉淀技能 | ✅ | `skilldraft` + 验收自动提议 + `skilldrafts.*`（含 `install` 写入真实 SKILL.md）+ `/skills/drafts` 采纳页 | 重名明确失败（不覆盖），由人改名后重试 |
-| G13 | 工作入口连接器 | ✅ | `webhook`/`wechat`/`dingtalk`/`feishu`/`email` + `channeldispatch` 出站 + 飞书卡片审批 | 真平台凭据下的端到端仍待验证 |
+| G13 | 工作入口连接器 | ✅ | **指令入口 = Web + 微信**（+ `webhook`/`email` 入站）；`dingtalk`/`feishu` 降级为**只出站**（`Send`+`Status`，接口里没有 `Receive`，入站路由与卡片审批已删）+ `channeldispatch` 出站 | 真平台凭据下的**出站**送达仍待验证 |
 | G14 | MCP 全量（注解→审批、两级白名单…） | 🟡 | 产品既有 toolkit/MCP 基建；`mcp__*` 走审批门；`tasks.tools` 任务级白名单**且已执行** | 注解→审批映射、prompts/resources、分页、结构化输出、进度取消未做 |
 
 ## 二、里程碑（M0–M6）
@@ -33,7 +33,7 @@
 | M2 触发 | 🟡 | webhook 入站 + heartbeat 自转 + automation 定时 + **事件→收件箱**通用通道（去重） | 事件源只接了预算停摆；routine 未绑 Bot |
 | M2.5 MCP 补全 | 🟡 | 批次 A 部分落地：工具白名单已执行、**单次调用超时隔离**（默认 60s，超时后服务器仍可用）、注解说明写进 APPROVAL-SURFACES | 注解→审批的运行时读取、prompts/resources、分页、结构化输出、进度取消未做 |
 | M3 浏览器 | 🟡 | CDP 真连接 + 三个工具 + **每 Bot 独立 browser context**（独立 cookie jar；空 profile 拒绝；并发首开只建一个；关闭释放） | 真浏览器需验证上下文命令经 WS 传输可用与大窗口行为；CDP 上下文不跨浏览器重启（需独立 user-data-dir，属 M5 收尾） |
-| M4 连接器 | 🟡 | 四类渠道 + 出站 + 凭据 + 扫码登录协议 + **邮件按声明的字符集解码**（GBK/Big5/Shift_JIS 等）；**真机验证只做了本地能做的部分** |
+| M4 连接器 | 🟡 | 入站（webhook/微信/邮件）+ 四类渠道出站 + 凭据 + 扫码登录协议 + **邮件按声明的字符集解码**（GBK/Big5/Shift_JIS 等）；钉钉/飞书只出站（入站已下线）；**真机验证只做了本地能做的部分** |
 | M5 浏览器收尾 | ⬜ | 未开工（依赖 M3 的隔离） |
 | M6 共享（多用户） | 🟡 | `users` 模块 + `Allowed` 在入口执行 + `users.*` 协议 + `/settings/users` + `user` 私有记忆作用域 + 任务 `requestedBy` 归属（派单记录、跨重启保留、`tasks.requestedby.get` 可读、任务页显示） | 预算未按人归属；渠道身份未绑定；**无登录**（角色是策略不是认证） |
 
@@ -57,7 +57,7 @@
 | 手段 | 命令 | 覆盖 |
 |---|---|---|
 | 单元 + 模块 | `scripts/verify.sh --quick` | 全仓 go test / vet / gofmt / 协议一致性 |
-| 装配链路 | `go test ./internal/assembly/` | 服务键、注册、`TestM0ChainEndToEnd`、飞书链路 |
+| 装配链路 | `go test ./internal/assembly/` | 服务键、注册、`TestM0ChainEndToEnd` |
 | 实机协议 | `scripts/verify-live/run.sh` | 真 serve + WS/HTTP：12 项，含整条 M0 链 |
 | Web | `cd web && npm run typecheck && npm run lint && npm run test` | 603 条，含 B5 与契约一致性 |
 | 真平台 | `docs/plans/channel-verification.md` | **需要真实凭据，尚未完成** |

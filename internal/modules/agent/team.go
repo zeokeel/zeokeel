@@ -91,15 +91,18 @@ func (r *dynamicTeamRunner) Start(ctx context.Context, spec rig.SubagentSpec) (r
 	// (its catalog row's BaseURL/APIKey), falling back to the parent session's
 	// connection when the model list has no such row.
 	cfg = r.service.configForModelOverride(cfg, spec.Model)
-	// Members start from the same model-visible surface as their parent run
-	// (disabled tools, preset allowlist and runtime mode whitelist all apply);
-	// the orchestration tools are then removed so a member cannot recurse.
-	childTools := withoutToolNames(r.service.toolsForSession(active), teamExcludedTools())
+	// Members start from the parent session's model-visible surface (disabled
+	// tools, preset allowlist and runtime mode whitelist), except that an
+	// orchestrator's members run as the executor role so the delegated work can
+	// actually be done; the orchestration tools are then removed so a member
+	// cannot recurse.
+	childTools := withoutToolNames(r.service.delegatedToolsForSession(active), teamExcludedTools())
 	// Team members get the same complete prompt as a normal run, with guidance
-	// and mode line rendered for exactly the surface they receive. Their tools
-	// are scoped to the parent session's workspace root (same as subagents).
+	// and mode line rendered for exactly the surface they receive and the
+	// executor role's persona when the parent is an orchestrator. Their tools are
+	// scoped to the parent session's workspace root (same as subagents).
 	workspaceRoot := r.service.sessionWorkspaceRoot(active)
-	cfg.SystemPrompt = r.service.buildRunSystemPrompt(ctx, active, cfg, toolNameSet(childTools), workspaceRoot)
+	cfg.SystemPrompt = r.service.delegatedSystemPrompt(ctx, active, cfg, toolNameSet(childTools), workspaceRoot)
 	provider, err := r.service.newProvider(cfg, r.service.thinkingParamsForSession(active, cfg.Model))
 	if err != nil {
 		return nil, fmt.Errorf("agent: team member %q: create provider: %w", strings.TrimSpace(spec.Name), err)

@@ -256,7 +256,8 @@ func TestPromptDateUsesTheClockLocation(t *testing.T) {
 	zone := time.FixedZone("UTC+8", 8*3600)
 	clock := time.Date(2026, 11, 21, 0, 30, 0, 0, zone)
 	sections := promptSectionsForRun("linux", "amd64", "/work", contracts.PermissionWorkspace,
-		contracts.PermissionWorkspace, "", clock, nil, map[string]bool{"bash": true})
+		approvalPolicy{Mode: contracts.PermissionWorkspace, ApprovalsAvailable: true, SandboxAssembled: true},
+		"", clock, nil, map[string]bool{"bash": true})
 	rendered := renderPromptSections(sections)
 	if !strings.Contains(rendered, "Today's date is 2026-11-21 (Saturday).") {
 		t.Fatalf("date does not follow the clock location: %q", rendered)

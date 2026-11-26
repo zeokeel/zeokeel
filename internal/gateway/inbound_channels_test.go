@@ -1,87 +1,65 @@
 package gateway
 
-// The other two channel adapters get their own ingress paths. Feishu is special:
-// its URL handshake must answer 200 with the challenge (a 202 would fail the
-// platform's verification), so the handler asks the adapter before treating the
-// body as a message.
+// The demotion guard for the channel ingress: DingTalk and Feishu are outbound
+// only, so /api/inbound has exactly one shape — the generic webhook source. These
+// tests fail the day a channel adapter regains a private path here (which is how
+// the earlier dingtalk/feishu ingress and the Feishu card callback were wired),
+// not just when the handler compiles differently.
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/modules/inbox"
+	"github.com/zeokeel/zeokeel/internal/modules/webhook"
 )
 
-type fakeDingTalk struct {
-	seen struct {
-		headers map[string]string
-		body    string
-	}
-	err error
+// fakeChannelSender stands in for each demoted adapter: it can send and report
+// status, and nothing else — which is the whole point.
+type fakeChannelSender struct {
+	sends int
 }
 
-func (f *fakeDingTalk) Receive(_ context.Context, headers map[string]string, body []byte) (contracts.InboxItem, bool, error) {
-	f.seen.headers = headers
-	f.seen.body = string(body)
-	if f.err != nil {
-		return contracts.InboxItem{}, false, f.err
-	}
-	return contracts.InboxItem{ID: "inbox-dt", Source: "dingtalk", Title: "dt", Status: contracts.InboxStatusNew}, false, nil
+func (f *fakeChannelSender) Send(context.Context, string, string) error {
+	f.sends++
+	return nil
 }
 
-func (f *fakeDingTalk) Send(context.Context, string, string) error { return nil }
-
-func (f *fakeDingTalk) Status(context.Context) (contracts.DingTalkStatus, error) {
+func (f *fakeChannelSender) Status(context.Context) (contracts.DingTalkStatus, error) {
 	return contracts.DingTalkStatus{Connected: true}, nil
 }
 
-type fakeFeishu struct {
-	received int
-	err      error
+// fakeFeishuSender is the Feishu half: same narrow surface, a different Status
+// return type, so the two fakes cannot be swapped by accident.
+type fakeFeishuSender struct {
+	sends int
 }
 
-func (f *fakeFeishu) VerifyURL(body []byte) (string, bool) {
-	var payload struct {
-		Type      string `json:"type"`
-		Challenge string `json:"challenge"`
-	}
-	if json.Unmarshal(body, &payload) != nil || payload.Type != "url_verification" {
-		return "", false
-	}
-	return payload.Challenge, true
+func (f *fakeFeishuSender) Send(context.Context, string, string) error {
+	f.sends++
+	return nil
 }
 
-func (f *fakeFeishu) Receive(_ context.Context, _ map[string]string, body []byte) (contracts.InboxItem, bool, error) {
-	f.received++
-	if f.err != nil {
-		return contracts.InboxItem{}, false, f.err
-	}
-	return contracts.InboxItem{ID: "inbox-fs", Source: "feishu", Title: "fs", Status: contracts.InboxStatusNew}, false, nil
-}
-
-func (f *fakeFeishu) CardAction([]byte) (string, string, bool) { return "", "", false }
-
-func (f *fakeFeishu) Send(context.Context, string, string) error { return nil }
-
-func (f *fakeFeishu) Status(context.Context) (contracts.FeishuStatus, error) {
+func (f *fakeFeishuSender) Status(context.Context) (contracts.FeishuStatus, error) {
 	return contracts.FeishuStatus{Connected: true}, nil
 }
 
-func startChannelGateway(t *testing.T, dingtalk contracts.DingTalkService, feishu contracts.FeishuService) *runningGateway {
+func startDemotedChannelGateway(t *testing.T, chanDingTalk contracts.DingTalkService, chanFeishu contracts.FeishuService) *runningGateway {
 	t.Helper()
 	root := testRoot(t, newFakeChat())
-	if dingtalk != nil {
-		if _, err := root.Provide(contracts.KeyDingTalk, dingtalk); err != nil {
+	if chanDingTalk != nil {
+		if _, err := root.Provide(contracts.KeyDingTalk, chanDingTalk); err != nil {
 			t.Fatalf("provide dingtalk: %v", err)
 		}
 	}
-	if feishu != nil {
-		if _, err := root.Provide(contracts.KeyFeishu, feishu); err != nil {
+	if chanFeishu != nil {
+		if _, err := root.Provide(contracts.KeyFeishu, chanFeishu); err != nil {
 			t.Fatalf("provide feishu: %v", err)
 		}
 	}
@@ -95,98 +73,127 @@ func startChannelGateway(t *testing.T, dingtalk contracts.DingTalkService, feish
 	return serveGateway(t, gateway)
 }
 
-func TestDingTalkIngressAcceptsAndForwardsHeaders(t *testing.T) {
-	dingtalk := &fakeDingTalk{}
-	gw := startChannelGateway(t, dingtalk, nil)
+// TestDemotedChannelsHaveNoInboundPath pins that both demoted adapters are
+// registered (so the assembly still composes them) and unreachable over the
+// ingress: the generic webhook source answers, and when no webhook service is
+// wired the path is a 404 — never the adapter.
+func TestDemotedChannelsHaveNoInboundPath(t *testing.T) {
+	dingtalk, feishu := &fakeChannelSender{}, &fakeFeishuSender{}
+	gw := startDemotedChannelGateway(t, dingtalk, feishu)
 	defer gw.stop(t)
 
-	response := postInbound(t, gw.address, "/api/inbound/dingtalk", `{"msgtype":"text"}`, map[string]string{
-		"X-DingTalk-Signature": "abc",
-		"X-DingTalk-Timestamp": "1700000000",
-	})
-	if response.StatusCode != http.StatusAccepted {
-		t.Fatalf("status = %d, want 202", response.StatusCode)
-	}
-	if dingtalk.seen.body != `{"msgtype":"text"}` {
-		t.Fatalf("adapter saw body %q", dingtalk.seen.body)
-	}
-	if !headerPresent(dingtalk.seen.headers, "X-DingTalk-Signature") {
-		t.Fatalf("adapter did not receive the signature header: %v", dingtalk.seen.headers)
-	}
-}
-
-func TestDingTalkIngressMapsBadSignature(t *testing.T) {
-	dingtalk := &fakeDingTalk{err: contracts.ErrDingTalkBadSignature}
-	gw := startChannelGateway(t, dingtalk, nil)
-	defer gw.stop(t)
-	if response := postInbound(t, gw.address, "/api/inbound/dingtalk", `{}`, nil); response.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", response.StatusCode)
-	}
-}
-
-func TestFeishuChallengeAnswers200WithChallenge(t *testing.T) {
-	feishu := &fakeFeishu{}
-	gw := startChannelGateway(t, nil, feishu)
-	defer gw.stop(t)
-
-	response := postInbound(t, gw.address, "/api/inbound/feishu", `{"type":"url_verification","challenge":"ch-42"}`, nil)
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (the platform rejects a challenge answered with 202)", response.StatusCode)
-	}
-	var payload struct {
-		Challenge string `json:"challenge"`
-	}
-	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil || payload.Challenge != "ch-42" {
-		t.Fatalf("challenge payload = (%+v, %v)", payload, err)
-	}
-	if feishu.received != 0 {
-		t.Fatal("a handshake reached the message path")
-	}
-}
-
-func TestFeishuMessageIngressAccepts(t *testing.T) {
-	feishu := &fakeFeishu{}
-	gw := startChannelGateway(t, nil, feishu)
-	defer gw.stop(t)
-
-	response := postInbound(t, gw.address, "/api/inbound/feishu", `{"schema":"2.0"}`, map[string]string{
-		"X-Lark-Signature": "sig",
-	})
-	if response.StatusCode != http.StatusAccepted {
-		t.Fatalf("status = %d, want 202", response.StatusCode)
-	}
-	if feishu.received != 1 {
-		t.Fatalf("adapter received %d messages, want 1", feishu.received)
-	}
-}
-
-func TestFeishuStaleMapsTo401(t *testing.T) {
-	feishu := &fakeFeishu{err: contracts.ErrFeishuStale}
-	gw := startChannelGateway(t, nil, feishu)
-	defer gw.stop(t)
-	if response := postInbound(t, gw.address, "/api/inbound/feishu", `{}`, nil); response.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", response.StatusCode)
-	}
-}
-
-func TestChannelIngressMissingServiceIs404(t *testing.T) {
-	gw := startChannelGateway(t, nil, nil)
-	defer gw.stop(t)
 	for _, path := range []string{"/api/inbound/dingtalk", "/api/inbound/feishu"} {
-		if response := postInbound(t, gw.address, path, `{}`, nil); response.StatusCode != http.StatusNotFound {
-			t.Fatalf("%s status = %d, want 404", path, response.StatusCode)
+		response := postInbound(t, gw.address, path, `{"msgtype":"text"}`, map[string]string{
+			"X-DingTalk-Signature": "abc",
+			"X-Lark-Signature":     "abc",
+		})
+		// No KeyWebhook on this root: the source is unknown, so 404. What matters
+		// is that it is the webhook adapter's answer, not a channel one.
+		if response.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want 404 (only the generic webhook may answer here)", path, response.StatusCode)
 		}
+	}
+	if dingtalk.sends != 0 || feishu.sends != 0 {
+		t.Fatal("an ingress request reached a demoted channel adapter")
 	}
 }
 
-func headerPresent(headers map[string]string, want string) bool {
-	for key := range headers {
-		if strings.EqualFold(key, want) {
-			return true
+// TestFeishuCardCallbackRouteIsGone pins that the card-button route was removed,
+// not merely left unregistered: nobody may resolve an approval from a webhook
+// body any more.
+func TestFeishuCardCallbackRouteIsGone(t *testing.T) {
+	dingtalk, feishu := &fakeChannelSender{}, &fakeFeishuSender{}
+	gw := startDemotedChannelGateway(t, dingtalk, feishu)
+	defer gw.stop(t)
+
+	for _, path := range []string{"/api/inbound/feishu/card", "/api/inbound/feishu/card/"} {
+		response := postInbound(t, gw.address, path, `{"event":{"action":{"value":{}}}}`, nil)
+		if response.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want 404 (the card callback route is retired)", path, response.StatusCode)
 		}
 	}
-	return false
+	if feishu.sends != 0 {
+		t.Fatal("a card callback reached the feishu adapter")
+	}
 }
 
-var _ = errors.Is
-var _ = time.Now
+// TestAChannelNameCannotBeAWebhookSource closes the seam the demotion left open:
+// /api/inbound/<source> accepts any id matching the source pattern, so `dingtalk`
+// and `feishu` were still legal *webhook source names*. The HMAC still decided
+// whether such a delivery landed, but a configured endpoint named after a
+// demoted channel puts the old path back on the map and files rows whose name
+// says "a channel" — so the name is now refused, and a sources.json carrying one
+// is not loaded either. The path therefore stays the generic adapter's 404 and no
+// demoted adapter is consulted, even with the webhook service present.
+func TestAChannelNameCannotBeAWebhookSource(t *testing.T) {
+	dingtalk, feishu := &fakeChannelSender{}, &fakeFeishuSender{}
+	dir := t.TempDir()
+	// sources.json is plain product data: write one the way a hand edit would,
+	// with a reserved row next to a legitimate one.
+	document := `{"version":1,"sources":[` +
+		`{"id":"dingtalk","secret":"MDEyMzQ1Njc4OWFiY2RlZg=="},` +
+		`{"id":"github","secret":"MDEyMzQ1Njc4OWFiY2RlZg=="}]}`
+	if err := os.WriteFile(filepath.Join(dir, "sources.json"), []byte(document), 0o600); err != nil {
+		t.Fatalf("write sources.json: %v", err)
+	}
+	inboxService := inbox.NewService(inbox.Config{Now: time.Now, MaxPerMinute: 1000})
+	webhookService, err := webhook.Open(dir, inboxService, webhook.Config{Now: time.Now})
+	if err != nil {
+		t.Fatalf("webhook.Open: %v", err)
+	}
+
+	root := testRoot(t, newFakeChat())
+	if _, err := root.Provide(contracts.KeyDingTalk, contracts.DingTalkService(dingtalk)); err != nil {
+		t.Fatalf("provide dingtalk: %v", err)
+	}
+	if _, err := root.Provide(contracts.KeyFeishu, contracts.FeishuService(feishu)); err != nil {
+		t.Fatalf("provide feishu: %v", err)
+	}
+	if _, err := root.Provide(contracts.KeyWebhook, contracts.WebhookService(webhookService)); err != nil {
+		t.Fatalf("provide webhook: %v", err)
+	}
+	if _, err := root.Provide(contracts.KeyInbox, contracts.InboxService(inboxService)); err != nil {
+		t.Fatalf("provide inbox: %v", err)
+	}
+	gateway, err := New(root, Options{DataDir: t.TempDir(), Port: -1, Logger: testLogger{t: t}, Out: discardWriter{}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := gateway.Provide(root); err != nil {
+		t.Fatalf("Provide: %v", err)
+	}
+	gw := serveGateway(t, gateway)
+	defer gw.stop(t)
+
+	// The admin write path refuses the name outright (the UI shows this error).
+	if err := webhookService.UpsertSource(context.Background(), contracts.WebhookSource{
+		ID: "dingtalk", Secret: []byte("0123456789abcdef"),
+	}); !errors.Is(err, contracts.ErrWebhookInvalidSource) {
+		t.Fatalf("UpsertSource(dingtalk) err = %v, want ErrWebhookInvalidSource", err)
+	}
+
+	for _, path := range []string{"/api/inbound/dingtalk", "/api/inbound/feishu", "/api/inbound/wechat", "/api/inbound/email"} {
+		response := postInbound(t, gw.address, path, `{"msgtype":"text"}`, map[string]string{
+			"X-DingTalk-Signature":           "abc",
+			"X-Lark-Signature":               "abc",
+			contracts.WebhookSignatureHeader: "t=1,v1=aa",
+		})
+		// 404 is the webhook adapter's "unknown source": the reserved row was not
+		// loaded, so nothing answers under a channel's name.
+		if response.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want 404 (a channel name is not a webhook source)", path, response.StatusCode)
+		}
+	}
+	if dingtalk.sends != 0 || feishu.sends != 0 {
+		t.Fatal("an ingress request reached a demoted channel adapter")
+	}
+
+	// The generic source in the same file still answers, so the 404s above mean
+	// "unknown source", not "no webhook service": a bad signature is a 401.
+	response := postInbound(t, gw.address, "/api/inbound/github", `{"title":"x"}`, map[string]string{
+		contracts.WebhookSignatureHeader: "t=1,v1=aa",
+	})
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("github status = %d, want 401 (the source exists; only the signature is wrong)", response.StatusCode)
+	}
+}

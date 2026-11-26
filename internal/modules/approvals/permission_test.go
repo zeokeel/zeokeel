@@ -179,9 +179,19 @@ func TestPermissionWorkspaceAllowsPathTools(t *testing.T) {
 		t.Fatalf("Mode = %q, want workspace", mode)
 	}
 
-	// Tools that can leave the workspace still queue.
+	// The MCP family is exempt by product decision (2026-11-26, personal
+	// helper): calling it answers allow immediately, exactly like the workspace
+	// path tools.
+	for _, tool := range []string{"mcp__server__run", "mcp__zk-test-mcp__echo"} {
+		decision, err := svc.Request(context.Background(), contracts.ApprovalRequest{Tool: tool})
+		if err != nil || decision != contracts.ApprovalAllow {
+			t.Fatalf("%s decision = %q/%v, want allow without queueing", tool, decision, err)
+		}
+	}
+
+	// Tools that can still leave the workspace queue.
 	for _, tool := range []string{"bash", "terminal", "web_fetch", "web_search",
-		"mcp__server__run", "unknown_tool"} {
+		"unknown_tool"} {
 		results := startRequest(context.Background(), svc, contracts.ApprovalRequest{Tool: tool})
 		waitFor(t, tool+" pending", func() bool { return len(svc.Pending()) == 1 })
 		if got := notifications.Load(); got == 0 {

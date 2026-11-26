@@ -27,11 +27,21 @@ var workspaceAutoAllowedSample = []string{
 
 // workspaceMustAskTools are the tools the workspace policy must still ask for.
 // settings_get asks as well: its payload can expose stored credentials, so it
-// goes through the approval flow (the backend then redacts secrets).
+// goes through the approval flow (the backend then redacts secrets). The command
+// family (bash/pwsh) and the MCP family are NOT here since the 2026-11-26
+// permission model: they are exempt without an approval card (see
+// docs/APPROVAL-SURFACES.md §S4.1 and the gate tests).
 var workspaceMustAskTools = []string{
-	"bash", "pwsh", "web_fetch", "web_search", "settings_set", "settings_get",
-	"mcp__server__run", "unknown_tool",
+	"web_fetch", "web_search", "settings_set", "settings_get",
+	"unknown_tool",
 }
+
+// workspaceExemptFamilies are exempt without consulting the approvals backend
+// even though they are not members of the shared map: the MCP prefix family.
+// The command family (bash/pwsh) is exempt too, but only when the sandbox module
+// is assembled; this fixture has no sandbox service, so it is covered by
+// sandbox_gate_test.go instead (without the module the old approval flow stays).
+var workspaceExemptFamilies = []string{"mcp__server__run", "mcp__zk-test-mcp__mcp_echo_marker"}
 
 // TestSessionPermissionWorkspaceUsesSharedAutoAllowList covers the per-session
 // workspace override: every shared tool is allowed without consulting the
@@ -58,6 +68,11 @@ func TestSessionPermissionWorkspaceUsesSharedAutoAllowList(t *testing.T) {
 		t.Fatalf("shared auto-allow tools requested approval: %v", asked)
 	}
 
+	for _, tool := range workspaceExemptFamilies {
+		if got := gateDecision(t, svc, sessionID, tool); got != rig.DecisionAllow {
+			t.Fatalf("workspace gate %q = %v, want allow without an approval", tool, got)
+		}
+	}
 	for _, tool := range workspaceMustAskTools {
 		if got := gateDecision(t, svc, sessionID, tool); got != rig.DecisionDeny {
 			t.Fatalf("workspace gate %q = %v, want the approvals backend's deny", tool, got)

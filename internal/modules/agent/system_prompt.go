@@ -12,6 +12,11 @@ package agent
 //  3. one short guidance line per tool family the run actually receives,
 //     modeled on the DSH tool plugins (dsh-tool-fs, dsh-tool-fs-search,
 //     dsh-tool-bash/pwsh, dsh-tool-terminal, dsh-tool-jobs, dsh-tool-web).
+//  4. the external-CLI section: when the user pointed a cli.<id>.path row at a
+//     vendor CLI (DingTalk's dws, Feishu's lark-cli), the model is told its
+//     absolute path, how to explore its commands and where its skills are
+//     indexed. Same idea as DSH's dsh-dingtalk / dsh-feishu plugins: a plain
+//     shell command, not an MCP server and not an inbound channel.
 //
 // The prompt is rebuilt from live state on every run; nothing generated here is
 // persisted to settings or the session log (Rig adds the system prompt to each
@@ -133,7 +138,11 @@ func workingDirectoryLine(workspaceRoot, sandboxMode string) string {
 	case contracts.PermissionFull:
 		return fmt.Sprintf("Working directory: %s. File policy: full-access; the OS file sandbox is bypassed — file tools and shell commands are not confined to this directory.", root)
 	default:
-		return fmt.Sprintf("Working directory: %s. File policy: workspace-write; the file tools may modify files inside it only.", root)
+		// Reads are not fenced to the workspace (the read-only file tools run on
+		// their own wide-root policy); writes and shell file effects are. The
+		// sentence states both halves: telling the model only the write half
+		// makes it refuse to look at a file the user pointed it at.
+		return fmt.Sprintf("Working directory: %s. File policy: workspace-write; the file tools may read files anywhere on this machine, and may modify files inside the working directory only.", root)
 	}
 }
 
@@ -153,20 +162,147 @@ func normalizeApprovalMode(mode string) string {
 	}
 }
 
-// approvalPolicyLine maps the effective approval mode to the model-facing
-// runtime-context sentence (modeled on DSH's approval-policy context). The
-// workspace copy explicitly tells the model not to give up on an operation just
-// because a prompt may appear: the user can approve it, or choose "always allow
-// in this session".
-func approvalPolicyLine(mode string) string {
-	switch normalizeApprovalMode(mode) {
-	case contracts.PermissionFull:
-		return "Approval policy: full — no approval prompts are shown."
-	case contracts.PermissionReadOnly:
-		return "Approval policy: read-only — read-only and informational tools run without approval; file writes, shell, network, settings writes and other tools may ask for approval. Do not abandon a needed operation because of this policy; use a tool normally and follow the dialog guidance (the user may choose always-allow-in-this-session)."
-	default:
-		return "Approval policy: workspace — file tools and read-only/informational tools run without approval; shell, network, settings writes and other tools may ask for approval. Do not abandon a needed operation because of this policy; use a tool normally and follow the dialog guidance (the user may choose always-allow-in-this-session)."
+// approvalPolicyLine maps the effective permission tier to the model-facing
+// runtime-context sentence (modeled on DSH's approval-policy context).
+//
+// The tier, not the approval mode, is the input (permission_policy.go): the
+// sentence used to be derived from the mode alone, so a session-level read-only
+// override — which refuses shell commands and every MCP tool outright, with no
+// dialog — was still described as "MCP tools and shell commands run without
+// approval". The model followed the sentence and was denied on every attempt
+// (2026-11-26 audit, 高).
+//
+// A GLOBAL preset (no override) is rendered from the same claim table — every
+// branch of it, not one string per preset. The three hand-written global
+// sentences were the audit's third fork: they read only the preset, so a product
+// with no approvals service, a headless deny-all assembly, or a sandbox module
+// without a command policy got a sentence promising exactly the exemptions the
+// gate refuses (2026-11-26 audit, 高). One claim table, one sentence.
+//
+// It never says "sandboxed shell commands": since 2026-11-26 commands are exempt
+// from approval whether or not the host can confine them, so that phrase would be
+// a lie on a host without an OS runner. The host-specific disclosure is appended
+// by unconfinedCommandsLine (see buildRunSystemPromptSections), which is the only
+// place that knows whether a runner exists.
+func approvalPolicyLine(policy approvalPolicy) string {
+	p := policy.normalized()
+	if p.SessionOverride != "" {
+		return overrideApprovalPolicyLine(p)
 	}
+	claims := approvalPolicyClaims(p)
+	label := "Approval policy: " + p.Mode + " — "
+	if len(familiesWith(claims, dispositionAllowed)) == len(claims) {
+		// Every family is exempt, so there is nothing to prompt about: the
+		// long-standing short form (the full preset with an approvals service and
+		// no deny-all policy). Any tier where the gate would refuse or ask falls
+		// through to the claim sentence instead of claiming this.
+		return label + "no approval prompts are shown."
+	}
+	sentence := label + claimSentence(claims) + "."
+	if len(familiesWith(claims, dispositionAsks)) > 0 {
+		sentence += " Do not abandon a needed operation because of this policy; use a tool normally and follow the dialog guidance (the user may choose always-allow-in-this-session)."
+	}
+	if len(familiesWith(claims, dispositionRefused)) > 0 {
+		// Same distinction the override sentence draws: a refusal is not a
+		// dialog, so "try it and see" costs a round trip and teaches nothing.
+		sentence += " A refusal is not a prompt: the tool is not offered for approval, so do not retry it or route around it — say what was blocked and continue with what you can do."
+	}
+	switch {
+	case p.DenyAll:
+		// Without the reason, "every family refused" reads like a bug.
+		sentence += " The assembly's approval policy is deny-all (never), which is why nothing is offered for approval."
+	case !p.ApprovalsAvailable:
+		// The fail-closed branch of the gate, in the model's own words.
+		sentence += " This product has no approvals service, so a call that would need approval is refused instead of asked about."
+	}
+	return sentence
+}
+
+// overrideApprovalPolicyLine describes a session-level permission override. It is
+// rendered from approvalPolicyClaims, so the families it calls "refused" are the
+// families policyClaim (and therefore the gate) refuses.
+//
+// The label stays the effective tier ("read-only", "workspace", "full") and the
+// override is named in the body: a client grepping for the tier keeps working,
+// and the sentence a reader compares with APPROVAL-SURFACES §S4.1 still matches
+// the documented preset names.
+func overrideApprovalPolicyLine(policy approvalPolicy) string {
+	p := policy.normalized()
+	claims := approvalPolicyClaims(p)
+	if p.SessionOverride == contracts.PermissionFull {
+		return "Approval policy: full — no approval prompts are shown. This conversation's permission override is full, so the usual network and settings prompts are gone too."
+	}
+	sentence := "Approval policy: " + p.SessionOverride + " — " + claimSentence(claims) + ". This conversation is under a " + p.SessionOverride + " permission override."
+	if len(familiesWith(claims, dispositionRefused)) > 0 {
+		// The half the audit was about: a refused family does not surface a card,
+		// so "try it and see" costs a round trip and teaches nothing.
+		sentence += " A refusal is not a prompt: the tool is not offered for approval, so do not retry it or route around it — say what was blocked and continue with what you can do (the user can lift the override for this conversation)."
+	} else if len(familiesWith(claims, dispositionAsks)) > 0 {
+		sentence += " Do not abandon a needed operation because of this policy; use a tool normally and follow the dialog guidance (the user may choose always-allow-in-this-session)."
+	}
+	if p.SessionOverride == contracts.PermissionWorkspace {
+		// Name what the override does NOT do: a workspace override only adds the
+		// workspace auto-allowed set. Commands and MCP tools were already exempt
+		// (sandbox / prefix family), so reading this as "now commands are limited
+		// too" or "now commands ask" would both be wrong.
+		sentence += " The override does not widen or narrow the command and MCP families: they are exempt through the sandbox module and the MCP prefix family, not through this override."
+	}
+	return sentence
+}
+
+// claimSentence renders the claim table as one clause: "<allowed> run without
+// approval; <refused> are refused outright (no approval prompt is offered);
+// <asks> may ask for approval".
+func claimSentence(claims []permissionClaim) string {
+	parts := make([]string, 0, 3)
+	if allowed := familiesWith(claims, dispositionAllowed); len(allowed) > 0 {
+		parts = append(parts, joinFamilies(allowed)+" run without approval")
+	}
+	if refused := familiesWith(claims, dispositionRefused); len(refused) > 0 {
+		parts = append(parts, joinFamilies(refused)+" are refused outright (no approval prompt is offered)")
+	}
+	if asks := familiesWith(claims, dispositionAsks); len(asks) > 0 {
+		parts = append(parts, joinFamilies(asks)+" may ask for approval")
+	}
+	return strings.Join(parts, "; ")
+}
+
+// joinFamilies renders a family list as "a, b and c".
+func joinFamilies(families []string) string {
+	switch len(families) {
+	case 0:
+		return ""
+	case 1:
+		return families[0]
+	case 2:
+		return families[0] + " and " + families[1]
+	}
+	return strings.Join(families[:len(families)-1], ", ") + " and " + families[len(families)-1]
+}
+
+// unconfinedCommandsLine is the honest half of the command exemption: when this
+// host has no OS sandbox runner, a shell command that never asked for approval
+// also has no OS-level fence, so the workspace write rule is the model's own
+// instruction rather than an enforced boundary. It returns "" when commands ARE
+// confined (or when no sandbox module is assembled, where the approval flow still
+// applies and "unconfined" would be the wrong word).
+func unconfinedCommandsLine(policy approvalPolicy) string {
+	p := policy.normalized()
+	if p.Confinement != contracts.SandboxConfinementNone {
+		return ""
+	}
+	// A tier that refuses the command family has no fence to disclose: the
+	// command does not run at all (session read-only override), which is a
+	// stronger statement than "it runs unconfined".
+	if policyClaim(p, claimToolShell) != dispositionAllowed {
+		return ""
+	}
+	if p.Mode == contracts.PermissionFull || p.SessionOverride == contracts.PermissionFull {
+		// Full access already states that nothing is confined; a second sentence
+		// would only repeat it.
+		return ""
+	}
+	return "OS confinement: none — this host has no OS sandbox runner, so shell commands run with the process's own permissions and the working-directory write rule is a rule you must follow, not a boundary the OS enforces. Check the path before writing outside the working directory, and use sandbox_status to see the fence the tools are actually under."
 }
 
 // toolGuidanceLines renders one short line per tool family the run receives, in
@@ -358,6 +494,11 @@ const (
 	PromptSectionMemory           = "memory"
 	PromptSectionSkills           = "skills"
 	PromptSectionToolGuidance     = "tool-guidance"
+	// PromptSectionCLILink is the external-CLI section (DingTalk's dws, Feishu's
+	// lark-cli): which one is configured, its ABSOLUTE path, how to explore its
+	// commands and where its skill bundle is indexed. Empty unless the user
+	// pointed a cli.<id>.path row at an executable.
+	PromptSectionCLILink = "cli-link"
 )
 
 // newPromptSection builds one measured prompt section (empty sections are the
@@ -380,9 +521,10 @@ func newPromptSection(id, source, text string) contracts.PromptSection {
 // configuration sections (base system prompt, AGENTS.md, preset, memory, skill
 // catalog); the runtime sections (identity/environment/policy/mode/tool
 // guidance) are prepended/appended here. sandboxMode is the effective OS file
-// policy (global preset); approvalMode is the gate's policy (session override
-// wins) — the two axes are independent (audit (a)/(b)).
-func promptSectionsForRun(goos, goarch, workspaceRoot, sandboxMode, approvalMode, mode string, now time.Time,
+// policy (global preset); policy is the whole permission tier the gate applies
+// (global preset + session override + approvals availability + the host's
+// confinement) — the two axes are independent (audit (a)/(b)).
+func promptSectionsForRun(goos, goarch, workspaceRoot, sandboxMode string, policy approvalPolicy, mode string, now time.Time,
 	configured []contracts.PromptSection, toolNames map[string]bool) []contracts.PromptSection {
 	shellSentence := shellEnvironmentSentence(goos)
 	if toolNames != nil {
@@ -401,8 +543,14 @@ func promptSectionsForRun(goos, goarch, workspaceRoot, sandboxMode, approvalMode
 		sections = append(sections, newPromptSection(PromptSectionDate, "builtin",
 			fmt.Sprintf("Today's date is %s (%s).", now.Format("2006-01-02"), now.Weekday())))
 	}
+	approvalText := approvalPolicyLine(policy)
+	// The command exemption's other half: when this host cannot confine
+	// commands, the policy section says so instead of implying a sandbox.
+	if unconfined := unconfinedCommandsLine(policy); unconfined != "" {
+		approvalText += "\n" + unconfined
+	}
 	sections = append(sections,
-		newPromptSection(PromptSectionApproval, "policy", approvalPolicyLine(approvalMode)))
+		newPromptSection(PromptSectionApproval, "policy", approvalText))
 	if modeLine := modePolicyLine(mode, toolNames); modeLine != "" {
 		sections = append(sections, newPromptSection(PromptSectionMode, "policy", modeLine))
 	}
@@ -460,8 +608,9 @@ func renderPromptSections(sections []contracts.PromptSection) string {
 // toolNames is the exact model-visible tool surface of the run; sandboxMode is
 // the effective OS file policy and approvalMode the gate's policy.
 func systemPromptForRun(goos, goarch, workspaceRoot, sandboxMode, approvalMode, mode, configuredPrompt string, toolNames map[string]bool) string {
-	return renderPromptSections(promptSectionsForRun(goos, goarch, workspaceRoot, sandboxMode, approvalMode, mode, time.Time{},
-		configuredPromptSections(configuredPrompt), toolNames))
+	return renderPromptSections(promptSectionsForRun(goos, goarch, workspaceRoot, sandboxMode,
+		approvalPolicy{Mode: approvalMode, ApprovalsAvailable: true, SandboxAssembled: true},
+		mode, time.Time{}, configuredPromptSections(configuredPrompt), toolNames))
 }
 
 // toolNameSet is the set of model-visible tool names a run receives; excluded
@@ -509,20 +658,40 @@ func (s *service) workspaceRoot(ctx context.Context) string {
 	return strings.TrimSpace(workspace.Root)
 }
 
-// effectiveApprovalMode resolves the approval policy the model should be told
-// about: the per-session override wins, then the approvals service's policy
-// (normalized to read-only/workspace/full). A service without an approvals
-// backend cannot answer a prompt, and the gate now fails closed for tools that
-// would need one, so the prompt reports the conservative workspace policy
-// instead of claiming "no approval prompts" while denying them.
+// effectiveApprovalPolicy resolves the whole permission tier the model should be
+// told about — the same inputs the gate reads, not just the approval mode.
+//
+// globalApprovalMode is the approvals service's preset. A service without an
+// approvals backend cannot answer a prompt, and the gate fails closed for tools
+// that would need one, so the global tier reports the conservative workspace
+// preset instead of claiming "no approval prompts" while denying them; the
+// session override is passed through untouched because it is what decides
+// whether the families are refused.
+func (s *service) effectiveApprovalPolicy(sessionID string) approvalPolicy {
+	return approvalPolicy{
+		Mode:               s.globalApprovalMode(),
+		SessionOverride:    strings.TrimSpace(s.sessionPermission(sessionID)),
+		ApprovalsAvailable: s.approvals != nil,
+		DenyAll:            s.denyAllApprovalPolicy(),
+		SandboxAssembled:   s.sandboxService != nil,
+		// The command exemption needs the policy too (shellCommandExempt asks it
+		// to judge the call, sandbox.go), so the tier carries whether THIS run's
+		// root has one — otherwise the sentence called the command family exempt
+		// while the gate asked the user (2026-11-26 audit, 高: the third fork).
+		CommandPolicyAvailable: s.commandPolicy(s.sessionWorkspaceRoot(sessionID)) != nil,
+		Confinement:            s.commandConfinement(),
+	}
+}
+
+// effectiveApprovalMode is the single-tier projection of effectiveApprovalPolicy
+// (the session override wins when present). Kept for callers that only need the
+// mode; the prompt uses the full policy.
 func (s *service) effectiveApprovalMode(sessionID string) string {
-	if override := strings.TrimSpace(s.sessionPermission(sessionID)); override != "" {
-		return normalizeApprovalMode(override)
+	policy := s.effectiveApprovalPolicy(sessionID).normalized()
+	if policy.SessionOverride != "" {
+		return policy.SessionOverride
 	}
-	if s.approvals == nil {
-		return contracts.PermissionWorkspace
-	}
-	return normalizeApprovalMode(s.approvals.Mode())
+	return policy.Mode
 }
 
 // clockNow is the prompt clock (the date line): tests freeze it.
@@ -578,13 +747,85 @@ func (s *service) buildRunSystemPromptSections(ctx context.Context, sessionID st
 		// source the toolkit's root-scoped build reads); the session approval
 		// override below never changes the OS wall (audit (a)/(b) disclosure).
 		s.effectiveSandboxMode(),
-		s.effectiveApprovalMode(sessionID),
+		// The whole tier, not just the approval mode: OS confinement is a host
+		// fact and the session override is a hard restriction, so both belong to
+		// the policy the sentence is rendered from (2026-11-26 audit, 高).
+		s.effectiveApprovalPolicy(sessionID),
 		s.runtimeMode(),
 		s.clockNow(),
 		configured,
 		toolNames,
 	)
+	// The external-CLI section comes last, beside the per-tool guidance it
+	// extends: it is a "here is a shell command you may run" hint, not policy.
+	if linkSection := s.cliLinkSection(toolNames); linkSection != "" {
+		sections = append(sections, newPromptSection(PromptSectionCLILink, "settings", linkSection))
+	}
 	return renderPromptSections(sections), sections
+}
+
+// cliLinkSection renders the external-CLI runtime context: the absolute path of
+// each configured vendor CLI, how to explore its command surface, and where its
+// skill bundle is indexed (contracts/clilink.go owns the wording).
+//
+// It reads the cli.<id>.path settings rows ONLY and never looks at PATH. That is
+// deliberate on two counts: the line must give an absolute path rather than tell
+// the model to trust whatever PATH the process inherited (a service started from
+// a desktop shell routinely lacks the user's nvm/npm bin directory), and the
+// rendered prompt must not change because a developer's machine happens to have
+// dws on PATH — the prompt bytes are compared in tests and describe the user's
+// configuration, not the host's environment.
+//
+// A run WITHOUT a shell tool is still told about a configured CLI — see
+// cliDelegateSection. Silence there was a defect, not a saving: an orchestration
+// session (the lead: tools, no bash) could not run the CLI, was told nothing
+// about it, and therefore answered "the DingTalk CLI is not set up" about a
+// machine where the settings page showed it configured. The reduced section
+// keeps the fact and replaces the shell commands with the one action the run can
+// actually take: delegate to a subagent that has a shell tool.
+func (s *service) cliLinkSection(toolNames map[string]bool) string {
+	if s == nil || s.settings == nil {
+		return ""
+	}
+	statuses := contracts.ConfiguredCLITools(s.settings, s.dataDir, contracts.CLILinkOptions{})
+	if toolNames != nil && !toolNames["bash"] && !toolNames["pwsh"] {
+		return cliDelegateSection(statuses)
+	}
+	return contracts.CLILinkContextSection(statuses)
+}
+
+// cliDelegateSection renders the shell-less variant of the external-CLI
+// section: which CLIs are configured (absolute path, as facts) plus the
+// instruction to delegate, because this run has no tool that could execute one.
+//
+// It is deliberately built here rather than in contracts/clilink.go: the full
+// section's wording is "run this with the shell tool", and a caller-specific
+// instruction is what differs. Only the ready/broken states are named — a CLI
+// nobody configured produces no line (and no section at all), so a product that
+// links no CLI keeps a byte-identical prompt.
+func cliDelegateSection(statuses []contracts.CLIToolStatus) string {
+	lines := make([]string, 0, len(statuses))
+	for _, status := range statuses {
+		switch {
+		case status.Found():
+			line := "- " + status.Title + " CLI (" + status.Binary + ") is configured at " + status.Path
+			if status.Version != "" {
+				line += ", " + status.Version
+			}
+			lines = append(lines, line+".")
+		case strings.TrimSpace(status.ConfiguredPath) != "":
+			lines = append(lines, "- "+status.Title+" CLI ("+status.Binary+") is configured at "+
+				status.ConfiguredPath+", which is not there (the user needs to install or fix it).")
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	notice := "This run has no shell tool, so you cannot run these CLIs yourself. Do not " +
+		"tell the user the CLI is missing or unconfigured: it is configured here. When a " +
+		"task needs one of them, delegate that task to a subagent that has a shell tool " +
+		"(subagent/subagent_fork) and let it run the CLI."
+	return "## External CLIs\n" + notice + "\n" + strings.Join(lines, "\n")
 }
 
 // --- bounded memory / skill context ----------------------------------------

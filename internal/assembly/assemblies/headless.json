@@ -78,6 +78,11 @@
       "config": {}
     },
     {
+      "id": "clilink",
+      "module": "zeokeel/clilink",
+      "config": {}
+    },
+    {
       "id": "notifyroute",
       "module": "zeokeel/notifyroute",
       "config": {}

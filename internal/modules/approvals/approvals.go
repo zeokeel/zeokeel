@@ -267,16 +267,27 @@ func (s *service) Request(ctx context.Context, request contracts.ApprovalRequest
 		return contracts.ApprovalDeny, nil
 	case ModeReadOnly:
 		// Only the read-only/informational subset of the shared list is
-		// auto-allowed; workspace writes, shell, network, MCP, settings writes
-		// and unknown tools queue below.
+		// auto-allowed here; workspace writes, network, settings writes and
+		// unknown tools queue below.
+		//
+		// Shell and MCP do not reach this service at all any more: the agent gate
+		// (internal/modules/agent/plan_mode.go) exempts both families before it
+		// calls Request (personal-helper permission model, 2026-11-26), so a
+		// Request for them would only happen from a stripped assembly. Keep the
+		// list checks below them unchanged — they are the honest answer if one
+		// ever arrives.
 		if contracts.ReadOnlyAutoAllowed(request.Tool) {
 			return contracts.ApprovalAllow, nil
 		}
 	case ModeWorkspace:
 		// One frozen list is shared with the agent gate
 		// (contracts.WorkspaceAutoAllowedTools): the workspace file tools plus
-		// read-only/informational tools. Shell, network, MCP, settings writes and
-		// unknown tools still queue below.
+		// read-only/informational tools. Network and settings writes (and unknown
+		// tools) still queue below.
+		//
+		// Shell and MCP are exempt in the gate before this call: they never enter
+		// the queue in the shipping products, so their absence from the lists
+		// above is not a gap in this table.
 		if contracts.WorkspaceAutoAllowed(request.Tool) {
 			return contracts.ApprovalAllow, nil
 		}

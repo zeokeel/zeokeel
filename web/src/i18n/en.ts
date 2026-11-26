@@ -377,6 +377,15 @@ export const en: Catalog = {
   'task.detail.budget.none': 'This task has no budget limit.',
   'task.detail.budget.exhausted': 'The task has stopped; more budget is needed before it can continue',
   'task.detail.budget.loadFailed': 'Could not load the budget',
+  'task.detail.budget.adjust': 'Adjust limit',
+  'task.detail.budget.maxTokens': 'Token limit',
+  'task.detail.budget.maxMinutes': 'Time limit (minutes)',
+  'task.detail.budget.zeroMeansUnlimited': '0 means no limit; the ceiling counts the usage already reported.',
+  'task.detail.budget.invalid': 'A limit must be a whole number, 0 or more',
+  'task.detail.budget.save': 'Save',
+  'task.detail.budget.confirmTitle': 'Change the ceiling?',
+  'task.detail.budget.confirmAdjust': 'Confirm change',
+  'task.detail.budget.saveFailed': 'Could not change the ceiling',
   // Message waiting to be sent (approval=before_send). The block shows the exact
   // words that would go out, so this copy never summarises them; the confirm says
   // plainly that approving sends them, because there is no undo.
@@ -397,6 +406,15 @@ export const en: Catalog = {
   'task.detail.progress.accepted': 'You accepted it',
   'task.detail.progress.rejected': 'You sent it back',
   'task.detail.progress.evidenceCount': '{count} pieces of evidence',
+  // Verdicts come from the durable review log (tasks.reviews), not the lease:
+  // the decision deletes the lease it describes.
+  'task.detail.progress.acceptedBy': '{reviewer} accepted it',
+  'task.detail.progress.rejectedBy': '{reviewer} sent it back',
+  'task.detail.progress.directClose': 'Closed directly (no review)',
+  'task.detail.reviews.failed': 'Could not load the audit trail',
+  'task.detail.role.lead': 'the lead',
+  'task.detail.role.executor': 'the executor',
+  'task.detail.role.auditor': 'the auditor',
   'task.detail.evidence.empty': 'No evidence yet',
   'task.detail.evidence.failed': 'Could not load the evidence',
   'task.detail.artifacts.empty': 'No artifacts yet',
@@ -605,7 +623,7 @@ export const en: Catalog = {
   'settings.ia.help.mcpJson': 'JSON array: {name, transport, command|url}.',
   'settings.ia.help.workspaceOverrides': 'JSON: per-workspace overrides.',
   'settings.ia.help.modelCatalog': 'JSON: model ids and display names. Empty uses the built-in catalog.',
-  'settings.ia.help.presets': 'JSON: preset list. Empty uses the built-in presets.',
+  'settings.ia.help.presets': 'JSON: preset list. Empty uses the built-in presets. When a row overrides a built-in role (lead/executor/auditor) under the same id, omitting tools keeps the built-in allowlist and an explicit "tools": [] clears it (an empty allowlist grants every tool).',
   'settings.ia.mcpServers': 'MCP servers',
   'settings.ia.onNewMessage': 'When a new message arrives',
   'settings.ia.theme': 'Theme',
@@ -645,6 +663,11 @@ export const en: Catalog = {
   'settings.ia.skillCatalog': 'Skill catalog',
   'settings.ia.search': 'Search',
   'settings.ia.searchEndpoint': 'Search endpoint',
+  'settings.ia.externalCli': 'External CLI',
+  'settings.ia.cliDingtalkPath': 'DingTalk CLI path (dws)',
+  'settings.ia.cliFeishuPath': 'Feishu CLI path (lark-cli)',
+  'settings.ia.help.cliPath':
+    'Only sessions and subagents that can run commands can use this. An orchestration session (the lead) has no shell tool, so instead of ignoring the CLI it delegates work that needs external data to a subagent that has one. Use an absolute path: a process started from the desktop shell often cannot see a nvm/npm PATH.',
   'settings.ia.collapseWhen': 'Collapse when',
   'settings.ia.group.data': 'Data',
   'settings.ia.dataAndPrivacy': 'Data and privacy',
@@ -753,6 +776,8 @@ export const en: Catalog = {
   'composer.queue.remove': 'Remove',
   'composer.queue.interject': 'Interject',
   'composer.usage': '{turns} turns {steps} steps · {tokens} tok · cache {cached}% · context {context}%',
+  'session.preset.problem.title': 'This conversation\'s role "{presetId}" cannot be resolved',
+  'session.preset.problem.help': 'Tool calls will be refused: pick a role that exists, or clear this session\'s preset row (session.<id>.preset).',
   'task.summary': '{completed} done · {inProgress} running · {pending} pending',
   'settings.model.defaultLabel': 'Default model',
   'settings.model.defaultUnset': 'Not set: add a model to the catalogue first',
@@ -854,7 +879,7 @@ export const en: Catalog = {
   'channels.credentials.delete': 'Delete',
   'channels.credentials.deleteConfirm': 'Delete the {kind} credential “{id}”?',
   'channels.field.token': 'Token',
-  'channels.field.signSecret': 'Sign secret',
+  'channels.field.robotCode': 'Robot code',
   'channels.field.appId': 'App ID',
   'channels.field.appSecret': 'App secret',
   'channels.field.username': 'Mailbox',
@@ -907,6 +932,24 @@ export const en: Catalog = {
   'health.note':
     'Heartbeat and browser are read-only here; this page does not poll — read it again when you need to.',
   'health.retry': 'Retry',
+  // Sandbox: the one row about a boundary rather than a moving part. Commands
+  // never ask for approval here, so this is where "is anything actually fencing
+  // them?" is answered.
+  'health.sandbox.title': 'Shell confinement',
+  'health.sandbox.note':
+    'Commands never ask for approval; this row says whether the OS sandbox confines what they can write.',
+  'health.sandbox.confined': 'OS-confined',
+  'health.sandbox.unconfined': 'No OS confinement',
+  'health.sandbox.unknown': 'No sandbox module',
+  'health.sandbox.unconfinedTitle': 'Shell commands run without OS confinement',
+  'health.sandbox.unconfinedBody':
+    'Commands run with this process\'s own permissions. The working-directory rule is an instruction the model follows, not a boundary the OS enforces.',
+  'health.sandbox.scope': 'What the fence covers',
+  'health.sandbox.scopeConfined':
+    'Commands run inside the OS sandbox; writes are limited to the working directory and private temporary directories.',
+  'health.sandbox.scopeUnconfined':
+    'No OS fence: any path the process can write is writable, including files outside the working directory.',
+  'health.sandbox.reason': 'Why',
   'health.loadFailed': 'Could not load the run status',
   'health.tickFailed': 'The manual pass failed',
   'health.refresh': 'Refresh',

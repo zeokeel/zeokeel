@@ -8,6 +8,7 @@ package lead
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/lib/leadplan"
@@ -56,6 +57,12 @@ func (p ModelPlanner) Plan(ctx context.Context, item contracts.InboxItem) (contr
 			Note:   decision.Note,
 			Task: &contracts.NewTask{
 				Subject: decision.Subject, Detail: decision.Detail, Assignee: decision.Assignee,
+				// The teammate envelope: the model was told "assignee: a teammate
+				// name taken from the rules", so the rules ARE the set a real
+				// assignee can come from. Declaring it lets triage refuse a name the
+				// model invented instead of writing it to the board as an owner
+				// (2026-11-26 audit, 中高: the assignee was never validated).
+				KnownAssignees: ruleAssignees(rules),
 			},
 		}, true, nil
 	case contracts.LeadActionIgnore:
@@ -63,6 +70,22 @@ func (p ModelPlanner) Plan(ctx context.Context, item contracts.InboxItem) (contr
 	default:
 		return contracts.TriageDecision{}, false, nil
 	}
+}
+
+// ruleAssignees lists the teammate names the current rules name — the set the
+// model may assign to, and the envelope triage enforces.
+func ruleAssignees(rules []contracts.LeadRule) []string {
+	seen := make(map[string]bool, len(rules))
+	out := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		name := strings.TrimSpace(rule.Assignee)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
 }
 
 var _ Planner = ModelPlanner{}

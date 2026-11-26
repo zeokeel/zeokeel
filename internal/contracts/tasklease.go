@@ -133,6 +133,15 @@ type TaskLeaseService interface {
 	Consume(ctx context.Context, taskID string, tokens int) (TaskBudget, error)
 }
 
+// TaskReviewLog is the optional half of the lease service that reports the
+// recorded review decisions of a task, oldest first. It is a separate interface
+// on purpose: reading the audit trail is a reporting capability, and a product
+// that cannot report it still runs the full claim/review flow (the gateway
+// answers the read as unavailable instead of pretending there are no reviews).
+type TaskReviewLog interface {
+	Reviews(ctx context.Context, taskID string) ([]TaskReview, error)
+}
+
 // Lease errors are typed so the UI can say "someone else has it" instead of a
 // generic failure.
 var (
@@ -153,7 +162,83 @@ var (
 	// ErrTaskToolsUnknownTask means tools were bound to a task that is not on
 	// the board (a dispatch bug, never a future task).
 	ErrTaskToolsUnknownTask = errors.New("lease: unknown task for tool binding")
+	// ErrLeaseReviewerIsOwner means the review came from the identity that
+	// executed the task. In a single-user product the "reviewer ≠ executor"
+	// rule cannot mean two natural persons; it means the *audit role* is not
+	// the *execution role* (contracts.PresetAuditorID vs PresetExecutorID). The
+	// lease owner is the executing identity, so reviewing your own work is
+	// refused instead of being recorded as an audit.
+	ErrLeaseReviewerIsOwner = errors.New("lease: reviewer is the executor")
 )
+
+// TaskReview is one recorded review decision (accept or reject). It outlives
+// the lease: Accept/Reject drop the lease from the live table (the board keeps
+// the outcome), and the historical write used to disappear with it — the
+// rejection reason a teammate needs was gone the moment it was written. The
+// review log is stored in the same document as the leases and is additive
+// (older builds ignore the key), the same way TaskStartRejection is.
+//
+// Role is the reviewer's role (a preset id such as "lead" or "auditor", or ""
+// when the reviewer is not role-shaped, e.g. the user's own name). Verdict is
+// the machine-readable outcome — "pass" / "fail" — so an auditor can be checked
+// independently of the free-form Findings text.
+type TaskReview struct {
+	TaskID string
+	// Reviewer is who decided (an identity: the user, the lead, an auditor).
+	Reviewer string
+	// Role is the reviewer's role, when the identity has one.
+	Role string
+	// Decision is the review verb: "accept" or "reject".
+	Decision string
+	// Verdict is "pass" for an accept, "fail" for a reject, and "unaudited" for a
+	// direct close that skipped the review (TaskReviewDirectClose).
+	Verdict string
+	// Findings is the note the reviewer gave (empty on an accept without one).
+	Findings string
+	// At is when the decision was recorded.
+	At time.Time
+}
+
+// Review decisions and verdicts (TaskReview.Decision / TaskReview.Verdict).
+const (
+	TaskReviewAccept = "accept"
+	TaskReviewReject = "reject"
+	// TaskReviewDirectClose is the decision recorded when a task entered a
+	// terminal state WITHOUT a lease review: `task.status` (the UI's
+	// complete/stop chip) and `team_task_update` can move a task to completed
+	// directly, and before this they left no audit row at all — so
+	// "reviewer ≠ owner, every task leaves a record" could be bypassed by the
+	// very button the UI offers (2026-11-26 audit, 高).
+	//
+	// The close is not refused (that would break the client): it is recorded as
+	// what it is — a human/agent decision that skipped the review — and the UI
+	// renders it as such.
+	TaskReviewDirectClose = "direct_close"
+	TaskVerdictPass       = "pass"
+	TaskVerdictFail       = "fail"
+	// TaskVerdictUnaudited marks a close nobody reviewed. It is deliberately not
+	// "pass": a verdict is the machine-readable half of a review, and claiming a
+	// pass for a task no reviewer looked at is exactly the dishonesty this row
+	// exists to prevent.
+	TaskVerdictUnaudited = "unaudited"
+)
+
+// TaskCloseAuditor is the write half of the "no unaudited terminal state" rule:
+// every path that can move a task into completed records itself here.
+type TaskCloseAuditor interface {
+	// RecordDirectClose appends one unaudited-close row for taskID. actor is who
+	// closed it (the user for the UI's chip, the agent for the model's tool) and
+	// source names the entry point ("tasks.status", "team_task_update").
+	RecordDirectClose(ctx context.Context, taskID, actor, source string) error
+}
+
+// TaskCloseObserverSetter is implemented by the task board so the lease module
+// can install its auditor at activation. It is a setter rather than a required
+// dependency because the board (toolkit) must not depend on the lease module:
+// the lease requires the board, so the direction is one-way.
+type TaskCloseObserverSetter interface {
+	SetTaskCloseObserver(observer TaskCloseAuditor)
+}
 
 // DefaultLeaseTTL is the default claim lifetime; heartbeats extend it.
 const DefaultLeaseTTL = 10 * time.Minute

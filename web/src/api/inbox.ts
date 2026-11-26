@@ -1,9 +1,12 @@
 /**
  * The inbound work inbox (`inbox.*`, docs/TRANSPORT.md §5.1.13).
  *
- * Every channel (WeChat, DingTalk, Feishu, email, webhooks, cron, a teammate's
- * proposal) lands in the gateway's inbox first, and only the Lead turns an item
- * into work. This module is the client's only reader/writer of that queue.
+ * Every inbound event lands in the gateway's inbox first, and only the Lead turns
+ * an item into work. Three adapters can file one: WeChat (single chat), signed
+ * webhooks, and email (latent — the product ships no IMAP client). DingTalk and
+ * Feishu are outbound notification targets only and never appear here
+ * (docs/research/channel-capabilities.md §6). This module is the client's only
+ * reader/writer of that queue.
  *
  * It is a **request/response** surface, not a pushed domain: there is no
  * `inbox.snapshot`/`inbox.delta` stream, so the screen reads once and re-reads
@@ -44,7 +47,11 @@ export const ALL_INBOX_STATUSES: readonly string[] = INBOX_STATUSES;
 export interface InboxItem {
   /** Gateway-assigned identity, stable across merges of the same event. */
   id: string;
-  /** Channel family: wechat, dingtalk, feishu, email, webhook, cron, teammate. */
+  /**
+   * Channel family that filed the row: `wechat` or `webhook` today, plus `email`
+   * once a host injects an IMAP client. DingTalk/Feishu never appear — they are
+   * outbound only (docs/research/channel-capabilities.md §6).
+   */
   source: string;
   /** Platform-side conversation identity (chat id, thread, repo, mailbox). */
   channel?: string;
@@ -102,12 +109,43 @@ export interface DispatchInboxInput {
   assignee?: string;
 }
 
+/**
+ * What the gateway's wake-up connector did with a dispatched task
+ * (`inbox.dispatch`'s `dispatch`, contracts.TriageDispatch).
+ *
+ * It is present exactly when a run was expected — the task was assigned to a role
+ * that starts one — and its three shapes are not interchangeable:
+ *
+ *   - `sessionId` + `presetId`: a run started, in that chat session, as that role;
+ *   - `skipped`: a policy decision (no budget headroom, the concurrency ceiling,
+ *     an assignee nobody can act as). The task exists; nobody is working on it;
+ *   - `error`: a run was expected and starting it failed.
+ *
+ * The reason travels because the client must be able to say it. A dispatch that
+ * only refreshes the list turns "the task has an owner" into progress, which is
+ * the state this field exists to expose (docs/TRANSPORT.md §5.1.13).
+ */
+export interface DispatchOutcome {
+  /** The task the record is about. */
+  taskId: string;
+  /** The chat session the run started in ("" when it did not start). */
+  sessionId?: string;
+  /** The role the session runs as (the lead role). */
+  presetId?: string;
+  /** Why a run that was expected did not start. */
+  error?: string;
+  /** Why no run was started on purpose (a policy decision, not a failure). */
+  skipped?: string;
+}
+
 export interface DispatchInboxResult {
   taskIds: string[];
   /** False when the subject matched an open task and the item was appended. */
   created: boolean;
   /** The item after triage. Absent only if the gateway omitted it. */
   item?: InboxItem;
+  /** The wake-up outcome. Absent when no run was expected (any other assignee). */
+  dispatch?: DispatchOutcome;
 }
 
 /** `inbox.triage`'s vocabulary (contracts.InboxAction*). */
@@ -161,11 +199,15 @@ export async function dispatchInboxItem(input: DispatchInboxInput): Promise<Disp
     taskIds?: string[];
     created?: boolean;
     item?: InboxItem;
+    dispatch?: DispatchOutcome;
   }>('inbox.dispatch', params);
   return {
     taskIds: result.taskIds ?? [],
     created: result.created ?? false,
     ...(result.item ? { item: result.item } : {}),
+    // Passed through untouched: the screen decides how to say a skipped or failed
+    // wake-up, and it cannot say what it never received.
+    ...(result.dispatch ? { dispatch: result.dispatch } : {}),
   };
 }
 

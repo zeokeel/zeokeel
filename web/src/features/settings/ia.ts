@@ -356,6 +356,23 @@ export const SETTINGS_PAGES: SettingsPage[] = [
         titleKey: 'settings.ia.search',
         fields: [text(K.webSearchEndpoint, 'settings.ia.searchEndpoint'), secret(K.webSearchAPIKey, 'settings.ia.apiKey')],
       },
+      {
+        // DingTalk and Feishu are tools, not channels: the product never receives
+        // their messages, it only runs their official CLIs when the agent needs
+        // data from them. The absolute path is a row because a process started
+        // from the desktop shell often cannot see a nvm/npm PATH.
+        //
+        // One help line covers both rows because it describes one precondition,
+        // which nothing on this page stated: the CLI can only be RUN by a
+        // session that has a shell tool. The lead session is an orchestrator
+        // (no bash) and therefore delegates instead — see
+        // internal/modules/agent/system_prompt.go (cliDelegateSection).
+        titleKey: 'settings.ia.externalCli',
+        fields: [
+          text(K.cliDingtalkPath, 'settings.ia.cliDingtalkPath', 'settings.ia.help.cliPath'),
+          text(K.cliFeishuPath, 'settings.ia.cliFeishuPath', 'settings.ia.help.cliPath'),
+        ],
+      },
     ],
   },
   {

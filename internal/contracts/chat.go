@@ -195,6 +195,18 @@ type ChatSessionInfo struct {
 	// session under a global full preset still runs unconfined at the OS level
 	// (the reverse-leak disclosure of audit (a)).
 	EffectiveSandboxMode string `json:"effectiveSandboxMode,omitempty"`
+	// PresetID is the agent role this session selected (the stored
+	// `session.<id>.preset` row), "" when it selected none. It is disclosed so a
+	// client can show WHICH role a conversation is running as — the selection is
+	// otherwise invisible outside the settings store.
+	PresetID string `json:"presetId,omitempty"`
+	// PresetProblem is a stable code saying the selected role cannot be resolved
+	// by this build (contracts.PresetProblemUnknown), "" when it is fine. The
+	// session then has NO tools and its calls are refused (filterSessionTools /
+	// presetToolsDenial fail closed); this field is the visible half of that
+	// failure, and the client owns the wording. It is a diagnosis only — the gate
+	// still enforces the role itself and never reads this field.
+	PresetProblem string `json:"presetProblem,omitempty"`
 }
 
 // Permission scope values for ChatSessionInfo.PermissionScope.
@@ -212,6 +224,11 @@ const (
 	SessionOriginUser       = ""
 	SessionOriginAutomation = "automation"
 	SessionOriginSubagent   = "subagent"
+	// SessionOriginDispatch marks a session opened by the dispatcher to run a
+	// board task that was assigned to the lead role (see
+	// contracts.TaskDispatcher). It is a sidebar/audit fact: the session exists
+	// because a task was dispatched, not because the user started a chat.
+	SessionOriginDispatch = "dispatch"
 )
 
 // SessionOriginSettingKey is the settings key that records one session's

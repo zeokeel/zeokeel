@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectorSummary, SkillSummary } from '@/api/read-models';
-import type { BoardTask, TaskLease } from '@/api/task';
+import type { BoardTask, TaskLease, TaskReview } from '@/api/task';
 import { translate, type MessageKey } from '@/i18n';
 import {
   expectNoHorizontalOverflow,
@@ -31,6 +31,9 @@ const T = (key: MessageKey, params?: Record<string, string | number>) =>
 const api = vi.hoisted(() => ({
   loadTaskBoard: vi.fn(),
   loadTaskLease: vi.fn(),
+  // 验收结论 reads its own row (`tasks.reviews`): the durable review log, which
+  // outlives the lease that the review deletes.
+  loadTaskReviews: vi.fn(),
   claimTask: vi.fn(),
   heartbeatTask: vi.fn(),
   submitTask: vi.fn(),
@@ -38,9 +41,11 @@ const api = vi.hoisted(() => ({
   // 工具绑定 reads and writes its own row on the task (`tasks.tools.get/set`).
   loadTaskTools: vi.fn(),
   setTaskTools: vi.fn(),
-  // 预算 reads its own row on the task (`tasks.budget.get`): its failure is
-  // never the task's failure, so it gets a mock of its own.
+  // 预算 reads its own row on the task (`tasks.budget.get`) and writes it
+  // (`tasks.budget.set`): its failure is never the task's failure, so it gets a
+  // mock of its own.
   loadTaskBudget: vi.fn(),
+  setTaskBudget: vi.fn(),
   // 待发送消息 reads (`tasks.send.pending`) and releases (`tasks.send.approve`)
   // a parked outbound message; both are its own, like the budget's read.
   loadPendingSend: vi.fn(),
@@ -58,6 +63,7 @@ vi.mock('@/api/task', () => ({
   EVIDENCE_KINDS: ['file', 'link', 'output', 'screenshot'],
   loadTaskBoard: api.loadTaskBoard,
   loadTaskLease: api.loadTaskLease,
+  loadTaskReviews: api.loadTaskReviews,
   claimTask: api.claimTask,
   heartbeatTask: api.heartbeatTask,
   submitTask: api.submitTask,
@@ -65,6 +71,7 @@ vi.mock('@/api/task', () => ({
   loadTaskTools: api.loadTaskTools,
   setTaskTools: api.setTaskTools,
   loadTaskBudget: api.loadTaskBudget,
+  setTaskBudget: api.setTaskBudget,
   loadPendingSend: api.loadPendingSend,
   approveSend: api.approveSend,
   loadTaskRequester: api.loadTaskRequester,
@@ -106,6 +113,19 @@ function lease(overrides: Partial<TaskLease> = {}): TaskLease {
   return { taskId: 'task-1', owner: 'lead', state: 'claimed', ...overrides };
 }
 
+/** One recorded review decision (`tasks.reviews` answers these oldest first). */
+function review(overrides: Partial<TaskReview> = {}): TaskReview {
+  return {
+    taskId: 'task-1',
+    reviewer: 'auditor',
+    role: 'auditor',
+    decision: 'accept',
+    verdict: 'pass',
+    at: '2026-11-26T02:00:00Z',
+    ...overrides,
+  };
+}
+
 function renderScreen(taskId = 'task-1') {
   return render(
     <MemoryRouter initialEntries={[`/t/${taskId}`]}>
@@ -137,6 +157,10 @@ beforeEach(() => {
   // `mockResolvedValueOnce` queues survive `clearAllMocks`, so the lease read is
   // reset outright: a leftover answer from one test must not steer the next.
   api.loadTaskLease.mockReset();
+  // Same reason: the audit-trail read is its own queue. "Never reviewed" is the
+  // honest default and the gateway's answer for a task with no decisions.
+  api.loadTaskReviews.mockReset();
+  api.loadTaskReviews.mockResolvedValue([]);
   // Same reason as the lease: a queued answer must not steer the next test.
   api.loadTaskTools.mockReset();
   // No binding unless a test says so: a task nobody bound tools to is the
@@ -228,7 +252,7 @@ describe('TaskDetailScreen', () => {
     expect(within(needYou).queryByRole('button', { name: label(T('task.detail.claim')) })).toBeNull();
   });
 
-  it('claims with the task id as the Lead, then re-reads the board', async () => {
+  it('claims with the task id as the executor role, then re-reads the board', async () => {
     api.loadTaskBoard.mockResolvedValue([task()]);
     // Opening the task: nobody holds it. After the claim the lease read is what
     // reports it — the same two reads, now with a claim in the second one.
@@ -239,7 +263,8 @@ describe('TaskDetailScreen', () => {
 
     await user.click(await screen.findByRole('button', { name: label(T('task.detail.claim')) }));
 
-    expect(api.claimTask).toHaveBeenCalledWith({ id: 'task-1', owner: 'lead' });
+    // Claiming acts as the executor role — the role that does the work.
+    expect(api.claimTask).toHaveBeenCalledWith({ id: 'task-1', owner: 'executor' });
     // One re-read after the write — the api is request/response, not a stream.
     await vi.waitFor(() => expect(api.loadTaskBoard).toHaveBeenCalledTimes(2));
     // The lease's state is what the screen now reports.
@@ -270,7 +295,7 @@ describe('TaskDetailScreen', () => {
 
     expect(api.submitTask).toHaveBeenCalledWith({
       id: 'task-1',
-      owner: 'lead',
+      owner: 'executor',
       evidence: [{ kind: 'file', ref: 'out/report.md' }],
     });
     await vi.waitFor(() => expect(api.loadTaskBoard).toHaveBeenCalledTimes(2));
@@ -290,7 +315,7 @@ describe('TaskDetailScreen', () => {
 
     expect(api.submitTask).toHaveBeenCalledWith({
       id: 'task-1',
-      owner: 'lead',
+      owner: 'executor',
       evidence: [{ kind: 'link', ref: 'https://example.com/r' }],
     });
   });
@@ -420,7 +445,7 @@ describe('TaskDetailScreen', () => {
     ).toBeNull();
   });
 
-  it('accepts through the gateway with the reviewer identity', async () => {
+  it('accepts through the gateway with the auditor identity', async () => {
     api.loadTaskBoard.mockResolvedValue([task()]);
     const user = userEvent.setup();
 
@@ -431,7 +456,9 @@ describe('TaskDetailScreen', () => {
     expect(api.reviewTask).toHaveBeenCalledWith({
       id: 'task-1',
       decision: 'accept',
-      reviewer: 'lead',
+      // Reviewing acts as the auditor role: in a single-user product the
+      // reviewer≠executor rule can only mean "a different role".
+      reviewer: 'auditor',
     });
     await vi.waitFor(() => expect(api.loadTaskBoard).toHaveBeenCalledTimes(2));
   });
@@ -455,7 +482,7 @@ describe('TaskDetailScreen', () => {
     expect(api.reviewTask).toHaveBeenCalledWith({
       id: 'task-1',
       decision: 'reject',
-      reviewer: 'lead',
+      reviewer: 'auditor',
       note: '少了第三家',
     });
     await vi.waitFor(() => expect(api.loadTaskBoard).toHaveBeenCalledTimes(2));
@@ -829,8 +856,11 @@ describe('TaskDetailScreen', () => {
    * A bound session reports real token usage and the task stops when it crosses
    * its ceiling, so the screen owes the reader two facts: how much of the
    * ceiling is spent, and — when it is spent — that the task has stopped and
-   * what unblocks it. The top-up itself is a Lead action on another surface
-   * (`tasks.budget.set`), so this block deliberately offers no 继续 button.
+   * what unblocks it. It also owns the ceiling's own write (`tasks.budget.set`):
+   * a dispatched task is created with a 200k/30min row, and until 2026-11-26 no
+   * client could change it. There is still no 继续 button — resuming is the
+   * gate's job once the ceiling allows it — but "adjust the limit" is not the
+   * same move as "skip the stop", and only the first one belongs here.
    *
    * It is a read of its own (`tasks.budget.get`), with its own failure: a budget
    * that did not load must not take the task around it down, and "no ceiling"
@@ -856,10 +886,128 @@ describe('TaskDetailScreen', () => {
       // Nothing was measured, so nothing is drawn: no bar, no alert, no retry.
       expect(block.queryByRole('progressbar')).toBeNull();
       expect(block.queryByRole('alert')).toBeNull();
-      expect(block.queryByRole('button')).toBeNull();
+      // No 继续: a stop is cleared through the ceiling and the gate, not by a
+      // button here. The ceiling itself IS writable from this block.
+      expect(block.queryByRole('button', { name: /继\s*续/ })).toBeNull();
+      expect(block.getByRole('button', { name: label(T('task.detail.budget.adjust')) })).toBeInTheDocument();
       expect(api.loadTaskBudget).toHaveBeenCalledWith('task-1');
       // The budget is its own read; the board is not read again for it.
       expect(api.loadTaskBoard).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * 追加预算 (2026-11-26 audit, 高): the read-only block told the reader that
+     * topping up "lives on the surface that owns that decision" — and no such
+     * surface existed. `tasks.budget.set` had zero callers in `web/src`, so the
+     * 200k/30min row a dispatched task gets automatically could be seen and
+     * never changed.
+     *
+     * The entry is deliberately two-step (保存 then a confirmation): raising a
+     * ceiling changes when the task stops, and that is a decision, not a field
+     * edit. A refusal (the gateway guards this write with a permission action) is
+     * shown inside the block, in the gateway's own words.
+     */
+    it('adjusts the ceiling through tasks.budget.set after an explicit confirmation', async () => {
+      api.loadTaskBoard.mockResolvedValue([task({ status: 'in_progress' })]);
+      api.loadTaskBudget.mockResolvedValue({
+        taskId: 'task-1',
+        maxTokens: 200000,
+        maxMinutes: 30,
+        usedTokens: 1000,
+        exhausted: false,
+      });
+      api.setTaskBudget.mockResolvedValue({
+        taskId: 'task-1',
+        maxTokens: 500000,
+        maxMinutes: 30,
+        usedTokens: 1000,
+        exhausted: false,
+      });
+      const user = userEvent.setup();
+
+      renderScreen();
+
+      const block = within(await budget());
+      await block.findByText(`已用 ${n(1000)} / 上限 ${n(200000)} tokens`);
+
+      await user.click(block.getByRole('button', { name: label(T('task.detail.budget.adjust')) }));
+      // The form starts from what the row says, not from blanks.
+      const tokens = block.getByLabelText(T('task.detail.budget.maxTokens')) as HTMLInputElement;
+      expect(tokens.value).toBe('200000');
+      await user.clear(tokens);
+      await user.type(tokens, '500000');
+      await user.click(block.getByRole('button', { name: label(T('task.detail.budget.save')) }));
+
+      // Nothing is written yet: the confirmation is the decision.
+      expect(api.setTaskBudget).not.toHaveBeenCalled();
+      await user.click(
+        await screen.findByRole('button', { name: label(T('task.detail.budget.confirmAdjust')) }),
+      );
+
+      await waitFor(() =>
+        expect(api.setTaskBudget).toHaveBeenCalledWith({ id: 'task-1', maxTokens: 500000, maxMinutes: 30 }),
+      );
+      // The block redraws from the write's own answer, so the new ceiling is the
+      // one on screen — no stale 200k under a fresh 500k.
+      expect(await block.findByText(`已用 ${n(1000)} / 上限 ${n(500000)} tokens`)).toBeInTheDocument();
+    });
+
+    it('refuses an empty or negative ceiling instead of writing 0', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadTaskBudget.mockResolvedValue({
+        taskId: 'task-1',
+        maxTokens: 1000,
+        maxMinutes: 0,
+        usedTokens: 10,
+        exhausted: false,
+      });
+      const user = userEvent.setup();
+
+      renderScreen();
+
+      const block = within(await budget());
+      await user.click(await block.findByRole('button', { name: label(T('task.detail.budget.adjust')) }));
+      const tokens = block.getByLabelText(T('task.detail.budget.maxTokens')) as HTMLInputElement;
+      await user.clear(tokens);
+
+      // An empty box is "I have not decided", never a ceiling of zero.
+      const save = block.getByRole('button', { name: label(T('task.detail.budget.save')) });
+      expect(save).toBeDisabled();
+      await waitFor(() => expect(block.getByText(T('task.detail.budget.invalid'))).toBeInTheDocument());
+      expect(api.setTaskBudget).not.toHaveBeenCalled();
+    });
+
+    it('shows a refused budget write inside the block, in the gateway words', async () => {
+      api.loadTaskBoard.mockResolvedValue([task()]);
+      api.loadTaskBudget.mockResolvedValue({
+        taskId: 'task-1',
+        maxTokens: 200000,
+        maxMinutes: 30,
+        usedTokens: 1000,
+        exhausted: true,
+      });
+      api.setTaskBudget.mockRejectedValue(new Error('没有权限调整预算'));
+      const user = userEvent.setup();
+
+      renderScreen();
+
+      const block = within(await budget());
+      await user.click(await block.findByRole('button', { name: label(T('task.detail.budget.adjust')) }));
+      const minutes = block.getByLabelText(T('task.detail.budget.maxMinutes')) as HTMLInputElement;
+      await user.clear(minutes);
+      await user.type(minutes, '60');
+      await user.click(block.getByRole('button', { name: label(T('task.detail.budget.save')) }));
+      await user.click(
+        await screen.findByRole('button', { name: label(T('task.detail.budget.confirmAdjust')) }),
+      );
+
+      const alert = await block.findByRole('alert');
+      expect(within(alert).getByText(T('task.detail.budget.saveFailed'))).toBeInTheDocument();
+      // The gateway's refusal, not a generic "failed": the user has to know it
+      // was not allowed, not that the network went away.
+      expect(within(alert).getByText('没有权限调整预算')).toBeInTheDocument();
+      // The old ceiling is still the one in force.
+      expect(await block.findByText(`已用 ${n(1000)} / 上限 ${n(200000)} tokens`)).toBeInTheDocument();
     });
 
     it('shows used over limit and a bar whose aria-valuenow is the used percentage', async () => {
@@ -924,8 +1072,10 @@ describe('TaskDetailScreen', () => {
       // The stop is the error semantic (the same colour an error uses
       // everywhere else) — not a decorative red.
       expect(bar.className).toContain('ant-progress-status-exception');
-      // Topping up is a Lead action on another surface: no 继续 button here.
-      expect(block.queryByRole('button')).toBeNull();
+      // The stop is not a button to press: raising the ceiling is
+      // (`tasks.budget.set`), resuming is the gate's decision afterwards.
+      expect(block.queryByRole('button', { name: /继\s*续/ })).toBeNull();
+      expect(block.getByRole('button', { name: label(T('task.detail.budget.adjust')) })).toBeInTheDocument();
     });
 
     it('keeps the failure inside the block and re-reads only the budget on 重试', async () => {
@@ -1330,5 +1480,75 @@ describe('TaskDetailScreen at 390px', () => {
     ]) {
       expectTapTarget(screen.getByRole('button', { name: label(verb) }));
     }
+  });
+
+  it('shows the recorded audit conclusion after the review deleted the lease', async () => {
+    // The state a review leaves behind: the board says completed, `tasks.lease`
+    // answers null (the decision deleted the claim), and the audit trail is the
+    // only record left. Before the review log existed the screen showed an
+    // accepted task as if nobody had ever looked at it.
+    api.loadTaskBoard.mockResolvedValue([task({ status: 'completed' })]);
+    api.loadTaskLease.mockResolvedValue(null);
+    api.loadTaskReviews.mockResolvedValue([
+      review({ decision: 'reject', verdict: 'fail', findings: '少了第三家' }),
+      review({ findings: '证据齐全' }),
+    ]);
+
+    renderScreen();
+
+    expect(
+      await screen.findByText(
+        T('task.detail.progress.acceptedBy', { reviewer: T('task.detail.role.auditor') }),
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        T('task.detail.progress.rejectedBy', { reviewer: T('task.detail.role.auditor') }),
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('少了第三家')).toBeInTheDocument();
+    expect(screen.getByText('证据齐全')).toBeInTheDocument();
+  });
+
+  it('renders a direct close as unaudited instead of borrowing the accepted wording', async () => {
+    // The gateway records `direct_close` + verdict `unaudited` when a task was
+    // completed without a lease review (`task.status` or `team_task_update`).
+    // Showing that as "验收通过" would claim an audit that never happened.
+    api.loadTaskBoard.mockResolvedValue([task({ status: 'completed' })]);
+    api.loadTaskLease.mockResolvedValue(null);
+    api.loadTaskReviews.mockResolvedValue([
+      review({
+        reviewer: 'user',
+        role: undefined,
+        decision: 'direct_close',
+        verdict: 'unaudited',
+        findings: 'closed via tasks.status, no lease review (lease state: review, evidence: 1)',
+      }),
+    ]);
+
+    renderScreen();
+
+    const progress = await screen.findByRole('region', { name: T('task.detail.section.progress') });
+    expect(await within(progress).findByText(T('task.detail.progress.directClose'))).toBeInTheDocument();
+    expect(
+      within(progress).getByText(/closed via tasks\.status, no lease review/),
+    ).toBeInTheDocument();
+    // The reviewed wording must not appear: nobody accepted this task.
+    expect(
+      within(progress).queryByText(
+        T('task.detail.progress.acceptedBy', { reviewer: T('task.detail.role.auditor') }),
+      ),
+    ).toBeNull();
+  });
+
+  it('says the audit trail failed to load instead of implying nobody reviewed it', async () => {
+    api.loadTaskBoard.mockResolvedValue([task()]);
+    api.loadTaskReviews.mockRejectedValue(new Error('tasks.reviews: unavailable'));
+
+    renderScreen();
+
+    const progress = await screen.findByRole('region', { name: T('task.detail.section.progress') });
+    expect(await within(progress).findByText(T('task.detail.reviews.failed'))).toBeInTheDocument();
+    expect(within(progress).getByText('tasks.reviews: unavailable')).toBeInTheDocument();
   });
 });

@@ -160,21 +160,30 @@ func TestANonReplyIsLeftForTheLead(t *testing.T) {
 }
 
 func TestNonChannelSourcesAreIgnored(t *testing.T) {
-	service, inbox, actions := newService(t)
-	seed(t, inbox, contracts.InboxItem{ID: "i1", Source: "webhook", Title: "同意", Body: "同意"})
+	// webhook/cron is machine input; dingtalk/feishu are outbound only now, so a
+	// row claiming to come from them is not a fresh human utterance either; and
+	// email has no authenticated sender at all (the From header is unverified),
+	// so its text must never reach ApplyReply — that would let anyone who can
+	// mail the mailbox answer whatever approval is first in the queue.
+	for _, source := range []string{"webhook", "dingtalk", "feishu", "cron", "email"} {
+		t.Run(source, func(t *testing.T) {
+			service, inbox, actions := newService(t)
+			seed(t, inbox, contracts.InboxItem{ID: "i1", Source: source, Title: "同意", Body: "同意"})
 
-	if _, err := service.Relay(context.Background()); err != nil {
-		t.Fatalf("Relay: %v", err)
-	}
-	if len(actions.replies) != 0 {
-		t.Fatalf("webhook text was parsed as an approval reply: %v", actions.replies)
+			if _, err := service.Relay(context.Background()); err != nil {
+				t.Fatalf("Relay: %v", err)
+			}
+			if len(actions.replies) != 0 {
+				t.Fatalf("%s text was parsed as an approval reply: %v", source, actions.replies)
+			}
+		})
 	}
 }
 
 func TestNoPendingApprovalIsNotAnError(t *testing.T) {
 	service, inbox, actions := newService(t)
 	actions.applyErr = contracts.ErrApprovalNoPending
-	seed(t, inbox, contracts.InboxItem{ID: "i1", Source: "feishu", Title: "同意", Body: "同意"})
+	seed(t, inbox, contracts.InboxItem{ID: "i1", Source: "wechat", Title: "同意", Body: "同意"})
 
 	report, err := service.Relay(context.Background())
 	if err != nil {

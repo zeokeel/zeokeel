@@ -419,6 +419,10 @@ const mockUsers = [{ id: 'owner', name: 'Owner', role: 'owner', createdAt: nowIs
 let mockActingUser = 'owner';
 /** Session -> bound task id ("" clears). */
 const mockSessionBindings = new Map();
+/** Session -> selected agent role (preset id; absent = no role). */
+const mockSessionPresets = new Map();
+/** Task -> recorded review decisions, oldest first (accept/reject both land here). */
+const mockTaskReviews = new Map();
 /** Shared team notes, newest first. */
 const mockTeamNotes = [];
 /** QR logins started by the settings screen. */
@@ -1851,6 +1855,7 @@ const wsDispatch = (client, message) => {
       // A dispatch may name a bot; the mock records the owner so the screen can
       // show which bot took the work.
       const botId = String(params.botId ?? '');
+      const assignee = String(params.assignee ?? '');
       const item = mockInbox.items.find((row) => row.id === params.id);
       if (!item) return fail(-32600, 'inbox: unknown item');
       const subject = String(params.subject ?? '').trim();
@@ -1873,8 +1878,23 @@ const wsDispatch = (client, message) => {
       item.status = 'task';
       item.taskIds = [...(item.taskIds ?? []), taskId];
       if (botId) item.assignee = botId;
+      if (assignee) item.assignee = assignee;
       publishTasks('');
-      return reply({ taskIds: [taskId], created: true, item: { ...item } });
+      // The wake-up record the gateway sends when it consulted the connector: a
+      // lead-role assignee starts a run, so the mock opens a real session for it.
+      // Any other assignee keeps the historical behaviour (owner written, nothing
+      // runs) and the field stays absent, exactly like the backend.
+      let dispatch;
+      if (assignee.toLowerCase() === 'lead') {
+        const run = session(`派单: ${subject.slice(0, 40)}`);
+        dispatch = { taskId, sessionId: run.id, presetId: 'lead' };
+      }
+      return reply({
+        taskIds: [taskId],
+        created: true,
+        item: { ...item },
+        ...(dispatch ? { dispatch } : {}),
+      });
     }
     case 'inbox.triage': {
       const item = mockInbox.items.find((row) => row.id === params.id);
@@ -2027,10 +2047,33 @@ const wsDispatch = (client, message) => {
       // The contract requires a reviewer; the mock reads it but does not echo it
       // in the lease (the wire DTO has no reviewer field).
       const reviewer = String(params.reviewer ?? '');
-      void reviewer;
+      // Auditing your own work is not an audit (single-user product: the rule is
+      // "audit role ≠ execution role"). The real gateway refuses it; the mock
+      // must fail the same way or a screen bug would only show up in production.
+      if (reviewer.toLowerCase() === String(held.owner).toLowerCase()) {
+        return fail(-32600, 'lease: reviewer is the executor');
+      }
+      const taskId = String(params.id ?? '');
+      const decisions = mockTaskReviews.get(taskId) ?? [];
+      decisions.push({
+        taskId,
+        reviewer,
+        role: ['lead', 'executor', 'auditor'].includes(reviewer) ? reviewer : '',
+        decision,
+        verdict: decision === 'accept' ? 'pass' : 'fail',
+        findings: String(params.note ?? ''),
+        at: nowIso(),
+      });
+      mockTaskReviews.set(taskId, decisions);
       held.state = decision === 'accept' ? 'done' : 'rejected';
       held.reviewNote = String(params.note ?? '');
       return reply({ ...held, evidence: held.evidence.slice() });
+    }
+    case 'tasks.reviews': {
+      const taskId = String(params.id ?? '');
+      if (!taskId) return fail(-32602, 'invalid_params');
+      const decisions = mockTaskReviews.get(taskId);
+      return reply({ reviews: decisions ? decisions.map((row) => ({ ...row })) : null });
     }
     case 'approval.token': {
       const approvalId = String(params.approvalId ?? '');
@@ -2117,6 +2160,24 @@ const wsDispatch = (client, message) => {
       if (index >= 0) mockBotTemplates[index] = template;
       else mockBotTemplates.push(template);
       return reply(template);
+    }
+    case 'session.preset.get': {
+      const sessionId = String(params.sessionId ?? '');
+      if (!sessionId) return fail(-32602, 'invalid_params');
+      return reply({ presetId: mockSessionPresets.get(sessionId) ?? '' });
+    }
+    case 'session.preset.set': {
+      const sessionId = String(params.sessionId ?? '');
+      if (!sessionId) return fail(-32602, 'invalid_params');
+      const presetId = String(params.presetId ?? '');
+      // The built-in roles plus anything a product wires; the mock only knows
+      // the three the product ships, which is enough for the picker.
+      if (presetId && !['lead', 'executor', 'auditor'].includes(presetId)) {
+        return fail(-32600, `session preset: unknown agent preset ${presetId}`);
+      }
+      if (presetId) mockSessionPresets.set(sessionId, presetId);
+      else mockSessionPresets.delete(sessionId);
+      return reply({ presetId });
     }
     case 'session.bindtask': {
       const sessionId = String(params.sessionId ?? '');
@@ -2298,6 +2359,14 @@ const wsDispatch = (client, message) => {
     }
     case 'browser.status': {
       return reply({ connected: false, pages: 0 });
+    }
+    case 'sandbox.status': {
+      // The stand-in reports the "confining runner" state: it is the quiet one,
+      // so a screen bug that only shows the warning path cannot hide here. Tests
+      // that need the unconfined state override the api function instead.
+      return reply({
+        available: true, platform: 'linux', confinement: 'os', commandsUnconfined: false,
+      });
     }
     case 'credentials.list': {
       const kind = String(params.kind ?? '');

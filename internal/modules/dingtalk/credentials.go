@@ -4,6 +4,10 @@ package dingtalk
 // channel, and the adapter reads it at activation so a token never has to sit in
 // an assembly document. An explicit configuration value still wins, because an
 // operator overriding by hand is a deliberate act.
+//
+// The row may still carry the historical `signSecret` field: it is ignored here
+// (kept in the store so old data round-trips, never read, because the adapter has
+// no callback to verify any more).
 
 import (
 	"context"
@@ -19,9 +23,6 @@ const CredentialKind = "dingtalk"
 func ApplyCredential(cfg Config, fields map[string]string) Config {
 	if cfg.Token == "" {
 		cfg.Token = fields["token"]
-	}
-	if cfg.SignSecret == "" {
-		cfg.SignSecret = fields["signSecret"]
 	}
 	if cfg.RobotCode == "" {
 		cfg.RobotCode = fields["robotCode"]

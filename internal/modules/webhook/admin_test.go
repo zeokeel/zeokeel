@@ -68,6 +68,50 @@ func TestUpsertValidatesIDAndSecret(t *testing.T) {
 	}
 }
 
+func TestReservedNamesCannotBeWebhookSources(t *testing.T) {
+	// The channel adapters and the internal sources already own these words. An
+	// endpoint named after one of them would not authenticate anything extra —
+	// the HMAC still decides — but it would put "/api/inbound/dingtalk" back on
+	// the map and file rows whose name says "a channel", so the name is refused
+	// rather than explained away in a log.
+	dir := t.TempDir()
+	svc, _ := openAdmin(t, dir)
+	ctx := context.Background()
+
+	for _, id := range []string{"dingtalk", "feishu", "wechat", "email", "cron", "teammate"} {
+		err := svc.UpsertSource(ctx, contracts.WebhookSource{ID: id, Secret: []byte("0123456789abcdef")})
+		if !errors.Is(err, contracts.ErrWebhookInvalidSource) {
+			t.Fatalf("UpsertSource(%q) err = %v, want ErrWebhookInvalidSource", id, err)
+		}
+		if !strings.Contains(err.Error(), "reserved") {
+			t.Fatalf("UpsertSource(%q) err = %v, want it to say the name is reserved (the UI shows this)", id, err)
+		}
+	}
+	if sources, _ := svc.Sources(ctx); len(sources) != 0 {
+		t.Fatalf("sources = %+v, want none of the reserved names stored", sources)
+	}
+}
+
+func TestAReservedNameInTheSourceFileIsNotLoaded(t *testing.T) {
+	// sources.json is a plain file next to the product data: hand-editing one
+	// must not be a way around the rule the API enforces.
+	dir := t.TempDir()
+	document := `{"version":1,"sources":[` +
+		`{"id":"dingtalk","secret":"MDEyMzQ1Njc4OWFiY2RlZg=="},` +
+		`{"id":"github","secret":"MDEyMzQ1Njc4OWFiY2RlZg=="}]}`
+	if err := os.WriteFile(filepath.Join(dir, "sources.json"), []byte(document), 0o600); err != nil {
+		t.Fatalf("write sources.json: %v", err)
+	}
+	svc, _ := openAdmin(t, dir)
+	sources, err := svc.Sources(context.Background())
+	if err != nil {
+		t.Fatalf("Sources: %v", err)
+	}
+	if len(sources) != 1 || sources[0].ID != "github" {
+		t.Fatalf("sources = %+v, want only github (the reserved row is skipped)", sources)
+	}
+}
+
 func TestRemoveSource(t *testing.T) {
 	dir := t.TempDir()
 	svc, _ := openAdmin(t, dir)

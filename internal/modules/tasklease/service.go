@@ -10,6 +10,7 @@ package tasklease
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +23,10 @@ type Config struct {
 	Now func() time.Time `json:"-"`
 	// TTL is the claim lifetime; heartbeats extend it.
 	TTL time.Duration `json:"ttl"`
+	// OnDirectClose is an optional observability hook, called after an unaudited
+	// close was recorded (the module logs it). Never used for policy: the row is
+	// already written, and a nil hook must not change behaviour.
+	OnDirectClose func(taskID, actor, source string) `json:"-"`
 }
 
 func (c Config) normalized() Config {
@@ -65,6 +70,11 @@ type Service struct {
 	// requesters is who asked for each task (M6 attribution): the board records
 	// the work and the lease the executor, but neither says which human wanted it.
 	requesters map[string]string
+	// reviews is the recorded review decision of each task (accept/reject). It
+	// is not part of a lease: the lease is dropped by the very decision it
+	// describes, so the explanation has to live somewhere else or it is lost the
+	// moment it is written (contracts.TaskReview).
+	reviews map[string][]contracts.TaskReview
 	// path is the durable document (dir/leases.json); empty means in-memory only
 	// (NewService, and unit tests that do not care about durability).
 	path string
@@ -81,6 +91,7 @@ func NewService(board contracts.TaskBoard, cfg Config) *Service {
 		budgets:         make(map[string]*contracts.TaskBudget),
 		heldSends:       make(map[string]string),
 		requesters:      make(map[string]string),
+		reviews:         make(map[string][]contracts.TaskReview),
 	}
 }
 
@@ -232,7 +243,7 @@ func (s *Service) Accept(ctx context.Context, taskID, reviewer, note string) (co
 	if err := ctx.Err(); err != nil {
 		return contracts.TaskLease{}, err
 	}
-	if reviewer == "" {
+	if strings.TrimSpace(reviewer) == "" {
 		return contracts.TaskLease{}, contracts.ErrLeaseInvalid
 	}
 	s.mu.Lock()
@@ -241,6 +252,13 @@ func (s *Service) Accept(ctx context.Context, taskID, reviewer, note string) (co
 		s.mu.Unlock()
 		return contracts.TaskLease{}, contracts.ErrLeaseNotHeld
 	}
+	// Auditing your own work is not an audit. The rule is role-shaped, not
+	// person-shaped (single-user product): see contracts.ErrLeaseReviewerIsOwner.
+	if sameIdentity(reviewer, lease.Owner) {
+		s.mu.Unlock()
+		return contracts.TaskLease{}, contracts.ErrLeaseReviewerIsOwner
+	}
+	s.recordReviewLocked(taskID, reviewer, contracts.TaskReviewAccept, note)
 	lease.State = contracts.LeaseStateDone
 	lease.ReviewNote = note
 	done := cloneLease(lease)
@@ -262,7 +280,7 @@ func (s *Service) Reject(ctx context.Context, taskID, reviewer, reason string) (
 	if err := ctx.Err(); err != nil {
 		return contracts.TaskLease{}, err
 	}
-	if reviewer == "" || reason == "" {
+	if strings.TrimSpace(reviewer) == "" || reason == "" {
 		return contracts.TaskLease{}, contracts.ErrLeaseInvalid
 	}
 	s.mu.Lock()
@@ -271,6 +289,11 @@ func (s *Service) Reject(ctx context.Context, taskID, reviewer, reason string) (
 		s.mu.Unlock()
 		return contracts.TaskLease{}, contracts.ErrLeaseNotHeld
 	}
+	if sameIdentity(reviewer, lease.Owner) {
+		s.mu.Unlock()
+		return contracts.TaskLease{}, contracts.ErrLeaseReviewerIsOwner
+	}
+	s.recordReviewLocked(taskID, reviewer, contracts.TaskReviewReject, reason)
 	lease.State = contracts.LeaseStateRejected
 	lease.ReviewNote = reason
 	rejected := cloneLease(lease)

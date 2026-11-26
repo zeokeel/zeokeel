@@ -3,6 +3,7 @@ package lead_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,5 +70,59 @@ func TestModelPlannerDrivesThePass(t *testing.T) {
 	}
 	if report.Dispatched != 1 || len(triage.applied) != 1 || triage.applied[0].Task.Assignee != "bot-3" {
 		t.Fatalf("report = %+v applied = %+v", report, triage.applied)
+	}
+}
+
+// TestModelPlannerDeclaresItsTeammateEnvelope pins the seam the triage unit uses
+// to validate an assignee (2026-11-26 audit, 中高): the model may only assign to a
+// name the rules name, and the planner — the only party that knows them — declares
+// that set on the decision. Without it triage cannot tell a rule-derived teammate
+// from an invented one.
+func TestModelPlannerDeclaresItsTeammateEnvelope(t *testing.T) {
+	rules := []contracts.LeadRule{
+		{Source: "webhook", Assignee: "bot-1"},
+		{Source: "email", Assignee: "fin-ops"},
+		{Source: "webhook", Assignee: "bot-1"},
+	}
+	planner := lead.ModelPlanner{
+		Model: &stubModel{answer: `{"action":"task","subject":"x","assignee":"fin-ops"}`},
+		Rules: func(context.Context) ([]contracts.LeadRule, error) { return rules, nil },
+	}
+	decision, ok, err := planner.Plan(context.Background(), contracts.InboxItem{ID: "i1", Source: "email"})
+	if err != nil || !ok {
+		t.Fatalf("Plan = (ok=%v, err=%v)", ok, err)
+	}
+	if got := strings.Join(decision.Task.KnownAssignees, ","); got != "bot-1,fin-ops" {
+		t.Fatalf("KnownAssignees = %q, want the rules' assignees (deduplicated, in order)", got)
+	}
+	// The prompt carries the same rules: the envelope and the instruction cannot
+	// describe different worlds.
+	if !strings.Contains(planner.Model.(*stubModel).prompt, `assignee="bot-1"`) {
+		t.Fatalf("prompt does not list the rules: %q", planner.Model.(*stubModel).prompt)
+	}
+}
+
+// TestServiceHandsTheLiveRulesToTheModelPlanner: a model-backed planner built by
+// PlannerFromSettings used to get Rules=nil, so it prompted with no rules at all
+// while still inventing assignees. The service now supplies its own live rule set.
+func TestServiceHandsTheLiveRulesToTheModelPlanner(t *testing.T) {
+	inboxSvc := inbox.NewService(inbox.Config{Now: time.Now, MaxPerMinute: 100})
+	triage := newFakeTriage()
+	model := &stubModel{answer: `{"action":"task","subject":"来自模型","assignee":"bot-3"}`}
+	svc := lead.NewService(inboxSvc, triage,
+		lead.ModelPlanner{Model: model}, lead.Config{MaxPerRun: 5, Now: time.Now})
+	if err := svc.SetRules(context.Background(), []lead.Rule{{Source: "webhook", Assignee: "bot-3"}}); err != nil {
+		t.Fatalf("SetRules: %v", err)
+	}
+	arrive(t, inboxSvc, "webhook", "告警")
+
+	if _, err := svc.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if !strings.Contains(model.prompt, `assignee="bot-3"`) {
+		t.Fatalf("the model planner was not given the live rules: %q", model.prompt)
+	}
+	if len(triage.applied) != 1 || strings.Join(triage.applied[0].Task.KnownAssignees, ",") != "bot-3" {
+		t.Fatalf("applied = %+v, want the decision to carry the rule envelope", triage.applied)
 	}
 }

@@ -227,10 +227,14 @@ func TestConfiguredSandboxModeIgnoresStoredPreset(t *testing.T) {
 
 // TestIgnorePermissionSettingPinsOSModeAtActivation is the end-to-end shape of
 // the same fix: with a stored full preset and ignorePermissionSetting enabled,
-// the activated file tools keep the workspace fence (an absolute path outside
-// the root is denied) instead of passing through. The control activation
-// without the flag reads the outside file (full passthrough), proving the
-// observable distinguishes the two modes.
+// the activated file tools keep the workspace fence (a write outside the root is
+// denied) instead of passing through. The control activation without the flag
+// writes the outside file (full passthrough), proving the observable
+// distinguishes the two modes.
+//
+// The observable is a WRITE, not a read: since the 2026-11-26 permission model
+// reads are unfenced on purpose (docs/APPROVAL-SURFACES.md §S4.3), so "an
+// outside read fails" no longer distinguishes the modes. Writes still do.
 func TestIgnorePermissionSettingPinsOSModeAtActivation(t *testing.T) {
 	rootDir := t.TempDir()
 	outsideDir := t.TempDir()
@@ -241,25 +245,28 @@ func TestIgnorePermissionSettingPinsOSModeAtActivation(t *testing.T) {
 	settings := newMutableSettings(map[string]string{
 		contracts.SettingAgentPermission: contracts.PermissionFull,
 	})
-	readOutside := func(registry *rigtool.Registry) (rig.ToolResult, error) {
+	writeOutside := func(registry *rigtool.Registry) (rig.ToolResult, error) {
 		return registry.Invoke(context.Background(), rig.ToolCall{
-			Name:      "read_file",
-			Arguments: `{"path":"` + outsideFile + `"}`,
+			Name:      "write_file",
+			Arguments: `{"path":"` + outsideFile + `","content":"overwritten"}`,
 		})
 	}
 
 	_, pinned, _, _ := activateMCPToolkitWithRoot(t, map[string]any{
 		"root": rootDir, "ignorePermissionSetting": true,
 	}, settings)
-	result, err := readOutside(pinned)
+	result, err := writeOutside(pinned)
 	if err == nil && !result.IsError {
-		t.Errorf("read outside the root succeeded with ignorePermissionSetting: the stored full preset passed the OS mode through (%q)", result.Content)
+		t.Errorf("write outside the root succeeded with ignorePermissionSetting: the stored full preset passed the OS mode through (%q)", result.Content)
+	}
+	if data, readErr := os.ReadFile(outsideFile); readErr != nil || string(data) != "outside the workspace" {
+		t.Fatalf("the outside file changed under the pinned workspace mode: %q/%v", data, readErr)
 	}
 
 	_, passthrough, _, _ := activateMCPToolkitWithRoot(t, map[string]any{
 		"root": rootDir,
 	}, settings)
-	result, err = readOutside(passthrough)
+	result, err = writeOutside(passthrough)
 	if err != nil || result.IsError {
 		t.Fatalf("control invalid: without the flag the stored full preset must pass through, got %q/%v", result.Content, err)
 	}

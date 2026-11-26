@@ -301,9 +301,70 @@ describe('ChannelsScreen — a failed read is reported, never hidden', () => {
 describe('ChannelsScreen — the credential field names are the contract', () => {
   it('uses the field keys each channel kind expects', () => {
     expect(CREDENTIAL_FIELD_NAMES.wechat).toEqual(['token']);
-    expect(CREDENTIAL_FIELD_NAMES.dingtalk).toEqual(['token', 'signSecret']);
+    // DingTalk's send body ALWAYS carries `robotCode`, so a row without one is a
+    // credential no send can use. The form must ask for it.
+    expect(CREDENTIAL_FIELD_NAMES.dingtalk).toEqual(['token', 'robotCode']);
     expect(CREDENTIAL_FIELD_NAMES.feishu).toEqual(['appId', 'appSecret']);
     expect(CREDENTIAL_FIELD_NAMES.email).toEqual(['username', 'password']);
+  });
+
+  it('offers no field the retired callback signature used to need', () => {
+    // `signSecret` signed DingTalk/Feishu callbacks. Those callbacks are gone, so
+    // no adapter reads such a field: offering the box would ask for a secret
+    // nothing consumes.
+    const names = Object.values(CREDENTIAL_FIELD_NAMES).flat();
+    expect(names).not.toContain('signSecret');
+  });
+});
+
+/**
+ * The DingTalk credential needs two identities, not one: the robot access token
+ * and the robot code, which the platform's send API always receives
+ * (`{"robotCode": ..., "openConversationId": ...}` — see
+ * `internal/modules/dingtalk/adapter.go`). With only the token in the form, the
+ * page saved a row the adapter could never use: the send went out with an empty
+ * robotCode and the platform answered 400 while the UI had just said 已保存.
+ */
+describe('ChannelsScreen — DingTalk asks for the robot code the send API needs', () => {
+  /** Pick a credential kind in the antd Select (its options live in a portal). */
+  async function selectKind(kind: string) {
+    const select = screen.getByTestId('channels-credential-kind-select');
+    fireEvent.mouseDown(select.querySelector('.ant-select-selector') ?? select);
+    const option = document.querySelector(`.ant-select-item-option[title="${kind}"]`);
+    expect(option).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(option as Element);
+    });
+  }
+
+  it('renders a robot code field for dingtalk', async () => {
+    renderScreen();
+    await screen.findByTestId('channels-credential-field-token');
+    await selectKind('dingtalk');
+
+    expect(await screen.findByTestId('channels-credential-field-robotCode')).toBeInTheDocument();
+  });
+
+  it('refuses a half-filled credential and sends both fields together', async () => {
+    const user = userEvent.setup();
+    renderScreen();
+    await screen.findByTestId('channels-credential-field-token');
+    await selectKind('dingtalk');
+
+    await user.type(await screen.findByTestId('channels-credential-field-token'), 'access-token');
+    // A token without a robot code cannot send, so it must not look saveable.
+    expect(screen.getByTestId('channels-credential-save')).toBeDisabled();
+
+    await user.type(screen.getByTestId('channels-credential-field-robotCode'), 'dingrobot1');
+    await user.click(screen.getByTestId('channels-credential-save'));
+
+    await waitFor(() =>
+      expect(api.setCredential).toHaveBeenCalledWith({
+        kind: 'dingtalk',
+        id: 'default',
+        fields: { token: 'access-token', robotCode: 'dingrobot1' },
+      }),
+    );
   });
 });
 

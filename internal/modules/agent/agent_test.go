@@ -92,6 +92,13 @@ func (l *fakeLogger) contains(fragment string) bool {
 	return false
 }
 
+// snapshot returns a copy of the recorded lines.
+func (l *fakeLogger) snapshot() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.lines...)
+}
+
 // provide registers one host service on ctx.
 func provide[T any](t *testing.T, ctx cordis.Context, key cordis.ServiceKey[T], value T) {
 	t.Helper()

@@ -173,16 +173,40 @@ SIGINT/SIGTERM（signals_unix.go:11）
 | GET | `/api/sessions/{id}/memory` | 会话记忆（R5） | `read_models.go` |
 | GET | `/api/files/tree`、`/api/files/content`、`/api/files/diff` | 工作区文件/预览/差异（R8–R11） | `files.go` |
 | GET | `/` 及其余 GET | 内嵌客户端静态资源（未内嵌时 503） | `server.go` |
-| POST | `/api/inbound/feishu/card` | 飞书卡片按钮回调：验签后用卡片携带的一次性 token 走 `ApprovalActionService.Apply`（无 token 拒绝） | `inbound.go` |
-| POST | `/api/inbound/{source}` | 渠道入站：**签名即认证**（`webhook` / `dingtalk` / `feishu`），不要求浏览器 token；Host 必须属于本机，带 `Origin` 一律 403，body ≤ 1 MiB | `inbound.go` |
+| POST | `/api/inbound/{source}` | webhook 入站：**签名即认证**（source 在 `webhook.source.*` 里配置），不要求浏览器 token；Host 必须属于本机，带 `Origin` 一律 403，body ≤ 1 MiB | `inbound.go` |
 
 **约定**：`/api/*` 未知路径先鉴权再 404（未鉴权的探测无法测绘端点面，`handleUnknownAPI`）。
 唯一例外是 `/api/inbound/{source}`：它由发送方的 HMAC 签名认证（`X-Zeokeel-Signature: t=<unix>,v1=<hex>`，
 ±5 分钟窗口），但要保留 Host 校验并拒绝任何 `Origin`——浏览器页面永远不该驱动一个签名端点。
 状态码：`202` 已入队（`{id,merged,count}`）、`401` 签名无效/过期、`404` 未知 source、`400` 载荷不可用、
-`413` 超限、`429` 配额用尽、`503` 渠道暂时不可用。
-飞书的 URL 握手是唯一例外：`{"type":"url_verification"}` 必须回 **200 `{"challenge":...}`**（回 202 会被平台判为校验失败）；
-已经验签但与消息无关的事件回 `204`。
+`413` 超限、`429` 配额用尽。
+
+**`/api/inbound` 只有一种入站形状**：通用 `webhook` 源。钉钉与飞书**不是入站渠道**——它们是个人助手的
+通知出口（`notify.route.*` / `channeldispatch` 的 `dingtalk`、`feishu`），同事在群里 @ 机器人不能把消息打进
+持有本机数据的 agent。因此这里没有 `/api/inbound/dingtalk`、`/api/inbound/feishu`，也没有飞书卡片回调
+`/api/inbound/feishu/card`：**卡片按钮不再能解决审批**，审批只走 Web（三值动词）与微信对话式回复
+（决策记录见 [docs/research/channel-capabilities.md](research/channel-capabilities.md) §6）。
+指令入口 = **Web 端 + 微信**。
+
+source id 另有一条**保留字**规则：`dingtalk` / `feishu` / `wechat` / `email` / `cron` / `teammate` 不能作为
+webhook source 名（`internal/modules/webhook/admin.go` 的 `reservedSourceIDs`）。它们分别是渠道适配器与
+内部（非人类）入站源的既有名字；签名始终由 HMAC 决定，但让 `/api/inbound/dingtalk` 重新存在会让一个配置
+好的 webhook 在日志与设置页里看起来像"渠道又接回来了"。写入端 `webhook.source.set` 回
+`ErrWebhookInvalidSource`（报文 `is a reserved name`），手写的 `sources.json` 里这类行**加载时同样跳过**。
+
+> **已知风险：微信对话式回复没有发送者校验（2026-11-26 记录，用户已决定不加校验）**
+>
+> `ReplyRelayService` 只把 `wechat` 源的消息当人话（`internal/modules/replyrelay/service.go` 的
+> `channelSources`，`email` 已从其中移除）。这条路径**没有发送者校验**：
+> `ApprovalActionService.ApplyReply`（`internal/modules/approvals/action.go`）读的是**全局**待批队列
+> （底层 `Pending()` 无会话过滤），正文 `1 同意` 这类文本按**序号** resolve 队首审批——带序号时任何时刻
+> 都能命中。代码里**没有**任何"channel binding 保证只有 owner"的实现：那条是注释里的假设，不是控制。
+> 因此：**任何一个能在这个微信单聊里发消息的人，发一句「1 同意」就能解掉队首审批。**
+> 这是**已知风险**，不是安全边界；审批的可靠入口是 Web（三值动词、无默认动作、Esc=拒绝）。
+>
+> 邮件**不在这条路径上**：`email` 已从 `channelSources` 移除。邮件适配器不校验发件人
+> （`internal/modules/email/imap.go` 把 `From` 头原样记进 `Sender`，无白名单、无签名、无头检查），
+> 若允许邮件回答审批，等于让任何能给这个邮箱发信的人解审批。
 
 ---
 
@@ -558,7 +582,8 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `session.fork` | `{sessionId}` | `{sessionId}` | N | `SessionForker` `chat.go:544` | 延后 |
 | `session.model.set` | `{sessionId,model}` | `{}` | Y | `SessionModelSwitcher` `chat.go:467` | 延后 |
 | `session.thinking.set` | `{sessionId,modelId,modeId}` | `{}` | Y | 组合 settings 行 `thinking.go:306-313` | 延后 |
-| `session.preset.get/set` | `{sessionId}` / `{sessionId,presetId}` | `{presetId}` | Y/Y | `SessionPresetSetter` `presets.go:138,139` | 延后 |
+| `session.preset.get` | `{sessionId}` | `{presetId}` | Y | `SessionPresetSetter` `presets.go:138`；读的是 settings 行 `SessionPresetSettingKey`（`presets.go`，重启不丢，随会话删除清空）；`presetId:""` = 没有角色（默认行为） | ✅ 已实现 |
+| `session.preset.set` | `{sessionId,presetId?}` | `{presetId}` | Y | `SessionPresetSetter` `presets.go:139`；省略/空 `presetId` = 清除角色；内置角色 `lead`/`executor`/`auditor` 由 `contracts.BuiltinAgentPresets()` 提供（用户 `presets.agents` 行同 ID 覆盖），**lead 不是默认**；未知会话/未知角色 → `-32600`（`ErrSessionPresetInvalid`）；**角色的 `Tools` 是门禁硬边界**（`agent/preset.go` 的 `presetToolsDenial`，`plan_mode.go` 任务绑定之后、plan 模式之前）；写成功后同时刷新 `session.list` 域，因为列表行带着角色与"角色解析不了"的诊断（§6.2） | ✅ 已实现 |
 | `session.permission.set` | `{sessionId,mode}` | `{}` | Y | `SessionPermissionSwitcher` `automation.go:73` | 延后 |
 | `session.workspace.set` | `{sessionId,workspaceId}` | `{}` | Y | `SessionWorkspaceSwitcher` `automation.go:67` | 延后 |
 | ~~`message.send`~~ | — | — | — | **已移除（2026-11-23）**：与 §4.6 的 `POST /api/chat/run` 完全重复（后者已带 text + attachments 且是流式入口）。两条发送路径并存必然漂移，只保留 SSE 那一条。原实现参考 `ChatService.Send` `chat.go:572`。 | 已移除 |
@@ -632,6 +657,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `theme.get` | — | `{dark}` | Y | `ThemeService.Dark()` `contracts.go:333` | 延后 |
 | `theme.set` | `{dark}` | `{}` | Y | `:334` | 延后 |
 | `appinfo.get` | — | `AppInfo` | Y | `contracts.go:185-191` | 延后 |
+| `sandbox.status` | — | `{available,platform,reason?,confinement,commandsUnconfined,note?}` | Y | `SandboxService.Status` `sandbox.go:44`（网关 `sandboxStatus` `sandbox_status.go`）；`confinement∈{os,none}`，空值 = 未装配 sandbox 模块（**不得**渲染成已受限） | ✅ 已实现 |
 | `models.snapshot` | — | `{models:[{ModelInfo,thinkingModes[]}]}` | Y | `ModelCatalogService.Models()` `modelcatalog.go:143` + `ThinkingModesForModel` `thinking.go:164` | 延后 |
 
 > `theme` 在盘点里归 T3（客户端 CSS 主题），但**主题选择必须同步到设置行**（`ui.theme.mode`，`interaction.go:120`），所以保留 `theme.get/set` 两个薄方法；渲染完全在客户端。
@@ -819,13 +845,14 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | 方法 | 参数 | 返回 | 幂等 | 契约 | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | `inbox.snapshot` | `{statuses?,source?,limit?,includeExpired?}` | `{items:[InboxItem],stats:{total,new,triaged}}` | Y | `InboxService.List` + `Stats` | ✅ 已实现 |
-| `inbox.dispatch` | `{id,subject,detail?,assignee?,blockedBy?,writeScopes?,note?}` | `{taskIds,created,item}` | N | `TriageService.Apply`（action=task） | ✅ 已实现 |
+| `inbox.dispatch` | `{id,subject,detail?,assignee?,blockedBy?,writeScopes?,note?}` | `{taskIds,created,item,dispatch?}` | N | `TriageService.Apply`（action=task）；**`assignee="lead"` 会真的起一次 run**（派单唤醒）：`ChatService.NewSession` → 记 `session.<id>.origin="dispatch"`（`contracts.SessionOriginDispatch`）→ `session.bindtask` → `session.preset.set="lead"` → `ChatService.Send(任务+目标+编排纪律)`。其它 assignee 只写 owner，不起 run（这是开关：避免"写个名字就烧 token"）；唤醒失败不失败整个派单，原因写进 `dispatch.error`。**唤醒前有两道花钱的闸（2026-11-26 审计）**：①预算——任务必须有预算行（没有就按默认 200k tokens / 30 分钟建一条），已耗尽则不起 run；②并发——同时在飞的派单受 `agent.subagentMaxConcurrent`（1–8，缺省 2）限制，槽位按一个 `DefaultLeaseTTL` 过期。被闸住的派单不复用 `error`，而是 `dispatch.skipped`（策略决定，不是失败）；`dispatch` 只在"期望有 run"时出现。assignee 还必须在调用方声明的队友名单内（`NewTask.KnownAssignees`，由 lead 用规则里的 assignee 填），不在名单内则**不写 owner、不派单**并记 `dispatch.skipped` | ✅ 已实现 |
 | `inbox.triage` | `{id,action,note?}` | `InboxItem` | N | `TriageService.Apply`（ignored/archived/triaged） | ✅ 已实现 |
 | `tasks.lease` | `{id}` | `TaskLease`（没有租约时 `{lease:null}`） | Y | `TaskLeaseService.Lease` | ✅ 已实现 |
 | `tasks.claim` | `{id,owner}` | `TaskLease` | N | `TaskLeaseService.Claim` | ✅ 已实现 |
 | `tasks.heartbeat` | `{id,owner}` | `TaskLease` | Y | `TaskLeaseService.Heartbeat` | ✅ 已实现 |
 | `tasks.submit` | `{id,owner,evidence:[{kind,ref,note?}]}` | `TaskLease` | N | `TaskLeaseService.Submit`（无证据 → `1010 evidence_required`） | ✅ 已实现 |
-| `tasks.review` | `{id,decision:"accept"\|"reject",reviewer,note?}` | `TaskLease` | N | `TaskLeaseService.Accept` / `Reject` | ✅ 已实现 |
+| `tasks.review` | `{id,decision:"accept"\|"reject",reviewer,note?}` | `TaskLease` | N | `TaskLeaseService.Accept` / `Reject`（**`reviewer` 不得等于执行人**：单用户产品里"人"只有一个，所以规则是"**审计角色 ≠ 执行角色**"，相等 → `-32600` `lease: reviewer is the executor`） | ✅ 已实现 |
+| `tasks.reviews` | `{id}` | `{reviews:[{taskId,reviewer,role?,decision,verdict,findings?,at?}]}` | Y | `contracts.TaskReviewLog.Reviews`（可选能力；accept/reject **都**写一行，存在 `leases.json` 的 `reviews` 键里，**租约被删后仍在**；从未验收 → `{reviews:null}`）。**直接关闭也留档**（2026-11-26 审计）：`task.status=completed` 与模型工具 `team_task_update` 绕过租约验收时，会记一行 `decision:"direct_close"` + `verdict:"unaudited"`（Findings 写 `closed via tasks.status, no lease review (lease state: …)`）；`verdict` 因此有三个取值 `pass`/`fail`/`unaudited`，UI 把它渲染成"直接关闭（未经审计）"而不是"验收通过" | ✅ 已实现 |
 | `tasks.tools.set` | `{id,tools:[string]}` | `TaskTools` | N | `TaskLeaseService.SetTools`（`tools:[]` 清除；名字 `[a-z0-9_.:-]{1,120}`、≤32、不重复；未知任务/非法列表 → `-32600`） | ✅ 已实现 |
 | `tasks.tools.get` | `{id}` | `TaskTools`（无绑定 `{tools:null}`） | Y | `TaskLeaseService.Tools` | ✅ 已实现 |
 | `tasks.approval.set` | `{id,policy:"none"\|"before_start"\|"before_send"}` | `{policy}` | N | `TaskLeaseService.SetApproval`（策略属于任务；写进 `leases.json` 的 `approvals` 键；其它值 → `-32600`） | ✅ 已实现 |
@@ -835,7 +862,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `tasks.requestedby.get` | `{id}` | `{requestedBy:string\|null}` | Y | `TaskRequester.RequestedBy`（派单时按 acting user 记录；无名册的产品返回 null） | ✅ 已实现 |
 | `tasks.send.pending` | `{id}` | `{held:true,text}` 或 `{held:false}` | Y | `TaskSendHolder.Held`（给任务页显示“有消息待批准”） | ✅ 已实现 |
 | `tasks.send.approve` | `{id,approver}` | `{sent:true,channel,attempts?}` | N | `TaskSendHolder.ApproveSend` + `ChannelDispatchService.Deliver`（仅 `approval=before_send` 的任务会挂起消息；approver 必填；同一条只发一次） | ✅ 已实现 |
-| `tasks.budget.set` | `{id,maxTokens?,maxMinutes?}` | `{taskId,maxTokens,maxMinutes,usedTokens,startedAt?,exhausted}` | N | `TaskLeaseService.SetBudget`（上限属于任务，写进 `leases.json` 的 `budgets` 键；两轴 0=不限、负数 → `-32600`；替换上限不动用量；兼作"Lead 追加预算"：有余量时被 stop 的租约回到 `claimed`） | ✅ 已实现 |
+| `tasks.budget.set` | `{id,maxTokens?,maxMinutes?}` | `{taskId,maxTokens,maxMinutes,usedTokens,startedAt?,exhausted}` | N | `TaskLeaseService.SetBudget`（上限属于任务，写进 `leases.json` 的 `budgets` 键；两轴 0=不限、负数 → `-32600`；替换上限不动用量；兼作"Lead 追加预算"：有余量时被 stop 的租约回到 `claimed`）；**需要 `ActionDecideBudget` 权限**（未授权 → 拒绝，客户端如实显示网关原话）；Web 入口：任务详情页 预算 块的「调整上限」（`web/src/features/task/TaskBudget.tsx` → `api/task.ts` 的 `setTaskBudget`，两步确认 + 空值不当 0） | ✅ 已实现 |
 | `tasks.budget.get` | `{id}` | 同上；从没设过预算且没有用量时 `{budget:null}` | Y | `TaskLeaseService.Budget` | ✅ 已实现 |
 | `tasks.budget.consume` | `{id,tokens}` | 累加后的 `TaskBudget` | N | `TaskLeaseService.Consume`（用量由测量方上报；`used > max` 越限时租约转 `blocked` 并返回 `-32600`（`lease: task budget exhausted`，报文含 used/max），此后 `tasks.submit` 同样被拒，只有 Lead 调 `tasks.budget.set` 追加预算才继续。显式 `tokens:0` = 只重算时长轴） | ✅ 已实现 |
 | `approval.token` | `{approvalId}` | `{token,expiresAt}` | N | `ApprovalActionService.IssueToken` | ✅ 已实现 |
@@ -856,7 +883,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `notify.route.snapshot` | — | `{routes:[NotifyRoute]}` | Y | `NotifyRouterService.Routes` | ✅ 已实现 |
 | `notify.route.upsert` | `{category,primary,fallback?,quietHours?,escalationMs?,enabled?}` | `NotifyRoute` | N | `NotifyRouterService.Upsert` | ✅ 已实现 |
 | `webhook.sources` | — | `{sources:[{id,channel?}]}` | Y | `WebhookSourceAdmin.Sources`（**不含 secret**） | ✅ 已实现 |
-| `webhook.source.set` | `{id,secret,channel?}` | `{id,channel?}` | N | `WebhookSourceAdmin.UpsertSource`（id `[a-z0-9-]`、secret ≥16 字节） | ✅ 已实现 |
+| `webhook.source.set` | `{id,secret,channel?}` | `{id,channel?}` | N | `WebhookSourceAdmin.UpsertSource`（id `[a-z0-9-]`、secret ≥16 字节；`dingtalk/feishu/wechat/email/cron/teammate` 是保留字 → `ErrWebhookInvalidSource`，报文写明 `reserved name`。**注意**：该错误当前走 `orchestrationError` 的兜底分支 → `-32603`，即报文准确但错误码读起来像"服务端坏了"——这是既有行为，本轮未改，见 §2.6） | ✅ 已实现 |
 | `webhook.source.remove` | `{id}` | `{ok:true}` | N | `WebhookSourceAdmin.RemoveSource` | ✅ 已实现 |
 | `lead.run` | — | `{scanned,dispatched,ignored,skipped,failed,errors?}` | Y | `LeadService.RunOnce`（有界一轮；已处理的条目不再是 new） | ✅ 已实现 |
 | `wechat.login.start` | — | `{qrId,qrUrl,expiresAt?}` | Y | `WeChatLoginService.StartLogin`（扫码登录） | ✅ 已实现 |
@@ -1031,7 +1058,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 | `import.run` | `{dir}` → `{ImportResult}` | N | `:45` |
 | `modules.snapshot` | — → `{modules:[ModuleInfo]}` | Y | `ModuleLister` `modules.go:19` |
 | `tools.snapshot` | — → `{names,total}` | Y | `ToolCatalog` `toolcatalog.go:19,22` |
-| `sandbox.status` | — → `SandboxStatus` | Y | `SandboxService.Status` `sandbox.go:44` |
+| `sandbox.status` | — → `SandboxStatus` | Y | `SandboxService.Status` `sandbox.go:44`；**已接线**，上线形状见 §5.1.5 |
 
 > `SandboxService.Runner()`（`sandbox.go:40`）返回 `rigsandbox.Runner` 接口值——**永不上线**；只有 `Status/Available` 的数据面上线。
 
@@ -1064,7 +1091,7 @@ SSE 由 TCP 自然背压，不需要像 WS 那样丢中间帧；但**渲染侧�
 
 | domain | 快照内容 | rev 何时 +1 | 数据源（订阅点） |
 |---|---|---|---|
-| `session.list` | `[]ChatSessionInfo` | 任意会话变更（含标题/running/unread/pin/archive） | `chat.Subscribe` `session.go:612` |
+| `session.list` | `[]ChatSessionInfo`（含 `presetId` / `presetProblem`：会话选了哪个角色、以及该角色在本 build 解析不了时的稳定代码 `unknown-preset`，见 §5.1 的 `session.preset.set`） | 任意会话变更（含标题/running/unread/pin/archive），以及角色行/`presets.agents` 的写入（否则"角色坏了"这条诊断要等下一次轮询才到） | `chat.Subscribe` `session.go:612`；行级 delta 由 `diffSessionList` 比较，`presetId`/`presetProblem` 参与比较（变化即 `changed` 行） |
 | `session:<id>` | 一个 `ChatSession`（含 messages） | 该会话任何变更 | 同上（过滤 sessionID） |
 | `approvals` | `{mode, pending[]}` | 待批集合变化 | `approvals.Subscribe` `approval.go:128` |
 | `ask` | 待回答的提问 | 提问/回答/取消 | `interaction`（真推送） |

@@ -1,48 +1,24 @@
 package dingtalk_test
 
-// TDD for the DingTalk chat-bot adapter. The two things that go wrong in
-// production are pinned here: an unsigned or replayed callback must never reach
-// the inbox (it is a public HTTP endpoint), and the outbound body must carry the
-// exact field set the robot API expects — a wrong shape is a silent no-op on the
-// platform side.
+// TDD for the DingTalk outbound adapter. The thing that goes wrong in production
+// is the outbound body shape: a wrong field set is a silent no-op on the platform
+// side. The ingress (callback signature, replay window, inbox filing) is gone by
+// decision — see docs/research/channel-capabilities.md §6 — and
+// internal/contracts/channel_surface_test.go pins that it does not come back.
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/modules/dingtalk"
-	"github.com/zeokeel/zeokeel/internal/modules/inbox"
 )
-
-const testSecret = "app-secret"
-
-// sign reproduces DingTalk's documented rule:
-// stringToSign = timestamp + "\n" + secret, sign = base64(HMAC-SHA256(secret, stringToSign)).
-func sign(secret, timestamp string) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(timestamp + "\n" + secret))
-	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
-}
-
-type clock struct {
-	mu sync.Mutex
-	t  time.Time
-}
-
-func (c *clock) now() time.Time          { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
-func (c *clock) advance(d time.Duration) { c.mu.Lock(); c.t = c.t.Add(d); c.mu.Unlock() }
 
 // fakeRobot is the outbound half of the platform.
 type fakeRobot struct {
@@ -91,232 +67,21 @@ func (f *fakeRobot) count() int {
 	return len(f.requests)
 }
 
-func newFixture(t *testing.T) (*dingtalk.Adapter, *fakeRobot, contracts.InboxService, *clock) {
+func newFixture(t *testing.T) (*dingtalk.Adapter, *fakeRobot) {
 	t.Helper()
 	robot := &fakeRobot{}
 	httpServer := httptest.NewServer(robot.handler())
 	t.Cleanup(httpServer.Close)
-	clk := &clock{t: time.Date(2026, 11, 25, 9, 0, 0, 0, time.UTC)}
-	inboxSvc := inbox.NewService(inbox.Config{Now: clk.now, MaxPerMinute: 1000})
-	adapter := dingtalk.NewAdapter(inboxSvc, dingtalk.Config{
-		BaseURL:    httpServer.URL,
-		Token:      "access-token",
-		SignSecret: testSecret,
-		RobotCode:  "dingrobot1",
-		Now:        clk.now,
+	adapter := dingtalk.NewAdapter(dingtalk.Config{
+		BaseURL:   httpServer.URL,
+		Token:     "access-token",
+		RobotCode: "dingrobot1",
 	})
-	return adapter, robot, inboxSvc, clk
-}
-
-// callback builds a chat-bot text callback plus its signed headers.
-func callback(t *testing.T, clk *clock, msgID, conversationID, staffID, msgType, text string) (map[string]string, []byte) {
-	t.Helper()
-	payload := map[string]any{
-		"msgtype":          msgType,
-		"msgId":            msgID,
-		"createAt":         clk.now().UnixMilli(),
-		"conversationId":   conversationID,
-		"conversationType": "1",
-		"senderNick":       "张三",
-		"senderStaffId":    staffID,
-		"text":             map[string]any{"content": text},
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal callback: %v", err)
-	}
-	timestamp := strconv.FormatInt(clk.now().Unix(), 10)
-	headers := map[string]string{
-		dingtalk.HeaderSignature: sign(testSecret, timestamp),
-		dingtalk.HeaderTimestamp: timestamp,
-	}
-	return headers, body
-}
-
-func TestReceiveIngestsSignedTextCallback(t *testing.T) {
-	adapter, _, inboxSvc, clk := newFixture(t)
-	headers, body := callback(t, clk, "msg-1", "cid-1", "staff-1", "text", "  帮我看下昨天的退款率  ")
-
-	item, merged, err := adapter.Receive(context.Background(), headers, body)
-	if err != nil {
-		t.Fatalf("Receive: %v", err)
-	}
-	if merged {
-		t.Fatal("first arrival reported as merged")
-	}
-	if item.Source != "dingtalk" {
-		t.Fatalf("source = %q, want dingtalk", item.Source)
-	}
-	if item.Channel != "cid-1" || item.Sender != "staff-1" {
-		t.Fatalf("item = %+v, want channel cid-1 sender staff-1", item)
-	}
-	if item.DedupKey != "dingtalk:msg-1" {
-		t.Fatalf("dedup key = %q", item.DedupKey)
-	}
-	if item.Body != "帮我看下昨天的退款率" {
-		t.Fatalf("body = %q, want the trimmed text", item.Body)
-	}
-	if !strings.Contains(item.Title, "退款率") {
-		t.Fatalf("title = %q", item.Title)
-	}
-
-	items, err := inboxSvc.List(context.Background(), contracts.InboxFilter{})
-	if err != nil || len(items) != 1 {
-		t.Fatalf("inbox = (%v, %v), want one item", items, err)
-	}
-
-	status, err := adapter.Status(context.Background())
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-	if !status.Connected {
-		t.Fatal("status disconnected with a configured token")
-	}
-	if !status.LastInbound.Equal(clk.now()) {
-		t.Fatalf("last inbound = %v, want %v", status.LastInbound, clk.now())
-	}
-}
-
-func TestReceiveRejectsBadSignature(t *testing.T) {
-	adapter, _, inboxSvc, clk := newFixture(t)
-	headers, body := callback(t, clk, "msg-1", "cid-1", "staff-1", "text", "hi")
-	headers[dingtalk.HeaderSignature] = sign("wrong-secret", headers[dingtalk.HeaderTimestamp])
-
-	if _, _, err := adapter.Receive(context.Background(), headers, body); !errors.Is(err, contracts.ErrDingTalkBadSignature) {
-		t.Fatalf("err = %v, want ErrDingTalkBadSignature", err)
-	}
-	assertInboxEmpty(t, inboxSvc)
-}
-
-func TestReceiveRejectsMissingSignatureHeaders(t *testing.T) {
-	adapter, _, inboxSvc, clk := newFixture(t)
-	_, body := callback(t, clk, "msg-1", "cid-1", "staff-1", "text", "hi")
-
-	for name, headers := range map[string]map[string]string{
-		"no signature": {dingtalk.HeaderTimestamp: strconv.FormatInt(clk.now().Unix(), 10)},
-		"no timestamp": {dingtalk.HeaderSignature: "AAAA"},
-		"empty map":    {},
-	} {
-		if _, _, err := adapter.Receive(context.Background(), headers, body); !errors.Is(err, contracts.ErrDingTalkBadSignature) {
-			t.Fatalf("%s: err = %v, want ErrDingTalkBadSignature", name, err)
-		}
-	}
-	assertInboxEmpty(t, inboxSvc)
-}
-
-func TestReceiveRejectsMissingSecret(t *testing.T) {
-	robot := &fakeRobot{}
-	httpServer := httptest.NewServer(robot.handler())
-	t.Cleanup(httpServer.Close)
-	adapter := dingtalk.NewAdapter(inbox.NewService(inbox.Config{MaxPerMinute: 1000}), dingtalk.Config{
-		BaseURL: httpServer.URL, Token: "access-token", // no SignSecret
-	})
-	clk := &clock{t: time.Date(2026, 11, 25, 9, 0, 0, 0, time.UTC)}
-	headers, body := callback(t, clk, "msg-1", "cid-1", "staff-1", "text", "hi")
-
-	if _, _, err := adapter.Receive(context.Background(), headers, body); !errors.Is(err, contracts.ErrDingTalkBadSignature) {
-		t.Fatalf("err = %v, want ErrDingTalkBadSignature without a secret", err)
-	}
-}
-
-func TestReceiveRejectsStaleAndFutureTimestamps(t *testing.T) {
-	for name, offset := range map[string]time.Duration{
-		"stale":          -2 * time.Hour,
-		"future":         2 * time.Hour,
-		"just past skew": -(contracts.DingTalkMaxSkew + time.Minute),
-	} {
-		t.Run(name, func(t *testing.T) {
-			adapter, _, inboxSvc, clk := newFixture(t)
-			stamp := strconv.FormatInt(clk.now().Add(offset).Unix(), 10)
-			body := []byte(`{"msgtype":"text","msgId":"m1","conversationId":"cid-1","senderStaffId":"staff-1","text":{"content":"hi"}}`)
-			headers := map[string]string{
-				dingtalk.HeaderSignature: sign(testSecret, stamp),
-				dingtalk.HeaderTimestamp: stamp,
-			}
-			if _, _, err := adapter.Receive(context.Background(), headers, body); !errors.Is(err, contracts.ErrDingTalkStaleTimestamp) {
-				t.Fatalf("err = %v, want ErrDingTalkStaleTimestamp", err)
-			}
-			assertInboxEmpty(t, inboxSvc)
-			status, _ := adapter.Status(context.Background())
-			if !status.LastInbound.IsZero() {
-				t.Fatalf("a rejected callback moved last inbound to %v", status.LastInbound)
-			}
-		})
-	}
-}
-
-func TestReceiveAcceptsTimestampInsideTheSkew(t *testing.T) {
-	adapter, _, _, clk := newFixture(t)
-	stamp := strconv.FormatInt(clk.now().Add(-30*time.Minute).Unix(), 10)
-	body := []byte(`{"msgtype":"text","msgId":"m1","conversationId":"cid-1","senderStaffId":"staff-1","text":{"content":"hi"}}`)
-	headers := map[string]string{
-		dingtalk.HeaderSignature: sign(testSecret, stamp),
-		dingtalk.HeaderTimestamp: stamp,
-	}
-	if _, _, err := adapter.Receive(context.Background(), headers, body); err != nil {
-		t.Fatalf("Receive inside skew: %v", err)
-	}
-}
-
-func TestReceiveDuplicateMsgIDMerges(t *testing.T) {
-	adapter, _, inboxSvc, clk := newFixture(t)
-	headers, body := callback(t, clk, "msg-1", "cid-1", "staff-1", "text", "again")
-
-	first, merged, err := adapter.Receive(context.Background(), headers, body)
-	if err != nil || merged {
-		t.Fatalf("first: (%+v, %v, %v)", first, merged, err)
-	}
-	clk.advance(time.Minute)
-	second, merged, err := adapter.Receive(context.Background(), headers, body)
-	if err != nil {
-		t.Fatalf("second: %v", err)
-	}
-	if !merged {
-		t.Fatal("platform retry reported as a new item")
-	}
-	if second.ID != first.ID {
-		t.Fatalf("retry id = %q, want %q", second.ID, first.ID)
-	}
-
-	items, _ := inboxSvc.List(context.Background(), contracts.InboxFilter{})
-	if len(items) != 1 || items[0].Count != 2 {
-		t.Fatalf("items = %+v, want one with count 2", items)
-	}
-}
-
-func TestReceiveRejectsNonTextMessage(t *testing.T) {
-	adapter, _, inboxSvc, clk := newFixture(t)
-	headers, body := callback(t, clk, "msg-2", "cid-1", "staff-1", "picture", "")
-
-	if _, _, err := adapter.Receive(context.Background(), headers, body); !errors.Is(err, contracts.ErrDingTalkUnsupportedMessage) {
-		t.Fatalf("err = %v, want ErrDingTalkUnsupportedMessage", err)
-	}
-	assertInboxEmpty(t, inboxSvc)
-}
-
-func TestReceiveRejectsMalformedBody(t *testing.T) {
-	adapter, _, inboxSvc, clk := newFixture(t)
-	stamp := strconv.FormatInt(clk.now().Unix(), 10)
-	headers := map[string]string{
-		dingtalk.HeaderSignature: sign(testSecret, stamp),
-		dingtalk.HeaderTimestamp: stamp,
-	}
-
-	for name, body := range map[string][]byte{
-		"not json":   []byte("{"),
-		"no msg id":  []byte(`{"msgtype":"text","conversationId":"cid-1","senderStaffId":"s","text":{"content":"hi"}}`),
-		"no content": []byte(`{"msgtype":"text","msgId":"m1","conversationId":"cid-1","senderStaffId":"s"}`),
-		"blank text": []byte(`{"msgtype":"text","msgId":"m1","conversationId":"cid-1","senderStaffId":"s","text":{"content":"  "}}`),
-	} {
-		if _, _, err := adapter.Receive(context.Background(), headers, body); !errors.Is(err, contracts.ErrDingTalkInvalid) {
-			t.Fatalf("%s: err = %v, want ErrDingTalkInvalid", name, err)
-		}
-	}
-	assertInboxEmpty(t, inboxSvc)
+	return adapter, robot
 }
 
 func TestSendPostsTheDocumentedBody(t *testing.T) {
-	adapter, robot, _, _ := newFixture(t)
+	adapter, robot := newFixture(t)
 
 	if err := adapter.Send(context.Background(), "cid-1", "收到，我在查"); err != nil {
 		t.Fatalf("Send: %v", err)
@@ -361,7 +126,7 @@ func TestSendPostsTheDocumentedBody(t *testing.T) {
 
 func TestSendUnauthorized(t *testing.T) {
 	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
-		adapter, robot, _, _ := newFixture(t)
+		adapter, robot := newFixture(t)
 		robot.status = status
 		if err := adapter.Send(context.Background(), "cid-1", "hi"); !errors.Is(err, contracts.ErrDingTalkUnauthorized) {
 			t.Fatalf("status %d: err = %v, want ErrDingTalkUnauthorized", status, err)
@@ -370,7 +135,7 @@ func TestSendUnauthorized(t *testing.T) {
 }
 
 func TestSendUnavailable(t *testing.T) {
-	adapter, robot, _, _ := newFixture(t)
+	adapter, robot := newFixture(t)
 	robot.status = http.StatusInternalServerError
 	if err := adapter.Send(context.Background(), "cid-1", "hi"); !errors.Is(err, contracts.ErrDingTalkUnavailable) {
 		t.Fatalf("err = %v, want ErrDingTalkUnavailable", err)
@@ -380,8 +145,8 @@ func TestSendUnavailable(t *testing.T) {
 	dead := httptest.NewServer(http.NotFoundHandler())
 	deadURL := dead.URL
 	dead.Close()
-	offline := dingtalk.NewAdapter(inbox.NewService(inbox.Config{MaxPerMinute: 1000}), dingtalk.Config{
-		BaseURL: deadURL, Token: "access-token", SignSecret: testSecret, RobotCode: "dingrobot1",
+	offline := dingtalk.NewAdapter(dingtalk.Config{
+		BaseURL: deadURL, Token: "access-token", RobotCode: "dingrobot1",
 	})
 	if err := offline.Send(context.Background(), "cid-1", "hi"); !errors.Is(err, contracts.ErrDingTalkUnavailable) {
 		t.Fatalf("offline err = %v, want ErrDingTalkUnavailable", err)
@@ -392,9 +157,7 @@ func TestSendRefusesWithoutTokenOrText(t *testing.T) {
 	robot := &fakeRobot{}
 	httpServer := httptest.NewServer(robot.handler())
 	t.Cleanup(httpServer.Close)
-	noToken := dingtalk.NewAdapter(inbox.NewService(inbox.Config{MaxPerMinute: 1000}), dingtalk.Config{
-		BaseURL: httpServer.URL, SignSecret: testSecret,
-	})
+	noToken := dingtalk.NewAdapter(dingtalk.Config{BaseURL: httpServer.URL})
 	if err := noToken.Send(context.Background(), "cid-1", "hi"); !errors.Is(err, contracts.ErrDingTalkUnauthorized) {
 		t.Fatalf("err = %v, want ErrDingTalkUnauthorized", err)
 	}
@@ -402,7 +165,7 @@ func TestSendRefusesWithoutTokenOrText(t *testing.T) {
 		t.Fatal("a send without a token still hit the network")
 	}
 
-	adapter, robot2, _, _ := newFixture(t)
+	adapter, robot2 := newFixture(t)
 	if err := adapter.Send(context.Background(), "cid-1", "   "); !errors.Is(err, contracts.ErrDingTalkEmptyMessage) {
 		t.Fatalf("err = %v, want ErrDingTalkEmptyMessage", err)
 	}
@@ -414,17 +177,17 @@ func TestSendRefusesWithoutTokenOrText(t *testing.T) {
 	}
 }
 
-func TestStatusBeforeAnyInbound(t *testing.T) {
-	adapter, _, _, _ := newFixture(t)
+func TestStatusReportsTheConfiguredToken(t *testing.T) {
+	adapter, _ := newFixture(t)
 	status, err := adapter.Status(context.Background())
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	if !status.Connected || !status.LastInbound.IsZero() {
-		t.Fatalf("status = %+v, want connected with no inbound yet", status)
+	if !status.Connected {
+		t.Fatalf("status = %+v, want connected with a configured token", status)
 	}
 
-	offline := dingtalk.NewAdapter(inbox.NewService(inbox.Config{}), dingtalk.Config{SignSecret: testSecret})
+	offline := dingtalk.NewAdapter(dingtalk.Config{})
 	disconnected, err := offline.Status(context.Background())
 	if err != nil {
 		t.Fatalf("Status: %v", err)
@@ -434,13 +197,83 @@ func TestStatusBeforeAnyInbound(t *testing.T) {
 	}
 }
 
-func assertInboxEmpty(t *testing.T, inboxSvc contracts.InboxService) {
-	t.Helper()
-	items, err := inboxSvc.List(context.Background(), contracts.InboxFilter{})
-	if err != nil {
-		t.Fatalf("List: %v", err)
+func TestCancelledContextSendsNothing(t *testing.T) {
+	adapter, robot := newFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := adapter.Send(ctx, "cid-1", "hi"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
-	if len(items) != 0 {
-		t.Fatalf("inbox = %+v, want nothing to reach it", items)
+	if robot.count() != 0 {
+		t.Fatal("a cancelled send still hit the network")
+	}
+	if _, err := adapter.Status(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Status err = %v, want context.Canceled", err)
+	}
+}
+
+// TestStatusIsNotConnectedWithoutARobotCode pins the honest status. Every send
+// body carries `robotCode`, so a credential row holding only a token cannot
+// deliver anything: the platform answers 400. Reporting Connected for that row
+// is what made the settings page call a broken setup healthy and let the router
+// schedule sends that were guaranteed to fail.
+func TestStatusIsNotConnectedWithoutARobotCode(t *testing.T) {
+	tokenOnly := dingtalk.NewAdapter(dingtalk.Config{Token: "access-token"})
+	status, err := tokenOnly.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.Connected {
+		t.Fatalf("status = %+v, want NOT connected: a token alone cannot send, the body always carries robotCode", status)
+	}
+	// The state must be diagnosable, not merely false: the page has to be able
+	// to say which field is missing.
+	if !strings.Contains(status.Reason, "robotCode") {
+		t.Fatalf("status.Reason = %q, want it to name the missing robotCode", status.Reason)
+	}
+	if len(status.MissingFields) != 1 || status.MissingFields[0] != "robotCode" {
+		t.Fatalf("status.MissingFields = %v, want [robotCode]", status.MissingFields)
+	}
+}
+
+// TestStatusNamesEveryMissingField pins that a completely unconfigured adapter
+// reports both halves, so the page can prompt for the whole credential instead
+// of one field at a time.
+func TestStatusNamesEveryMissingField(t *testing.T) {
+	status, err := dingtalk.NewAdapter(dingtalk.Config{}).Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.Connected {
+		t.Fatalf("status = %+v, want not connected", status)
+	}
+	if len(status.MissingFields) != 2 || status.MissingFields[0] != "token" || status.MissingFields[1] != "robotCode" {
+		t.Fatalf("status.MissingFields = %v, want [token robotCode]", status.MissingFields)
+	}
+}
+
+// TestSendRefusesWithoutRobotCode is the send-side half: a request with an empty
+// robotCode is a guaranteed 400, so it must fail locally with a readable reason
+// instead of spending a network round trip to learn that.
+func TestSendRefusesWithoutRobotCode(t *testing.T) {
+	robot := &fakeRobot{}
+	httpServer := httptest.NewServer(robot.handler())
+	t.Cleanup(httpServer.Close)
+	adapter := dingtalk.NewAdapter(dingtalk.Config{
+		BaseURL: httpServer.URL,
+		Token:   "access-token",
+	})
+	err := adapter.Send(context.Background(), "cid-1", "hi")
+	if err == nil {
+		t.Fatal("Send succeeded with no robot code")
+	}
+	if !errors.Is(err, contracts.ErrDingTalkInvalid) {
+		t.Fatalf("err = %v, want ErrDingTalkInvalid", err)
+	}
+	if !strings.Contains(err.Error(), "robotCode") {
+		t.Fatalf("err = %v, want it to name robotCode", err)
+	}
+	if robot.count() != 0 {
+		t.Fatal("a send with no robot code still hit the network")
 	}
 }

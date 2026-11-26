@@ -8,10 +8,7 @@ package assembly_test
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"os"
-	"strconv"
 	"time"
 
 	"errors"
@@ -148,7 +145,7 @@ func TestProductsAndEntries(t *testing.T) {
 	wantHeadless := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/inbox", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/insights",
-		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/notifyroute", "zeokeel/credentials", "zeokeel/webhook", "zeokeel/wechat", "zeokeel/feishu", "zeokeel/dingtalk", "zeokeel/email", "zeokeel/replyrelay", "zeokeel/channeldispatch", "zeokeel/heartbeat", "zeokeel/browser", "zeokeel/hosttools", "zeokeel/memorystore", "zeokeel/teamnotes", "zeokeel/skilldraft", "zeokeel/bots", "zeokeel/users",
+		"zeokeel/skills", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/triage", "zeokeel/lead", "zeokeel/tasklease", "zeokeel/clilink", "zeokeel/notifyroute", "zeokeel/credentials", "zeokeel/webhook", "zeokeel/wechat", "zeokeel/feishu", "zeokeel/dingtalk", "zeokeel/email", "zeokeel/replyrelay", "zeokeel/channeldispatch", "zeokeel/heartbeat", "zeokeel/browser", "zeokeel/hosttools", "zeokeel/memorystore", "zeokeel/teamnotes", "zeokeel/skilldraft", "zeokeel/bots", "zeokeel/users",
 		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
 	}
 	loaded := make(map[string]bool, len(headless))
@@ -264,7 +261,7 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 
 	instances := loader.Instances()
 	wantIDs := []string{
-		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "notifyroute", "creds", "webhook", "wechat", "feishu", "dingtalk", "email", "replyrelay", "channeldispatch", "heartbeat", "browser", "hosttools", "memorystore", "teamnotes", "skilldraft", "bots", "users",
+		"appinfo", "store", "inbox", "goal", "approvals", "workspace", "insights", "skills", "sandbox", "toolkit", "triage", "lead", "tasklease", "clilink", "notifyroute", "creds", "webhook", "wechat", "feishu", "dingtalk", "email", "replyrelay", "channeldispatch", "heartbeat", "browser", "hosttools", "memorystore", "teamnotes", "skilldraft", "bots", "users",
 		"agent", "automation", "update", "importer", "acp",
 	}
 	gotIDs := make([]string, 0, len(instances))
@@ -379,8 +376,10 @@ func TestHeadlessAssemblyLoadsAndUnwinds(t *testing.T) {
 	if !ok || feishuService == nil {
 		t.Fatal("KeyFeishu service is not available on the root")
 	}
-	if challenge, ok := feishuService.VerifyURL([]byte(`{"type":"url_verification","challenge":"abc"}`)); !ok || challenge != "abc" {
-		t.Fatalf("feishu VerifyURL = (%q, %v), want the challenge echoed", challenge, ok)
+	// Feishu is outbound only: it has no credentials here, so the honest answer
+	// is "unauthorized" — never a silently dropped message.
+	if err := feishuService.Send(context.Background(), "oc_assembly", "hi"); !errors.Is(err, contracts.ErrFeishuUnauthorized) {
+		t.Fatalf("feishu Send without credentials = %v, want ErrFeishuUnauthorized", err)
 	}
 
 	// The roster exists and has an owner: the permission table (contracts.Allowed)
@@ -1069,104 +1068,5 @@ func TestM0ChainEndToEnd(t *testing.T) {
 	plan, err := router.Plan(ctx, contracts.NotifyCategoryApproval, time.Now(), nil)
 	if err != nil || len(plan.Channels) == 0 || plan.Channels[len(plan.Channels)-1] != contracts.NotifyChannelInApp {
 		t.Fatalf("notify plan = (%+v, %v), want in-app terminal channel", plan, err)
-	}
-}
-
-// TestFeishuChainEndToEnd is the second channel through the same assembled chain:
-// a signed Feishu event travels adapter → inbox → lead triage → task board. The
-// webhook chain proved the wire; this proves the adapter's own seam (signature,
-// envelope parsing, dedupe key) really reaches the same services.
-func TestFeishuChainEndToEnd(t *testing.T) {
-	root := newRoot(t)
-	provideHostServices(t, root)
-	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductHeadless, assembly.BuildInfo{
-		Version: "9.9.9", Commit: "deadbeef", BuildTime: "2026-11-06T12:00:00Z",
-	})
-	if err != nil {
-		t.Fatalf("load headless: %v", err)
-	}
-	defer func() {
-		if err := loader.Close(); err != nil {
-			t.Errorf("loader.Close: %v", err)
-		}
-	}()
-
-	ctx := context.Background()
-	inboxService, ok := root.Get(contracts.KeyInbox)
-	if !ok {
-		t.Fatal("KeyInbox missing")
-	}
-	feishuService, ok := root.Get(contracts.KeyFeishu)
-	if !ok || feishuService == nil {
-		t.Fatal("KeyFeishu missing")
-	}
-	leadService, ok := root.Get(contracts.KeyLead)
-	if !ok {
-		t.Fatal("KeyLead missing")
-	}
-	leadRules, ok := leadService.(contracts.LeadRuleAdmin)
-	if !ok {
-		t.Fatal("lead does not expose rule admin")
-	}
-	board, ok := root.Get(contracts.KeyTaskBoard)
-	if !ok {
-		t.Fatal("KeyTaskBoard missing")
-	}
-
-	if err := leadRules.SetRules(ctx, []contracts.LeadRule{{
-		Source: "feishu", Assignee: "bot-feishu", SubjectPrefix: "飞书：",
-	}}); err != nil {
-		t.Fatalf("SetRules: %v", err)
-	}
-
-	body := []byte(`{"schema":"2.0","header":{"event_type":"im.message.receive_v1"},` +
-		`"event":{"sender":{"sender_id":{"open_id":"ou_1"}},` +
-		`"message":{"message_id":"om_1","chat_id":"oc_1","message_type":"text",` +
-		`"content":"{\"text\":\"帮我看下退款率\"}"}}}`)
-	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-	nonce := "assembly-nonce"
-	// The headless assembly configures no encrypt key, so the signature covers an
-	// empty key — exactly what the adapter computes from its own config.
-	mac := sha256.Sum256(append([]byte(timestamp+nonce), body...))
-	headers := map[string]string{
-		"X-Lark-Signature":         hex.EncodeToString(mac[:]),
-		"X-Lark-Request-Timestamp": timestamp,
-		"X-Lark-Request-Nonce":     nonce,
-	}
-
-	item, merged, err := feishuService.Receive(ctx, headers, body)
-	if err != nil {
-		t.Fatalf("feishu.Receive through the assembly: %v", err)
-	}
-	if merged || item.Source != contracts.FeishuSource || item.Channel != "oc_1" {
-		t.Fatalf("item = %+v merged=%v, want a feishu inbox row", item, merged)
-	}
-
-	report, err := leadService.RunOnce(ctx)
-	if err != nil {
-		t.Fatalf("lead.RunOnce: %v", err)
-	}
-	if report.Dispatched != 1 || report.Failed != 0 {
-		t.Fatalf("lead report = %+v, want the feishu item dispatched", report)
-	}
-
-	tasks, err := board.List(ctx)
-	if err != nil {
-		t.Fatalf("board.List: %v", err)
-	}
-	found := false
-	for _, task := range tasks {
-		if task.Owner == "bot-feishu" && strings.HasPrefix(task.Subject, "飞书：") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("no task owned by bot-feishu on the board: %+v", tasks)
-	}
-
-	updated, err := inboxService.Get(ctx, item.ID)
-	if err != nil || updated.Status != contracts.InboxStatusTask {
-		t.Fatalf("inbox row after triage = (%+v, %v), want status task", updated, err)
 	}
 }

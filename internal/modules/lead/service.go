@@ -49,6 +49,10 @@ func (p RulePlanner) Plan(ctx context.Context, item contracts.InboxItem) (contra
 				Subject:  rule.SubjectPrefix + item.Title,
 				Detail:   rule.DetailPrefix + item.Body,
 				Assignee: rule.Assignee,
+				// The envelope is the rules' own assignees: the assignee above is
+				// always one of them, and declaring it keeps the contract the same
+				// shape as the model planner's (triage validates both the same way).
+				KnownAssignees: ruleAssignees(p.Rules),
 			},
 		}, true, nil
 	}
@@ -98,6 +102,13 @@ func NewService(inboxService contracts.InboxService, triage contracts.TriageServ
 		// The rule planner's rules are editable through LeadRuleAdmin, so keep
 		// them in one place; other planners are used exactly as injected.
 		service.rules = append([]Rule(nil), rulePlanner.Rules...)
+	} else if modelPlanner, ok := planner.(ModelPlanner); ok {
+		// The model planner reads the LIVE rules: they are the prompt context it
+		// decides with and the teammate envelope its assignee is checked against.
+		// Without this it saw an empty rule set (the prompt said "no rules") while
+		// still inventing assignees nobody could act as.
+		modelPlanner.Rules = service.Rules
+		service.planner = modelPlanner
 	} else {
 		service.planner = planner
 	}
@@ -158,14 +169,21 @@ func (s *Service) RunOnce(ctx context.Context) (contracts.LeadReport, error) {
 			report.Skipped++
 			continue
 		}
-		if _, applyErr := s.triage.Apply(ctx, item.ID, decision); applyErr != nil {
+		result, applyErr := s.triage.Apply(ctx, item.ID, decision)
+		if applyErr != nil {
 			report.Failed++
 			report.Errors = append(report.Errors, fmt.Sprintf("%s: apply: %v", item.ID, applyErr))
 			continue
 		}
-		if decision.Action == contracts.InboxActionIgnored {
+		switch {
+		case decision.Action == contracts.InboxActionIgnored:
 			report.Ignored++
-		} else {
+		case result.Dispatch != nil && result.Dispatch.Skipped != "":
+			// The decision was made but no run started (no budget, the dispatch
+			// ceiling, an assignee nobody can act as). Counting it as "dispatched"
+			// would report work in flight that does not exist.
+			report.Skipped++
+		default:
 			report.Dispatched++
 		}
 	}

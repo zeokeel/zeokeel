@@ -271,6 +271,12 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		"session.bindtask": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.bindSessionTask(ctx, request.Params)
 		},
+		"session.preset.get": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.getSessionPreset(ctx, request.Params)
+		},
+		"session.preset.set": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.setSessionPreset(ctx, request.Params)
+		},
 		"mcp.reload": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.reloadConnectors(ctx, request.Params)
 		},
@@ -369,6 +375,9 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		},
 		"tasks.submit": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.taskSubmit(ctx, request.Params)
+		},
+		"tasks.reviews": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.taskReviews(ctx, request.Params)
 		},
 		"tasks.review": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.taskReview(ctx, request.Params)
@@ -516,6 +525,9 @@ func (g *Gateway) methodTable() map[string]methodHandler {
 		},
 		"heartbeat.configure": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.heartbeatConfigure(ctx, request.Params)
+		},
+		"sandbox.status": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
+			return g.sandboxStatus(ctx, request.Params)
 		},
 		"browser.status": func(ctx context.Context, c *client, request rpcRequest) (any, *protocolError) {
 			return g.browserStatus(ctx, request.Params)
@@ -1501,6 +1513,83 @@ func (g *Gateway) bindSessionTask(ctx context.Context, raw json.RawMessage) (any
 	return sessionBindTaskResult{TaskID: bound}, nil
 }
 
+// sessionPresetParams is the body of session.preset.get and session.preset.set.
+// presetId is optional on the write: omitting it clears the role, exactly like
+// taskId on session.bindtask.
+type sessionPresetParams struct {
+	SessionID string `json:"sessionId"`
+	PresetID  string `json:"presetId,omitempty"`
+}
+
+// sessionPresetResult is the answer of both halves: the selection in effect
+// after the call ("" = no role), so a client renders the picker without a
+// second read and can tell "cleared" from "the call failed".
+type sessionPresetResult struct {
+	PresetID string `json:"presetId"`
+}
+
+// getSessionPreset answers the session's selected agent preset (TRANSPORT
+// §5.1.1). It is a read, so it does not refresh the settings domain.
+func (g *Gateway) getSessionPreset(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	var params sessionPresetParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	sessionID, protocolErr := requireSessionID(params.SessionID)
+	if protocolErr != nil {
+		return nil, protocolErr
+	}
+	setter, problem := g.presetSetter()
+	if problem != nil {
+		return nil, problem
+	}
+	return sessionPresetResult{PresetID: setter.SessionPreset(sessionID)}, nil
+}
+
+// setSessionPreset selects (or clears) the session's agent preset — the product
+// half of "this conversation runs as a role". The answer carries the selection
+// in effect, and a write refreshes the settings domain because the selection is
+// a settings row (the same rule as settings.set and session.bindtask).
+func (g *Gateway) setSessionPreset(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	var params sessionPresetParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	sessionID, protocolErr := requireSessionID(params.SessionID)
+	if protocolErr != nil {
+		return nil, protocolErr
+	}
+	setter, problem := g.presetSetter()
+	if problem != nil {
+		return nil, problem
+	}
+	if err := setter.SetSessionPreset(sessionID, params.PresetID); err != nil {
+		return nil, orchestrationError(err)
+	}
+	if err := g.hub.refreshNow(ctx, domainSettings); err != nil {
+		g.logger.Printf("gateway: refresh settings after preset.set: %v", err)
+	}
+	// The session list row carries the role and whether it resolves, so the
+	// selection has to reach it too — otherwise the composer warning would only
+	// appear (or clear) on the next poll (2026-11-26 audit, 高).
+	g.hub.markDomainDirty(listDomain)
+	return sessionPresetResult{PresetID: setter.SessionPreset(sessionID)}, nil
+}
+
+// presetSetter resolves the chat backend's optional preset half. A product
+// without roles reports the method as unavailable instead of pretending.
+func (g *Gateway) presetSetter() (contracts.SessionPresetSetter, *protocolError) {
+	chat, err := g.chatService()
+	if err != nil {
+		return nil, internalError(err)
+	}
+	setter, ok := chat.(contracts.SessionPresetSetter)
+	if !ok {
+		return nil, appError(codeInternalError, "preset_unavailable", false)
+	}
+	return setter, nil
+}
+
 // renameSession sets a session's display title (TRANSPORT §5.1.1).
 //
 // Renaming is a sidebar concern, so the answer carries the list revision and
@@ -1704,6 +1793,42 @@ func (g *Gateway) setSetting(ctx context.Context, raw json.RawMessage) (any, *pr
 	}
 	if len(params.Value) > maxSettingValueBytes {
 		return nil, errInvalidParams("value", "is longer than 64 KiB")
+	}
+	// `session.<id>.preset` is a settings row, but not a plain one: a raw write
+	// here bypassed SetSessionPreset's validation, so a typo (or a hand-written
+	// row) became "no role" and handed the session the full tool surface
+	// (2026-11-26 audit). Route the write through the setter that validates it,
+	// so the only way to store an unknown id is an older document — which the
+	// agent still treats fail-closed.
+	if sessionID, isPresetRow := contracts.ParseSessionPresetSettingKey(key); isPresetRow {
+		setter, problem := g.presetSetter()
+		if problem != nil {
+			return nil, problem
+		}
+		if err := setter.SetSessionPreset(sessionID, strings.TrimSpace(params.Value)); err != nil {
+			return nil, orchestrationError(err)
+		}
+		if err := g.hub.refreshNow(ctx, domainSettings); err != nil {
+			g.logger.Printf("gateway: refresh settings after preset row: %v", err)
+		}
+		// Same reason as session.preset.set: the role lives in the session list
+		// row the composer reads.
+		g.hub.markDomainDirty(listDomain)
+		rev := uint64(0)
+		if snapshot, err := g.hub.snapshotDomain(ctx, domainSettings); err == nil {
+			rev = snapshot.rev
+		}
+		return settingsSetResult{Epoch: g.epoch, Rev: rev}, nil
+	}
+	// `presets.agents` is a JSON document the agent reads its roles from, so a
+	// malformed value is not a harmless string: the read side degrades to "no
+	// user presets" and a session that selected one of those roles silently loses
+	// every tool (2026-11-26 audit, 高). The write is refused with the reason
+	// while the value is still attributable to this request.
+	if key == contracts.SettingAgentPresets {
+		if err := contracts.ValidateAgentPresets(params.Value); err != nil {
+			return nil, errInvalidParams("value", err.Error())
+		}
 	}
 	service, ok := g.root.Get(contracts.KeySettings)
 	if !ok || service == nil {
@@ -1953,7 +2078,39 @@ func (g *Gateway) taskSetStatus(ctx context.Context, raw json.RawMessage) (any, 
 	if err != nil {
 		return nil, internalError(err)
 	}
+	// A status write to completed is a close that bypasses the lease review: the
+	// lease's Accept is the audited path, and this command is the chip that
+	// skips it (2026-11-26 audit, 高 — "reviewer ≠ owner, every task leaves a
+	// record" was bypassable by the very button the client offers). The record is
+	// written as an explicit unaudited close instead of the command being
+	// refused, so the client keeps working while the audit trail stops lying.
+	if status == contracts.TaskStatusCompleted {
+		g.recordDirectClose(ctx, task.ID, "user", "tasks.status")
+	}
 	return g.publishTaskChange(ctx, params.SessionID, &task)
+}
+
+// recordDirectClose hands one unaudited close to the lease layer's review log.
+//
+// The write is best effort and never fails the command: the task is already
+// completed by the time this runs, so turning a missing audit row into an error
+// would invite the client to retry a write that succeeded. An assembly without
+// the lease module has no review log at all — the same assembly also answers
+// `tasks.reviews` as unavailable — and that is logged instead of hidden.
+func (g *Gateway) recordDirectClose(ctx context.Context, taskID, actor, source string) {
+	service, ok := g.root.Get(contracts.KeyTaskLease)
+	if !ok || service == nil {
+		g.logger.Printf("gateway: task %s closed via %s without a lease module to record it", taskID, source)
+		return
+	}
+	auditor, ok := service.(contracts.TaskCloseAuditor)
+	if !ok {
+		g.logger.Printf("gateway: task %s closed via %s but the lease service cannot record it", taskID, source)
+		return
+	}
+	if err := auditor.RecordDirectClose(ctx, taskID, actor, source); err != nil {
+		g.logger.Printf("gateway: record direct close of task %s: %v", taskID, err)
+	}
 }
 
 // taskDelete removes one task from the board (the chip's "cancel").

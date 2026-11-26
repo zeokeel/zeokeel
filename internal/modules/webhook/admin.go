@@ -23,6 +23,30 @@ import (
 // sourceIDPattern keeps ids usable as a URL path segment.
 var sourceIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
 
+// reservedSourceIDs are names a webhook source may not take because something
+// else in the product already means that word:
+//
+//   - dingtalk / feishu / wechat / email are the channel adapters. Their inbound
+//     paths are gone (docs/research/channel-capabilities.md §6), but the names
+//     still name a channel everywhere else — an inbox `source`, a notify route, a
+//     credential kind. Letting /api/inbound/dingtalk answer the generic webhook
+//     adapter would make a configured webhook look like a rewired channel to
+//     anyone reading a request log or the settings list.
+//   - cron / teammate are the internal, non-human inbox sources (automation runs
+//     and child-agent proposals). A webhook that files rows under those names
+//     would launder machine input into a source the product treats as its own.
+//
+// The check lives in one place so both the settings write path
+// (`webhook.source.set`) and the reload path (Open) apply it.
+var reservedSourceIDs = map[string]bool{
+	"dingtalk": true,
+	"feishu":   true,
+	"wechat":   true,
+	"email":    true,
+	"cron":     true,
+	"teammate": true,
+}
+
 // minSecretBytes is the shortest secret we accept; anything shorter is a guess.
 const minSecretBytes = 16
 
@@ -90,9 +114,15 @@ func (s *Service) UpsertSource(ctx context.Context, source contracts.WebhookSour
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !validSourceID(source.ID) || len(source.Secret) < minSecretBytes {
-		return fmt.Errorf("%w: id must match %s and the secret must be at least %d bytes",
-			contracts.ErrWebhookInvalidSource, sourceIDPattern.String(), minSecretBytes)
+	if !sourceIDPattern.MatchString(source.ID) {
+		return fmt.Errorf("%w: id must match %s", contracts.ErrWebhookInvalidSource, sourceIDPattern.String())
+	}
+	if reservedSourceIDs[source.ID] {
+		return fmt.Errorf("%w: %q is a reserved name (channel adapters and internal inbox sources own it)",
+			contracts.ErrWebhookInvalidSource, source.ID)
+	}
+	if len(source.Secret) < minSecretBytes {
+		return fmt.Errorf("%w: the secret must be at least %d bytes", contracts.ErrWebhookInvalidSource, minSecretBytes)
 	}
 
 	s.mu.Lock()
@@ -165,6 +195,11 @@ func (s *Service) persistSourcesLocked() error {
 	return nil
 }
 
-func validSourceID(id string) bool { return sourceIDPattern.MatchString(id) }
+// validSourceID reports whether an id may address an endpoint: the URL-shape
+// rule plus the reserved-name rule. A hand-edited sources.json gets the same
+// answer as the API.
+func validSourceID(id string) bool {
+	return sourceIDPattern.MatchString(id) && !reservedSourceIDs[id]
+}
 
 var _ contracts.WebhookSourceAdmin = (*Service)(nil)

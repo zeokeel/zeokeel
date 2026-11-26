@@ -74,8 +74,25 @@ func (s *service) delegatedParentSpec(sessionID, workspaceRoot string, childTool
 		History:       s.historyView(),
 		Logger:        s.logger,
 	}
+	// The gate must judge this child by the role it executes as, not by the
+	// session's own role (childGate).
+	spec.Gate = s.childGate(sessionID)
 	s.withContextBudget(&spec, cfg, provider)
 	return spec
+}
+
+// childGate builds the approval gate of one delegated child run: the session's
+// own gate unless the parent runs an orchestrator role, in which case the child
+// executes as the executor role and must be judged by that role's allowlist.
+//
+// Without this the surface and the veto disagree — a lead's child would be
+// handed write_file and then have it denied by the lead's read-only allowlist,
+// which is exactly the dead end the delegated-role override exists to remove.
+func (s *service) childGate(sessionID string) rig.Gate {
+	if role, ok := s.delegatedRolePreset(sessionID); ok {
+		return s.gateForRole(sessionID, role.ID)
+	}
+	return s.gate(sessionID)
 }
 
 // dynamicOrchestrationRunner builds a fresh Rig subagent runner for one workflow
@@ -93,11 +110,12 @@ var _ rig.SubagentRunner = (*dynamicOrchestrationRunner)(nil)
 func (r *dynamicOrchestrationRunner) Start(ctx context.Context, spec rig.SubagentSpec) (rig.Subagent, error) {
 	cfg, active := r.service.subagentParent(contracts.AgentSessionFromContext(ctx))
 	cfg = r.service.configForModelOverride(cfg, spec.Model)
-	// A workflow step / ralph round starts from the same model-visible surface as
-	// the parent run, minus every orchestration tool (it must never recurse).
-	childTools := withoutToolNames(r.service.toolsForSession(active), subagentExcludedTools())
+	// A workflow step / ralph round starts from the parent run's model-visible
+	// surface (a step is execution work, so an orchestrator parent hands it the
+	// executor role), minus every orchestration tool (it must never recurse).
+	childTools := withoutToolNames(r.service.delegatedToolsForSession(active), subagentExcludedTools())
 	workspaceRoot := r.service.sessionWorkspaceRoot(active)
-	cfg.SystemPrompt = r.service.buildRunSystemPrompt(ctx, active, cfg, toolNameSet(childTools), workspaceRoot)
+	cfg.SystemPrompt = r.service.delegatedSystemPrompt(ctx, active, cfg, toolNameSet(childTools), workspaceRoot)
 	provider, err := r.service.newProvider(cfg, r.service.thinkingParamsForSession(active, cfg.Model))
 	if err != nil {
 		return nil, fmt.Errorf("agent: orchestration child %q: create provider: %w", strings.TrimSpace(spec.Name), err)

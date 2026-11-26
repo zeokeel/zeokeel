@@ -23,7 +23,7 @@ import (
 func legacySystemPrompt(goos, goarch, workspaceRoot, sandboxMode, approvalMode, mode, configuredPrompt string, toolNames map[string]bool) string {
 	parts := []string{
 		environmentBlockFor(goos, goarch, workspaceRoot, sandboxMode, toolNames),
-		approvalPolicyLine(approvalMode),
+		approvalPolicyLine(approvalPolicy{Mode: approvalMode, ApprovalsAvailable: true, SandboxAssembled: true}),
 	}
 	if modeLine := modePolicyLine(mode, toolNames); modeLine != "" {
 		parts = append(parts, modeLine)
@@ -74,7 +74,8 @@ func TestPromptSectionsShape(t *testing.T) {
 		ID: PromptSectionConfig, Source: "config", Text: "base system prompt",
 	}}
 	frozen := time.Date(2026, 11, 21, 9, 0, 0, 0, time.UTC)
-	sections := promptSectionsForRun("linux", "amd64", "/work", contracts.PermissionWorkspace, contracts.PermissionWorkspace,
+	sections := promptSectionsForRun("linux", "amd64", "/work", contracts.PermissionWorkspace,
+		approvalPolicy{Mode: contracts.PermissionWorkspace, ApprovalsAvailable: true, SandboxAssembled: true},
 		"", frozen, configured, toolNames)
 	ids := make([]string, 0, len(sections))
 	for _, section := range sections {

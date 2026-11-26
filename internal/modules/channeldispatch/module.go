@@ -50,6 +50,16 @@ func Module() *module.Descriptor[Config] {
 
 // The adapters have different Send signatures; these thin shims give them the
 // one shape the plan executor needs.
+//
+// The channel shims are typed with `plainTextSender`, not with the full service
+// contract: dispatch only ever sends, so taking the narrow interface is what
+// makes "outbound only" hold at compile time — a channel whose contract grows an
+// inbound method still cannot be reached from here.
+
+// plainTextSender is the only thing dispatch needs from a channel.
+type plainTextSender interface {
+	Send(ctx context.Context, conversation, text string) error
+}
 
 type wechatSender struct{ service contracts.WeChatService }
 
@@ -58,14 +68,14 @@ func (w wechatSender) Send(ctx context.Context, conversation, text string) error
 	return w.service.Send(ctx, conversation, text)
 }
 
-type dingtalkSender struct{ service contracts.DingTalkService }
+type dingtalkSender struct{ service plainTextSender }
 
 func (d dingtalkSender) Name() string { return contracts.NotifyChannelDingTalk }
 func (d dingtalkSender) Send(ctx context.Context, conversation, text string) error {
 	return d.service.Send(ctx, conversation, text)
 }
 
-type feishuSender struct{ service contracts.FeishuService }
+type feishuSender struct{ service plainTextSender }
 
 func (f feishuSender) Name() string { return contracts.NotifyChannelFeishu }
 func (f feishuSender) Send(ctx context.Context, conversation, text string) error {

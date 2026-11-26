@@ -113,7 +113,11 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
   // stream, but the gateway says the session is running: the composer must offer
   // Stop instead of inviting a send that would 409 (round-4 loop audit F3).
   // Without a stream the text does not grow here; the snapshot catches up.
-  const remoteRunning = sessions.find((item) => item.id === sessionId)?.running === true;
+  // The session list row already carries the selected role and whether it
+  // resolves: no second read, and the composer can say why a conversation with a
+  // broken role refuses everything (2026-11-26 audit, 高).
+  const sessionRow = sessions.find((item) => item.id === sessionId);
+  const remoteRunning = sessionRow?.running === true;
   const running = chat.isRequesting || remoteRunning;
 
   // Coarse turn state for the screen reader, derived from the last row: a
@@ -551,6 +555,8 @@ export function ThreadScreen({ sessionId }: { sessionId: string }) {
             permission={composerSettings.permission}
             model={composerSettings.model}
             thinkingMode={composerSettings.thinkingMode}
+            presetId={sessionRow?.presetId}
+            presetProblem={sessionRow?.presetProblem}
             onSetting={(key: string, value: string) => void setSetting(key, value)}
           />
         }

@@ -68,6 +68,11 @@ type leaseStoreDocument struct {
 	// Requesters is who asked for each task (M6): additive, same document, so the
 	// attribution survives a restart with the work it describes.
 	Requesters []contracts.HeldSend `json:"requesters,omitempty"`
+	// Reviews is the accept/reject history per task: the lease a decision
+	// describes is deleted by that decision, so the audit trail lives here.
+	// Additive like the rest: no version bump, and a build that does not know
+	// the key simply ignores it.
+	Reviews []contracts.TaskReview `json:"reviews,omitempty"`
 }
 
 // Open builds a service whose live leases live in dir/leases.json. A missing
@@ -182,6 +187,21 @@ func Open(dir string, board contracts.TaskBoard, cfg Config) (*Service, error) {
 		stored.Exhausted = stored.Exhausted || budgetExhausted(stored, now)
 		service.budgets[budget.TaskID] = &stored
 	}
+	// Review decisions are history too: restored as written, never read by any
+	// authorization path. A row without a task id or a decision is unusable.
+	for _, review := range document.Reviews {
+		if review.TaskID == "" || review.Decision == "" {
+			continue
+		}
+		stored := review
+		if stored.Verdict == "" {
+			stored.Verdict = contracts.TaskVerdictFail
+			if stored.Decision == contracts.TaskReviewAccept {
+				stored.Verdict = contracts.TaskVerdictPass
+			}
+		}
+		service.reviews[review.TaskID] = append(service.reviews[review.TaskID], stored)
+	}
 	// Start refusals are history, not authority: they are restored as written
 	// and never gate a claim on their own (the policy does that).
 	for _, refusal := range document.StartRejections {
@@ -276,6 +296,14 @@ func (s *Service) persistLocked() error {
 	sort.Strings(heldIDs)
 	for _, id := range heldIDs {
 		document.HeldSends = append(document.HeldSends, contracts.HeldSend{TaskID: id, Text: s.heldSends[id]})
+	}
+	reviewIDs := make([]string, 0, len(s.reviews))
+	for id := range s.reviews {
+		reviewIDs = append(reviewIDs, id)
+	}
+	sort.Strings(reviewIDs)
+	for _, id := range reviewIDs {
+		document.Reviews = append(document.Reviews, s.reviews[id]...)
 	}
 	refusalIDs := make([]string, 0, len(s.startRejections))
 	for id := range s.startRejections {

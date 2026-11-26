@@ -22,6 +22,9 @@ type fakeTriage struct {
 	applied []contracts.TriageDecision
 	ids     []string
 	failOn  map[string]error
+	// dispatch, when set, is the wake-up outcome the fake reports — so a test can
+	// pin how the pass counts a dispatch that was deliberately not started.
+	dispatch *contracts.TriageDispatch
 }
 
 func newFakeTriage() *fakeTriage {
@@ -41,7 +44,8 @@ func (f *fakeTriage) Apply(ctx context.Context, inboxID string, decision contrac
 		item.Status = contracts.InboxStatusTask
 		item.TaskIDs = []string{"task-" + inboxID}
 	}
-	return contracts.TriageResult{Inbox: item, TaskIDs: item.TaskIDs, Created: true}, nil
+	return contracts.TriageResult{Inbox: item, TaskIDs: item.TaskIDs, Created: true,
+		Dispatch: f.dispatch}, nil
 }
 
 func newServices(t *testing.T, rules []lead.Rule) (*lead.Service, contracts.InboxService, *fakeTriage) {
@@ -242,5 +246,23 @@ func TestPlannerFromSettings(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestRunOnceCountsASkippedDispatchAsSkipped pins the report's honesty: a decision
+// that was applied but deliberately not woken (no budget, the dispatch ceiling, an
+// assignee nobody can act as) must not be counted as "dispatched" — that number is
+// what the heartbeat status and the UI show as work in flight.
+func TestRunOnceCountsASkippedDispatchAsSkipped(t *testing.T) {
+	svc, inboxSvc, triageSvc := newServices(t, []lead.Rule{{Source: "webhook", Assignee: contracts.PresetLeadID}})
+	triageSvc.dispatch = &contracts.TriageDispatch{TaskID: "task-1", Skipped: "已有 2 个派单在飞，达到并发上限 2"}
+	arrive(t, inboxSvc, "webhook", "告警")
+
+	report, err := svc.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if report.Dispatched != 0 || report.Skipped != 1 || report.Failed != 0 {
+		t.Fatalf("report = %+v, want the skipped dispatch counted as skipped", report)
 	}
 }

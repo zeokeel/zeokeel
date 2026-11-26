@@ -8,12 +8,13 @@ import (
 
 // SandboxStatus is the read model of the OS sandbox for settings and
 // diagnostics. The OS sandbox has no user switch: whenever the host has a
-// usable runner, commands run inside it (writes confined to the policy). When
-// the host has none, Available is false and Runner is nil: the tool side decides
-// by policy — a workspace-write policy runs commands with the host's own
-// permissions under the application-level policy and the approval gate
-// (personal-client best effort, never a startup failure), while a read-only
-// policy refuses shell commands outright.
+// usable runner, commands run inside it (writes confined to the policy).
+//
+// Personal-helper permission model (2026-11-26): commands never park on an
+// approval card, so the OS runner is the ONLY thing that confines their file
+// effects. On a host without one, `Available`/`Confinement` are the difference
+// between "the fence is real" and "the model was told a rule it can ignore" —
+// which is why they are a read model the client renders, not a log line.
 type SandboxStatus struct {
 	// Available reports whether this host has a usable runner.
 	Available bool
@@ -21,7 +22,31 @@ type SandboxStatus struct {
 	Platform string
 	// Reason explains why the sandbox is unavailable (empty when available).
 	Reason string
+	// Confinement is the honest state of the command fence: SandboxConfinementOS
+	// when a runner reports real enforcement, SandboxConfinementNone when
+	// shell commands run with the process's own permissions. It is the label a
+	// settings/status surface must show; an empty value means "unknown" (no
+	// sandbox module is assembled) and must never be rendered as confined.
+	Confinement string
+	// CommandsUnconfined is true exactly when Confinement is
+	// SandboxConfinementNone: no OS-level write constraint applies to shell
+	// commands. The write rule the model is given (workspace only) is then an
+	// application-level rule it can ignore, not an enforced boundary.
+	CommandsUnconfined bool
+	// Note is the user-facing sentence for this state (empty when confined, so
+	// a client shows nothing rather than "everything is normal" noise).
+	Note string
 }
+
+// Confinement states of contracts.SandboxStatus.
+const (
+	// SandboxConfinementOS means shell commands run inside an OS sandbox whose
+	// runner reports real enforcement.
+	SandboxConfinementOS = "os"
+	// SandboxConfinementNone means shell commands run without any OS-level
+	// confinement (no usable runner on this host).
+	SandboxConfinementNone = "none"
+)
 
 // SandboxService owns the OS sandbox runner and its status.
 //

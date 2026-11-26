@@ -336,6 +336,10 @@
         "attachments"
       ]
     },
+    "sandbox.status": {
+      "required": [],
+      "optional": []
+    },
     "session.active.get": {
       "required": [],
       "optional": []
@@ -378,6 +382,22 @@
       ],
       "optional": [
         "pinned"
+      ]
+    },
+    "session.preset.get": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": [
+        "presetId"
+      ]
+    },
+    "session.preset.set": {
+      "required": [
+        "sessionId"
+      ],
+      "optional": [
+        "presetId"
       ]
     },
     "session.rename": {
@@ -561,6 +581,12 @@
       "optional": [
         "note"
       ]
+    },
+    "tasks.reviews": {
+      "required": [
+        "id"
+      ],
+      "optional": []
     },
     "tasks.send.approve": {
       "required": [

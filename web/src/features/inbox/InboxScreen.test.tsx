@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InboxItem, InboxSnapshot } from '@/api/inbox';
@@ -132,6 +132,83 @@ describe('InboxScreen', () => {
     // One read on mount, exactly one more after the write.
     await waitFor(() => expect(api.loadInboxSnapshot).toHaveBeenCalledTimes(2));
     expect(api.triageInboxItem).not.toHaveBeenCalled();
+  });
+
+  it('offers a role picker per row and sends the chosen role with the dispatch', async () => {
+    const user = userEvent.setup();
+    api.loadInboxSnapshot.mockResolvedValue(snapshot([row('inbox-1', { title: '查退款率' })]));
+
+    render(<InboxScreen />);
+
+    // Without a way to name who takes the task, `inbox.dispatch` could only ever
+    // send {id, subject}: the gateway then records an owner and wakes nobody,
+    // because only the lead role starts a run.
+    const picker = await screen.findByTestId('inbox-assignee-inbox-1');
+    // Reachable by name too, with the word the task detail uses for the owner:
+    // a picker only a mouse can find is not a control.
+    expect(screen.getByRole('combobox', { name: '谁在做' })).toBeInTheDocument();
+    fireEvent.mouseDown(picker.querySelector('.ant-select-selector') ?? picker);
+    const leadOption = document.querySelector('.ant-select-item-option[title="编排者"]');
+    expect(leadOption).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(leadOption as Element);
+    });
+
+    await user.click(screen.getByRole('button', { name: '派成任务' }));
+
+    await waitFor(() =>
+      expect(api.dispatchInboxItem).toHaveBeenCalledWith({
+        id: 'inbox-1',
+        subject: '查退款率',
+        assignee: 'lead',
+      }),
+    );
+  });
+
+  it('says why a dispatch woke nobody instead of only refreshing the list', async () => {
+    const user = userEvent.setup();
+    api.loadInboxSnapshot.mockResolvedValue(snapshot([row('inbox-1', { title: '查退款率' })]));
+    // The gateway created the task but skipped the wake-up (a policy decision):
+    // the task exists, nobody is working on it, and the client must say so.
+    api.dispatchInboxItem.mockResolvedValue({
+      taskIds: ['task-9'],
+      created: true,
+      dispatch: {
+        taskId: 'task-9',
+        skipped: '任务预算已耗尽（200000 tokens / 30 分钟上限），不唤醒；需要先追加预算',
+      },
+    });
+
+    render(<InboxScreen />);
+
+    await user.click(await screen.findByRole('button', { name: '派成任务' }));
+
+    const notice = await screen.findByRole('alert');
+    expect(notice).toHaveTextContent('任务预算已耗尽');
+    // The queue is still re-read: the task really was created.
+    await waitFor(() => expect(api.loadInboxSnapshot).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('查退款率')).toBeInTheDocument();
+  });
+
+  it('reports a failed wake-up as an error, not as a quiet success', async () => {
+    const user = userEvent.setup();
+    api.loadInboxSnapshot.mockResolvedValue(snapshot([row('inbox-1', { title: '查退款率' })]));
+    api.dispatchInboxItem.mockResolvedValue({
+      taskIds: ['task-9'],
+      created: true,
+      dispatch: {
+        taskId: 'task-9',
+        error: 'start run: no model configured',
+      },
+    });
+
+    render(<InboxScreen />);
+
+    await user.click(await screen.findByRole('button', { name: '派成任务' }));
+
+    const notice = await screen.findByRole('alert');
+    expect(notice).toHaveTextContent('no model configured');
+    await waitFor(() => expect(api.loadInboxSnapshot).toHaveBeenCalledTimes(2));
   });
 
   it('triages 忽略 without creating a task', async () => {

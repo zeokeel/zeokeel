@@ -365,9 +365,12 @@ func (s *service) runColdResumeAgent(ctx context.Context, record childSessionRec
 	if model := strings.TrimSpace(record.Model); model != "" {
 		cfg = s.configForModelOverride(cfg, model)
 	}
-	childTools := withoutToolNames(s.toolsForSession(parentID), subagentExcludedTools())
+	// A resumed child is still the child of its parent: an orchestrator parent
+	// hands it the executor role (surface + persona), exactly like a live
+	// delegation, so a resumed worker does not come back as a reader.
+	childTools := withoutToolNames(s.delegatedToolsForSession(parentID), subagentExcludedTools())
 	workspaceRoot := s.sessionWorkspaceRoot(parentID)
-	cfg.SystemPrompt = s.buildRunSystemPrompt(ctx, parentID, cfg, toolNameSet(childTools), workspaceRoot)
+	cfg.SystemPrompt = s.delegatedSystemPrompt(ctx, parentID, cfg, toolNameSet(childTools), workspaceRoot)
 	provider, err := s.newProvider(cfg, s.thinkingParamsForSession(parentID, cfg.Model))
 	if err != nil {
 		return rig.RunResult{}, fmt.Errorf("agent: cold resume %q: create provider: %w", record.ID, err)
@@ -386,8 +389,10 @@ func (s *service) runColdResumeAgent(ctx context.Context, record childSessionRec
 	s.withKitContextBudget(&runConfig, cfg, provider)
 	hostModule := hostbundle.New(hostbundle.Options{
 		History: s.store.History(),
-		Gate:    s.gate(parentID),
-		Spill:   s.spillPolicy(ctx, workspaceRoot),
+		// Same role rule as a live delegation: the resumed child executes as its
+		// parent's delegated role, so the gate must judge it that way.
+		Gate:  s.childGate(parentID),
+		Spill: s.spillPolicy(ctx, workspaceRoot),
 	})
 	runner, err := kit.BuildConfig(ctx, runConfig, hostModule)
 	if err != nil {

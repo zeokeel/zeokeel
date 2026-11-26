@@ -59,6 +59,20 @@ type taskLeaseDTO struct {
 	ReviewNote string        `json:"reviewNote,omitempty"`
 }
 
+// taskReviewDTO is one recorded review decision (contracts.TaskReview). It
+// exists because the lease a review describes is deleted by that decision: the
+// audit trail is the only place a task's "who accepted/rejected it and why"
+// survives, so the task screen reads it here instead of from tasks.lease.
+type taskReviewDTO struct {
+	TaskID   string `json:"taskId"`
+	Reviewer string `json:"reviewer"`
+	Role     string `json:"role,omitempty"`
+	Decision string `json:"decision"`
+	Verdict  string `json:"verdict"`
+	Findings string `json:"findings,omitempty"`
+	At       string `json:"at,omitempty"`
+}
+
 // taskToolsDTO is the M5 tool binding of one task. `tools` is deliberately not
 // omitempty: null on the wire means "no binding" (the same shape tasks.tools.get
 // answers when there is none), while [] never comes back from a read — a clear
@@ -188,12 +202,20 @@ func orchestrationError(err error) *protocolError {
 		errors.Is(err, contracts.ErrLeaseEvidenceRequired),
 		errors.Is(err, contracts.ErrLeaseApprovalRequired),
 		errors.Is(err, contracts.ErrLeaseInvalid),
+		// Reviewing your own work is a request problem the reviewer can fix by
+		// acting as the audit role (single-user product: the rule is "audit role
+		// ≠ execution role"), not "something broke".
+		errors.Is(err, contracts.ErrLeaseReviewerIsOwner),
 		errors.Is(err, contracts.ErrTaskToolsInvalid),
 		errors.Is(err, contracts.ErrTaskToolsUnknownTask),
 		// Binding a session to a task is a request problem (empty session id, a
 		// task id that is not an id): the settings screen must show the field,
 		// not "something broke".
 		errors.Is(err, contracts.ErrSessionTaskBindingInvalid),
+		// Selecting a nonexistent agent role (or writing it to a session the
+		// product does not have) is the picker's problem: the client must show
+		// the field, not "something broke".
+		errors.Is(err, contracts.ErrSessionPresetInvalid),
 		errors.Is(err, contracts.ErrLeaseBudgetExhausted),
 		errors.Is(err, contracts.ErrInboxUnknownItem),
 		errors.Is(err, contracts.ErrInboxUnknownAction),
@@ -285,6 +307,25 @@ type inboxDispatchResult struct {
 	TaskIDs []string     `json:"taskIds"`
 	Created bool         `json:"created"`
 	Item    inboxItemDTO `json:"item"`
+	// Dispatch explains a task that was assigned to the lead role but did not get
+	// a run: no budget, the dispatch concurrency ceiling, or an assignee nobody
+	// can act as. It is absent when no run was expected (any other assignee) and
+	// when the run started. "The task has an owner and nobody is working on it" is
+	// exactly the state a user mistakes for progress, so the reason travels.
+	Dispatch *inboxDispatchRecord `json:"dispatch,omitempty"`
+}
+
+// inboxDispatchRecord is the wake-up outcome of one dispatch (contracts.TriageDispatch).
+type inboxDispatchRecord struct {
+	TaskID string `json:"taskId"`
+	// SessionID is the chat session the run started in ("" when it did not start).
+	SessionID string `json:"sessionId,omitempty"`
+	// PresetID is the role the session runs as (the lead role).
+	PresetID string `json:"presetId,omitempty"`
+	// Error is why a run that was expected failed to start.
+	Error string `json:"error,omitempty"`
+	// Skipped is why no run was started deliberately (a policy decision).
+	Skipped string `json:"skipped,omitempty"`
 }
 
 func (g *Gateway) inboxDispatch(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
@@ -354,10 +395,20 @@ func (g *Gateway) inboxDispatch(ctx context.Context, raw json.RawMessage) (any, 
 			}
 		}
 	}
-	return inboxDispatchResult{
+	out := inboxDispatchResult{
 		TaskIDs: result.TaskIDs, Created: result.Created,
 		Item: inboxItemFromContract(result.Inbox),
-	}, nil
+	}
+	if result.Dispatch != nil {
+		out.Dispatch = &inboxDispatchRecord{
+			TaskID:    result.Dispatch.TaskID,
+			SessionID: result.Dispatch.SessionID,
+			PresetID:  result.Dispatch.PresetID,
+			Error:     result.Dispatch.Error,
+			Skipped:   result.Dispatch.Skipped,
+		}
+	}
+	return out, nil
 }
 
 type inboxTriageParams struct {
@@ -448,6 +499,54 @@ func (g *Gateway) taskSubmit(ctx context.Context, raw json.RawMessage) (any, *pr
 		return nil, orchestrationError(err)
 	}
 	return taskLeaseFromContract(lease), nil
+}
+
+// taskReviewsParams is the body of tasks.reviews.
+type taskReviewsParams struct {
+	ID string `json:"id"`
+}
+
+// taskReviewsResult is the answer of tasks.reviews: the recorded decisions,
+// oldest first. `reviews` is null when the task was never reviewed, which is
+// different from "the read failed" (that is an error, not an empty list).
+type taskReviewsResult struct {
+	Reviews []taskReviewDTO `json:"reviews"`
+}
+
+// taskReviews reads the recorded review decisions of one task (L3 audit trail).
+// It is a separate read from tasks.lease on purpose: the lease is gone exactly
+// when the review has happened.
+func (g *Gateway) taskReviews(ctx context.Context, raw json.RawMessage) (any, *protocolError) {
+	service, problem := g.leaseService()
+	if problem != nil {
+		return nil, problem
+	}
+	var params taskReviewsParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(params.ID) == "" {
+		return nil, errInvalidParams("id", "task id is required")
+	}
+	log, ok := service.(contracts.TaskReviewLog)
+	if !ok {
+		// A build that cannot report the audit trail says so instead of
+		// answering "no reviews": those are different statements.
+		return nil, appError(codeInternalError, "review_log_unavailable", false)
+	}
+	reviews, err := log.Reviews(ctx, params.ID)
+	if err != nil {
+		return nil, orchestrationError(err)
+	}
+	result := taskReviewsResult{}
+	for _, review := range reviews {
+		result.Reviews = append(result.Reviews, taskReviewDTO{
+			TaskID: review.TaskID, Reviewer: review.Reviewer, Role: review.Role,
+			Decision: review.Decision, Verdict: review.Verdict,
+			Findings: review.Findings, At: rfc3339(review.At),
+		})
+	}
+	return result, nil
 }
 
 type taskReviewParams struct {
