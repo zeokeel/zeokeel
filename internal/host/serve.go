@@ -141,13 +141,10 @@ func runServe(ctx context.Context, opts Options, out io.Writer) error {
 	// gateway's System notifications reach the notification center here.
 	installSystemNotifier(notifierFrom(root), settings, logger)
 
-	if !trayEnabled(opts.NoTray) {
-		// --no-tray, or a Linux session without a display: pure gateway. Wait for
-		// the service to end instead of starting the mygo event loop.
-		err = <-serveErr
-	} else {
-		err = runServeWithTray(ctx, opts, root, gw, settings, logger, serveErr, cancelServe)
-	}
+	// Pure gateway: the process has no UI of its own any more (the browser
+	// client is the window), so serving is the whole job. Wait for the service
+	// to end.
+	err = <-serveErr
 	// The gateway stops before the installer runs: that is the whole point of
 	// the marker handoff (a running executable cannot replace itself, and the
 	// listener and data directory must be free). Failures are logged and keep
@@ -170,65 +167,6 @@ func notifierFrom(root cordis.Context) contracts.Notifier {
 		return nil
 	}
 	return notifier
-}
-
-// runServeWithTray runs the gateway (already started in a goroutine) alongside
-// the tray shell, on the main goroutine. Whoever ends first ends the process:
-// the tray quitting cancels the gateway, and the gateway ending quits the tray.
-func runServeWithTray(ctx context.Context, opts Options, root cordis.Context, gw *gateway.Gateway,
-	settings *Settings, logger *Logger, serveErr <-chan error, cancelServe context.CancelFunc) error {
-	// The tray mirrors the live counters the desktop read through uiroot: running
-	// conversations and pending approvals, both from the in-process services.
-	status := func() (running, approvals int) {
-		if chat, ok := root.Get(contracts.KeyChat); ok && chat != nil {
-			for _, session := range chat.Sessions() {
-				if session.Running {
-					running++
-				}
-			}
-		}
-		if service, ok := root.Get(contracts.KeyApprovals); ok && service != nil {
-			approvals = len(service.Pending())
-		}
-		return running, approvals
-	}
-	english := func() bool {
-		if service, ok := root.Get(contracts.KeyLocale); ok && service != nil {
-			return service.Language() == "en"
-		}
-		return false
-	}
-	trayCtx, stopTray := context.WithCancel(ctx)
-	defer stopTray()
-
-	// Watch the gateway: when it ends, the tray must end too.
-	gatewayEnded := make(chan error, 1)
-	go func() {
-		err := <-serveErr
-		gatewayEnded <- err
-		stopTray()
-	}()
-
-	runErr := startTrayShell(trayCtx, opts.DataDir, settings, status, english, logger)
-	if runErr != nil {
-		// The event loop itself failed to start (no display backend, no tray
-		// host): the gateway keeps serving. This is the documented degradation,
-		// so it is a warning, not an error, and the service keeps running until
-		// the process context ends.
-		logger.Printf("%s: tray shell unavailable (%v); the gateway keeps serving", appName, runErr)
-		err := <-gatewayEnded
-		if err != nil && !errors.Is(err, gateway.ErrAlreadyRunning) {
-			return err
-		}
-		return nil
-	}
-	// The tray ended through its quit item: stop the gateway and wait for it.
-	cancelServe()
-	err := <-gatewayEnded
-	if err != nil && !errors.Is(err, gateway.ErrAlreadyRunning) {
-		return err
-	}
-	return nil
 }
 
 // parseServePort validates the --port flag value: a port in 1..65535, or 0 for

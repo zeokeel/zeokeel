@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +32,11 @@ const (
 	MaxRefLen        = 2000
 	MaxRetained      = 200
 	DefaultListLimit = 50
+	// DefaultDigestAt is the local hour the deferred reports are digested.
+	DefaultDigestAt = "08:00"
+	// DefaultRetryInterval bounds how often a deferred report is retried
+	// outside the digest hour.
+	DefaultRetryInterval = 30 * time.Minute
 )
 
 // Config is the module's typed assembly config.
@@ -45,6 +51,14 @@ type Config struct {
 	Enabled *bool `json:"enabled,omitempty"`
 	// Interval overrides DefaultSweepInterval.
 	Interval time.Duration `json:"interval,omitempty"`
+	// DigestAt is the local time of day the accumulated deferred reports are
+	// digested ("08:00"). A closed WeChat window cannot be pushed through, so the
+	// product's answer is one summary at the hour the human is awake — not a
+	// retry every minute.
+	DigestAt string `json:"digestAt,omitempty"`
+	// RetryInterval is how often a deferred report is retried outside the digest
+	// hour (a channel that recovers mid-day should not wait until tomorrow).
+	RetryInterval time.Duration `json:"retryInterval,omitempty"`
 }
 
 // enabled starts the retry loop (default true).
@@ -68,6 +82,12 @@ func (c Config) normalized() Config {
 	if c.Retained <= 0 {
 		c.Retained = MaxRetained
 	}
+	if strings.TrimSpace(c.DigestAt) == "" {
+		c.DigestAt = DefaultDigestAt
+	}
+	if c.RetryInterval <= 0 {
+		c.RetryInterval = DefaultRetryInterval
+	}
 	return c
 }
 
@@ -85,6 +105,12 @@ type Service struct {
 	notify Dispatcher
 	logger contracts.Logger
 	path   string
+	// lastAttempt is when the sweep last tried the deferred set; a closed
+	// channel must not be poked every minute.
+	lastAttempt time.Time
+	// lastDigestDay is the date (local) the digest already went out, so the
+	// morning summary is once a day rather than once a sweep after 08:00.
+	lastDigestDay string
 }
 
 // New builds an in-memory service.
@@ -253,6 +279,9 @@ func (s *Service) Deliver(ctx context.Context, id string) (contracts.ReportDeliv
 		delivery.Reason = err.Error()
 	}
 	s.mu.Lock()
+	if delivery.Deferred {
+		s.lastAttempt = s.cfg.Now()
+	}
 	if index := s.indexLocked(report.ID); index >= 0 {
 		s.rows[index].Delivered = !delivery.Deferred && delivery.Channel != ""
 		s.rows[index].Deferred = delivery.Deferred
@@ -284,6 +313,17 @@ func (s *Service) Sweep(ctx context.Context) (contracts.ReportSweep, error) {
 	if len(pending) == 0 {
 		return report, nil
 	}
+	now := s.cfg.Now()
+	s.mu.Lock()
+	lastAttempt, lastDigestDay := s.lastAttempt, s.lastDigestDay
+	s.mu.Unlock()
+	digestDue := s.digestDue(now, lastDigestDay)
+	if !digestDue && !lastAttempt.IsZero() && now.Sub(lastAttempt) < s.cfg.RetryInterval {
+		// Inside the hold: the deferred set waits for the digest hour or for the
+		// retry interval to pass. Retried=0 tells the caller nothing was sent.
+		return contracts.ReportSweep{}, nil
+	}
+	_ = digestDue
 	if notify == nil {
 		report.Errors = append(report.Errors, "no notification router is assembled")
 		return report, nil
@@ -297,6 +337,12 @@ func (s *Service) Sweep(ctx context.Context) (contracts.ReportSweep, error) {
 	}
 	delivery := deliveryOf("digest", receipt, nil)
 	report.Digests = 1
+	s.mu.Lock()
+	s.lastAttempt = now
+	if !delivery.Deferred && delivery.Channel != "" {
+		s.lastDigestDay = now.Format("2006-01-02")
+	}
+	s.mu.Unlock()
 	s.mu.Lock()
 	for _, row := range pending {
 		for index := range s.rows {
@@ -412,3 +458,30 @@ func verdictLabel(verdict string) string {
 // errNoRows keeps gofmt honest about the errors import when validation messages
 // are the only users.
 var _ = errors.Is
+
+// digestDue reports whether the morning digest is owed: today's digest hour has
+// been reached and today's digest has not gone out yet.
+func (s *Service) digestDue(now time.Time, lastDigestDay string) bool {
+	hour, minute, ok := parseDigestAt(s.cfg.DigestAt)
+	if !ok {
+		return false
+	}
+	if now.Hour() < hour || (now.Hour() == hour && now.Minute() < minute) {
+		return false
+	}
+	return lastDigestDay != now.Format("2006-01-02")
+}
+
+// parseDigestAt reads "HH:MM".
+func parseDigestAt(value string) (int, int, bool) {
+	parts := strings.SplitN(strings.TrimSpace(value), ":", 2)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	hour, errHour := strconv.Atoi(strings.TrimSpace(parts[0]))
+	minute, errMinute := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if errHour != nil || errMinute != nil || hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return 0, 0, false
+	}
+	return hour, minute, true
+}

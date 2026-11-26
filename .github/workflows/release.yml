@@ -1,19 +1,14 @@
 name: Release
 
-# Every vX.Y.Z tag publishes one GitHub release, built by mygo on the runner
-# of each platform: Windows installers (NSIS, GUI subsystem), Linux AppImages
-# and a macOS arm64 dmg built, signed and notarized entirely on Linux.
-# The release is created as a draft, every platform uploads into it, the central checksums step writes
-# SHA256SUMS.txt and the last step publishes it. In-app updates read this
-# release directly (no update-signing key): the update module picks the
-# platform installer (Windows setup exe / macOS dmg / Linux AppImage) the
-# release carries, and the host runs it in-app.
+# Every vX.Y.Z tag publishes one GitHub release containing the server binary for
+# each supported platform. The product has no desktop shell any more: the binary
+# is the whole application (serve / headless / acp), and the browser client is
+# embedded, so a tarball with one executable per platform is the complete
+# artifact set. The release is created as a draft, each platform job uploads into
+# it, the checksums step writes SHA256SUMS.txt, and the last step publishes.
 #
-# Required repository secrets (set once by the maintainer):
-#   MACOS_CERT_P12, MACOS_CERT_PASSWORD  Developer ID Application .p12 + password
-#   APPLE_API_KEY_P8, APPLE_API_KEY_ID, APPLE_API_ISSUER
-#                                        App Store Connect API key for notarytool
-# No secret value is stored in the repository.
+# No signing keys, no notarization, no installers: there is nothing to sign when
+# the artifact is a CLI binary and the UI is a browser tab.
 
 on:
   push:
@@ -28,8 +23,6 @@ concurrency:
 
 env:
   CGO_ENABLED: "0"
-  # No module mirror override: the hosted runners reach proxy.golang.org, so the
-  # job uses Go's defaults instead of a third-party mirror.
 
 jobs:
   version-check:
@@ -64,183 +57,20 @@ jobs:
               --draft --verify-tag --title "ZeoKeel $GITHUB_REF_NAME" --generate-notes
           fi
 
-  package-macos:
-    name: macOS arm64 (Linux compile + dmg + sign/notarize)
-    # One Linux job: mygo cross-compiles the darwin/arm64 .app, prebuilt
-    # libdmg-hfsplus makes the dmg, and indygreg/apple-code-sign-action signs
-    # and notarizes. No macOS runner and no artifact round-trip.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      # The web client bundle is gitignored, so a fresh checkout embeds only
-      # `.keep`. Build it before any binary is compiled: the resulting release
-      # must actually carry the browser client (the release guard checks the
-      # bundle is real and refuses a placeholder tree).
-      - uses: ./.github/actions/web-client
-
-      - name: Install librsvg (icon derivation)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y librsvg2-bin
-
-      - name: Compile the macOS app bundle (Linux cross-build)
-        run: |
-          set -eu
-          bash scripts/build-app.sh -platform darwin/arm64 -skip-dmg -skip-notarize
-          test -d build/darwin-arm64/ZeoKeel.app
-          test -f build/darwin-arm64/ZeoKeel.app/Contents/MacOS/ZeoKeel
-          mkdir -p dist
-          cp -a build/darwin-arm64/ZeoKeel.app dist/ZeoKeel.app
-
-      - name: Install hfsprogs and liblzfse
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y hfsprogs liblzfse-dev
-          command -v mkfs.hfsplus
-
-      - name: Download prebuilt libdmg-hfsplus
-        run: |
-          set -eu
-          tools="$RUNNER_TEMP/dmg-tools"
-          mkdir -p "$tools"
-          url="https://github.com/JuliaBinaryWrappers/libdmg_hfsplus_jll.jl/releases/download/libdmg_hfsplus-v0.5.0%2B0/libdmg_hfsplus.v0.5.0.x86_64-linux-gnu.tar.gz"
-          curl -fsSL -o "$tools/libdmg.tar.gz" "$url"
-          tar -xzf "$tools/libdmg.tar.gz" -C "$tools"
-          test -x "$tools/bin/hfsplus"
-          test -x "$tools/bin/dmg"
-          echo "HFSPLUS_TOOL=$tools/bin/hfsplus" >> "$GITHUB_ENV"
-          echo "DMG_TOOL=$tools/bin/dmg" >> "$GITHUB_ENV"
-
-      - name: Materialize the signing identity and notary key
-        env:
-          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
-          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: |
-          set -eu
-          echo "SIGNING_AVAILABLE=0" >> "$GITHUB_ENV"
-          echo "NOTARIZE_AVAILABLE=0" >> "$GITHUB_ENV"
-          if [ -z "${MACOS_CERT_P12:-}" ]; then
-            echo "::warning::MACOS_CERT_P12 is not configured; producing an unsigned dmg"
-            exit 0
-          fi
-          printf '%s' "$MACOS_CERT_P12" | base64 -d > "$RUNNER_TEMP/cert.p12"
-          # Keychain exports commonly use the legacy RC2 bag encryption; newer
-          # OpenSSL needs -legacy for those. Extract the leaf certificate and
-          # key separately (rcodesign pairs the key with the first certificate
-          # in a p12, which can be the intermediate CA).
-          extract_p12() {
-            local out=$1
-            shift
-            if ! openssl pkcs12 -legacy -in "$RUNNER_TEMP/cert.p12" \
-              -passin "pass:${MACOS_CERT_PASSWORD:-}" "$@" -out "$out" 2>/dev/null; then
-              openssl pkcs12 -in "$RUNNER_TEMP/cert.p12" \
-                -passin "pass:${MACOS_CERT_PASSWORD:-}" "$@" -out "$out"
-            fi
-          }
-          extract_p12 "$RUNNER_TEMP/key.pem" -nocerts -nodes
-          extract_p12 "$RUNNER_TEMP/leaf.pem" -clcerts -nokeys
-          echo "SIGNING_AVAILABLE=1" >> "$GITHUB_ENV"
-          if [ -z "${APPLE_API_KEY_P8:-}" ]; then
-            echo "::warning::APPLE_API_KEY_P8 is not configured; notarization is skipped"
-            exit 0
-          fi
-          printf '%s' "$APPLE_API_KEY_P8" | base64 -d > "$RUNNER_TEMP/AuthKey.p8"
-          # apple-code-sign-action requires the JSON form of the App Store
-          # Connect key; produce it with rcodesign itself.
-          rc="$RUNNER_TEMP/rcodesign"
-          mkdir -p "$rc"
-          curl -fsSL -o "$rc/rcodesign.tar.gz" \
-            https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz
-          tar -xzf "$rc/rcodesign.tar.gz" -C "$rc" --strip-components=1
-          "$rc/rcodesign" encode-app-store-connect-api-key \
-            "$APPLE_API_ISSUER" "$APPLE_API_KEY_ID" "$RUNNER_TEMP/AuthKey.p8" \
-            --output-path "$RUNNER_TEMP/notary-api-key.json"
-          echo "NOTARY_JSON=$RUNNER_TEMP/notary-api-key.json" >> "$GITHUB_ENV"
-          echo "NOTARIZE_AVAILABLE=1" >> "$GITHUB_ENV"
-
-      - name: Sign the app bundle
-        if: env.SIGNING_AVAILABLE == '1'
-        uses: indygreg/apple-code-sign-action@v1.2
-        with:
-          input_path: dist/ZeoKeel.app
-          output_path: dist/ZeoKeel-signed.app
-          sign: true
-          # sign_args is one argument per line, not a shell command line.
-          sign_args: |
-            --code-signature-flags
-            runtime
-          pem_file: |
-            ${{ runner.temp }}/key.pem
-            ${{ runner.temp }}/leaf.pem
-          rcodesign_version: '0.29.0'
-
-      - name: Use the signed bundle
-        if: env.SIGNING_AVAILABLE == '1'
-        run: |
-          set -eu
-          rm -rf dist/ZeoKeel.app
-          mv dist/ZeoKeel-signed.app dist/ZeoKeel.app
-
-      - name: Create the dmg
-        run: |
-          set -eu
-          dmg="build/zeokeel-$(cat VERSION)-arm64.dmg"
-          bash scripts/package-macos-dmg.sh dist/ZeoKeel.app "$dmg"
-          echo "DMG_PATH=$dmg" >> "$GITHUB_ENV"
-          ls -lh "$dmg"
-
-      - name: Sign the dmg
-        if: env.SIGNING_AVAILABLE == '1'
-        uses: indygreg/apple-code-sign-action@v1.2
-        with:
-          input_path: ${{ env.DMG_PATH }}
-          sign: true
-          pem_file: |
-            ${{ runner.temp }}/key.pem
-            ${{ runner.temp }}/leaf.pem
-          rcodesign_version: '0.29.0'
-
-      - name: Notarize and staple the dmg
-        if: env.SIGNING_AVAILABLE == '1' && env.NOTARIZE_AVAILABLE == '1'
-        uses: indygreg/apple-code-sign-action@v1.2
-        with:
-          input_path: ${{ env.DMG_PATH }}
-          sign: false
-          notarize: true
-          staple: true
-          app_store_connect_api_key_json_file: ${{ env.NOTARY_JSON }}
-          rcodesign_version: '0.29.0'
-
-      - name: Upload the macOS dmg
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -eu
-          shopt -s nullglob
-          dmgs=(build/zeokeel-*-arm64.dmg)
-          if [ ${#dmgs[@]} -eq 0 ]; then
-            echo "::warning::no dmg was produced; the macOS asset is missing from this release"
-            exit 0
-          fi
-          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber "${dmgs[@]}"
-
-  build-windows:
-    name: Windows installers (NSIS, GUI subsystem)
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
     needs: draft-release
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,  goarch: amd64 }
+          - { goos: linux,  goarch: arm64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: windows, goarch: amd64 }
     steps:
       - uses: actions/checkout@v7
 
@@ -250,105 +80,39 @@ jobs:
           cache: true
 
       # The web client bundle is gitignored, so a fresh checkout embeds only
-      # `.keep`. Build it before any binary is compiled: the resulting release
-      # must actually carry the browser client (the release guard checks the
-      # bundle is real and refuses a placeholder tree).
+      # `.keep`. Build it before the binary: the release must actually carry the
+      # browser client.
       - uses: ./.github/actions/web-client
 
-      - name: Install NSIS and librsvg
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y nsis librsvg2-bin
-
-      - name: Build the installers
+      - name: Build the binary
         run: |
           set -eu
-          bash scripts/build-app.sh -platform windows/amd64,windows/arm64
           version="$(cat VERSION)"
-          for arch in amd64 arm64; do
-            test -f "build/windows-$arch/zeokeel-setup-$version-$arch.exe"
-          done
-          ls -l build/windows-amd64/zeokeel-setup-*.exe build/windows-arm64/zeokeel-setup-*.exe
+          binary="zeokeel"
+          if [ "${{ matrix.goos }}" = "windows" ]; then binary="zeokeel.exe"; fi
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 \
+            go build -trimpath -buildvcs=false \
+            -ldflags "-s -w -buildid= \
+              -X github.com/zeokeel/zeokeel/internal/host.Version=v${version} \
+              -X github.com/zeokeel/zeokeel/internal/host.Commit=$(git rev-parse --short=12 HEAD) \
+              -X github.com/zeokeel/zeokeel/internal/host.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o "dist/${binary}" ./cmd/zeokeel
+          ./scripts/release-archive.sh
 
-      - name: Upload the Windows assets
+      - name: Upload the asset
         env:
           GH_TOKEN: ${{ github.token }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
         run: |
           set -eu
-          # The in-app updater runs these setup installers; no portable tar.gz
-          # archive can reliably replace a per-user installed Windows app.
-          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
-            build/windows-amd64/zeokeel-setup-*.exe \
-            build/windows-arm64/zeokeel-setup-*.exe
-
-  build-linux:
-    name: Linux AppImages
-    needs: draft-release
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      # The web client bundle is gitignored, so a fresh checkout embeds only
-      # `.keep`. Build it before any binary is compiled: the resulting release
-      # must actually carry the browser client (the release guard checks the
-      # bundle is real and refuses a placeholder tree).
-      - uses: ./.github/actions/web-client
-
-      - name: Install the AppImage toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y librsvg2-bin squashfs-tools patchelf desktop-file-utils file
-          bin="$RUNNER_TEMP/appimage-bin"
-          mkdir -p "$bin"
-          for attempt in 1 2 3; do
-            if GOBIN="$bin" GOPROXY=https://proxy.golang.org,direct GOSUMDB=sum.golang.org \
-              go install github.com/probonopd/go-appimage/src/appimagetool@v0.0.0-20260903171257-b7864b5e53d4; then
-              break
-            fi
-            echo "appimagetool install attempt $attempt failed; retrying" >&2
-            sleep 10
-          done
-          printf '#!/bin/sh\nexit 0\n' > "$bin/uploadtool"
-          chmod +x "$bin/uploadtool"
-          for arch in x86_64 aarch64; do
-            curl -fsSL --retry 5 --retry-delay 3 -o "$bin/runtime-$arch" \
-              "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-$arch"
-            chmod +x "$bin/runtime-$arch"
-          done
-          echo "APPIMAGE_BIN=$bin" >> "$GITHUB_ENV"
-
-      - name: Build the AppImages
-        run: |
-          set -eu
-          bash scripts/build-app.sh -platform linux/amd64,linux/arm64
-          APPIMAGETOOL="$APPIMAGE_BIN/appimagetool" \
-            APPIMAGE_RUNTIME="$APPIMAGE_BIN/runtime-x86_64" \
-            bash scripts/build-appimage.sh build/linux-amd64 "$(cat VERSION)" amd64
-          APPIMAGETOOL="$APPIMAGE_BIN/appimagetool" \
-            APPIMAGE_RUNTIME="$APPIMAGE_BIN/runtime-aarch64" \
-            bash scripts/build-appimage.sh build/linux-arm64 "$(cat VERSION)" arm64
-          ls -l build/zeokeel-*-linux-*.AppImage
-
-      - name: Upload the Linux assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -eu
-          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
-            build/zeokeel-*-linux-amd64.AppImage \
-            build/zeokeel-*-linux-arm64.AppImage
+          asset="$(ls dist/zeokeel-*-${GOOS}-${GOARCH}.*)"
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber "$asset"
 
   publish:
     name: Checksums and publish
-    needs: [package-macos, build-windows, build-linux]
-    # package-macos (Linux dmg/sign/notarize) is optional; never block the release on it.
-    if: always() && needs.build-windows.result == 'success' && needs.build-linux.result == 'success'
+    needs: [build]
+    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

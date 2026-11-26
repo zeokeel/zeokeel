@@ -653,3 +653,41 @@ go test ./...    → 0 FAIL，59 包 ok
 normify_validate → 0 error / 41 warning（31 条为 17.2 的存量债务）
 normify_build    → 217 模块 / 178 叶子 / 406 API / 133 依赖
 ```
+
+---
+
+## 18. 删除桌面外壳（2026-11-26 夜间收尾）
+
+### 18.1 删了什么
+
+| 层 | 删除内容 |
+|---|---|
+| 原生 UI 外壳 | `internal/host/{tray.go,tray_shell.go,hotkey.go,theme_mode.go,framework_locale.go,notify.go}` 及其测试 |
+| 原生设计系统 | `internal/design/`、`internal/brand/`、`internal/icons/`（只被托盘引用） |
+| 框架依赖 | `go.mod` 的 `github.com/egoist/mygo` 与 `tool` 指令，`go.sum` 同步 |
+| 打包链路 | `mygo.json`、`scripts/build-app.sh`、`scripts/build-appimage.sh`、`scripts/package-macos-dmg.sh`、`scripts/gen-icons.sh`、Makefile 的 `package`/`icons`、ci.yml 的安装包步骤 |
+
+### 18.2 替换而非删除的两处
+
+- **系统通知**：改为平台命令 `notify-send`（Linux）/ `osascript`（macOS），`osnotify.go` 里带 AppleScript 转义；不支持的平台返回错误，调用方记日志并保留应用内 toast。
+- **打开 URL**：`lib/openurl` 改为 `open`/`xdg-open`/`rundll32`，子进程 `Start()` 与进程寿命解耦；空 URL 直接拒绝（不再是"trim 后交给平台"）。
+
+### 18.3 发布形态
+
+一个二进制就是整个产品（serve / headless / acp，内嵌浏览器客户端）。`release.yml` 改为矩阵交叉编译 + `scripts/release-archive.sh` 打 tar/zip + SHA256SUMS，**没有安装器、没有签名/公证**——UI 是浏览器标签，没有平台专属产物可签。
+
+### 18.4 建模同步
+
+- 删除 `zeokeel.entry.tray`，`zeokeel.entry.serve` 去掉托盘边，`entry.notify`/`entry.settings`/`lib.openurl` 的 source 与描述重写。
+- `zeokeel.agent.prompt.system`（原 880 行叶子）拆为容器 + 5 个真实接缝：`environment`（环境与审批句）、`tools`（逐工具指引）、`sections`（分节组装）、`clilink`（外部 CLI）、`context`（记忆/技能块）。未锚定箭头从 102 降到 98，模块数 217→221。
+
+### 18.5 验证
+
+```
+go mod tidy            → mygo 从 go.mod/go.sum 消失
+go build ./...         → 通过
+go vet ./...           → 干净
+go test ./...          → 0 FAIL，56 包 ok（少了 design/brand/icons 三个包）
+normify_validate       → 0 error / 40 warning
+normify_build          → 221 模块 / 181 叶子 / 415 API / 129 依赖 / 深度 5
+```

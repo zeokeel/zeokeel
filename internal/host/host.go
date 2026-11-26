@@ -20,9 +20,9 @@
 // service keys, so an assembly can add or drop modules without the host
 // knowing their names.
 //
-// A desktop shell (tray, hotkey, mygo window) still exists under this package
-// from the retired native product; it compiles, but it is not part of either
-// product path above and nothing on the browser path may depend on it.
+// The desktop shell (native window, tray, global hotkey) is gone: it was removed
+// together with the framework dependency it needed, so this package now carries
+// no UI code at all.
 package host
 
 import (
@@ -52,18 +52,6 @@ const (
 	// Settings keys the host owns. Modules use their own namespaces.
 	settingDark     = "ui.theme.dark"
 	settingLanguage = "ui.language"
-
-	// Window geometry of the desktop product (mygo native window options).
-	// The default window is the reading-first size: at 1512x944 the 960 DIP
-	// transcript keeps comfortable margins and the composer/dock still leave a
-	// useful conversation area. The state key is versioned so this larger
-	// default applies once on an existing install (the framework restores the
-	// saved geometry under the old key), while later user resizes persist.
-	mainWindowWidth     = 1512
-	mainWindowHeight    = 944
-	mainWindowMinWidth  = 900
-	mainWindowMinHeight = 600
-	mainWindowStateKey  = "main.v2"
 )
 
 // Build identity of the running binary. Release builds fill these with
@@ -99,10 +87,6 @@ type Options struct {
 	// default range (gateway.DefaultPort..+9, then any free port). It is
 	// meaningless for the other products.
 	Port int
-	// NoTray skips the tray shell of the gateway product: a pure server. A
-	// display-less Linux session skips it anyway (silently), so this flag is for
-	// a machine with a display that must not show an icon.
-	NoTray bool
 }
 
 // normalize fills zero-valued options with their process defaults. Product
@@ -186,7 +170,6 @@ func mainWithStreams(args []string, stdout, stderr io.Writer) int {
 	listProducts := flags.Bool("list-products", false, "print the embedded assembly products and exit")
 	acpMode := flags.Bool("acp", false, "run the Agent Client Protocol (ACP) stdio server")
 	servePort := flags.Int("port", 0, "first port for --product serve (default 9932, then +1..+9, then any free port)")
-	noTray := flags.Bool("no-tray", false, "run --product serve without the system tray (pure gateway)")
 
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -241,13 +224,8 @@ func mainWithStreams(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s\n\n%s", err, usageText)
 		return 2
 	}
-	if *noTray && (strings.TrimSuffix(strings.TrimSpace(*product), ".json") != assembly.ProductServe || *acpMode || *headless) {
-		fmt.Fprintf(stderr, "%s: --no-tray only applies to --product %s\n\n%s", appName, assembly.ProductServe, usageText)
-		return 2
-	}
 	opts := Options{
 		Product:      *product,
-		NoTray:       *noTray,
 		DataDir:      *dataDir,
 		AppVersion:   Version,
 		AppCommit:    Commit,
