@@ -1,0 +1,309 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<style>/* ============================================================================
+   ZeoKeel — 克制工具风设计令牌 (antd re-skin layer, concrete)
+   Operate console · Linear/Vercel-grade · OFL fonts only
+   ========================================================================== */
+
+/* ---- Fonts: all SIL OFL 1.1, self-hostable, embeddable in the binary ---- */
+@font-face{font-family:Inter;font-weight:400;font-display:swap;src:url(../fonts/inter-400.woff2) format('woff2')}
+@font-face{font-family:Inter;font-weight:500;font-display:swap;src:url(../fonts/inter-500.woff2) format('woff2')}
+@font-face{font-family:Inter;font-weight:600;font-display:swap;src:url(../fonts/inter-600.woff2) format('woff2')}
+@font-face{font-family:Inter;font-weight:700;font-display:swap;src:url(../fonts/inter-700.woff2) format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-weight:400;font-display:swap;src:url(../fonts/jbmono-400.woff2) format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-weight:500;font-display:swap;src:url(../fonts/jbmono-500.woff2) format('woff2')}
+@font-face{font-family:'Noto Sans SC';font-weight:400;font-display:swap;src:url(../fonts/notosc-400.ttf) format('truetype')}
+@font-face{font-family:'Noto Sans SC';font-weight:500;font-display:swap;src:url(../fonts/notosc-500.ttf) format('truetype')}
+@font-face{font-family:'Noto Sans SC';font-weight:700;font-display:swap;src:url(../fonts/notosc-700.ttf) format('truetype')}
+
+:root{
+  /* ---- Neutral ramp (cool, desaturated — the console's base) ---- */
+  --z-bg:        #0d0f12;   /* app canvas            */
+  --z-surface:   #14171c;   /* panels / sidebar      */
+  --z-raised:    #191d23;   /* cards / rows          */
+  --z-raised-2:  #1f242b;   /* nested / hover        */
+  --z-line:      #262c34;   /* hairline borders      */
+  --z-line-soft: #1d2128;   /* inner separators      */
+
+  --z-ink:       #e7ebf0;   /* primary text          */
+  --z-ink-2:     #9aa4b1;   /* secondary text        */
+  --z-ink-3:     #68707d;   /* tertiary / meta       */
+  --z-ink-faint: #474e59;   /* disabled              */
+
+  /* ---- Single accent (indigo) — the only brand hue ---- */
+  --z-accent:    #6e7bff;
+  --z-accent-ink:#aab2ff;
+  --z-accent-bg: #1a1e3a;
+  --z-accent-line:#343c73;
+
+  /* ---- Status (used as data, never decoration) ---- */
+  --z-ok:   #3fb573;  --z-ok-bg:#122318;  --z-ok-line:#1e3a28;
+  --z-warn: #d8a43a;  --z-warn-bg:#241d10; --z-warn-line:#3d3115;
+  --z-err:  #e5614f;  --z-err-bg:#261412;  --z-err-line:#43211c;
+  --z-info: #4aa3d6;  --z-info-bg:#0f1f28; --z-info-line:#1a3240;
+  --z-run:  #6e7bff;  --z-run-bg:#171a33;
+
+  /* ---- Type ---- */
+  --z-sans:'Inter','Noto Sans SC',system-ui,sans-serif;
+  --z-mono:'JetBrains Mono','Noto Sans SC',monospace;
+
+  /* ---- Radius / depth ---- */
+  --z-r-sm:5px; --z-r:7px; --z-r-lg:10px; --z-r-xl:14px;
+  --z-shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 18px -6px rgba(0,0,0,.55);
+  --z-shadow-lg: 0 2px 6px rgba(0,0,0,.45), 0 24px 48px -16px rgba(0,0,0,.6);
+  --z-focus: 0 0 0 2px var(--z-bg), 0 0 0 4px var(--z-accent);
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--z-bg);
+  color:var(--z-ink);
+  font-family:var(--z-sans);
+  font-size:13px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  letter-spacing:-0.006em;
+}
+::selection{background:var(--z-accent);color:#fff}
+.mono,.num{font-family:var(--z-mono);font-feature-settings:"tnum" 1,"cv01" 1;letter-spacing:0}
+
+/* ---------- App frame ---------- */
+.app{display:grid;grid-template-columns:232px 1fr;height:100vh;overflow:hidden}
+
+/* sidebar */
+.side{background:var(--z-surface);border-right:1px solid var(--z-line);display:flex;flex-direction:column;min-height:0}
+.side__brand{display:flex;align-items:center;gap:9px;padding:15px 16px 13px}
+.side__logo{width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--z-accent),#4b56d6);display:grid;place-items:center;flex:none}
+.side__logo svg{width:13px;height:13px}
+.side__name{font-weight:600;font-size:13.5px;letter-spacing:-0.02em}
+.side__ver{margin-left:auto;font-family:var(--z-mono);font-size:10.5px;color:var(--z-ink-3);background:var(--z-raised);border:1px solid var(--z-line);border-radius:5px;padding:1px 6px}
+.side__new{margin:2px 12px 10px;display:flex;align-items:center;gap:8px;padding:8px 11px;border:1px solid var(--z-line);border-radius:var(--z-r);background:var(--z-raised);color:var(--z-ink-2);font-size:12.5px;cursor:pointer}
+.side__new kbd{margin-left:auto;font-family:var(--z-mono);font-size:10px;color:var(--z-ink-3);border:1px solid var(--z-line);border-radius:4px;padding:1px 5px}
+.side__scroll{overflow:auto;flex:1;min-height:0;padding-bottom:10px}
+.navgrp{padding:11px 12px 3px}
+.navgrp__t{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--z-ink-3);padding:0 8px 5px}
+.nav{display:flex;align-items:center;gap:9px;padding:6px 8px;margin:1px 4px;border-radius:6px;color:var(--z-ink-2);font-size:12.5px;cursor:pointer;position:relative}
+.nav:hover{background:var(--z-raised);color:var(--z-ink)}
+.nav--on{background:var(--z-accent-bg);color:var(--z-accent-ink)}
+.nav--on::before{content:"";position:absolute;left:-4px;top:7px;bottom:7px;width:2.5px;border-radius:2px;background:var(--z-accent)}
+.nav svg{width:15px;height:15px;flex:none;opacity:.9}
+.nav__badge{margin-left:auto;font-family:var(--z-mono);font-size:10.5px;min-width:17px;height:17px;padding:0 4px;border-radius:5px;display:grid;place-items:center}
+.nav__badge--act{background:var(--z-warn);color:#1a1205;font-weight:600}
+.nav__badge--q{background:var(--z-raised-2);color:var(--z-ink-2)}
+.side__foot{border-top:1px solid var(--z-line);padding:9px 14px;display:flex;align-items:center;gap:8px;color:var(--z-ink-3);font-size:11.5px}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.dot--ok{background:var(--z-ok);box-shadow:0 0 0 3px var(--z-ok-bg)}
+
+/* main column */
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.band{height:49px;border-bottom:1px solid var(--z-line);display:flex;align-items:center;gap:12px;padding:0 20px;background:color-mix(in srgb,var(--z-surface) 55%,transparent);backdrop-filter:blur(8px);flex:none}
+.band__title{font-weight:600;font-size:14px;letter-spacing:-0.02em}
+.band__crumb{color:var(--z-ink-3);font-size:12.5px}
+.band__sub{color:var(--z-ink-3);font-size:12px}
+.band__sp{flex:1}
+.body{flex:1;overflow:auto;min-height:0}
+
+/* ---------- Primitives ---------- */
+.btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:var(--z-r);border:1px solid var(--z-line);background:var(--z-raised);color:var(--z-ink);font:inherit;font-size:12.5px;font-weight:500;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--z-raised-2);border-color:#30373f}
+.btn svg{width:14px;height:14px}
+.btn--pri{background:var(--z-accent);border-color:var(--z-accent);color:#fff}
+.btn--pri:hover{background:#5e6bf0;border-color:#5e6bf0}
+.btn--ghost{background:transparent;border-color:transparent;color:var(--z-ink-2)}
+.btn--ghost:hover{background:var(--z-raised);color:var(--z-ink)}
+.btn--sm{height:26px;padding:0 9px;font-size:12px}
+.btn--danger{color:var(--z-err);border-color:var(--z-err-line)}
+.btn--danger:hover{background:var(--z-err-bg)}
+
+.chip{display:inline-flex;align-items:center;gap:5px;height:21px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:500;border:1px solid var(--z-line);color:var(--z-ink-2);background:var(--z-raised);white-space:nowrap;flex:none}
+.chip .dot{width:6px;height:6px}
+.chip--ok{color:var(--z-ok);border-color:var(--z-ok-line);background:var(--z-ok-bg)}
+.chip--warn{color:var(--z-warn);border-color:var(--z-warn-line);background:var(--z-warn-bg)}
+.chip--err{color:var(--z-err);border-color:var(--z-err-line);background:var(--z-err-bg)}
+.chip--run{color:var(--z-accent-ink);border-color:var(--z-accent-line);background:var(--z-accent-bg)}
+.chip--info{color:var(--z-info);border-color:var(--z-info-line);background:var(--z-info-bg)}
+
+.card{background:var(--z-raised);border:1px solid var(--z-line);border-radius:var(--z-r-lg)}
+.seg{display:inline-flex;background:var(--z-raised);border:1px solid var(--z-line);border-radius:7px;padding:2px}
+.seg button{height:24px;padding:0 11px;border:0;background:transparent;color:var(--z-ink-2);font:inherit;font-size:12px;font-weight:500;border-radius:5px;cursor:pointer}
+.seg button.on{background:var(--z-raised-2);color:var(--z-ink)}
+
+.tag{font-family:var(--z-mono);font-size:11px;color:var(--z-ink-2);background:var(--z-raised-2);border:1px solid var(--z-line);border-radius:5px;padding:1px 6px}
+.kbd{font-family:var(--z-mono);font-size:10.5px;color:var(--z-ink-3);border:1px solid var(--z-line);border-radius:4px;padding:1px 5px;background:var(--z-surface)}
+.meta{color:var(--z-ink-3);font-size:11.5px}
+.h-sec{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--z-ink-3)}
+
+/* backdrop = a hint of the console behind, heavily dimmed */
+body{overflow:hidden}
+.bg{position:fixed;inset:0;background:var(--z-bg)}
+.bg__grid{position:absolute;inset:0;opacity:.28;filter:blur(1.5px);
+  background:
+   linear-gradient(90deg,var(--z-surface) 232px,transparent 232px),
+   repeating-linear-gradient(var(--z-line-soft) 0 1px,transparent 1px 64px);}
+.scrim{position:fixed;inset:0;background:rgba(6,7,9,.68);backdrop-filter:blur(3px)}
+.wrap{position:fixed;inset:0;display:flex;align-items:flex-start;justify-content:center;padding-top:88px}
+
+.launch{width:660px;max-width:92vw;background:var(--z-surface);border:1px solid var(--z-line);border-radius:var(--z-r-xl);box-shadow:var(--z-shadow-lg);overflow:hidden}
+
+/* prompt row */
+.lq{display:flex;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid var(--z-line)}
+.lq__ic{width:19px;height:19px;color:var(--z-ink-3);flex:none}
+.lq__in{flex:1;font-size:15px;color:var(--z-ink);letter-spacing:-0.01em}
+.lq__cursor{display:inline-block;width:1.5px;height:17px;background:var(--z-accent);margin-left:1px;vertical-align:-3px}
+.lq__ph{color:var(--z-ink-faint)}
+.lq__k{font-family:var(--z-mono);font-size:10.5px;color:var(--z-ink-3);border:1px solid var(--z-line);border-radius:5px;padding:2px 7px}
+
+/* mode selector */
+.lmodes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:14px 16px 4px}
+.lmode{text-align:left;border:1px solid var(--z-line);border-radius:var(--z-r-lg);background:var(--z-raised);padding:12px 13px;cursor:pointer;display:flex;flex-direction:column;gap:7px}
+.lmode:hover{background:var(--z-raised-2)}
+.lmode--on{border-color:var(--z-accent);background:var(--z-accent-bg);box-shadow:0 0 0 1px var(--z-accent)}
+.lmode__top{display:flex;align-items:center;gap:8px}
+.lmode__ic{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex:none;background:var(--z-raised-2);color:var(--z-ink-2)}
+.lmode--on .lmode__ic{background:var(--z-accent);color:#fff}
+.lmode__n{font-size:13px;font-weight:600;letter-spacing:-0.01em}
+.lmode__d{font-size:11px;color:var(--z-ink-3);line-height:1.45}
+.lmode--on .lmode__d{color:var(--z-accent-ink)}
+.lmode__tag{font-family:var(--z-mono);font-size:9.5px;color:var(--z-ink-3);margin-left:auto}
+
+/* task config (revealed when 任务 chosen) */
+.lcfg{padding:6px 16px 4px}
+.lcfg__lead{font-size:11px;color:var(--z-ink-3);padding:10px 2px 12px;line-height:1.5}
+.lcfg__lead b{color:var(--z-ink-2);font-weight:500}
+.frow2{display:flex;align-items:center;gap:12px;padding:11px 0;border-top:1px solid var(--z-line-soft)}
+.frow2__l{width:88px;flex:none;font-size:12px;color:var(--z-ink-3);display:flex;align-items:center;gap:6px}
+.frow2__l svg{width:13px;height:13px;opacity:.8}
+.frow2__v{flex:1;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.selpill{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border-radius:7px;border:1px solid var(--z-line);background:var(--z-raised);font-size:12.5px;cursor:pointer}
+.selpill--on{border-color:var(--z-accent-line);background:var(--z-accent-bg);color:var(--z-accent-ink)}
+.selpill .dot{width:6px;height:6px}
+.ghostpill{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 10px;border-radius:7px;border:1px dashed var(--z-line);background:transparent;color:var(--z-ink-3);font-size:12px;cursor:pointer}
+.acc2{font-size:12.5px;color:var(--z-ink-2);line-height:1.5}
+.acc2 .chk{color:var(--z-ok);margin-right:6px}
+.budget{display:inline-flex;align-items:center;gap:9px}
+.budget__v{font-family:var(--z-mono);font-size:13px;color:var(--z-ink)}
+.budget__track{width:120px;height:5px;border-radius:3px;background:var(--z-raised-2);overflow:hidden}
+.budget__track span{display:block;height:100%;width:45%;background:var(--z-accent)}
+
+/* footer: the resolved route + launch */
+.lfoot{display:flex;align-items:center;gap:12px;padding:13px 16px;border-top:1px solid var(--z-line);background:var(--z-raised)}
+.route{font-size:11.5px;color:var(--z-ink-3);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.route b{color:var(--z-ink-2);font-weight:500}
+.route .sep{color:var(--z-ink-faint)}
+.lfoot__sp{flex:1}
+.btn--lg{height:34px;padding:0 16px;font-size:13px}
+.lhint{display:flex;gap:14px;padding:9px 18px;color:var(--z-ink-faint);font-size:11px;border-top:1px solid var(--z-line-soft);background:var(--z-surface)}
+.lhint .kbd{margin:0}
+</style></head><body><!-- icon symbols, 1.6 stroke, consistent -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-flow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="6" height="5" rx="1.3"/><rect x="15" y="4" width="6" height="5" rx="1.3"/><rect x="9" y="15" width="6" height="5" rx="1.3"/><path d="M6 9v2.5a2 2 0 0 0 2 2h1M18 9v2.5a2 2 0 0 1-2 2h-1"/></symbol>
+<symbol id="i-roles" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3Z"/><path d="M9 11.5l2 2 4-4"/></symbol>
+<symbol id="i-report" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h6M9 9h2"/></symbol>
+<symbol id="i-msg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></symbol>
+<symbol id="i-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13l2.5-8h11L20 13M4 13v6h16v-6M4 13h5l1.5 2.5h3L14 13h6"/></symbol>
+<symbol id="i-team" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 6.5a3 3 0 0 1 0 6M17 14c2 .6 3.5 2.3 3.5 5"/></symbol>
+<symbol id="i-board" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/></symbol>
+<symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v5M15 3v5M7 8h10v3a5 5 0 0 1-10 0zM12 16v5"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+<symbol id="i-act" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5 7 5-15L17 12h4"/></symbol>
+<symbol id="i-set" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M21 12h-2.5M5.5 12H3M18 6l-1.8 1.8M7.8 16.2 6 18M18 18l-1.8-1.8M7.8 7.8 6 6"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l16-7-7 16-2.5-6.5z"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+<symbol id="i-dot" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+<symbol id="i-ban" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/></symbol>
+<symbol id="i-tool" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 6.5a3.5 3.5 0 0 0-4.7 4.2l-5.5 5.5 2.5 2.5 5.5-5.5a3.5 3.5 0 0 0 4.2-4.7l-2 2-2-2z"/></symbol>
+<symbol id="i-arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+<symbol id="i-redo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10a8 8 0 1 0 .5 4"/><path d="M20 5v5h-5"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+<symbol id="i-sparkle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l1.8 4.9L19 11l-5.2 2.1L12 18l-1.8-4.9L5 11l5.2-2.1z"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></symbol>
+<symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 15l6-6M10 7l1-1a4 4 0 0 1 6 6l-1 1M14 17l-1 1a4 4 0 0 1-6-6l1-1"/></symbol>
+<symbol id="i-term" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10l3 2.5L7 15M12.5 15h4"/></symbol>
+</defs></svg>
+
+<div class="bg"><div class="bg__grid"></div></div>
+<div class="scrim"></div>
+<div class="wrap">
+  <div class="launch">
+    <!-- prompt -->
+    <div class="lq">
+      <svg class="lq__ic"><use href="#i-sparkle"/></svg>
+      <div class="lq__in">给审计循环补齐工作流阶段推进的集成测试<span class="lq__cursor"></span></div>
+      <span class="lq__k">⌘K</span>
+    </div>
+
+    <!-- the choice the backend actually implies -->
+    <div class="lmodes">
+      <button class="lmode">
+        <div class="lmode__top"><span class="lmode__ic"><svg width="16" height="16"><use href="#i-msg"/></svg></span></div>
+        <div class="lmode__n">问一下</div>
+        <div class="lmode__d">开个一次性会话，聊完即走，不进任务板</div>
+      </button>
+      <button class="lmode lmode--on">
+        <div class="lmode__top"><span class="lmode__ic"><svg width="16" height="16"><use href="#i-board"/></svg></span><span class="lmode__tag">task.submit</span></div>
+        <div class="lmode__n">派个任务</div>
+        <div class="lmode__d">进任务板 · 分角色 · 带验收与预算 · 过审计</div>
+      </button>
+      <button class="lmode">
+        <div class="lmode__top"><span class="lmode__ic"><svg width="16" height="16"><use href="#i-flow"/></svg></span><span class="lmode__tag">2 条</span></div>
+        <div class="lmode__n">跑工作流</div>
+        <div class="lmode__d">套用已定义的多阶段编排，自动分派角色</div>
+      </button>
+    </div>
+
+    <!-- task config -->
+    <div class="lcfg">
+      <div class="lcfg__lead">这会在任务板建一条任务，派给你选的角色去执行。<b>完成由审计验收，不是自说自话</b>——所以先把"算完成"的标准写清楚。</div>
+
+      <div class="frow2">
+        <div class="frow2__l"><svg><use href="#i-roles"/></svg>派给</div>
+        <div class="frow2__v">
+          <span class="selpill selpill--on"><span class="dot" style="background:var(--z-info)"></span>executor</span>
+          <span class="selpill"><span class="dot" style="background:var(--z-ok)"></span>researcher</span>
+          <span class="ghostpill"><svg width="12" height="12"><use href="#i-plus"/></svg>其他角色</span>
+          <span class="route" style="margin-left:4px">工具上限 <b>bash·read·write·edit</b></span>
+        </div>
+      </div>
+
+      <div class="frow2">
+        <div class="frow2__l"><svg><use href="#i-check"/></svg>验收标准</div>
+        <div class="frow2__v" style="flex-direction:column;align-items:stretch;gap:4px">
+          <div class="acc2"><span class="chk">✓</span>新增集成测试覆盖阶段 01→02→03 推进与依赖门槛</div>
+          <div class="acc2"><span class="chk">✓</span>go test ./... 全绿，0 FAIL</div>
+          <span class="ghostpill" style="align-self:flex-start;margin-top:3px"><svg width="12" height="12"><use href="#i-plus"/></svg>加一条</span>
+        </div>
+      </div>
+
+      <div class="frow2">
+        <div class="frow2__l"><svg><use href="#i-clock"/></svg>预算</div>
+        <div class="frow2__v">
+          <span class="budget"><span class="budget__track"><span></span></span><span class="budget__v">50k tok</span></span>
+          <span class="route" style="margin-left:4px"><span class="sep">·</span> 到顶自动停并汇报，不会悄悄烧</span>
+        </div>
+      </div>
+
+      <div class="frow2">
+        <div class="frow2__l"><svg><use href="#i-send"/></svg>完成通知</div>
+        <div class="frow2__v">
+          <span class="selpill selpill--on">应用内</span>
+          <span class="selpill">飞书</span>
+          <span class="ghostpill">静默</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- resolved route + launch -->
+    <div class="lfoot">
+      <div class="route"><b>任务</b><span class="sep">→</span>executor<span class="sep">→</span>审计验收<span class="sep">→</span>报告<span class="sep">·</span>应用内通知</div>
+      <div class="lfoot__sp"></div>
+      <button class="btn btn--sm" style="height:34px">存为工作流阶段</button>
+      <button class="btn btn--pri btn--lg"><svg><use href="#i-arr"/></svg>建任务并派出</button>
+    </div>
+    <div class="lhint"><span><span class="kbd">Tab</span> 切模式</span><span><span class="kbd">⌘↵</span> 派出</span><span><span class="kbd">Esc</span> 取消</span></div>
+  </div>
+</div>
+</body></html>

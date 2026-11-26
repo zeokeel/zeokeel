@@ -1,0 +1,133 @@
+/* ============================================================================
+   ZeoKeel — 克制工具风设计令牌 (antd re-skin layer, concrete)
+   Operate console · Linear/Vercel-grade · OFL fonts only
+   ========================================================================== */
+
+/* ---- Fonts: all SIL OFL 1.1, self-hostable, embeddable in the binary ---- */
+@font-face{font-family:Inter;font-weight:400;font-display:swap;src:url(../fonts/inter-400.woff2) format('woff2')}
+@font-face{font-family:Inter;font-weight:500;font-display:swap;src:url(../fonts/inter-500.woff2) format('woff2')}
+@font-face{font-family:Inter;font-weight:600;font-display:swap;src:url(../fonts/inter-600.woff2) format('woff2')}
+@font-face{font-family:Inter;font-weight:700;font-display:swap;src:url(../fonts/inter-700.woff2) format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-weight:400;font-display:swap;src:url(../fonts/jbmono-400.woff2) format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-weight:500;font-display:swap;src:url(../fonts/jbmono-500.woff2) format('woff2')}
+@font-face{font-family:'Noto Sans SC';font-weight:400;font-display:swap;src:url(../fonts/notosc-400.ttf) format('truetype')}
+@font-face{font-family:'Noto Sans SC';font-weight:500;font-display:swap;src:url(../fonts/notosc-500.ttf) format('truetype')}
+@font-face{font-family:'Noto Sans SC';font-weight:700;font-display:swap;src:url(../fonts/notosc-700.ttf) format('truetype')}
+
+:root{
+  /* ---- Neutral ramp (cool, desaturated — the console's base) ---- */
+  --z-bg:        #0d0f12;   /* app canvas            */
+  --z-surface:   #14171c;   /* panels / sidebar      */
+  --z-raised:    #191d23;   /* cards / rows          */
+  --z-raised-2:  #1f242b;   /* nested / hover        */
+  --z-line:      #262c34;   /* hairline borders      */
+  --z-line-soft: #1d2128;   /* inner separators      */
+
+  --z-ink:       #e7ebf0;   /* primary text          */
+  --z-ink-2:     #9aa4b1;   /* secondary text        */
+  --z-ink-3:     #68707d;   /* tertiary / meta       */
+  --z-ink-faint: #474e59;   /* disabled              */
+
+  /* ---- Single accent (indigo) — the only brand hue ---- */
+  --z-accent:    #6e7bff;
+  --z-accent-ink:#aab2ff;
+  --z-accent-bg: #1a1e3a;
+  --z-accent-line:#343c73;
+
+  /* ---- Status (used as data, never decoration) ---- */
+  --z-ok:   #3fb573;  --z-ok-bg:#122318;  --z-ok-line:#1e3a28;
+  --z-warn: #d8a43a;  --z-warn-bg:#241d10; --z-warn-line:#3d3115;
+  --z-err:  #e5614f;  --z-err-bg:#261412;  --z-err-line:#43211c;
+  --z-info: #4aa3d6;  --z-info-bg:#0f1f28; --z-info-line:#1a3240;
+  --z-run:  #6e7bff;  --z-run-bg:#171a33;
+
+  /* ---- Type ---- */
+  --z-sans:'Inter','Noto Sans SC',system-ui,sans-serif;
+  --z-mono:'JetBrains Mono','Noto Sans SC',monospace;
+
+  /* ---- Radius / depth ---- */
+  --z-r-sm:5px; --z-r:7px; --z-r-lg:10px; --z-r-xl:14px;
+  --z-shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 18px -6px rgba(0,0,0,.55);
+  --z-shadow-lg: 0 2px 6px rgba(0,0,0,.45), 0 24px 48px -16px rgba(0,0,0,.6);
+  --z-focus: 0 0 0 2px var(--z-bg), 0 0 0 4px var(--z-accent);
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--z-bg);
+  color:var(--z-ink);
+  font-family:var(--z-sans);
+  font-size:13px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  letter-spacing:-0.006em;
+}
+::selection{background:var(--z-accent);color:#fff}
+.mono,.num{font-family:var(--z-mono);font-feature-settings:"tnum" 1,"cv01" 1;letter-spacing:0}
+
+/* ---------- App frame ---------- */
+.app{display:grid;grid-template-columns:232px 1fr;height:100vh;overflow:hidden}
+
+/* sidebar */
+.side{background:var(--z-surface);border-right:1px solid var(--z-line);display:flex;flex-direction:column;min-height:0}
+.side__brand{display:flex;align-items:center;gap:9px;padding:15px 16px 13px}
+.side__logo{width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--z-accent),#4b56d6);display:grid;place-items:center;flex:none}
+.side__logo svg{width:13px;height:13px}
+.side__name{font-weight:600;font-size:13.5px;letter-spacing:-0.02em}
+.side__ver{margin-left:auto;font-family:var(--z-mono);font-size:10.5px;color:var(--z-ink-3);background:var(--z-raised);border:1px solid var(--z-line);border-radius:5px;padding:1px 6px}
+.side__new{margin:2px 12px 10px;display:flex;align-items:center;gap:8px;padding:8px 11px;border:1px solid var(--z-line);border-radius:var(--z-r);background:var(--z-raised);color:var(--z-ink-2);font-size:12.5px;cursor:pointer}
+.side__new kbd{margin-left:auto;font-family:var(--z-mono);font-size:10px;color:var(--z-ink-3);border:1px solid var(--z-line);border-radius:4px;padding:1px 5px}
+.side__scroll{overflow:auto;flex:1;min-height:0;padding-bottom:10px}
+.navgrp{padding:11px 12px 3px}
+.navgrp__t{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--z-ink-3);padding:0 8px 5px}
+.nav{display:flex;align-items:center;gap:9px;padding:6px 8px;margin:1px 4px;border-radius:6px;color:var(--z-ink-2);font-size:12.5px;cursor:pointer;position:relative}
+.nav:hover{background:var(--z-raised);color:var(--z-ink)}
+.nav--on{background:var(--z-accent-bg);color:var(--z-accent-ink)}
+.nav--on::before{content:"";position:absolute;left:-4px;top:7px;bottom:7px;width:2.5px;border-radius:2px;background:var(--z-accent)}
+.nav svg{width:15px;height:15px;flex:none;opacity:.9}
+.nav__badge{margin-left:auto;font-family:var(--z-mono);font-size:10.5px;min-width:17px;height:17px;padding:0 4px;border-radius:5px;display:grid;place-items:center}
+.nav__badge--act{background:var(--z-warn);color:#1a1205;font-weight:600}
+.nav__badge--q{background:var(--z-raised-2);color:var(--z-ink-2)}
+.side__foot{border-top:1px solid var(--z-line);padding:9px 14px;display:flex;align-items:center;gap:8px;color:var(--z-ink-3);font-size:11.5px}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.dot--ok{background:var(--z-ok);box-shadow:0 0 0 3px var(--z-ok-bg)}
+
+/* main column */
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.band{height:49px;border-bottom:1px solid var(--z-line);display:flex;align-items:center;gap:12px;padding:0 20px;background:color-mix(in srgb,var(--z-surface) 55%,transparent);backdrop-filter:blur(8px);flex:none}
+.band__title{font-weight:600;font-size:14px;letter-spacing:-0.02em}
+.band__crumb{color:var(--z-ink-3);font-size:12.5px}
+.band__sub{color:var(--z-ink-3);font-size:12px}
+.band__sp{flex:1}
+.body{flex:1;overflow:auto;min-height:0}
+
+/* ---------- Primitives ---------- */
+.btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:var(--z-r);border:1px solid var(--z-line);background:var(--z-raised);color:var(--z-ink);font:inherit;font-size:12.5px;font-weight:500;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--z-raised-2);border-color:#30373f}
+.btn svg{width:14px;height:14px}
+.btn--pri{background:var(--z-accent);border-color:var(--z-accent);color:#fff}
+.btn--pri:hover{background:#5e6bf0;border-color:#5e6bf0}
+.btn--ghost{background:transparent;border-color:transparent;color:var(--z-ink-2)}
+.btn--ghost:hover{background:var(--z-raised);color:var(--z-ink)}
+.btn--sm{height:26px;padding:0 9px;font-size:12px}
+.btn--danger{color:var(--z-err);border-color:var(--z-err-line)}
+.btn--danger:hover{background:var(--z-err-bg)}
+
+.chip{display:inline-flex;align-items:center;gap:5px;height:21px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:500;border:1px solid var(--z-line);color:var(--z-ink-2);background:var(--z-raised);white-space:nowrap;flex:none}
+.chip .dot{width:6px;height:6px}
+.chip--ok{color:var(--z-ok);border-color:var(--z-ok-line);background:var(--z-ok-bg)}
+.chip--warn{color:var(--z-warn);border-color:var(--z-warn-line);background:var(--z-warn-bg)}
+.chip--err{color:var(--z-err);border-color:var(--z-err-line);background:var(--z-err-bg)}
+.chip--run{color:var(--z-accent-ink);border-color:var(--z-accent-line);background:var(--z-accent-bg)}
+.chip--info{color:var(--z-info);border-color:var(--z-info-line);background:var(--z-info-bg)}
+
+.card{background:var(--z-raised);border:1px solid var(--z-line);border-radius:var(--z-r-lg)}
+.seg{display:inline-flex;background:var(--z-raised);border:1px solid var(--z-line);border-radius:7px;padding:2px}
+.seg button{height:24px;padding:0 11px;border:0;background:transparent;color:var(--z-ink-2);font:inherit;font-size:12px;font-weight:500;border-radius:5px;cursor:pointer}
+.seg button.on{background:var(--z-raised-2);color:var(--z-ink)}
+
+.tag{font-family:var(--z-mono);font-size:11px;color:var(--z-ink-2);background:var(--z-raised-2);border:1px solid var(--z-line);border-radius:5px;padding:1px 6px}
+.kbd{font-family:var(--z-mono);font-size:10.5px;color:var(--z-ink-3);border:1px solid var(--z-line);border-radius:4px;padding:1px 5px;background:var(--z-surface)}
+.meta{color:var(--z-ink-3);font-size:11.5px}
+.h-sec{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--z-ink-3)}

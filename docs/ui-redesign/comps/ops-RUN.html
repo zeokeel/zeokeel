@@ -1,0 +1,151 @@
+<!--active:BOARD title:task-4820 sub:-->
+<div class="main">
+  <div class="band">
+    <span class="band__crumb">任务板</span><span class="band__crumb">/</span>
+    <span class="chip chip--info" style="height:21px">executor</span>
+    <span class="band__title" style="font-size:13.5px">实现变更 · 审计循环单测</span>
+    <span class="tag">task-4820</span>
+    <span class="chip chip--run"><span class="spin"></span>运行中</span>
+    <span class="band__sp"></span>
+    <button class="btn btn--sm">打断</button>
+    <button class="btn btn--sm"><svg><use href="#i-flow"/></svg>发布流水线 · 阶段 02</button>
+  </div>
+
+  <div class="runwrap">
+    <!-- CENTER: the run transcript -->
+    <section class="run">
+      <div class="run__scroll">
+        <!-- task banner: the session's real identity -->
+        <div class="rbanner">
+          <div class="rbanner__row"><span class="h-sec">这一轮在做</span><span class="meta" style="margin-left:auto">阶段 02 · 依赖 01 已满足</span></div>
+          <div class="rbanner__goal">为 <b>发布流水线</b> 的审计循环补齐单元测试，覆盖返工计数到顶与证据门槛。</div>
+          <div class="rbanner__means"><span class="meta">分配工具</span><span class="tchip">bash</span><span class="tchip">read</span><span class="tchip">write</span><span class="tchip">edit</span><span class="meta" style="margin-left:6px">· lead 在派单时绑定，是本轮工具上限</span></div>
+        </div>
+
+        <!-- assistant reasoning (folded) -->
+        <div class="step step--think"><svg width="13" height="13" style="color:var(--z-ink-3)"><use href="#i-sparkle"/></svg>思考 3 轮 · 已折叠<span class="meta" style="margin-left:auto">展开</span></div>
+
+        <!-- tool call: bash -->
+        <div class="tcall">
+          <div class="tcall__h"><span class="tcall__ic" style="color:var(--z-ok)"><svg width="13" height="13"><use href="#i-check"/></svg></span><span class="tcall__name mono">bash</span><span class="tcall__arg mono">go test ./internal/modules/audit/... -run Rework</span><span class="meta" style="margin-left:auto">0.8s · 退出 0</span></div>
+          <div class="tcall__out mono">ok  &nbsp;zeokeel/internal/modules/audit&nbsp;&nbsp;0.412s<br>PASS · 6 tests</div>
+        </div>
+
+        <!-- tool call: write -->
+        <div class="tcall">
+          <div class="tcall__h"><span class="tcall__ic" style="color:var(--z-ok)"><svg width="13" height="13"><use href="#i-check"/></svg></span><span class="tcall__name mono">write</span><span class="tcall__arg mono">internal/modules/audit/rework_test.go</span><span class="meta" style="margin-left:auto">+84 行</span></div>
+        </div>
+
+        <!-- assistant text -->
+        <div class="msg">
+          <div class="msg__role">executor</div>
+          <div class="msg__body">返工到顶的用例已补上：第 3 次打回后 <code>Claim</code> 与 <code>Submit</code> 都返回 <code>ErrLeaseReworkExhausted</code>，并验证了负数 rework 行被夹到 0。测试全绿。还需要我补 workflow 阶段推进的集成测试吗？</div>
+        </div>
+
+        <!-- approval inline (this is where a gate appears in-context) -->
+        <div class="rgate">
+          <div class="rgate__h"><span class="dkind dkind--approval"><svg width="11" height="11"><use href="#i-term"/></svg>批准命令</span><span class="meta" style="margin-left:auto">也会出现在「决策」队列</span></div>
+          <div class="rgate__q">在工作区执行命令？会改动文件。</div>
+          <div class="rgate__cmd mono">$ gofmt -w internal/modules/audit/rework_test.go</div>
+          <div class="rgate__acts"><span class="dcard__scope" style="margin-right:auto">允许范围 · 本会话内</span><button class="ba ba--deny"><svg><use href="#i-x"/></svg>拒绝</button><button class="ba">允许一次</button><button class="ba ba--ok"><svg><use href="#i-check"/></svg>本会话始终</button></div>
+        </div>
+      </div>
+
+      <!-- composer -->
+      <div class="composer">
+        <div class="composer__box">
+          <div class="composer__ph">给 executor 发消息，/ 调用指令，@ 文件或对话…</div>
+          <div class="composer__bar">
+            <span class="cpill"><svg width="12" height="12"><use href="#i-roles"/></svg>executor</span>
+            <span class="cpill">deepseek-v4-flash</span>
+            <span class="cpill"><svg width="12" height="12"><use href="#i-lock"/></svg>工作区内修改</span>
+            <span class="band__sp" style="flex:1"></span>
+            <span class="meta mono">2 轮 14 步 · 48k tok · 缓存 71% · 上下文 23%</span>
+            <button class="btn btn--pri btn--sm" style="height:28px"><svg><use href="#i-send"/></svg>发送</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT: live trajectory + evidence accumulating for audit -->
+    <aside class="rside">
+      <div class="rtabs"><button class="on">轨迹</button><button>证据 <span class="num">2</span></button><button>上下文</button><button>文件</button></div>
+
+      <div class="rside__scroll">
+        <div class="h-sec" style="margin:4px 0 10px">这一轮的轨迹</div>
+        <div class="tl2"><span class="tl2__ic tl2__ic--ok"><svg width="10" height="10"><use href="#i-check"/></svg></span><div><div class="tl2__t">bash · go test</div><div class="meta mono">PASS 6 · 0.8s</div></div></div>
+        <div class="tl2"><span class="tl2__ic tl2__ic--ok"><svg width="10" height="10"><use href="#i-check"/></svg></span><div><div class="tl2__t">write · rework_test.go</div><div class="meta mono">+84 行</div></div></div>
+        <div class="tl2"><span class="tl2__ic tl2__ic--run"><span class="spin" style="width:9px;height:9px"></span></span><div><div class="tl2__t">等待批准 · gofmt</div><div class="meta">在你这儿</div></div></div>
+
+        <div class="h-sec" style="margin:20px 0 9px">已累积证据<span class="meta" style="font-weight:400;text-transform:none;letter-spacing:0"> · 提交时交给审计</span></div>
+        <div class="ev2"><svg width="13" height="13" style="color:var(--z-ink-3)"><use href="#i-term"/></svg><div><div class="ev2__t">go test ./... · 0 FAIL</div><div class="meta">命令输出</div></div></div>
+        <div class="ev2"><svg width="13" height="13" style="color:var(--z-ink-3)"><use href="#i-file"/></svg><div><div class="ev2__t">rework_test.go</div><div class="meta">文件 · +84</div></div></div>
+        <button class="btn btn--sm" style="width:100%;justify-content:center;margin-top:8px;border-style:dashed;color:var(--z-ink-3)"><svg><use href="#i-plus"/></svg>添加证据</button>
+
+        <div class="submit">
+          <div class="meta" style="margin-bottom:8px;line-height:1.5">提交后租约转 <b style="color:var(--z-warn)">复核</b>，auditor 会检查证据充分性；证据不足会被打回并计一次返工。</div>
+          <button class="btn btn--pri" style="width:100%;justify-content:center"><svg><use href="#i-check"/></svg>提交证据 · 请求验收</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<style>
+.runwrap{flex:1;display:grid;grid-template-columns:1fr 316px;min-height:0}
+.run{display:flex;flex-direction:column;min-height:0;min-width:0}
+.run__scroll{flex:1;overflow:auto;padding:20px 26px 10px;max-width:800px;width:100%;margin:0 auto}
+.rbanner{background:var(--z-raised);border:1px solid var(--z-line);border-radius:var(--z-r-lg);padding:13px 15px;margin-bottom:20px}
+.rbanner__row{display:flex;align-items:center;margin-bottom:8px}
+.rbanner__goal{font-size:13.5px;line-height:1.55;color:var(--z-ink)}
+.rbanner__goal b{color:var(--z-accent-ink);font-weight:600}
+.rbanner__means{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:11px;padding-top:11px;border-top:1px solid var(--z-line-soft)}
+.step{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--z-ink-2);padding:8px 12px;border:1px solid var(--z-line);border-radius:var(--z-r);background:var(--z-raised);margin-bottom:12px;cursor:pointer}
+.tcall{border:1px solid var(--z-line);border-radius:var(--z-r);background:var(--z-raised);margin-bottom:12px;overflow:hidden}
+.tcall__h{display:flex;align-items:center;gap:9px;padding:9px 12px}
+.tcall__ic{flex:none;display:grid;place-items:center}
+.tcall__name{font-size:12px;font-weight:500;color:var(--z-ink)}
+.tcall__arg{font-size:11.5px;color:var(--z-ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tcall__out{font-size:11px;color:var(--z-ink-2);padding:9px 12px;border-top:1px solid var(--z-line-soft);background:var(--z-surface);line-height:1.6}
+.msg{display:flex;gap:12px;margin-bottom:16px}
+.msg__role{font-size:11px;font-weight:600;color:var(--z-info);width:66px;flex:none;padding-top:2px;font-family:var(--z-mono)}
+.msg__body{font-size:13.5px;line-height:1.65;color:var(--z-ink)}
+.msg__body code{font-family:var(--z-mono);font-size:12px;background:var(--z-raised-2);border:1px solid var(--z-line);border-radius:4px;padding:0 5px;color:var(--z-accent-ink)}
+.rgate{border:1px solid var(--z-err-line);border-radius:var(--z-r-lg);background:color-mix(in srgb,var(--z-err-bg) 30%,var(--z-raised));padding:12px 14px;margin-bottom:16px}
+.rgate__h{display:flex;align-items:center;margin-bottom:9px}
+.rgate__q{font-size:13px;font-weight:500}
+.rgate__cmd{font-size:11.5px;color:var(--z-ink-2);background:var(--z-surface);border:1px solid var(--z-line-soft);border-radius:6px;padding:8px 10px;margin:9px 0 11px}
+.rgate__acts{display:flex;align-items:center;gap:8px}
+.dkind{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:6px;font-size:10.5px;font-weight:600}
+.dkind--approval{background:var(--z-err-bg);color:var(--z-err);border:1px solid var(--z-err-line)}
+.ba{height:28px;padding:0 12px;border-radius:6px;border:1px solid var(--z-line);background:var(--z-raised-2);color:var(--z-ink);font:inherit;font-size:12px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.ba svg{width:13px;height:13px}
+.ba--ok{background:var(--z-accent);border-color:var(--z-accent);color:#fff}
+.ba--deny{color:var(--z-err);border-color:var(--z-err-line);background:var(--z-err-bg)}
+.dcard__scope{font-size:10.5px;color:var(--z-ink-3)}
+.composer{border-top:1px solid var(--z-line);padding:14px 26px;background:var(--z-surface)}
+.composer__box{max-width:800px;margin:0 auto;border:1px solid var(--z-line);border-radius:var(--z-r-lg);background:var(--z-raised);overflow:hidden}
+.composer__ph{padding:13px 15px 9px;color:var(--z-ink-faint);font-size:13px}
+.composer__bar{display:flex;align-items:center;gap:7px;padding:9px 11px;border-top:1px solid var(--z-line-soft)}
+.cpill{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:6px;font-size:11.5px;background:var(--z-raised-2);border:1px solid var(--z-line);color:var(--z-ink-2)}
+.tchip{display:inline-flex;align-items:center;height:21px;padding:0 8px;border-radius:5px;font-size:11px;font-family:var(--z-mono);background:var(--z-raised-2);border:1px solid var(--z-line);color:var(--z-ink-2)}
+.rside{border-left:1px solid var(--z-line);background:var(--z-surface);display:flex;flex-direction:column;min-height:0}
+.rtabs{display:flex;gap:2px;padding:10px 12px;border-bottom:1px solid var(--z-line)}
+.rtabs button{height:27px;padding:0 10px;border:0;background:transparent;color:var(--z-ink-3);font:inherit;font-size:12px;font-weight:500;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.rtabs button.on{background:var(--z-accent-bg);color:var(--z-accent-ink)}
+.rtabs .num{font-family:var(--z-mono);font-size:10px;background:var(--z-raised-2);border-radius:4px;padding:0 4px}
+.rside__scroll{flex:1;overflow:auto;padding:16px 16px 20px}
+.tl2{display:flex;gap:10px;padding-bottom:13px;position:relative}
+.tl2::before{content:"";position:absolute;left:8px;top:18px;bottom:-1px;width:1.5px;background:var(--z-line)}
+.tl2:last-of-type::before{display:none}
+.tl2__ic{width:17px;height:17px;border-radius:50%;flex:none;display:grid;place-items:center;z-index:1}
+.tl2__ic--ok{background:var(--z-ok-bg);color:var(--z-ok);border:1px solid var(--z-ok-line)}
+.tl2__ic--run{background:var(--z-accent-bg);border:1px solid var(--z-accent-line)}
+.tl2__t{font-size:12px;font-weight:500}
+.ev2{display:flex;gap:9px;align-items:center;padding:8px 10px;border:1px solid var(--z-line);border-radius:7px;background:var(--z-raised);margin-bottom:7px}
+.ev2 svg{flex:none}
+.ev2__t{font-size:12px;font-weight:500}
+.submit{margin-top:18px;padding-top:16px;border-top:1px solid var(--z-line)}
+.submit b{font-weight:600}
+.spin{width:11px;height:11px;border-radius:50%;border:2px solid var(--z-accent-line);border-top-color:var(--z-accent);display:inline-block}
+</style>

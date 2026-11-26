@@ -1,0 +1,125 @@
+<!--active:REPORT title:报告中心 sub:-->
+<div class="main">
+  <div class="band">
+    <span class="band__title">报告中心</span>
+    <span class="band__sp"></span>
+    <div class="seg"><button class="on">全部</button><button>已送达</button><button>延迟</button></div>
+    <button class="btn btn--sm">重投延迟项</button>
+  </div>
+
+  <div class="body" style="display:grid;grid-template-columns:1fr 352px">
+    <!-- report list -->
+    <section style="overflow:auto;padding:20px 24px;max-width:780px">
+      <!-- INTERVENTION: audit rework exhausted — the one thing that needs a human -->
+      <div class="alert">
+        <svg width="17" height="17" style="color:var(--z-warn)"><use href="#i-redo"/></svg>
+        <div style="flex:1">
+          <div class="alert__t">task-4815「迁移鉴权中间件」返工已达上限 3/3</div>
+          <div class="alert__m">审计三次打回，任务已停止自动流转。需要你拍板：重置返工计数让它再试，或直接关闭。</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn--sm">看审计记录</button>
+          <button class="btn btn--pri btn--sm"><svg><use href="#i-redo"/></svg>重置返工</button>
+        </div>
+      </div>
+
+      <div class="h-sec" style="margin:22px 0 11px">结构化报告</div>
+
+      <!-- report card: delivered -->
+      <div class="rc">
+        <div class="rc__top">
+          <span class="chip chip--ok"><svg width="11" height="11"><use href="#i-check"/></svg>通过</span>
+          <span class="rc__goal">为发布流水线补齐审计循环的单元测试</span>
+          <span class="band__sp" style="flex:1"></span>
+          <span class="chip chip--info" style="height:20px"><svg width="11" height="11"><use href="#i-send"/></svg>已送达 · 飞书</span>
+        </div>
+        <div class="rc__row"><span class="rc__k">证据</span><div class="rc__v"><span class="ev"><svg width="12" height="12"><use href="#i-file"/></svg>rework_test.go</span><span class="ev"><svg width="12" height="12"><use href="#i-term"/></svg>go test ./... · 0 FAIL</span><span class="ev"><svg width="12" height="12"><use href="#i-link"/></svg>CI #284</span></div></div>
+        <div class="rc__row"><span class="rc__k">待澄清</span><div class="rc__v meta">无</div></div>
+        <div class="rc__foot"><span class="meta mono">report-0291</span><span class="meta">lead · 15:12</span></div>
+      </div>
+
+      <!-- report card: deferred (digest) -->
+      <div class="rc">
+        <div class="rc__top">
+          <span class="chip chip--ok"><svg width="11" height="11"><use href="#i-check"/></svg>通过</span>
+          <span class="rc__goal">每日未读事项汇总</span>
+          <span class="band__sp" style="flex:1"></span>
+          <span class="chip chip--warn" style="height:20px"><svg width="11" height="11"><use href="#i-clock"/></svg>延迟 · 窗口已关</span>
+        </div>
+        <div class="rc__row"><span class="rc__k">证据</span><div class="rc__v"><span class="ev"><svg width="12" height="12"><use href="#i-file"/></svg>digest-11-26.md</span></div></div>
+        <div class="rc__row"><span class="rc__k">投递</span><div class="rc__v meta">微信 24h 窗口已关闭，回落应用内。与另 2 份合并为 1 条 digest，每分钟重投。</div></div>
+        <div class="rc__foot"><span class="meta mono">report-0290</span><span class="meta">lead · 08:30</span><span class="band__sp" style="flex:1"></span><button class="btn btn--ghost btn--sm"><svg><use href="#i-send"/></svg>立即重投</button></div>
+      </div>
+
+      <!-- report card: fail (no evidence => impossible, so this is a real verdict) -->
+      <div class="rc rc--muted">
+        <div class="rc__top">
+          <span class="chip chip--err"><svg width="11" height="11"><use href="#i-x"/></svg>未通过</span>
+          <span class="rc__goal">升级 OpenRouter 默认模型</span>
+          <span class="band__sp" style="flex:1"></span>
+          <span class="chip chip--info" style="height:20px"><svg width="11" height="11"><use href="#i-send"/></svg>已送达 · 应用内</span>
+        </div>
+        <div class="rc__row"><span class="rc__k">待澄清</span><div class="rc__v">目标模型在白名单外，需要管理员确认是否放开。</div></div>
+        <div class="rc__foot"><span class="meta mono">report-0288</span><span class="meta">lead · 昨天 19:04</span></div>
+      </div>
+    </section>
+
+    <!-- audit trail side -->
+    <aside style="border-left:1px solid var(--z-line);background:var(--z-surface);padding:18px;overflow:auto">
+      <div class="h-sec" style="margin-bottom:12px">审计轨迹 · task-4815</div>
+      <div class="atl">
+        <div class="atl__i atl__i--err"><svg width="12" height="12"><use href="#i-x"/></svg></div>
+        <div><div class="atl__t">第 3 次打回 <span class="meta">· 到顶</span></div><div class="atl__m">「错误处理仍吞掉原始 error，证据不充分」</div><div class="meta mono">auditor · 15:02</div></div>
+      </div>
+      <div class="atl">
+        <div class="atl__i atl__i--run"><svg width="11" height="11"><use href="#i-redo"/></svg></div>
+        <div><div class="atl__t">自动返工 2 → 3</div><div class="meta mono">14:40</div></div>
+      </div>
+      <div class="atl">
+        <div class="atl__i atl__i--err"><svg width="12" height="12"><use href="#i-x"/></svg></div>
+        <div><div class="atl__t">第 2 次打回</div><div class="atl__m">「缺少回滚路径的测试」</div><div class="meta mono">auditor · 14:38</div></div>
+      </div>
+      <div class="atl">
+        <div class="atl__i atl__i--ok"><svg width="12" height="12"><use href="#i-check"/></svg></div>
+        <div><div class="atl__t">执行者提交证据</div><div class="meta mono">executor · 14:20</div></div>
+      </div>
+
+      <div class="esc">
+        <div class="h-sec" style="margin-bottom:8px">当前裁决</div>
+        <div class="esc__row"><span>返工</span><b class="mono" style="color:var(--z-err)">3 / 3 已用尽</b></div>
+        <div class="esc__row"><span>自动流转</span><b style="color:var(--z-warn)">已停止</b></div>
+        <div class="esc__row"><span>解锁动作</span><b class="mono" style="font-size:11px">tasks.rework.reset</b></div>
+        <button class="btn btn--pri" style="width:100%;margin-top:12px;justify-content:center"><svg><use href="#i-redo"/></svg>重置并再试一次</button>
+        <button class="btn btn--danger btn--sm" style="width:100%;margin-top:8px;justify-content:center">关闭任务</button>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<style>
+.alert{display:flex;align-items:flex-start;gap:12px;background:var(--z-warn-bg);border:1px solid var(--z-warn-line);border-radius:var(--z-r-lg);padding:14px 16px}
+.alert__t{font-size:13.5px;font-weight:600;color:#f0cd7e}
+.alert__m{font-size:12px;color:var(--z-ink-2);margin-top:3px;max-width:52ch;line-height:1.5}
+.rc{background:var(--z-raised);border:1px solid var(--z-line);border-radius:var(--z-r-lg);padding:14px 16px;margin-bottom:13px}
+.rc--muted{opacity:.82}
+.rc__top{display:flex;align-items:center;gap:10px}
+.rc__goal{font-size:13.5px;font-weight:600;letter-spacing:-0.015em}
+.rc__row{display:flex;gap:12px;margin-top:11px;font-size:12.5px}
+.rc__k{color:var(--z-ink-3);width:46px;flex:none;padding-top:1px}
+.rc__v{color:var(--z-ink-2);display:flex;flex-wrap:wrap;gap:7px;line-height:1.5}
+.ev{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:6px;font-size:11.5px;background:var(--z-surface);border:1px solid var(--z-line);color:var(--z-ink-2)}
+.ev svg{color:var(--z-ink-3)}
+.rc__foot{display:flex;align-items:center;gap:14px;margin-top:13px;padding-top:11px;border-top:1px solid var(--z-line-soft)}
+.atl{display:flex;gap:11px;padding:0 0 15px;position:relative}
+.atl::before{content:"";position:absolute;left:9px;top:19px;bottom:-1px;width:1.5px;background:var(--z-line)}
+.atl:last-of-type::before{display:none}
+.atl__i{width:19px;height:19px;border-radius:50%;flex:none;display:grid;place-items:center;z-index:1}
+.atl__i--ok{background:var(--z-ok-bg);color:var(--z-ok);border:1px solid var(--z-ok-line)}
+.atl__i--err{background:var(--z-err-bg);color:var(--z-err);border:1px solid var(--z-err-line)}
+.atl__i--run{background:var(--z-accent-bg);color:var(--z-accent-ink);border:1px solid var(--z-accent-line)}
+.atl__t{font-size:12.5px;font-weight:500}
+.atl__m{font-size:12px;color:var(--z-ink-2);margin:3px 0;line-height:1.45}
+.esc{margin-top:8px;background:var(--z-raised);border:1px solid var(--z-line);border-radius:var(--z-r-lg);padding:14px}
+.esc__row{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;padding:5px 0;color:var(--z-ink-2)}
+.esc__row span{color:var(--z-ink-3)}
+</style>

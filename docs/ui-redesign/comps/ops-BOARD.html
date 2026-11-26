@@ -1,0 +1,139 @@
+<!--active:BOARD title:任务板 sub:-->
+<div class="main">
+  <div class="band">
+    <span class="band__title">任务板</span>
+    <span class="band__sub" style="margin-left:4px">9 个在办 · 2 个等你 · 2 个卡住</span>
+    <span class="band__sp"></span>
+    <div class="seg"><button class="on">全部</button><button>我负责</button><button>等人</button></div>
+    <button class="btn btn--sm"><svg><use href="#i-team"/></svg>按角色</button>
+    <button class="btn btn--pri btn--sm"><svg><use href="#i-plus"/></svg>建任务</button>
+  </div>
+
+  <div class="body kb">
+    <!-- 排队 -->
+    <div class="kcol">
+      <div class="kcol__h"><span class="kdot" style="background:var(--z-ink-faint)"></span>排队<span class="kcol__c">2</span></div>
+      <div class="tcard">
+        <div class="tcard__subj">给渠道适配器补重试退避</div>
+        <div class="tcard__meta"><span class="tag">task-4823</span><span class="meta">依赖 task-4820</span></div>
+        <div class="tcard__foot"><span class="chip" style="height:19px;color:var(--z-ink-3)"><svg width="10" height="10"><use href="#i-lock"/></svg>待依赖</span></div>
+      </div>
+      <div class="tcard">
+        <div class="tcard__subj">整理 normify 存量未锚定边</div>
+        <div class="tcard__meta"><span class="tag">task-4826</span></div>
+        <div class="tcard__foot"><span class="chip" style="height:19px;color:var(--z-ink-3)">未认领</span></div>
+      </div>
+    </div>
+
+    <!-- 进行中 -->
+    <div class="kcol">
+      <div class="kcol__h"><span class="kdot" style="background:var(--z-accent)"></span>进行中<span class="kcol__c">3</span></div>
+      <div class="tcard tcard--run">
+        <div class="tcard__subj">实现变更 · 审计循环单测</div>
+        <div class="tcard__meta"><span class="tag">task-4820</span><span class="chip chip--info" style="height:18px">executor</span></div>
+        <div class="bar"><span style="width:62%"></span></div>
+        <div class="tcard__foot"><span class="meta"><span class="spin"></span> 运行中 1m20s</span><span class="meta mono">62% 预算</span></div>
+      </div>
+      <div class="tcard">
+        <div class="tcard__subj">检索竞品的审批交互</div>
+        <div class="tcard__meta"><span class="tag">task-4819</span><span class="chip" style="height:18px;color:var(--z-ok);border-color:var(--z-ok-line);background:var(--z-ok-bg)">researcher</span></div>
+        <div class="bar"><span style="width:40%;background:var(--z-ok)"></span></div>
+        <div class="tcard__foot"><span class="meta"><span class="spin"></span> 运行中 3m</span></div>
+      </div>
+      <div class="tcard">
+        <div class="tcard__subj">验收 task-4807 的证据</div>
+        <div class="tcard__meta"><span class="tag">task-4807</span><span class="chip chip--warn" style="height:18px">auditor</span></div>
+        <div class="bar"><span style="width:30%;background:var(--z-warn)"></span></div>
+        <div class="tcard__foot"><span class="meta"><span class="spin"></span> 只读复核 22s</span></div>
+      </div>
+    </div>
+
+    <!-- 等你 -->
+    <div class="kcol kcol--wait">
+      <div class="kcol__h"><span class="kdot" style="background:var(--z-warn)"></span>等你<span class="kcol__c">2</span></div>
+      <div class="tcard tcard--wait">
+        <div class="tcard__subj">迁移鉴权中间件</div>
+        <div class="tcard__meta"><span class="tag">task-4815</span><span class="chip chip--warn" style="height:18px"><svg width="10" height="10"><use href="#i-redo"/></svg>返工 3/3</span></div>
+        <div class="tcard__note">审计三次打回，已停止流转。等你重置或关闭。</div>
+        <div class="tcard__foot"><button class="btn btn--sm" style="height:24px">关闭</button><button class="btn btn--pri btn--sm" style="height:24px">重置再试</button></div>
+      </div>
+      <div class="tcard tcard--wait">
+        <div class="tcard__subj">发布说明外发到产品群</div>
+        <div class="tcard__meta"><span class="tag">task-4811</span><span class="chip chip--warn" style="height:18px"><svg width="10" height="10"><use href="#i-send"/></svg>外发待批</span></div>
+        <div class="tcard__note">不可撤回 · 送达 @产品群</div>
+        <div class="tcard__foot"><button class="btn btn--sm" style="height:24px">看原文</button><button class="btn btn--pri btn--sm" style="height:24px;background:var(--z-warn);border-color:var(--z-warn);color:#1a1205">批准发送</button></div>
+      </div>
+    </div>
+
+    <!-- 卡住 -->
+    <div class="kcol">
+      <div class="kcol__h"><span class="kdot" style="background:var(--z-err)"></span>卡住<span class="kcol__c">2</span></div>
+      <div class="tcard tcard--stuck">
+        <div class="tcard__subj">接入支付回调验签</div>
+        <div class="tcard__meta"><span class="tag">task-4802</span><span class="chip chip--info" style="height:18px">executor</span></div>
+        <div class="tcard__note"><svg width="12" height="12" style="color:var(--z-err)"><use href="#i-x"/></svg>预算耗尽 · 需追加才能继续</div>
+        <div class="tcard__foot"><button class="btn btn--sm" style="height:24px">调预算</button></div>
+      </div>
+      <div class="tcard tcard--stuck">
+        <div class="tcard__subj">抓取第三方汇率</div>
+        <div class="tcard__meta"><span class="tag">task-4798</span></div>
+        <div class="tcard__note"><svg width="12" height="12" style="color:var(--z-err)"><use href="#i-x"/></svg>派单失败 · assignee 不在队友名单</div>
+        <div class="tcard__foot"><button class="btn btn--sm" style="height:24px">改派</button></div>
+      </div>
+    </div>
+
+    <!-- 完成 -->
+    <div class="kcol">
+      <div class="kcol__h"><span class="kdot" style="background:var(--z-ok)"></span>完成<span class="kcol__c num">12</span></div>
+      <div class="tcard tcard--done">
+        <div class="tcard__subj">补齐审计循环单元测试</div>
+        <div class="tcard__meta"><span class="tag">task-4807</span></div>
+        <div class="tcard__foot"><span class="chip chip--ok" style="height:19px"><svg width="10" height="10"><use href="#i-check"/></svg>auditor 验收</span><span class="meta">report-0291</span></div>
+      </div>
+      <div class="tcard tcard--done">
+        <div class="tcard__subj">修复弹窗几何与 Esc</div>
+        <div class="tcard__meta"><span class="tag">task-4805</span></div>
+        <div class="tcard__foot"><span class="chip chip--ok" style="height:19px"><svg width="10" height="10"><use href="#i-check"/></svg>通过 · 0 返工</span></div>
+      </div>
+      <div class="tcard tcard--done" style="opacity:.6">
+        <div class="tcard__subj">删除桌面外壳打包链路</div>
+        <div class="tcard__meta"><span class="tag">task-4790</span></div>
+        <div class="tcard__foot"><span class="chip chip--ok" style="height:19px"><svg width="10" height="10"><use href="#i-check"/></svg>通过</span></div>
+      </div>
+    </div>
+
+    <!-- 失败 -->
+    <div class="kcol">
+      <div class="kcol__h"><span class="kdot" style="background:var(--z-err)"></span>失败<span class="kcol__c num">1</span></div>
+      <div class="tcard tcard--done" style="opacity:.82">
+        <div class="tcard__subj">升级 OpenRouter 默认模型</div>
+        <div class="tcard__meta"><span class="tag">task-4788</span></div>
+        <div class="tcard__note">目标模型在白名单外 · 已汇报待管理员确认</div>
+        <div class="tcard__foot"><span class="chip chip--err" style="height:19px"><svg width="10" height="10"><use href="#i-x"/></svg>未通过</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.kb{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;padding:18px 20px;align-items:start;overflow:auto}
+.kcol{display:flex;flex-direction:column;gap:9px;min-width:0}
+.kcol__h{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--z-ink-2);padding:2px 2px 4px}
+.kdot{width:8px;height:8px;border-radius:50%;flex:none}
+.kcol__c{margin-left:auto;font-family:var(--z-mono);font-size:11px;color:var(--z-ink-3);background:var(--z-raised);border:1px solid var(--z-line);border-radius:5px;padding:0 6px;min-width:20px;text-align:center}
+.tcard{background:var(--z-raised);border:1px solid var(--z-line);border-radius:var(--z-r-lg);padding:11px 12px;display:flex;flex-direction:column;gap:8px}
+.tcard--run{border-color:var(--z-accent-line);box-shadow:0 0 0 1px var(--z-accent-line)}
+.tcard--wait{border-color:var(--z-warn-line);background:color-mix(in srgb,var(--z-warn-bg) 22%,var(--z-raised))}
+.tcard--stuck{border-color:var(--z-err-line)}
+.tcard--done{background:var(--z-surface)}
+.tcard__subj{font-size:12.5px;font-weight:500;line-height:1.4;letter-spacing:-0.01em}
+.tcard__meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.tcard__note{font-size:11px;color:var(--z-ink-2);display:flex;align-items:center;gap:6px;line-height:1.45}
+.tcard__note svg{flex:none}
+.tcard__foot{display:flex;align-items:center;gap:7px;margin-top:1px}
+.tcard__foot .meta{display:flex;align-items:center;gap:6px}
+.tcard__foot .meta:last-child{margin-left:auto}
+.bar{height:5px;border-radius:3px;background:var(--z-raised-2);overflow:hidden}
+.bar span{display:block;height:100%;background:var(--z-accent);border-radius:3px}
+.spin{width:11px;height:11px;border-radius:50%;border:2px solid var(--z-accent-line);border-top-color:var(--z-accent);display:inline-block}
+</style>

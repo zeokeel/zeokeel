@@ -1,0 +1,402 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<style>/* ============================================================================
+   ZeoKeel — 克制工具风设计令牌 (antd re-skin layer, concrete)
+   Operate console · Linear/Vercel-grade · OFL fonts only
+   ========================================================================== */
+
+/* ---- Fonts: all SIL OFL 1.1, self-hostable, embeddable in the binary ---- */
+@font-face{font-family:Inter;font-weight:400;font-display:swap;src:url(../fonts/inter-400.woff2) format('woff2')}
+@font-face{font-family:Inter;font-weight:500;font-display:swap;src:url(../fonts/inter-500.woff2) format('woff2')}
+@font-face{font-family:Inter;font-weight:600;font-display:swap;src:url(../fonts/inter-600.woff2) format('woff2')}
+@font-face{font-family:Inter;font-weight:700;font-display:swap;src:url(../fonts/inter-700.woff2) format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-weight:400;font-display:swap;src:url(../fonts/jbmono-400.woff2) format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-weight:500;font-display:swap;src:url(../fonts/jbmono-500.woff2) format('woff2')}
+@font-face{font-family:'Noto Sans SC';font-weight:400;font-display:swap;src:url(../fonts/notosc-400.ttf) format('truetype')}
+@font-face{font-family:'Noto Sans SC';font-weight:500;font-display:swap;src:url(../fonts/notosc-500.ttf) format('truetype')}
+@font-face{font-family:'Noto Sans SC';font-weight:700;font-display:swap;src:url(../fonts/notosc-700.ttf) format('truetype')}
+
+:root{
+  /* ---- Neutral ramp (cool, desaturated — the console's base) ---- */
+  --z-bg:        #0d0f12;   /* app canvas            */
+  --z-surface:   #14171c;   /* panels / sidebar      */
+  --z-raised:    #191d23;   /* cards / rows          */
+  --z-raised-2:  #1f242b;   /* nested / hover        */
+  --z-line:      #262c34;   /* hairline borders      */
+  --z-line-soft: #1d2128;   /* inner separators      */
+
+  --z-ink:       #e7ebf0;   /* primary text          */
+  --z-ink-2:     #9aa4b1;   /* secondary text        */
+  --z-ink-3:     #68707d;   /* tertiary / meta       */
+  --z-ink-faint: #474e59;   /* disabled              */
+
+  /* ---- Single accent (indigo) — the only brand hue ---- */
+  --z-accent:    #6e7bff;
+  --z-accent-ink:#aab2ff;
+  --z-accent-bg: #1a1e3a;
+  --z-accent-line:#343c73;
+
+  /* ---- Status (used as data, never decoration) ---- */
+  --z-ok:   #3fb573;  --z-ok-bg:#122318;  --z-ok-line:#1e3a28;
+  --z-warn: #d8a43a;  --z-warn-bg:#241d10; --z-warn-line:#3d3115;
+  --z-err:  #e5614f;  --z-err-bg:#261412;  --z-err-line:#43211c;
+  --z-info: #4aa3d6;  --z-info-bg:#0f1f28; --z-info-line:#1a3240;
+  --z-run:  #6e7bff;  --z-run-bg:#171a33;
+
+  /* ---- Type ---- */
+  --z-sans:'Inter','Noto Sans SC',system-ui,sans-serif;
+  --z-mono:'JetBrains Mono','Noto Sans SC',monospace;
+
+  /* ---- Radius / depth ---- */
+  --z-r-sm:5px; --z-r:7px; --z-r-lg:10px; --z-r-xl:14px;
+  --z-shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 18px -6px rgba(0,0,0,.55);
+  --z-shadow-lg: 0 2px 6px rgba(0,0,0,.45), 0 24px 48px -16px rgba(0,0,0,.6);
+  --z-focus: 0 0 0 2px var(--z-bg), 0 0 0 4px var(--z-accent);
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--z-bg);
+  color:var(--z-ink);
+  font-family:var(--z-sans);
+  font-size:13px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  letter-spacing:-0.006em;
+}
+::selection{background:var(--z-accent);color:#fff}
+.mono,.num{font-family:var(--z-mono);font-feature-settings:"tnum" 1,"cv01" 1;letter-spacing:0}
+
+/* ---------- App frame ---------- */
+.app{display:grid;grid-template-columns:232px 1fr;height:100vh;overflow:hidden}
+
+/* sidebar */
+.side{background:var(--z-surface);border-right:1px solid var(--z-line);display:flex;flex-direction:column;min-height:0}
+.side__brand{display:flex;align-items:center;gap:9px;padding:15px 16px 13px}
+.side__logo{width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--z-accent),#4b56d6);display:grid;place-items:center;flex:none}
+.side__logo svg{width:13px;height:13px}
+.side__name{font-weight:600;font-size:13.5px;letter-spacing:-0.02em}
+.side__ver{margin-left:auto;font-family:var(--z-mono);font-size:10.5px;color:var(--z-ink-3);background:var(--z-raised);border:1px solid var(--z-line);border-radius:5px;padding:1px 6px}
+.side__new{margin:2px 12px 10px;display:flex;align-items:center;gap:8px;padding:8px 11px;border:1px solid var(--z-line);border-radius:var(--z-r);background:var(--z-raised);color:var(--z-ink-2);font-size:12.5px;cursor:pointer}
+.side__new kbd{margin-left:auto;font-family:var(--z-mono);font-size:10px;color:var(--z-ink-3);border:1px solid var(--z-line);border-radius:4px;padding:1px 5px}
+.side__scroll{overflow:auto;flex:1;min-height:0;padding-bottom:10px}
+.navgrp{padding:11px 12px 3px}
+.navgrp__t{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--z-ink-3);padding:0 8px 5px}
+.nav{display:flex;align-items:center;gap:9px;padding:6px 8px;margin:1px 4px;border-radius:6px;color:var(--z-ink-2);font-size:12.5px;cursor:pointer;position:relative}
+.nav:hover{background:var(--z-raised);color:var(--z-ink)}
+.nav--on{background:var(--z-accent-bg);color:var(--z-accent-ink)}
+.nav--on::before{content:"";position:absolute;left:-4px;top:7px;bottom:7px;width:2.5px;border-radius:2px;background:var(--z-accent)}
+.nav svg{width:15px;height:15px;flex:none;opacity:.9}
+.nav__badge{margin-left:auto;font-family:var(--z-mono);font-size:10.5px;min-width:17px;height:17px;padding:0 4px;border-radius:5px;display:grid;place-items:center}
+.nav__badge--act{background:var(--z-warn);color:#1a1205;font-weight:600}
+.nav__badge--q{background:var(--z-raised-2);color:var(--z-ink-2)}
+.side__foot{border-top:1px solid var(--z-line);padding:9px 14px;display:flex;align-items:center;gap:8px;color:var(--z-ink-3);font-size:11.5px}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.dot--ok{background:var(--z-ok);box-shadow:0 0 0 3px var(--z-ok-bg)}
+
+/* main column */
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.band{height:49px;border-bottom:1px solid var(--z-line);display:flex;align-items:center;gap:12px;padding:0 20px;background:color-mix(in srgb,var(--z-surface) 55%,transparent);backdrop-filter:blur(8px);flex:none}
+.band__title{font-weight:600;font-size:14px;letter-spacing:-0.02em}
+.band__crumb{color:var(--z-ink-3);font-size:12.5px}
+.band__sub{color:var(--z-ink-3);font-size:12px}
+.band__sp{flex:1}
+.body{flex:1;overflow:auto;min-height:0}
+
+/* ---------- Primitives ---------- */
+.btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:var(--z-r);border:1px solid var(--z-line);background:var(--z-raised);color:var(--z-ink);font:inherit;font-size:12.5px;font-weight:500;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--z-raised-2);border-color:#30373f}
+.btn svg{width:14px;height:14px}
+.btn--pri{background:var(--z-accent);border-color:var(--z-accent);color:#fff}
+.btn--pri:hover{background:#5e6bf0;border-color:#5e6bf0}
+.btn--ghost{background:transparent;border-color:transparent;color:var(--z-ink-2)}
+.btn--ghost:hover{background:var(--z-raised);color:var(--z-ink)}
+.btn--sm{height:26px;padding:0 9px;font-size:12px}
+.btn--danger{color:var(--z-err);border-color:var(--z-err-line)}
+.btn--danger:hover{background:var(--z-err-bg)}
+
+.chip{display:inline-flex;align-items:center;gap:5px;height:21px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:500;border:1px solid var(--z-line);color:var(--z-ink-2);background:var(--z-raised)}
+.chip .dot{width:6px;height:6px}
+.chip--ok{color:var(--z-ok);border-color:var(--z-ok-line);background:var(--z-ok-bg)}
+.chip--warn{color:var(--z-warn);border-color:var(--z-warn-line);background:var(--z-warn-bg)}
+.chip--err{color:var(--z-err);border-color:var(--z-err-line);background:var(--z-err-bg)}
+.chip--run{color:var(--z-accent-ink);border-color:var(--z-accent-line);background:var(--z-accent-bg)}
+.chip--info{color:var(--z-info);border-color:var(--z-info-line);background:var(--z-info-bg)}
+
+.card{background:var(--z-raised);border:1px solid var(--z-line);border-radius:var(--z-r-lg)}
+.seg{display:inline-flex;background:var(--z-raised);border:1px solid var(--z-line);border-radius:7px;padding:2px}
+.seg button{height:24px;padding:0 11px;border:0;background:transparent;color:var(--z-ink-2);font:inherit;font-size:12px;font-weight:500;border-radius:5px;cursor:pointer}
+.seg button.on{background:var(--z-raised-2);color:var(--z-ink)}
+
+.tag{font-family:var(--z-mono);font-size:11px;color:var(--z-ink-2);background:var(--z-raised-2);border:1px solid var(--z-line);border-radius:5px;padding:1px 6px}
+.kbd{font-family:var(--z-mono);font-size:10.5px;color:var(--z-ink-3);border:1px solid var(--z-line);border-radius:4px;padding:1px 5px;background:var(--z-surface)}
+.meta{color:var(--z-ink-3);font-size:11.5px}
+.h-sec{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--z-ink-3)}
+
+/* ===== ops-specific ===== */
+.side__scroll{padding-bottom:10px}
+.ops{display:grid;grid-template-columns:1fr 372px;height:100%;min-height:0}
+.ops__main{overflow:auto;padding:20px 24px 40px}
+.ops__side{border-left:1px solid var(--z-line);background:var(--z-surface);overflow:auto;min-height:0}
+
+/* pulse header row */
+.pulse{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px}
+.pstat{background:var(--z-raised);border:1px solid var(--z-line);border-radius:var(--z-r-lg);padding:13px 15px}
+.pstat__n{font-family:var(--z-mono);font-size:25px;font-weight:500;letter-spacing:-0.02em;line-height:1.1}
+.pstat__l{font-size:11.5px;color:var(--z-ink-3);margin-top:3px}
+.pstat__d{display:flex;align-items:center;gap:6px;margin-top:9px;font-size:11px;color:var(--z-ink-2)}
+.pstat--act .pstat__n{color:var(--z-warn)}
+.pstat--run .pstat__n{color:var(--z-accent-ink)}
+
+.sec__h{display:flex;align-items:center;gap:9px;margin:0 0 12px}
+.sec__h h2{margin:0;font-size:13px;font-weight:600;letter-spacing:.02em}
+.sec__h .meta{margin-left:auto}
+
+/* live activity list */
+.live{display:flex;flex-direction:column;gap:2px;margin-bottom:28px}
+.lrow{display:flex;align-items:center;gap:12px;padding:10px 13px;border:1px solid var(--z-line);border-radius:var(--z-r);background:var(--z-raised)}
+.lrow__role{width:72px;flex:none}
+.lrow__name{font-size:12.5px;font-weight:500;flex:none;width:168px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lrow__task{color:var(--z-ink-2);font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lrow__bar{width:84px;height:5px;border-radius:3px;background:var(--z-raised-2);overflow:hidden;flex:none}
+.lrow__bar span{display:block;height:100%;background:var(--z-accent)}
+.lrow__t{font-family:var(--z-mono);font-size:11px;color:var(--z-ink-3);width:48px;text-align:right;flex:none}
+.spin{width:12px;height:12px;border-radius:50%;border:2px solid var(--z-accent-line);border-top-color:var(--z-accent);flex:none}
+
+/* board strip */
+.board{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+.bcol{background:var(--z-raised);border:1px solid var(--z-line);border-radius:var(--z-r);padding:11px 12px}
+.bcol__n{font-family:var(--z-mono);font-size:19px;font-weight:500}
+.bcol__l{font-size:11px;color:var(--z-ink-3);margin-top:2px}
+.bcol--run .bcol__n{color:var(--z-accent-ink)} .bcol--wait .bcol__n{color:var(--z-warn)} .bcol--stuck .bcol__n{color:var(--z-err)} .bcol--done .bcol__n{color:var(--z-ok)}
+
+/* ======= DECISION QUEUE (the thesis) ======= */
+.dq__h{display:flex;align-items:center;gap:9px;padding:17px 18px 13px}
+.dq__h h2{margin:0;font-size:14px;font-weight:600;letter-spacing:-0.01em}
+.dq__count{font-family:var(--z-mono);font-size:11px;font-weight:600;color:#1a1205;background:var(--z-warn);border-radius:6px;padding:1px 7px}
+.dq__sub{padding:0 18px 8px;color:var(--z-ink-3);font-size:11.5px;line-height:1.5}
+.dq__list{padding:4px 12px 16px;display:flex;flex-direction:column;gap:9px}
+
+.dcard{background:var(--z-raised);border:1px solid var(--z-line);border-radius:var(--z-r-lg);overflow:hidden}
+.dcard--urgent{border-color:var(--z-warn-line)}
+.dcard__top{display:flex;align-items:center;gap:8px;padding:11px 13px 0}
+.dkind{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:6px;font-size:10.5px;font-weight:600;letter-spacing:.02em}
+.dkind--approval{background:var(--z-err-bg);color:var(--z-err);border:1px solid var(--z-err-line)}
+.dkind--ask{background:var(--z-info-bg);color:var(--z-info);border:1px solid var(--z-info-line)}
+.dkind--plan{background:var(--z-accent-bg);color:var(--z-accent-ink);border:1px solid var(--z-accent-line)}
+.dkind--send{background:var(--z-warn-bg);color:var(--z-warn);border:1px solid var(--z-warn-line)}
+.dkind--rework{background:var(--z-warn-bg);color:var(--z-warn);border:1px solid var(--z-warn-line)}
+.dcard__from{margin-left:auto;font-size:10.5px;color:var(--z-ink-3)}
+.dcard__from b{color:var(--z-ink-2);font-weight:500}
+.dcard__body{padding:9px 13px 11px}
+.dcard__q{font-size:13px;font-weight:500;letter-spacing:-0.01em;line-height:1.45}
+.dcard__detail{margin-top:7px;font-family:var(--z-mono);font-size:11px;color:var(--z-ink-2);background:var(--z-surface);border:1px solid var(--z-line-soft);border-radius:6px;padding:7px 9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dcard__opts{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.oopt{height:26px;padding:0 10px;border-radius:6px;border:1px solid var(--z-line);background:var(--z-raised-2);color:var(--z-ink);font:inherit;font-size:12px;cursor:pointer}
+.dcard__acts{display:flex;align-items:center;gap:8px;padding:10px 13px;border-top:1px solid var(--z-line-soft);background:color-mix(in srgb,var(--z-surface) 50%,transparent)}
+.dcard__scope{font-size:10.5px;color:var(--z-ink-3);margin-right:auto}
+.ba{height:28px;padding:0 12px;border-radius:6px;border:1px solid var(--z-line);background:var(--z-raised-2);color:var(--z-ink);font:inherit;font-size:12px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.ba svg{width:13px;height:13px}
+.ba--ok{background:var(--z-accent);border-color:var(--z-accent);color:#fff}
+.ba--deny{color:var(--z-err);border-color:var(--z-err-line);background:var(--z-err-bg)}
+.ba--send{background:var(--z-warn);border-color:var(--z-warn);color:#1a1205}
+.hintline{display:flex;align-items:center;gap:7px;padding:9px 18px;border-top:1px solid var(--z-line);color:var(--z-ink-3);font-size:11px}
+.hintline .kbd{margin:0}
+</style></head><body><!-- icon symbols, 1.6 stroke, consistent -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-flow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="6" height="5" rx="1.3"/><rect x="15" y="4" width="6" height="5" rx="1.3"/><rect x="9" y="15" width="6" height="5" rx="1.3"/><path d="M6 9v2.5a2 2 0 0 0 2 2h1M18 9v2.5a2 2 0 0 1-2 2h-1"/></symbol>
+<symbol id="i-roles" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3Z"/><path d="M9 11.5l2 2 4-4"/></symbol>
+<symbol id="i-report" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h6M9 9h2"/></symbol>
+<symbol id="i-msg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></symbol>
+<symbol id="i-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13l2.5-8h11L20 13M4 13v6h16v-6M4 13h5l1.5 2.5h3L14 13h6"/></symbol>
+<symbol id="i-team" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 6.5a3 3 0 0 1 0 6M17 14c2 .6 3.5 2.3 3.5 5"/></symbol>
+<symbol id="i-board" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/></symbol>
+<symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v5M15 3v5M7 8h10v3a5 5 0 0 1-10 0zM12 16v5"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+<symbol id="i-act" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5 7 5-15L17 12h4"/></symbol>
+<symbol id="i-set" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M21 12h-2.5M5.5 12H3M18 6l-1.8 1.8M7.8 16.2 6 18M18 18l-1.8-1.8M7.8 7.8 6 6"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l16-7-7 16-2.5-6.5z"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+<symbol id="i-dot" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+<symbol id="i-ban" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/></symbol>
+<symbol id="i-tool" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 6.5a3.5 3.5 0 0 0-4.7 4.2l-5.5 5.5 2.5 2.5 5.5-5.5a3.5 3.5 0 0 0 4.2-4.7l-2 2-2-2z"/></symbol>
+<symbol id="i-arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+<symbol id="i-redo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10a8 8 0 1 0 .5 4"/><path d="M20 5v5h-5"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+<symbol id="i-sparkle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l1.8 4.9L19 11l-5.2 2.1L12 18l-1.8-4.9L5 11l5.2-2.1z"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></symbol>
+<symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 15l6-6M10 7l1-1a4 4 0 0 1 6 6l-1 1M14 17l-1 1a4 4 0 0 1-6-6l1-1"/></symbol>
+<symbol id="i-term" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10l3 2.5L7 15M12.5 15h4"/></symbol>
+</defs></svg>
+
+<div class="app">
+
+<!-- ========== RE-DERIVED SIDEBAR (object model, not route table) ========== -->
+<aside class="side">
+  <div class="side__brand">
+    <span class="side__logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14M5 7l7 10 7-10M8 17h8"/></svg></span>
+    <span class="side__name">ZeoKeel</span>
+    <span class="side__ver mono">0.4.1</span>
+  </div>
+  <div class="side__new"><svg width="15" height="15"><use href="#i-plus"/></svg>起一个活<kbd>⌘K</kbd></div>
+  <div class="side__scroll">
+    <div class="navgrp">
+      <div class="nav nav--on"><svg><use href="#i-act"/></svg>指挥台</div>
+      <div class="nav"><svg><use href="#i-inbox"/></svg>决策<span class="nav__badge nav__badge--act">5</span></div>
+    </div>
+    <div class="navgrp">
+      <div class="navgrp__t">工作</div>
+      <div class="nav"><svg><use href="#i-board"/></svg>任务板<span class="nav__badge nav__badge--q">9</span></div>
+      <div class="nav"><svg><use href="#i-flow"/></svg>工作流<span class="nav__badge nav__badge--q">2</span></div>
+    </div>
+    <div class="navgrp">
+      <div class="navgrp__t">团队</div>
+      <div class="nav"><svg><use href="#i-team"/></svg>成员</div>
+      <div class="nav"><svg><use href="#i-roles"/></svg>角色与预设</div>
+    </div>
+    <div class="navgrp">
+      <div class="navgrp__t">产出</div>
+      <div class="nav"><svg><use href="#i-report"/></svg>报告<span class="nav__badge nav__badge--act">1</span></div>
+      <div class="nav"><svg><use href="#i-msg"/></svg>会话历史</div>
+      <div class="nav"><svg><use href="#i-act"/></svg>洞察</div>
+      <div class="nav"><svg><use href="#i-clock"/></svg>自动化</div>
+    </div>
+    <div class="navgrp">
+      <div class="navgrp__t">配置</div>
+      <div class="nav"><svg><use href="#i-plug"/></svg>能力与连接</div>
+      <div class="nav"><svg><use href="#i-send"/></svg>渠道</div>
+      <div class="nav"><svg><use href="#i-set"/></svg>设置</div>
+    </div>
+  </div>
+  <div class="side__foot"><span class="dot dot--ok"></span>自转运行中 · 30s 前 triage</div>
+</aside>
+
+<!-- ========== MAIN ========== -->
+<div class="main">
+  <div class="band">
+    <span class="band__title">指挥台</span>
+    <span class="band__sub" style="margin-left:4px">周三 15:24 · 过去 1 小时派出 6 个任务</span>
+    <span class="band__sp"></span>
+    <span class="chip chip--run"><span class="spin"></span>3 个会话在跑</span>
+    <button class="btn btn--pri btn--sm"><svg><use href="#i-plus"/></svg>起一个活</button>
+  </div>
+
+  <div class="ops">
+    <!-- LEFT: the operation's state -->
+    <section class="ops__main">
+      <!-- pulse -->
+      <div class="pulse">
+        <div class="pstat pstat--act"><div class="pstat__n">5</div><div class="pstat__l">在等你拍板</div><div class="pstat__d"><span class="dot" style="background:var(--z-warn)"></span>最久 已等 8 分钟</div></div>
+        <div class="pstat pstat--run"><div class="pstat__n">3</div><div class="pstat__l">正在执行</div><div class="pstat__d"><span class="spin"></span>~96 tok/s</div></div>
+        <div class="pstat"><div class="pstat__n">9</div><div class="pstat__l">任务板在办</div><div class="pstat__d"><span class="dot" style="background:var(--z-ink-faint)"></span>2 个卡住</div></div>
+        <div class="pstat"><div class="pstat__n num">12</div><div class="pstat__l">今日完成</div><div class="pstat__d" style="color:var(--z-ok)"><svg width="12" height="12"><use href="#i-check"/></svg>11 通过 · 1 未过</div></div>
+      </div>
+
+      <!-- live activity -->
+      <div class="sec__h"><h2 class="h-sec" style="letter-spacing:.06em">正在发生</h2><span class="meta">每 30s 自转，无需刷新</span></div>
+      <div class="live">
+        <div class="lrow">
+          <span class="chip chip--info lrow__role" style="height:19px">executor</span>
+          <span class="lrow__name">实现变更</span>
+          <span class="lrow__task">task-4820 · 发布流水线 阶段 02</span>
+          <span class="lrow__bar"><span style="width:62%"></span></span>
+          <span class="spin"></span>
+          <span class="lrow__t">1m20s</span>
+        </div>
+        <div class="lrow">
+          <span class="chip chip--warn lrow__role" style="height:19px">auditor</span>
+          <span class="lrow__name">验收 task-4807</span>
+          <span class="lrow__task">检查证据充分性 · 只读</span>
+          <span class="lrow__bar"><span style="width:30%"></span></span>
+          <span class="spin"></span>
+          <span class="lrow__t">22s</span>
+        </div>
+        <div class="lrow">
+          <span class="chip lrow__role" style="height:19px;color:var(--z-accent-ink);border-color:var(--z-accent-line);background:var(--z-accent-bg)">lead</span>
+          <span class="lrow__name">分诊收件箱</span>
+          <span class="lrow__task">3 条新事件 → 规划任务</span>
+          <span class="lrow__bar"><span style="width:80%"></span></span>
+          <span class="spin"></span>
+          <span class="lrow__t">6s</span>
+        </div>
+      </div>
+
+      <!-- board strip -->
+      <div class="sec__h"><h2 class="h-sec" style="letter-spacing:.06em">任务板</h2><span class="meta">点开进看板</span></div>
+      <div class="board">
+        <div class="bcol bcol--run"><div class="bcol__n">3</div><div class="bcol__l">进行中</div></div>
+        <div class="bcol bcol--wait"><div class="bcol__n">2</div><div class="bcol__l">等你</div></div>
+        <div class="bcol"><div class="bcol__n">2</div><div class="bcol__l">排队</div></div>
+        <div class="bcol bcol--stuck"><div class="bcol__n">2</div><div class="bcol__l">卡住</div></div>
+        <div class="bcol bcol--done"><div class="bcol__n num">12</div><div class="bcol__l">完成</div></div>
+        <div class="bcol"><div class="bcol__n num">1</div><div class="bcol__l">失败</div></div>
+      </div>
+    </section>
+
+    <!-- RIGHT: THE DECISION QUEUE — one place for every human gate -->
+    <aside class="ops__side">
+      <div class="dq__h">
+        <svg width="16" height="16" style="color:var(--z-warn)"><use href="#i-inbox"/></svg>
+        <h2>在等你拍板</h2>
+        <span class="dq__count">5</span>
+      </div>
+      <div class="dq__sub">后端六类闸门（批准 · 提问 · 计划 · 外发 · 返工 · 升级）汇到这一条队列——机器此刻就停在这些地方。</div>
+      <div class="dq__list">
+
+        <!-- approval -->
+        <div class="dcard dcard--urgent">
+          <div class="dcard__top"><span class="dkind dkind--approval"><svg width="11" height="11"><use href="#i-term"/></svg>批准命令</span><span class="dcard__from"><b>executor</b> · task-4820 · 8 分钟</span></div>
+          <div class="dcard__body">
+            <div class="dcard__q">在工作区执行命令？会改动文件。</div>
+            <div class="dcard__detail">$ go test ./internal/modules/audit/... -run Rework</div>
+          </div>
+          <div class="dcard__acts"><span class="dcard__scope">允许范围 · 本会话内</span><button class="ba ba--deny"><svg><use href="#i-x"/></svg>拒绝</button><button class="ba">允许一次</button><button class="ba ba--ok"><svg><use href="#i-check"/></svg>本会话始终</button></div>
+        </div>
+
+        <!-- before-send (irreversible) -->
+        <div class="dcard dcard--urgent">
+          <div class="dcard__top"><span class="dkind dkind--send"><svg width="11" height="11"><use href="#i-send"/></svg>外发待批</span><span class="dcard__from"><b>lead</b> · 飞书 · 不可撤回</span></div>
+          <div class="dcard__body">
+            <div class="dcard__q">这条消息批准后立刻发出，发出不能撤回：</div>
+            <div class="dcard__detail" style="white-space:normal">「已完成鉴权中间件迁移，CI #284 通过，详见报告 report-0291。」</div>
+          </div>
+          <div class="dcard__acts"><span class="dcard__scope">送达 @产品群</span><button class="ba ba--deny">拦下</button><button class="ba ba--send"><svg><use href="#i-send"/></svg>批准发送</button></div>
+        </div>
+
+        <!-- rework exhausted -->
+        <div class="dcard">
+          <div class="dcard__top"><span class="dkind dkind--rework"><svg width="11" height="11"><use href="#i-redo"/></svg>返工到顶</span><span class="dcard__from">task-4815 · 3/3 已用尽</span></div>
+          <div class="dcard__body">
+            <div class="dcard__q">「迁移鉴权中间件」审计三次打回，已停止自动流转。</div>
+          </div>
+          <div class="dcard__acts"><span class="dcard__scope">tasks.rework.reset</span><button class="ba ba--deny">关闭任务</button><button class="ba ba--ok"><svg><use href="#i-redo"/></svg>重置再试</button></div>
+        </div>
+
+        <!-- ask -->
+        <div class="dcard">
+          <div class="dcard__top"><span class="dkind dkind--ask"><svg width="11" height="11"><use href="#i-msg"/></svg>agent 在问你</span><span class="dcard__from"><b>researcher</b> · 2 分钟</span></div>
+          <div class="dcard__body">
+            <div class="dcard__q">部署目标是预发还是生产？两边配置不同。</div>
+            <div class="dcard__opts"><button class="oopt">预发 staging</button><button class="oopt">生产 production</button><button class="oopt" style="color:var(--z-ink-3)">其他…</button></div>
+          </div>
+        </div>
+
+        <!-- plan -->
+        <div class="dcard">
+          <div class="dcard__top"><span class="dkind dkind--plan"><svg width="11" height="11"><use href="#i-flow"/></svg>计划待审</span><span class="dcard__from"><b>lead</b> · 5 步</span></div>
+          <div class="dcard__body">
+            <div class="dcard__q">重构记忆写入链路 · 执行前请过目计划</div>
+          </div>
+          <div class="dcard__acts"><span class="dcard__scope">批准后开始执行</span><button class="ba">继续规划</button><button class="ba ba--ok"><svg><use href="#i-check"/></svg>批准计划</button></div>
+        </div>
+
+      </div>
+      <div class="hintline"><span class="kbd">J</span><span class="kbd">K</span>逐条 · <span class="kbd">⌘↵</span>允许 · <span class="kbd">Esc</span>拒绝 · 处理完回到"正在发生"</div>
+    </aside>
+  </div>
+</div>
+</div></body></html>
