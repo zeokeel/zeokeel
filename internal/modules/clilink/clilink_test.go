@@ -66,17 +66,6 @@ func writeScript(t *testing.T, body string) string {
 	return path
 }
 
-// lookupOnly resolves exactly one binary name and fails the rest, so a script
-// path under t.TempDir is the only thing a test can resolve.
-func lookupOnly(name, path string) func(string) (string, error) {
-	return func(candidate string) (string, error) {
-		if candidate == name {
-			return path, nil
-		}
-		return "", os.ErrNotExist
-	}
-}
-
 // newTestService builds the service with a settings row pointing at dwsPath (may
 // be "") and a PATH that resolves nothing besides that row.
 func newTestService(t *testing.T, dwsPath string, timeout time.Duration) (*service, *fakeLogger) {

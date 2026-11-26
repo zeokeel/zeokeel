@@ -4,7 +4,6 @@ package importer
 // importer's existing call sites and tests unchanged.
 
 import (
-	rig "github.com/zeokeel/zeokeel-rig"
 	rigimporter "github.com/zeokeel/zeokeel-rig/session/importer"
 )
 
@@ -19,8 +18,4 @@ func parseSessionFile(path string) (*parsedSession, error) {
 
 func importedTitle(messages []parsedMessage) string {
 	return rigimporter.Title(messages)
-}
-
-func importedRigMessages(messages []parsedMessage) []rig.Message {
-	return rigimporter.Messages(messages)
 }

@@ -62,17 +62,6 @@ func parseExemptions(t *testing.T) documentedExemptions {
 	return declaredExemptions
 }
 
-// splitNames splits a comma-separated list, dropping blanks.
-func splitNames(value string) []string {
-	var names []string
-	for _, part := range strings.Split(value, ",") {
-		if name := strings.TrimSpace(part); name != "" {
-			names = append(names, name)
-		}
-	}
-	return names
-}
-
 // sortedCopy returns a sorted copy of a string slice.
 func sortedCopy(names []string) []string {
 	out := append([]string(nil), names...)

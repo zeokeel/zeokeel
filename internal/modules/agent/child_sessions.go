@@ -114,19 +114,9 @@ func randomHex(n int) string {
 	return hex.EncodeToString(buffer)
 }
 
-// hasID reports whether the identity is already retained.
-func (s *childSessionStore) hasID(id string) bool {
-	return s != nil && s.inner != nil && s.inner.HasID(id)
-}
-
 // upsert stores one record and reports whether anything changed.
 func (s *childSessionStore) upsert(record childSessionRecord) bool {
 	return s != nil && s.inner != nil && s.inner.Upsert(record)
-}
-
-// markNotified flags a finished child as receipt-delivered.
-func (s *childSessionStore) markNotified(id string, finished time.Time) bool {
-	return s != nil && s.inner != nil && s.inner.MarkNotified(id, finished)
 }
 
 // pendingReceipts returns finished, unnotified records of one parent and kind.
@@ -173,13 +163,6 @@ func (s *childSessionStore) byBackendRef(backendRef, sessionID, kind string) (ch
 func (s *childSessionStore) clear() {
 	if s != nil && s.inner != nil {
 		s.inner.Clear()
-	}
-}
-
-// prune applies the TTL/count bounds now.
-func (s *childSessionStore) prune(now time.Time) {
-	if s != nil && s.inner != nil {
-		s.inner.Prune(now)
 	}
 }
 
@@ -383,21 +366,6 @@ func childStatusFromSubagentStatus(status string) string {
 		return contracts.ChildAgentInterrupted
 	default:
 		return contracts.ChildAgentInterrupted
-	}
-}
-
-// subagentStatusFromChildStatus is the inverse mapping used when a live
-// delegation is recorded.
-func subagentStatusFromChildStatus(status string) string {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case contracts.ChildAgentRunning:
-		return contracts.SubagentStatusRunning
-	case contracts.ChildAgentCompleted:
-		return contracts.SubagentStatusDone
-	case contracts.ChildAgentFailed:
-		return contracts.SubagentStatusError
-	default:
-		return contracts.SubagentStatusCancelled
 	}
 }
 

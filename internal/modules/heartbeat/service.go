@@ -246,15 +246,6 @@ func (s *Service) setRunning(running bool) {
 	s.mu.Unlock()
 }
 
-func stopTimer(timer *time.Timer) {
-	if !timer.Stop() {
-		select {
-		case <-timer.C:
-		default:
-		}
-	}
-}
-
 func (s *Service) runLeadOnly(ctx context.Context) {
 	if s.lead == nil {
 		return

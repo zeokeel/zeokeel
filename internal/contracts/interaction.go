@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -134,29 +133,3 @@ const (
 	WorkStepsCollapseCompletion = "completion"
 	WorkStepsCollapseNextInput  = "next-input"
 )
-
-// NormalizeWorkStepsMode returns one documented work-steps mode, falling back to
-// WorkStepsStandard for empty or unknown stored values.
-func NormalizeWorkStepsMode(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case WorkStepsCompact:
-		return WorkStepsCompact
-	case WorkStepsDetailed:
-		return WorkStepsDetailed
-	case WorkStepsVerbose:
-		return WorkStepsVerbose
-	default:
-		return WorkStepsStandard
-	}
-}
-
-// NormalizeWorkStepsCollapse returns one documented collapse timing, falling back
-// to WorkStepsCollapseCompletion for empty or unknown stored values.
-func NormalizeWorkStepsCollapse(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case WorkStepsCollapseNextInput:
-		return WorkStepsCollapseNextInput
-	default:
-		return WorkStepsCollapseCompletion
-	}
-}

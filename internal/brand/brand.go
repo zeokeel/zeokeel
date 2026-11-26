@@ -69,15 +69,6 @@ func DarkTheme() *ui.Theme {
 	return t
 }
 
-// ThemeFor returns the brand theme for an appearance: true is dark, the same
-// pick the app makes when it resolves the system appearance.
-func ThemeFor(dark bool) *ui.Theme {
-	if dark {
-		return DarkTheme()
-	}
-	return LightTheme()
-}
-
 // applyPalette copies the palette's colors into the mygo theme slots.
 func applyPalette(t *ui.Theme, p Palette) {
 	t.Background = p.Background

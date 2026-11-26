@@ -363,38 +363,3 @@ type frontmatterPair struct {
 	key   string
 	value string
 }
-
-// splitFrontmatter splits a SKILL.md document into its frontmatter pairs and
-// the Markdown body. It mirrors the rig rule exactly (S-06): the block only
-// exists when the first line is exactly "---" and a later line is exactly
-// "---"; otherwise the whole content is body and the frontmatter is nil.
-func splitFrontmatter(content string) (pairs []frontmatterPair, body string) {
-	content = strings.TrimPrefix(content, "\ufeff")
-	lines := strings.Split(content, "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return nil, content
-	}
-	closing := -1
-	for index := 1; index < len(lines); index++ {
-		if strings.TrimSpace(lines[index]) == "---" {
-			closing = index
-			break
-		}
-	}
-	if closing < 0 {
-		// Unclosed frontmatter is ordinary text (same as rig).
-		return nil, content
-	}
-	pairs = make([]frontmatterPair, 0, closing-1)
-	for _, line := range lines[1:closing] {
-		key, value, _ := strings.Cut(line, ":")
-		pairs = append(pairs, frontmatterPair{
-			raw:   line,
-			key:   strings.ToLower(strings.TrimSpace(key)),
-			value: strings.Trim(strings.TrimSpace(value), `"'`),
-		})
-	}
-	// The guaranteed blank separator line after the closing delimiter is not
-	// part of the body (the editor always writes one).
-	return pairs, strings.TrimLeft(strings.Join(lines[closing+1:], "\n"), "\r\n")
-}

@@ -6,28 +6,12 @@
 package mcpreload
 
 import (
-	"context"
 	"strings"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
-
-// Trigger asks the toolkit to rebuild the MCP connections for the current
-// workspace. A composition without the reloader (older test seams, headless
-// runs without the toolkit) is a no-op.
-func Trigger(ctx cordis.Context) {
-	reloader, ok := ctx.Get(contracts.KeyMCPReloader)
-	if !ok || reloader == nil {
-		return
-	}
-	go func() {
-		if _, err := reloader.Reload(context.Background()); err != nil {
-			reportFailure(ctx, err)
-		}
-	}()
-}
 
 // reportFailure surfaces a failed workspace-switch reload: the log line always
 // lands, and the host notifier raises a localized error toast when present.

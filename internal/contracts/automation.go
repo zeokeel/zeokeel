@@ -685,60 +685,6 @@ func AutomationDefaultLocation() *time.Location {
 	return time.Local
 }
 
-// AutomationScheduleAfter renders the canonical "after <N>s" one-shot selector
-// for a delay (a reminder "in N minutes"). A sub-second delay rounds up to the
-// selector's one-second unit.
-func AutomationScheduleAfter(delay time.Duration) string {
-	seconds := int(delay / time.Second)
-	if delay%time.Second != 0 {
-		seconds++
-	}
-	if seconds < 1 {
-		seconds = 1
-	}
-	return fmt.Sprintf("after %ds", seconds)
-}
-
-// AutomationScheduleDailyAt renders the canonical "daily <HH:MM:SS>" selector
-// in the product's default wall-clock zone.
-func AutomationScheduleDailyAt(hour, minute int) string {
-	return fmt.Sprintf("daily %02d:%02d:00", hour, minute)
-}
-
-// AutomationScheduleAt renders the canonical absolute "at <RFC3339>" selector.
-func AutomationScheduleAt(instant time.Time) string {
-	return "at " + formatAutomationUTCInstant(instant)
-}
-
-// ParseAutomationAtInput parses the reminder dialog's optional exact time: an
-// RFC 3339 date-time, or the local wall-clock forms "2006-01-02 15:04" and
-// "2006-01-02 15:04:05" evaluated in AutomationDefaultLocation. The instant
-// must be in the future relative to now.
-func ParseAutomationAtInput(input string, now time.Time) (time.Time, error) {
-	trimmed := strings.TrimSpace(input)
-	if trimmed == "" {
-		return time.Time{}, fmt.Errorf("empty exact time")
-	}
-	var instant time.Time
-	if parsed, err := time.Parse(time.RFC3339Nano, trimmed); err == nil {
-		instant = parsed
-	} else {
-		for _, layout := range []string{"2006-01-02 15:04", "2006-01-02 15:04:05"} {
-			if parsed, layoutErr := time.ParseInLocation(layout, trimmed, AutomationDefaultLocation()); layoutErr == nil {
-				instant = parsed
-				break
-			}
-		}
-	}
-	if instant.IsZero() {
-		return time.Time{}, fmt.Errorf("parse exact time %q: want an RFC 3339 date-time or \"2006-01-02 15:04\"", input)
-	}
-	if !instant.After(now) {
-		return time.Time{}, fmt.Errorf("exact time %q is not in the future", input)
-	}
-	return instant, nil
-}
-
 // ValidateAutomationSchedule reports whether spec is a supported schedule.
 func ValidateAutomationSchedule(spec string) error {
 	_, err := ParseAutomationSchedule(spec)

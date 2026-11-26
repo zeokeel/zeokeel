@@ -3,7 +3,6 @@ package contracts
 import (
 	"context"
 	"strconv"
-	"strings"
 	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -53,21 +52,6 @@ func MessageOrdinalLocator(ordinal int) string {
 		return ""
 	}
 	return MessageOrdinalLocatorPrefix + strconv.Itoa(ordinal)
-}
-
-// ParseMessageOrdinalLocator reads a locator made by MessageOrdinalLocator. It
-// reports false for any other string (a live message id, an empty locator), so
-// a caller can fall back to matching the in-memory id first.
-func ParseMessageOrdinalLocator(locator string) (int, bool) {
-	rest, ok := strings.CutPrefix(strings.TrimSpace(locator), MessageOrdinalLocatorPrefix)
-	if !ok {
-		return 0, false
-	}
-	ordinal, err := strconv.Atoi(strings.TrimSpace(rest))
-	if err != nil || ordinal <= 0 {
-		return 0, false
-	}
-	return ordinal, true
 }
 
 // SessionFocus is the optional cross-module handoff from a search surface (the

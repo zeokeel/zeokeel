@@ -110,13 +110,6 @@ func NormalizeShellTimeoutSeconds(raw string, fallback int) int {
 	return normalizeIntInRange(raw, CapabilityMinShellTimeoutSeconds, CapabilityMaxShellTimeoutSeconds, fallback)
 }
 
-// NormalizeShellMaxOutputKiB parses a stored shell output cap: 0 (the explicit
-// tool default) and 1..CapabilityMaxShellOutputKiB win; empty, malformed or
-// out-of-range values return fallback.
-func NormalizeShellMaxOutputKiB(raw string, fallback int) int {
-	return normalizeIntInRange(raw, CapabilityShellOutputDefaultKiB, CapabilityMaxShellOutputKiB, fallback)
-}
-
 // NormalizeApprovalTimeoutSeconds parses the stored automation approval
 // timeout: 0 (disabled, the default) and 1..CapabilityMaxApprovalTimeoutSeconds
 // win; empty, malformed or out-of-range values disable the timeout (0), so a

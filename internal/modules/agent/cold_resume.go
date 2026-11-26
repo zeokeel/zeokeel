@@ -83,21 +83,6 @@ func (s *service) coldResumeActive(id string) bool {
 	return s.coldResumeSnapshot(id) != nil
 }
 
-// waitColdResume blocks until the current cold resume of id finishes (tests and
-// the async send path). It returns false when no run is in flight.
-func (s *service) waitColdResume(ctx context.Context, id string) bool {
-	state := s.coldResumeSnapshot(id)
-	if state == nil {
-		return false
-	}
-	select {
-	case <-state.done:
-		return true
-	case <-ctx.Done():
-		return false
-	}
-}
-
 // ColdResumeChild resumes one historical child session with a new human/Lead
 // message and returns the child's answer. It is the shared implementation of
 // SendChildAgent / TeamService.Send.

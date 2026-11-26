@@ -43,11 +43,3 @@ func brandBitmap(data []byte, name string) *ui.Bitmap {
 func MarkPNGBytes() []byte {
 	return append([]byte(nil), markPNG...)
 }
-
-// Mark returns the brand mark bitmap for the given appearance.
-func Mark(dark bool) *ui.Bitmap {
-	if dark {
-		return markDark
-	}
-	return mark
-}

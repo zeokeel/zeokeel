@@ -128,14 +128,6 @@ func (s *service) commandConfinement() string {
 	}
 }
 
-// commandsRunUnconfined reports the one condition the model-facing prompt has to
-// disclose: the command family is exempt from approval AND this host has no
-// OS-level fence for it.
-func (s *service) commandsRunUnconfined(root string) bool {
-	return s.sandboxService != nil && s.commandPolicy(root) != nil &&
-		s.commandConfinement() == contracts.SandboxConfinementNone
-}
-
 // recordUnconfinedShell states once per session+tool that a command ran without
 // an approval prompt *and* without OS confinement. It is the "record it honestly"
 // half of requirement 4: the user asked not to be asked, not to be misled about

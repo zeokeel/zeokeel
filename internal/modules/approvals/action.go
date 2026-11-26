@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -182,12 +181,3 @@ func (s *actionService) verifyToken(token string) (string, time.Time, error) {
 }
 
 var _ contracts.ApprovalActionService = (*actionService)(nil)
-
-// describePending is a small helper for error messages and the channel layer.
-func describePending(requests []contracts.ApprovalRequest) string {
-	parts := make([]string, 0, len(requests))
-	for i, request := range requests {
-		parts = append(parts, fmt.Sprintf("%d) %s", i+1, request.Summary))
-	}
-	return strings.Join(parts, "；")
-}

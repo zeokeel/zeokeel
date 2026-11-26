@@ -23,16 +23,6 @@ import (
 	"github.com/zeokeel/zeokeel-rig/sandbox"
 )
 
-// waitBuildClosed waits for the build's release hook to run.
-func waitBuildClosed(t *testing.T, scoped *rootScoped) {
-	t.Helper()
-	select {
-	case <-scoped.closedChan():
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for the root-scoped build to close")
-	}
-}
-
 // findProxy returns the named proxy from one root build's proxy list.
 func findProxy(t *testing.T, proxies []rig.Tool, name string) rig.Tool {
 	t.Helper()
