@@ -108,7 +108,7 @@ ci: build vet test
 verify:
 	./scripts/verify.sh $(ARGS)
 
-# Run the desktop product from source (needs a desktop session).
+# Run the server product from source (prints the client URL to open).
 run:
 	$(GO) run ./cmd/zeokeel $(ARGS)
 
@@ -119,21 +119,8 @@ run-headless:
 clean:
 	$(GO) clean ./...
 
-# Framework-native packaging, the same `go tool mygo build` CI runs: Windows
-# GUI executable + NSIS installer under build/windows-amd64/, Linux app
-# directory under build/linux-amd64/ (executable, .desktop, icon, .deb,
-# .tar.gz, PKGBUILD) via mygo.json. Needs rsvg-convert and NSIS (makensis).
-# The AppImage step is scripts/build-appimage.sh, called by the release
-# workflow after this build. Usage: make package
-package: web-client-fresh
-	./scripts/build-app.sh -platform linux/amd64,windows/amd64
-
-# Regenerate every raster icon from the two logo SVGs (scripts/gen-icons.sh).
-icons:
-	./scripts/gen-icons.sh
-
-# Plain dist/ binary build (the pre-framework release path; CI/release.yml now
-# packages with `make package`/mygo build).
+# The release artifact: one static server binary (serve + headless + acp in one
+# executable). Release.yml runs this per platform and uploads the tarball.
 # Usage: make release VERSION=0.1.0
 VERSION ?= $(shell cat VERSION 2>/dev/null || echo 0.1.0)
 release: web-client-fresh

@@ -25,11 +25,18 @@ func (f *fakeDispatcher) Deliver(_ context.Context, category, text string) (cont
 	return f.receipt, f.err
 }
 
-func newService(t *testing.T) (*reports.Service, *fakeDispatcher) {
+// movableClock is a time source the tests can advance.
+type movableClock struct{ at time.Time }
+
+func (c *movableClock) Now() time.Time { return c.at }
+
+func (c *movableClock) advance(d time.Duration) { c.at = c.at.Add(d) }
+
+func newService(t *testing.T) (*reports.Service, *fakeDispatcher, *movableClock) {
 	t.Helper()
 	dispatcher := &fakeDispatcher{receipt: contracts.DispatchReceipt{Channel: contracts.NotifyChannelWeChat, Attempts: []string{"wechat"}}}
-	clock := time.Unix(1_700_000_000, 0)
-	return reports.New(dispatcher, nil, reports.Config{Now: func() time.Time { return clock }}), dispatcher
+	clock := &movableClock{at: time.Unix(1_700_000_000, 0)}
+	return reports.New(dispatcher, nil, reports.Config{Now: clock.Now}), dispatcher, clock
 }
 
 func passingReport() contracts.Report {
@@ -44,7 +51,8 @@ func passingReport() contracts.Report {
 }
 
 func TestPutValidatesAndStores(t *testing.T) {
-	svc, _ := newService(t)
+	svc, _, clk := newService(t)
+	_ = clk
 	ctx := context.Background()
 	stored, err := svc.Put(ctx, passingReport())
 	if err != nil {
@@ -60,7 +68,8 @@ func TestPutValidatesAndStores(t *testing.T) {
 }
 
 func TestPutRefusesAPassWithoutEvidence(t *testing.T) {
-	svc, _ := newService(t)
+	svc, _, clk := newService(t)
+	_ = clk
 	report := passingReport()
 	report.Evidence = nil
 	if _, err := svc.Put(context.Background(), report); !errors.Is(err, contracts.ErrReportInvalid) {
@@ -69,7 +78,8 @@ func TestPutRefusesAPassWithoutEvidence(t *testing.T) {
 }
 
 func TestPutRefusesBrokenReports(t *testing.T) {
-	svc, _ := newService(t)
+	svc, _, clk := newService(t)
+	_ = clk
 	cases := map[string]func(*contracts.Report){
 		"no goal":         func(r *contracts.Report) { r.Goal = "  " },
 		"unknown verdict": func(r *contracts.Report) { r.Verdict = "great" },
@@ -87,7 +97,8 @@ func TestPutRefusesBrokenReports(t *testing.T) {
 }
 
 func TestDeliverMarksDeliveredWhenAChannelAccepts(t *testing.T) {
-	svc, dispatcher := newService(t)
+	svc, dispatcher, clk := newService(t)
+	_ = clk
 	ctx := context.Background()
 	stored, err := svc.Put(ctx, passingReport())
 	if err != nil {
@@ -113,7 +124,8 @@ func TestDeliverMarksDeliveredWhenAChannelAccepts(t *testing.T) {
 // dispatcher falls back to in-app. That is NOT delivery — the human has not been
 // told — so the report stays deferred and keeps its reason.
 func TestInAppOnlyIsDeferred(t *testing.T) {
-	svc, dispatcher := newService(t)
+	svc, dispatcher, clk := newService(t)
+	_ = clk
 	dispatcher.receipt = contracts.DispatchReceipt{Channel: contracts.NotifyChannelInApp, Reason: "wechat window closed"}
 	ctx := context.Background()
 	stored, err := svc.Put(ctx, passingReport())
@@ -134,7 +146,8 @@ func TestInAppOnlyIsDeferred(t *testing.T) {
 }
 
 func TestSweepSendsOneDigestForAllDeferred(t *testing.T) {
-	svc, dispatcher := newService(t)
+	svc, dispatcher, clk := newService(t)
+	_ = clk
 	dispatcher.receipt = contracts.DispatchReceipt{Channel: contracts.NotifyChannelInApp, Reason: "window closed"}
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
@@ -146,8 +159,10 @@ func TestSweepSendsOneDigestForAllDeferred(t *testing.T) {
 			t.Fatalf("Deliver: %v", err)
 		}
 	}
-	// The channel recovers before the sweep.
+	// The channel recovers before the sweep. The sweep is also past the retry
+	// interval (the three deliveries happened "just now", so wait it out first).
 	dispatcher.receipt = contracts.DispatchReceipt{Channel: contracts.NotifyChannelWeChat, Attempts: []string{"wechat"}}
+	clk.advance(31 * time.Minute)
 	report, err := svc.Sweep(ctx)
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -170,7 +185,8 @@ func TestSweepSendsOneDigestForAllDeferred(t *testing.T) {
 }
 
 func TestDeliverUnknownReport(t *testing.T) {
-	svc, _ := newService(t)
+	svc, _, clk := newService(t)
+	_ = clk
 	if _, err := svc.Deliver(context.Background(), "nope"); !errors.Is(err, contracts.ErrReportNotFound) {
 		t.Fatalf("err = %v, want ErrReportNotFound", err)
 	}

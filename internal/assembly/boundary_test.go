@@ -10,12 +10,10 @@ package assembly_test
 //  2. Backend modules may import contracts, design, lib/* and the shared
 //     libraries; never another module implementation, never host or assembly.
 //  3. host must not reach into internal/modules/* directly.
-//  4. The native UI engine (github.com/egoist/mygo) survives only in the shell:
-//     internal/host (tray/hotkey/OS notifications), internal/lib/openurl
-//     (OS launchers) and the two asset layers the web generator parses
-//     (internal/brand, internal/design). Everything the browser talks to —
-//     gateway, contracts, modules — must stay engine-free, proven both directly
-//     and through the transitive dependency graph.
+//  4. The native UI engine (github.com/egoist/mygo) is GONE: the desktop shell
+//     was removed and go.mod no longer requires it. Nothing may import it again
+//     — proven directly, through the transitive dependency graph, and by
+//     go.mod itself. Reintroducing it is a product decision, not a refactor.
 //
 // Test dependencies are listed separately on purpose: internal/gateway's e2e
 // tests load the real backend modules, so `go list -deps -test` there contains
@@ -24,6 +22,7 @@ package assembly_test
 // dependency must not drag mygo in either.
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -34,19 +33,14 @@ import (
 
 const modulePath = "github.com/zeokeel/zeokeel/"
 
-// engineModulePath is the native UI engine (github.com/egoist/mygo). The tray
-// shell still uses it; nothing else may.
+// engineModulePath is the retired native UI engine. The desktop shell that used
+// it is gone; this constant exists so the tests below can assert its absence.
 const engineModulePath = "github.com/egoist/mygo"
 
-// engineAllowlist is the complete set of packages allowed to import the engine.
-// It is a *decision*, not an observation: adding a package here means the
-// product now carries a native dependency again (docs/plans/s4-execution-checklist.md).
-var engineAllowlist = map[string]bool{
-	"internal/host":        true, // tray icon, global hotkey, OS notifications
-	"internal/lib/openurl": true, // open the browser client / OAuth URLs
-	"internal/brand":       true, // palette + logo colors as mygo colors
-	"internal/design":      true, // design tokens as mygo colors
-}
+// engineAllowlist is the complete set of packages allowed to import the engine:
+// none. It is a *decision*, not an observation — adding a package here means the
+// product carries a native dependency again, which is a product change.
+var engineAllowlist = map[string]bool{}
 
 // boundaryPkg is one package row of `go list`.
 type boundaryPkg struct {
@@ -163,15 +157,17 @@ func TestEngineIsQuarantinedToTheShell(t *testing.T) {
 		}
 		importers[rel] = true
 	}
-	if len(importers) == 0 {
-		t.Fatalf("no package imports %s: the quarantine assertion would pass vacuously", engineModulePath)
+	if len(importers) != 0 {
+		t.Fatalf("these packages import %s again: %v", engineModulePath, keysOf(importers))
 	}
-	// Every allowlisted package must still be a real importer, otherwise the
-	// allowlist has gone stale (a package that dropped mygo belongs off it).
-	for name := range engineAllowlist {
-		if !importers[name] {
-			t.Errorf("allowlist entry %q no longer imports %s; drop it from the allowlist", name, engineModulePath)
-		}
+	// The dependency is also gone from go.mod: an import-only check would pass
+	// while `go mod tidy` drags the module back in through a new indirect edge.
+	gomod, err := os.ReadFile(filepath.Join(repoRoot(t), "go.mod"))
+	if err != nil {
+		t.Fatalf("read go.mod: %v", err)
+	}
+	if strings.Contains(string(gomod), engineModulePath) {
+		t.Fatalf("go.mod still references %s", engineModulePath)
 	}
 }
 
@@ -196,8 +192,8 @@ func TestEngineIsQuarantinedToTheShellInTests(t *testing.T) {
 			}
 		}
 	}
-	if seen == 0 {
-		t.Errorf("no test file imports %s: the quarantine assertion would pass vacuously", engineModulePath)
+	if seen != 0 {
+		t.Errorf("%d test import(s) of %s remain", seen, engineModulePath)
 	}
 }
 
@@ -300,4 +296,24 @@ func goList(t *testing.T, format string, patterns ...string) []string {
 		}
 	}
 	return lines
+}
+
+// repoRoot is the module root of the package under test.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	root, err := exec.Command("go", "env", "GOMOD").Output()
+	if err != nil {
+		t.Fatalf("go env GOMOD: %v", err)
+	}
+	return filepath.Dir(strings.TrimSpace(string(root)))
+}
+
+// keysOf renders a set for an assertion message.
+func keysOf(set map[string]bool) []string {
+	keys := make([]string, 0, len(set))
+	for key := range set {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

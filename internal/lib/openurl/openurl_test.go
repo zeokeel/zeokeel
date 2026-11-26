@@ -27,19 +27,38 @@ func TestOpenTrimsURLBeforeLaunching(t *testing.T) {
 	}
 }
 
-func TestOpenEmptyURLStillDelegates(t *testing.T) {
-	var got []string
-	openExternal = func(raw string) error {
-		got = append(got, raw)
+func TestOpenEmptyURLIsRefused(t *testing.T) {
+	called := false
+	openExternal = func(string) error {
+		called = true
 		return nil
 	}
 	t.Cleanup(func() { openExternal = defaultOpenExternal })
 
-	if err := Open("  "); err != nil {
-		t.Fatalf("Open error = %v, want nil", err)
+	if err := Open("  \n"); err == nil {
+		t.Fatal("Open(blank) = nil, want a refusal")
 	}
-	if len(got) != 1 || got[0] != "" {
-		t.Fatalf("opened URLs = %q, want one empty-string call (trim only)", got)
+	if called {
+		t.Fatal("the launcher ran for a blank URL")
+	}
+}
+
+// The platform command is what makes this package work without a UI framework;
+// pin it for the three platforms the product builds for.
+func TestLauncherArgsPerPlatform(t *testing.T) {
+	cases := map[string]string{
+		"darwin":  "open",
+		"linux":   "xdg-open",
+		"windows": "rundll32",
+	}
+	for goos, want := range cases {
+		name, args, err := launcherArgs(goos, "https://example.com")
+		if err != nil || name != want || len(args) == 0 {
+			t.Fatalf("%s = (%q, %v, %v), want %q", goos, name, args, err, want)
+		}
+	}
+	if _, _, err := launcherArgs("plan9", "x"); err == nil {
+		t.Fatal("unsupported platform should error")
 	}
 }
 

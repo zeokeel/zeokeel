@@ -2,13 +2,12 @@ package host
 
 // Wiring the OS notification sink (AUDIT-2026-11-24 A-7).
 //
-// mygoOSNotifier was written but never called, and the gateway — which is what
-// raises the notifications — holds no OS sink by design (§7.2: the gateway is
-// the backend, the tray shell is the host). So the chain was broken at both
-// ends and the "system notifications" switch controlled nothing. This file is the
-// missing link: the tray shell watches the gateway's toast stream through
-// contracts.ToastObserver and delivers the notifications the caller marked
-// System, unless the user turned the setting off.
+// The OS sink used to live in the desktop tray shell. It is now the platform's
+// own command-line notifier (internal/host/osnotify.go): the browser client is
+// the window, but "tell me when it is done" must still work with the tab closed.
+// This file is the link between the gateway's toast stream and that sink: the
+// notifications the caller marked System are delivered, unless the user turned
+// the setting off.
 
 import (
 	"strings"
@@ -23,11 +22,11 @@ import (
 // The seam is contracts.Notifier's own SetHandler: the gateway already exposes
 // it, so the host needs no extra capability surface.
 func installSystemNotifier(notifier contracts.Notifier, settings *Settings, logger contracts.Logger) {
-	installSystemNotifierWith(notifier, settings, logger, mygoOSNotifier())
+	installSystemNotifierWith(notifier, settings, logger, systemNotifier())
 }
 
 // installSystemNotifierWith is installSystemNotifier with an injectable sink
-// (the tests use it; production always passes mygo's).
+// (the tests use it; production passes the platform command).
 func installSystemNotifierWith(notifier contracts.Notifier, settings *Settings, logger contracts.Logger,
 	sink func(id, title, body string) error) {
 	if notifier == nil || sink == nil {
