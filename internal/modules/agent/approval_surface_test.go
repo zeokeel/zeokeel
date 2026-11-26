@@ -37,44 +37,29 @@ type documentedExemptions struct {
 	Parks        []string
 }
 
-// parseExemptions reads the approval-exemptions block.
+// declaredExemptions is the single declared approval surface. It used to be the
+// machine-readable block of docs/APPROVAL-SURFACES.md §S4.1; the documentation
+// tree is gone, so the declaration lives in the test and the tests below keep the
+// code honest against it. Change a rule and this block changes in the same commit.
+var declaredExemptions = documentedExemptions{
+	SandboxShell: []string{"bash", "pwsh"},
+	MCPFamily:    []string{"mcp__"},
+	Workspace: strings.Fields(`apply_patch edit_file glob grep inspect job_list job_output job_wait
+		list_dir lsp_definition lsp_diagnostics lsp_hover lsp_implementation lsp_references lsp_symbols
+		memory read_file read_image sandbox_status search session_event_read session_event_search
+		session_event_trace session_search session_trace skill spill_read str_replace_editor
+		team_task_get team_task_list terminal_list terminal_read todo_write tool_search undo
+		working_directory write_file`),
+	Interaction: []string{"ask_user", "present", "plan_review", "exit_plan_mode", "get_goal", "create_goal", "update_goal"},
+	Parks: strings.Fields(`enter_worktree exit_worktree job_kill list_worktrees request_sandbox_access
+		schedule_create schedule_delete schedule_list schedule_update settings_get settings_set
+		team_task_create team_task_update web_fetch web_search`),
+}
+
+// parseExemptions returns the declared surface.
 func parseExemptions(t *testing.T) documentedExemptions {
 	t.Helper()
-	path := filepath.Join("..", "..", "..", "docs", "APPROVAL-SURFACES.md")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	text := string(raw)
-	const begin = "<!-- approval-exemptions:begin -->"
-	const end = "<!-- approval-exemptions:end -->"
-	start := strings.Index(text, begin)
-	finish := strings.Index(text, end)
-	if start < 0 || finish < start {
-		t.Fatalf("%s has no approval-exemptions block", path)
-	}
-	var documented documentedExemptions
-	for _, line := range strings.Split(text[start+len(begin):finish], "\n") {
-		line = strings.TrimSpace(line)
-		key, value, found := strings.Cut(line, ":")
-		if !found {
-			continue
-		}
-		names := splitNames(value)
-		switch strings.TrimSpace(key) {
-		case "sandbox-shell":
-			documented.SandboxShell = names
-		case "mcp-family":
-			documented.MCPFamily = names
-		case "workspace-auto":
-			documented.Workspace = names
-		case "interaction":
-			documented.Interaction = names
-		case "parks":
-			documented.Parks = names
-		}
-	}
-	return documented
+	return declaredExemptions
 }
 
 // splitNames splits a comma-separated list, dropping blanks.

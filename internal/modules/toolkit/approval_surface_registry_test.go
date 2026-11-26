@@ -20,8 +20,6 @@ package toolkit
 // stay in internal/modules/agent/approval_surface_test.go.
 
 import (
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -29,7 +27,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// docFamilies is the machine-readable block of APPROVAL-SURFACES.md §S4.1.
+// docFamilies is the declared approval surface.
 type docFamilies struct {
 	SandboxShell []string
 	MCPFamily    []string
@@ -38,51 +36,29 @@ type docFamilies struct {
 	Parks        []string
 }
 
-// parseDocFamilies reads the approval-exemptions block.
+// declaredFamilies is the single declared approval surface. It used to be the
+// machine-readable block of docs/APPROVAL-SURFACES.md §S4.1; the documentation
+// tree is gone, so the declaration lives here and the tests below keep the code
+// honest against it. Change a rule and this block changes in the same commit.
+var declaredFamilies = docFamilies{
+	SandboxShell: []string{"bash", "pwsh"},
+	MCPFamily:    []string{"mcp__"},
+	Workspace: strings.Fields(`apply_patch edit_file glob grep inspect job_list job_output job_wait
+		list_dir lsp_definition lsp_diagnostics lsp_hover lsp_implementation lsp_references lsp_symbols
+		memory read_file read_image sandbox_status search session_event_read session_event_search
+		session_event_trace session_search session_trace skill spill_read str_replace_editor
+		team_task_get team_task_list terminal_list terminal_read todo_write tool_search undo
+		working_directory write_file`),
+	Interaction: []string{"ask_user", "present", "plan_review", "exit_plan_mode", "get_goal", "create_goal", "update_goal"},
+	Parks: strings.Fields(`enter_worktree exit_worktree job_kill list_worktrees request_sandbox_access
+		schedule_create schedule_delete schedule_list schedule_update settings_get settings_set
+		team_task_create team_task_update web_fetch web_search`),
+}
+
+// parseDocFamilies returns the declared surface.
 func parseDocFamilies(t *testing.T) docFamilies {
 	t.Helper()
-	path := filepath.Join("..", "..", "..", "docs", "APPROVAL-SURFACES.md")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	text := string(raw)
-	const begin = "<!-- approval-exemptions:begin -->"
-	const end = "<!-- approval-exemptions:end -->"
-	start := strings.Index(text, begin)
-	finish := strings.Index(text, end)
-	if start < 0 || finish < start {
-		t.Fatalf("%s has no approval-exemptions block", path)
-	}
-	var families docFamilies
-	for _, line := range strings.Split(text[start+len(begin):finish], "\n") {
-		key, value, found := strings.Cut(strings.TrimSpace(line), ":")
-		if !found {
-			continue
-		}
-		var names []string
-		for _, part := range strings.Split(value, ",") {
-			if name := strings.TrimSpace(part); name != "" {
-				names = append(names, name)
-			}
-		}
-		switch strings.TrimSpace(key) {
-		case "sandbox-shell":
-			families.SandboxShell = names
-		case "mcp-family":
-			families.MCPFamily = names
-		case "workspace-auto":
-			families.Workspace = names
-		case "interaction":
-			families.Interaction = names
-		case "parks":
-			families.Parks = names
-		}
-	}
-	if len(families.Parks) == 0 || len(families.Workspace) == 0 {
-		t.Fatal("the documented table is missing its parks or workspace-auto family")
-	}
-	return families
+	return declaredFamilies
 }
 
 // familyOf reports which documented family a tool belongs to ("" = none).

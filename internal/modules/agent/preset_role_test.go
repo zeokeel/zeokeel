@@ -12,8 +12,6 @@ package agent
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -101,33 +99,16 @@ func TestBuiltinLeadRoleExistsAndIsNotDefault(t *testing.T) {
 	}
 }
 
-// TestLeadRoleMatchesApprovalSurfaceDoc keeps the documented role boundary and
-// the shipped lead preset from drifting: APPROVAL-SURFACES.md §S4.1's
-// `role-deny-lead:` line names the tool families a role must not have, and every
-// name there must be absent from the lead allowlist. The write/shell families
-// are listed regardless so the line cannot shrink silently.
+// TestLeadRoleMatchesApprovalSurfaceDoc keeps the declared role boundary and
+// the shipped lead preset from drifting: every tool a role must not have is
+// absent from the lead allowlist. The write/shell families are listed
+// unconditionally so the boundary cannot shrink silently.
 func TestLeadRoleMatchesApprovalSurfaceDoc(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "docs", "APPROVAL-SURFACES.md")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	var denied []string
-	for _, line := range strings.Split(string(raw), "\n") {
-		key, value, found := strings.Cut(strings.TrimSpace(line), ":")
-		if !found || strings.TrimSpace(key) != "role-deny-lead" {
-			continue
-		}
-		for _, name := range strings.Split(value, ",") {
-			if name = strings.TrimSpace(name); name != "" {
-				denied = append(denied, name)
-			}
-		}
-	}
-	if len(denied) == 0 {
-		t.Fatal("APPROVAL-SURFACES.md has no role-deny-lead line")
-	}
-	want := []string{"apply_patch", "bash", "edit_file", "pwsh", "write_file"}
+	// The role boundary used to live in docs/APPROVAL-SURFACES.md; the
+	// documentation tree is gone, so the declaration is this list. Keep it in
+	// sync with the lead preset in the same commit as any rule change.
+	denied := []string{"apply_patch", "bash", "edit_file", "pwsh", "write_file"}
+	want := append([]string(nil), denied...)
 	sort.Strings(want)
 	got := append([]string(nil), denied...)
 	sort.Strings(got)

@@ -163,9 +163,9 @@ check_gofmt() {
 	return 0
 }
 
-# Protocol/implementation consistency: docs/TRANSPORT.md §5.1 must list exactly
-# the methods the gateway dispatches (a pure string comparison, so it is cheap
-# enough for the quick loop).
+# Protocol/implementation consistency: the generated wire contract must declare
+# exactly the methods the gateway dispatches (a pure string comparison, so it is
+# cheap enough for the quick loop).
 check_protocol_consistency() {
 	"$GO" test ./internal/gateway -count=1 -run 'TestTransport' >/dev/null
 }
@@ -251,7 +251,7 @@ echo
 run_step "gofmt" check_gofmt
 run_step "go build (internal, cmd)" "$GO" build ./internal/... ./cmd/...
 run_step "go vet (internal, cmd)" "$GO" vet ./internal/... ./cmd/...
-run_step_quiet "protocol consistency (TRANSPORT §5.1 vs dispatch)" check_protocol_consistency
+run_step_quiet "protocol consistency (contract.json vs dispatch)" check_protocol_consistency
 run_step_quiet "go test (internal, cmd) -count=1" "$GO" test ./internal/... ./cmd/... -count=1
 if [[ $RACE -eq 1 ]]; then
 	run_step_quiet "go test (internal, cmd) -count=1 -race" "$GO" test ./internal/... ./cmd/... -count=1 -race

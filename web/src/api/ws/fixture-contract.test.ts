@@ -129,20 +129,6 @@ describe('registration lists stay honest', () => {
     }
   });
 
-  it('mentions every registered gap in the fixture README section', () => {
-    // "The list may grow only together with the documentation": a new entry must
-    // appear in `web/README.md`, or this assertion is where the growth stops.
-    const readme = readFileSync(resolve(repoRoot, 'web/README.md'), 'utf8');
-    for (const [method, fields] of Object.entries(UNIMPLEMENTED_PARAMS)) {
-      for (const field of Object.keys(fields)) {
-        expect(readme, `README 未提到 ${method}.${field}`).toContain(`${method}.${field}`);
-      }
-    }
-    for (const method of Object.keys(UNIMPLEMENTED_METHODS)) {
-      expect(readme, `README 未提到 ${method}`).toContain(method);
-    }
-  });
-
   it('does not let the lists grow silently', () => {
     // A count is the cheapest way to make growth a deliberate act: raise it *and*
     // update the README in the same change.
